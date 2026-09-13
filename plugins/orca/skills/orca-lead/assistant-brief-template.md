@@ -13,7 +13,7 @@
    - 커밋 메시지 접두사: `guard:` / `refactor:`·`feat:`·`fix:` / `docs:`.
    - 편집 지시에는 파일 경로·위치·본보기 파일(`cat` 으로 읽으라고)·넣을 텍스트 전문을 적는다. "적절히" 같은 말은 쓰지 않는다. 위치·본보기를 찾는 읽기는 파일을 다 열지 말고 `~/.orca-skills/orca-lead/staff-find.sh <저장소 절대 경로> "<질문>" --paths <경로 힌트>` 로 사원에게 — 대조 통과한 파일:행만 온다(14초 실측).
 3. **실행**: `~/.orca-skills/orca-lead/pipeline-run.sh <워크트리> <일감 디렉터리> --branch <브랜치> --notify <네 터미널> > /tmp/pipeline-<조각>.log 2>&1 &` 로 배경 실행하고 프롬프트로 돌아간다. 끝나면 `[pipeline …]` 한 줄이 온다(일감당 1~4분). 네 터미널 핸들은 `orca terminal show --json` 의 `handle`.
-4. **실패 일감**: 사원은 일감마다 gpt-oss 5회 → flash 2회 사다리를 탄다(통과 뒤 검수 사원이 추가 검사·변이를 돌려 미달이면 1회 반려). 그래도 🔴 인 `PIPELINE.md` 일감은 **네가 직접** 들어가 확인하고 한다(같은 브랜치, 일감 파일의 편집 지시·완료 조건 그대로, 완료 조건을 네가 돌려 확인). 로그 `/tmp/pipe-<워크트리>-task-NN.harness.log` 에 사원·검수·대리(사다리)가 무엇을 틀렸는지 있다.
+4. **실패 일감**: 사원은 일감마다 gpt-oss 5회 → 대리급 승격 2회(같은 하네스 안에서 flash 가 편집만, 네 세션이 아니다) 사다리를 탄다(통과 뒤 검수 사원이 추가 검사·변이를 돌려 미달이면 1회 반려). 그래도 🔴 인 `PIPELINE.md` 일감은 **네가 직접** 들어가 확인하고 한다(같은 브랜치, 일감 파일의 편집 지시·완료 조건 그대로, 완료 조건을 네가 돌려 확인). 로그 `/tmp/pipe-<워크트리>-task-NN.harness.log` 에 사원·검수·대리(사다리)가 무엇을 틀렸는지 있다.
    - 🔴 가 **cherry-pick 충돌**이면 커밋은 이미 `pipe/task-NN` 브랜치에 있다 — `git cherry-pick <sha>` 로 네 브랜치에 올리며 충돌만 풀고(완료 조건 다시 확인), `git branch -D pipe/task-NN`.
 5. **통합**: 전체 검사(`<CHECK_CMDS>`)를 필터 없이 돌린다 → 교차 영향(일감 사이 import·이름 충돌)을 고친다 → 가드를 빼고 돌려 빨개지는지 각 가드마다 확인(출력) → `~/.orca-skills/orca-worker/preflight.sh '<검사…>'` 🔴 0 → push → `gh pr create --base main --body-file <파일>`(본문: 한 것 / 안 한 것 / 가드 빼면 빨강 출력 / **PIPELINE.md 표** / preflight 출력 / 내린 것).
 6. **보고**: 과장 Run 으로(아래 공통 규칙의 `--run`). 제목 `대리 완료 — PR #<n> (<조각>)`, 본문에 PIPELINE.md 표(사원/대리 누가 몇 회에 했나)를 붙인다.

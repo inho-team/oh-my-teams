@@ -82,7 +82,7 @@ OUT="$(orca worktree create --name "$NAME" --repo "path:$REPO" --base-branch ori
 WT="$(printf '%s' "$OUT" | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["worktree"]["path"])' 2>/dev/null)"
 [ -n "$WT" ] && [ -d "$WT" ] || die "🔴 워크트리 생성 실패: $(printf '%s' "$OUT" | head -c 300)"
 cp "$BRIEF" "$WT/TASK.md"
-# 사원(intern, 2026-09-13 실측 뒤 결정): TUI 를 띄우지 않는다. worker-run.sh 가 사다리(gpt-oss 5회 → flash 2회)로 편집만 모델에 시키고
+# 사원(intern, 2026-09-13 실측 뒤 결정): TUI 를 띄우지 않는다. worker-run.sh 가 사다리(gpt-oss 5회 → 대리급 승격 2회, 하네스 안의 flash)로 편집만 모델에 시키고
 # 검증·재시도·승격·커밋·PR·보고를 스크립트로 한다. (gpt-oss: 편집 도구 인자 누락·엉성한 편집·지어낸 완료 → 하네스가 흡수. 문서 2건·Kotlin 가드 1건 통과 실측)
 if [ "$AGENT" = staff ]; then
   [ -n "$RUN_ID" ] || die "🔴 사원에도 --run <RUN_ID> 가 필요하다(브리프 「보고」 절이 그 Run 으로 보낸다)"
