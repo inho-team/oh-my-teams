@@ -1,7 +1,7 @@
 ---
 name: pm
 description: >-
-  연쇄(PM=Claude 계획·머지 → PL=codex 판단만 → 시니어=agy-pro 운영·검토 → 주니어=agy-flash 구현 · 인턴=gpt-oss)의 진입점. `/pm <요청>` 또는 "PM 으로 진행해",
+  연쇄(PM=Claude 계획·머지 → PL=codex 판정만 → 과장=agy-pro 운영·검토 → 대리=agy-flash 분할·통합·어려운 로직 → 사원=gpt-oss 하네스)의 진입점. `/pm <요청>` 또는 "PM 으로 진행해",
   "PL 붙여서 해", "3층으로 돌려", "orca 로 나눠 시켜" 같은 말이면 이 스킬이다. 요청을 조각으로 잘라
   PL 을 세우고 표본 검증·머지·운영까지 끝낸다. 상세 절차는 orca-top / orca-lead / orca-worker.
 ---

@@ -1,11 +1,11 @@
 # 시니어#<N>(운영·검토) 일감 — <조각 이름> (PM → 시니어)
 
-## 네 역할 — 양을 맡는 자리 (2026-09-13 배치)
-너는 이 조각의 **시니어(agy-pro)** 다. PL(codex)은 판단만 하고, **세우기·기다리기·검사·검토·증거 조립은 네가 한다.** 네 아래에 주니어(구현, junior)·인턴(기계적 일, intern)을 세운다. 네 위 PL 에게는 **증거 묶음**만 올린다 — "된 것 같다" 는 보고가 아니다.
+## 네 역할 — 과장: 세우고·기다리고·검토한다 (2026-09-13 배치: 과장 pro → 대리 flash → 사원 gpt-oss)
+너는 이 조각의 **과장(시니어, agy-pro)** 이다. PL(codex)은 판정만 하고, **세우기·기다리기·검사·검토·증거 조립은 네가 한다.** 네 아래에 **대리(flash) 한 명**을 세운다 — 대리가 조각을 사원(gpt-oss 하네스) 일감으로 잘라 `pipeline-run.sh` 로 돌리고, 사원이 못 넘긴 것을 직접 하고, 통합해 PR 을 연다. **너는 코드를 쓰지 않고 사원 일감도 직접 세우지 않는다**(그건 대리 몫). 네 위 PL 에게는 **증거 묶음**만 올린다 — "된 것 같다" 는 보고가 아니다.
 읽을 것: `~/.orca-skills/orca-lead/SKILL.md` §3(세우기·등급)·§5(검증)·§6(반려 기준)·§7(보고), `review-brief-template.md`(네가 할 검토의 규칙 — 변이 의무·점검표).
 
 ## 네가 하는 것 (PR 하나의 한 바퀴)
-1. **주니어 브리프** — `brief-template.md` 로 쓴다(근거 인용·먼저 읽어라 파일:행·재현→고침→가드 순서·범위/파일 경계). **인턴급이면 `intern-brief-template.md`** 로(편집 지시 + 순서·빈 줄까지 잡는 완료 조건 + 브랜치/커밋/PR/보고 절) — 인턴은 TUI 가 아니라 `worker-run.sh` 로 돌고 스크립트가 검증·재시도·커밋·PR·보고를 한다. `launch-worker.sh <이름> <브리프> intern --run <네 Run> --repo … --handles … --parent … --notify <네 터미널>` 한 줄이면 된다(배경 실행, 끝나면 `[intern …]` 알림). 세운다:
+1. **대리 브리프** — `junior-brief-template.md` 로 쓴다: 조각 목표·근거·먼저 읽어라 파일:행·범위/파일 경계·**분할 힌트**(guard → refactor → docs 순서의 사원 일감 후보)·일감 디렉터리(`~/.<프로젝트>/coord/tasks-<조각>/`, 워크트리 밖)·CHECK_CMDS·GUARD_CMD. 대리가 사원 일감을 쓰고 `pipeline-run.sh` 로 돌린다. (조각이 문서 한 줄처럼 작아 분할이 무의미하면 `intern-brief-template.md` 로 사원 일감 하나를 네가 직접 `launch-worker.sh … intern` 으로 돌려도 된다.) 세운다:
    `launch-worker.sh junior-<이름> <브리프> junior --run <네 Run(자동 배정)> --repo <저장소> --handles <네 핸들 파일> --parent <네 워크트리> --notify <네 터미널> > /tmp/launch-junior-<이름>.log 2>&1 &`
    배경으로 띄우고 프롬프트로 돌아간다 — 끝나면 `[launch …]` 가 오고, 그 뒤는 **폴러가 깨운다**(네 워크트리의 POLLER). 이름은 **`junior-<조각>`**(재시도는 `junior-<조각>-2`, 인턴은 `intern-<조각>-<무엇>`) — `launch-worker.sh` 가 `junior-1` 같은 이름을 거부한다(이전 조각과 충돌해 `-2` 경로가 생긴 실측). 폴러·verify 로그 `tail` 을 네가 돌리지 마라.
 2. **PR 도착** — 배경으로: `verify-pr.sh <PR> --role senior --notify <네 터미널> --guard-cmd '<GUARD_CMD>' --mutate '<변이1>' --mutate '<변이2>' '<전체 검사>' > /tmp/verify-<PR>-senior.log 2>&1 &`

@@ -17,7 +17,7 @@ description: >-
 보고 사슬: 주니어/인턴 → 시니어 → PL → PM. 시니어가 자기가 세운 주니어를 검토하지만, 모델이 다르고(pro/flash) 변이 검사는 스크립트 출력이며 최종 판단은 다른 계열(codex)이 한다.
 (2026-09-12 의 이전 배치 — PL 이 직접 세우고 시니어는 검토만 — 는 PL 이 조각당 48턴·4M 토큰을 써 codex 압박이 커서 바꿨다. `agent-stats.py` 로 잰다.)
 이 파일은 리드가 읽는다. 동봉: `lead-brief-template.md`(코디네이터가 리드에게 주는 브리프 뼈대),
-`PL-CHECKLIST.md`(PL 이 읽는 2KB), `brief-template.md`(주니어 브리프 뼈대), `ops-brief-template.md`(시니어 운영·검토 브리프 뼈대), `review-brief-template.md`(검토 규칙·점검표 — ops 브리프가 참조), `agent-stats.py`(부담 지표), `common-rules.md`(워커 공통 규칙 **정본** — launch-worker.sh 가 붙인다),
+`PL-CHECKLIST.md`(PL 이 읽는 2KB), `ops-brief-template.md`(과장 브리프), `junior-brief-template.md`(대리: 분할·통합), `intern-brief-template.md`(사원 일감 형식), `worker-run.sh`(사원→대리 사다리 하네스), `pipeline-run.sh`(일감 순차 실행), `brief-template.md`(구 주니어 단독 브리프 — 대리가 직접 할 때 참고), `review-brief-template.md`(검토 규칙·점검표), `agent-stats.py`(부담 지표), `common-rules.md`(워커 공통 규칙 **정본** — launch-worker.sh 가 붙인다),
 `project.env.example`(프로젝트 고유값 양식 → `<저장소>/.orca/project.env`), `launch-worker.sh`, `finish-worker.sh`, `poll.py`, `verify-pr.sh`, `keepboth.py`. 워커 쪽 규칙은 `~/.orca-skills/orca-worker/`(`preflight.sh` 포함).
 
 ## 0. 리드가 하는 것 / 안 하는 것
@@ -64,12 +64,12 @@ description: >-
 | 일감의 깊이 | 누가 | 명령 | 예 |
 |---|---|---|---|
 | **사원(intern, 하네스)** — 브리프가 **무엇을 어디에** 다 정해 주고 **완료 조건이 테스트/셸로 판정**되는 구현·문서. 사다리: gpt-oss 4회 → flash 2회 자동 승격, 그래도 실패면 과장(시니어)에게. 시니어 검토는 코드 PR 이면 붙인다 | `intern` → `worker-run.sh`(TUI 없음, `intern-brief-template.md`) | `launch-worker.sh … intern` | 가드 테스트 파일 추가(본보기 지정), 문서 경로·규약·표 갱신, 일괄 치환, 정해진 함수 하나 고치기(테스트 있음), KDoc 문체 |
-| **대리(junior, TUI)** — 탐색·설계가 조금 필요한 구현(가드를 어디에 둘지, 여러 파일을 읽고 고치기), 하네스 사다리에서 떨어진 일 | `junior` (=agy-flash TUI) | `launch-worker.sh … junior` | 재현→고침→가드 흐름 전체, 여러 파일에 걸친 리팩터링 |
-| **과장(senior)** — 운영·검토: 사원/대리를 세우고 기다리고 verify·변이 검토·묶음 조립. 코드는 쓰지 않는다 | `senior --supervise` (=agy-pro) | `ops-brief-template.md` | 조각당 하나. **구현 일감은 먼저 사원(하네스)에게** 주고, 사다리에서 떨어지거나 탐색이 필요한 것만 대리 TUI 로 |
+| **대리(junior, TUI)** — 조각을 사원 일감으로 **분할**(task-NN.md, 완료 조건은 테스트/셸) → `pipeline-run.sh` 로 사원에게 → 사원이 못 넘긴 것을 **직접** → **통합**(전체 검사·교차 영향·가드 빼기·preflight·PR) | `junior` (=agy-flash TUI), `junior-brief-template.md` | `launch-worker.sh … junior` | 조각당 하나. 어려운 로직·설계 판단은 대리 몫 |
+| **과장(senior)** — 운영·검토: 대리 한 명을 세우고 기다리고 PR 이 오면 verify·변이 검토·묶음 조립. 코드도, 사원 일감도 쓰지 않는다 | `senior --supervise` (=agy-pro) | `ops-brief-template.md` | 조각당 하나 |
 | **계획이 필요한 일(시니어)** — 후보가 여럿이라 근거를 고르고, 관문 자리를 정하고, 조각을 쪼개야 하는 것 | `senior` (=agy-pro) | `launch-worker.sh … senior` | 새 관문/배관 넣기, 프로토콜 조각, 조사(실측 + 후보 비교 + 추천), 설계 결정을 코드로 옮기기 |
 | **깊은 계획** — 아키텍처, 여러 조각에 걸친 설계, 사람 결정이 얽힌 것 | **코디네이터(Claude)가 직접** 계획해 **조각으로 잘라** 위 둘에 내린다 | (워커에게 주지 않는다) | E안→MCP 전환의 조각 나누기, P6 DoD 를 조각으로 쪼개기, 위협 모델 |
 
-판단 기준(2026-09-13 배치 — 사원 gpt-oss · 대리 flash · 과장 pro, agy 사용량의 대부분이 주니어 flash 였던 실측 뒤): **완료 조건을 테스트/셸로 쓸 수 있으면 사원(하네스)에게 먼저** — 하네스가 실패 출력을 되돌려 주며 최대 4회, 그 뒤 flash 2회로 자동 승격한다. 탐색·설계가 필요해 조건을 못 쓰는 일만 대리 TUI. "후보 중 근거를 적어 골라라" 가
+사슬(2026-09-13 사용자 결정): **과장 → 대리 → 사원**. 과장은 대리 하나만 세우고, 대리가 조각을 사원 일감으로 잘라 `pipeline-run.sh`(한 브랜치, 일감마다 커밋, 사원 4회 → flash 2회 사다리)로 돌린 뒤 실패분과 통합을 맡는다. 사원은 세션이 아니라 하네스라 보고 사슬은 늘지 않는다. 실측: 파이프라인 일감 2/2 사원 통과(4회씩), Kotlin 가드 사원 4회·대리 승격 1회. "후보 중 근거를 적어 골라라" 가
 들어가면 pro. 브리프를 쓰려는데 내가 먼저 조사·설계를 해야 쓸 수 있으면 그건 내 일이다 — 조사 워커(pro)를 먼저
 보내 실측을 받고, 결정은 사용자에게 묻고, 그 다음 조각 브리프를 쓴다(#120 → M-18 → #122 가 그 순서였다).
 **인턴은 `worker-run.sh` 의 3회 재시도 안에 완료 조건을 못 맞추면 주니어로 승격**한다(스크립트가 「인턴 실패 → 승격」 메일을 보낸다). 실측(2026-09-13, 실험실): gpt-oss 는 agy 편집 도구 인자를 빠뜨리고(편집 실패), 셸 편집은 순서·빈 줄을 틀리며, 커밋·보고를 안 하고도 "완료" 라고 쓴다 — 그래서 모델에게는 편집만, 나머지는 스크립트. 재시도 루프로 2~3회 안에 정답(2/2). 주니어가 두 번 반려되면 시니어가 같은 워크트리·같은 브랜치에서 이어받는다(새 에이전트 — 같은 일감이다).
