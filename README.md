@@ -7,18 +7,18 @@ Claude Code 플러그인 마켓 `orca-skills` 이자, codex·agy 가 읽는 고�
 ```
 사용자 ── 결정(설계·실 데이터·로스터)만 묻는다
    │
-PM      Claude        계획 · 조각 나누기 · PL/과장 브리프 · 표본 검증 · 머지 · 회수 · 기록
+이사    Claude        계획 · 조각 나누기 · 부장/과장 브리프 · 표본 검증 · 머지 · 회수 · 기록
    │
-PL      codex         판정만 — 폴러가 저장해 준 증거 묶음(/tmp/bundle-*.md)을 읽고 통과/반려, 「머지 준비됨」 정리
+부장    codex         판정만 — 폴러가 저장해 준 증거 묶음(/tmp/bundle-*.md)을 읽고 통과/반려, 「머지 준비됨」 정리
    │
-과장    agy-pro       운영·검토 — 대리 한 명을 세우고 기다리고, PR 이 오면 verify·변이 검사·점검표 → PL 에 증거 묶음
+과장    agy-pro       운영·검토 — 대리 한 명을 세우고 기다리고, PR 이 오면 verify·변이 검사·점검표 → 부장에 증거 묶음
    │
 대리    agy-flash     분할·통합 — 조각을 사원 일감으로 잘라 pipeline-run.sh 로 돌리고, 실패분을 직접 하고, 통합·PR
    │
 사원    gpt-oss-120b  하네스 — worker-run.sh 가 편집만 시키고 검증·재시도(4회)·flash 승격(2회)·커밋을 대신한다. 세션이 아니다
 ```
 
-추론 능력(Claude > codex > gemini > gpt-oss) 순서로 **위는 판단, 아래로 갈수록 양**을 맡는다. 예산은 Claude·agy 가 크고 codex 가 작다는 전제다.
+추론 능력(Claude > codex > gemini > gpt-oss) 순서로 **위는 판단, 아래로 갈수록 양**을 맡는다. 호칭은 한국식 직급(이사·부장·과장·대리·사원)으로 통일하고, 기계 id 는 `director / lead / manager / assistant / staff` 다(2026-09-13 결정). 예산은 Claude·agy 가 크고 codex 가 작다는 전제다.
 
 원칙 하나: **말은 주장이고 출력이 증거다.** 층마다 아래의 보고를 믿지 않고 스크립트 출력(가드 자동 검사·변이 검사·preflight)으로 다시 잰다.
 
@@ -29,7 +29,7 @@ git clone https://github.com/inho-team/orca-skills ~/orca/orca-skills   # 작업
 sh ~/orca/orca-skills/install.sh                                         # 마켓 등록 + 플러그인 설치 + ~/.orca-skills 링크
 ```
 
-`install.sh` 는 (1) `claude plugin marketplace add inho-team/orca-skills` + `claude plugin install orca@orca-skills`, (2) `~/.orca-skills → ~/.claude/plugins/marketplaces/orca-skills/plugins/orca/skills` 링크를 만든다. Claude 는 플러그인으로 스킬(`orca:pm`, `orca:orca-top`, `orca:orca-lead`, `orca:orca-worker`)을, codex·agy 는 `~/.orca-skills/…` 경로로 같은 파일을 읽는다. `~/.claude/skills/` 아래에 두지 않는다(스킬 이중 등록).
+`install.sh` 는 (1) `claude plugin marketplace add inho-team/orca-skills` + `claude plugin install orca@orca-skills`, (2) `~/.orca-skills → ~/.claude/plugins/marketplaces/orca-skills/plugins/orca/skills` 링크를 만든다. Claude 는 플러그인으로 스킬(`orca:director`, `orca:orca-top`, `orca:orca-lead`, `orca:orca-worker`)을, codex·agy 는 `~/.orca-skills/…` 경로로 같은 파일을 읽는다. `~/.claude/skills/` 아래에 두지 않는다(스킬 이중 등록).
 
 필요한 것: `orca`(Orca CLI), `gh`, `codex`, `agy`(Antigravity CLI), `python3`, macOS `sandbox-exec`(격리), 프로젝트별 `.orca/project.env`.
 
@@ -43,17 +43,17 @@ sh ~/orca/orca-skills/install.sh                                         # 마�
 
 ```
 plugins/orca/skills/
-  pm/SKILL.md                 /orca:pm <요청> — 연쇄 진입점(PM 절차 5단계)
-  orca-top/SKILL.md           PM 규칙: 계획·세우기·감시·표본 검증·머지·회수·기록·격리
-  orca-lead/                  PL·과장·대리·사원의 규칙과 스크립트
+  director/SKILL.md           /orca:director <요청> — 연쇄 진입점(이사 절차 5단계)
+  orca-top/SKILL.md           이사 규칙: 계획·세우기·감시·표본 검증·머지·회수·기록·격리
+  orca-lead/                  부장·과장·대리·사원의 규칙과 스크립트
     SKILL.md                  절차 전문(§0 배치, §2 절대 규칙, §3 세우기·등급, §4 폴링, §5 검증, §6 반려 기준, §7 보고)
-    PL-CHECKLIST.md           PL(codex)이 읽는 2KB — 판정표와 금지 목록
-    lead-brief-template.md    PM → PL 브리프(판정용, 반 쪽)
-    ops-brief-template.md     PM → 과장 브리프(운영·검토)
-    junior-brief-template.md  과장 → 대리 브리프(분할·통합)
-    intern-brief-template.md  사원 일감 형식(편집 지시 + 완료 조건 + 브랜치/커밋)
+    LEAD-CHECKLIST.md           부장(codex)이 읽는 2KB — 판정표와 금지 목록
+    lead-brief-template.md    이사 → 부장 브리프(판정용, 반 쪽)
+    manager-brief-template.md     이사 → 과장 브리프(운영·검토)
+    assistant-brief-template.md  과장 → 대리 브리프(분할·통합)
+    staff-brief-template.md  사원 일감 형식(편집 지시 + 완료 조건 + 브랜치/커밋)
     review-brief-template.md  검토 규칙·점검표(과장이 참조)
-    brief-template.md         대리가 직접 구현할 때의 단독 브리프
+    assistant-solo-brief-template.md  대리가 직접 구현할 때의 단독 브리프
     common-rules.md           워커 공통 규칙 정본 — launch-worker.sh 가 자리표시자를 채워 TASK.md 에 붙인다
     project.env.example       프로젝트 고유값 양식 → <저장소>/.orca/project.env
     launch-worker.sh          워크트리 + 에이전트 세우기(이름 규칙·기계 포화 검사·seatbelt·워커 스택·Run/POLLER 자동 배정·--notify)
@@ -72,17 +72,17 @@ install.sh                    이 머신 설치
 
 ## 한 조각의 흐름
 
-1. **PM**: 요청을 읽고(추측 금지) 조각으로 자른다. 사람 결정은 한 번에 묻는다. `lead-brief-template.md`(PL)와 `ops-brief-template.md`(과장) 둘 다 쓴다. PM 터미널은 `/rename pm-<프로젝트>`.
-2. **PM 이 세운다**: `launch-worker.sh pl-<조각> <PL브리프> codex --repo … --handles ~/.<프로젝트>/coord/leads.txt` → 출력의 PL Run → `launch-worker.sh senior-<조각> <과장브리프> senior --supervise --run <PL Run> --repo … --handles ~/.<프로젝트>/coord/handles-pl-<조각>.txt --parent pl-<조각>`. PM Run 은 Monitor 로 감시.
-3. **과장**: `junior-brief-template.md` 로 대리를 세운다(`launch-worker.sh junior-<조각> … junior --run <과장 Run> --parent senior-<조각> --notify <과장 터미널>`, 배경). 폴러가 깨운다.
+1. **이사**: 요청을 읽고(추측 금지) 조각으로 자른다. 사람 결정은 한 번에 묻는다. `lead-brief-template.md`(부장)와 `manager-brief-template.md`(과장) 둘 다 쓴다. 이사 터미널은 `/rename director-<프로젝트>`.
+2. **이사가 세운다**: `launch-worker.sh lead-<조각> <부장브리프> codex --repo … --handles ~/.<프로젝트>/coord/leads.txt` → 출력의 부장 Run → `launch-worker.sh manager-<조각> <과장브리프> manager --supervise --run <부장 Run> --repo … --handles ~/.<프로젝트>/coord/handles-lead-<조각>.txt --parent lead-<조각>`. 이사 Run 은 Monitor 로 감시.
+3. **과장**: `assistant-brief-template.md` 로 대리를 세운다(`launch-worker.sh assistant-<조각> … assistant --run <과장 Run> --parent manager-<조각> --notify <과장 터미널>`, 배경). 폴러가 깨운다.
 4. **대리**: 조각을 `task-01.md, task-02a.md, task-02b.md …`(워크트리 밖 `~/.<프로젝트>/coord/tasks-<조각>/`)로 자른다 — guard → 구현 → 문서 순서, 겹치지 않는 것은 같은 번호+글자로 병렬. `pipeline-run.sh <워크트리> <디렉터리> --branch … --notify <대리 터미널>` 배경 실행. 실패분과 cherry-pick 충돌은 직접. 통합(전체 검사·가드 빼기·preflight) → PR → 과장 Run 에 보고(`PIPELINE.md` 표 포함).
-5. **과장**: `verify-pr.sh <PR> --role senior --guard-cmd … --mutate … --mutate … --notify <과장 터미널>`(배경) → 점검표 → 묶음을 PL Run 에 제출. 통과 뒤 `finish-worker.sh junior-<조각>`.
-6. **PL**: 폴러가 `/tmp/bundle-*.md` 와 ✅/🔴 집계로 깨운다 → `PL-CHECKLIST.md` 판정표 → 통과면 PM Run 에 「머지 준비됨」(묶음 + 판단 근거 3줄), 반려면 과장에게 사유. PR 마다 `/compact`.
-7. **PM**: 표본 검증 `verify-pr.sh <PR> --role pm --mutate <과장 변이 하나> …` + 가드 본문 읽기 + 점검표 한 행 대조 → `gh pr merge` → 착지를 파일로 확인 → 운영 반영 → `finish-worker.sh pl-<조각>`(POLLER·스택 포함) → 워크트리 회수 → 잔존 프로세스 → 백로그에 `agent-stats.py` 한 줄.
+5. **과장**: `verify-pr.sh <PR> --role manager --guard-cmd … --mutate … --mutate … --notify <과장 터미널>`(배경) → 점검표 → 묶음을 부장 Run 에 제출. 통과 뒤 `finish-worker.sh assistant-<조각>`.
+6. **부장**: 폴러가 `/tmp/bundle-*.md` 와 ✅/🔴 집계로 깨운다 → `LEAD-CHECKLIST.md` 판정표 → 통과면 이사 Run 에 「머지 준비됨」(묶음 + 판단 근거 3줄), 반려면 과장에게 사유. PR 마다 `/compact`.
+7. **이사**: 표본 검증 `verify-pr.sh <PR> --role director --mutate <과장 변이 하나> …` + 가드 본문 읽기 + 점검표 한 행 대조 → `gh pr merge` → 착지를 파일로 확인 → 운영 반영 → `finish-worker.sh lead-<조각>`(POLLER·스택 포함) → 워크트리 회수 → 잔존 프로세스 → 백로그에 `agent-stats.py` 한 줄.
 
 ## 이름 규칙
 
-워크트리·탭 제목·핸들·스택 이름은 `<역할>-<조각>[-n]`: `pm-<프로젝트>`, `pl-<조각>`, `senior-<조각>`, `junior-<조각>`(재시도 `-2`), `intern-<조각>-<무엇>`, `poller-<조각>`. 소문자·숫자·하이픈. 조각 마디는 숫자만이면 안 된다(`junior-1` 금지 — 이전 조각과 충돌해 `-2` 경로가 생겼다). `launch-worker.sh` 가 거부한다.
+워크트리·탭 제목·핸들·스택 이름은 `<역할>-<조각>[-n]`: `director-<프로젝트>`, `lead-<조각>`, `manager-<조각>`, `assistant-<조각>`(재시도 `-2`), `staff-<조각>-<무엇>`, `poller-<조각>`. 소문자·숫자·하이픈. 조각 마디는 숫자만이면 안 된다(`assistant-1` 금지 — 이전 조각과 충돌해 `-2` 경로가 생겼다). `launch-worker.sh` 가 거부한다.
 
 ## 격리와 자원
 
@@ -93,14 +93,14 @@ install.sh                    이 머신 설치
 
 ## 실측으로 정해진 것들 (왜 이렇게 생겼나)
 
-- **PL 이 세우기·기다리기까지 하면 조각당 48턴·4M 토큰**(codex). 판정만 남기고 세우기는 PM, 운영은 과장으로 내렸다. 폴러가 메일 본문을 파일로 저장하는 것도 PL 컨텍스트(턴당 100K→목표 30~40K) 때문.
+- **부장이 세우기·기다리기까지 하면 조각당 48턴·4M 토큰**(codex). 판정만 남기고 세우기는 이사, 운영은 과장으로 내렸다. 폴러가 메일 본문을 파일로 저장하는 것도 부장 컨텍스트(턴당 100K→목표 30~40K) 때문.
 - **codex 는 도구 실행이 30초에 끊기고**, 2분 넘는 명령을 배경으로 돌리다 못 돌아온다. 그래서 긴 스크립트는 `--notify` 로 끝을 알린다.
 - **gpt-oss 는 agy 편집 도구 인자를 빠뜨리고, 셸 편집은 순서·빈 줄을 틀리며, 커밋·보고를 안 하고 "완료" 라고 쓴다.** 그래서 편집만 시키고 나머지는 하네스. 실측: 문서 2건(2~3회), Kotlin 가드 테스트 1건(4회), 파이프라인 일감 7건 통과.
 - **agy `-p` 는 `--add-dir` 없이는 홈을 뒤진다**(남의 파일을 편집하려 했다). 하네스는 반드시 `--add-dir`.
 - **flash 할당량은 429 로 소진된다.** 하네스가 429 를 감지하면 그 모델의 남은 시도를 건너뛴다.
 - 가드 검사는 "가드 커밋을 revert" 가 아니라 **"main + guard 커밋만 올려 빨간가"**(재현 테스트 원칙). revert 는 파일 삭제로 빨개질 뿐이었다.
 - `GUARD_CMD` 뒤에 `| tail` 을 붙이면 종료코드가 tail 것이 된다 — `verify-pr.sh` 는 pipefail 로 방어하지만 정본은 깨끗하게.
-- 같은 PM Run 으로 다음 조각을 감시할 때 본메일 파일을 새로 비우면 지난 보고가 다시 깨운다 — Run 단위로 하나를 이어 쓴다.
+- 같은 이사 Run 으로 다음 조각을 감시할 때 본메일 파일을 새로 비우면 지난 보고가 다시 깨운다 — Run 단위로 하나를 이어 쓴다.
 
 ## 프로젝트별로 두는 것 (여기 두지 않는다)
 

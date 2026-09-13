@@ -22,4 +22,4 @@
 `docs: <무엇을>`
 
 ## 보고
-`orca orchestration send --run <RUN_ID> --type status --subject "인턴 완료 — <이름>" --body "worker-run.sh 통과. 로그 /tmp/intern-<워크트리>.log"`
+`orca orchestration send --run <RUN_ID> --type status --subject "사원 완료 — <이름>" --body "worker-run.sh 통과. 로그 /tmp/staff-<워크트리>.log"`

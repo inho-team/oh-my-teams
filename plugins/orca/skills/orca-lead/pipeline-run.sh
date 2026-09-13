@@ -3,7 +3,7 @@
 #   배치: 과장(pro) → 대리(flash, 분할·통합·어려운 로직) → 사원(gpt-oss, 하네스). 사원 일감마다 커밋 하나. 브랜치를 여러 개 만들지 않는다(병합 충돌을 대리에게 쌓지 않기 위해).
 #
 # 사용:  pipeline-run.sh <워크트리> <일감 디렉터리> [--branch <브랜치>] [--notify <대리 터미널>] [--models "gpt-oss-120b-medium:4,gemini-3.8-flash-high:2"] [--stop-on-fail|--continue]
-#   일감 파일: intern-brief-template.md 형식. 「브랜치」 절은 무시하고 --branch(기본: 첫 일감의 브랜치 절)를 쓴다. 「PR 제목」「보고」 절은 파이프라인이 무시한다 — PR·보고는 대리가 통합 뒤에 한다.
+#   일감 파일: staff-assistant-solo-brief-template.md 형식. 「브랜치」 절은 무시하고 --branch(기본: 첫 일감의 브랜치 절)를 쓴다. 「PR 제목」「보고」 절은 파이프라인이 무시한다 — PR·보고는 대리가 통합 뒤에 한다.
 #   병렬(2026-09-13 사용자 결정): 같은 번호에 글자를 붙인 일감(task-02a.md, task-02b.md)은 **한 묶음으로 병렬** 실행한다 — 대리가 "파일이 겹치지 않는다" 고 판단한 것만.
 #     스크립트가 묶음마다 임시 작업 공간(git worktree, 대리 브랜치 tip 기준)을 만들어 동시에 돌리고, 끝나면 커밋을 **대리 브랜치에 순서대로 cherry-pick** 한 뒤 임시 공간을 지운다.
 #     cherry-pick 이 충돌하면 그 일감의 임시 브랜치(pipe/<일감>)를 남기고 🔴 로 기록한다 — 대리가 `git cherry-pick <sha>` 로 직접 병합한다(커밋은 git 에 다 있다). 번호가 다른 일감은 순차.
@@ -43,7 +43,7 @@ for wave in $WAVES; do
     t="$GROUP"; n=$((n+1)); name="$(basename "$t" .md)"; echo "=== [$n/$TOTALN] $name (순차) — $(head -1 "$t" | sed 's/^# //' | cut -c1-60)"
     TMP="$(prep "$t" "$BR")"; BEFORE="$(git rev-parse HEAD)"
     "$HERE/worker-run.sh" "$WT" "$TMP" ${MODELS:+--models "$MODELS"} > "/tmp/pipe-$(basename "$WT")-$name.log" 2>&1; rc=$?
-    LOG="/tmp/intern-$(basename "$WT").log"; stats "$LOG"; cp "$LOG" "/tmp/pipe-$(basename "$WT")-$name.harness.log" 2>/dev/null
+    LOG="/tmp/staff-$(basename "$WT").log"; stats "$LOG"; cp "$LOG" "/tmp/pipe-$(basename "$WT")-$name.harness.log" 2>/dev/null
     if [ $rc -eq 0 ] && [ "$(git rev-parse HEAD)" != "$BEFORE" ]; then record_ok "$name" "$model" "$tries" "$(git rev-parse --short HEAD)"
     else record_fail "$name" "$(grep -oE '거친 모델:[^)]*' "$LOG" 2>/dev/null | tail -1)" "(로그 /tmp/pipe-$(basename "$WT")-$name.harness.log)"; [ $CONT = 1 ] || { echo "   중단(--continue 면 계속)"; break; }; fi
   else
@@ -60,7 +60,7 @@ for wave in $WAVES; do
     wait $PIDS
     for name in $NAMES; do
       n=$((n+1)); PW="/tmp/pipe-$(basename "$WT")-$name.wt"; PB="pipe/$name"; rc="$(cat "/tmp/pipe-$(basename "$WT")-$name.rc" 2>/dev/null || echo 1)"
-      LOG="/tmp/intern-$(basename "$PW").log"; stats "$LOG"; cp "$LOG" "/tmp/pipe-$(basename "$WT")-$name.harness.log" 2>/dev/null
+      LOG="/tmp/staff-$(basename "$PW").log"; stats "$LOG"; cp "$LOG" "/tmp/pipe-$(basename "$WT")-$name.harness.log" 2>/dev/null
       SHA="$(git -C "$PW" rev-parse HEAD 2>/dev/null)"
       if [ "$rc" = 0 ] && [ -n "$SHA" ] && [ "$SHA" != "$TIP" ]; then
         if git cherry-pick "$SHA" >/dev/null 2>&1; then

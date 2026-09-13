@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""에이전트 세션 로그에서 부담 지표를 뽑는다 — PM 이 조각마다 백로그에 적는 숫자. (2026-09-13)
+"""에이전트 세션 로그에서 부담 지표를 뽑는다 — 이사가 조각마다 백로그에 적는 숫자. (2026-09-13)
 
 사용:  python3 agent-stats.py <워크트리 이름>...        # codex 로그(~/.codex/sessions)에서 그 워크트리를 쓴 세션을 찾는다
        python3 agent-stats.py --file <rollout.jsonl>
@@ -36,9 +36,9 @@ def stats(f):
             calls.append(str(a.get("command") if isinstance(a, dict) else a))
         if p.get("type") == "token_count" and (p.get("info") or {}).get("total_token_usage"):
             tok.append(p["info"])
-    kinds = {"브리프": 0, "폴러": 0, "verify": 0, "PM/PL 답신": 0, "기타": 0}
+    kinds = {"브리프": 0, "폴러": 0, "verify": 0, "이사/부장 답신": 0, "기타": 0}
     for _, m in inputs:
-        k = "브리프" if m.startswith("이 워크트리") else "폴러" if m.startswith("[폴러") else "verify" if m.startswith("[verify") else "PM/PL 답신" if "답신" in m else "기타"
+        k = "브리프" if m.startswith("이 워크트리") else "폴러" if m.startswith("[폴러") else "verify" if m.startswith("[verify") else "이사/부장 답신" if "답신" in m else "기타"
         kinds[k] += 1
     waits = sum(1 for c in calls if re.search(r"tail -\d+ /tmp/verify|for i in .*tail|sleep \d+;", c))
     t = tok[-1]["total_token_usage"] if tok else {}; l = tok[-1].get("last_token_usage", {}) if tok else {}

@@ -3,9 +3,9 @@
 
 사용:  python3 poll.py --run <run_id> --handles <handles.txt> [--seen <seen.txt>] [--max-min 20]
        (Claude Code 에서는 Bash run_in_background=true 로 띄운다 — 종료가 곧 알림이다)
-  또는 python3 poll.py --run <run_id> --handles <handles.txt> --wake <PL 터미널 핸들> --loop
-       (2026-09-12 폴러 역전: PL 워크트리의 POLLER 터미널에서 계속 돌며, 사건이 생기면 PL 터미널에 한 줄을 **보내** 깨운다.
-        PL(codex)은 폴러를 부르지 않는다 — 턴이 끝나면 프롬프트에서 멈추는 성질이 그대로 장점이 된다.
+  또는 python3 poll.py --run <run_id> --handles <handles.txt> --wake <부장 터미널 핸들> --loop
+       (2026-09-12 폴러 역전: 부장 워크트리의 POLLER 터미널에서 계속 돌며, 사건이 생기면 부장 터미널에 한 줄을 **보내** 깨운다.
+        부장(codex)은 폴러를 부르지 않는다 — 턴이 끝나면 프롬프트에서 멈추는 성질이 그대로 장점이 된다.
         launch-worker.sh 의 codex 분기가 이 모드로 POLLER 를 자동으로 띄운다.)
 
 handles.txt 한 줄 형식:  <워크트리이름>:<term_handle> [(메모)] [done <시각>]   — done 줄은 건너뛴다
@@ -22,11 +22,11 @@ ap.add_argument("--handles", required=True)
 ap.add_argument("--seen", default="/tmp/orca-lead-seen.txt")
 ap.add_argument("--interval", type=int, default=60)
 ap.add_argument("--max-min", type=int, default=20)
-ap.add_argument("--no-pr", action="store_true", help="열린 PR 변화로는 깨우지 않는다(PM 은 PL 의 보고로만 깬다)")
-ap.add_argument("--wake", default="", help="사건이 생기면 종료하지 않고 이 터미널(PL)에 한 줄을 보내 깨운다")
+ap.add_argument("--no-pr", action="store_true", help="열린 PR 변화로는 깨우지 않는다(이사는 부장의 보고로만 깬다)")
+ap.add_argument("--wake", default="", help="사건이 생기면 종료하지 않고 이 터미널(부장)에 한 줄을 보내 깨운다")
 ap.add_argument("--loop", action="store_true", help="max-min 이 지나도 끝내지 않고 계속 돈다(--wake 와 함께 쓴다)")
-ap.add_argument("--environment", default="", help="orca --environment (원격 PL 일 때)")
-ap.add_argument("--bundle-dir", default="/tmp", help="--wake 모드: 메일 본문을 파일로 저장할 곳(PL 은 check JSON 덤프 대신 이 파일만 읽는다)")
+ap.add_argument("--environment", default="", help="orca --environment (원격 부장 일 때)")
+ap.add_argument("--bundle-dir", default="/tmp", help="--wake 모드: 메일 본문을 파일로 저장할 곳(부장은 check JSON 덤프 대신 이 파일만 읽는다)")
 a = ap.parse_args()
 ENVOPT = ["--environment", a.environment] if a.environment else []
 
@@ -51,8 +51,8 @@ PENDING_AT = 0.0
 DEBOUNCE = 60
 
 def wake(reason, lines=()):
-    """사건을 PL 에게 알린다. --wake 가 없으면 종료(=하네스 알림), 있으면 모아 두었다가 PL 터미널에 한 줄을 보내고 계속 돈다.
-    PL 이 턴 중이면 TUI 가 입력을 큐에 넣는다(codex·claude 둘 다) — 잃어버리지 않는다."""
+    """사건을 부장에게 알린다. --wake 가 없으면 종료(=하네스 알림), 있으면 모아 두었다가 부장 터미널에 한 줄을 보내고 계속 돈다.
+    부장이 턴 중이면 TUI 가 입력을 큐에 넣는다(codex·claude 둘 다) — 잃어버리지 않는다."""
     global PENDING_AT
     print("[폴러] " + reason + " — 깨운다", flush=True)
     for l in lines:
@@ -74,7 +74,7 @@ def flush_wake():
     out = subprocess.run(["orca", "terminal", "send"] + ENVOPT + ["--terminal", a.wake, "--text", body, "--enter", "--json"],
                          capture_output=True, text=True, timeout=60).stdout
     if '"ok": true' not in out:
-        print("[폴러] 🔴 PL 터미널에 보내기 실패 — 종료해서 PM 을 깨운다:", out[:300], flush=True)
+        print("[폴러] 🔴 부장 터미널에 보내기 실패 — 종료해서 이사를 깨운다:", out[:300], flush=True)
         sys.exit(1)
 
 def seen_ids():
@@ -133,7 +133,7 @@ def handles():
         name, rest = line.split(":", 1)
         h = rest.split()[0].strip()
         if not h.startswith("term_"):
-            continue  # 인턴(worker-run.sh)은 터미널이 없다 — 상태줄 검사 대상이 아니다
+            continue  # 사원(worker-run.sh)은 터미널이 없다 — 상태줄 검사 대상이 아니다
         hs.append((name.strip(), h))
     return hs
 
@@ -166,8 +166,8 @@ while a.loop or time.time() < deadline:
     try:
         ms = mailbox()
         if ms:
-            # 2026-09-13: PL 컨텍스트 다이어트 — 본문을 파일로 저장하고 경로 + ✅/🔴 집계만 알린다.
-            # (실측: PL 이 check --json 덤프를 통째로 읽어 턴당 100K 가 됐다)
+            # 2026-09-13: 부장 컨텍스트 다이어트 — 본문을 파일로 저장하고 경로 + ✅/🔴 집계만 알린다.
+            # (실측: 부장이 check --json 덤프를 통째로 읽어 턴당 100K 가 됐다)
             lines = []
             for m in ms:
                 body = m.get("body") or ""
@@ -183,7 +183,7 @@ while a.loop or time.time() < deadline:
         prs = None if a.no_pr else open_prs()
         if prs is not None and base is not None and prs != base:
             new = [n for n in prs if n not in base]
-            if new:   # 새로 열린 것만 사건이다. 닫힘은 남의 PR 머지·PM 의 머지라 PL 이 할 일이 없다(실측: 무관한 깨움 2건)
+            if new:   # 새로 열린 것만 사건이다. 닫힘은 남의 PR 머지·이사의 머지라 부장이 할 일이 없다(실측: 무관한 깨움 2건)
                 wake("새 PR: %s (전체 %s)" % (new, prs))
             base = prs
         tick += 1

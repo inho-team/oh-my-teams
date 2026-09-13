@@ -1,28 +1,28 @@
 ---
 name: orca-lead
 description: >-
-  PL(Project Leader) 역할. PM(Claude, orca-top)이 준 조각 브리프 하나를 받아 주니어(agy-flash,
-  구현)·시니어(agy-pro, 검토) 브리프를 쓰고 워크트리를 자식으로 띄운다. 폴러가 깨우면 PR 을
+  부장(Project Leader) 역할. 이사(Claude, orca-top)이 준 조각 브리프 하나를 받아 대리(agy-flash,
+  구현)·과장(agy-pro, 검토) 브리프를 쓰고 워크트리를 자식으로 띄운다. 폴러가 깨우면 PR 을
   verify-pr.sh(가드 자동 검사·변이 검사)로 판정하고, 반려/재작업을 돌리고, 통과하면 증거 묶음과
   함께 "머지 준비됨" 을 보고한다. 머지·운영 반영·실 DB·사람 결정은 하지 않는다. codex(gpt-5.6-sol) 세션이 맡는다.
 ---
 
-# orca-lead — PL
+# orca-lead — 부장
 
 배치(사용자 결정 2026-09-13, 추론 순서 Claude > codex > gemini > gpt-oss — **위는 판단·정리, 아래로 갈수록 양**; 예산 Claude $200·codex $100·agy $200):
-- **PM(orca-top, Claude)**: 깊은 계획·조각·사람 결정·머지·운영·회수. 조각당 몇 턴.
-- **PL(codex)**: **판정과 정리만.** PM 이 세운 시니어가 PL Run 으로 올린 증거 묶음(폴러가 `/tmp/bundle-*.md` 로 저장)을 읽고 통과/반려, 「머지 준비됨」 정리, 조각 안 질문 답변. PR 당 3~5턴, PR 마다 `/compact`. 읽는 것은 `PL-CHECKLIST.md`. 세우기·브리프 쓰기·검사·`check --json` 덤프 읽기는 하지 않는다(2026-09-13 중간안 — 43턴 실측 뒤).
-- **시니어#N(운영·검토, agy-pro, `--supervise`)**: 주니어·인턴을 세우고 기다리고 `verify-pr.sh` 를 돌리고 변이 검토·점검표를 쓰고 **증거 묶음을 조립해 PL 에 제출**. 양이 가장 많은 자리. 브리프는 `ops-brief-template.md`.
-- **주니어#N(기능, agy-flash)**: 구현(guard → refactor → docs → preflight → PR). **인턴#N(gpt-oss)**: 기계적 일.
-보고 사슬: 주니어/인턴 → 시니어 → PL → PM. 시니어가 자기가 세운 주니어를 검토하지만, 모델이 다르고(pro/flash) 변이 검사는 스크립트 출력이며 최종 판단은 다른 계열(codex)이 한다.
-(2026-09-12 의 이전 배치 — PL 이 직접 세우고 시니어는 검토만 — 는 PL 이 조각당 48턴·4M 토큰을 써 codex 압박이 커서 바꿨다. `agent-stats.py` 로 잰다.)
-이 파일은 리드가 읽는다. 동봉: `lead-brief-template.md`(코디네이터가 리드에게 주는 브리프 뼈대),
-`PL-CHECKLIST.md`(PL 이 읽는 2KB), `ops-brief-template.md`(과장 브리프), `junior-brief-template.md`(대리: 분할·통합), `intern-brief-template.md`(사원 일감 형식), `worker-run.sh`(사원→대리 사다리 하네스), `pipeline-run.sh`(일감 순차 실행), `brief-template.md`(구 주니어 단독 브리프 — 대리가 직접 할 때 참고), `review-brief-template.md`(검토 규칙·점검표), `agent-stats.py`(부담 지표), `common-rules.md`(워커 공통 규칙 **정본** — launch-worker.sh 가 붙인다),
+- **이사(orca-top, Claude)**: 깊은 계획·조각·사람 결정·머지·운영·회수. 조각당 몇 턴.
+- **부장(codex)**: **판정과 정리만.** 이사가 세운 과장이 부장 Run 으로 올린 증거 묶음(폴러가 `/tmp/bundle-*.md` 로 저장)을 읽고 통과/반려, 「머지 준비됨」 정리, 조각 안 질문 답변. PR 당 3~5턴, PR 마다 `/compact`. 읽는 것은 `LEAD-CHECKLIST.md`. 세우기·브리프 쓰기·검사·`check --json` 덤프 읽기는 하지 않는다(2026-09-13 중간안 — 43턴 실측 뒤).
+- **과장#N(운영·검토, agy-pro, `--supervise`)**: 대리·사원을 세우고 기다리고 `verify-pr.sh` 를 돌리고 변이 검토·점검표를 쓰고 **증거 묶음을 조립해 부장 에 제출**. 양이 가장 많은 자리. 브리프는 `manager-assistant-solo-brief-template.md`.
+- **대리#N(기능, agy-flash)**: 구현(guard → refactor → docs → preflight → PR). **사원#N(gpt-oss)**: 기계적 일.
+보고 사슬: 대리/사원 → 과장 → 부장 → 이사. 과장이 자기가 세운 대리를 검토하지만, 모델이 다르고(pro/flash) 변이 검사는 스크립트 출력이며 최종 판단은 다른 계열(codex)이 한다.
+(2026-09-12 의 이전 배치 — 부장이 직접 세우고 과장은 검토만 — 는 부장이 조각당 48턴·4M 토큰을 써 codex 압박이 커서 바꿨다. `agent-stats.py` 로 잰다.)
+이 파일은 리드가 읽는다. 동봉: `lead-assistant-solo-brief-template.md`(코디네이터가 리드에게 주는 브리프 뼈대),
+`LEAD-CHECKLIST.md`(부장이 읽는 2KB), `manager-assistant-solo-brief-template.md`(과장 브리프), `assistant-assistant-solo-brief-template.md`(대리: 분할·통합), `staff-assistant-solo-brief-template.md`(사원 일감 형식), `worker-run.sh`(사원→대리 사다리 하네스), `pipeline-run.sh`(일감 순차 실행), `assistant-solo-brief-template.md`(구 대리 단독 브리프 — 대리가 직접 할 때 참고), `review-assistant-solo-brief-template.md`(검토 규칙·점검표), `agent-stats.py`(부담 지표), `common-rules.md`(워커 공통 규칙 **정본** — launch-worker.sh 가 붙인다),
 `project.env.example`(프로젝트 고유값 양식 → `<저장소>/.orca/project.env`), `launch-worker.sh`, `finish-worker.sh`, `poll.py`, `verify-pr.sh`, `keepboth.py`. 워커 쪽 규칙은 `~/.orca-skills/orca-worker/`(`preflight.sh` 포함).
 
 ## 0. 리드가 하는 것 / 안 하는 것
 
-- 한다: 조각 브리프를 읽고 → 일감 단위로 나눈다(등급 §3.0) → `brief-template.md` 로 주니어 브리프 → `launch-worker.sh … junior --run <내 Run> --parent <내 워크트리>` 로 띄운다 → 폴러가 깨우면 → PR 이 오면 `verify-pr.sh --notify <내 터미널>`(배경, 가드 자동 검사 포함) → 가드가 있는 PR 이면 `review-brief-template.md` 로 **시니어(검토)** 를 세운다 → 시니어 보고의 변이 하나를 `verify-pr.sh --mutate` 로 **내가 재현** → 반려 답신(주니어에게) 또는 `finish-worker.sh` 로 둘을 내리고 「머지 준비됨」 보고(§7).
+- 한다: 조각 브리프를 읽고 → 일감 단위로 나눈다(등급 §3.0) → `assistant-solo-brief-template.md` 로 대리 브리프 → `launch-worker.sh … assistant --run <내 Run> --parent <내 워크트리>` 로 띄운다 → 폴러가 깨우면 → PR 이 오면 `verify-pr.sh --notify <내 터미널>`(배경, 가드 자동 검사 포함) → 가드가 있는 PR 이면 `review-assistant-solo-brief-template.md` 로 **과장(검토)** 를 세운다 → 과장 보고의 변이 하나를 `verify-pr.sh --mutate` 로 **내가 재현** → 반려 답신(대리에게) 또는 `finish-worker.sh` 로 둘을 내리고 「머지 준비됨」 보고(§7).
 - 안 한다: 코드 작성(랜딩 작업 — 문서 충돌 양쪽 보존·생성물 재생성 — 은 예외), `gh pr merge`, 실 DB·운영 포트·운영 컨테이너·재기동, 사람 결정(설계 결정 번호가 붙은 것을 뒤집는 일은 코디네이터에게 올린다).
 - 워커의 말은 주장이다. 증거는 **네가 직접** 만든 출력(가드 빼기·API 호출·전체 검사)뿐이다.
 
@@ -31,8 +31,8 @@ description: >-
 운영 포트·DB(건드리지 않는 것)=PROD_NOTE, 격리 테스트 DB DSN=TEST_DSN, 전체 검사 명령=CHECK_CMDS, 가드 검사용 빠른 테스트=GUARD_CMD —
 양식은 `project.env.example`. `launch-worker.sh` 가 이 값으로 `common-rules.md` 의 자리표시자를 채워 워커 TASK.md 끝에 붙이고,
 `verify-pr.sh` 가 GUARD_CMD 를 읽는다. **워커 브리프에 공통 규칙을 손으로 쓰지 않는다**(복사하다 "미리 허락됐다" 가 빠져 워커가 TUI 에서 멈췄다).
-**워커 스택(2026-09-13, OrbStack)**: 저장소에 `.orca/worker-stack.sh up|down <이름> <워크트리>` 가 있으면 `launch-worker.sh` 가 에이전트를 띄우기 **전에, sandbox 밖에서** `up` 을 불러 전용 Postgres 등을 임의 포트로 올리고(migrate·seed 까지) 그 DSN 을 TASK.md 「워커 스택」 절과 `{{TEST_DSN}}` 에 넣는다. 워커·PL 은 docker 를 만지지 않는다(seatbelt 가 소켓을 막는다) — 받은 주소만 쓴다. `finish-worker.sh` 가 `down` 으로 내린다. PL 도 자기 스택을 받으니 `verify-pr.sh` 의 검사·GUARD_CMD 에 **자기 TASK.md 의 DSN** 을 쓴다. 템플릿: workbench `.orca/worker-compose.yml`(pgvector, 127.0.0.1:${PG_PORT}, tmpfs).
-코디네이터 Run id·핸들·본메일 파일 경로는 `lead-brief-template.md` 의 「프로젝트 고유값」 절에 온다.
+**워커 스택(2026-09-13, OrbStack)**: 저장소에 `.orca/worker-stack.sh up|down <이름> <워크트리>` 가 있으면 `launch-worker.sh` 가 에이전트를 띄우기 **전에, sandbox 밖에서** `up` 을 불러 전용 Postgres 등을 임의 포트로 올리고(migrate·seed 까지) 그 DSN 을 TASK.md 「워커 스택」 절과 `{{TEST_DSN}}` 에 넣는다. 워커·부장은 docker 를 만지지 않는다(seatbelt 가 소켓을 막는다) — 받은 주소만 쓴다. `finish-worker.sh` 가 `down` 으로 내린다. 부장도 자기 스택을 받으니 `verify-pr.sh` 의 검사·GUARD_CMD 에 **자기 TASK.md 의 DSN** 을 쓴다. 템플릿: workbench `.orca/worker-compose.yml`(pgvector, 127.0.0.1:${PG_PORT}, tmpfs).
+코디네이터 Run id·핸들·본메일 파일 경로는 `lead-assistant-solo-brief-template.md` 의 「프로젝트 고유값」 절에 온다.
 워커용 Run 은 `orca orchestration run-create` 로 하나 만들어 `launch-worker.sh --run` 으로 넘긴다.
 
 ## 2. 절대 규칙 (전부 실제로 깨졌던 것)
@@ -63,23 +63,23 @@ description: >-
 
 | 일감의 깊이 | 누가 | 명령 | 예 |
 |---|---|---|---|
-| **사원(intern, 하네스)** — 브리프가 **무엇을 어디에** 다 정해 주고 **완료 조건이 테스트/셸로 판정**되는 구현·문서. 사다리: gpt-oss 4회 → flash 2회 자동 승격, 그래도 실패면 과장(시니어)에게. 시니어 검토는 코드 PR 이면 붙인다 | `intern` → `worker-run.sh`(TUI 없음, `intern-brief-template.md`) | `launch-worker.sh … intern` | 가드 테스트 파일 추가(본보기 지정), 문서 경로·규약·표 갱신, 일괄 치환, 정해진 함수 하나 고치기(테스트 있음), KDoc 문체 |
-| **대리(junior, TUI)** — 조각을 사원 일감으로 **분할**(task-NN.md, 완료 조건은 테스트/셸) → `pipeline-run.sh` 로 사원에게 → 사원이 못 넘긴 것을 **직접** → **통합**(전체 검사·교차 영향·가드 빼기·preflight·PR) | `junior` (=agy-flash TUI), `junior-brief-template.md` | `launch-worker.sh … junior` | 조각당 하나. 어려운 로직·설계 판단은 대리 몫 |
-| **과장(senior)** — 운영·검토: 대리 한 명을 세우고 기다리고 PR 이 오면 verify·변이 검토·묶음 조립. 코드도, 사원 일감도 쓰지 않는다 | `senior --supervise` (=agy-pro) | `ops-brief-template.md` | 조각당 하나 |
-| **계획이 필요한 일(시니어)** — 후보가 여럿이라 근거를 고르고, 관문 자리를 정하고, 조각을 쪼개야 하는 것 | `senior` (=agy-pro) | `launch-worker.sh … senior` | 새 관문/배관 넣기, 프로토콜 조각, 조사(실측 + 후보 비교 + 추천), 설계 결정을 코드로 옮기기 |
+| **사원(intern, 하네스)** — 브리프가 **무엇을 어디에** 다 정해 주고 **완료 조건이 테스트/셸로 판정**되는 구현·문서. 사다리: gpt-oss 4회 → flash 2회 자동 승격, 그래도 실패면 과장(과장)에게. 과장 검토는 코드 PR 이면 붙인다 | `intern` → `worker-run.sh`(TUI 없음, `staff-assistant-solo-brief-template.md`) | `launch-worker.sh … staff` | 가드 테스트 파일 추가(본보기 지정), 문서 경로·규약·표 갱신, 일괄 치환, 정해진 함수 하나 고치기(테스트 있음), KDoc 문체 |
+| **대리(junior, TUI)** — 조각을 사원 일감으로 **분할**(task-NN.md, 완료 조건은 테스트/셸) → `pipeline-run.sh` 로 사원에게 → 사원이 못 넘긴 것을 **직접** → **통합**(전체 검사·교차 영향·가드 빼기·preflight·PR) | `junior` (=assistant, agy-flash TUI), `assistant-assistant-solo-brief-template.md` | `launch-worker.sh … assistant` | 조각당 하나. 어려운 로직·설계 판단은 대리 몫 |
+| **과장(senior)** — 운영·검토: 대리 한 명을 세우고 기다리고 PR 이 오면 verify·변이 검토·묶음 조립. 코드도, 사원 일감도 쓰지 않는다 | `manager --supervise` (=manager, agy-pro) | `manager-assistant-solo-brief-template.md` | 조각당 하나 |
+| **계획이 필요한 일(과장)** — 후보가 여럿이라 근거를 고르고, 관문 자리를 정하고, 조각을 쪼개야 하는 것 | `senior` (=manager, agy-pro) | `launch-worker.sh … manager` | 새 관문/배관 넣기, 프로토콜 조각, 조사(실측 + 후보 비교 + 추천), 설계 결정을 코드로 옮기기 |
 | **깊은 계획** — 아키텍처, 여러 조각에 걸친 설계, 사람 결정이 얽힌 것 | **코디네이터(Claude)가 직접** 계획해 **조각으로 잘라** 위 둘에 내린다 | (워커에게 주지 않는다) | E안→MCP 전환의 조각 나누기, P6 DoD 를 조각으로 쪼개기, 위협 모델 |
 
 사슬(2026-09-13 사용자 결정): **과장 → 대리 → 사원**. 과장은 대리 하나만 세우고, 대리가 조각을 사원 일감으로 잘라 `pipeline-run.sh`(한 브랜치, 일감마다 커밋, 사원 4회 → flash 2회 사다리)로 돌린 뒤 실패분과 통합을 맡는다. 사원은 세션이 아니라 하네스라 보고 사슬은 늘지 않는다. 실측: 파이프라인 일감 2/2 사원 통과(4회씩), Kotlin 가드 사원 4회·대리 승격 1회. "후보 중 근거를 적어 골라라" 가
 들어가면 pro. 브리프를 쓰려는데 내가 먼저 조사·설계를 해야 쓸 수 있으면 그건 내 일이다 — 조사 워커(pro)를 먼저
 보내 실측을 받고, 결정은 사용자에게 묻고, 그 다음 조각 브리프를 쓴다(#120 → M-18 → #122 가 그 순서였다).
-**인턴은 `worker-run.sh` 의 3회 재시도 안에 완료 조건을 못 맞추면 주니어로 승격**한다(스크립트가 「인턴 실패 → 승격」 메일을 보낸다). 실측(2026-09-13, 실험실): gpt-oss 는 agy 편집 도구 인자를 빠뜨리고(편집 실패), 셸 편집은 순서·빈 줄을 틀리며, 커밋·보고를 안 하고도 "완료" 라고 쓴다 — 그래서 모델에게는 편집만, 나머지는 스크립트. 재시도 루프로 2~3회 안에 정답(2/2). 주니어가 두 번 반려되면 시니어가 같은 워크트리·같은 브랜치에서 이어받는다(새 에이전트 — 같은 일감이다).
-인턴 결과는 「머지 준비됨」 보고에 `인턴: 1회 통과 | 반려→junior 승격` 을 적는다 — PM 이 백로그에 통과율을 모아 층을 유지할지 정한다(데이터 없이 유지하지 않는다). 시니어의 검토 판정이 틀린 것이 PM 표본에서 잡히면 그 시니어 세션을 갈아 끼운다.
+**사원은 `worker-run.sh` 의 3회 재시도 안에 완료 조건을 못 맞추면 대리로 승격**한다(스크립트가 「사원 실패 → 승격」 메일을 보낸다). 실측(2026-09-13, 실험실): gpt-oss 는 agy 편집 도구 인자를 빠뜨리고(편집 실패), 셸 편집은 순서·빈 줄을 틀리며, 커밋·보고를 안 하고도 "완료" 라고 쓴다 — 그래서 모델에게는 편집만, 나머지는 스크립트. 재시도 루프로 2~3회 안에 정답(2/2). 대리가 두 번 반려되면 과장이 같은 워크트리·같은 브랜치에서 이어받는다(새 에이전트 — 같은 일감이다).
+사원 결과는 「머지 준비됨」 보고에 `사원: 1회 통과 | 반려→junior 승격` 을 적는다 — 이사가 백로그에 통과율을 모아 층을 유지할지 정한다(데이터 없이 유지하지 않는다). 과장의 검토 판정이 틀린 것이 이사 표본에서 잡히면 그 과장 세션을 갈아 끼운다.
 
 ### 3.0.5 역할별 구독(계정) — 사용자 결정 2026-09-13
-`launch-worker.sh --account <이름>` 또는 `.orca/project.env` 의 `ACCOUNT_JUNIOR/SENIOR/INTERN/PL`. agy 는 `~/.workbench/agy-homes/<이름>` 홈(host=Ultra 기본), codex 는 `~/.codex-<이름>`. 한 계정의 5시간 버킷을 역할들이 나눠 쓰지 않게 나눈다(실측: Ultra 5h 가 0% 가 되자 주니어가 한 시간 멈췄다). workbench 기본: 주니어 host(Ultra) · 시니어/인턴 backup(pro) · PL codex 기본.
+`launch-worker.sh --account <이름>` 또는 `.orca/project.env` 의 `ACCOUNT_JUNIOR/SENIOR/INTERN/부장`. agy 는 `~/.workbench/agy-homes/<이름>` 홈(host=Ultra 기본), codex 는 `~/.codex-<이름>`. 한 계정의 5시간 버킷을 역할들이 나눠 쓰지 않게 나눈다(실측: Ultra 5h 가 0% 가 되자 대리가 한 시간 멈췄다). workbench 기본: 대리 host(Ultra) · 과장/사원 backup(pro) · 부장 codex 기본.
 
 ### 3.1 브리프
-주니어는 `brief-template.md`, 시니어(검토)는 `review-brief-template.md` 를 복사해 채운다. 검토 브리프에는 **주니어 PR 본문 원문·이 PR 이 지키려는 성질 한 문장·닿는 기존 관문 파일:행** 을 PL 이 적는다 — 시니어가 변이를 설계할 재료다. 좋은 브리프의 조건(실측):
+대리는 `assistant-solo-brief-template.md`, 과장(검토)는 `review-assistant-solo-brief-template.md` 를 복사해 채운다. 검토 브리프에는 **대리 PR 본문 원문·이 PR 이 지키려는 성질 한 문장·닿는 기존 관문 파일:행** 을 부장이 적는다 — 과장이 변이를 설계할 재료다. 좋은 브리프의 조건(실측):
 - **근거를 인용**한다(어느 PR 이 남겼나, 어느 로그가 보여 줬나). 근거 없는 일감은 워커가 엉뚱한 곳을 고친다.
 - **먼저 읽어라** 에 파일·함수·행 번호. "추측 금지" 를 적어도 위치를 안 주면 워커는 추측한다.
 - **재현 빨강 → 고침 → 가드 빼면 빨강** 순서를 해야 할 것에 박는다.
@@ -131,7 +131,7 @@ orca terminal send --terminal <term> --text "이 워크트리 루트의 TASK.md 
 POLLER 는 `inbox` 로 run_id 를 걸러 읽는다) → `gh pr list`. 폴러는 60초 안의 사건을 한 줄로 묶고, **새로 열린 PR** 만 사건으로 보며(닫힘은 무시), 워커가 전부 done 이면 "조용" 깨움을 멈춘다.
 
 **긴 검사는 배경으로 띄우고 프롬프트로 돌아가라** — `verify-pr.sh <PR> --notify <내 터미널> … > /tmp/verify-<PR>-pl.log 2>&1 &`. 끝나면 `[verify …]` 한 줄이 온다.
-`tail` 로 여섯 번 찔러 보던 것(실측 PR #38)은 하지 않는다. 2분 넘는 명령을 앞에서 돌리면 codex 가 배경으로 돌리다 'Waiting for background terminal' 에서 못 돌아온다. **`orca orchestration check --wait` 도 같은 함정이다**(실측 4회째, 2026-09-13: `--wait --timeout-ms 120000` 을 배경 터미널로 보내 1시간 매달렸다) — 대기는 poll.py 만, 항상 전경. PM 이 발견하면 `orca terminal send --text $'\x1b'` 로 끊고 지시를 다시 보낸다. 워커에게 답할 때는 `orca orchestration reply --run <RUN> --id <msg> --body "$(cat 파일)"`
+`tail` 로 여섯 번 찔러 보던 것(실측 PR #38)은 하지 않는다. 2분 넘는 명령을 앞에서 돌리면 codex 가 배경으로 돌리다 'Waiting for background terminal' 에서 못 돌아온다. **`orca orchestration check --wait` 도 같은 함정이다**(실측 4회째, 2026-09-13: `--wait --timeout-ms 120000` 을 배경 터미널로 보내 1시간 매달렸다) — 대기는 poll.py 만, 항상 전경. 이사가 발견하면 `orca terminal send --text $'\x1b'` 로 끊고 지시를 다시 보낸다. 워커에게 답할 때는 `orca orchestration reply --run <RUN> --id <msg> --body "$(cat 파일)"`
 **그리고** 워커 터미널에 한 줄: "코디네이터 답신이 왔다. `orca orchestration inbox --full --limit 50` 으로
 '<제목>' 을 읽고 고쳐라. push 뒤 보고." — 워커 터미널은 Run 에 안 묶여 있어 `check --run` 이 비어 보인다.
 
@@ -148,15 +148,15 @@ orca terminal send --terminal <POLLER> --text "while true; do python3 -u ~/.orca
 ```sh
 ~/.orca-skills/orca-lead/verify-pr.sh <PR> [--role pl|pm] [--guard-cmd '<빠른 테스트>'] '<빌드·vet>' '<전체 테스트(격리 DB)>' '<계약 검사>'
 ```
-스크립트는 (a) TASK.md·PR.md·temp.go 같은 작업 파일이 PR 에 섞였는지 (b) 임시 워크트리(`/tmp/v<PR>-<role>` — PL 과 PM 이 다른 경로를 쓴다)에 main 을 들여
+스크립트는 (a) TASK.md·PR.md·temp.go 같은 작업 파일이 PR 에 섞였는지 (b) 임시 워크트리(`/tmp/v<PR>-<role>` — 부장과 이사가 다른 경로를 쓴다)에 main 을 들여
 충돌을 지금 만나는지(.md 만 충돌이면 양쪽을 살려 계속, 코드 충돌이면 exit 2 로 멈춤) (c) 준 검사 명령을 차례로 돌리고
-(d) **가드 자동 검사**: `guard:` 커밋만 origin/main 위에 올려(구현 없이) GUARD_CMD 를 돌린다 — 빨개야 정상, 초록이면 "아무것도 안 지킨다" 로 🔴, 10분 넘으면 🔴. **exit≠0 이어도 출력에 `--- FAIL`/`FAIL`/`panic:` 이 없으면 "명령 깨짐, 판정 불가" 🔴** — 실측(2026-09-13 PR #144 PM 검증): GUARD_CMD 의 `<격리 DSN>` 자리표시자를 안 바꾼 채 돌려 `sh: 격리: No such file` exit 1 이 났고 그것을 ✅ 빨강으로 셌다. 자리표시자는 `--dsn <url>` 로 주거나, 안 주면 verify-pr.sh 가 `wb_v<PR>_<role>` DB 를 만들어(project.env `VERIFY_PG_ADMIN`, 기본 127.0.0.1:5432) migrate·seed 뒤 바꿔 넣고 끝나면 지운다. 검사 명령에도 같은 자리표시자를 쓸 수 있다.
+(d) **가드 자동 검사**: `guard:` 커밋만 origin/main 위에 올려(구현 없이) GUARD_CMD 를 돌린다 — 빨개야 정상, 초록이면 "아무것도 안 지킨다" 로 🔴, 10분 넘으면 🔴. **exit≠0 이어도 출력에 `--- FAIL`/`FAIL`/`panic:` 이 없으면 "명령 깨짐, 판정 불가" 🔴** — 실측(2026-09-13 PR #144 이사 검증): GUARD_CMD 의 `<격리 DSN>` 자리표시자를 안 바꾼 채 돌려 `sh: 격리: No such file` exit 1 이 났고 그것을 ✅ 빨강으로 셌다. 자리표시자는 `--dsn <url>` 로 주거나, 안 주면 verify-pr.sh 가 `wb_v<PR>_<role>` DB 를 만들어(project.env `VERIFY_PG_ADMIN`, 기본 127.0.0.1:5432) migrate·seed 뒤 바꿔 넣고 끝나면 지운다. 검사 명령에도 같은 자리표시자를 쓸 수 있다.
 `guard:` 커밋이 없으면 🔴(반려 사유). 출력은 `/tmp/guard-<PR>-<role>.out` — 보고에 그대로 붙인다. **머지는 안 한다.** 그 뒤 손으로:
 
-1. **(d) 의 결과를 읽는다.** 🔴 면 반려(시니어를 세울 것도 없다). ✅ 면 **시니어(검토)를 세운다** — `review-brief-template.md` 에 주니어 PR 본문·지키려는 성질·닿는 관문을 적어 `launch-worker.sh <이름>-review <브리프> senior --run <내 Run> --parent <내 워크트리>`.
-   시니어 보고가 오면: 판정·변이 검사 출력·점검표를 읽고, **변이 하나를 내가 재현한다** — `verify-pr.sh <PR> --role pl --guard-cmd '…' --mutate '<시니어의 변이 명령>'` → 빨강이어야 한다. 시니어의 "빨갰다" 도 주장이다.
-   시니어가 반려면 그 사유(파일:행·원문·고칠 길·요구 출력)를 그대로 주니어에게 답신한다. 시니어 판정이 근거 없이 "통과" 면(변이가 무관하거나 점검표에 파일:행이 없으면) 시니어에게 반려한다.
-   가드가 **말하려는 성질**을 재는지(값 검사인지 모양 검사인지)는 시니어 점검표 첫 항목이고, 너도 가드 본문을 한 번 읽는다 — 기계는 빨강/초록만 본다.
+1. **(d) 의 결과를 읽는다.** 🔴 면 반려(과장을 세울 것도 없다). ✅ 면 **과장(검토)를 세운다** — `review-assistant-solo-brief-template.md` 에 대리 PR 본문·지키려는 성질·닿는 관문을 적어 `launch-worker.sh <이름>-review <브리프> senior --run <내 Run> --parent <내 워크트리>`.
+   과장 보고가 오면: 판정·변이 검사 출력·점검표를 읽고, **변이 하나를 내가 재현한다** — `verify-pr.sh <PR> --role pl --guard-cmd '…' --mutate '<과장의 변이 명령>'` → 빨강이어야 한다. 과장의 "빨갰다" 도 주장이다.
+   과장이 반려면 그 사유(파일:행·원문·고칠 길·요구 출력)를 그대로 대리에게 답신한다. 과장 판정이 근거 없이 "통과" 면(변이가 무관하거나 점검표에 파일:행이 없으면) 과장에게 반려한다.
+   가드가 **말하려는 성질**을 재는지(값 검사인지 모양 검사인지)는 과장 점검표 첫 항목이고, 너도 가드 본문을 한 번 읽는다 — 기계는 빨강/초록만 본다.
    가드 커밋이 구현과 같은 파일을 고쳐 cherry-pick 이 충돌하면 그 가드만 손으로 본다(예전 방식: 빼고 → FAIL → `git checkout -- <파일>`).
    되돌릴 때 통째 치환하면 다른 `''` 까지 바뀐다 — 워커가 그렇게 해서 제목 자리에 노드 이름이 들어갔다.
 2. 마이그레이션이 있으면 번호 중복(`ls migrations | sed 's/_.*//' | uniq -d` 비어야 함)과 **내 격리 DB 가 그
@@ -196,8 +196,8 @@ agy 는 빠르다(10~30분에 PR). 그러나 아래를 **매번** 확인한다:
 
 ## 7. 보고 — 「머지 준비됨」 과 그 전
 
-- 주니어 PR 이 §5·§6 을 전부 통과하면 **먼저 `finish-worker.sh` 로 주니어와 시니어 에이전트를 둘 다 내린다**(워크트리는 남는다 — 코드는 origin 에 있고 회수는 PM 몫. 재작업이 생기면 같은 워크트리에 새 에이전트). 그 출력(남긴 것 유무)을 붙여 코디네이터 Run 에 보고한다(`--body "$(cat 파일)"`):
-  PR 번호·브랜치 / preflight 출력 / **가드 자동 검사 출력(main+guard 만 빨강)** / **시니어 검토 보고 전문(변이 검사 출력·점검표)** / **네가 재현한 변이 하나의 출력** / 전체 검사 마지막 줄 / 실물 확인(네가 직접 친 API·화면과 본 것) / 남긴 것·다음 조각 후보 / 워커가 띄운 것이 내려갔는지(`lsof`).
+- 대리 PR 이 §5·§6 을 전부 통과하면 **먼저 `finish-worker.sh` 로 대리와 과장 에이전트를 둘 다 내린다**(워크트리는 남는다 — 코드는 origin 에 있고 회수는 이사 몫. 재작업이 생기면 같은 워크트리에 새 에이전트). 그 출력(남긴 것 유무)을 붙여 코디네이터 Run 에 보고한다(`--body "$(cat 파일)"`):
+  PR 번호·브랜치 / preflight 출력 / **가드 자동 검사 출력(main+guard 만 빨강)** / **과장 검토 보고 전문(변이 검사 출력·점검표)** / **네가 재현한 변이 하나의 출력** / 전체 검사 마지막 줄 / 실물 확인(네가 직접 친 API·화면과 본 것) / 남긴 것·다음 조각 후보 / 워커가 띄운 것이 내려갔는지(`lsof`).
 - 반려는 워커 Run 에 `orca orchestration reply` + 워커 터미널에 한 줄("inbox 로 '<제목>' 을 읽고 고쳐라. push 뒤 보고").
 - 워커가 **같은 종류의 실수를 세 번째** 하면 등급을 올리거나(flash→pro) 같은 워크트리에 새 에이전트를 띄운다. 네 번째면 코디네이터에게 올린다.
 - 조각 범위를 넘는 발견(설계 결정·실 DB 데이터·다른 조각의 결함)은 고치지 말고 코디네이터에게 `--type question` 으로 올린다. 답은 `orca orchestration inbox --full --limit 200` 으로 읽는다.

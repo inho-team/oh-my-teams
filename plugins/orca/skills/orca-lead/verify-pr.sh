@@ -5,15 +5,15 @@
 #   예:  verify-pr.sh 116 --guard-cmd 'go test -count=1 ./internal/...' 'go build ./... && go vet ./...' \
 #            'TEST_DB_URL=… go test -timeout 40m ./...' 'cd web && npm run check:contract'
 #   검사 명령을 안 주면 빌드/테스트는 돌리지 않고 머지 준비(워크트리·충돌)와 가드 검사만 한다.
-#   --role     워크트리 경로 접미사. PL 은 pl(기본), PM 표본 검증은 pm — 같은 /tmp/v<PR> 을 둘이 쓰다 PM 검사가 중간에 사라진 사고(orca-top §6).
+#   --role     워크트리 경로 접미사. 부장은 pl(기본), 이사 표본 검증은 pm — 같은 /tmp/v<PR> 을 둘이 쓰다 이사 검사가 중간에 사라진 사고(orca-top §6).
 #   --guard-cmd main+guard 상태에서 돌릴 **빠른** 테스트 명령. 비우면 <저장소>/.orca/project.env 의 GUARD_CMD, 그것도 없으면 마지막 검사 명령.
 #   --no-guard 가드 자동 검사를 건너뛴다(가드 커밋 규약 이전의 PR 에만).
 #   --dsn      검사·가드 명령의 `<격리 DSN>` 자리표시자에 넣을 Postgres URL. 안 주면 이 스크립트가 wb_v<PR>_<role> DB 를 만들고
 #              워크트리 바이너리로 migrate·seed 해서 채운다(관리 DSN: project.env VERIFY_PG_ADMIN, 기본 127.0.0.1:5432/postgres). 끝나면 지운다.
-#   --mutate   변이 검사(2026-09-12 시니어 검토 규약): PR tip 에 이 셸 명령(성질을 깨뜨리는 최소 변경, 예: 'mkdir -p core/application/src/main/kotlin/cc/midolog/common')
+#   --mutate   변이 검사(2026-09-12 과장 검토 규약): PR tip 에 이 셸 명령(성질을 깨뜨리는 최소 변경, 예: 'mkdir -p core/application/src/main/kotlin/cc/midolog/common')
 #              을 적용한 뒤 GUARD_CMD 를 돌려 **빨개야** 통과. 초록이면 가드가 그 성질을 안 지킨다. 여러 번 줄 수 있다. 되돌리기는 자동.
-#              시니어 검토 보고의 변이를 PL·PM 이 그대로 재현하는 데 쓴다 — "빨갰다" 는 문장은 주장이고 이 출력이 증거다.
-#   --notify   끝나면 이 터미널(PL)에 "[verify] PR <n> 끝 — 로그" 한 줄을 보낸다. PL 은 `verify-pr.sh … > /tmp/verify-<n>.log 2>&1 &` 로 띄우고
+#              과장 검토 보고의 변이를 부장·이사가 그대로 재현하는 데 쓴다 — "빨갰다" 는 문장은 주장이고 이 출력이 증거다.
+#   --notify   끝나면 이 터미널(부장)에 "[verify] PR <n> 끝 — 로그" 한 줄을 보낸다. 부장은 `verify-pr.sh … > /tmp/verify-<n>.log 2>&1 &` 로 띄우고
 #              프롬프트로 돌아가면 된다(codex 가 2분 넘는 명령을 배경으로 돌리다 매달리는 것, tail 로 6번 찔러 보던 것을 없앤다).
 #
 # 끝나면 워크트리를 남긴다(/tmp/v<PR>-<role>) — 추가 실험은 거기서 손으로 한다.
@@ -25,7 +25,7 @@ while [ $# -gt 0 ]; do case "$1" in --role) ROLE="$2"; shift 2;; --dsn) DSN="$2"
   --mutate) NM=$((NM+1)); eval "MUTATE_$NM=\$2"; shift 2;; *) break;; esac; done
 LOGF="/tmp/verify-$PR-$ROLE.log"
 notify() { [ -z "$NOTIFY" ] && return 0; orca terminal send --terminal "$NOTIFY" --text "[verify $(date '+%H:%M')] PR #$PR 검증 끝($1) — 결과 로그: $LOGF(네가 리다이렉트한 파일), 가드: /tmp/guard-$PR-$ROLE.out, 변이: /tmp/mutate-$PR-$ROLE-*.out. 읽고 반려/통과를 정해라." --enter --json >/dev/null 2>&1; return 0; }
-# 로그: 이 스크립트는 stdout 에만 쓴다. 배경으로 띄울 때 PL 이 `> /tmp/verify-<PR>-<role>.log 2>&1 &` 로 리다이렉트한다(notify 가 그 경로를 가리킨다).
+# 로그: 이 스크립트는 stdout 에만 쓴다. 배경으로 띄울 때 부장이 `> /tmp/verify-<PR>-<role>.log 2>&1 &` 로 리다이렉트한다(notify 가 그 경로를 가리킨다).
 REPO="$(git rev-parse --show-toplevel)" || exit 1
 cd "$REPO" || exit 1
 if [ -z "$GUARD_CMD" ] && [ -f "$REPO/.orca/project.env" ]; then GUARD_CMD="$(sh -c ". '$REPO/.orca/project.env'; printf '%s' \"\${GUARD_CMD:-}\"")"; fi
@@ -56,7 +56,7 @@ if [ $MERGE -ne 0 ]; then
   fi
 fi
 # `<격리 DSN>` 자리표시자(project.env 규약): 검사·가드 명령 어디든 있으면 실제 DSN 으로 바꾼다.
-# 실측(PR #144 PM 검증): 안 바꾸고 그대로 돌리자 `sh: 격리: No such file` 로 exit 1 이 났고, 가드 검사가 그것을 "빨강 ✅" 로 셌다.
+# 실측(PR #144 이사 검증): 안 바꾸고 그대로 돌리자 `sh: 격리: No such file` 로 exit 1 이 났고, 가드 검사가 그것을 "빨강 ✅" 로 셌다.
 PLACE='<격리 DSN>'; MADE_DB=""
 if printf '%s\n' "$GUARD_CMD" "$@" | grep -qF "$PLACE"; then
   if [ -z "$DSN" ]; then

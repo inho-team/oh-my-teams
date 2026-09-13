@@ -1,15 +1,15 @@
 #!/bin/sh
-# orca-lead 워커 내리기 — 「머지 준비됨」 을 보내기 **직전에** PL 이 돌린다. (2026-09-12)
+# orca-lead 워커 내리기 — 「머지 준비됨」 을 보내기 **직전에** 부장이 돌린다. (2026-09-12)
 #
 # 사용:  finish-worker.sh <이름> --handles <핸들파일> [--port <포트>]... [--environment <orca 환경>]
 #   <이름> 은 launch-worker.sh 에 준 워크트리 이름(핸들 파일의 `<이름>:<term> (agent)` 줄).
 #
 # 하는 일: 마지막 화면 몇 줄을 남긴다 → 워커 터미널(=에이전트)을 닫는다 → 워커가 띄운 것이 남았는지 본다
 #   (--port 로 준 포트의 리스너, 워크트리를 cwd 로 가진 프로세스) → 핸들 파일의 그 줄에 `done <시각>` 을 표기한다.
-# 워크트리와 브랜치는 **남긴다** — 코드는 origin 에 있고, 회수는 PM 이 머지 뒤에 한다(orca-top §1.4).
+# 워크트리와 브랜치는 **남긴다** — 코드는 origin 에 있고, 회수는 이사가 머지 뒤에 한다(orca-top §1.4).
 # 왜: 에이전트를 살려 두면 100~370MB 씩 잡고 유휴로 남는다(실측: 맥북에 5~14시간 유휴 agy 6개, swap 91%).
 #     반려로 재작업이 필요하면 같은 워크트리에 새 에이전트를 띄운다(§3.0 마지막 줄과 같은 규칙) — 그게 더 싸다.
-# 🔴 남은 리스너·프로세스는 **보고만** 한다. 내리는 것은 pid 를 보고 PL 이 결정한다(운영 프로세스일 수도 있다).
+# 🔴 남은 리스너·프로세스는 **보고만** 한다. 내리는 것은 pid 를 보고 부장이 결정한다(운영 프로세스일 수도 있다).
 set -u
 NAME="${1:-}"; shift 2>/dev/null || true
 HANDLES=""; ENV=""; PORTS=""
@@ -19,8 +19,8 @@ while [ $# -gt 0 ]; do case "$1" in --handles) HANDLES="$2"; shift 2;; --port) P
 LINE="$(grep -E "^$NAME:" "$HANDLES" | grep -v ' done ' | tail -1)"
 [ -n "$LINE" ] || { echo "🔴 핸들 파일에 '$NAME:' 줄이 없거나 이미 done 이다"; grep -E "^$NAME:" "$HANDLES"; exit 1; }
 T="$(printf '%s' "$LINE" | cut -d: -f2 | awk '{print $1}')"
-if [ "$T" = "intern-run" ]; then   # 인턴은 터미널이 없다 — 남은 프로세스만 정리하고 done 표기
-  PID="$(printf '%s' "$LINE" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"; [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null && { kill "$PID"; echo "⚠️ worker-run.sh(pid $PID)가 아직 돌고 있어 내렸다"; } || echo "✅ 인턴 프로세스 없음(이미 끝남)"
+if [ "$T" = "staff-run" ] || [ "$T" = "intern-run" ]; then   # 사원은 터미널이 없다 — 남은 프로세스만 정리하고 done 표기
+  PID="$(printf '%s' "$LINE" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"; [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null && { kill "$PID"; echo "⚠️ worker-run.sh(pid $PID)가 아직 돌고 있어 내렸다"; } || echo "✅ 사원 프로세스 없음(이미 끝남)"
   python3 - "$HANDLES" "$NAME" "$(date '+%Y-%m-%d %H:%M')" <<'PY'
 import sys; p, name, ts = sys.argv[1:4]
 lines = open(p, encoding='utf-8').read().split('\n'); out=[]; done=False
@@ -51,7 +51,7 @@ OUT="$(orca terminal close $ENVOPT --terminal "$T" --json 2>&1)"
 printf '%s' "$OUT" | grep -q '"ok": true' || { echo "🔴 터미널 닫기 실패: $(printf '%s' "$OUT" | head -3)"; exit 1; }
 echo "✅ 에이전트 터미널을 닫았다"
 
-# 3.2) PL 이면 POLLER 터미널도 닫는다(핸들 파일의 `# <이름>-poller:<term>` 줄) — 실측: PL 만 닫으면 POLLER 가 워크트리 cwd 로 남아 🔴 로 잡힌다
+# 3.2) 부장 이면 POLLER 터미널도 닫는다(핸들 파일의 `# <이름>-poller:<term>` 줄) — 실측: 부장만 닫으면 POLLER 가 워크트리 cwd 로 남아 🔴 로 잡힌다
 PT="$(grep -E "^# $NAME-poller:" "$HANDLES" | tail -1 | cut -d: -f2 | awk '{print $1}')"
 # 핸들 파일에 없으면(실측: 기록이 다른 파일로 간 적이 있다) 워크트리의 POLLER 제목 터미널을 직접 찾는다
 if [ -z "$PT" ] && [ -n "$WT" ]; then

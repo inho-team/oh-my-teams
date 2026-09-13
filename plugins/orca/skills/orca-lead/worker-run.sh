@@ -5,19 +5,19 @@
 #
 # 사용:  worker-run.sh <워크트리> <브리프.md> [--run <RUN_ID>] [--notify <터미널>] [--models "gpt-oss-120b-medium:4,gemini-3.8-flash-high:2"]
 #   --models  모델:시도수 를 쉼표로. 앞에서부터 쓰고, 시도를 다 쓰면 다음 모델로 **승격**한다(같은 브리프·같은 실패 출력을 이어 준다). 기본은 사원 4회 → 대리 2회.
-#   (구 intern-run.sh. --max-tries N 은 첫 모델의 시도수로 취급한다)
-#   브리프(intern-brief-template.md)의 절을 읽는다:
+#   (구 worker-run.sh. --max-tries N 은 첫 모델의 시도수로 취급한다)
+#   브리프(staff-assistant-solo-brief-template.md)의 절을 읽는다:
 #     ## 편집 지시      — 모델에게 주는 문장(파일·위치·전/후 텍스트). 자유 서술.
 #     ## 완료 조건      — 셸 명령 한 줄씩. **모두 exit 0** 이어야 통과. 순서·형식까지 잡히게 쓴다(예: grep -A1 'Beta' f | grep -q Gamma).
 #     ## 브랜치 / ## 커밋 메시지 / ## PR 제목  — 스크립트가 쓴다.
-#     ## 보고           — 통과 뒤 실행할 명령 한 줄(보통 orca orchestration send …). 실패면 스크립트가 "인턴 실패 → 승격" 을 같은 주소로 보낸다.
+#     ## 보고           — 통과 뒤 실행할 명령 한 줄(보통 orca orchestration send …). 실패면 스크립트가 "사원 실패 → 승격" 을 같은 주소로 보낸다.
 #
 # 왜 이렇게 하나(실측 2026-09-13, 실험실 3회): gpt-oss 는 (1) agy 편집 도구를 부를 때 필수 인자를 빠뜨려 편집이 실패하고
 #   (2) 셸 편집은 하지만 순서·빈 줄을 틀리며 (3) 커밋·보고를 안 하고도 "완료" 라고 쓴다. 그래서 편집만 맡기고 나머지는 결정적으로 돌린다.
 #   실패 출력을 붙여 다시 시키면 고치는지는 이 스크립트의 재시도 루프가 잰다.
 # ⚠️ agy -p 는 --add-dir 없이는 cwd 를 워크스페이스로 잡지 않고 홈을 뒤진다(실측: 남의 TASK.md.bak 을 편집하려 했다). 반드시 --add-dir.
 set -u
-WT="${1:-}"; BRIEF="${2:-}"; shift 2 2>/dev/null || { echo "사용: intern-run.sh <워크트리> <브리프.md> [--run R] [--notify T] [--max-tries N]"; exit 2; }
+WT="${1:-}"; BRIEF="${2:-}"; shift 2 2>/dev/null || { echo "사용: worker-run.sh <워크트리> <브리프.md> [--run R] [--notify T] [--max-tries N]"; exit 2; }
 RUN_ID=""; NOTIFY=""; MAX=""; MODELS="gpt-oss-120b-medium:4,gemini-3.8-flash-high:2"
 while [ $# -gt 0 ]; do case "$1" in --run) RUN_ID="$2"; shift 2;; --notify) NOTIFY="$2"; shift 2;; --max-tries) MAX="$2"; shift 2;; --models) MODELS="$2"; shift 2;; --model) MODELS="$2:${MAX:-3}"; shift 2;; *) shift;; esac; done
 [ -n "$MAX" ] && MODELS="$(printf '%s' "$MODELS" | sed "s/^\([^:,]*\):[0-9]*/\1:$MAX/")"
@@ -26,7 +26,7 @@ LADDER=""; OLDIFS="$IFS"; IFS=','; for spec in $MODELS; do m="${spec%%:*}"; n="$
 TOTAL=$(printf '%s' "$LADDER" | wc -w | tr -d ' ')
 [ -d "$WT/.git" ] || git -C "$WT" rev-parse --git-dir >/dev/null 2>&1 || { echo "🔴 워크트리가 아니다: $WT"; exit 2; }
 [ -f "$BRIEF" ] || { echo "🔴 브리프가 없다: $BRIEF"; exit 2; }
-NAME="$(basename "$WT")"; LOG="/tmp/intern-$NAME.log"; : > "$LOG"
+NAME="$(basename "$WT")"; LOG="/tmp/staff-$NAME.log"; : > "$LOG"
 section() { awk -v h="## $1" 'BEGIN{p=0} /^## /{p=($0==h)} p&&$0!=h{print}' "$BRIEF" | sed '/^[[:space:]]*$/d;/^<!--/d'; }
 EDIT="$(awk -v h="## 편집 지시" 'BEGIN{p=0} /^## /{p=($0==h)} p&&$0!=h{print}' "$BRIEF")"
 CONDS="$(section "완료 조건" | sed 's/^- //; s/^`//; s/`$//')"
@@ -65,8 +65,8 @@ for MODEL in $LADDER; do
 ## 편집 지시
 $EDIT
 $( [ -n "$PREV" ] && printf '\n## 직전 시도의 검증 실패(이것을 고쳐라 — 파일의 현재 상태를 먼저 cat 으로 확인하라)\n%s\n' "$PREV" )"
-  TRYOUT="/tmp/intern-$NAME-try$try.out"
-  if [ -n "${INTERN_SANDBOX_PROFILE:-}" ]; then sandbox-exec -p "$INTERN_SANDBOX_PROFILE" agy --model "$MODEL" --dangerously-skip-permissions --add-dir "$WT" --print-timeout 5m -p "$PROMPT" >"$TRYOUT" 2>&1
+  TRYOUT="/tmp/staff-$NAME-try$try.out"
+  if [ -n "${STAFF_SANDBOX_PROFILE:-}" ]; then sandbox-exec -p "$STAFF_SANDBOX_PROFILE" agy --model "$MODEL" --dangerously-skip-permissions --add-dir "$WT" --print-timeout 5m -p "$PROMPT" >"$TRYOUT" 2>&1
   else agy --model "$MODEL" --dangerously-skip-permissions --add-dir "$WT" --print-timeout 5m -p "$PROMPT" >"$TRYOUT" 2>&1; fi
   cat "$TRYOUT" >>"$LOG"
   # 할당량 소진 감지(실측 2026-09-13: flash 가 RESOURCE_EXHAUSTED 429 를 6분 재시도만 하다 끝났다) — 그 모델의 남은 시도를 건너뛴다
@@ -89,7 +89,7 @@ $( [ -n "$PREV" ] && printf '\n## 직전 시도의 검증 실패(이것을 고�
   echo "🔴 시도 $try 실패:$FAILS" | tee -a "$LOG"
   PREV="$FAILS"; try=$((try+1))
 done
-echo "🔴 하네스 $TOTAL 회 실패(거친 모델:$USED_MODELS) → 과장(시니어)에게 올려라. 마지막 실패:$FAILS" | tee -a "$LOG"
+echo "🔴 하네스 $TOTAL 회 실패(거친 모델:$USED_MODELS) → 과장(과장)에게 올려라. 마지막 실패:$FAILS" | tee -a "$LOG"
 { echo "--- 마지막 시도의 diff(새 파일 포함) ---"; git add -A -N . 2>/dev/null; git diff; git status --short; } >>"$LOG" 2>&1
 git checkout -q -- . 2>/dev/null; git clean -qfd -e TASK.md 2>/dev/null
 # 실패 보고는 orca 메일일 때만(제목을 바꿔서). 다른 보고 명령(파일 기록 등)은 실패 때 실행하지 않는다 — 실측: 성공 문구가 그대로 찍혔다
