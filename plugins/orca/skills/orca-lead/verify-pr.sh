@@ -124,7 +124,9 @@ if [ "$NM" -gt 0 ]; then
       perl -e 'alarm 600; exec @ARGV' sh -c "set -o pipefail 2>/dev/null; $GUARD_CMD" >>"/tmp/mutate-$PR-$ROLE-$i.out" 2>&1; rc=$?
       if [ $rc -eq 0 ]; then echo "🔴 변이 $i 를 넣어도 초록(exit 0) — 가드가 이 성질을 안 지킨다. 반려. 출력: /tmp/mutate-$PR-$ROLE-$i.out"
       elif [ $rc -eq 142 ] || [ $rc -eq 14 ]; then echo "🔴 변이 $i 에서 10분 매달린다 — 반려."
-      else echo "✅ 변이 $i 는 빨강(exit $rc) — 출력: /tmp/mutate-$PR-$ROLE-$i.out"; grep -E "FAIL|panic|Error|error|✗|failed" "/tmp/mutate-$PR-$ROLE-$i.out" | head -3; fi
+      elif grep -qE "compile(Test)?Kotlin FAILED|^e: |cannot find symbol|error\[E|SyntaxError|undefined:" "/tmp/mutate-$PR-$ROLE-$i.out" && ! grep -qE "^[^>]*(Test|Spec)[^ ]* > .* FAILED|--- FAIL|tests? completed, [1-9]+ failed" "/tmp/mutate-$PR-$ROLE-$i.out"; then
+        echo "⚠️ 변이 $i 는 빨강이지만 **컴파일이 깨진 것**(exit $rc) — 가드가 성질을 잡은 게 아니다. 변이로 치지 않는다. 출력: /tmp/mutate-$PR-$ROLE-$i.out"
+      else echo "✅ 변이 $i 는 빨강(exit $rc, 테스트 실패) — 출력: /tmp/mutate-$PR-$ROLE-$i.out"; grep -E "FAIL|panic|Error|error|✗|failed" "/tmp/mutate-$PR-$ROLE-$i.out" | head -3; fi
       git reset -q --hard "$TIP"; git clean -qfd -e build -e .gradle -e node_modules
       i=$((i+1))
     done

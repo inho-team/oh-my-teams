@@ -62,6 +62,9 @@ plugins/orca/skills/
     verify-pr.sh              PR 검증 — 작업 파일 혼입·main 병합·전체 검사·가드 자동 검사(main+guard 만 빨강)·변이 검사(--mutate)·--notify
     worker-run.sh             사원 하네스 — 모델에 편집만, 검증·재시도·사다리 승격·429 감지·커밋·PR·보고는 스크립트
     pipeline-run.sh           사원 일감 순차/병렬 실행(task-NN[a-z].md, 한 브랜치, cherry-pick, 충돌은 pipe/<일감> 브랜치로)
+    staff-find.sh             사원 찾기 — 질문 → 인용 대조 통과한 {file,line,quote,why}. 상위 자리의 읽기·인용을 내린다
+    staff-draft.sh            사원 초안 — checklist(점검표 초안, 판정 없음) / mutations(diff 안 변이 후보). 인용은 cite-check 로 대조
+    cite-check.py             인용 대조기 — 사원의 {file,line,quote} 를 실제 파일과 맞춘다(±3줄 보정, 지어낸 인용 탈락)
     agent-stats.py            codex 로그에서 턴·토큰·깨움·기다림 지표(백로그 한 줄)
     keepboth.py               문서 충돌 양쪽 보존
   orca-worker/
@@ -76,7 +79,7 @@ install.sh                    이 머신 설치
 2. **이사가 세운다**: `launch-worker.sh lead-<조각> <부장브리프> codex --repo … --handles ~/.<프로젝트>/coord/leads.txt` → 출력의 부장 Run → `launch-worker.sh manager-<조각> <과장브리프> manager --supervise --run <부장 Run> --repo … --handles ~/.<프로젝트>/coord/handles-lead-<조각>.txt --parent lead-<조각>`. 이사 Run 은 Monitor 로 감시.
 3. **과장**: `assistant-brief-template.md` 로 대리를 세운다(`launch-worker.sh assistant-<조각> … assistant --run <과장 Run> --parent manager-<조각> --notify <과장 터미널>`, 배경). 폴러가 깨운다.
 4. **대리**: 조각을 `task-01.md, task-02a.md, task-02b.md …`(워크트리 밖 `~/.<프로젝트>/coord/tasks-<조각>/`)로 자른다 — guard → 구현 → 문서 순서, 겹치지 않는 것은 같은 번호+글자로 병렬. `pipeline-run.sh <워크트리> <디렉터리> --branch … --notify <대리 터미널>` 배경 실행. 실패분과 cherry-pick 충돌은 직접. 통합(전체 검사·가드 빼기·preflight) → PR → 과장 Run 에 보고(`PIPELINE.md` 표 포함).
-5. **과장**: `verify-pr.sh <PR> --role manager --guard-cmd … --mutate … --mutate … --notify <과장 터미널>`(배경) → 점검표 → 묶음을 부장 Run 에 제출. 통과 뒤 `finish-worker.sh assistant-<조각>`.
+5. **과장**: `staff-draft.sh mutations/checklist` 로 사원 초안(대조된 인용만) → 변이를 골라 `verify-pr.sh <PR> --role manager --guard-cmd … --mutate … --notify <과장 터미널>`(배경, 컴파일만 깨는 변이는 ⚠️ 로 제외됨) → 점검표 행마다 판정 → 묶음을 부장 Run 에 제출. 통과 뒤 `finish-worker.sh assistant-<조각>`.
 6. **부장**: 폴러가 `/tmp/bundle-*.md` 와 ✅/🔴 집계로 깨운다 → `LEAD-CHECKLIST.md` 판정표 → 통과면 이사 Run 에 「머지 준비됨」(묶음 + 판단 근거 3줄), 반려면 과장에게 사유. PR 마다 `/compact`.
 7. **이사**: 표본 검증 `verify-pr.sh <PR> --role director --mutate <과장 변이 하나> …` + 가드 본문 읽기 + 점검표 한 행 대조 → `gh pr merge` → 착지를 파일로 확인 → 운영 반영 → `finish-worker.sh lead-<조각>`(POLLER·스택 포함) → 워크트리 회수 → 잔존 프로세스 → 백로그에 `agent-stats.py` 한 줄.
 
@@ -101,6 +104,7 @@ install.sh                    이 머신 설치
 - 가드 검사는 "가드 커밋을 revert" 가 아니라 **"main + guard 커밋만 올려 빨간가"**(재현 테스트 원칙). revert 는 파일 삭제로 빨개질 뿐이었다.
 - `GUARD_CMD` 뒤에 `| tail` 을 붙이면 종료코드가 tail 것이 된다 — `verify-pr.sh` 는 pipefail 로 방어하지만 정본은 깨끗하게.
 - 같은 이사 Run 으로 다음 조각을 감시할 때 본메일 파일을 새로 비우면 지난 보고가 다시 깨운다 — Run 단위로 하나를 이어 쓴다.
+- **상위 자리 턴의 절반은 "찾아 인용하기"** 다. 요약은 검증이 안 되지만 **인용은 검증된다** — 사원(gpt-oss)이 찾고 `cite-check.py` 가 실제 파일과 대조해 통과분만 올린다(`staff-find`·`staff-draft`). 결론은 위에 남긴다. 실측: 점검표 초안 10행 전부 대조 통과·과장의 실제 근거와 일치(25초).
 
 ## 프로젝트별로 두는 것 (여기 두지 않는다)
 
