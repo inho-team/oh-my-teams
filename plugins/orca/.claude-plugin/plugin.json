@@ -1,6 +1,6 @@
 {
   "name": "orca",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "orca 3층 오케스트레이션: PM(Claude) → PL(codex, 판단) → 시니어(agy-pro, 운영·검토) → 주니어(agy-flash)·인턴(gpt-oss). 스크립트는 ~/.orca-skills 링크로 non-Claude 에이전트도 쓴다.",
   "author": { "name": "inho-team" }
 }

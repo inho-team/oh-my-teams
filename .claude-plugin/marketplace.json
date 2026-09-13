@@ -1,7 +1,7 @@
 {
   "name": "orca-skills",
   "owner": { "name": "inho-team" },
-  "metadata": { "description": "orca 3층 오케스트레이션(PM→PL→시니어/주니어/인턴) 스킬·스크립트 배포용 사설 마켓플레이스", "version": "0.1.0" },
+  "metadata": { "description": "orca 3층 오케스트레이션(PM→PL→시니어/주니어/인턴) 스킬·스크립트 배포용 사설 마켓플레이스", "version": "0.1.1" },
   "plugins": [
     { "name": "orca", "source": "./plugins/orca", "description": "PM(orca-top)·PL(orca-lead)·실무자(orca-worker) 규칙과 launch/finish/verify/poll/intern 스크립트, /pm 진입점" }
   ]
