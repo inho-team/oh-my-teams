@@ -12,7 +12,7 @@
 - 실측한 것만 보고해라 — 파이프 뒤 `$?`, 대체물로 잰 것, 프록시 신호로 "돈다" 고 하지 마라. "통과했다" 는 문장 대신 **출력**.
 - **사람·PL의 확인을 기다리며 멈추지 마라** — 확인용 서버를 띄웠으면 네가 본 것과 주소를 보고에 적고 바로 다음 단계로 간다.
 - **끝나면 네가 띄운 서버·프로세스·브랜치 DB·모델을 내려라.** PR 본문에 "내린 것" 을 적어라. 🔴 큰 로컬 모델(ollama 등)은 올리지 마라 — 기계가 swap 으로 죽는다.
-- 보고 전에 `~/.claude/skills/orca-worker/preflight.sh '<검사1>' '<검사2>'` 를 돌려 🔴 가 없어야 한다. 그 **출력을 PR 본문에 그대로** 붙인다(작업 파일 혼입·미push·가드 커밋 유무·stat·검사 결과가 한 번에 나온다). 실무 규칙 전체는 `~/.claude/skills/orca-worker/SKILL.md`.
+- 보고 전에 `~/.orca-skills/orca-worker/preflight.sh '<검사1>' '<검사2>'` 를 돌려 🔴 가 없어야 한다. 그 **출력을 PR 본문에 그대로** 붙인다(작업 파일 혼입·미push·가드 커밋 유무·stat·검사 결과가 한 번에 나온다). 실무 규칙 전체는 `~/.orca-skills/orca-worker/SKILL.md`.
 - **보고는 커밋·push 가 끝난 뒤에** 한다. push 전에 보고하면 PL가 옛 커밋을 본다.
 - ⚠️ PL 답신은 `orca orchestration inbox --full --limit 200` 으로 읽는다(`check --run` 은 워커 터미널에 안 묶여 있어 비어 보인다). 물었으면 꼭 확인해라.
 - 보고: `orca orchestration send --run {{RUN_ID}} --type status --subject "<제목> — PR #<번호>" --body "$(cat <요약 파일>)"`

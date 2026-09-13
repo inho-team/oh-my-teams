@@ -17,7 +17,7 @@ description: >-
 2. 브랜치를 브리프의 이름으로 딴다(`git checkout -b <종류>/<이름>`).
 3. **재현 먼저**: 고치기 전에 빨간 테스트를 만들어 **`guard: <무엇을 지키나>` 제목의 별도 커밋**으로 남긴다(구현과 섞지 않는다 — PL 의 verify-pr.sh 가 그 커밋만 main 위에 올려 빨개지는지 기계로 본다. 구현 없이도 초록이면 반려). 그 다음 고친다(`fix:`/`feat:` 커밋). 그 다음 **가드를 빼고 돌려 빨개지는지** 본다 — 각 가드마다, 출력을 남긴다.
 4. 검증은 프로젝트의 전체 검사(예: `make migrate && make seed && make test`, `make web-check`)를 **필터 없이** 돌린다.
-5. `~/.claude/skills/orca-worker/preflight.sh '<검사1>' '<검사2>'` 를 돌린다. 🔴 가 하나라도 있으면 고치고 다시. **preflight 출력을 그대로 PR 본문에 붙인다.**
+5. `~/.orca-skills/orca-worker/preflight.sh '<검사1>' '<검사2>'` 를 돌린다. 🔴 가 하나라도 있으면 고치고 다시. **preflight 출력을 그대로 PR 본문에 붙인다.**
 6. 커밋·push → `gh pr create --base main --head <브랜치> --title … --body-file <파일>` → 그 뒤에 보고(브리프 마지막 줄의 orca 명령).
 
 ## 하지 말 것 (반려 사유였던 것)

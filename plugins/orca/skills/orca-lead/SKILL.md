@@ -18,7 +18,7 @@ description: >-
 (2026-09-12 의 이전 배치 — PL 이 직접 세우고 시니어는 검토만 — 는 PL 이 조각당 48턴·4M 토큰을 써 codex 압박이 커서 바꿨다. `agent-stats.py` 로 잰다.)
 이 파일은 리드가 읽는다. 동봉: `lead-brief-template.md`(코디네이터가 리드에게 주는 브리프 뼈대),
 `PL-CHECKLIST.md`(PL 이 읽는 2KB), `brief-template.md`(주니어 브리프 뼈대), `ops-brief-template.md`(시니어 운영·검토 브리프 뼈대), `review-brief-template.md`(검토 규칙·점검표 — ops 브리프가 참조), `agent-stats.py`(부담 지표), `common-rules.md`(워커 공통 규칙 **정본** — launch-worker.sh 가 붙인다),
-`project.env.example`(프로젝트 고유값 양식 → `<저장소>/.orca/project.env`), `launch-worker.sh`, `finish-worker.sh`, `poll.py`, `verify-pr.sh`, `keepboth.py`. 워커 쪽 규칙은 `~/.claude/skills/orca-worker/`(`preflight.sh` 포함).
+`project.env.example`(프로젝트 고유값 양식 → `<저장소>/.orca/project.env`), `launch-worker.sh`, `finish-worker.sh`, `poll.py`, `verify-pr.sh`, `keepboth.py`. 워커 쪽 규칙은 `~/.orca-skills/orca-worker/`(`preflight.sh` 포함).
 
 ## 0. 리드가 하는 것 / 안 하는 것
 
@@ -88,7 +88,7 @@ description: >-
 
 ### 3.2 워크트리 + 에이전트 — 터미널은 **하나**
 ```sh
-~/.claude/skills/orca-lead/launch-worker.sh <이름> <브리프.md> agy-flash|agy-pro --run <내 Run> --repo <프로젝트> --handles <핸들파일> --parent <내 워크트리 이름>
+~/.orca-skills/orca-lead/launch-worker.sh <이름> <브리프.md> agy-flash|agy-pro --run <내 Run> --repo <프로젝트> --handles <핸들파일> --parent <내 워크트리 이름>
 ```
 스크립트가 하는 일: **기계 포화 검사(§3.3)** → `orca worktree create` → `TASK.md` 복사 + 공통 규칙 첨부 → **워크트리의 기본 터미널**에 에이전트 명령을
 보낸다(터미널을 따로 만들지 않는다 — `orca terminal create --command` 로 만들면 기본 셸이 하나 더 남아
@@ -140,13 +140,13 @@ agy 의 만족도 설문 TUI. 그래서 폴러가 20분마다 "조용했다" 로
 POLLER 가 죽었으면(터미널 목록에 없거나 `[폴러]` 줄이 안 늘면) 직접 다시 띄운다:
 ```sh
 orca terminal create --worktree current --title POLLER --json   # 그 핸들에
-orca terminal send --terminal <POLLER> --text "while true; do python3 -u ~/.claude/skills/orca-lead/poll.py --run <RUN> --handles <핸들> --seen <본메일> --wake <내 터미널> --loop --interval 30 --max-min 20; sleep 10; done" --enter
+orca terminal send --terminal <POLLER> --text "while true; do python3 -u ~/.orca-skills/orca-lead/poll.py --run <RUN> --handles <핸들> --seen <본메일> --wake <내 터미널> --loop --interval 30 --max-min 20; sleep 10; done" --enter
 ```
 
 ## 5. PR 검증 (머지·반영·회수는 코디네이터 — 여기선 '머지 준비됨' 까지)
 
 ```sh
-~/.claude/skills/orca-lead/verify-pr.sh <PR> [--role pl|pm] [--guard-cmd '<빠른 테스트>'] '<빌드·vet>' '<전체 테스트(격리 DB)>' '<계약 검사>'
+~/.orca-skills/orca-lead/verify-pr.sh <PR> [--role pl|pm] [--guard-cmd '<빠른 테스트>'] '<빌드·vet>' '<전체 테스트(격리 DB)>' '<계약 검사>'
 ```
 스크립트는 (a) TASK.md·PR.md·temp.go 같은 작업 파일이 PR 에 섞였는지 (b) 임시 워크트리(`/tmp/v<PR>-<role>` — PL 과 PM 이 다른 경로를 쓴다)에 main 을 들여
 충돌을 지금 만나는지(.md 만 충돌이면 양쪽을 살려 계속, 코드 충돌이면 exit 2 로 멈춤) (c) 준 검사 명령을 차례로 돌리고

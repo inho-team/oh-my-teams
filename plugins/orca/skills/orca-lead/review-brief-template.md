@@ -14,13 +14,13 @@
 1. `git fetch origin && git diff origin/main...origin/<브랜치>` — **전체 diff**. 파일 목록만 보고 판단하지 않는다.
 2. `guard:` 커밋의 테스트 본문 전부 — 무엇을 단언하는지, 그 값이 어디서 오는지(항상 비어 오는 값이면 반려 사유).
 3. <PL 이 적는다: 이 변경이 닿는 기존 관문·호출 경로 파일:행. 예: 상신·복구 경로, 비동기 turn/start 경계>
-4. `~/.claude/skills/orca-lead/SKILL.md` §6 — 반려 사유 목록. 아래 점검표가 그것이다.
+4. `~/.orca-skills/orca-lead/SKILL.md` §6 — 반려 사유 목록. 아래 점검표가 그것이다.
 
 ## 해야 할 것
 
 1. **변이 검사(의무)** — 성질을 깨뜨리는 **최소 변경**을 최소 2개 설계하고, `verify-pr.sh` 로 실행해 빨개지는지 본다:
    ```sh
-   ~/.claude/skills/orca-lead/verify-pr.sh <번호> --role senior --guard-cmd '<GUARD_CMD>' \
+   ~/.orca-skills/orca-lead/verify-pr.sh <번호> --role senior --guard-cmd '<GUARD_CMD>' \
      --mutate '<변이 1: 예 mkdir -p core/application/src/main/kotlin/cc/midolog/common>' \
      --mutate '<변이 2: 예 관문 한 줄 제거 — sed -i "" "/if !allowed/d" path/file.go>' \
      > /tmp/verify-<번호>-senior.log 2>&1
