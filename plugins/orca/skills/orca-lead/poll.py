@@ -93,21 +93,27 @@ def mailbox():
     """새 메시지만. --ack 이 읽음 표시를 안 하는 경우가 있어 본 id 를 파일로 기억한다.
     `check --run` 은 그 Run 의 코디네이터 터미널에서만 된다 — 다른 터미널(POLLER)에서는 consumer_fenced(실측 2026-09-12).
     그때는 `inbox --json`(수신자 무관, run_id 필드 있음)으로 run_id 를 걸러 읽는다."""
+    # 실측(2026-09-13 17:12·17:18 「머지 준비됨」 둘을 놓침): `check --peek` 은 **오래된 것부터 100건**만 준다. Run 의 미읽음이
+    # 100 을 넘으면 새 메시지가 그 창에 안 들어와 영영 안 깨운다. 그래서 inbox(최신순, 수신자 무관, run_id 필드)를 **먼저** 읽고
+    # check 는 합집합으로만 보탠다. 두 호출이 다 실패하면 빈 목록.
+    ms = []; ids = set()
+    out = sh(["orca", "orchestration", "inbox", "--limit", "300", "--json"])
+    try:
+        d = json.loads(out); r = d.get("result") or {}
+        for m in (r.get("messages") or r.get("items") or []):
+            if m.get("run_id") == a.run and m.get("id") not in ids:
+                ms.append(m); ids.add(m.get("id"))
+    except Exception:
+        pass
     out = sh(["orca", "orchestration", "check", "--run", a.run, "--peek", "--json"])
-    ms = None
     try:
         d = json.loads(out)
         if d.get("ok"):
-            ms = (d.get("result") or {}).get("messages") or []
+            for m in (d.get("result") or {}).get("messages") or []:
+                if m.get("id") not in ids:
+                    ms.append(m); ids.add(m.get("id"))
     except Exception:
         pass
-    if ms is None:
-        out = sh(["orca", "orchestration", "inbox", "--limit", "200", "--json"])
-        try:
-            d = json.loads(out); r = d.get("result") or {}
-            ms = [m for m in (r.get("messages") or r.get("items") or []) if m.get("run_id") == a.run]
-        except Exception:
-            return []
     fresh = [m for m in ms if m.get("id") not in seen_ids()]
     if fresh:
         remember(m.get("id") for m in fresh)
