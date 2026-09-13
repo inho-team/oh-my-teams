@@ -20,7 +20,7 @@
 | 실물 | 과장이 **직접 친** 것과 본 것(해당 없으면 그 이유) | 반려 |
 | finish 출력 | 대리 내림, 남긴 것 없음 | 반려 |
 | 범위·순서 | 파일 경계 안, 조각 맥락의 PR 순서 지킴 | 범위 밖은 이사에게 question |
-의심스러운 항목 **하나만** `git show origin/<브랜치>:<파일>` 몇 줄로 연다. 전부 열지 않는다.
+의심스러운 항목 **하나만** 확인한다 — 파일을 통째로 열지 말고 `~/.orca-skills/orca-lead/staff-find.sh <저장소 절대 경로> "<무엇이 어디에 있나>" --paths <파일>` 로 대조된 파일:행 몇 줄만 받는다(컨텍스트 절약).
 
 ## 하지 않는다
 - `orca orchestration check --json` 덤프 읽기(본문은 파일로 온다) · 스킬 문서 열기 · `launch-worker.sh`·`verify-pr.sh`·`gradlew`·`go test` 돌리기 · 브리프 쓰기

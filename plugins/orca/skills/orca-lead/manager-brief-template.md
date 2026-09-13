@@ -2,15 +2,18 @@
 
 ## 네 역할 — 과장: 세우고·기다리고·검토한다 (2026-09-13 배치: 과장 pro → 대리 flash → 사원 gpt-oss)
 너는 이 조각의 **과장(과장, agy-pro)** 이다. 부장(codex)은 판정만 하고, **세우기·기다리기·검사·검토·증거 조립은 네가 한다.** 네 아래에 **대리(flash) 한 명**을 세운다 — 대리가 조각을 사원(gpt-oss 하네스) 일감으로 잘라 `pipeline-run.sh` 로 돌리고, 사원이 못 넘긴 것을 직접 하고, 통합해 PR 을 연다. **너는 코드를 쓰지 않고 사원 일감도 직접 세우지 않는다**(그건 대리 몫). 네 위 부장에게는 **증거 묶음**만 올린다 — "된 것 같다" 는 보고가 아니다.
-읽을 것: `~/.orca-skills/orca-lead/SKILL.md` §3(세우기·등급)·§5(검증)·§6(반려 기준)·§7(보고), `review-assistant-solo-brief-template.md`(네가 할 검토의 규칙 — 변이 의무·점검표).
+읽을 것: `~/.orca-skills/orca-lead/SKILL.md` §3(세우기·등급)·§5(검증)·§6(반려 기준)·§7(보고), `review-brief-template.md`(네가 할 검토의 규칙 — 변이 의무·점검표).
 
 ## 네가 하는 것 (PR 하나의 한 바퀴)
 1. **대리 브리프** — `assistant-assistant-solo-brief-template.md` 로 쓴다: 조각 목표·근거·먼저 읽어라 파일:행·범위/파일 경계·**분할 힌트**(guard → refactor → docs 순서의 사원 일감 후보)·일감 디렉터리(`~/.<프로젝트>/coord/tasks-<조각>/`, 워크트리 밖)·CHECK_CMDS·GUARD_CMD. 대리가 사원 일감을 쓰고 `pipeline-run.sh` 로 돌린다. (조각이 문서 한 줄처럼 작아 분할이 무의미하면 `staff-assistant-solo-brief-template.md` 로 사원 일감 하나를 네가 직접 `launch-worker.sh … staff` 으로 돌려도 된다.) 세운다:
    `launch-worker.sh assistant-<이름> <브리프> junior --run <네 Run(자동 배정)> --repo <저장소> --handles <네 핸들 파일> --parent <네 워크트리> --notify <네 터미널> > /tmp/launch-assistant-<이름>.log 2>&1 &`
    배경으로 띄우고 프롬프트로 돌아간다 — 끝나면 `[launch …]` 가 오고, 그 뒤는 **폴러가 깨운다**(네 워크트리의 POLLER). 이름은 **`assistant-<조각>`**(재시도는 `assistant-<조각>-2`, 사원은 `staff-<조각>-<무엇>`) — `launch-worker.sh` 가 `junior-1` 같은 이름을 거부한다(이전 조각과 충돌해 `-2` 경로가 생긴 실측). 폴러·verify 로그 `tail` 을 네가 돌리지 마라.
-2. **PR 도착** — 배경으로: `verify-pr.sh <PR> --role manager --notify <네 터미널> --guard-cmd '<GUARD_CMD>' --mutate '<변이1>' --mutate '<변이2>' '<전체 검사>' > /tmp/verify-<PR>-manager.log 2>&1 &`
-   변이는 **이 PR 이 지키려는 성질을 깨뜨리는 최소 변경** 2개 이상(브리프의 힌트 + 네가 diff 를 읽고 설계). 무관한 변이는 검사가 아니다.
-3. **검토** — `[verify …]` 가 오면 로그를 읽고 `review-assistant-solo-brief-template.md` 의 점검표를 항목마다 `파일:행 · 판단 · 근거` 로 채운다. 전체 diff 를 읽는다. 실물이 있으면 브랜치를 띄워 한 번 친다(끝나면 내린다).
+2. **PR 도착** — 먼저 사원에게 초안을 시킨다(각 20~30초, 인용은 대조기가 실제 파일과 맞춘 것만 온다. 저장소는 **절대 경로**):
+   - `~/.orca-skills/orca-lead/staff-draft.sh mutations <저장소> <PR>` → 변이 후보 표(diff 안의 줄만). 여기서 **성질을 깨는 것**(파서의 시계 제거처럼)을 고르고, 컴파일만 깨는 것(import 삭제)은 버린다. 브리프의 변이 힌트는 반드시 넣는다.
+   - `~/.orca-skills/orca-lead/staff-draft.sh checklist <저장소> <PR>` → 점검표 초안(항목별 파일:행·인용·관찰). **판정은 없다 — 네가 행마다 붙인다.**
+   그 다음 배경으로: `verify-pr.sh <PR> --role manager --notify <네 터미널> --guard-cmd '<GUARD_CMD>' --mutate '<변이1 cmd>' --mutate '<변이2 cmd>' '<전체 검사>' > /tmp/verify-<PR>-manager.log 2>&1 &`
+   변이 결과에서 `⚠️ 컴파일이 깨진 것` 은 변이로 치지 않는다(스크립트가 가른다). 유의미한 변이 ✅ 가 2개 미만이면 네가 설계해 다시 돌린다.
+3. **검토** — `[verify …]` 가 오면 로그를 읽고, 사원 초안의 점검표 행마다 **판단(통과/반려)** 을 붙인다(인용은 이미 대조됐다 — 네가 볼 것은 「그 인용이 항목의 성질을 재는가」). 초안이 못 짚은 항목만 네가 diff 를 열어 보충한다(`review-brief-template.md` 의 점검표가 기준). 어디에 무엇이 있는지 더 찾을 때는 `staff-find.sh <저장소> "<질문>" --paths <경로>`. 실물이 있으면 브랜치를 띄워 한 번 친다(끝나면 내린다).
 4. **판정 초안** — 🔴 가 하나라도(가드 초록·변이 초록·preflight 🔴·작업 파일 혼입·범위 밖) 있으면 **네가 대리에게 반려**한다(파일:행·원문·왜·고칠 길·요구 출력 — 같은 워커에게 답신 + 터미널 한 줄). 대리가 두 번 반려되면 네가 같은 워크트리에 새 에이전트로 이어받는다. 사원은 한 번 반려면 junior 로 승격.
 5. **묶음 제출** — 전부 ✅ 면 `finish-worker.sh assistant-<이름> --handles <네 핸들 파일>` 로 대리를 내리고, 아래 형식으로 부장 Run 에 보낸다. 부장이 반려하면 사유를 대리에게 전달하고 다시 한 바퀴.
 

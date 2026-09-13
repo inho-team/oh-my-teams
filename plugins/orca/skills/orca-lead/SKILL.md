@@ -17,12 +17,12 @@ description: >-
 보고 사슬: 대리/사원 → 과장 → 부장 → 이사. 과장이 자기가 세운 대리를 검토하지만, 모델이 다르고(pro/flash) 변이 검사는 스크립트 출력이며 최종 판단은 다른 계열(codex)이 한다.
 (2026-09-12 의 이전 배치 — 부장이 직접 세우고 과장은 검토만 — 는 부장이 조각당 48턴·4M 토큰을 써 codex 압박이 커서 바꿨다. `agent-stats.py` 로 잰다.)
 이 파일은 리드가 읽는다. 동봉: `lead-assistant-solo-brief-template.md`(코디네이터가 리드에게 주는 브리프 뼈대),
-`LEAD-CHECKLIST.md`(부장이 읽는 2KB), `manager-assistant-solo-brief-template.md`(과장 브리프), `assistant-assistant-solo-brief-template.md`(대리: 분할·통합), `staff-assistant-solo-brief-template.md`(사원 일감 형식), `worker-run.sh`(사원→대리 사다리 하네스), `pipeline-run.sh`(일감 순차 실행), `assistant-solo-brief-template.md`(구 대리 단독 브리프 — 대리가 직접 할 때 참고), `review-assistant-solo-brief-template.md`(검토 규칙·점검표), `agent-stats.py`(부담 지표), `common-rules.md`(워커 공통 규칙 **정본** — launch-worker.sh 가 붙인다),
+`LEAD-CHECKLIST.md`(부장이 읽는 2KB), `manager-assistant-solo-brief-template.md`(과장 브리프), `assistant-assistant-solo-brief-template.md`(대리: 분할·통합), `staff-assistant-solo-brief-template.md`(사원 일감 형식), `worker-run.sh`(사원→대리 사다리 하네스), `pipeline-run.sh`(일감 순차 실행), `assistant-solo-brief-template.md`(구 대리 단독 브리프 — 대리가 직접 할 때 참고), `review-brief-template.md`(검토 규칙·점검표), `agent-stats.py`(부담 지표), `common-rules.md`(워커 공통 규칙 **정본** — launch-worker.sh 가 붙인다),
 `project.env.example`(프로젝트 고유값 양식 → `<저장소>/.orca/project.env`), `launch-worker.sh`, `finish-worker.sh`, `poll.py`, `verify-pr.sh`, `keepboth.py`. 워커 쪽 규칙은 `~/.orca-skills/orca-worker/`(`preflight.sh` 포함).
 
 ## 0. 리드가 하는 것 / 안 하는 것
 
-- 한다: 조각 브리프를 읽고 → 일감 단위로 나눈다(등급 §3.0) → `assistant-solo-brief-template.md` 로 대리 브리프 → `launch-worker.sh … assistant --run <내 Run> --parent <내 워크트리>` 로 띄운다 → 폴러가 깨우면 → PR 이 오면 `verify-pr.sh --notify <내 터미널>`(배경, 가드 자동 검사 포함) → 가드가 있는 PR 이면 `review-assistant-solo-brief-template.md` 로 **과장(검토)** 를 세운다 → 과장 보고의 변이 하나를 `verify-pr.sh --mutate` 로 **내가 재현** → 반려 답신(대리에게) 또는 `finish-worker.sh` 로 둘을 내리고 「머지 준비됨」 보고(§7).
+- 한다: 조각 브리프를 읽고 → 일감 단위로 나눈다(등급 §3.0) → `assistant-solo-brief-template.md` 로 대리 브리프 → `launch-worker.sh … assistant --run <내 Run> --parent <내 워크트리>` 로 띄운다 → 폴러가 깨우면 → PR 이 오면 `verify-pr.sh --notify <내 터미널>`(배경, 가드 자동 검사 포함) → 가드가 있는 PR 이면 `review-brief-template.md` 로 **과장(검토)** 를 세운다 → 과장 보고의 변이 하나를 `verify-pr.sh --mutate` 로 **내가 재현** → 반려 답신(대리에게) 또는 `finish-worker.sh` 로 둘을 내리고 「머지 준비됨」 보고(§7).
 - 안 한다: 코드 작성(랜딩 작업 — 문서 충돌 양쪽 보존·생성물 재생성 — 은 예외), `gh pr merge`, 실 DB·운영 포트·운영 컨테이너·재기동, 사람 결정(설계 결정 번호가 붙은 것을 뒤집는 일은 코디네이터에게 올린다).
 - 워커의 말은 주장이다. 증거는 **네가 직접** 만든 출력(가드 빼기·API 호출·전체 검사)뿐이다.
 
@@ -79,7 +79,7 @@ description: >-
 `launch-worker.sh --account <이름>` 또는 `.orca/project.env` 의 `ACCOUNT_JUNIOR/SENIOR/INTERN/부장`. agy 는 `~/.workbench/agy-homes/<이름>` 홈(host=Ultra 기본), codex 는 `~/.codex-<이름>`. 한 계정의 5시간 버킷을 역할들이 나눠 쓰지 않게 나눈다(실측: Ultra 5h 가 0% 가 되자 대리가 한 시간 멈췄다). workbench 기본: 대리 host(Ultra) · 과장/사원 backup(pro) · 부장 codex 기본.
 
 ### 3.1 브리프
-대리는 `assistant-solo-brief-template.md`, 과장(검토)는 `review-assistant-solo-brief-template.md` 를 복사해 채운다. 검토 브리프에는 **대리 PR 본문 원문·이 PR 이 지키려는 성질 한 문장·닿는 기존 관문 파일:행** 을 부장이 적는다 — 과장이 변이를 설계할 재료다. 좋은 브리프의 조건(실측):
+대리는 `assistant-solo-brief-template.md`, 과장(검토)는 `review-brief-template.md` 를 복사해 채운다. 검토 브리프에는 **대리 PR 본문 원문·이 PR 이 지키려는 성질 한 문장·닿는 기존 관문 파일:행** 을 부장이 적는다 — 과장이 변이를 설계할 재료다. 좋은 브리프의 조건(실측):
 - **근거를 인용**한다(어느 PR 이 남겼나, 어느 로그가 보여 줬나). 근거 없는 일감은 워커가 엉뚱한 곳을 고친다.
 - **먼저 읽어라** 에 파일·함수·행 번호. "추측 금지" 를 적어도 위치를 안 주면 워커는 추측한다.
 - **재현 빨강 → 고침 → 가드 빼면 빨강** 순서를 해야 할 것에 박는다.
@@ -150,10 +150,16 @@ orca terminal send --terminal <POLLER> --text "while true; do python3 -u ~/.orca
 ```
 스크립트는 (a) TASK.md·PR.md·temp.go 같은 작업 파일이 PR 에 섞였는지 (b) 임시 워크트리(`/tmp/v<PR>-<role>` — 부장과 이사가 다른 경로를 쓴다)에 main 을 들여
 충돌을 지금 만나는지(.md 만 충돌이면 양쪽을 살려 계속, 코드 충돌이면 exit 2 로 멈춤) (c) 준 검사 명령을 차례로 돌리고
-(d) **가드 자동 검사**: `guard:` 커밋만 origin/main 위에 올려(구현 없이) GUARD_CMD 를 돌린다 — 빨개야 정상, 초록이면 "아무것도 안 지킨다" 로 🔴, 10분 넘으면 🔴. **exit≠0 이어도 출력에 `--- FAIL`/`FAIL`/`panic:` 이 없으면 "명령 깨짐, 판정 불가" 🔴** — 실측(2026-09-13 PR #144 이사 검증): GUARD_CMD 의 `<격리 DSN>` 자리표시자를 안 바꾼 채 돌려 `sh: 격리: No such file` exit 1 이 났고 그것을 ✅ 빨강으로 셌다. 자리표시자는 `--dsn <url>` 로 주거나, 안 주면 verify-pr.sh 가 `wb_v<PR>_<role>` DB 를 만들어(project.env `VERIFY_PG_ADMIN`, 기본 127.0.0.1:5432) migrate·seed 뒤 바꿔 넣고 끝나면 지운다. 검사 명령에도 같은 자리표시자를 쓸 수 있다.
+(d) **가드 자동 검사**: `guard:` 커밋만 origin/main 위에 올려(구현 없이) GUARD_CMD 를 돌린다 — 빨개야 정상, 초록이면 "아무것도 안 지킨다" 로 🔴, 10분 넘으면 🔴. (e) **변이 검사** `--mutate`: PR tip 에 변이를 넣고 GUARD_CMD — 빨강이어야 하되 **컴파일만 깨진 빨강은 ⚠️ 로 제외**(2026-09-13).
+
+**사원 도구(2026-09-13 실측 뒤 도입)** — 상위 자리 턴의 절반이 "찾아 인용하기" 라서, 그 부분만 사원(gpt-oss)에게 내리고 **인용 대조기(`cite-check.py`)로 실제 파일과 맞춘 것만** 받는다. 결론(통과/반려·성질·분할 경계)은 내리지 않는다.
+- `staff-find.sh <저장소> "<질문>" --paths …` → 대조된 `{file,line,quote,why}` (실측: JwtCodec 시계 3곳, 14초, 3/3 정확)
+- `staff-draft.sh checklist <저장소> <PR>` → 점검표 초안(테스트 assert 줄 인용·관찰만, 판정 없음) (실측 PR #47: 10행 전부 대조 통과, 과장 실제 근거와 일치, 25초)
+- `staff-draft.sh mutations <저장소> <PR>` → diff 안의 줄만 고른 변이 후보 (실측: 4개 중 1개가 결정적 변이, 나머지는 컴파일 깨는 것 → verify 가 ⚠️ 로 가른다)
+- 저장소 인자는 **절대 경로**(`.` 을 주면 agy 가 홈을 뒤진다 — 실측). **exit≠0 이어도 출력에 `--- FAIL`/`FAIL`/`panic:` 이 없으면 "명령 깨짐, 판정 불가" 🔴** — 실측(2026-09-13 PR #144 이사 검증): GUARD_CMD 의 `<격리 DSN>` 자리표시자를 안 바꾼 채 돌려 `sh: 격리: No such file` exit 1 이 났고 그것을 ✅ 빨강으로 셌다. 자리표시자는 `--dsn <url>` 로 주거나, 안 주면 verify-pr.sh 가 `wb_v<PR>_<role>` DB 를 만들어(project.env `VERIFY_PG_ADMIN`, 기본 127.0.0.1:5432) migrate·seed 뒤 바꿔 넣고 끝나면 지운다. 검사 명령에도 같은 자리표시자를 쓸 수 있다.
 `guard:` 커밋이 없으면 🔴(반려 사유). 출력은 `/tmp/guard-<PR>-<role>.out` — 보고에 그대로 붙인다. **머지는 안 한다.** 그 뒤 손으로:
 
-1. **(d) 의 결과를 읽는다.** 🔴 면 반려(과장을 세울 것도 없다). ✅ 면 **과장(검토)를 세운다** — `review-assistant-solo-brief-template.md` 에 대리 PR 본문·지키려는 성질·닿는 관문을 적어 `launch-worker.sh <이름>-review <브리프> senior --run <내 Run> --parent <내 워크트리>`.
+1. **(d) 의 결과를 읽는다.** 🔴 면 반려(과장을 세울 것도 없다). ✅ 면 **과장(검토)를 세운다** — `review-brief-template.md` 에 대리 PR 본문·지키려는 성질·닿는 관문을 적어 `launch-worker.sh <이름>-review <브리프> senior --run <내 Run> --parent <내 워크트리>`.
    과장 보고가 오면: 판정·변이 검사 출력·점검표를 읽고, **변이 하나를 내가 재현한다** — `verify-pr.sh <PR> --role pl --guard-cmd '…' --mutate '<과장의 변이 명령>'` → 빨강이어야 한다. 과장의 "빨갰다" 도 주장이다.
    과장이 반려면 그 사유(파일:행·원문·고칠 길·요구 출력)를 그대로 대리에게 답신한다. 과장 판정이 근거 없이 "통과" 면(변이가 무관하거나 점검표에 파일:행이 없으면) 과장에게 반려한다.
    가드가 **말하려는 성질**을 재는지(값 검사인지 모양 검사인지)는 과장 점검표 첫 항목이고, 너도 가드 본문을 한 번 읽는다 — 기계는 빨강/초록만 본다.
