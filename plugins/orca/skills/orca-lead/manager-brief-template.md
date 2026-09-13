@@ -5,7 +5,7 @@
 읽을 것: `~/.orca-skills/orca-lead/SKILL.md` §3(세우기·등급)·§5(검증)·§6(반려 기준)·§7(보고), `review-brief-template.md`(네가 할 검토의 규칙 — 변이 의무·점검표).
 
 ## 네가 하는 것 (PR 하나의 한 바퀴)
-1. **대리 브리프** — `assistant-assistant-solo-brief-template.md` 로 쓴다: 조각 목표·근거·먼저 읽어라 파일:행·범위/파일 경계·**분할 힌트**(guard → refactor → docs 순서의 사원 일감 후보)·일감 디렉터리(`~/.<프로젝트>/coord/tasks-<조각>/`, 워크트리 밖)·CHECK_CMDS·GUARD_CMD. 대리가 사원 일감을 쓰고 `pipeline-run.sh` 로 돌린다. (조각이 문서 한 줄처럼 작아 분할이 무의미하면 `staff-assistant-solo-brief-template.md` 로 사원 일감 하나를 네가 직접 `launch-worker.sh … staff` 으로 돌려도 된다.) 세운다:
+1. **대리 브리프** — `assistant-brief-template.md` 로 쓴다: 조각 목표·근거·먼저 읽어라 파일:행·범위/파일 경계·**분할 힌트**(guard → refactor → docs 순서의 사원 일감 후보)·일감 디렉터리(`~/.<프로젝트>/coord/tasks-<조각>/`, 워크트리 밖)·CHECK_CMDS·GUARD_CMD. 대리가 사원 일감을 쓰고 `pipeline-run.sh` 로 돌린다. (조각이 문서 한 줄처럼 작아 분할이 무의미하면 `staff-brief-template.md` 로 사원 일감 하나를 네가 직접 `launch-worker.sh … staff` 으로 돌려도 된다.) 세운다:
    `launch-worker.sh assistant-<이름> <브리프> junior --run <네 Run(자동 배정)> --repo <저장소> --handles <네 핸들 파일> --parent <네 워크트리> --notify <네 터미널> > /tmp/launch-assistant-<이름>.log 2>&1 &`
    배경으로 띄우고 프롬프트로 돌아간다 — 끝나면 `[launch …]` 가 오고, 그 뒤는 **폴러가 깨운다**(네 워크트리의 POLLER). 이름은 **`assistant-<조각>`**(재시도는 `assistant-<조각>-2`, 사원은 `staff-<조각>-<무엇>`) — `launch-worker.sh` 가 `junior-1` 같은 이름을 거부한다(이전 조각과 충돌해 `-2` 경로가 생긴 실측). 폴러·verify 로그 `tail` 을 네가 돌리지 마라.
 2. **PR 도착** — 먼저 사원에게 초안을 시킨다(각 20~30초, 인용은 대조기가 실제 파일과 맞춘 것만 온다. 저장소는 **절대 경로**):

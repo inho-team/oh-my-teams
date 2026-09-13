@@ -15,7 +15,7 @@ Claude Code 플러그인 마켓 `orca-skills` 이자, codex·agy 가 읽는 고�
    │
 대리    agy-flash     분할·통합 — 조각을 사원 일감으로 잘라 pipeline-run.sh 로 돌리고, 실패분을 직접 하고, 통합·PR
    │
-사원    gpt-oss-120b  하네스 — worker-run.sh 가 편집만 시키고 검증·재시도(4회)·flash 승격(2회)·커밋을 대신한다. 세션이 아니다
+사원    gpt-oss-120b  하네스(2인 1조) — worker-run.sh 가 편집만 시키고 검증·재시도(5회)·flash 승격(2회)·커밋을 대신한다. 통과 뒤 검수 사원(gpt-oss)이 추가 검사·변이를 내고 미달이면 반려(1회). 세션이 아니다
 ```
 
 추론 능력(Claude > codex > gemini > gpt-oss) 순서로 **위는 판단, 아래로 갈수록 양**을 맡는다. 호칭은 한국식 직급(이사·부장·과장·대리·사원)으로 통일하고, 기계 id 는 `director / lead / manager / assistant / staff` 다(2026-09-13 결정). 예산은 Claude·agy 가 크고 codex 가 작다는 전제다.
@@ -60,7 +60,7 @@ plugins/orca/skills/
     finish-worker.sh          에이전트 내리기(터미널·POLLER·워커 스택·잔존 프로세스 보고·핸들 done)
     poll.py                   폴러 — 사건(메일·새 PR·워커 상태줄)을 60초 묶음으로 감독자 터미널에 보내 깨운다. 메일 본문은 파일로
     verify-pr.sh              PR 검증 — 작업 파일 혼입·main 병합·전체 검사·가드 자동 검사(main+guard 만 빨강)·변이 검사(--mutate)·--notify
-    worker-run.sh             사원 하네스 — 모델에 편집만, 검증·재시도·사다리 승격·429 감지·커밋·PR·보고는 스크립트
+    worker-run.sh             사원 하네스 — 모델에 편집만, 검증·재시도·사다리 승격·429 감지·커밋·PR·보고는 스크립트. 통과 뒤 검수 사원(--no-review 로 끔)
     pipeline-run.sh           사원 일감 순차/병렬 실행(task-NN[a-z].md, 한 브랜치, cherry-pick, 충돌은 pipe/<일감> 브랜치로)
     staff-find.sh             사원 찾기 — 질문 → 인용 대조 통과한 {file,line,quote,why}. 상위 자리의 읽기·인용을 내린다
     staff-draft.sh            사원 초안 — checklist(점검표 초안, 판정 없음) / mutations(diff 안 변이 후보). 인용은 cite-check 로 대조
@@ -105,6 +105,7 @@ install.sh                    이 머신 설치
 - `GUARD_CMD` 뒤에 `| tail` 을 붙이면 종료코드가 tail 것이 된다 — `verify-pr.sh` 는 pipefail 로 방어하지만 정본은 깨끗하게.
 - 같은 이사 Run 으로 다음 조각을 감시할 때 본메일 파일을 새로 비우면 지난 보고가 다시 깨운다 — Run 단위로 하나를 이어 쓴다.
 - **상위 자리 턴의 절반은 "찾아 인용하기"** 다. 요약은 검증이 안 되지만 **인용은 검증된다** — 사원(gpt-oss)이 찾고 `cite-check.py` 가 실제 파일과 대조해 통과분만 올린다(`staff-find`·`staff-draft`). 결론은 위에 남긴다. 실측: 점검표 초안 10행 전부 대조 통과·과장의 실제 근거와 일치(25초).
+- **사원은 2인 1조**(2026-09-14). 작업 사원이 완료 조건을 넘기면 검수 사원(gpt-oss)이 diff 를 보고 실행 가능한 검사·변이를 JSON 으로 내고 하네스가 돌린다. 미달이면 임시 커밋을 풀고 실패 출력과 함께 작업 사원에게 되돌린다(일감당 1회) — gpt-oss 할당량으로 Claude·codex·gemini 를 아끼는 구조다. 사다리는 gpt-oss 5회 → flash 2회, 그래도 실패면 대리가 직접 본다. 실측: 검수 검사 4건 31초, 그러나 「빈 줄 두 개」는 못 잡았다 — 검수는 완료 조건의 보강이지 대체가 아니다.
 
 ## 프로젝트별로 두는 것 (여기 두지 않는다)
 

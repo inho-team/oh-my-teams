@@ -14,12 +14,12 @@ description: >-
 스크립트는 `~/.orca-skills/orca-lead/`(launch-worker.sh·poll.py·verify-pr.sh)를 그대로 쓴다.
 
 ## 0. 호칭 (사용자 결정 2026-09-12)
-- **이사** = 나(Claude, `orca-top`). **부장** = 조각당 codex 리드(`orca-lead`). 사슬은 **과장(pro) → 대리(flash) → 사원(gpt-oss)**: 과장 = 조각당 하나, 대리 세우기·기다리기·검토·묶음. 대리 = 조각을 사원 일감으로 분할해 `pipeline-run.sh` 로 돌리고, 실패분·통합·PR. 사원 = 하네스(`worker-run.sh`, 사원 4회 → flash 2회 사다리, 세션 아님) — 브리프 제목·핸들 파일·보고 제목에 이 호칭을 쓴다. 예: `부장 — 자원 관제 ②③`, `대리#1(조치 API)`, `과장#1(검토)`.
+- **이사** = 나(Claude, `orca-top`). **부장** = 조각당 codex 리드(`orca-lead`). 사슬은 **과장(pro) → 대리(flash) → 사원(gpt-oss)**: 과장 = 조각당 하나, 대리 세우기·기다리기·검토·묶음. 대리 = 조각을 사원 일감으로 분할해 `pipeline-run.sh` 로 돌리고, 실패분·통합·PR. 사원 = 하네스(`worker-run.sh`, 사원 5회 → flash 2회 사다리, 세션 아님) — 브리프 제목·핸들 파일·보고 제목에 이 호칭을 쓴다. 예: `부장 — 자원 관제 ②③`, `대리#1(조치 API)`, `과장#1(검토)`.
 - **이름 규칙(사용자 결정 2026-09-13)**: 워크트리·터미널 탭 제목·핸들·스택 이름은 전부 `<역할>-<조각>[-n]` — `director-<프로젝트>`(이사 터미널 제목), `lead-<조각>`, `manager-<조각>`, `assistant-<조각>`(재시도는 `-2`), `staff-<조각>-<무엇>`, `poller-<조각>`. 소문자·숫자·하이픈, 조각 마디는 숫자만이면 안 된다(`junior-1` 금지 — 이전 조각과 충돌해 `-2` 경로가 생겼다). `launch-worker.sh` 가 거부하고, 탭 제목을 이름으로 바꾼다. 호칭(`대리#1(기능)`)은 브리프·보고 제목에만.
 
 ## 1. 내가 하는 것
-1. **깊은 계획** — 사용자 요청·설계 문서·실측을 읽고 조각으로 자른다(조각 = 리드 하나가 1~5개 워커로 하루 안에 끝낼 크기). 조각 브리프는 `orca-lead/lead-assistant-solo-brief-template.md`.
-2. **리드·과장 세우기(2026-09-13 중간안 — 부장 부담 43턴 실측 뒤)** — 이사가 **두 브리프를 다 쓴다**: 리드 브리프(`lead-assistant-solo-brief-template.md`, 반 쪽 — 판정에 필요한 조각 맥락만)와 과장 브리프(`manager-assistant-solo-brief-template.md`, 조각 목표·근거·워커 후보·성질·변이 힌트·GUARD_CMD 전문). 순서:
+1. **깊은 계획** — 사용자 요청·설계 문서·실측을 읽고 조각으로 자른다(조각 = 리드 하나가 1~5개 워커로 하루 안에 끝낼 크기). 조각 브리프는 `orca-lead/lead-brief-template.md`.
+2. **리드·과장 세우기(2026-09-13 중간안 — 부장 부담 43턴 실측 뒤)** — 이사가 **두 브리프를 다 쓴다**: 리드 브리프(`lead-brief-template.md`, 반 쪽 — 판정에 필요한 조각 맥락만)와 과장 브리프(`manager-brief-template.md`, 조각 목표·근거·워커 후보·성질·변이 힌트·GUARD_CMD 전문). 순서:
    (a) `launch-worker.sh lead-<조각> <리드브리프> codex --repo <프로젝트> --handles ~/.<프로젝트>/coord/leads.txt` → 출력의 `워커용 Run: run_…`(= 부장 Run, `~/.<프로젝트>/coord/run-lead-<조각>.json` 에도 있음)을 받는다.
    (b) `launch-worker.sh manager-<조각> <과장브리프> manager --supervise --run <부장 Run> --repo <프로젝트> --handles ~/.<프로젝트>/coord/handles-lead-<조각>.txt --parent lead-<조각>` — 과장은 부장 Run 으로 보고하고, 자기 아래 워커용 Run 을 따로 받는다.
    부장은 브리프를 옮겨 적지도, 세우지도 않는다(그 두 가지가 부장 턴의 1/3 이었다). 부장은 폴러가 파일로 저장해 준 묶음만 읽고 판정한다.
