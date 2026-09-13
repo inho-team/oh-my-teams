@@ -98,7 +98,9 @@ if [ "$NO_GUARD" != 1 ]; then
     TIP="$(git rev-parse HEAD)"
     git checkout -q --detach origin/main
     PICKED=""; for g in $GUARDS; do
-      if git cherry-pick --no-commit "$g" >/dev/null 2>&1; then PICKED="$PICKED $g"; else echo "⚠️ $g 를 main 위에 올리다 충돌(구현과 같은 파일을 고친 테스트) — 이 가드는 손으로 본다"; git reset -q --hard; fi
+      # 가드마다 **커밋**한다. --no-commit 으로 쌓다가 뒤 가드가 충돌해 `reset --hard` 하면 앞서 올린 가드까지 사라져
+      # 맨 main 을 돌리고 "구현 없이도 초록 🔴" 로 오판했다(실측 2026-09-13 PR #158: 과장·이사 둘 다 거짓 반려).
+      if git -c user.name=verify -c user.email=verify@local cherry-pick "$g" >/dev/null 2>&1; then PICKED="$PICKED $g"; else echo "⚠️ $g 를 main 위에 올리다 충돌(구현과 같은 파일을 고친 테스트) — 이 가드는 손으로 본다"; git cherry-pick --abort >/dev/null 2>&1 || git reset -q --hard HEAD; fi
     done
     if [ -n "$PICKED" ]; then
       echo "--- main + guard[$PICKED ] 로 실행: $GUARD_CMD"
