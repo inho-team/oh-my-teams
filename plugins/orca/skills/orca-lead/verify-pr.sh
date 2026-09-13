@@ -33,8 +33,11 @@ BR="$(gh pr view "$PR" --json headRefName -q .headRefName)" || { echo "🔴 PR $
 git fetch -q --prune origin
 echo "=== PR #$PR  branch=$BR  main=$(git log --oneline -1 origin/main)  role=$ROLE"
 # 작업 파일이 커밋에 섞였는지 먼저 본다 — 실측: TASK.md·PR.md·temp.go 가 세 번 들어왔다.
-STRAY="$(gh pr view "$PR" --json files -q '.files[].path' | grep -E '^(TASK\.md|PR\.md|temp\.[a-z]+|patch.*\.diff)$')"
+STRAY="$(gh pr view "$PR" --json files -q '.files[].path' | grep -E '^(TASK\.md|PR\.md|temp\.[a-z]+|patch.*\.diff|PIPELINE\.md|task-[0-9]+[a-z]?\.md|.*HANDOFF-.*\.md)$')"
 [ -n "$STRAY" ] && echo "🔴 작업 파일이 PR 에 들어 있다: $STRAY"
+# 사원 하네스(worker-run.sh)의 실패 로그가 문서로 둔갑해 머지된 실측(2026-09-13 PR #154 docs/HANDOFF-drain-property-b.md, 네 층이 다 놓침).
+HARN="$(for f in $(gh pr view "$PR" --json files -q '.files[].path' | grep -E '\.md$'); do git show "origin/$BR:$f" 2>/dev/null | grep -lq "직전 시도의 검증 실패" && echo "$f"; done)"
+[ -n "$HARN" ] && echo "🔴 사원 하네스 실패 로그가 문서로 들어 있다(본문에 '직전 시도의 검증 실패'): $HARN"
 WT="/tmp/v$PR-$ROLE"
 rm -rf "$WT"; git worktree prune   # 같은 이름으로 검증한 뒤 지운 흔적(prunable)이 남아 add 가 막힌다(실측)
 # ⚠️ `git worktree add … && …` 로 묶지 않는다 — add 가 실패하면 뒤 명령이 메인 체크아웃에서 돈다.
