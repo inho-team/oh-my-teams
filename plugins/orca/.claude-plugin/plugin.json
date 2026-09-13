@@ -1,6 +1,6 @@
 {
   "name": "orca",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "orca 오케스트레이션: 이사(Claude, 계획·머지) → 부장(codex, 판정) → 과장(agy-pro, 운영·검토) → 대리(agy-flash, 분할·통합) → 사원(gpt-oss 하네스). 스크립트는 ~/.orca-skills 링크로 non-Claude 에이전트도 쓴다.",
   "author": { "name": "inho-team" }
 }

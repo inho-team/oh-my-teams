@@ -9,12 +9,13 @@ set -u
 KIND="${1:-}"; REPO="$(cd "${2:-.}" 2>/dev/null && pwd)"; PR="${3:-}"; shift 3 2>/dev/null || { echo "사용: staff-draft.sh checklist|mutations <저장소> <PR> [--model M] [--max N]"; exit 2; }
 MODEL="gpt-oss-120b-medium"; MAX=4
 while [ $# -gt 0 ]; do case "$1" in --model) MODEL="$2"; shift 2;; --max) MAX="$2"; shift 2;; *) shift;; esac; done
-HERE="$(cd "$(dirname "$0")" && pwd)"; DIFF="/tmp/staff-draft-$PR.diff"; OUT="/tmp/staff-draft-$PR-$KIND.out"; JSON="/tmp/staff-draft-$PR-$KIND.json"
+HERE="$(cd "$(dirname "$0")" && pwd)"; DIFF="/tmp/staff-draft-$PR-$KIND-$$.diff"; OUT="/tmp/staff-draft-$PR-$KIND.out"; JSON="/tmp/staff-draft-$PR-$KIND.json"
 cd "$REPO" || exit 2
 gh pr diff "$PR" > "$DIFF" 2>/dev/null || { echo "🔴 gh pr diff $PR 실패"; exit 1; }
 BR="$(gh pr view "$PR" --json headRefName -q .headRefName)"; git fetch -q origin "$BR" 2>/dev/null
 # 대조는 PR 브랜치 기준 파일로 한다(머지 뒤라도 그 브랜치 tip 의 내용)
-WT="/tmp/staff-draft-$PR.wt"; rm -rf "$WT"; git worktree prune; git worktree add -q --detach "$WT" "origin/$BR" 2>/dev/null || git worktree add -q --detach "$WT" HEAD
+# 실행마다 유일한 임시 워크트리(실측: 과장이 checklist·mutations 를 겹쳐 돌리자 한쪽 정리가 다른 쪽 파일을 지워 인용이 전부 "파일 없음" 으로 탈락했다)
+WT="/tmp/staff-draft-$PR-$KIND-$$.wt"; git worktree prune; git worktree add -q --detach "$WT" "origin/$BR" 2>/dev/null || git worktree add -q --detach "$WT" HEAD
 case "$KIND" in
   checklist)
     ITEMS="1 값 검사인가 모양 검사인가(타입·컴파일·존재 확인으로 값 검사를 대신했나) | 2 판정에 쓴 값이 실제로 채워지는 값인가(항상 비어 오는 필드로 만든 판정이 아닌가) | 3 비동기 경계: 함수 반환=완료 로 착각한 곳 | 4 새 검사를 기존 관문 앞에 넣어 기존 경로를 막았나 | 5 시드/픽스처 not-null 위반·flaky 단언 | 6 작업 파일·생성물 혼입 | 7 범위 밖 변경"
