@@ -5,7 +5,7 @@
 읽을 것: `~/.orca-skills/orca-lead/SKILL.md` §3(세우기·등급)·§5(검증)·§6(반려 기준)·§7(보고), `review-brief-template.md`(네가 할 검토의 규칙 — 변이 의무·점검표).
 
 ## 네가 하는 것 (PR 하나의 한 바퀴)
-1. **주니어 브리프** — `brief-template.md` 로 쓴다(근거 인용·먼저 읽어라 파일:행·재현→고침→가드 순서·범위/파일 경계). **인턴급이면 `intern-brief-template.md`** 로(편집 지시 + 순서·빈 줄까지 잡는 완료 조건 + 브랜치/커밋/PR/보고 절) — 인턴은 TUI 가 아니라 `intern-run.sh` 로 돌고 스크립트가 검증·재시도·커밋·PR·보고를 한다. `launch-worker.sh <이름> <브리프> intern --run <네 Run> --repo … --handles … --parent … --notify <네 터미널>` 한 줄이면 된다(배경 실행, 끝나면 `[intern …]` 알림). 세운다:
+1. **주니어 브리프** — `brief-template.md` 로 쓴다(근거 인용·먼저 읽어라 파일:행·재현→고침→가드 순서·범위/파일 경계). **인턴급이면 `intern-brief-template.md`** 로(편집 지시 + 순서·빈 줄까지 잡는 완료 조건 + 브랜치/커밋/PR/보고 절) — 인턴은 TUI 가 아니라 `worker-run.sh` 로 돌고 스크립트가 검증·재시도·커밋·PR·보고를 한다. `launch-worker.sh <이름> <브리프> intern --run <네 Run> --repo … --handles … --parent … --notify <네 터미널>` 한 줄이면 된다(배경 실행, 끝나면 `[intern …]` 알림). 세운다:
    `launch-worker.sh junior-<이름> <브리프> junior --run <네 Run(자동 배정)> --repo <저장소> --handles <네 핸들 파일> --parent <네 워크트리> --notify <네 터미널> > /tmp/launch-junior-<이름>.log 2>&1 &`
    배경으로 띄우고 프롬프트로 돌아간다 — 끝나면 `[launch …]` 가 오고, 그 뒤는 **폴러가 깨운다**(네 워크트리의 POLLER). 이름은 **`junior-<조각>`**(재시도는 `junior-<조각>-2`, 인턴은 `intern-<조각>-<무엇>`) — `launch-worker.sh` 가 `junior-1` 같은 이름을 거부한다(이전 조각과 충돌해 `-2` 경로가 생긴 실측). 폴러·verify 로그 `tail` 을 네가 돌리지 마라.
 2. **PR 도착** — 배경으로: `verify-pr.sh <PR> --role senior --notify <네 터미널> --guard-cmd '<GUARD_CMD>' --mutate '<변이1>' --mutate '<변이2>' '<전체 검사>' > /tmp/verify-<PR>-senior.log 2>&1 &`

@@ -1,6 +1,6 @@
-# 인턴#<N>(<기능>) 일감 — <한 줄 제목>
+# 사원#<N>(<기능>) 일감 — <한 줄 제목>   <!-- worker-run.sh 하네스용(사다리 gpt-oss→flash) -->
 
-<!-- intern-run.sh 가 이 파일의 절을 읽는다. 절 제목(## …)을 바꾸지 마라. 모델에게 가는 것은 「편집 지시」 뿐이고
+<!-- worker-run.sh(구 worker-run.sh) 가 이 파일의 절을 읽는다. 절 제목(## …)을 바꾸지 마라. 모델에게 가는 것은 「편집 지시」 뿐이고
      브랜치·검증·재시도(3회)·커밋·PR·보고는 스크립트가 한다. 완료 조건은 **순서·빈 줄·형식까지** 잡히게 쓴다(grep -c 만으로는 순서 오류를 못 잡는다 — 실측). -->
 
 ## 편집 지시
@@ -22,4 +22,4 @@
 `docs: <무엇을>`
 
 ## 보고
-`orca orchestration send --run <RUN_ID> --type status --subject "인턴 완료 — <이름>" --body "intern-run.sh 통과. 로그 /tmp/intern-<워크트리>.log"`
+`orca orchestration send --run <RUN_ID> --type status --subject "인턴 완료 — <이름>" --body "worker-run.sh 통과. 로그 /tmp/intern-<워크트리>.log"`

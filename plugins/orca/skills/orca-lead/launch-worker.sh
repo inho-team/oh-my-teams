@@ -9,7 +9,7 @@
 #              켜지면 그 터미널에서 워커용 Run 을 만들어 묶고, TASK.md 끝에 「자동 배정」(Run·핸들 파일·워커 명령)을 붙이고, POLLER 터미널을 띄운다.
 #              codex 는 기본 켜짐(PL 도 시니어의 보고·질문을 받을 Run 이 필요하다). 시니어(운영)는 `senior --supervise --run <PL Run>` 으로.
 #   기본으로 macOS seatbelt 격리(시그널은 자기 pgrp 만, docker 소켓 차단). --no-sandbox 는 PM 이 직접 쓰는 세션에만.
-#   intern(=agy gpt-oss-120b-medium, 원격 호스팅 — 로컬 ollama 아님) = 판단이 없는 기계적 일(경로 인용 갱신·일괄 치환·문체 통일). 브리프에 파일·바꿀 내용까지, 완료 조건은 셸 한 줄. 1회 반려면 junior 로 승격(2026-09-13 사용자 결정)
+#   intern(사원 = gpt-oss-120b 하네스 → 대리 flash 로 자동 승격) = 브리프가 다 정해 주고 테스트/셸이 판정하는 구현·문서. TUI 없음(worker-run.sh). 2026-09-13 사용자 배치: 사원 gpt-oss · 대리 flash · 과장 pro
 #   junior(=agy-flash, gemini-3.8-flash-high) = 구현. 명령형 브리프로 다 정해진 일 · senior(=agy-pro, gemini-3.1-pro-high) = 검토(review-brief-template)·계획이 필요한 일·주니어 2회 반려 뒤 인계
 #   (2026-09-12 사용자 결정: 4역할 3층 — PM → PL → {주니어: 코딩, 시니어: 검토}. 주니어·시니어는 PL 의 형제 자식이고 서로 직접 말하지 않는다)
 #   codex = PL(orca-lead 역할, gpt-5.6-sol) · --parent 를 주면 그 워크트리의 자식으로 만든다(리드 → 워커 계보)
@@ -78,15 +78,15 @@ OUT="$(orca worktree create --name "$NAME" --repo "path:$REPO" --base-branch ori
 WT="$(printf '%s' "$OUT" | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["worktree"]["path"])' 2>/dev/null)"
 [ -n "$WT" ] && [ -d "$WT" ] || die "🔴 워크트리 생성 실패: $(printf '%s' "$OUT" | head -c 300)"
 cp "$BRIEF" "$WT/TASK.md"
-# 인턴(2026-09-13 실측 뒤 결정): TUI 를 띄우지 않는다. intern-run.sh 가 gpt-oss 에 편집만 시키고 검증·재시도(3회)·커밋·PR·보고를 스크립트로 한다.
-# (gpt-oss 는 agy 편집 도구 인자를 빠뜨리고, 편집이 엉성하며, 끝을 지어낸다 — 실험실 5회 실측. 재시도 루프로 3회 안에 통과했다.)
+# 사원(intern, 2026-09-13 실측 뒤 결정): TUI 를 띄우지 않는다. worker-run.sh 가 사다리(gpt-oss 4회 → flash 2회)로 편집만 모델에 시키고
+# 검증·재시도·승격·커밋·PR·보고를 스크립트로 한다. (gpt-oss: 편집 도구 인자 누락·엉성한 편집·지어낸 완료 → 하네스가 흡수. 문서 2건·Kotlin 가드 1건 통과 실측)
 if [ "$AGENT" = intern ]; then
   [ -n "$RUN_ID" ] || die "🔴 인턴에도 --run <RUN_ID> 가 필요하다(브리프 「보고」 절이 그 Run 으로 보낸다)"
   EX="$(git -C "$WT" rev-parse --git-path info/exclude)"; mkdir -p "$(dirname "$EX")"; grep -qx 'TASK.md' "$EX" 2>/dev/null || printf '%s\n' TASK.md '*.log' >> "$EX"
   SBP=""; [ "$SANDBOX" = 1 ] && SBP="$SB_PROFILE"
-  ( INTERN_SANDBOX_PROFILE="$SBP" nohup "$SKILL_DIR/intern-run.sh" "$WT" "$WT/TASK.md" --run "$RUN_ID" --notify "$NOTIFY" > "/tmp/launch-$NAME.log" 2>&1 & echo $! > "/tmp/intern-$NAME.pid" )
+  ( INTERN_SANDBOX_PROFILE="$SBP" nohup "$SKILL_DIR/worker-run.sh" "$WT" "$WT/TASK.md" --run "$RUN_ID" --notify "$NOTIFY" > "/tmp/launch-$NAME.log" 2>&1 & echo $! > "/tmp/intern-$NAME.pid" )
   [ -n "$HANDLES" ] && printf '%s:intern-run pid %s (intern, 터미널 없음 — 폴러 감시 대상 아님)\n' "$NAME" "$(cat /tmp/intern-$NAME.pid)" >> "$HANDLES"
-  echo "✅ $NAME  $WT  intern-run.sh 배경 실행(pid $(cat /tmp/intern-$NAME.pid)) — 끝나면 --notify 로 알림, 로그 /tmp/intern-$NAME.log"
+  echo "✅ $NAME  $WT  worker-run.sh 배경 실행(pid $(cat /tmp/intern-$NAME.pid), 사다리 gpt-oss→flash) — 끝나면 --notify 로 알림, 로그 /tmp/intern-$NAME.log"
   exit 0
 fi
 # 워커 스택(2026-09-13, OrbStack): 저장소에 `.orca/worker-stack.sh` 가 있으면 **에이전트를 띄우기 전에, sandbox 밖에서** `up <이름> <워크트리>` 를 불러

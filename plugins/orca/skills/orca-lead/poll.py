@@ -133,7 +133,7 @@ def handles():
         name, rest = line.split(":", 1)
         h = rest.split()[0].strip()
         if not h.startswith("term_"):
-            continue  # 인턴(intern-run.sh)은 터미널이 없다 — 상태줄 검사 대상이 아니다
+            continue  # 인턴(worker-run.sh)은 터미널이 없다 — 상태줄 검사 대상이 아니다
         hs.append((name.strip(), h))
     return hs
 

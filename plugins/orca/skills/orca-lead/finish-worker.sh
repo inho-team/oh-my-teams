@@ -20,7 +20,7 @@ LINE="$(grep -E "^$NAME:" "$HANDLES" | grep -v ' done ' | tail -1)"
 [ -n "$LINE" ] || { echo "🔴 핸들 파일에 '$NAME:' 줄이 없거나 이미 done 이다"; grep -E "^$NAME:" "$HANDLES"; exit 1; }
 T="$(printf '%s' "$LINE" | cut -d: -f2 | awk '{print $1}')"
 if [ "$T" = "intern-run" ]; then   # 인턴은 터미널이 없다 — 남은 프로세스만 정리하고 done 표기
-  PID="$(printf '%s' "$LINE" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"; [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null && { kill "$PID"; echo "⚠️ intern-run.sh(pid $PID)가 아직 돌고 있어 내렸다"; } || echo "✅ 인턴 프로세스 없음(이미 끝남)"
+  PID="$(printf '%s' "$LINE" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"; [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null && { kill "$PID"; echo "⚠️ worker-run.sh(pid $PID)가 아직 돌고 있어 내렸다"; } || echo "✅ 인턴 프로세스 없음(이미 끝남)"
   python3 - "$HANDLES" "$NAME" "$(date '+%Y-%m-%d %H:%M')" <<'PY'
 import sys; p, name, ts = sys.argv[1:4]
 lines = open(p, encoding='utf-8').read().split('\n'); out=[]; done=False
