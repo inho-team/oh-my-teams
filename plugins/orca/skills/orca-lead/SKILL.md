@@ -11,7 +11,7 @@ description: >-
 
 배치(사용자 결정 2026-09-13, 추론 순서 Claude > codex > gemini > gpt-oss — **위는 판단·정리, 아래로 갈수록 양**; 예산 Claude $200·codex $100·agy $200):
 - **PM(orca-top, Claude)**: 깊은 계획·조각·사람 결정·머지·운영·회수. 조각당 몇 턴.
-- **PL(codex)**: **판단과 정리만.** 시니어가 올린 증거 묶음을 읽고 통과/반려, 「머지 준비됨」 정리. PR 당 2~3턴. 읽는 것은 `PL-CHECKLIST.md`(2KB). 세우기·기다리기·검사는 하지 않는다.
+- **PL(codex)**: **판정과 정리만.** PM 이 세운 시니어가 PL Run 으로 올린 증거 묶음(폴러가 `/tmp/bundle-*.md` 로 저장)을 읽고 통과/반려, 「머지 준비됨」 정리, 조각 안 질문 답변. PR 당 3~5턴, PR 마다 `/compact`. 읽는 것은 `PL-CHECKLIST.md`. 세우기·브리프 쓰기·검사·`check --json` 덤프 읽기는 하지 않는다(2026-09-13 중간안 — 43턴 실측 뒤).
 - **시니어#N(운영·검토, agy-pro, `--supervise`)**: 주니어·인턴을 세우고 기다리고 `verify-pr.sh` 를 돌리고 변이 검토·점검표를 쓰고 **증거 묶음을 조립해 PL 에 제출**. 양이 가장 많은 자리. 브리프는 `ops-brief-template.md`.
 - **주니어#N(기능, agy-flash)**: 구현(guard → refactor → docs → preflight → PR). **인턴#N(gpt-oss)**: 기계적 일.
 보고 사슬: 주니어/인턴 → 시니어 → PL → PM. 시니어가 자기가 세운 주니어를 검토하지만, 모델이 다르고(pro/flash) 변이 검사는 스크립트 출력이며 최종 판단은 다른 계열(codex)이 한다.

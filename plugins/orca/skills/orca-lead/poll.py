@@ -26,6 +26,7 @@ ap.add_argument("--no-pr", action="store_true", help="열린 PR 변화로는 깨
 ap.add_argument("--wake", default="", help="사건이 생기면 종료하지 않고 이 터미널(PL)에 한 줄을 보내 깨운다")
 ap.add_argument("--loop", action="store_true", help="max-min 이 지나도 끝내지 않고 계속 돈다(--wake 와 함께 쓴다)")
 ap.add_argument("--environment", default="", help="orca --environment (원격 PL 일 때)")
+ap.add_argument("--bundle-dir", default="/tmp", help="--wake 모드: 메일 본문을 파일로 저장할 곳(PL 은 check JSON 덤프 대신 이 파일만 읽는다)")
 a = ap.parse_args()
 ENVOPT = ["--environment", a.environment] if a.environment else []
 
@@ -67,8 +68,8 @@ def flush_wake():
     global PENDING
     if not PENDING or time.time() - PENDING_AT < DEBOUNCE:
         return
-    body = "[폴러 %s] %s. 메일박스(orca orchestration check --run %s --peek --json)와 gh pr list 를 보고 처리해라. 처리 뒤 프롬프트에서 멈춰도 된다 — 다음 사건은 폴러가 다시 깨운다." % (
-        time.strftime("%H:%M"), " | ".join(PENDING), a.run)
+    body = "[폴러 %s] %s. 메일 본문은 위 파일을 읽어라(check --json 덤프를 읽지 마라). 답신은 orca orchestration reply --run %s --id <id> --body \"$(cat 파일)\". 처리 뒤 프롬프트에서 멈춰도 된다 — 다음 사건은 폴러가 다시 깨운다." % (
+        time.strftime("%H:%M"), " || ".join(PENDING), a.run)
     PENDING = []
     out = subprocess.run(["orca", "terminal", "send"] + ENVOPT + ["--terminal", a.wake, "--text", body, "--enter", "--json"],
                          capture_output=True, text=True, timeout=60).stdout
@@ -165,7 +166,20 @@ while a.loop or time.time() < deadline:
     try:
         ms = mailbox()
         if ms:
-            wake("메일박스 %d건" % len(ms), ["%s | %s" % (m.get("type"), (m.get("subject") or "")[:90]) for m in ms])
+            # 2026-09-13: PL 컨텍스트 다이어트 — 본문을 파일로 저장하고 경로 + ✅/🔴 집계만 알린다.
+            # (실측: PL 이 check --json 덤프를 통째로 읽어 턴당 100K 가 됐다)
+            lines = []
+            for m in ms:
+                body = m.get("body") or ""
+                path = "%s/bundle-%s-%s.md" % (a.bundle_dir, a.run, (m.get("id") or "x")[-8:])
+                try:
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write("# %s\n(type=%s from=%s id=%s)\n\n%s" % (m.get("subject") or "", m.get("type"), m.get("from_handle"), m.get("id"), body))
+                except Exception:
+                    path = "(저장 실패)"
+                tally = "✅%d 🔴%d ⚠️%d" % (body.count("✅"), body.count("🔴"), body.count("⚠️"))
+                lines.append("%s | %s | id=%s | %s | 본문 %s" % (m.get("type"), (m.get("subject") or "")[:70], m.get("id"), tally, path))
+            wake("메일박스 %d건" % len(ms), lines)
         prs = None if a.no_pr else open_prs()
         if prs is not None and base is not None and prs != base:
             new = [n for n in prs if n not in base]
