@@ -9,6 +9,42 @@ import {
   finalizeUsage,
 } from "./usage.mjs";
 
+const TERMINAL_GOAL_STATUSES = new Set(["complete", "completed", "cancelled"]);
+
+/**
+ * Derives user-facing progress from authoritative Goal and worker observations.
+ *
+ * Plans, queued next steps, and existing commits are evidence of intended or
+ * completed work, not evidence that an implementation process is currently live.
+ *
+ * @param {object} observation - Current Goal and worker-list observation.
+ * @param {string} observation.goalStatus - Authoritative Goal status.
+ * @param {Array<object>} observation.workers - Current worker-list entries.
+ * @returns {{status:string,activeWorkers:number,unverifiableWorkers:number}}
+ * A conservative user-facing status and the worker counts supporting it.
+ * @throws {Error} When required authoritative observations are absent.
+ */
+export function supervisedProgressStatus({ goalStatus, workers }) {
+  if (typeof goalStatus !== "string" || !goalStatus.trim())
+    throw new Error("Authoritative Goal status required");
+  if (!Array.isArray(workers))
+    throw new Error("Authoritative worker-list required");
+
+  const activeWorkers = workers.filter(
+    (worker) => worker.liveness === "live",
+  ).length;
+  const unverifiableWorkers = workers.filter(
+    (worker) => worker.liveness === "unverifiable",
+  ).length;
+  let status;
+  if (goalStatus === "blocked") status = "blocked";
+  else if (TERMINAL_GOAL_STATUSES.has(goalStatus)) status = goalStatus;
+  else if (activeWorkers > 0) status = "in-progress";
+  else if (unverifiableWorkers > 0) status = "unverifiable";
+  else status = "stopped";
+  return { status, activeWorkers, unverifiableWorkers };
+}
+
 function currentGateStatus(stateDir, report) {
   const file = path.join(stateDir, "gates", `${report.taskId}.json`);
   if (!fs.existsSync(file)) return null;

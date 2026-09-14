@@ -8,8 +8,8 @@
 
 | 계획 | 완료 범위 | 확인 근거 | 남은 후속 항목 |
 |---|---|---|---|
-| [AI-native 에이전트 조직](plan/ai-native-agent-organization.md) | P0–P6 | task v2, review·acceptance gate, workflow 복구·예산, 실패 라우팅, incident·lesson 기능과 6개 로컬 eval 시나리오 | `research`, `design`, `integration` 전용 task kind는 현재 출시 범위가 아니며, 추가할 때 별도 계약이 필요하다. |
-| [oh my teams 이름 변경과 Orca 연동](plan/oh-my-teams-rename-and-orca-integration.md) | R0–R4 | package·marketplace·manifest의 기본 버전 1.5.1 일치, `plugins/orca` forwarding 진입점, Orca 1.4.200 discovery, 설치·CLI 회귀 테스트 | 이전 0.6.1은 rollback과 역사 보존 용도로만 유지한다. |
+| [AI-native 에이전트 조직](plan/ai-native-agent-organization.md) | P0–P6 | task v2, review·acceptance gate, workflow 복구·예산, 실패 라우팅, incident·lesson 기능과 7개 로컬 eval 시나리오 | `research`, `design`, `integration` 전용 task kind는 현재 출시 범위가 아니며, 추가할 때 별도 계약이 필요하다. |
+| [oh my teams 이름 변경과 Orca 연동](plan/oh-my-teams-rename-and-orca-integration.md) | R0–R4 | package·marketplace·manifest의 기본 버전 1.5.2 일치, `plugins/orca` forwarding 진입점, Orca 1.4.200 discovery, 설치·CLI 회귀 테스트 | 이전 0.6.1은 rollback과 역사 보존 용도로만 유지한다. |
 | [공유 할당량 모델 라우팅](plan/shared-quota-model-routing.md) | P0–P4와 E1/E2 | 프리셋, pool 소진 차단, quota snapshot, 사용량 기록, 30회 라우팅 결과와 정리된 worktree | balanced는 잠정 권고다. E3 실제 업무 표본과 반복 비교가 있어야 영구 기본값을 판단할 수 있다. |
 
 ## 최종 검증
