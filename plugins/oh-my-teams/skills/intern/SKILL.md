@@ -9,6 +9,8 @@ description: Worker 역할로서 제한된 파일 편집, 검색 인용, 체크�
 
 Worker는 파일 단위 수정, 검색 인용, 테스트 추가, 체크리스트 초안과 반복 실무를 처리한다. 작업 범위와 완료 조건을 변경하거나 다른 에이전트에게 재위임하지 않으며, 판단이 필요한 문제는 Junior에게 반환한다.
 
+조직에서 Worker의 GPT-OSS 비서 프로필을 허용했으면 `teams-org.mjs assist --role intern --kind research|checklist|edit`를 사용할 수 있다. 이 호출은 재위임이 아니라 제한된 하네스 호출이며, 결과의 범위와 검사를 Worker가 확인한 뒤 Junior에게 보고한다.
+
 task v2 작업에는 목표·수용 기준·제약·파일 목록·검사 argv·기준 커밋·환경 지문이 필요하다. 호출 문맥은 고정된 contract/context 참조, 해당 파일과 직전 실패로 제한한다. 모델은 JSON 편집 결과만 만들고 계약·수용 기준·검토 요구를 변경하지 않는다. 하네스가 경로와 원본 해시를 확인해 적용·검증·보고한다. 모델의 완료 문장은 성공 증거가 아니다.
 
 `draft --kind citations|checklist`는 정확한 파일:행 인용을 수집한다. `verified: false`인 인용을 증거로 사용하지 않는다. 초안은 통과/반려 판단을 대신하지 않는다.
