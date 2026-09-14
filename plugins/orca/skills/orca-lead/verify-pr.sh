@@ -96,7 +96,11 @@ if [ "$NO_GUARD" != 1 ]; then
     echo "⚠️ 가드 커밋은 있으나 돌릴 명령이 없다(--guard-cmd 또는 project.env GUARD_CMD 또는 검사 명령) — 손으로 봐라: $(echo $GUARDS | tr '\n' ' ')"
   else
     TIP="$(git rev-parse HEAD)"
+    # 검사 명령(check:contract 등)이 추적 파일을 바꿔 두면 checkout 이 조용히 실패하고 PR tip 위에 PR 자신의 가드를 올려
+    # 전부 "충돌" 로 보인다(실측 2026-09-14 PR #160: 가드 3개가 모두 충돌로 찍혔는데 손으로는 다 올라갔다). 먼저 되돌린다.
+    git checkout -q -- . 2>/dev/null; git clean -qfd -e build -e .gradle -e node_modules 2>/dev/null
     git checkout -q --detach origin/main
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "🔴 origin/main 으로 checkout 실패 — 가드 검사를 못 한다: $(git status --short | head -3 | tr '\n' ' ')"; }
     PICKED=""; for g in $GUARDS; do
       # 가드마다 **커밋**한다. --no-commit 으로 쌓다가 뒤 가드가 충돌해 `reset --hard` 하면 앞서 올린 가드까지 사라져
       # 맨 main 을 돌리고 "구현 없이도 초록 🔴" 로 오판했다(실측 2026-09-13 PR #158: 과장·이사 둘 다 거짓 반려).
