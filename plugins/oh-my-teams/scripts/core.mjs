@@ -193,7 +193,8 @@ function acquireFileLock(lockFile, busyMessage) {
  * Resolves an allowed relative path without permitting workspace escape.
  *
  * Both lexical traversal and symlink traversal through the nearest existing
- * ancestor are rejected. `.git` and `.orca` are always outside edit scope.
+ * ancestor are rejected. `.git`, `.orca`, and `.omt` are always outside edit
+ * scope because they contain repository or coordinator-owned state.
  *
  * @param {string} root - Existing workspace root.
  * @param {string} relative - Non-empty relative path within the workspace.
@@ -208,7 +209,7 @@ export function inside(root, relative) {
   assert(
     !relative
       .split(/[\\/]/)
-      .some((part) => ["..", ".git", ".orca"].includes(part)),
+      .some((part) => ["..", ".git", ".orca", ".omt"].includes(part)),
     `Forbidden path: ${relative}`,
   );
 

@@ -179,7 +179,7 @@ function createInitialState(request, org, tasks) {
 /**
  * Creates an immutable workflow snapshot and append-only creation event.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {object} request - Valid workflow request.
  * @param {object} org - Organization snapshot.
  * @param {string} [baseDir=process.cwd()] - Base for repo/task relative paths.
@@ -258,7 +258,7 @@ export async function createWorkflow(
 /**
  * Reads workflow state, frozen tasks, and organization without mutation.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @returns {object} Complete durable workflow snapshot.
  * @throws {Error} When the workflow or a referenced revision is unavailable.
@@ -579,7 +579,7 @@ export async function acceptWorkflowIntegration(
  * A running attempt without an authoritative observation yields
  * `reconcile-required`; it is never silently restarted.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} [observations={}] - External states keyed by attempt ID.
@@ -658,7 +658,7 @@ function validateExecutionInput(input, reserveOnly = false) {
 /**
  * Attaches an actual Orca execution receipt to one ready workflow task.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} input - Event, attempt, task, and Orca receipt.
@@ -879,7 +879,7 @@ function validateSettlementInput(input) {
 /**
  * Records an idempotent settlement without equating it to product acceptance.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} input - Attempt outcome, usage, identity, and failure evidence.
@@ -953,7 +953,7 @@ function validateRetryInput(input) {
 /**
  * Requeues a routed, resolved failure without erasing attempt or budget history.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} input - Resolution owner, evidence, and retry event.

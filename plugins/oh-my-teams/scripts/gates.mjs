@@ -144,7 +144,7 @@ function assertReportBinding(task, report) {
 /**
  * Loads every review recorded for a task, preserving deterministic file order.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {object} task - Task whose review history is requested.
  * @returns {object[]} Matching review records.
  */
@@ -263,7 +263,7 @@ function legacyGateStatus(task, report) {
  * @param {string} repo - Current task workspace.
  * @param {object} task - Trusted task contract.
  * @param {object} report - Implementation report bound to the task.
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @returns {Promise<object>} Current business state and gate details.
  * @throws {Error} When task/report/evidence bindings are stale or invalid.
  */
@@ -309,7 +309,7 @@ export async function gateCheck(repo, task, report, stateDir) {
  * @param {object} task - Trusted task v2 contract.
  * @param {object} report - Implementation report under review.
  * @param {object} input - Review input from a distinct execution identity.
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @returns {Promise<object>} Recorded review and resulting gate status.
  * @throws {Error} For duplicate IDs, self-review, or stale evidence.
  */
@@ -359,7 +359,7 @@ async function recordReviewLocked(repo, task, report, input, stateDir) {
  * @param {object} task - Trusted task v2 contract.
  * @param {object} report - Passing implementation report.
  * @param {object} input - PM identity, full criteria set, and decision basis.
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @returns {Promise<object>} Acceptance decision and accepted gate status.
  * @throws {Error} For incomplete reviews, criteria, duplicate IDs, or stale source.
  */

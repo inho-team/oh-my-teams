@@ -10,7 +10,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { work } from "../plugins/oh-my-teams/scripts/worker.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const state = path.join(root, ".orca"),
+const state = path.join(root, ".omt"),
   setupDir = path.join(state, "smoke-setup");
 fs.mkdirSync(setupDir, { recursive: true });
 const org = readJSON(

@@ -26,8 +26,8 @@ import { acceptOutcome } from "../plugins/oh-my-teams/scripts/gates.mjs";
 
 test("component acceptance cannot bypass failed or stale integration evidence", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
-  fs.writeFileSync(path.join(dir, ".gitignore"), ".orca/\n");
+    stateDir = path.join(dir, ".omt");
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   for (const id of ["a", "b"])
     writeJSON(path.join(dir, `${id}.json`), task(id));
   const integration = {
@@ -165,8 +165,8 @@ test("component acceptance cannot bypass failed or stale integration evidence", 
 
 test("worker enforces persisted workflow allowance before a second provider call", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
-  fs.writeFileSync(path.join(dir, ".gitignore"), ".orca/\n");
+    stateDir = path.join(dir, ".omt");
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   fs.writeFileSync(path.join(dir, "a.txt"), "unchanged");
   writeJSON(path.join(dir, "a.json"), task("a"));
   const request = {
@@ -246,7 +246,7 @@ const organization = readJSON(
 
 test("prelaunch reservation blocks duplicate launches and attaches without spending twice", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
+    stateDir = path.join(dir, ".omt");
   writeJSON(path.join(dir, "a.json"), task("a"));
   writeJSON(path.join(dir, "b.json"), task("b"));
   const request = {
@@ -309,7 +309,7 @@ test("prelaunch reservation blocks duplicate launches and attaches without spend
 
 test("parallel attempts reserve allowances and reject spending another attempt budget", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
+    stateDir = path.join(dir, ".omt");
   writeJSON(path.join(dir, "a.json"), task("a"));
   writeJSON(path.join(dir, "b.json"), task("b"));
   const request = {
@@ -429,7 +429,7 @@ async function repo(t) {
 
 test("attachExecution enforces workflow running capacity and active conflicts", async (t) => {
   const dir = await repo(t);
-  const stateDir = path.join(dir, ".orca");
+  const stateDir = path.join(dir, ".omt");
   const first = task("first", ["shared.txt"]);
   const second = task("second", ["shared.txt"]);
   writeJSON(path.join(dir, "first.json"), first);
@@ -525,7 +525,7 @@ test("attachExecution enforces workflow running capacity and active conflicts", 
 
 test("resumeWorkflow rejects pending and stale-execution gates", async (t) => {
   const dir = await repo(t);
-  const stateDir = path.join(dir, ".orca");
+  const stateDir = path.join(dir, ".omt");
   const item = task("gated");
   writeJSON(path.join(dir, "gated.json"), item);
   const request = {

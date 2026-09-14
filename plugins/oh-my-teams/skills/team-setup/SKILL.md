@@ -5,7 +5,7 @@ description: 최초 oh my teams 조직을 만들고 PM/PL/Senior/Junior/Intern�
 
 # 팀 최초 구성
 
-대상 프로젝트 `.orca/organization.json`을 먼저 확인한다. 있으면 `team-show`로 표시하고 저장된 구독을 그대로 사용한다. 다시 질문하거나 예제 설정으로 덮어쓰지 않는다.
+대상 프로젝트 `.omt/organization.json`을 먼저 확인한다. 있으면 `team-show`로 표시하고 저장된 구독을 그대로 사용한다. 다시 질문하거나 예제 설정으로 덮어쓰지 않는다.
 
 없으면 한 번의 구성 대화에서 다음을 묻는다. 모델은 선택의 추천값일 뿐, 사용자 답을 대신하지 않는다.
 
@@ -22,8 +22,8 @@ description: 최초 oh my teams 조직을 만들고 PM/PL/Senior/Junior/Intern�
 현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
 
 ```text
-node <runtime> init --org <project>/.orca/organization.json --from <user-approved-config.json>
-node <runtime> show --org <project>/.orca/organization.json
+node <runtime> init --org <project>/.omt/organization.json --from <user-approved-config.json>
+node <runtime> show --org <project>/.omt/organization.json
 ```
 
-인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 구독 선택 질문을 다시 시작하지 않는다. `.orca/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다.
+인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 구독 선택 질문을 다시 시작하지 않는다. `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다.

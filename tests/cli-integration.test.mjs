@@ -41,7 +41,7 @@ test("CLI task v2 flow requires review, records acceptance, and rejects stale so
   await git(repo, "config", "user.email", "cli-test@example.invalid");
   fs.writeFileSync(
     path.join(repo, ".gitignore"),
-    ".orca/\norg.json\ntask.json\nfake-provider.mjs\nreview*.json\ndecision.json\n",
+    ".omt/\norg.json\ntask.json\nfake-provider.mjs\nreview*.json\ndecision.json\n",
   );
   fs.writeFileSync(path.join(repo, "value.txt"), "wrong\n");
   fs.writeFileSync(
@@ -113,7 +113,7 @@ process.stdout.write(JSON.stringify({ result: JSON.stringify(payload), model: "f
   };
   const taskFile = path.join(repo, "task.json");
   writeJson(taskFile, task);
-  const state = path.join(repo, ".orca");
+  const state = path.join(repo, ".omt");
 
   const workResult = await cliRun(
     repo,
@@ -273,7 +273,7 @@ test("CLI newer changes-requested review with no findings revokes prior approval
   await git(repo, "config", "user.email", "cli-test@example.invalid");
   fs.writeFileSync(
     path.join(repo, ".gitignore"),
-    ".orca/\norg.json\ntask.json\nfake-provider.mjs\nreview*.json\n",
+    ".omt/\norg.json\ntask.json\nfake-provider.mjs\nreview*.json\n",
   );
   fs.writeFileSync(path.join(repo, "value.txt"), "wrong\n");
   fs.writeFileSync(path.join(repo, "check.mjs"), "process.exit(0);\n");
@@ -326,7 +326,7 @@ test("CLI newer changes-requested review with no findings revokes prior approval
   };
   const taskFile = path.join(repo, "task.json");
   writeJson(taskFile, task);
-  const state = path.join(repo, ".orca");
+  const state = path.join(repo, ".omt");
   const workResult = await cliRun(
     repo,
     "work",

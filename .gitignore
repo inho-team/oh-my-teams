@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 .omc/
 .orca/
+.omt/
 experiments/results/

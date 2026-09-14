@@ -118,7 +118,7 @@ function createIncident(event, config, now, fingerprint, holdReason) {
  * Intake never grants deployment permission. A disabled kill switch or exceeded
  * budget records the event as held rather than silently dropping it.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {object} event - Source event with a stable dedupe key and evidence.
  * @param {object} config - Kill switch, budgets, and observation policy.
  * @param {number} [now=Date.now()] - Injectable clock for deterministic tests.
@@ -203,7 +203,7 @@ function transitionIncident(incident, input, config, observedAt) {
 /**
  * Records one idempotent observation and advances the incident lifecycle.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @param {object} input - Incident ID, event ID, outcome, evidence, and time.
  * @param {object} config - Observation and no-progress policy.
  * @returns {{duplicate: boolean, incident: object}} Updated incident state.
@@ -245,7 +245,7 @@ export function observeIncident(stateDir, input, config) {
 /**
  * Reads the current incident index without mutating it.
  *
- * @param {string} stateDir - Coordinator `.orca` state directory.
+ * @param {string} stateDir - Coordinator `.omt` state directory.
  * @returns {object} Incident state, or an empty initialized shape.
  */
 export function incidentStatus(stateDir) {

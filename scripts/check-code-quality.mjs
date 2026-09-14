@@ -9,6 +9,7 @@ const ignoredDirectories = new Set([
   ".git",
   ".omc",
   ".orca",
+  ".omt",
   "legacy",
   "node_modules",
   "results",
