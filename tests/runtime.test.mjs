@@ -211,6 +211,33 @@ test("graph validation accepts branches and rejects cycle/missing profile/second
   root.roles.senior.parent = null;
   assert.throws(() => validateOrg(root), /root/);
 });
+test("default organization uses the responsibility hierarchy and routing", () => {
+  const org = validateOrg(clone());
+  assert.equal(org.roles.pl.parent, "pm");
+  assert.equal(org.roles.senior.parent, "pl");
+  assert.equal(org.roles.junior.parent, "senior");
+  assert.equal(org.roles.intern.parent, "junior");
+  assert.deepEqual(
+    ["pm", "pl", "senior", "junior", "intern"].map(
+      (role) => org.roles[role].concurrency,
+    ),
+    [1, 1, 1, 2, 4],
+  );
+  assert.equal(org.profiles[org.roles.pl.profile].model, "gpt-5.6-sol");
+  assert.equal(
+    org.profiles[org.roles.senior.profile].model,
+    "gemini-3.8-flash-high",
+  );
+  assert.equal(
+    org.profiles[org.roles.junior.profile].model,
+    "claude-opus-4-6-thinking",
+  );
+  assert.equal(
+    org.profiles[org.roles.intern.profile].model,
+    "claude-sonnet-4-6",
+  );
+  assert.ok(Object.values(org.profiles).some((profile) => profile.model === "gpt-oss-120b-medium"));
+});
 test("account labels alone cannot pretend to switch subscriptions", () => {
   const org = clone();
   org.profiles["agy-oss"].account = "second-account";

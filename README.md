@@ -1,6 +1,6 @@
 # oh my teams
 
-Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior / Intern의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 내부 실행기는 **Claude, Codex, Agy**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
+Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior / Worker의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 런타임의 `intern` 역할 ID는 이전 조직과의 호환성을 위해 유지한다. 내부 실행기는 **Claude, Codex, Agy**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
 
 ## 시작
 
@@ -14,11 +14,11 @@ Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / J
 Claude에서는 `/oh-my-teams:team-setup`, `/oh-my-teams:pm` 등으로 호출한다. Codex에서는 플러그인의 해당 스킬을 호출하거나 같은 뜻으로 요청한다. 기존 `org-setup`, `org-show`, `org-edit`은 호환 별칭으로 유지한다. 조직 구성 후 구독을 다시 묻지 않는다. 실행 중 작업은 시작 당시 조직 스냅샷을 유지한다.
 
 ```text
-PM       요구·계획·최종 결과
-└─ PL    분할·배정·통합
-   ├─ Senior  설계·중요 변경 검토·어려운 실패
-   └─ Junior  구현·Intern 통합
-      └─ Intern  제한된 편집·인용·초안
+PM       분석·중장기 계획·최종 결과
+└─ PL    분석·중단기 계획·분할·통합
+   └─ Senior  구체적인 구현 방법·중요 변경 검토
+      └─ Junior  기능 구현·Worker 통합
+         └─ Worker  제한된 편집·테스트·반복 실무
 ```
 
 작은 작업에 다섯 세션을 모두 만들지 않는다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`, 웹 검증에는 `orca-browser-use`, 외부 앱에는 `computer-use` 스킬을 필요할 때 사용한다.
@@ -41,7 +41,9 @@ sh install.sh both   # claude | codex | both
 
 ## 모델과 구독
 
-Agy에서 확인한 ID(2026-09-14): `gpt-oss-120b-medium`, `gemini-3.1-pro-high`, `gemini-3.8-flash-high`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking`. 설치 때 `agy models`로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
+Agy에서 확인한 ID(2026-09-15): `gpt-oss-120b-medium`, `gemini-3.1-pro-high`, `gemini-3.8-flash-high`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking`. 설치 때 `agy models`로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
+
+기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`, Worker=`claude-sonnet-4-6`으로 배정한다. 동시 인원은 `1 → 1 → 1 → 2 → 4`로 늘어난다. Junior 이상은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있지만, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
 
 Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 모델이 지원한다고 확인되지 않은 `--effort`는 추측해 추가하지 않으며, 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
 
