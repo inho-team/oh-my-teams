@@ -32,6 +32,8 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 
 감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 
+진행 상황이나 최종 결과를 사용자에게 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. `live` worker가 0명이면 실제 구현이 실행 중이라고 표현하지 않는다. Goal이 `blocked`이면 표현을 완화하지 않고 그대로 전달하며, 모든 Dispatch가 terminal이고 coordinator가 직접 구현을 이어 가지 않았다면 작업이 멈춘 사실을 명시한다. `unverifiable` worker는 실행 중인 worker 수에 포함하지 않는다. 계획 커밋이나 예정된 다음 단계가 있다는 사실은 현재 구현이 진행 중이라는 근거로 사용하지 않는다. 보고에는 Goal 상태, `live` worker 수, 확인된 최근 코드 변경을 서로 구분하여 포함한다.
+
 ## 사용자에게 결과 전달
 
 사용자가 한국어로 요청했으면 최종 결과도 자연스러운 한국어로 쓴다. 내부 task·dispatch·gate 순서를 그대로 나열하지 말고, 확인된 사실을 사용자가 판단하기 쉬운 인과관계로 다시 구성한다. 구체적인 작성 기준과 예시는 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)를 읽고 따른다.
