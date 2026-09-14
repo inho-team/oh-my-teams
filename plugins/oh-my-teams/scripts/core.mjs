@@ -548,7 +548,7 @@ export function saveOrg(file, org, { update = false, expectedRevision } = {}) {
           "Organization changed; read it again before editing",
         );
       } else {
-        assert(!update, "No organization; run org-setup first");
+        assert(!update, "No organization; run team-setup first");
       }
 
       const next = validateOrg({

@@ -35,7 +35,7 @@ function profileForModel(org, model) {
   assert(
     matches.length === 1,
     `Preset requires exactly one Agy profile for model ${model}; ` +
-      "add or disambiguate it with org-edit first",
+      "add or disambiguate it with team-edit first",
   );
   return matches[0][0];
 }

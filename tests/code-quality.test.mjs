@@ -76,3 +76,20 @@ test("signature helpers handle multiline parameters and single arrow parameters"
     true,
   );
 });
+
+test("team skills are primary and org names remain compatibility aliases", () => {
+  const skills = path.resolve("plugins/oh-my-teams/skills");
+  for (const action of ["setup", "show", "edit"]) {
+    const primary = fs.readFileSync(
+      path.join(skills, `team-${action}`, "SKILL.md"),
+      "utf8",
+    );
+    const alias = fs.readFileSync(
+      path.join(skills, `org-${action}`, "SKILL.md"),
+      "utf8",
+    );
+    assert.match(primary, new RegExp(`^name: team-${action}$`, "m"));
+    assert.match(alias, new RegExp(`^name: org-${action}$`, "m"));
+    assert.match(alias, new RegExp(`\\.\\./team-${action}/SKILL\\.md`));
+  }
+});
