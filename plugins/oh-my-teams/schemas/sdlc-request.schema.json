@@ -8,6 +8,6 @@
     "schemaVersion": { "const": 1 },
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
     "goal": { "type": "string", "minLength": 1 },
-    "trustedPolicyAuthorities": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" } }
+    "trustedAuthorities": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "kind", "publicKey"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "kind": { "enum": ["human", "policy"] }, "publicKey": { "type": "string", "minLength": 1 } } } }
   }
 }

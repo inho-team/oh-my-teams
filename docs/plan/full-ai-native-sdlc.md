@@ -78,7 +78,7 @@
 2. verification과 review가 같은 source와 현재 upstream에 고정돼야 한다.
 3. rollback 계획과 관찰 계획이 존재해야 한다.
 4. deployment authorization이 action, repository, environment, release ID, source hash와 만료 시각을 포함해야 한다.
-5. authorization의 승인 주체가 `human` 또는 사전에 설정된 외부 policy authority여야 한다.
+5. authorization의 승인 주체가 lifecycle에 고정된 human/policy public key로 canonical payload에 서명해야 한다.
 6. 모델 출력, PM 역할, task의 risk 값과 환경변수만으로 배포 권한을 만들 수 없어야 한다.
 
 권한 검사는 배포 준비를 판정할 뿐 외부 명령을 실행하지 않는다. 실제 배포는 별도 adapter가 기존 사용자 위임을 확인한 뒤 수행하고 receipt를 되돌려준다.
@@ -162,7 +162,7 @@ state는 event에서 재구성할 수 있는 projection이다. 단일 coordinato
 
 2026-09-15에 artifact·authorization·deployment receipt 스키마와 `scripts/sdlc.mjs`를 추가했다. 모든 상태 변경은 불변 revision과 append-only event로 저장하며, transaction journal이 event와 materialized state를 함께 복구한다. 현재 upstream의 accepted revision/hash를 강제하고 상위 변경 시 downstream을 재귀적으로 무효화한다.
 
-plan·build·verification·review·release에는 기존 task/workflow report, evidence, 독립 review, acceptance와 동일 source hash를 연결한다. release는 rollback·observation 계획을 요구한다. deployment는 별도로 기록된 human/policy authorization과 범위가 일치하는 성공 receipt가 모두 있어야 accepted가 된다. 이 과정은 외부 배포 명령을 실행하지 않는다.
+plan·build·verification·review·release에는 기존 task/workflow report, evidence, 독립 review, acceptance와 동일 source hash를 연결한다. release는 rollback·observation 계획을 요구한다. deployment는 lifecycle에 미리 고정된 human/policy public key로 검증한 authorization과 범위·시간이 일치하는 성공 receipt가 모두 있어야 accepted가 된다. 이 과정은 외부 배포 명령을 실행하지 않는다.
 
 observation·incident·learning의 의미 관문과 incident fingerprint 기반의 중복 없는 새 intent 생성을 구현했다. 계획에 명시한 SDLC CLI를 `teams-org.mjs`에 연결했고, intent부터 learning까지의 전체 경로와 배포 권한 실패 변형을 `tests/sdlc.test.mjs`에서 검증한다.
 

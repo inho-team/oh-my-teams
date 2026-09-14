@@ -4,11 +4,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { organizationStatus } from "../plugins/oh-my-teams/scripts/status.mjs";
 import {
   checkDeployment,
   createSdlc,
+  deploymentAuthorizationPayload,
   incidentToIntent,
   readSdlc,
   recordDeployment,
@@ -40,6 +42,31 @@ function artifact(overrides = {}) {
     createdAt: "2026-09-15T00:00:00.000Z",
     supersedes: null,
     ...overrides,
+  };
+}
+
+function authorityFixture(id = "user-1", kind = "human") {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  return {
+    trusted: {
+      id,
+      kind,
+      publicKey: publicKey.export({ type: "spki", format: "pem" }),
+    },
+    sign(authorization) {
+      const value = {
+        ...authorization,
+        authority: { kind, id, signature: "" },
+      };
+      value.authority.signature = crypto
+        .sign(
+          null,
+          Buffer.from(deploymentAuthorizationPayload(value)),
+          privateKey,
+        )
+        .toString("base64");
+      return value;
+    },
   };
 }
 
@@ -143,6 +170,7 @@ test("artifact lineage requires the current upstream revision and hash", (t) => 
 });
 
 test("deployment authorization is explicit, scoped, and expiring", () => {
+  const authority = authorityFixture();
   const expected = {
     action: "deploy",
     lifecycleId: "release-a",
@@ -152,20 +180,22 @@ test("deployment authorization is explicit, scoped, and expiring", () => {
     repository: "inho-team/app",
     environment: "production",
   };
-  const authorization = {
+  const { action: _action, ...authorizationScope } = expected;
+  const authorization = authority.sign({
     schemaVersion: 1,
     id: "deploy-auth",
-    ...expected,
+    ...authorizationScope,
     actions: ["deploy"],
-    authority: { kind: "human", id: "user-1" },
     issuedAt: "2026-09-15T00:00:00.000Z",
     expiresAt: "2026-09-16T00:00:00.000Z",
-  };
-  delete authorization.action;
+  });
   assert.equal(
     validateDeploymentAuthorization(
       authorization,
-      expected,
+      {
+        ...expected,
+        trustedAuthorities: { [authority.trusted.id]: authority.trusted },
+      },
       Date.parse("2026-09-15T12:00:00.000Z"),
     ),
     authorization,
@@ -173,8 +203,19 @@ test("deployment authorization is explicit, scoped, and expiring", () => {
   assert.throws(
     () =>
       validateDeploymentAuthorization(
-        { ...authorization, environment: "staging" },
-        expected,
+        authority.sign({
+          ...authorizationScope,
+          schemaVersion: 1,
+          id: "deploy-auth-staging",
+          environment: "staging",
+          actions: ["deploy"],
+          issuedAt: "2026-09-15T00:00:00.000Z",
+          expiresAt: "2026-09-16T00:00:00.000Z",
+        }),
+        {
+          ...expected,
+          trustedAuthorities: { [authority.trusted.id]: authority.trusted },
+        },
         Date.parse("2026-09-15T12:00:00.000Z"),
       ),
     /environment mismatch/,
@@ -183,7 +224,10 @@ test("deployment authorization is explicit, scoped, and expiring", () => {
     () =>
       validateDeploymentAuthorization(
         authorization,
-        expected,
+        {
+          ...expected,
+          trustedAuthorities: { [authority.trusted.id]: authority.trusted },
+        },
         Date.parse("2026-09-17T00:00:00.000Z"),
       ),
     /expired/,
@@ -193,9 +237,12 @@ test("deployment authorization is explicit, scoped, and expiring", () => {
       validateDeploymentAuthorization(
         {
           ...authorization,
-          authority: { kind: "role", id: "pm" },
+          authority: { kind: "role", id: "pm", signature: "invalid" },
         },
-        expected,
+        {
+          ...expected,
+          trustedAuthorities: { [authority.trusted.id]: authority.trusted },
+        },
         Date.parse("2026-09-15T12:00:00.000Z"),
       ),
     /External deployment authority/,
@@ -205,9 +252,13 @@ test("deployment authorization is explicit, scoped, and expiring", () => {
       validateDeploymentAuthorization(
         {
           ...authorization,
-          authority: { kind: "policy", id: "untrusted-policy" },
+          authority: {
+            kind: "policy",
+            id: "untrusted-policy",
+            signature: authorization.authority.signature,
+          },
         },
-        { ...expected, trustedPolicyAuthorities: [] },
+        { ...expected, trustedAuthorities: {} },
         Date.parse("2026-09-15T12:00:00.000Z"),
       ),
     /not trusted/,
@@ -603,10 +654,12 @@ test("identical orphan artifact writes recover while conflicts fail closed", (t)
 test("the complete lifecycle reaches learning with explicit deployment evidence", (t) => {
   const stateDir = fixture(t);
   const lifecycleId = "complete-flow";
+  const authority = authorityFixture();
   createSdlc(stateDir, {
     schemaVersion: 1,
     id: lifecycleId,
     goal: "Complete the SDLC",
+    trustedAuthorities: [authority.trusted],
   });
   let lifecycleRevision = 1;
   let previous = null;
@@ -721,7 +774,7 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
         transition.evidence = [previous];
       }
       if (kind === "deployment" && targetState === "accepted") {
-        const authorization = {
+        const authorization = authority.sign({
           schemaVersion: 1,
           id: "deploy-auth",
           lifecycleId,
@@ -731,10 +784,9 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
           repository: "inho-team/app",
           environment: "production",
           actions: ["deploy"],
-          authority: { kind: "human", id: "user-1" },
           issuedAt: "2020-09-15T00:00:00.000Z",
           expiresAt: "2099-09-16T00:00:00.000Z",
-        };
+        });
         const receipt = {
           schemaVersion: 1,
           id: "deploy-receipt",

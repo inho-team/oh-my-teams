@@ -1,6 +1,7 @@
 /** Immutable SDLC artifacts, lineage checks, transitions, and deployment authority. */
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { assert, hash, readJSON, withFileLock, writeJSON } from "./core.mjs";
 
 /** Ordered SDLC artifact kinds from intent through learning. */
@@ -272,6 +273,17 @@ export function sdlcArtifactHash(artifact) {
 }
 
 /**
+ * Creates the canonical bytes an external authority signs.
+ * @param {object} authorization - Authorization with an optional signature.
+ * @returns {string} Canonical JSON payload excluding only the signature.
+ */
+export function deploymentAuthorizationPayload(authorization) {
+  const value = structuredClone(authorization);
+  if (value.authority) delete value.authority.signature;
+  return JSON.stringify(canonical(value));
+}
+
+/**
  * Validates a scoped, expiring deployment authorization.
  * @param {object} authorization - Candidate authorization.
  * @param {object} expected - Required lifecycle, release, source, repository, environment, and action.
@@ -291,16 +303,28 @@ export function validateDeploymentAuthorization(
   assert(
     ["human", "policy"].includes(authorization.authority?.kind) &&
       typeof authorization.authority.id === "string" &&
-      authorization.authority.id.trim(),
+      authorization.authority.id.trim() &&
+      typeof authorization.authority.signature === "string" &&
+      authorization.authority.signature.trim(),
     "External deployment authority required",
   );
-  if (authorization.authority.kind === "policy") {
-    assert(
-      Array.isArray(expected.trustedPolicyAuthorities) &&
-        expected.trustedPolicyAuthorities.includes(authorization.authority.id),
-      "Deployment policy authority is not trusted",
+  const trusted = expected.trustedAuthorities?.[authorization.authority.id];
+  assert(
+    trusted && trusted.kind === authorization.authority.kind,
+    "Deployment authority is not trusted",
+  );
+  let signatureValid = false;
+  try {
+    signatureValid = crypto.verify(
+      null,
+      Buffer.from(deploymentAuthorizationPayload(authorization)),
+      trusted.publicKey,
+      Buffer.from(authorization.authority.signature, "base64"),
     );
+  } catch {
+    signatureValid = false;
   }
+  assert(signatureValid, "Deployment authority signature invalid");
   assert(
     Number.isFinite(Date.parse(authorization.issuedAt)) &&
       Number.isFinite(Date.parse(authorization.expiresAt)),
@@ -370,12 +394,26 @@ export function createSdlc(stateDir, request) {
     "Lifecycle schemaVersion=1, id, and goal required",
   );
   assert(
-    request.trustedPolicyAuthorities === undefined ||
-      (Array.isArray(request.trustedPolicyAuthorities) &&
-        new Set(request.trustedPolicyAuthorities).size ===
-          request.trustedPolicyAuthorities.length &&
-        request.trustedPolicyAuthorities.every((id) => ID.test(id))),
-    "Trusted policy authority IDs must be unique and valid",
+    request.trustedAuthorities === undefined ||
+      (Array.isArray(request.trustedAuthorities) &&
+        new Set(request.trustedAuthorities.map((item) => item.id)).size ===
+          request.trustedAuthorities.length &&
+        request.trustedAuthorities.every((item) => {
+          if (
+            !ID.test(item?.id) ||
+            !["human", "policy"].includes(item.kind) ||
+            typeof item.publicKey !== "string"
+          ) {
+            return false;
+          }
+          try {
+            crypto.createPublicKey(item.publicKey);
+            return true;
+          } catch {
+            return false;
+          }
+        })),
+    "Trusted authorities must have unique IDs, kinds, and public keys",
   );
   const directory = sdlcDirectory(stateDir, request.id);
   return withFileLock(path.join(directory, ".lock"), () => {
@@ -387,7 +425,9 @@ export function createSdlc(stateDir, request) {
       id: request.id,
       revision: 1,
       goal: request.goal,
-      trustedPolicyAuthorities: request.trustedPolicyAuthorities ?? [],
+      trustedAuthorities: Object.fromEntries(
+        (request.trustedAuthorities ?? []).map((item) => [item.id, item]),
+      ),
       artifacts: {},
       authorizations: {},
       receipts: {},
@@ -485,7 +525,7 @@ export function recordDeploymentAuthorization(
       sourceHash: release.artifact.content.sourceHash,
       repository: release.artifact.content.repository,
       environment: authorization.environment,
-      trustedPolicyAuthorities: state.trustedPolicyAuthorities,
+      trustedAuthorities: state.trustedAuthorities,
     });
     const target = path.join(
       directory,
@@ -564,7 +604,7 @@ export function checkDeployment(
       sourceHash: deployment.content.sourceHash,
       repository: deployment.content.repository,
       environment: deployment.content.environment,
-      trustedPolicyAuthorities: state.trustedPolicyAuthorities,
+      trustedAuthorities: state.trustedAuthorities,
     },
     now,
   );
@@ -863,7 +903,7 @@ export function transitionSdlcArtifact(
           sourceHash: current.content.sourceHash,
           repository: current.content.repository,
           environment: current.content.environment,
-          trustedPolicyAuthorities: state.trustedPolicyAuthorities,
+          trustedAuthorities: state.trustedAuthorities,
         },
         input.now ?? Date.now(),
       );

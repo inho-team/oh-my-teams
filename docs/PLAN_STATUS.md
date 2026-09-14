@@ -20,7 +20,7 @@
 | 명령 | 결과 |
 |---|---|
 | `npm test` | 79개 테스트가 모두 통과했다. |
-| `npm run quality` | 활성 `.mjs` 40개와 공개 export 114개를 검사했으며 지적 사항이 없었다. |
+| `npm run quality` | 활성 `.mjs` 40개와 공개 export 115개를 검사했으며 지적 사항이 없었다. |
 | `npm run eval:organization` | 결정적 로컬 시나리오 7개가 모두 통과했다. |
 | README의 `validate`·`show` 예제 | 현재 예제 조직으로 정상 실행됐다. |
 | 로컬 Markdown 링크 검사 | README, `docs/`, 실험 보고서의 상대 링크에서 누락된 대상이 없었다. |

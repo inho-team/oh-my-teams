@@ -19,6 +19,6 @@
     "supersedes": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/ref" }] }
   },
   "$defs": {
-    "ref": { "type": "object", "additionalProperties": false, "required": ["id", "revision", "sha256"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "revision": { "type": "integer", "minimum": 1 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } }
+    "ref": { "type": "object", "additionalProperties": false, "required": ["id", "revision", "sha256"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "revision": { "type": "integer", "minimum": 1 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "kind": { "enum": ["intent", "research", "design", "plan", "build", "verification", "review", "release", "deployment", "observation", "incident", "learning"] }, "state": { "enum": ["draft", "ready", "active", "submitted", "accepted", "invalidated", "superseded", "archived"] } } }
   }
 }
