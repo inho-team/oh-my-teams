@@ -1,6 +1,6 @@
 ---
 name: team-edit
-description: 저장된 oh my teams 조직의 이름, 보고 구조, 직급별 구독·모델, 인원, 승격 정책을 변경한다. 진행 중 작업의 설정은 유지한다.
+description: 이전 팀 변경 스킬명의 호환 진입점이다. 상설 조직 조정에는 team-adjust를 사용한다.
 ---
 
 # 팀 구성 변경

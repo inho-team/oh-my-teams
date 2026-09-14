@@ -93,3 +93,29 @@ test("team skills are primary and org names remain compatibility aliases", () =>
     assert.match(alias, new RegExp(`\\.\\./team-${action}/SKILL\\.md`));
   }
 });
+
+test("team lifecycle skills expose one kickoff loop and explicit outcomes", () => {
+  const skills = path.resolve("plugins/oh-my-teams/skills");
+  for (const action of [
+    "form",
+    "kickoff",
+    "status",
+    "adjust",
+    "close",
+    "disband",
+  ]) {
+    const skill = fs.readFileSync(
+      path.join(skills, `team-${action}`, "SKILL.md"),
+      "utf8",
+    );
+    assert.match(skill, new RegExp(`name: team-${action}`));
+  }
+
+  const kickoff = fs.readFileSync(
+    path.join(skills, "team-kickoff", "SKILL.md"),
+    "utf8",
+  );
+  assert.match(kickoff, /유일한 지속 실행 권한/);
+  assert.match(kickoff, /team-close/);
+  assert.match(kickoff, /team-disband/);
+});
