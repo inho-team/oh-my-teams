@@ -1,13 +1,14 @@
 # oh my teams 이름 변경과 Orca 연동 최소화 계획
 
 - 작성일: 2026-09-14
+- 최종 점검일: 2026-09-15
 - 상태: R0–R4 구현·연동 검증 완료
 - 사용자 결정: 제품 이름을 `orca-skills`에서 **oh my teams**로 변경한다.
 - 사용자 방향: Orca 관련 CLI는 최신 버전에 맞는 공식 가이드를 가져와 사용하고, 이 저장소에서 따라 수정해야 하는 부분을 최소화한다.
 - 관련 계획: [AI-native 에이전트 조직 계획](./ai-native-agent-organization.md)
 - 문서 범위: 이름 변경, 설치 호환성, 런타임 연동 경계, 단계별 이전과 검증. 이 문서 작성으로 실제 이름 변경·설치·업데이트를 실행하지 않는다.
 
-구현 기록(2026-09-14): 활성 plugin/package/marketplace를 `oh-my-teams`와 `plugins/oh-my-teams`로 이전했고 `teams-org.mjs`를 기본 런타임으로 지정했다. 기존 `plugins/orca/scripts/orca-org.mjs`는 forwarding 진입점만 유지한다. 공통 Orca discovery 참조와 분리된 `prepare-input`/Orca adapter/`attach-workspace` 경로를 추가했다. 호환 `prepare`는 이 세 단계를 감싼다. 선택된 Orca CLI/runtime 1.4.200과 version-matched guide hash를 실제 조회했다. 상세 주석·공통 모듈 리팩터링을 포함한 새 plugin 1.3.0을 Claude에, cachebuster가 적용된 1.3.0을 Codex에 설치·발견 확인했다. Claude의 구 0.6.1은 rollback용 설치를 보존한 채 비활성화했다. 기존 `.orca` 데이터는 이동·삭제하지 않았다.
+구현 기록(2026-09-14): 활성 plugin/package/marketplace를 `oh-my-teams`와 `plugins/oh-my-teams`로 이전했고 `teams-org.mjs`를 기본 런타임으로 지정했다. 기존 `plugins/orca/scripts/orca-org.mjs`는 forwarding 진입점만 유지한다. 공통 Orca discovery 참조와 분리된 `prepare-input`/Orca adapter/`attach-workspace` 경로를 추가했다. 호환 `prepare`는 이 세 단계를 감싼다. 선택된 Orca CLI/runtime 1.4.200과 version-matched guide hash를 실제 조회했다. 상세 주석·공통 모듈 리팩터링을 포함한 plugin 1.4.0을 Claude에, cachebuster가 적용된 1.4.0을 Codex에 설치·발견 확인했다. Claude의 구 0.6.1은 rollback용 설치를 보존한 채 비활성화했다. 기존 `.orca` 데이터는 이동·삭제하지 않았다.
 
 ## 1. 제품 정체성과 책임 경계
 

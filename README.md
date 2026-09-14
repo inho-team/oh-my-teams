@@ -81,4 +81,6 @@ npm run quality
 
 활성 코드의 JSDoc·모듈 설명·장문 실행문 기준과 전수조사 결과는 [코드 품질 문서](docs/CODE_QUALITY.md)에 정리했다.
 
+세 구현 계획의 완료 범위, 검증 근거와 의도적으로 남긴 후속 운영 검증은 [계획 완료 상태](docs/PLAN_STATUS.md)에 정리했다. 계획 문서의 초기 기준선과 미래형 문장은 당시 설계를 설명하며, 현재 지원 여부는 구현 기록과 계획 완료 상태를 우선한다.
+
 확대 모델 실험은 `--dry-run`으로 6개 fixture와 호출 수를 먼저 확인한다. 실제 실행은 `--confirm-subscription-use`가 있어야 하며 E1은 18회, `opus-first`와 `balanced`는 각각 6회의 초기 호출을 사용한다. 실행 중 manifest를 계속 저장하고, 결과는 `summarize-routing.mjs`, 정확한 worktree 정리는 `finish-routing.mjs --confirm-close`로 처리한다.
