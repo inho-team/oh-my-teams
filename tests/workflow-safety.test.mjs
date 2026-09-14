@@ -166,6 +166,8 @@ test("component acceptance cannot bypass failed or stale integration evidence", 
 test("worker enforces persisted workflow allowance before a second provider call", async (t) => {
   const dir = await repo(t),
     stateDir = path.join(dir, ".omt");
+  const fallbackOrganization = structuredClone(organization);
+  fallbackOrganization.roles.intern.fallbacks = ["agy-oss"];
   fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   fs.writeFileSync(path.join(dir, "a.txt"), "unchanged");
   writeJSON(path.join(dir, "a.json"), task("a"));
@@ -178,7 +180,7 @@ test("worker enforces persisted workflow allowance before a second provider call
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 1 },
   };
-  await createWorkflow(stateDir, request, structuredClone(organization), dir);
+  await createWorkflow(stateDir, request, fallbackOrganization, dir);
   attachExecution(stateDir, request.id, 1, {
     schemaVersion: 1,
     eventId: "attached",
@@ -211,7 +213,7 @@ test("worker enforces persisted workflow allowance before a second provider call
     },
   };
   await assert.rejects(
-    () => work(dir, structuredClone(organization), frozen, options),
+    () => work(dir, structuredClone(fallbackOrganization), frozen, options),
     /allowance exhausted/,
   );
   assert.equal(calls, 1);
@@ -220,7 +222,7 @@ test("worker enforces persisted workflow allowance before a second provider call
     1,
   );
   await assert.rejects(
-    () => work(dir, structuredClone(organization), frozen, options),
+    () => work(dir, structuredClone(fallbackOrganization), frozen, options),
     /already has a worker/,
   );
   assert.equal(calls, 1);

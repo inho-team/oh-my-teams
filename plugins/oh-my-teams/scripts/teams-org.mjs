@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, chart, readJSON, saveOrg, validateOrg } from "./core.mjs";
-import { draft, validateTask, work } from "./worker.mjs";
+import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
@@ -45,6 +45,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role intern]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
+  assist --org FILE --task FILE --repo DIR --state DIR --role ROLE
+         --kind research|checklist|edit [--profile PROFILE]
   verify --task FILE --repo DIR --state DIR
   merge-check --evidence FILE --task TRUSTED_TASK --repo DIR --base REF
               [--report FILE --state DIR]
@@ -93,6 +95,7 @@ const ALLOWED_OPTIONS = {
   "runtime-discover": ["orca"],
   work: ["org", "task", "repo", "state", "role", "workflow-id", "attempt-id"],
   draft: ["org", "task", "repo", "kind"],
+  assist: ["org", "task", "repo", "state", "role", "kind", "profile"],
   verify: ["task", "repo", "state"],
   "merge-check": ["evidence", "task", "repo", "base", "report", "state"],
   aggregate: ["expected", "report"],
@@ -137,6 +140,7 @@ const REQUIRED_OPTIONS = {
   "runtime-discover": [],
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
+  assist: ["org", "task", "repo", "state", "role", "kind"],
   verify: ["task", "repo", "state"],
   "merge-check": ["evidence", "task", "repo", "base"],
   aggregate: ["expected"],
@@ -362,6 +366,18 @@ async function executeCommand(args) {
         readJSON(args.org),
         readJSON(args.task),
         { kind: args.kind || "citations" },
+      );
+    case "assist":
+      return assist(
+        path.resolve(args.repo),
+        readJSON(args.org),
+        readJSON(args.task),
+        {
+          role: args.role,
+          kind: args.kind,
+          stateDir: path.resolve(args.state),
+          profileId: args.profile,
+        },
       );
     case "verify": {
       const task = validateTask(readJSON(args.task));
