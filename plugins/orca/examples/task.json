@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "fix-expiry-boundary",
+  "instruction": "Fix the documented expiry boundary in src/expiry.mjs. Preserve the public API. The caller supplies the acceptance tests before dispatch.",
+  "files": ["src/expiry.mjs"],
+  "checks": [["node", "--test", "tests/expiry.test.mjs"]],
+  "environment": "node22-lockfile-and-fixtures-revision-1",
+  "baseRef": "origin/main",
+  "risk": "normal"
+}

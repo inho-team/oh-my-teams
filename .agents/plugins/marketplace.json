@@ -1,0 +1,20 @@
+{
+  "name": "orca-skills",
+  "interface": {
+    "displayName": "Orca Skills"
+  },
+  "plugins": [
+    {
+      "name": "orca",
+      "source": {
+        "source": "local",
+        "path": "./plugins/orca"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

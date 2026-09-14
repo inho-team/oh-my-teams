@@ -1,0 +1,143 @@
+{
+  "date": "2026-09-14",
+  "provider": "agy",
+  "base": "e06389b99646107e478349b2b19bdd7c9379128b",
+  "taskCount": 2,
+  "models": [
+    {
+      "model": "gpt-oss-120b-medium",
+      "attempts": [
+        {
+          "task": "evidence-cache",
+          "attempt": 1,
+          "passed": true,
+          "promptHash": "60ece025254eded77e34079f9b06c162726a3bff2f2f6b4fe54cbc4167fcf8dd",
+          "usage": {
+            "input_tokens": 11432,
+            "output_tokens": 942,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 12374
+          },
+          "elapsedMs": 17537
+        },
+        {
+          "task": "organization-graph",
+          "attempt": 1,
+          "passed": false,
+          "promptHash": "3ba1ef07cceb3a7ea9bf829948af371ee3aae2fbe21030dd4a3fe3820f60f4d3",
+          "usage": {
+            "input_tokens": 11490,
+            "output_tokens": 57,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 11547
+          },
+          "elapsedMs": 7583
+        },
+        {
+          "task": "organization-graph",
+          "attempt": 2,
+          "passed": true,
+          "promptHash": "aac24c971566aff4e063db91f05586e64d7dc33aeb02b107dc16cb06985e3771",
+          "usage": {
+            "input_tokens": 11522,
+            "output_tokens": 1760,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 13282
+          },
+          "elapsedMs": 25763
+        }
+      ],
+      "calls": 3,
+      "firstPass": 1,
+      "finalPass": 2,
+      "totalTokens": 37203,
+      "elapsedMs": 50883,
+      "costUsd": null,
+      "quotaConsumption": null
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "attempts": [
+        {
+          "task": "evidence-cache",
+          "attempt": 1,
+          "passed": true,
+          "promptHash": "60ece025254eded77e34079f9b06c162726a3bff2f2f6b4fe54cbc4167fcf8dd",
+          "usage": {
+            "input_tokens": 16110,
+            "output_tokens": 599,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 16709
+          },
+          "elapsedMs": 15389
+        },
+        {
+          "task": "organization-graph",
+          "attempt": 1,
+          "passed": true,
+          "promptHash": "3ba1ef07cceb3a7ea9bf829948af371ee3aae2fbe21030dd4a3fe3820f60f4d3",
+          "usage": {
+            "input_tokens": 16171,
+            "output_tokens": 1284,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 17455
+          },
+          "elapsedMs": 21881
+        }
+      ],
+      "calls": 2,
+      "firstPass": 2,
+      "finalPass": 2,
+      "totalTokens": 34164,
+      "elapsedMs": 37270,
+      "costUsd": null,
+      "quotaConsumption": null
+    },
+    {
+      "model": "claude-opus-4-6-thinking",
+      "attempts": [
+        {
+          "task": "evidence-cache",
+          "attempt": 1,
+          "passed": true,
+          "promptHash": "60ece025254eded77e34079f9b06c162726a3bff2f2f6b4fe54cbc4167fcf8dd",
+          "usage": {
+            "input_tokens": 16111,
+            "output_tokens": 647,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 16758
+          },
+          "elapsedMs": 17179
+        },
+        {
+          "task": "organization-graph",
+          "attempt": 1,
+          "passed": true,
+          "promptHash": "3ba1ef07cceb3a7ea9bf829948af371ee3aae2fbe21030dd4a3fe3820f60f4d3",
+          "usage": {
+            "input_tokens": 16173,
+            "output_tokens": 562,
+            "thinking_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 16735
+          },
+          "elapsedMs": 23820
+        }
+      ],
+      "calls": 2,
+      "firstPass": 2,
+      "finalPass": 2,
+      "totalTokens": 33493,
+      "elapsedMs": 40999,
+      "costUsd": null,
+      "quotaConsumption": null
+    }
+  ],
+  "caveat": "Two small tasks, first-attempt matched prompts, one OSS repair with failure feedback. Provider-reported tokens are not monetary cost or subscription quota consumption."
+}

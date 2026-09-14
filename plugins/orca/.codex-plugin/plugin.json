@@ -1,0 +1,16 @@
+{
+  "name": "orca",
+  "version": "1.0.0",
+  "description": "Orca organization with per-role subscriptions, Claude/Codex/Agy workers and reusable verification evidence.",
+  "author": { "name": "inho-team" },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Orca Organization",
+    "shortDescription": "Run a PM/PL/Senior/Junior/Intern organization.",
+    "longDescription": "Choose subscriptions once, run isolated Orca workers, and reduce repeated model and verification work.",
+    "developerName": "inho-team",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Set up my Orca organization and show its roles."
+  }
+}
