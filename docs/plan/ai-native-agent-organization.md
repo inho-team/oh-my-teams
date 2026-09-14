@@ -1,19 +1,20 @@
 # AI-native SDLC 철학을 Orca 에이전트 조직에 연결하는 계획
 
 - 작성일: 2026-09-14
-- 상태: P1–P6 구현·로컬 eval 완료. 실제 모델 비교와 Orca/플러그인 연동 검증 완료
-- 관련 계획: [oh my teams 이름 변경과 Orca 연동 최소화](./oh-my-teams-rename-and-orca-integration.md). 이 문서의 현재 경로는 이름 변경 시 해당 계획의 매핑에 따라 이전한다.
+- 최종 점검일: 2026-09-15
+- 상태: P0–P6 구현·로컬 eval 완료. 실제 모델 비교와 Orca/플러그인 연동 검증 완료
+- 관련 계획: [oh my teams 이름 변경과 Orca 연동 최소화](./oh-my-teams-rename-and-orca-integration.md). 이름과 경로 이전은 완료됐다.
 - 대상: 현재 `plugins/oh-my-teams`의 조직 설정, 역할 skill, 제한 편집 런타임, Orca 감독 실행 연계
 - 목적: 에이전트 조직이 사용자 요청을 책임·작업 계약·검증 증거에 따라 끝까지 수행하고, 실패 경험을 다음 작업에 반영하도록 한다.
-- 범위: 설계 및 단계별 구현 계획. 본 문서 작성 자체로 런타임 변경, 설치, 모델 호출, PR 머지 또는 배포를 실행하지 않는다.
+- 범위: 설계 및 단계별 구현 계획과 구현 완료 기록이다. 원래 계획의 권한 경계는 런타임 변경, 설치, 모델 호출, PR 머지 또는 배포 권한을 별도로 부여하지 않는다.
 
 구현 기록(2026-09-14): task v1 호환성을 유지하면서 `schemas/task.schema.json`, `scripts/contracts.mjs`, `examples/task.v2.json`을 추가했다. v2 `kind: edit`는 목표·제약·수용 기준·고정된 contract/context 참조를 제한 프롬프트에 포함하며 task revision/hash를 준비 snapshot과 실행 report에 기록한다. `review.schema.json`과 `gates.mjs`는 독립 실행 ID의 검토, finding 이력, source/task에 고정된 PM acceptance를 강제한다. 역할 지침과 `org-show`를 gate 상태에 연결했다. `workflow.schema.json`과 `workflow.mjs`는 dependency DAG, 역할/검토 동시 한도, 전체 예산, 실제 receipt, 중복·지연 event 및 running 상태 재대조를 관리한다. 실패 라우팅·재작업 이력·중복 제거 lesson 후보와 incident kill switch/dedupe/관찰/무진전 중단을 추가했다. `evals/organization`의 6개 결정적 시나리오는 모델 호출 없이 통과했다. 별도 30회 모델 실험은 [`../../experiments/ROUTING_REPORT.md`](../../experiments/ROUTING_REPORT.md)에 품질·토큰·시간·제한을 기록했으며 이를 로컬 eval 결과와 혼동하지 않는다.
 
 ## 1. 배경과 제품 방향
 
-Orca-Skills는 PM / PL / Senior / Junior / Intern 역할을 모델·계정과 분리하고, 실제 작업에 필요한 역할만 실행하는 에이전트 조직을 지향한다. 조직도에 더해 작업이 시작되고, 검토되고, 수용되는 공통 규칙을 갖추는 것이 이번 변화의 목적이다.
+oh my teams는 PM / PL / Senior / Junior / Intern 역할을 모델·계정과 분리하고, 실제 작업에 필요한 역할만 실행하는 에이전트 조직을 지향한다. 조직도에 더해 작업이 시작되고, 검토되고, 수용되는 공통 규칙을 갖추는 것이 이번 변화의 목적이다.
 
-참고 글인 [The AI-Native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)은 개발 단계 사이를 기록된 산출물과 검증으로 연결하는 접근을 제안한다. 여기서는 그 방향을 Orca 조직에 맞게 적용한다. 아래 데이터 모델, 상태 전이, CLI 및 단계 구분은 Orca-Skills에 대한 자체 설계 제안이다.
+참고 글인 [The AI-Native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)은 개발 단계 사이를 기록된 산출물과 검증으로 연결하는 접근을 제안한다. 여기서는 그 방향을 Orca 조직에 맞게 적용한다. 아래 데이터 모델, 상태 전이, CLI 및 단계 구분은 oh my teams에 적용한 자체 설계다.
 
 목표 제품 경험:
 
@@ -21,9 +22,9 @@ Orca-Skills는 PM / PL / Senior / Junior / Intern 역할을 모델·계정과 �
 
 조직도는 책임과 위임 관계를 나타내고, 작업 그래프는 실행 순서와 의존성을 나타낸다. 두 구조를 동일하게 만들지 않는다. PM → PL → Senior → Junior → Intern을 매번 순차 실행하지 않는다.
 
-## 2. 현재 기반과 부족한 연결
+## 2. 구현 전 기준선과 부족했던 연결
 
-계획 수립 시 현재 작업 디렉터리를 읽은 결과이며, 실행 검증 결과가 아니다. 저장소가 변경 중이므로 구현 시작 시 인터페이스를 다시 확인한다.
+아래 표는 계획 수립 당시 작업 디렉터리를 조사한 기준선이다. 현재 구현 상태는 문서 첫머리의 구현 기록과 [계획 완료 상태](../PLAN_STATUS.md)를 기준으로 판단한다.
 
 | 영역 | 현재 근거 | 유지할 것 | 추가할 것 |
 |---|---|---|---|
@@ -36,7 +37,7 @@ Orca-Skills는 PM / PL / Senior / Junior / Intern 역할을 모델·계정과 �
 | 감독 실행 | PM/PL skill | Orca Run/Task/Dispatch, accepted settlement, 안전한 회수 | 업무 상태와 Orca 실행 ID 연결 |
 | 비용·실험 | `experiments/`, 호출 기록 | 실제 usage와 미확인 비용 구분 | 조직 단위 품질·개입·시간 평가 |
 
-현재 `work`는 검사 통과 시 `status: passed`를 기록하고, `risk !== low`이면 Senior 검토 필요 문장을 `issues`에 추가한다. `aggregate`는 issues가 있는 보고를 차단한다. 즉 검토 요구를 완전히 무시하는 상태는 아니지만, 검토 수행·반려·해결을 표현하는 구조화된 기록이 부족하다.
+계획 수립 당시 `work`는 검사 통과 시 `status: passed`를 기록하고, `risk !== low`이면 Senior 검토 필요 문장을 `issues`에 추가했다. 현재는 task v2의 구조화된 review와 PM acceptance가 이 부족한 연결을 보완한다.
 
 제한 편집 하네스와 일반 감독 작업은 서로 다른 실행 경로다. `work` 자체가 Orca Dispatch나 `worker_done`을 만들지는 않는다. 새 설계에서도 이 경계를 유지한다.
 
@@ -87,11 +88,11 @@ Orca-Skills는 PM / PL / Senior / Junior / Intern 역할을 모델·계정과 �
 
 Senior가 에이전트인 경우 결과는 `agent-review`다. 사람의 승인으로 기록하지 않는다. 독립 검토가 요구되면 구현 Dispatch와 다른 검토 Dispatch를 사용한다. 컨텍스트 분리는 오류 독립성을 보장하지 않으므로 수용 기준과 실제 실행 증거도 함께 확인한다.
 
-## 6. 데이터 계약 제안
+## 6. 데이터 계약
 
 ### 6.1 작업 계약 v2
 
-`task.schema.json`과 정규화 함수를 추가한다. 기존 제한 편집 필드를 유지하면서 조직 업무 필드를 추가한다. 다음 예시는 목표 형식이며 현재 CLI에서 지원한다고 가정하지 않는다.
+`task.schema.json`과 정규화 함수는 기존 제한 편집 필드를 유지하면서 조직 업무 필드를 추가한다. 다음 예시는 현재 CLI가 지원하는 task v2 형식이다.
 
 ```json
 {
@@ -132,9 +133,9 @@ Senior가 에이전트인 경우 결과는 `agent-review`다. 사람의 승인�
 
 ### 6.2 실행 경로별 작업 종류
 
-첫 단계의 v2는 `kind: edit`만 제한 편집 하네스에서 실행한다. 탐색·설계 작업에 가짜 수정 파일과 의미 없는 검사 명령을 요구하지 않는다.
+현재 v2 제한 편집 하네스는 `kind: edit`만 실행한다. 탐색·설계 작업에 가짜 수정 파일과 의미 없는 검사 명령을 요구하지 않는다.
 
-후속 단계에서 `research`, `design`, `integration`을 별도 discriminated schema로 추가한다. 이들은 Orca 감독 실행 경로를 사용하고, 파일 편집 대신 인용·설계 결정·통합 결과 등 각 종류에 맞는 증거를 요구한다. `work`는 지원하지 않는 kind를 명확히 거부한다.
+`research`, `design`, `integration`을 별도 discriminated schema로 추가하는 방안은 현재 출시 범위에 포함하지 않았다. 이 작업들은 Orca 감독 실행 경로를 사용하며, `work`는 지원하지 않는 kind를 명확히 거부한다. 향후 해당 kind를 제품 범위에 넣을 때에는 파일 편집 대신 인용·설계 결정·통합 결과 등 각 종류에 맞는 증거 계약을 먼저 정의해야 한다.
 
 ### 6.3 실행 및 검토 기록
 
