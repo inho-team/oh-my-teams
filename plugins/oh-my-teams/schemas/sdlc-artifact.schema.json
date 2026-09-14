@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams SDLC artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "revision", "kind", "state", "title", "content", "upstream", "evidence", "owner", "createdAt", "supersedes"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "kind": { "enum": ["intent", "research", "design", "plan", "build", "verification", "review", "release", "deployment", "observation", "incident", "learning"] },
+    "state": { "enum": ["draft", "ready", "active", "submitted", "accepted", "invalidated", "superseded", "archived"] },
+    "title": { "type": "string", "minLength": 1 },
+    "content": { "type": "object" },
+    "upstream": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/ref" } },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "owner": { "type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": { "kind": { "enum": ["role", "human", "system"] }, "id": { "type": "string", "minLength": 1 } } },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "supersedes": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/ref" }] }
+  },
+  "$defs": {
+    "ref": { "type": "object", "additionalProperties": false, "required": ["id", "revision", "sha256"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "revision": { "type": "integer", "minimum": 1 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } }
+  }
+}
