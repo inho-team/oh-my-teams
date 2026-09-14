@@ -6,12 +6,17 @@ Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / J
 
 | 스킬 | 동작 |
 |---|---|
-| `team-setup` | 조직 이름·구조와 각 직급의 구독/계정·모델·인원·대체 순서를 한 번 선택 |
-| `team-show` | 조직도, 구독·모델, 작업 상태 표시 |
-| `team-edit` | 요청한 설정만 수정, 이전 설정 보존 |
-| `pm` | 저장된 조직으로 개발 요청 계획·배정·검증·통합 |
+| `team-help` | 설치된 생애주기·역할·호환 스킬과 사용 시점을 표로 안내 |
+| `team-form` | 상설 조직의 이름·구조와 직급별 구독/계정·모델·인원·대체 순서를 한 번 선택 |
+| `team-kickoff` | 하나의 개발 Goal을 시작하거나 재개하고 완료 조건까지 지속 감독 |
+| `team-status` | 상설 조직과 현재 Goal·실행 팀·워크트리·검증 상태를 구분하여 표시 |
+| `team-adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존 |
+| `team-close` | 성공한 Goal의 PR/MR·병합·워크트리 정리와 완료 기록 처리 |
+| `team-disband` | 실패·취소된 실행 팀을 해체하고 복구 가능한 결과와 기록 보존 |
 
-Claude에서는 `/oh-my-teams:team-setup`, `/oh-my-teams:pm` 등으로 호출한다. Codex에서는 플러그인의 해당 스킬을 호출하거나 같은 뜻으로 요청한다. 기존 `org-setup`, `org-show`, `org-edit`은 호환 별칭으로 유지한다. 조직 구성 후 구독을 다시 묻지 않는다. 실행 중 작업은 시작 당시 조직 스냅샷을 유지한다.
+Claude에서는 `/oh-my-teams:team-form`, `/oh-my-teams:team-kickoff` 등으로 호출한다. Codex에서는 플러그인의 해당 스킬을 호출하거나 같은 뜻으로 요청한다. 기존 `team-setup`, `team-show`, `team-edit`, `org-setup`, `org-show`, `org-edit`은 호환 진입점으로 유지한다. `pm`은 kickoff 내부의 지휘 역할로 유지한다. 조직 구성 후 구독을 다시 묻지 않는다. 실행 중 작업은 시작 당시 조직 스냅샷을 유지한다.
+
+`team-kickoff`는 호스트의 네이티브 Goal을 유일한 지속 실행 권한으로 사용한다. 같은 세션에서 Ralph, autopilot 또는 다른 Goal 루프를 함께 실행하지 않는다. 매 실행 주기에는 확인 가능한 진전을 남기며, 완료 조건과 최신 검증이 모두 충족된 뒤 `team-close`로 전달과 자원 정리를 마쳐야 Goal을 완료한다.
 
 ```text
 PM       분석·중장기 계획·최종 결과

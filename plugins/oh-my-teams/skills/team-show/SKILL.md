@@ -1,6 +1,6 @@
 ---
 name: team-show
-description: oh my teams 팀 이름과 PM/PL/Senior/Junior/Intern 조직도, 구독·모델 배정, 작업 상태를 표시한다.
+description: 이전 팀 조회 스킬명의 호환 진입점이다. 상설 조직과 kickoff 실행 현황 조회에는 team-status를 사용한다.
 ---
 
 # 팀 구성과 상태

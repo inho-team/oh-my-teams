@@ -1,6 +1,6 @@
 {
   "name": "oh-my-teams",
-  "version": "1.5.2+codex.20260914231823",
+  "version": "1.6.0+codex.20260915120000",
   "description": "oh my teams: an agent organization with role subscriptions and reusable evidence, running on Orca.",
   "author": {
     "name": "inho-team"
@@ -13,6 +13,6 @@
     "developerName": "inho-team",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Set up my oh my teams organization and show its roles."
+    "defaultPrompt": "Form my oh my teams organization, then kick off a development goal."
   }
 }
