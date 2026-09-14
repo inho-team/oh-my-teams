@@ -338,6 +338,65 @@ export function recordSdlcArtifact(
 }
 
 /**
+ * Converts one incident into a deduplicated draft intent artifact.
+ * @param {string} stateDir - Project `.omt` directory.
+ * @param {string} lifecycleId - Lifecycle identifier.
+ * @param {number} expectedRevision - Current lifecycle revision.
+ * @param {object} incident - Persisted incident with evidence and fingerprint.
+ * @param {string} eventId - Unique lifecycle event identifier.
+ * @returns {object} Existing intent or newly recorded artifact result.
+ */
+export function incidentToIntent(
+  stateDir,
+  lifecycleId,
+  expectedRevision,
+  incident,
+  eventId,
+) {
+  assert(
+    incident &&
+      typeof incident.fingerprint === "string" &&
+      SHA.test(incident.fingerprint) &&
+      typeof incident.summary === "string" &&
+      incident.summary.trim() &&
+      typeof incident.evidence === "string" &&
+      incident.evidence.trim(),
+    "Incident fingerprint, summary, and evidence required",
+  );
+  const artifactId = `intent-${incident.fingerprint.slice(0, 16)}`;
+  const state = readSdlc(stateDir, lifecycleId);
+  if (state.artifacts[artifactId]) {
+    return { duplicate: true, artifact: state.artifacts[artifactId], state };
+  }
+  const result = recordSdlcArtifact(
+    stateDir,
+    lifecycleId,
+    expectedRevision,
+    {
+      schemaVersion: 1,
+      id: artifactId,
+      revision: 1,
+      kind: "intent",
+      state: "draft",
+      title: `Incident follow-up: ${incident.summary}`,
+      content: {
+        sourceIncidentId: incident.id,
+        sourceIncidentFingerprint: incident.fingerprint,
+        goal: `Resolve and prevent recurrence: ${incident.summary}`,
+        evidence: incident.evidence,
+      },
+      upstream: [],
+      evidence: [],
+      owner: { kind: "role", id: "pm" },
+      createdAt: new Date().toISOString(),
+      supersedes: null,
+    },
+    eventId,
+  );
+  return { duplicate: false, ...result };
+}
+
+/**
  * Advances one artifact through an allowed transition as a new immutable revision.
  * @param {string} stateDir - Project `.omt` directory.
  * @param {string} lifecycleId - Lifecycle identifier.

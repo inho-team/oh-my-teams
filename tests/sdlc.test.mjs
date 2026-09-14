@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   createSdlc,
+  incidentToIntent,
   readSdlc,
   recordSdlcArtifact,
   sdlcArtifactHash,
@@ -361,4 +362,33 @@ test("SDLC CLI creates, records, transitions, and reads lifecycle state", (t) =>
   ]);
   assert.equal(status.status, 0);
   assert.equal(JSON.parse(status.stdout).artifacts["intent-a"].state, "ready");
+});
+
+test("incident feedback creates one deduplicated intent", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, { id: "release-a", goal: "Operate safely" });
+  const incident = {
+    id: "incident-a",
+    fingerprint: "b".repeat(64),
+    summary: "Production regression",
+    evidence: "receipt-1 and observation-1",
+  };
+  const first = incidentToIntent(
+    stateDir,
+    "release-a",
+    1,
+    incident,
+    "incident-intent",
+  );
+  assert.equal(first.duplicate, false);
+  assert.equal(first.artifact.kind, "intent");
+  const second = incidentToIntent(
+    stateDir,
+    "release-a",
+    first.state.revision,
+    incident,
+    "ignored-duplicate-event",
+  );
+  assert.equal(second.duplicate, true);
+  assert.equal(Object.keys(second.state.artifacts).length, 1);
 });

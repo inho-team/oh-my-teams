@@ -31,6 +31,7 @@ import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { organizationStatus } from "./status.mjs";
 import {
   createSdlc,
+  incidentToIntent,
   readSdlc,
   recordSdlcArtifact,
   transitionSdlcArtifact,
@@ -76,6 +77,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   sdlc-status --id ID --state DIR
   artifact-record --id SDLC_ID --artifact FILE --state DIR --revision N --event ID
   artifact-transition --id SDLC_ID --transition FILE --state DIR --revision N
+  incident-to-intent --id SDLC_ID --incident FILE --state DIR --revision N --event ID
   aggregate --expected id,id --report FILE [--report FILE ...]
 
 Existing organizations are reused; init never asks for subscriptions again.
@@ -128,6 +130,7 @@ const ALLOWED_OPTIONS = {
   "sdlc-status": ["id", "state"],
   "artifact-record": ["id", "artifact", "state", "revision", "event"],
   "artifact-transition": ["id", "transition", "state", "revision"],
+  "incident-to-intent": ["id", "incident", "state", "revision", "event"],
 };
 
 const REQUIRED_OPTIONS = {
@@ -176,6 +179,7 @@ const REQUIRED_OPTIONS = {
   "sdlc-status": ["id", "state"],
   "artifact-record": ["id", "artifact", "state", "revision", "event"],
   "artifact-transition": ["id", "transition", "state", "revision"],
+  "incident-to-intent": ["id", "incident", "state", "revision", "event"],
 };
 
 /**
@@ -511,6 +515,14 @@ async function executeCommand(args) {
         args.id,
         Number(args.revision),
         readJSON(args.transition),
+      );
+    case "incident-to-intent":
+      return incidentToIntent(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.incident),
+        args.event,
       );
     case "merge-check":
       return mergeCheck(args);
