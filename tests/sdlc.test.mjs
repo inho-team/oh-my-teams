@@ -671,6 +671,16 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
           authorization,
         );
         lifecycleRevision = authorized.state.revision;
+        assert.throws(
+          () =>
+            recordDeploymentAuthorization(
+              stateDir,
+              lifecycleId,
+              lifecycleRevision,
+              authorization,
+            ),
+          /already recorded/,
+        );
         assert.equal(
           checkDeployment(
             stateDir,
@@ -845,4 +855,51 @@ test("deployment cannot be accepted without matching authorization and receipt",
       }),
     /Authorization identity required/,
   );
+});
+
+test("explicit invalidation recursively invalidates accepted descendants", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Invalidate safely",
+  });
+  const intent = recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    1,
+    artifact(),
+    "intent",
+  );
+  let revision = acceptArtifact(stateDir, "release-a", "intent-a", 2);
+  const acceptedIntent = readSdlc(stateDir, "release-a").artifacts["intent-a"];
+  recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    artifact({
+      id: "research-a",
+      kind: "research",
+      upstream: [acceptedIntent],
+    }),
+    "research",
+  );
+  revision = acceptArtifact(
+    stateDir,
+    "release-a",
+    "research-a",
+    revision + 1,
+  );
+  const result = transitionSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    {
+      eventId: "invalidate-intent",
+      artifactId: "intent-a",
+      toState: "invalidated",
+    },
+  );
+  assert.equal(result.state.artifacts["intent-a"].state, "invalidated");
+  assert.equal(result.state.artifacts["research-a"].state, "invalidated");
 });

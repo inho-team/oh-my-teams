@@ -424,6 +424,12 @@ export function recordDeploymentAuthorization(
   return withFileLock(path.join(directory, ".lock"), () => {
     const state = readSdlc(stateDir, lifecycleId);
     assert(state.revision === expectedRevision, "Stale lifecycle revision");
+    const eventId = `authorization-${authorization.id}`;
+    assert(
+      !state.eventIds.includes(eventId) &&
+        !state.authorizations?.[authorization.id],
+      "Deployment authorization already recorded",
+    );
     const release = checkRelease(stateDir, lifecycleId, authorization.releaseId);
     validateDeploymentAuthorization(authorization, {
       action: "deploy",
@@ -458,7 +464,7 @@ export function recordDeploymentAuthorization(
     state.updatedAt = new Date().toISOString();
     const event = queueEvent(
       state,
-      `authorization-${authorization.id}`,
+      eventId,
       "deployment-authorized",
       {
         authorizationId: authorization.id,
@@ -789,21 +795,21 @@ export function transitionSdlcArtifact(
         `${authorization.id}.json`,
       );
       const receiptFile = path.join(directory, "receipts", `${receipt.id}.json`);
-      if (fs.existsSync(authorizationFile)) {
-        assert(
-          JSON.stringify(readJSON(authorizationFile)) ===
-            JSON.stringify(authorization),
-          "Conflicting deployment authorization",
-        );
-      }
+      assert(
+        state.authorizations?.[authorization.id] &&
+          fs.existsSync(authorizationFile),
+        "Deployment authorization must be recorded first",
+      );
+      assert(
+        JSON.stringify(readJSON(authorizationFile)) ===
+          JSON.stringify(authorization),
+        "Conflicting deployment authorization",
+      );
       if (fs.existsSync(receiptFile)) {
         assert(
           JSON.stringify(readJSON(receiptFile)) === JSON.stringify(receipt),
           "Conflicting deployment receipt",
         );
-      }
-      if (!fs.existsSync(authorizationFile)) {
-        writeJSON(authorizationFile, authorization);
       }
       if (!fs.existsSync(receiptFile)) writeJSON(receiptFile, receipt);
       state.receipts ??= {};
@@ -837,6 +843,15 @@ export function transitionSdlcArtifact(
       writeJSON(nextFile, next);
     }
     state.artifacts[next.id] = referenceFor(next, digest);
+    const invalidated =
+      input.toState === "invalidated"
+        ? invalidateDownstream(
+            directory,
+            state,
+            currentReference,
+            next.createdAt,
+          )
+        : [];
     state.revision += 1;
     state.updatedAt = next.createdAt;
     const event = queueEvent(state, input.eventId, "artifact-transitioned", {
@@ -844,6 +859,7 @@ export function transitionSdlcArtifact(
       to: state.artifacts[next.id],
       authorizationId: input.authorization?.id ?? null,
       receiptId: input.receipt?.id ?? null,
+      invalidated,
     });
     commitSdlcUpdate(directory, state, event);
     return { artifact: next, sha256: digest, state };
