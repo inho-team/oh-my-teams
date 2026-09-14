@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "intent-example",
+  "revision": 1,
+  "kind": "intent",
+  "state": "draft",
+  "title": "안전한 릴리스 의도",
+  "content": { "goal": "현재 검증과 권한에 고정된 릴리스를 준비한다." },
+  "upstream": [],
+  "evidence": [],
+  "owner": { "kind": "role", "id": "pm" },
+  "createdAt": "2026-09-15T00:00:00.000Z",
+  "supersedes": null
+}

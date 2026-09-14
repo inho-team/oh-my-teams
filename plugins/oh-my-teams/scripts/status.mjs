@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readJSON, validateOrg } from "./core.mjs";
 import { latestQuotaSnapshots, quotaStatus } from "./quota.mjs";
+import { readSdlc, SDLC_KINDS } from "./sdlc.mjs";
 import {
   addCallUsage,
   createUsageAccumulator,
@@ -114,6 +115,38 @@ function poolStatuses(org, stateDir) {
   );
 }
 
+function lifecycleStatuses(stateDir) {
+  const root = stateDir && path.join(stateDir, "sdlc");
+  if (!root || !fs.existsSync(root)) return [];
+  return fs
+    .readdirSync(root)
+    .filter((id) => fs.statSync(path.join(root, id)).isDirectory())
+    .sort()
+    .map((id) => {
+      const state = readSdlc(stateDir, id);
+      const artifacts = Object.values(state.artifacts);
+      const acceptedKinds = new Set(
+        artifacts
+          .filter((artifact) => artifact.state === "accepted")
+          .map((artifact) => artifact.kind),
+      );
+      return {
+        id,
+        revision: state.revision,
+        goal: state.goal,
+        artifactCount: artifacts.length,
+        acceptedCount: artifacts.filter(
+          (artifact) => artifact.state === "accepted",
+        ).length,
+        invalidatedCount: artifacts.filter(
+          (artifact) => artifact.state === "invalidated",
+        ).length,
+        currentStage:
+          SDLC_KINDS.find((kind) => !acceptedKinds.has(kind)) ?? "complete",
+      };
+    });
+}
+
 /**
  * Builds the read-only status shown by the organization CLI.
  *
@@ -135,6 +168,7 @@ export function organizationStatus(org, stateDir) {
       : [];
   return {
     runs,
+    sdlc: lifecycleStatuses(stateDir),
     usage: finalizeUsage(usage),
     pools: poolStatuses(org, stateDir),
   };

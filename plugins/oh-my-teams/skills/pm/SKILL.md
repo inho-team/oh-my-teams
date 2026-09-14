@@ -18,6 +18,8 @@ description: 저장된 oh my teams 조직으로 개발 요청을 계획·배정�
 
 제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 PL의 감독 실행 경로를 쓴다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 준다.
 
+제품 생명주기 전체를 맡으면 `sdlc-create`로 intent부터 learning까지의 상위 기록을 만들고, 각 단계의 결과를 `artifact-record`와 `artifact-transition`으로 연결한다. plan은 task/workflow 계약 hash를, build는 제출된 task report와 source hash를, verification·review·release는 같은 source의 evidence·독립 review·PM acceptance를 참조해야 한다. 상위 artifact가 바뀌면 무효화된 하위 결과를 새 근거 없이 재수용하지 않는다.
+
 ## 완료 판단
 
 보고 취합은 런타임 `aggregate`로 처리한다. 상위는 실패·충돌·미완료 gate만 먼저 읽고 필요할 때 원문 증거를 연다. PL의 통합 결과와 프로젝트 필수 CI를 확인한다. 같은 소스·기준 브랜치·환경의 검사를 단계마다 반복하지 않는다.
@@ -29,6 +31,8 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 실패는 `failure-classify` 결과의 next owner/action으로 보낸다. 재시도 가능한 실패도 `workflow-retry`에 해결 근거를 기록하고 기존 attempt·전체 예산을 유지한다. 반복 가능한 교훈은 `lesson-record` 후보로만 저장하며 검증 없이 역할 skill을 바꾸지 않는다. 외부 이슈·알림은 명시적으로 활성화된 incident config 안에서만 받고, 중복·제안 한도·관찰 기간·무진전 중단을 적용한다.
 
 사용자가 요청한 범위의 커밋·PR·머지를 처리하되 단순 개발 요청을 운영 배포나 외부 메시지 발송 허가로 확대하지 않는다. 머지할 때는 검증한 HEAD와 실제 PR HEAD, 최신 base를 대조하고 필수 검사를 통과시킨다. 승인 범위와 구체적인 머지 절차는 PL 스킬을 따른다.
+
+릴리스 준비에는 `release-check`를 사용한다. `deployment-authorize`는 human/policy authority가 지정한 release revision, source hash, repository, environment, action과 만료를 기록할 뿐 배포를 실행하지 않는다. `deployment-check`도 준비 상태만 반환한다. 별도 외부 실행에서 받은 성공 receipt가 같은 범위와 일치할 때만 `deployment-record`로 deployed 결과를 수용한다.
 
 감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 

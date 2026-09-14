@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "deploy-receipt-example",
+  "authorizationId": "deploy-auth-example",
+  "lifecycleId": "release-example",
+  "releaseId": "release-artifact-example",
+  "sourceHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "repository": "owner/repository",
+  "environment": "production",
+  "action": "deploy",
+  "status": "succeeded",
+  "executedAt": "2026-09-15T01:00:00.000Z",
+  "externalId": "provider-deployment-reference"
+}

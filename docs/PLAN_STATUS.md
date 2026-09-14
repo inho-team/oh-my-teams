@@ -8,6 +8,7 @@
 
 | 계획 | 완료 범위 | 확인 근거 | 남은 후속 항목 |
 |---|---|---|---|
+| [전체 AI-native SDLC](plan/full-ai-native-sdlc.md) | S1–S5 | 12단계 artifact 계보, 상태 전이, 재귀 무효화, transaction 복구, 실행·검토·릴리스 연결, 명시적 배포 권한·receipt, incident 피드백, CLI와 전체 경로 테스트 | 실제 외부 배포는 의도적으로 실행하지 않으며 E3 운영 표본은 계속 축적한다. |
 | [AI-native 에이전트 조직](plan/ai-native-agent-organization.md) | P0–P6 | task v2, review·acceptance gate, workflow 복구·예산, 실패 라우팅, incident·lesson 기능과 7개 로컬 eval 시나리오 | `research`, `design`, `integration` 전용 task kind는 현재 출시 범위가 아니며, 추가할 때 별도 계약이 필요하다. |
 | [oh my teams 이름 변경과 Orca 연동](plan/oh-my-teams-rename-and-orca-integration.md) | R0–R4 | package·marketplace·manifest의 기본 버전 1.5.2 일치, `plugins/orca` forwarding 진입점, Orca 1.4.200 discovery, 설치·CLI 회귀 테스트 | 이전 0.6.1은 rollback과 역사 보존 용도로만 유지한다. |
 | [공유 할당량 모델 라우팅](plan/shared-quota-model-routing.md) | P0–P4와 E1/E2 | 프리셋, pool 소진 차단, quota snapshot, 사용량 기록, 30회 라우팅 결과와 정리된 worktree | balanced는 잠정 권고다. E3 실제 업무 표본과 반복 비교가 있어야 영구 기본값을 판단할 수 있다. |
@@ -18,9 +19,9 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npm test` | 63개 테스트가 모두 통과했다. |
-| `npm run quality` | 활성 `.mjs` 38개와 공개 export 98개를 검사했으며 지적 사항이 없었다. |
-| `npm run eval:organization` | 결정적 로컬 시나리오 6개가 모두 통과했다. |
+| `npm test` | 75개 테스트가 모두 통과했다. |
+| `npm run quality` | 활성 `.mjs` 40개와 공개 export 114개를 검사했으며 지적 사항이 없었다. |
+| `npm run eval:organization` | 결정적 로컬 시나리오 7개가 모두 통과했다. |
 | README의 `validate`·`show` 예제 | 현재 예제 조직으로 정상 실행됐다. |
 | 로컬 Markdown 링크 검사 | README, `docs/`, 실험 보고서의 상대 링크에서 누락된 대상이 없었다. |
 

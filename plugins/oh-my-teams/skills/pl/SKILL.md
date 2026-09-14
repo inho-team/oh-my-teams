@@ -34,6 +34,8 @@ task v2는 구현 report가 `submitted`인 뒤 `review-record`와 `gate-check`�
 
 여러 task는 `workflow-create`로 dependency DAG와 전체 호출/attempt 예산을 고정한다. `workflow-resume`의 `dispatch-ready`만 배정하고, 실제 Run/Task/Dispatch/worktree ID를 받은 뒤 `workflow-attach`로 attempt에 연결한다. 재개 시 running attempt는 현재 Orca 가이드로 조회한 관측값을 제공하기 전까지 `reconcile-required`이며 중복 생성하지 않는다. settlement event ID는 중복 제거되고 다른 attempt의 늦은 결과는 현재 작업을 완료시키지 않는다.
 
+전체 SDLC에서는 task/workflow를 plan artifact에 고정하고, 제출된 report와 통합 source를 build artifact로 연결한다. verification·review·release artifact의 source hash가 build와 다르면 전이를 거부한다. 상위 revision 변경으로 invalidated된 결과는 자동 검사 또는 검토를 다시 수행한 새 revision에서만 재개한다.
+
 취합기는 기대한 작업의 누락·중복·실패를 막고 짧은 표만 만든다. `ready-for-verification`은 머지 승인 상태가 아니다. 각 보고의 실제 소스와 검증 기록을 대조한다. 통합은 **별도 Orca worktree**에서 하고 충돌 파일과 관련 작업 조건만 담당자에게 되돌린다.
 
 검증 캐시는 HEAD·base 커밋·파일 내용·검사 argv·환경 지문에 묶인다. 테스트나 환경이 달라지면 새 검사를 실행한다. 환경 지문에는 도구 버전, lockfile, DB fixture/스키마 버전 등 검사에 영향을 주는 외부 상태를 포함한다. 해시와 로그는 전송 무결성 확인이며 악의적 로컬 작성자를 인증하지는 않는다.

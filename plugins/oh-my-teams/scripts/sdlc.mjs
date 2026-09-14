@@ -186,6 +186,33 @@ function validateExecutionContent(artifact) {
       "Release acceptance must bind sourceHash",
     );
   }
+  if (kind === "observation") {
+    assert(
+      Number.isInteger(content.windowMinutes) &&
+        content.windowMinutes >= 1 &&
+        Array.isArray(content.metrics) &&
+        content.metrics.length > 0 &&
+        SHA.test(content.sourceHash),
+      "Observation window, metrics, and sourceHash required",
+    );
+  }
+  if (kind === "incident") {
+    assert(
+      typeof content.incidentId === "string" &&
+        content.incidentId.trim() &&
+        typeof content.evidence === "string" &&
+        content.evidence.trim(),
+      "Incident identity and evidence required",
+    );
+  }
+  if (kind === "learning") {
+    assert(
+      content.verification?.status === "passed" &&
+        typeof content.target === "string" &&
+        content.target.trim(),
+      "Learning requires verified evidence and a target",
+    );
+  }
 }
 
 /**
@@ -299,10 +326,11 @@ export function sdlcDirectory(stateDir, lifecycleId) {
 export function createSdlc(stateDir, request) {
   assert(
     request &&
+      request.schemaVersion === 1 &&
       ID.test(request.id) &&
       typeof request.goal === "string" &&
       request.goal.trim(),
-    "Lifecycle id and goal required",
+    "Lifecycle schemaVersion=1, id, and goal required",
   );
   const directory = sdlcDirectory(stateDir, request.id);
   return withFileLock(path.join(directory, ".lock"), () => {

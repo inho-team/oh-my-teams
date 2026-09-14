@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "deploy-auth-example",
+  "lifecycleId": "release-example",
+  "releaseId": "release-artifact-example",
+  "releaseRevision": 5,
+  "sourceHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "repository": "owner/repository",
+  "environment": "production",
+  "actions": ["deploy"],
+  "authority": { "kind": "human", "id": "approver-reference" },
+  "issuedAt": "2026-09-15T00:00:00.000Z",
+  "expiresAt": "2026-09-16T00:00:00.000Z"
+}

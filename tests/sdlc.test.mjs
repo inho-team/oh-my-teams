@@ -5,10 +5,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { organizationStatus } from "../plugins/oh-my-teams/scripts/status.mjs";
 import {
+  checkDeployment,
   createSdlc,
   incidentToIntent,
   readSdlc,
+  recordDeployment,
+  recordDeploymentAuthorization,
   recordSdlcArtifact,
   sdlcArtifactHash,
   transitionSdlcArtifact,
@@ -49,7 +53,11 @@ function cli(args) {
 
 test("SDLC artifacts persist immutable revisions and reject stale lifecycle updates", (t) => {
   const stateDir = fixture(t);
-  createSdlc(stateDir, { id: "release-a", goal: "Ship safely" });
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Ship safely",
+  });
   const first = recordSdlcArtifact(stateDir, "release-a", 1, artifact(), "record-intent-1");
   assert.equal(first.state.revision, 2);
   assert.equal(readSdlc(stateDir, "release-a").artifacts["intent-a"].sha256, first.sha256);
@@ -79,7 +87,11 @@ test("SDLC artifacts persist immutable revisions and reject stale lifecycle upda
 
 test("artifact lineage requires the current upstream revision and hash", (t) => {
   const stateDir = fixture(t);
-  createSdlc(stateDir, { id: "release-a", goal: "Ship safely" });
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Ship safely",
+  });
   const intent = recordSdlcArtifact(
     stateDir,
     "release-a",
@@ -202,7 +214,11 @@ function acceptArtifact(stateDir, lifecycleId, artifactId, revision) {
 
 test("artifact transitions cannot skip states and preserve immutable revisions", (t) => {
   const stateDir = fixture(t);
-  createSdlc(stateDir, { id: "release-a", goal: "Ship safely" });
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Ship safely",
+  });
   recordSdlcArtifact(stateDir, "release-a", 1, artifact(), "intent");
   assert.throws(
     () =>
@@ -227,7 +243,11 @@ test("artifact transitions cannot skip states and preserve immutable revisions",
 
 test("a new upstream revision recursively invalidates downstream artifacts", (t) => {
   const stateDir = fixture(t);
-  createSdlc(stateDir, { id: "release-a", goal: "Ship safely" });
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Ship safely",
+  });
   let revision = 1;
   const intent = recordSdlcArtifact(
     stateDir,
@@ -308,7 +328,7 @@ test("SDLC CLI creates, records, transitions, and reads lifecycle state", (t) =>
   const transitionFile = path.join(root, "transition.json");
   fs.writeFileSync(
     requestFile,
-    JSON.stringify({ id: "release-a", goal: "Ship safely" }),
+    JSON.stringify({ schemaVersion: 1, id: "release-a", goal: "Ship safely" }),
   );
   fs.writeFileSync(artifactFile, JSON.stringify(artifact()));
   fs.writeFileSync(
@@ -366,7 +386,11 @@ test("SDLC CLI creates, records, transitions, and reads lifecycle state", (t) =>
 
 test("incident feedback creates one deduplicated intent", (t) => {
   const stateDir = fixture(t);
-  createSdlc(stateDir, { id: "release-a", goal: "Operate safely" });
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Operate safely",
+  });
   const incident = {
     id: "incident-a",
     fingerprint: "b".repeat(64),
@@ -396,6 +420,7 @@ test("incident feedback creates one deduplicated intent", (t) => {
 test("SDLC transaction recovers event and materialized state together", (t) => {
   const stateDir = fixture(t);
   const state = createSdlc(stateDir, {
+    schemaVersion: 1,
     id: "release-a",
     goal: "Recover safely",
   });
@@ -433,7 +458,11 @@ test("SDLC transaction recovers event and materialized state together", (t) => {
 test("the complete lifecycle reaches learning with explicit deployment evidence", (t) => {
   const stateDir = fixture(t);
   const lifecycleId = "complete-flow";
-  createSdlc(stateDir, { id: lifecycleId, goal: "Complete the SDLC" });
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: lifecycleId,
+    goal: "Complete the SDLC",
+  });
   let lifecycleRevision = 1;
   let previous = null;
   const sourceHash = "c".repeat(64);
@@ -497,10 +526,27 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
               repository: "inho-team/app",
               environment: "production",
             }
-          : kind === "observation" ||
-              kind === "incident" ||
-              kind === "learning"
-            ? { stage: kind, sourceHash }
+          : kind === "observation"
+            ? {
+                stage: kind,
+                sourceHash,
+                windowMinutes: 30,
+                metrics: ["error-rate"],
+              }
+            : kind === "incident"
+              ? {
+                  stage: kind,
+                  sourceHash,
+                  incidentId: "incident-a",
+                  evidence: "observation-a",
+                }
+              : kind === "learning"
+                ? {
+                    stage: kind,
+                    sourceHash,
+                    target: "runtime-check",
+                    verification: { status: "passed" },
+                  }
             : { stage: kind };
     const recorded = recordSdlcArtifact(
       stateDir,
@@ -530,7 +576,7 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
         transition.evidence = [previous];
       }
       if (kind === "deployment" && targetState === "accepted") {
-        transition.authorization = {
+        const authorization = {
           schemaVersion: 1,
           id: "deploy-auth",
           lifecycleId,
@@ -541,10 +587,10 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
           environment: "production",
           actions: ["deploy"],
           authority: { kind: "human", id: "user-1" },
-          issuedAt: "2026-09-15T00:00:00.000Z",
-          expiresAt: "2026-09-16T00:00:00.000Z",
+          issuedAt: "2020-09-15T00:00:00.000Z",
+          expiresAt: "2099-09-16T00:00:00.000Z",
         };
-        transition.receipt = {
+        const receipt = {
           schemaVersion: 1,
           id: "deploy-receipt",
           authorizationId: "deploy-auth",
@@ -558,6 +604,38 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
           executedAt: "2026-09-15T12:00:00.000Z",
           externalId: "provider-deployment-1",
         };
+        const authorized = recordDeploymentAuthorization(
+          stateDir,
+          lifecycleId,
+          lifecycleRevision,
+          authorization,
+        );
+        lifecycleRevision = authorized.state.revision;
+        assert.equal(
+          checkDeployment(
+            stateDir,
+            lifecycleId,
+            id,
+            authorization.id,
+            transition.now,
+          ).ready,
+          true,
+        );
+        const deployed = recordDeployment(
+          stateDir,
+          lifecycleId,
+          lifecycleRevision,
+          {
+            deploymentId: id,
+            authorizationId: authorization.id,
+            receipt,
+            eventId: transition.eventId,
+            now: transition.now,
+          },
+        );
+        lifecycleRevision = deployed.state.revision;
+        previous = readSdlc(stateDir, lifecycleId).artifacts[id];
+        continue;
       }
       const transitioned = transitionSdlcArtifact(
         stateDir,
@@ -596,11 +674,24 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
     ),
     true,
   );
+  const org = JSON.parse(
+    fs.readFileSync(
+      "plugins/oh-my-teams/examples/organization.json",
+      "utf8",
+    ),
+  );
+  const status = organizationStatus(org, stateDir);
+  assert.equal(status.sdlc[0].currentStage, "complete");
+  assert.equal(status.sdlc[0].acceptedCount, 12);
 });
 
 test("deployment cannot be accepted without matching authorization and receipt", (t) => {
   const stateDir = fixture(t);
-  createSdlc(stateDir, { id: "release-a", goal: "Deploy safely" });
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Deploy safely",
+  });
   const release = recordSdlcArtifact(
     stateDir,
     "release-a",

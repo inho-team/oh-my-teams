@@ -65,6 +65,23 @@ node experiments/run-routing.mjs --mode e1 --max-calls 18 --dry-run
 npm run quality
 ```
 
+## 전체 AI-native SDLC
+
+OMT는 intent → research → design → plan → build → verification → review → release → deployment → observation → incident → learning을 불변 artifact revision과 검증 가능한 계보로 연결한다. 상위 artifact가 바뀌면 이를 참조하는 모든 하위 결과를 재귀적으로 무효화한다.
+
+```text
+node plugins/oh-my-teams/scripts/teams-org.mjs sdlc-create --request <request.json> --state <project>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs sdlc-status --id <sdlc-id> --state <project>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs artifact-record --id <sdlc-id> --artifact <artifact.json> --state <project>/.omt --revision <n> --event <id>
+node plugins/oh-my-teams/scripts/teams-org.mjs artifact-transition --id <sdlc-id> --transition <transition.json> --state <project>/.omt --revision <n>
+node plugins/oh-my-teams/scripts/teams-org.mjs release-check --id <sdlc-id> --release-id <id> --state <project>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs deployment-authorize --id <sdlc-id> --authorization <authorization.json> --state <project>/.omt --revision <n>
+node plugins/oh-my-teams/scripts/teams-org.mjs deployment-check --id <sdlc-id> --deployment-id <id> --authorization-id <id> --state <project>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs deployment-record --id <sdlc-id> --deployment-id <id> --authorization-id <id> --receipt <receipt.json> --state <project>/.omt --revision <n> --event <id>
+```
+
+`deployment-authorize`는 범위가 고정된 권한 기록만 만들고, `deployment-check`는 준비 여부만 반환한다. 실제 배포는 수행하지 않는다. 외부 실행 뒤 반환된 성공 receipt가 승인 범위와 일치해야만 `deployment-record`가 deployment artifact를 수용한다.
+
 제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 coordinator state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.
 
 - 파일과 직전 실패만 모델에 전달하고, JSON 편집을 경로·원본 해시 대조 후 하네스가 적용한다.

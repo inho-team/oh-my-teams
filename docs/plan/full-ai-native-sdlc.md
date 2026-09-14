@@ -1,7 +1,7 @@
 # 전체 AI-native SDLC 구현 계획
 
 - 작성일: 2026-09-15
-- 상태: 구현 중
+- 상태: S1–S5 구현·전체 회귀·통합 검증 완료
 - 통합 브랜치: `feat/full-sdlc-lifecycle`
 - 목표: 계획·조사·설계·구현·검증·검토·릴리스·운영 학습을 검증 가능한 산출물과 상태 전이로 연결한다.
 - 권한 경계: 릴리스 준비는 결정적으로 판정할 수 있지만, 실제 배포·외부 발송·프로덕션 변경은 범위가 명시된 별도 권한 없이는 실행하지 않는다.
@@ -104,15 +104,15 @@ state는 event에서 재구성할 수 있는 projection이다. 단일 coordinato
 
 - `sdlc-create --request FILE --state DIR`
 - `sdlc-status --id ID --state DIR [--json]`
-- `artifact-record --id SDLC_ID --artifact FILE --state DIR`
-- `artifact-transition --id SDLC_ID --transition FILE --state DIR`
-- `artifact-invalidate --id SDLC_ID --source FILE --state DIR`
-- `release-check --id SDLC_ID --release FILE --repo DIR --state DIR`
-- `deployment-authorize --id SDLC_ID --authorization FILE --state DIR`
-- `deployment-check --id SDLC_ID --deployment FILE --repo DIR --state DIR`
-- `deployment-record --id SDLC_ID --receipt FILE --state DIR`
-- `observation-record --id SDLC_ID --observation FILE --state DIR`
-- `incident-to-intent --id SDLC_ID --incident FILE --state DIR`
+- `artifact-record --id SDLC_ID --artifact FILE --state DIR --revision N --event ID`
+- `artifact-transition --id SDLC_ID --transition FILE --state DIR --revision N`
+- `artifact-invalidate --id SDLC_ID --artifact-id ID --state DIR --revision N --event ID`
+- `release-check --id SDLC_ID --release-id ID --state DIR`
+- `deployment-authorize --id SDLC_ID --authorization FILE --state DIR --revision N`
+- `deployment-check --id SDLC_ID --deployment-id ID --authorization-id ID --state DIR`
+- `deployment-record --id SDLC_ID --deployment-id ID --authorization-id ID --receipt FILE --state DIR --revision N --event ID`
+- `observation-record --id SDLC_ID --observation FILE --state DIR --revision N --event ID`
+- `incident-to-intent --id SDLC_ID --incident FILE --state DIR --revision N --event ID`
 
 어떤 명령도 push, PR, merge, deploy, publish 또는 외부 발송을 자동 실행하지 않는다.
 
@@ -158,7 +158,15 @@ state는 event에서 재구성할 수 있는 projection이다. 단일 coordinato
 - 시작부터 운영 학습까지의 통합 테스트와 중단 복구 테스트를 추가한다.
 - README, 실행 문서, 계획 상태와 역할 skill을 실제 지원 범위에 맞춘다.
 
-## 10. 완료 증거
+## 10. 구현 기록
+
+2026-09-15에 artifact·authorization·deployment receipt 스키마와 `scripts/sdlc.mjs`를 추가했다. 모든 상태 변경은 불변 revision과 append-only event로 저장하며, transaction journal이 event와 materialized state를 함께 복구한다. 현재 upstream의 accepted revision/hash를 강제하고 상위 변경 시 downstream을 재귀적으로 무효화한다.
+
+plan·build·verification·review·release에는 기존 task/workflow report, evidence, 독립 review, acceptance와 동일 source hash를 연결한다. release는 rollback·observation 계획을 요구한다. deployment는 별도로 기록된 human/policy authorization과 범위가 일치하는 성공 receipt가 모두 있어야 accepted가 된다. 이 과정은 외부 배포 명령을 실행하지 않는다.
+
+observation·incident·learning의 의미 관문과 incident fingerprint 기반의 중복 없는 새 intent 생성을 구현했다. 계획에 명시한 SDLC CLI를 `teams-org.mjs`에 연결했고, intent부터 learning까지의 전체 경로와 배포 권한 실패 변형을 `tests/sdlc.test.mjs`에서 검증한다.
+
+## 11. 완료 증거
 
 - 모든 산출물 kind의 유효·무효 스키마 fixture가 존재해야 한다.
 - 정상 전체 흐름이 intent부터 learning까지 이어져야 한다.
