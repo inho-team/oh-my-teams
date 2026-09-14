@@ -439,8 +439,14 @@ export function recordDeploymentAuthorization(
       "authorizations",
       `${authorization.id}.json`,
     );
-    assert(!fs.existsSync(target), "Deployment authorization already recorded");
-    writeJSON(target, authorization);
+    if (fs.existsSync(target)) {
+      assert(
+        JSON.stringify(readJSON(target)) === JSON.stringify(authorization),
+        "Conflicting deployment authorization",
+      );
+    } else {
+      writeJSON(target, authorization);
+    }
     state.authorizations ??= {};
     state.authorizations[authorization.id] = {
       id: authorization.id,
@@ -608,8 +614,14 @@ export function recordSdlcArtifact(
     }
     const digest = sdlcArtifactHash(artifact);
     const target = artifactFile(directory, artifact);
-    assert(!fs.existsSync(target), "Artifact revision already exists");
-    writeJSON(target, artifact);
+    if (fs.existsSync(target)) {
+      assert(
+        JSON.stringify(readJSON(target)) === JSON.stringify(artifact),
+        "Conflicting artifact revision",
+      );
+    } else {
+      writeJSON(target, artifact);
+    }
     state.artifacts[artifact.id] = referenceFor(artifact, digest);
     state.revision += 1;
     state.updatedAt = new Date().toISOString();
@@ -784,11 +796,16 @@ export function transitionSdlcArtifact(
           "Conflicting deployment authorization",
         );
       }
-      assert(!fs.existsSync(receiptFile), "Deployment receipt already recorded");
+      if (fs.existsSync(receiptFile)) {
+        assert(
+          JSON.stringify(readJSON(receiptFile)) === JSON.stringify(receipt),
+          "Conflicting deployment receipt",
+        );
+      }
       if (!fs.existsSync(authorizationFile)) {
         writeJSON(authorizationFile, authorization);
       }
-      writeJSON(receiptFile, receipt);
+      if (!fs.existsSync(receiptFile)) writeJSON(receiptFile, receipt);
       state.receipts ??= {};
       state.receipts[receipt.id] = {
         id: receipt.id,
@@ -810,7 +827,15 @@ export function transitionSdlcArtifact(
       },
     };
     const digest = sdlcArtifactHash(next);
-    writeJSON(artifactFile(directory, next), next);
+    const nextFile = artifactFile(directory, next);
+    if (fs.existsSync(nextFile)) {
+      assert(
+        JSON.stringify(readJSON(nextFile)) === JSON.stringify(next),
+        "Conflicting artifact transition revision",
+      );
+    } else {
+      writeJSON(nextFile, next);
+    }
     state.artifacts[next.id] = referenceFor(next, digest);
     state.revision += 1;
     state.updatedAt = next.createdAt;

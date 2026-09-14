@@ -455,6 +455,66 @@ test("SDLC transaction recovers event and materialized state together", (t) => {
   );
 });
 
+test("identical orphan artifact writes recover while conflicts fail closed", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Recover orphan writes",
+  });
+  const value = artifact();
+  const file = path.join(
+    stateDir,
+    "sdlc",
+    "release-a",
+    "artifacts",
+    "intent",
+    "intent-a",
+    "revisions",
+    "1.json",
+  );
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(value));
+  const recovered = recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    1,
+    value,
+    "recover-orphan",
+  );
+  assert.equal(recovered.state.artifacts["intent-a"].revision, 1);
+
+  const conflictingState = fixture(t);
+  createSdlc(conflictingState, {
+    schemaVersion: 1,
+    id: "release-b",
+    goal: "Reject conflicts",
+  });
+  const conflictFile = path.join(
+    conflictingState,
+    "sdlc",
+    "release-b",
+    "artifacts",
+    "intent",
+    "intent-a",
+    "revisions",
+    "1.json",
+  );
+  fs.mkdirSync(path.dirname(conflictFile), { recursive: true });
+  fs.writeFileSync(conflictFile, JSON.stringify({ ...value, title: "Other" }));
+  assert.throws(
+    () =>
+      recordSdlcArtifact(
+        conflictingState,
+        "release-b",
+        1,
+        value,
+        "reject-conflict",
+      ),
+    /Conflicting artifact revision/,
+  );
+});
+
 test("the complete lifecycle reaches learning with explicit deployment evidence", (t) => {
   const stateDir = fixture(t);
   const lifecycleId = "complete-flow";
