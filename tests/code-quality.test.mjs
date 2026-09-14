@@ -97,6 +97,7 @@ test("team skills are primary and org names remain compatibility aliases", () =>
 test("team lifecycle skills expose one kickoff loop and explicit outcomes", () => {
   const skills = path.resolve("plugins/oh-my-teams/skills");
   for (const action of [
+    "help",
     "form",
     "kickoff",
     "status",
