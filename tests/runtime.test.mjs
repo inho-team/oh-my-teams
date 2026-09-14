@@ -399,6 +399,8 @@ test("Agy selects GPT-OSS, Sonnet, and Opus with the same model argument", () =>
 test("failed OSS output promotes once to configured fallback and preserves org snapshot", async (t) => {
   const dir = await repo(t),
     org = clone();
+  org.roles.intern.profile = "agy-oss";
+  org.roles.intern.fallbacks = ["agy-sonnet"];
   let calls = 0;
   const result = await work(dir, org, task, {
     stateDir: path.join(dir, ".omt"),
@@ -444,7 +446,10 @@ test("quota stop does not switch subscriptions; repeated failure never becomes s
   });
   assert.equal(result.status, "failed");
   assert.equal(calls, 1);
-  const failed = await work(dir, clone(), task, {
+  const retryOrg = clone();
+  retryOrg.roles.intern.profile = "agy-oss";
+  retryOrg.roles.intern.fallbacks = ["agy-sonnet"];
+  const failed = await work(dir, retryOrg, task, {
     stateDir: path.join(dir, ".omt"),
     call: async () => response({ edits: [] }),
   });
