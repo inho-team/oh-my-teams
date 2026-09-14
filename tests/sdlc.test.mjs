@@ -9,6 +9,7 @@ import {
   readSdlc,
   recordSdlcArtifact,
   sdlcArtifactHash,
+  transitionSdlcArtifact,
   validateDeploymentAuthorization,
 } from "../plugins/oh-my-teams/scripts/sdlc.mjs";
 
@@ -168,4 +169,123 @@ test("artifact hashes are canonical across object key order", () => {
   const value = artifact();
   const reordered = { ...value, content: { goal: "Ship safely" } };
   assert.equal(sdlcArtifactHash(value), sdlcArtifactHash(reordered));
+});
+
+function acceptArtifact(stateDir, lifecycleId, artifactId, revision) {
+  let lifecycleRevision = revision;
+  for (const state of ["ready", "active", "submitted", "accepted"]) {
+    const result = transitionSdlcArtifact(
+      stateDir,
+      lifecycleId,
+      lifecycleRevision,
+      {
+        eventId: `${artifactId}-${state}`,
+        artifactId,
+        toState: state,
+        now: Date.parse("2026-09-15T12:00:00.000Z") + lifecycleRevision,
+      },
+    );
+    lifecycleRevision = result.state.revision;
+  }
+  return lifecycleRevision;
+}
+
+test("artifact transitions cannot skip states and preserve immutable revisions", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, { id: "release-a", goal: "Ship safely" });
+  recordSdlcArtifact(stateDir, "release-a", 1, artifact(), "intent");
+  assert.throws(
+    () =>
+      transitionSdlcArtifact(stateDir, "release-a", 2, {
+        eventId: "skip",
+        artifactId: "intent-a",
+        toState: "accepted",
+      }),
+    /Invalid artifact transition/,
+  );
+  const finalRevision = acceptArtifact(
+    stateDir,
+    "release-a",
+    "intent-a",
+    2,
+  );
+  const current = readSdlc(stateDir, "release-a");
+  assert.equal(current.revision, finalRevision);
+  assert.equal(current.artifacts["intent-a"].state, "accepted");
+  assert.equal(current.artifacts["intent-a"].revision, 5);
+});
+
+test("a new upstream revision recursively invalidates downstream artifacts", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, { id: "release-a", goal: "Ship safely" });
+  let revision = 1;
+  const intent = recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    artifact(),
+    "intent",
+  );
+  revision = acceptArtifact(stateDir, "release-a", "intent-a", 2);
+  const acceptedIntent = readSdlc(stateDir, "release-a").artifacts["intent-a"];
+  recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    artifact({
+      id: "research-a",
+      kind: "research",
+      upstream: [acceptedIntent],
+    }),
+    "research",
+  );
+  revision = acceptArtifact(
+    stateDir,
+    "release-a",
+    "research-a",
+    revision + 1,
+  );
+  const acceptedResearch = readSdlc(stateDir, "release-a").artifacts[
+    "research-a"
+  ];
+  recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    artifact({
+      id: "design-a",
+      kind: "design",
+      upstream: [acceptedResearch],
+    }),
+    "design",
+  );
+  revision = acceptArtifact(
+    stateDir,
+    "release-a",
+    "design-a",
+    revision + 1,
+  );
+  const previousIntent = readSdlc(stateDir, "release-a").artifacts["intent-a"];
+  const changed = artifact({
+    revision: previousIntent.revision + 1,
+    content: { goal: "Ship more safely" },
+    supersedes: {
+      id: "intent-a",
+      revision: previousIntent.revision,
+      sha256: previousIntent.sha256,
+    },
+  });
+  const result = recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    changed,
+    "intent-changed",
+  );
+  assert.deepEqual(
+    result.invalidated.map((item) => item.id).sort(),
+    ["design-a", "research-a"],
+  );
+  assert.equal(result.state.artifacts["research-a"].state, "invalidated");
+  assert.equal(result.state.artifacts["design-a"].state, "invalidated");
 });
