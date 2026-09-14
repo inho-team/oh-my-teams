@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams deployment receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "authorizationId", "lifecycleId", "releaseId", "sourceHash", "repository", "environment", "action", "status", "executedAt", "externalId"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "authorizationId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "lifecycleId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "releaseId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "sourceHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "repository": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "action": { "enum": ["deploy", "rollback"] },
+    "status": { "const": "succeeded" },
+    "executedAt": { "type": "string", "format": "date-time" },
+    "externalId": { "type": "string", "minLength": 1 }
+  }
+}

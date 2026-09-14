@@ -15,6 +15,9 @@ export const SDLC_STATES = [
 ];
 const ID = /^[a-z0-9][a-z0-9-]*$/;
 const SHA = /^[a-f0-9]{64}$/;
+const PREVIOUS_KIND = Object.fromEntries(
+  SDLC_KINDS.slice(1).map((kind, index) => [kind, SDLC_KINDS[index]]),
+);
 const NEXT = {
   draft: ["ready", "archived"], ready: ["active", "archived"],
   active: ["submitted", "archived"],
@@ -192,6 +195,19 @@ export function validateDeploymentAuthorization(
   return authorization;
 }
 
+function validateDeploymentReceipt(receipt, authorization) {
+  assert(receipt?.schemaVersion === 1 && ID.test(receipt.id), "Deployment receipt identity required");
+  assert(receipt.authorizationId === authorization.id, "Deployment receipt authorization mismatch");
+  for (const key of ["lifecycleId", "releaseId", "sourceHash", "repository", "environment"]) {
+    assert(receipt[key] === authorization[key], `Deployment receipt ${key} mismatch`);
+  }
+  assert(authorization.actions.includes(receipt.action), "Deployment receipt action not authorized");
+  assert(receipt.status === "succeeded", "Deployment receipt must prove success");
+  assert(Number.isFinite(Date.parse(receipt.executedAt)), "Deployment receipt executedAt required");
+  assert(typeof receipt.externalId === "string" && receipt.externalId.trim(), "Deployment receipt externalId required");
+  return receipt;
+}
+
 /**
  * Resolves a lifecycle directory under coordinator state.
  * @param {string} stateDir - Project `.omt` directory.
@@ -360,8 +376,26 @@ export function transitionSdlcArtifact(
         `Upstream not accepted or current: ${upstream.id}`,
       );
     }
+    if (input.toState === "ready" && PREVIOUS_KIND[current.kind]) {
+      assert(
+        current.upstream.some(
+          (reference) =>
+            state.artifacts[reference.id]?.kind === PREVIOUS_KIND[current.kind],
+        ),
+        `${current.kind} requires ${PREVIOUS_KIND[current.kind]} upstream`,
+      );
+    }
+    if (current.kind === "release" && input.toState === "ready") {
+      assert(SHA.test(current.content.sourceHash), "Release sourceHash required");
+      assert(typeof current.content.repository === "string" && current.content.repository.trim(), "Release repository required");
+      assert(current.content.rollbackPlan, "Release rollback plan required");
+      assert(current.content.observationPlan, "Release observation plan required");
+    }
+    if (["verification", "review", "release"].includes(current.kind) && input.toState === "submitted") {
+      assert((input.evidence ?? current.evidence).length > 0, `${current.kind} evidence required before submission`);
+    }
     if (current.kind === "deployment" && input.toState === "accepted") {
-      validateDeploymentAuthorization(
+      const authorization = validateDeploymentAuthorization(
         input.authorization,
         {
           action: "deploy",
@@ -374,6 +408,17 @@ export function transitionSdlcArtifact(
         },
         input.now ?? Date.now(),
       );
+      const receipt = validateDeploymentReceipt(input.receipt, authorization);
+      const authorizationFile = path.join(
+        directory,
+        "authorizations",
+        `${authorization.id}.json`,
+      );
+      const receiptFile = path.join(directory, "receipts", `${receipt.id}.json`);
+      assert(!fs.existsSync(authorizationFile), "Deployment authorization already recorded");
+      assert(!fs.existsSync(receiptFile), "Deployment receipt already recorded");
+      writeJSON(authorizationFile, authorization);
+      writeJSON(receiptFile, receipt);
     }
     const next = {
       ...current,
@@ -396,6 +441,7 @@ export function transitionSdlcArtifact(
       from: currentReference,
       to: state.artifacts[next.id],
       authorizationId: input.authorization?.id ?? null,
+      receiptId: input.receipt?.id ?? null,
     });
     writeJSON(path.join(directory, "state.json"), state);
     return { artifact: next, sha256: digest, state };
