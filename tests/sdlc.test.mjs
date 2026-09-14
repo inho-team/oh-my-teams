@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   createSdlc,
   readSdlc,
@@ -35,6 +36,14 @@ function artifact(overrides = {}) {
     supersedes: null,
     ...overrides,
   };
+}
+
+function cli(args) {
+  return spawnSync(
+    process.execPath,
+    ["plugins/oh-my-teams/scripts/teams-org.mjs", ...args],
+    { cwd: path.resolve("."), encoding: "utf8" },
+  );
 }
 
 test("SDLC artifacts persist immutable revisions and reject stale lifecycle updates", (t) => {
@@ -288,4 +297,68 @@ test("a new upstream revision recursively invalidates downstream artifacts", (t)
   );
   assert.equal(result.state.artifacts["research-a"].state, "invalidated");
   assert.equal(result.state.artifacts["design-a"].state, "invalidated");
+});
+
+test("SDLC CLI creates, records, transitions, and reads lifecycle state", (t) => {
+  const root = fixture(t);
+  const stateDir = path.join(root, ".omt");
+  const requestFile = path.join(root, "request.json");
+  const artifactFile = path.join(root, "artifact.json");
+  const transitionFile = path.join(root, "transition.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({ id: "release-a", goal: "Ship safely" }),
+  );
+  fs.writeFileSync(artifactFile, JSON.stringify(artifact()));
+  fs.writeFileSync(
+    transitionFile,
+    JSON.stringify({
+      eventId: "intent-ready",
+      artifactId: "intent-a",
+      toState: "ready",
+    }),
+  );
+  assert.equal(
+    cli(["sdlc-create", "--request", requestFile, "--state", stateDir]).status,
+    0,
+  );
+  assert.equal(
+    cli([
+      "artifact-record",
+      "--id",
+      "release-a",
+      "--artifact",
+      artifactFile,
+      "--state",
+      stateDir,
+      "--revision",
+      "1",
+      "--event",
+      "intent-recorded",
+    ]).status,
+    0,
+  );
+  assert.equal(
+    cli([
+      "artifact-transition",
+      "--id",
+      "release-a",
+      "--transition",
+      transitionFile,
+      "--state",
+      stateDir,
+      "--revision",
+      "2",
+    ]).status,
+    0,
+  );
+  const status = cli([
+    "sdlc-status",
+    "--id",
+    "release-a",
+    "--state",
+    stateDir,
+  ]);
+  assert.equal(status.status, 0);
+  assert.equal(JSON.parse(status.stdout).artifacts["intent-a"].state, "ready");
 });

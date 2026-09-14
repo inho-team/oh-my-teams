@@ -29,6 +29,12 @@ import {
 } from "./incidents.mjs";
 import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { organizationStatus } from "./status.mjs";
+import {
+  createSdlc,
+  readSdlc,
+  recordSdlcArtifact,
+  transitionSdlcArtifact,
+} from "./sdlc.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   init --org FILE --from CONFIG
@@ -66,6 +72,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   incident-status --state DIR
   quota-record --snapshot FILE --state DIR
   quota-compare --before FILE --after FILE
+  sdlc-create --request FILE --state DIR
+  sdlc-status --id ID --state DIR
+  artifact-record --id SDLC_ID --artifact FILE --state DIR --revision N --event ID
+  artifact-transition --id SDLC_ID --transition FILE --state DIR --revision N
   aggregate --expected id,id --report FILE [--report FILE ...]
 
 Existing organizations are reused; init never asks for subscriptions again.
@@ -114,6 +124,10 @@ const ALLOWED_OPTIONS = {
   "incident-status": ["state"],
   "quota-record": ["snapshot", "state"],
   "quota-compare": ["before", "after"],
+  "sdlc-create": ["request", "state"],
+  "sdlc-status": ["id", "state"],
+  "artifact-record": ["id", "artifact", "state", "revision", "event"],
+  "artifact-transition": ["id", "transition", "state", "revision"],
 };
 
 const REQUIRED_OPTIONS = {
@@ -158,6 +172,10 @@ const REQUIRED_OPTIONS = {
   "incident-status": ["state"],
   "quota-record": ["snapshot", "state"],
   "quota-compare": ["before", "after"],
+  "sdlc-create": ["request", "state"],
+  "sdlc-status": ["id", "state"],
+  "artifact-record": ["id", "artifact", "state", "revision", "event"],
+  "artifact-transition": ["id", "transition", "state", "revision"],
 };
 
 /**
@@ -475,6 +493,25 @@ async function executeCommand(args) {
       );
     case "quota-compare":
       return compareQuotaSnapshots(readJSON(args.before), readJSON(args.after));
+    case "sdlc-create":
+      return createSdlc(path.resolve(args.state), readJSON(args.request));
+    case "sdlc-status":
+      return readSdlc(path.resolve(args.state), args.id);
+    case "artifact-record":
+      return recordSdlcArtifact(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.artifact),
+        args.event,
+      );
+    case "artifact-transition":
+      return transitionSdlcArtifact(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.transition),
+      );
     case "merge-check":
       return mergeCheck(args);
     case "aggregate":
