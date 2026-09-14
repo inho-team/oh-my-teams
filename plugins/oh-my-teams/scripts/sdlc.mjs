@@ -861,6 +861,14 @@ export function transitionSdlcArtifact(
         directory,
         state.artifacts[previousKindReference.id],
       );
+      if (current.kind === "deployment") {
+        assert(
+          previousKindReference.id === current.content.releaseId &&
+            previousKindReference.revision ===
+              current.content.releaseRevision,
+          "Deployment release content differs from upstream",
+        );
+      }
       if (current.content.sourceHash && previousArtifact.content.sourceHash) {
         assert(
           current.content.sourceHash === previousArtifact.content.sourceHash,

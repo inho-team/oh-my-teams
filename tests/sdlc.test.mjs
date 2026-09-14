@@ -746,6 +746,36 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
                     verification: { status: "passed" },
                   }
             : { stage: kind };
+    if (kind === "deployment") {
+      const wrong = recordSdlcArtifact(
+        stateDir,
+        lifecycleId,
+        lifecycleRevision,
+        artifact({
+          id: "deployment-wrong-release",
+          kind,
+          title: "wrong deployment",
+          content: { ...content, releaseId: "another-release" },
+          upstream: [previous],
+        }),
+        "record-deployment-wrong-release",
+      );
+      lifecycleRevision = wrong.state.revision;
+      assert.throws(
+        () =>
+          transitionSdlcArtifact(
+            stateDir,
+            lifecycleId,
+            lifecycleRevision,
+            {
+              eventId: "deployment-wrong-ready",
+              artifactId: "deployment-wrong-release",
+              toState: "ready",
+            },
+          ),
+        /differs from upstream/,
+      );
+    }
     const recorded = recordSdlcArtifact(
       stateDir,
       lifecycleId,
