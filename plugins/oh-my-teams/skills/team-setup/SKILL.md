@@ -13,7 +13,7 @@ description: 최초 oh my teams 조직을 만들고 PM/PL/Senior/Junior/Intern�
 - **각 직급마다** 사용할 구독/계정 프로필과 모델. 기존 직급의 구독 공유도 명시적으로 선택할 수 있다.
 - 사용할 대체 프로필과 순서, 할당량 소진 시 대체 또는 중단, 전체 호출 한도.
 
-실행기는 Claude·Codex·Agy, 설치 호스트는 Claude·Codex다. 먼저 설치된 `agy models`와 각 CLI 도움말에서 실제 모델 ID를 확인한다. 이 배포에서 확인한 Agy 선택지는 GPT-OSS-120B, Gemini Pro 3.1, Gemini Flash 3.8, Claude Sonnet 4.6, Opus 4.6이다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 사용한다. 고정된 모델 능력 서열이나 구독 가격을 가정하지 않는다.
+실행기는 Claude·Codex·Agy, 설치 호스트는 Claude·Codex다. 먼저 설치된 `agy models`와 각 CLI 도움말에서 실제 모델 ID를 확인한다. 이 배포에서 확인한 Agy 선택지는 GPT-OSS-120B, Gemini Pro 3.1, Gemini Flash 3.8, Claude Sonnet 4.6, Opus 4.6이다. Agy의 GPT-OSS·Sonnet·Opus는 모두 프로필의 정확한 모델 ID를 `--model` 인자로 전달하며, 지원 여부를 확인하지 않은 `--effort`를 덧붙이지 않는다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 사용한다. 고정된 모델 능력 서열이나 구독 가격을 가정하지 않는다.
 
 최초 구성에서는 `opus-first`와 `balanced` 프리셋을 제안한다. `opus-first`는 Agy 역할의 기준선을 Opus로 통일하고, `balanced`는 Senior=Opus, Junior=Sonnet, Intern=GPT-OSS로 배정한다. PM·PL의 기존 Claude·Codex 선택은 두 프리셋 모두 바꾸지 않는다. 프리셋을 고른 뒤에도 직급별 구독·계정과 실제 모델 ID를 확인하며 사용자는 모두 변경할 수 있다. 구독별 청구/할당량은 토큰 수와 다른 값이다.
 

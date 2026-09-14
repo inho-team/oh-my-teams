@@ -18,7 +18,7 @@ node <runtime> work --org <returned-org> --task <returned-task> --repo <returned
 
 `prepare`는 이전 호출용 호환 진입점이다. 새 연동은 `prepare-input`으로 계약과 base를 먼저 고정하고, 공통 discovery에서 확인한 Orca 기능으로 worktree를 만든 뒤 실제 receipt를 `attach-workspace`에 전달한다. 연결 단계는 receipt 경로·Git root·HEAD·parent의 base를 대조한다. `work`는 Agy/Claude/Codex의 제한된 응답을 받아 명시된 파일에만 적용하고, 선택한 검사와 호출 한도를 관리한다. 보고서는 공유 state의 runs 아래에 남는다. 실행 실패 시 편집 내용을 보존한다. 이 하네스는 비대화 명령이며 자체적으로 감독 Dispatch나 `worker_done`을 만들지 않는다. 감독된 Junior가 실행했다면 하네스 결과를 확인한 뒤 자신의 실제 Dispatch에 보고한다.
 
-**일반 감독 작업:** 현재 discovery에서 확인한 Run/Task/Dispatch 기능으로 배정한다. 사용자가 선택한 모델만 전달하고 requested/effective를 비교한다. 별도 계정 프로필이나 Agy를 현재 감독 명령이 표현하지 못하면 지원 여부를 확인한 뒤 현재 가이드의 경로를 따른다. 계정 이름만 브리프에 적어 계정이 바뀌었다고 판단하지 않는다.
+**일반 감독 작업:** 현재 discovery에서 확인한 Run/Task/Dispatch 기능으로 배정한다. 사용자가 선택한 모델만 전달하고 requested/effective를 비교한다. Agy의 GPT-OSS·Sonnet·Opus는 모두 `--model <profile.model>`로 지정하며 지원하지 않는 `--effort`를 추측해 추가하지 않는다. 별도 계정 프로필이나 Agy를 현재 감독 명령이 표현하지 못하면 지원 여부를 확인한 뒤 현재 가이드의 custom argv 경로를 따른다. 요청 모델이 적용됐다는 증거가 없거나 대화형 화면의 현재 모델이 다르면 Dispatch를 시작하지 않는다. 계정 이름만 브리프에 적어 계정이 바뀌었다고 판단하지 않는다.
 
 감독 메시지는 현재 injected preamble의 Task/Dispatch 권한을 사용한다. 대기에는 `check --wait`를 쓰며 터미널 화면을 주기적으로 전체 읽어 모델을 깨우지 않는다. timeout은 완료나 재시도 근거가 아니다. 메시지를 처리하고 accepted settlement의 다음 소유권을 정한 뒤 acknowledge한다.
 
