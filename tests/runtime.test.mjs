@@ -351,6 +351,23 @@ test("provider argv preserves prompt literally without shell execution or permis
     assert.ok(!spec.argv.some((v) => v.startsWith("--dangerously")));
   }
 });
+test("Agy selects GPT-OSS, Sonnet, and Opus with the same model argument", () => {
+  for (const model of [
+    "gpt-oss-120b-medium",
+    "claude-sonnet-4-6",
+    "claude-opus-4-6-thinking",
+  ]) {
+    const spec = providerCommand(
+      { provider: "agy", command: ["agy"], model },
+      "/tmp/task",
+      "prompt",
+    );
+    const modelIndex = spec.argv.indexOf("--model");
+    assert.ok(modelIndex > 0);
+    assert.equal(spec.argv[modelIndex + 1], model);
+    assert.ok(!spec.argv.includes("--effort"));
+  }
+});
 test("failed OSS output promotes once to configured fallback and preserves org snapshot", async (t) => {
   const dir = await repo(t),
     org = clone();
