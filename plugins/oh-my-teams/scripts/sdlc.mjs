@@ -65,15 +65,41 @@ function referenceFor(artifact, sha256 = sdlcArtifactHash(artifact)) {
   };
 }
 
-function writeEvent(directory, state, eventId, type, details) {
+function queueEvent(state, eventId, type, details) {
   state.eventIds.push(eventId);
   const sequence = String(state.eventIds.length).padStart(6, "0");
-  writeJSON(path.join(directory, "events", `${sequence}-${eventId}.json`), {
-    id: eventId,
-    type,
-    ...details,
-    recordedAt: state.updatedAt,
-  });
+  return {
+    name: `${sequence}-${eventId}.json`,
+    value: {
+      id: eventId,
+      type,
+      ...details,
+      recordedAt: state.updatedAt,
+    },
+  };
+}
+
+function recoverSdlcTransaction(directory) {
+  const file = path.join(directory, "transaction.json");
+  if (!fs.existsSync(file)) return;
+  const transaction = readJSON(file);
+  const eventFile = path.join(directory, "events", transaction.event.name);
+  if (fs.existsSync(eventFile)) {
+    assert(
+      JSON.stringify(readJSON(eventFile)) ===
+        JSON.stringify(transaction.event.value),
+      "Conflicting SDLC event during recovery",
+    );
+  } else {
+    writeJSON(eventFile, transaction.event.value);
+  }
+  writeJSON(path.join(directory, "state.json"), transaction.state);
+  fs.unlinkSync(file);
+}
+
+function commitSdlcUpdate(directory, state, event) {
+  writeJSON(path.join(directory, "transaction.json"), { state, event });
+  recoverSdlcTransaction(directory);
 }
 
 function invalidateDownstream(directory, state, initialReference, now) {
@@ -248,11 +274,18 @@ export function createSdlc(stateDir, request) {
       createdAt: now,
       updatedAt: now,
     };
-    writeJSON(
-      path.join(directory, "events", "000001-lifecycle-created.json"),
-      { id: "lifecycle-created", type: "lifecycle-created", recordedAt: now },
+    commitSdlcUpdate(
+      directory,
+      state,
+      {
+        name: "000001-lifecycle-created.json",
+        value: {
+          id: "lifecycle-created",
+          type: "lifecycle-created",
+          recordedAt: now,
+        },
+      },
     );
-    writeJSON(file, state);
     return state;
   });
 }
@@ -264,7 +297,9 @@ export function createSdlc(stateDir, request) {
  * @returns {object} Current state.
  */
 export function readSdlc(stateDir, lifecycleId) {
-  return readJSON(path.join(sdlcDirectory(stateDir, lifecycleId), "state.json"));
+  const directory = sdlcDirectory(stateDir, lifecycleId);
+  recoverSdlcTransaction(directory);
+  return readJSON(path.join(directory, "state.json"));
 }
 
 /**
@@ -328,11 +363,11 @@ export function recordSdlcArtifact(
     const invalidated = previous
       ? invalidateDownstream(directory, state, previous, state.updatedAt)
       : [];
-    writeEvent(directory, state, eventId, "artifact-recorded", {
+    const event = queueEvent(state, eventId, "artifact-recorded", {
       artifact: state.artifacts[artifact.id],
       invalidated,
     });
-    writeJSON(path.join(directory, "state.json"), state);
+    commitSdlcUpdate(directory, state, event);
     return { artifact, sha256: digest, invalidated, state };
   });
 }
@@ -496,13 +531,13 @@ export function transitionSdlcArtifact(
     state.artifacts[next.id] = referenceFor(next, digest);
     state.revision += 1;
     state.updatedAt = next.createdAt;
-    writeEvent(directory, state, input.eventId, "artifact-transitioned", {
+    const event = queueEvent(state, input.eventId, "artifact-transitioned", {
       from: currentReference,
       to: state.artifacts[next.id],
       authorizationId: input.authorization?.id ?? null,
       receiptId: input.receipt?.id ?? null,
     });
-    writeJSON(path.join(directory, "state.json"), state);
+    commitSdlcUpdate(directory, state, event);
     return { artifact: next, sha256: digest, state };
   });
 }

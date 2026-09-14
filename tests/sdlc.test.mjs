@@ -392,3 +392,40 @@ test("incident feedback creates one deduplicated intent", (t) => {
   assert.equal(second.duplicate, true);
   assert.equal(Object.keys(second.state.artifacts).length, 1);
 });
+
+test("SDLC transaction recovers event and materialized state together", (t) => {
+  const stateDir = fixture(t);
+  const state = createSdlc(stateDir, {
+    id: "release-a",
+    goal: "Recover safely",
+  });
+  const directory = path.join(stateDir, "sdlc", "release-a");
+  const recovered = {
+    ...state,
+    revision: 2,
+    eventIds: [...state.eventIds, "recovered-event"],
+    updatedAt: "2026-09-15T12:00:00.000Z",
+  };
+  fs.writeFileSync(
+    path.join(directory, "transaction.json"),
+    JSON.stringify({
+      state: recovered,
+      event: {
+        name: "000002-recovered-event.json",
+        value: {
+          id: "recovered-event",
+          type: "test-recovery",
+          recordedAt: recovered.updatedAt,
+        },
+      },
+    }),
+  );
+  assert.equal(readSdlc(stateDir, "release-a").revision, 2);
+  assert.equal(fs.existsSync(path.join(directory, "transaction.json")), false);
+  assert.equal(
+    fs.existsSync(
+      path.join(directory, "events", "000002-recovered-event.json"),
+    ),
+    true,
+  );
+});
