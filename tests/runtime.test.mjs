@@ -64,6 +64,7 @@ import {
   createWorktree,
   discoverOrcaRuntime,
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import { supervisedProgressStatus } from "../plugins/oh-my-teams/scripts/status.mjs";
 import {
   evaluateRoutingFixture,
   routingFixtures,
@@ -919,6 +920,28 @@ test("org-show reports persisted gate owner and keeps unknown usage/cost explici
   assert.equal(output.usage.missingUsageCalls, 1);
   assert.equal(output.usage.missingCostCalls, 1);
   assert.equal(output.pools["agy-shared"].status, "unknown");
+});
+test("terminal dispatches cannot be reported as active goal progress", () => {
+  const workers = [
+    { id: "agy-design", status: "failed", liveness: "exited" },
+    { id: "codex-pl", status: "blocked", liveness: "exited" },
+  ];
+  assert.deepEqual(supervisedProgressStatus({ goalStatus: "blocked", workers }), {
+    status: "blocked",
+    activeWorkers: 0,
+    unverifiableWorkers: 0,
+  });
+  assert.equal(
+    supervisedProgressStatus({ goalStatus: "active", workers }).status,
+    "stopped",
+  );
+  assert.equal(
+    supervisedProgressStatus({
+      goalStatus: "active",
+      workers: [{ liveness: "unverifiable" }],
+    }).status,
+    "unverifiable",
+  );
 });
 test("workspace preparation and receipt attachment are separated and bind actual Git state", async (t) => {
   const dir = await repo(t),

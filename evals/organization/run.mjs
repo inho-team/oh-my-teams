@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Runs the six deterministic organization scenarios and emits JSON evidence. */
+/** Runs the deterministic organization scenarios and emits JSON evidence. */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
