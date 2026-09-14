@@ -429,3 +429,236 @@ test("SDLC transaction recovers event and materialized state together", (t) => {
     true,
   );
 });
+
+test("the complete lifecycle reaches learning with explicit deployment evidence", (t) => {
+  const stateDir = fixture(t);
+  const lifecycleId = "complete-flow";
+  createSdlc(stateDir, { id: lifecycleId, goal: "Complete the SDLC" });
+  let lifecycleRevision = 1;
+  let previous = null;
+  const sourceHash = "c".repeat(64);
+  for (const [index, kind] of [
+    "intent",
+    "research",
+    "design",
+    "plan",
+    "build",
+    "verification",
+    "review",
+    "release",
+    "deployment",
+    "observation",
+    "incident",
+    "learning",
+  ].entries()) {
+    const id = `${kind}-a`;
+    const content =
+      kind === "release"
+        ? {
+            sourceHash,
+            repository: "inho-team/app",
+            rollbackPlan: { command: "rollback" },
+            observationPlan: { durationMinutes: 30 },
+          }
+        : kind === "deployment"
+          ? {
+              releaseId: "release-a",
+              releaseRevision: previous.revision,
+              sourceHash,
+              repository: "inho-team/app",
+              environment: "production",
+            }
+          : { stage: kind };
+    const recorded = recordSdlcArtifact(
+      stateDir,
+      lifecycleId,
+      lifecycleRevision,
+      artifact({
+        id,
+        kind,
+        title: kind,
+        content,
+        upstream: previous ? [previous] : [],
+      }),
+      `record-${kind}`,
+    );
+    lifecycleRevision = recorded.state.revision;
+    for (const targetState of ["ready", "active", "submitted", "accepted"]) {
+      const transition = {
+        eventId: `${kind}-${targetState}`,
+        artifactId: id,
+        toState: targetState,
+        now: Date.parse("2026-09-15T12:00:00.000Z") + index,
+      };
+      if (
+        targetState === "submitted" &&
+        ["verification", "review", "release"].includes(kind)
+      ) {
+        transition.evidence = [previous];
+      }
+      if (kind === "deployment" && targetState === "accepted") {
+        transition.authorization = {
+          schemaVersion: 1,
+          id: "deploy-auth",
+          lifecycleId,
+          releaseId: "release-a",
+          releaseRevision: previous.revision,
+          sourceHash,
+          repository: "inho-team/app",
+          environment: "production",
+          actions: ["deploy"],
+          authority: { kind: "human", id: "user-1" },
+          issuedAt: "2026-09-15T00:00:00.000Z",
+          expiresAt: "2026-09-16T00:00:00.000Z",
+        };
+        transition.receipt = {
+          schemaVersion: 1,
+          id: "deploy-receipt",
+          authorizationId: "deploy-auth",
+          lifecycleId,
+          releaseId: "release-a",
+          sourceHash,
+          repository: "inho-team/app",
+          environment: "production",
+          action: "deploy",
+          status: "succeeded",
+          executedAt: "2026-09-15T12:00:00.000Z",
+          externalId: "provider-deployment-1",
+        };
+      }
+      const transitioned = transitionSdlcArtifact(
+        stateDir,
+        lifecycleId,
+        lifecycleRevision,
+        transition,
+      );
+      lifecycleRevision = transitioned.state.revision;
+    }
+    previous = readSdlc(stateDir, lifecycleId).artifacts[id];
+    assert.equal(previous.state, "accepted");
+  }
+  const state = readSdlc(stateDir, lifecycleId);
+  assert.equal(state.artifacts["learning-a"].state, "accepted");
+  assert.equal(
+    fs.existsSync(
+      path.join(
+        stateDir,
+        "sdlc",
+        lifecycleId,
+        "authorizations",
+        "deploy-auth.json",
+      ),
+    ),
+    true,
+  );
+  assert.equal(
+    fs.existsSync(
+      path.join(
+        stateDir,
+        "sdlc",
+        lifecycleId,
+        "receipts",
+        "deploy-receipt.json",
+      ),
+    ),
+    true,
+  );
+});
+
+test("deployment cannot be accepted without matching authorization and receipt", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, { id: "release-a", goal: "Deploy safely" });
+  const release = recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    1,
+    artifact({ id: "release-artifact", kind: "release" }),
+    "release-recorded",
+  );
+  const acceptedRelease = {
+    ...release.artifact,
+    revision: 2,
+    state: "accepted",
+    supersedes: {
+      id: "release-artifact",
+      revision: 1,
+      sha256: release.sha256,
+    },
+  };
+  const acceptedHash = sdlcArtifactHash(acceptedRelease);
+  const lifecycle = readSdlc(stateDir, "release-a");
+  const directory = path.join(stateDir, "sdlc", "release-a");
+  fs.mkdirSync(
+    path.join(
+      directory,
+      "artifacts",
+      "release",
+      "release-artifact",
+      "revisions",
+    ),
+    { recursive: true },
+  );
+  fs.writeFileSync(
+    path.join(
+      directory,
+      "artifacts",
+      "release",
+      "release-artifact",
+      "revisions",
+      "2.json",
+    ),
+    JSON.stringify(acceptedRelease),
+  );
+  lifecycle.artifacts["release-artifact"] = {
+    id: "release-artifact",
+    kind: "release",
+    revision: 2,
+    state: "accepted",
+    sha256: acceptedHash,
+  };
+  fs.writeFileSync(
+    path.join(directory, "state.json"),
+    JSON.stringify(lifecycle),
+  );
+  const deployment = recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    lifecycle.revision,
+    artifact({
+      id: "deployment-a",
+      kind: "deployment",
+      content: {
+        releaseId: "release-artifact",
+        releaseRevision: 2,
+        sourceHash: "d".repeat(64),
+        repository: "inho-team/app",
+        environment: "production",
+      },
+      upstream: [lifecycle.artifacts["release-artifact"]],
+    }),
+    "deployment-recorded",
+  );
+  let revision = deployment.state.revision;
+  for (const targetState of ["ready", "active", "submitted"]) {
+    const transitioned = transitionSdlcArtifact(
+      stateDir,
+      "release-a",
+      revision,
+      {
+        eventId: `deployment-${targetState}`,
+        artifactId: "deployment-a",
+        toState: targetState,
+      },
+    );
+    revision = transitioned.state.revision;
+  }
+  assert.throws(
+    () =>
+      transitionSdlcArtifact(stateDir, "release-a", revision, {
+        eventId: "deployment-accepted",
+        artifactId: "deployment-a",
+        toState: "accepted",
+      }),
+    /Authorization identity required/,
+  );
+});
