@@ -319,6 +319,43 @@ test("artifact transitions cannot skip states and preserve immutable revisions",
   assert.equal(current.artifacts["intent-a"].revision, 5);
 });
 
+test("artifact exception states preserve failure and support explicit recovery", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Recover failures",
+  });
+  recordSdlcArtifact(stateDir, "release-a", 1, artifact(), "intent");
+  let transition = transitionSdlcArtifact(stateDir, "release-a", 2, {
+    eventId: "intent-ready",
+    artifactId: "intent-a",
+    toState: "ready",
+  });
+  transition = transitionSdlcArtifact(
+    stateDir,
+    "release-a",
+    transition.state.revision,
+    {
+      eventId: "intent-blocked",
+      artifactId: "intent-a",
+      toState: "blocked",
+    },
+  );
+  assert.equal(transition.artifact.state, "blocked");
+  transition = transitionSdlcArtifact(
+    stateDir,
+    "release-a",
+    transition.state.revision,
+    {
+      eventId: "intent-ready-again",
+      artifactId: "intent-a",
+      toState: "ready",
+    },
+  );
+  assert.equal(transition.artifact.state, "ready");
+});
+
 test("a new upstream revision recursively invalidates downstream artifacts", (t) => {
   const stateDir = fixture(t);
   createSdlc(stateDir, {
@@ -537,6 +574,42 @@ test("concurrent incident CLI deliveries create one intent", async (t) => {
     1,
   );
   assert.equal(Object.keys(readSdlc(stateDir, "release-a").artifacts).length, 1);
+});
+
+test("incident fingerprints with the same prefix create distinct intents", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Keep incidents distinct",
+  });
+  const prefix = "a".repeat(63);
+  const first = incidentToIntent(
+    stateDir,
+    "release-a",
+    1,
+    {
+      id: "incident-a",
+      fingerprint: `${prefix}1`,
+      summary: "First incident",
+      evidence: "first evidence",
+    },
+    "first-incident",
+  );
+  const second = incidentToIntent(
+    stateDir,
+    "release-a",
+    first.state.revision,
+    {
+      id: "incident-b",
+      fingerprint: `${prefix}2`,
+      summary: "Second incident",
+      evidence: "second evidence",
+    },
+    "second-incident",
+  );
+  assert.equal(second.duplicate, false);
+  assert.equal(Object.keys(second.state.artifacts).length, 2);
 });
 
 test("SDLC transaction recovery serializes concurrent readers", async (t) => {

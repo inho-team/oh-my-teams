@@ -12,7 +12,7 @@ export const SDLC_KINDS = [
 /** Allowed immutable artifact states. */
 export const SDLC_STATES = [
   "draft", "ready", "active", "submitted", "accepted", "invalidated",
-  "superseded", "archived",
+  "blocked", "failed", "cancelled", "superseded", "archived",
 ];
 const ID = /^[a-z0-9][a-z0-9-]*$/;
 const SHA = /^[a-f0-9]{64}$/;
@@ -20,11 +20,24 @@ const PREVIOUS_KIND = Object.fromEntries(
   SDLC_KINDS.slice(1).map((kind, index) => [kind, SDLC_KINDS[index]]),
 );
 const NEXT = {
-  draft: ["ready", "archived"], ready: ["active", "archived"],
-  active: ["submitted", "archived"],
-  submitted: ["accepted", "invalidated", "archived"],
+  draft: ["ready", "cancelled", "archived"],
+  ready: ["active", "blocked", "cancelled", "archived"],
+  active: ["submitted", "blocked", "failed", "cancelled", "archived"],
+  submitted: [
+    "accepted",
+    "blocked",
+    "failed",
+    "cancelled",
+    "invalidated",
+    "archived",
+  ],
   accepted: ["superseded", "invalidated", "archived"],
-  invalidated: ["ready", "archived"], superseded: ["archived"], archived: [],
+  invalidated: ["ready", "cancelled", "archived"],
+  blocked: ["ready", "active", "cancelled", "archived"],
+  failed: ["ready", "cancelled", "archived"],
+  cancelled: ["archived"],
+  superseded: ["archived"],
+  archived: [],
 };
 const LOCK_WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
 
@@ -762,7 +775,7 @@ export function incidentToIntent(
       incident.evidence.trim(),
     "Incident fingerprint, summary, and evidence required",
   );
-  const artifactId = `intent-${incident.fingerprint.slice(0, 16)}`;
+  const artifactId = `intent-${incident.fingerprint}`;
   const directory = sdlcDirectory(stateDir, lifecycleId);
   return withRetriedLock(
     path.join(directory, `.incident-${artifactId}.lock`),
