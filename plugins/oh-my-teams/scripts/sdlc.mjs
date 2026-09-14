@@ -25,6 +25,19 @@ const NEXT = {
   accepted: ["superseded", "invalidated", "archived"],
   invalidated: ["ready", "archived"], superseded: ["archived"], archived: [],
 };
+const LOCK_WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
+
+function withRetriedLock(lockFile, callback, busyMessage) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      return withFileLock(lockFile, callback, busyMessage);
+    } catch (error) {
+      if (error.message !== busyMessage) throw error;
+      Atomics.wait(LOCK_WAIT_ARRAY, 0, 0, 10);
+    }
+  }
+  throw new Error(busyMessage);
+}
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -80,21 +93,31 @@ function queueEvent(state, eventId, type, details) {
 }
 
 function recoverSdlcTransaction(directory) {
-  const file = path.join(directory, "transaction.json");
-  if (!fs.existsSync(file)) return;
-  const transaction = readJSON(file);
-  const eventFile = path.join(directory, "events", transaction.event.name);
-  if (fs.existsSync(eventFile)) {
-    assert(
-      JSON.stringify(readJSON(eventFile)) ===
-        JSON.stringify(transaction.event.value),
-      "Conflicting SDLC event during recovery",
-    );
-  } else {
-    writeJSON(eventFile, transaction.event.value);
-  }
-  writeJSON(path.join(directory, "state.json"), transaction.state);
-  fs.unlinkSync(file);
+  return withRetriedLock(
+    path.join(directory, ".recovery.lock"),
+    () => {
+      const file = path.join(directory, "transaction.json");
+      if (!fs.existsSync(file)) return;
+      const transaction = readJSON(file);
+      const eventFile = path.join(
+        directory,
+        "events",
+        transaction.event.name,
+      );
+      if (fs.existsSync(eventFile)) {
+        assert(
+          JSON.stringify(readJSON(eventFile)) ===
+            JSON.stringify(transaction.event.value),
+          "Conflicting SDLC event during recovery",
+        );
+      } else {
+        writeJSON(eventFile, transaction.event.value);
+      }
+      writeJSON(path.join(directory, "state.json"), transaction.state);
+      fs.unlinkSync(file);
+    },
+    "SDLC transaction recovery in progress",
+  );
 }
 
 function commitSdlcUpdate(directory, state, event) {
@@ -271,6 +294,13 @@ export function validateDeploymentAuthorization(
       authorization.authority.id.trim(),
     "External deployment authority required",
   );
+  if (authorization.authority.kind === "policy") {
+    assert(
+      Array.isArray(expected.trustedPolicyAuthorities) &&
+        expected.trustedPolicyAuthorities.includes(authorization.authority.id),
+      "Deployment policy authority is not trusted",
+    );
+  }
   assert(
     Number.isFinite(Date.parse(authorization.issuedAt)) &&
       Number.isFinite(Date.parse(authorization.expiresAt)),
@@ -293,7 +323,7 @@ export function validateDeploymentAuthorization(
   return authorization;
 }
 
-function validateDeploymentReceipt(receipt, authorization) {
+function validateDeploymentReceipt(receipt, authorization, now) {
   assert(receipt?.schemaVersion === 1 && ID.test(receipt.id), "Deployment receipt identity required");
   assert(receipt.authorizationId === authorization.id, "Deployment receipt authorization mismatch");
   for (const key of ["lifecycleId", "releaseId", "sourceHash", "repository", "environment"]) {
@@ -301,7 +331,14 @@ function validateDeploymentReceipt(receipt, authorization) {
   }
   assert(authorization.actions.includes(receipt.action), "Deployment receipt action not authorized");
   assert(receipt.status === "succeeded", "Deployment receipt must prove success");
-  assert(Number.isFinite(Date.parse(receipt.executedAt)), "Deployment receipt executedAt required");
+  const executedAt = Date.parse(receipt.executedAt);
+  assert(Number.isFinite(executedAt), "Deployment receipt executedAt required");
+  assert(
+    Date.parse(authorization.issuedAt) <= executedAt &&
+      executedAt < Date.parse(authorization.expiresAt) &&
+      executedAt <= now,
+    "Deployment receipt execution time outside authorization window",
+  );
   assert(typeof receipt.externalId === "string" && receipt.externalId.trim(), "Deployment receipt externalId required");
   return receipt;
 }
@@ -332,6 +369,14 @@ export function createSdlc(stateDir, request) {
       request.goal.trim(),
     "Lifecycle schemaVersion=1, id, and goal required",
   );
+  assert(
+    request.trustedPolicyAuthorities === undefined ||
+      (Array.isArray(request.trustedPolicyAuthorities) &&
+        new Set(request.trustedPolicyAuthorities).size ===
+          request.trustedPolicyAuthorities.length &&
+        request.trustedPolicyAuthorities.every((id) => ID.test(id))),
+    "Trusted policy authority IDs must be unique and valid",
+  );
   const directory = sdlcDirectory(stateDir, request.id);
   return withFileLock(path.join(directory, ".lock"), () => {
     const file = path.join(directory, "state.json");
@@ -342,6 +387,7 @@ export function createSdlc(stateDir, request) {
       id: request.id,
       revision: 1,
       goal: request.goal,
+      trustedPolicyAuthorities: request.trustedPolicyAuthorities ?? [],
       artifacts: {},
       authorizations: {},
       receipts: {},
@@ -439,6 +485,7 @@ export function recordDeploymentAuthorization(
       sourceHash: release.artifact.content.sourceHash,
       repository: release.artifact.content.repository,
       environment: authorization.environment,
+      trustedPolicyAuthorities: state.trustedPolicyAuthorities,
     });
     const target = path.join(
       directory,
@@ -495,6 +542,11 @@ export function checkDeployment(
 ) {
   const directory = sdlcDirectory(stateDir, lifecycleId);
   const state = readSdlc(stateDir, lifecycleId);
+  assert(ID.test(authorizationId), "Authorization id required");
+  assert(
+    state.authorizations?.[authorizationId],
+    "Deployment authorization not recorded",
+  );
   const reference = state.artifacts[deploymentId];
   assert(reference?.kind === "deployment", "Deployment artifact not found");
   assert(reference.state === "submitted", "Deployment artifact not submitted");
@@ -512,6 +564,7 @@ export function checkDeployment(
       sourceHash: deployment.content.sourceHash,
       repository: deployment.content.repository,
       environment: deployment.content.environment,
+      trustedPolicyAuthorities: state.trustedPolicyAuthorities,
     },
     now,
   );
@@ -670,36 +723,47 @@ export function incidentToIntent(
     "Incident fingerprint, summary, and evidence required",
   );
   const artifactId = `intent-${incident.fingerprint.slice(0, 16)}`;
-  const state = readSdlc(stateDir, lifecycleId);
-  if (state.artifacts[artifactId]) {
-    return { duplicate: true, artifact: state.artifacts[artifactId], state };
-  }
-  const result = recordSdlcArtifact(
-    stateDir,
-    lifecycleId,
-    expectedRevision,
-    {
-      schemaVersion: 1,
-      id: artifactId,
-      revision: 1,
-      kind: "intent",
-      state: "draft",
-      title: `Incident follow-up: ${incident.summary}`,
-      content: {
-        sourceIncidentId: incident.id,
-        sourceIncidentFingerprint: incident.fingerprint,
-        goal: `Resolve and prevent recurrence: ${incident.summary}`,
-        evidence: incident.evidence,
-      },
-      upstream: [],
-      evidence: [],
-      owner: { kind: "role", id: "pm" },
-      createdAt: new Date().toISOString(),
-      supersedes: null,
+  const directory = sdlcDirectory(stateDir, lifecycleId);
+  return withRetriedLock(
+    path.join(directory, `.incident-${artifactId}.lock`),
+    () => {
+      const state = readSdlc(stateDir, lifecycleId);
+      if (state.artifacts[artifactId]) {
+        return {
+          duplicate: true,
+          artifact: state.artifacts[artifactId],
+          state,
+        };
+      }
+      const result = recordSdlcArtifact(
+        stateDir,
+        lifecycleId,
+        expectedRevision,
+        {
+          schemaVersion: 1,
+          id: artifactId,
+          revision: 1,
+          kind: "intent",
+          state: "draft",
+          title: `Incident follow-up: ${incident.summary}`,
+          content: {
+            sourceIncidentId: incident.id,
+            sourceIncidentFingerprint: incident.fingerprint,
+            goal: `Resolve and prevent recurrence: ${incident.summary}`,
+            evidence: incident.evidence,
+          },
+          upstream: [],
+          evidence: [],
+          owner: { kind: "role", id: "pm" },
+          createdAt: new Date().toISOString(),
+          supersedes: null,
+        },
+        eventId,
+      );
+      return { duplicate: false, ...result };
     },
-    eventId,
+    "Incident intent creation in progress",
   );
-  return { duplicate: false, ...result };
 }
 
 /**
@@ -771,8 +835,22 @@ export function transitionSdlcArtifact(
       assert(current.content.rollbackPlan, "Release rollback plan required");
       assert(current.content.observationPlan, "Release observation plan required");
     }
-    if (["verification", "review", "release"].includes(current.kind) && input.toState === "submitted") {
-      assert((input.evidence ?? current.evidence).length > 0, `${current.kind} evidence required before submission`);
+    if (
+      ["verification", "review", "release"].includes(current.kind) &&
+      input.toState === "submitted"
+    ) {
+      const evidence = input.evidence ?? current.evidence;
+      assert(evidence.length > 0, `${current.kind} evidence required before submission`);
+      for (const reference of evidence) {
+        const latest = state.artifacts[reference.id];
+        assert(
+          latest &&
+            latest.revision === reference.revision &&
+            latest.sha256 === reference.sha256 &&
+            latest.state === "accepted",
+          `Stale or unaccepted evidence: ${reference.id}`,
+        );
+      }
     }
     if (current.kind === "deployment" && input.toState === "accepted") {
       const authorization = validateDeploymentAuthorization(
@@ -785,10 +863,15 @@ export function transitionSdlcArtifact(
           sourceHash: current.content.sourceHash,
           repository: current.content.repository,
           environment: current.content.environment,
+          trustedPolicyAuthorities: state.trustedPolicyAuthorities,
         },
         input.now ?? Date.now(),
       );
-      const receipt = validateDeploymentReceipt(input.receipt, authorization);
+      const receipt = validateDeploymentReceipt(
+        input.receipt,
+        authorization,
+        input.now ?? Date.now(),
+      );
       const authorizationFile = path.join(
         directory,
         "authorizations",

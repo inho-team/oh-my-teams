@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
   "id": "release-example",
-  "goal": "검증된 변경을 명시적 권한 아래 안전하게 릴리스한다."
+  "goal": "검증된 변경을 명시적 권한 아래 안전하게 릴리스한다.",
+  "trustedPolicyAuthorities": []
 }

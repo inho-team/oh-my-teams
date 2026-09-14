@@ -177,4 +177,4 @@ observation·incident·learning의 의미 관문과 incident fingerprint 기반�
 - 권한이 유효해도 외부 배포를 실행하지 않고 준비 상태만 반환해야 한다.
 - deployment receipt가 승인 범위와 일치해야만 deployed 상태를 기록해야 한다.
 - incident가 원래 deployment와 새 intent의 계보를 연결해야 한다.
-- 기존 63개 테스트와 새 SDLC 테스트·eval이 모두 통과해야 한다.
+- 전체 79개 테스트와 SDLC 통합 경로·조직 eval이 모두 통과해야 한다.

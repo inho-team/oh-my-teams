@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { organizationStatus } from "../plugins/oh-my-teams/scripts/status.mjs";
 import {
   checkDeployment,
@@ -49,6 +49,21 @@ function cli(args) {
     ["plugins/oh-my-teams/scripts/teams-org.mjs", ...args],
     { cwd: path.resolve("."), encoding: "utf8" },
   );
+}
+
+function cliAsync(args) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      ["plugins/oh-my-teams/scripts/teams-org.mjs", ...args],
+      { cwd: path.resolve(".") },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
 }
 
 test("SDLC artifacts persist immutable revisions and reject stale lifecycle updates", (t) => {
@@ -184,6 +199,18 @@ test("deployment authorization is explicit, scoped, and expiring", () => {
         Date.parse("2026-09-15T12:00:00.000Z"),
       ),
     /External deployment authority/,
+  );
+  assert.throws(
+    () =>
+      validateDeploymentAuthorization(
+        {
+          ...authorization,
+          authority: { kind: "policy", id: "untrusted-policy" },
+        },
+        { ...expected, trustedPolicyAuthorities: [] },
+        Date.parse("2026-09-15T12:00:00.000Z"),
+      ),
+    /not trusted/,
   );
 });
 
@@ -417,7 +444,51 @@ test("incident feedback creates one deduplicated intent", (t) => {
   assert.equal(Object.keys(second.state.artifacts).length, 1);
 });
 
-test("SDLC transaction recovers event and materialized state together", (t) => {
+test("concurrent incident CLI deliveries create one intent", async (t) => {
+  const root = fixture(t);
+  const stateDir = path.join(root, ".omt");
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Deduplicate incidents",
+  });
+  const incidentFile = path.join(root, "incident.json");
+  fs.writeFileSync(
+    incidentFile,
+    JSON.stringify({
+      id: "incident-a",
+      fingerprint: "b".repeat(64),
+      summary: "Concurrent incident",
+      evidence: "same evidence",
+    }),
+  );
+  const command = [
+    "incident-to-intent",
+    "--id",
+    "release-a",
+    "--incident",
+    incidentFile,
+    "--state",
+    stateDir,
+    "--revision",
+    "1",
+    "--event",
+    "incident-intent",
+  ];
+  const results = await Promise.all([cliAsync(command), cliAsync(command)]);
+  assert.deepEqual(
+    results.map((result) => result.status),
+    [0, 0],
+  );
+  assert.equal(
+    results.map((result) => JSON.parse(result.stdout).duplicate).filter(Boolean)
+      .length,
+    1,
+  );
+  assert.equal(Object.keys(readSdlc(stateDir, "release-a").artifacts).length, 1);
+});
+
+test("SDLC transaction recovery serializes concurrent readers", async (t) => {
   const stateDir = fixture(t);
   const state = createSdlc(stateDir, {
     schemaVersion: 1,
@@ -445,7 +516,21 @@ test("SDLC transaction recovers event and materialized state together", (t) => {
       },
     }),
   );
-  assert.equal(readSdlc(stateDir, "release-a").revision, 2);
+  const command = [
+    "sdlc-status",
+    "--id",
+    "release-a",
+    "--state",
+    stateDir,
+  ];
+  const readers = await Promise.all([cliAsync(command), cliAsync(command)]);
+  assert.deepEqual(
+    readers.map((reader) => reader.status),
+    [0, 0],
+  );
+  assert.ok(
+    readers.every((reader) => JSON.parse(reader.stdout).revision === 2),
+  );
   assert.equal(fs.existsSync(path.join(directory, "transaction.json")), false);
   assert.equal(
     fs.existsSync(
@@ -691,6 +776,37 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
           ).ready,
           true,
         );
+        assert.throws(
+          () =>
+            checkDeployment(
+              stateDir,
+              lifecycleId,
+              id,
+              "../outside",
+              transition.now,
+            ),
+          /Authorization id required/,
+        );
+        assert.throws(
+          () =>
+            recordDeployment(
+              stateDir,
+              lifecycleId,
+              lifecycleRevision,
+              {
+                deploymentId: id,
+                authorizationId: authorization.id,
+                receipt: {
+                  ...receipt,
+                  id: "future-receipt",
+                  executedAt: "2100-09-15T12:00:00.000Z",
+                },
+                eventId: "reject-future-receipt",
+                now: transition.now,
+              },
+            ),
+          /outside authorization window/,
+        );
         const deployed = recordDeployment(
           stateDir,
           lifecycleId,
@@ -854,6 +970,90 @@ test("deployment cannot be accepted without matching authorization and receipt",
         toState: "accepted",
       }),
     /Authorization identity required/,
+  );
+});
+
+test("critical submissions reject fabricated or stale evidence", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Verify evidence",
+  });
+  const build = recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    1,
+    artifact({ id: "build-a", kind: "build" }),
+    "build-recorded",
+  );
+  const acceptedBuild = {
+    ...build.artifact,
+    revision: 2,
+    state: "accepted",
+    supersedes: { id: "build-a", revision: 1, sha256: build.sha256 },
+  };
+  const acceptedHash = sdlcArtifactHash(acceptedBuild);
+  const directory = path.join(stateDir, "sdlc", "release-a");
+  const buildFile = path.join(
+    directory,
+    "artifacts",
+    "build",
+    "build-a",
+    "revisions",
+    "2.json",
+  );
+  fs.mkdirSync(path.dirname(buildFile), { recursive: true });
+  fs.writeFileSync(buildFile, JSON.stringify(acceptedBuild));
+  const state = readSdlc(stateDir, "release-a");
+  state.artifacts["build-a"] = {
+    id: "build-a",
+    kind: "build",
+    revision: 2,
+    state: "accepted",
+    sha256: acceptedHash,
+  };
+  fs.writeFileSync(path.join(directory, "state.json"), JSON.stringify(state));
+  const verification = recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    state.revision,
+    artifact({
+      id: "verification-a",
+      kind: "verification",
+      content: {
+        sourceHash: "e".repeat(64),
+        evidence: { status: "passed", key: "evidence-a" },
+      },
+      upstream: [state.artifacts["build-a"]],
+    }),
+    "verification-recorded",
+  );
+  let revision = verification.state.revision;
+  for (const targetState of ["ready", "active"]) {
+    const transitioned = transitionSdlcArtifact(
+      stateDir,
+      "release-a",
+      revision,
+      {
+        eventId: `verification-${targetState}`,
+        artifactId: "verification-a",
+        toState: targetState,
+      },
+    );
+    revision = transitioned.state.revision;
+  }
+  assert.throws(
+    () =>
+      transitionSdlcArtifact(stateDir, "release-a", revision, {
+        eventId: "verification-submitted",
+        artifactId: "verification-a",
+        toState: "submitted",
+        evidence: [
+          { id: "fabricated", revision: 1, sha256: "f".repeat(64) },
+        ],
+      }),
+    /Stale or unaccepted evidence/,
   );
 });
 

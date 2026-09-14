@@ -7,6 +7,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
-    "goal": { "type": "string", "minLength": 1 }
+    "goal": { "type": "string", "minLength": 1 },
+    "trustedPolicyAuthorities": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" } }
   }
 }
