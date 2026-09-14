@@ -1,14 +1,14 @@
 {
-  "name": "orca-skills",
+  "name": "oh-my-teams",
   "interface": {
-    "displayName": "Orca Skills"
+    "displayName": "oh my teams"
   },
   "plugins": [
     {
-      "name": "orca",
+      "name": "oh-my-teams",
       "source": {
         "source": "local",
-        "path": "./plugins/orca"
+        "path": "./plugins/oh-my-teams"
       },
       "policy": {
         "installation": "AVAILABLE",

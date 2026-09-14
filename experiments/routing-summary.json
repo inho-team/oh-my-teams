@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "status": "complete",
+  "runs": [
+    {
+      "mode": "e1",
+      "complete": true,
+      "passed": 17,
+      "total": 18,
+      "passRate": 0.9444444444444444,
+      "totalTokens": 286621,
+      "elapsedMs": 192223,
+      "usageKnown": true,
+      "quota": {
+        "attributable": false,
+        "reasons": [
+          "missing-before-or-after-snapshot"
+        ],
+        "consumption": null
+      },
+      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::/Users/jinsungkim/orca/workspaces/orca-skills/routing-e1-1789392072315",
+      "cleanup": "completed"
+    },
+    {
+      "mode": "opus-first",
+      "complete": true,
+      "passed": 5,
+      "total": 6,
+      "passRate": 0.8333333333333334,
+      "totalTokens": 105658,
+      "elapsedMs": 72301,
+      "usageKnown": true,
+      "quota": {
+        "attributable": false,
+        "reasons": [
+          "missing-before-or-after-snapshot"
+        ],
+        "consumption": null
+      },
+      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::/Users/jinsungkim/orca/workspaces/orca-skills/routing-opus-first-1789392272291",
+      "cleanup": "completed"
+    },
+    {
+      "mode": "balanced",
+      "complete": true,
+      "passed": 6,
+      "total": 6,
+      "passRate": 1,
+      "totalTokens": 95449,
+      "elapsedMs": 60764,
+      "usageKnown": true,
+      "quota": {
+        "attributable": false,
+        "reasons": [
+          "missing-before-or-after-snapshot"
+        ],
+        "consumption": null
+      },
+      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::/Users/jinsungkim/orca/workspaces/orca-skills/routing-balanced-1789392354356",
+      "cleanup": "completed"
+    }
+  ],
+  "recommendation": {
+    "status": "provisional",
+    "preset": "balanced",
+    "reason": "Balanced passed more matched fixtures; repeat before broad adoption.",
+    "tokenGain": 0.09662306687614756,
+    "timeGain": 0.15956902394157757
+  },
+  "gptOssKeep": [
+    "narrow-edit",
+    "source-citations"
+  ],
+  "gptOssObservedPass": [
+    "narrow-edit",
+    "source-citations",
+    "multi-file-contract",
+    "regression-review",
+    "contract-conflict"
+  ],
+  "note": "A provisional recommendation from one batch is not a statistical claim. GPT-OSS operating recommendations remain limited to low-risk narrow/citation work even when one higher-risk fixture passed. Missing quota remains unknown."
+}

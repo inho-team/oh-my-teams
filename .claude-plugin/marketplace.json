@@ -1,8 +1,15 @@
 {
-  "name": "orca-skills",
+  "name": "oh-my-teams",
   "owner": { "name": "inho-team" },
-  "metadata": { "description": "Orca PM/PL/Senior/Junior/Intern organization plugin", "version": "1.0.0" },
+  "metadata": {
+    "description": "oh my teams — an agent organization running on Orca",
+    "version": "1.4.0"
+  },
   "plugins": [
-    { "name": "orca", "source": "./plugins/orca", "description": "Organization setup, editing, chart, per-role subscriptions and Orca worktree orchestration" }
+    {
+      "name": "oh-my-teams",
+      "source": "./plugins/oh-my-teams",
+      "description": "Agent organization setup, role assignment, evidence, and execution on Orca"
+    }
   ]
 }

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams review input v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "requirementId", "reviewer", "implementationExecutionId", "conclusion", "criteria", "findings"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "requirementId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "reviewer": { "type": "object", "additionalProperties": false, "required": ["kind", "role", "executionId"], "properties": { "kind": { "const": "agent-review" }, "role": { "const": "senior" }, "executionId": { "type": "string", "minLength": 1 } } },
+    "implementationExecutionId": { "type": "string", "minLength": 1 },
+    "conclusion": { "enum": ["approved", "changes-requested", "inconclusive"] },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "conclusion", "evidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "conclusion": { "enum": ["approved", "changes-requested", "inconclusive"] },
+          "evidence": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "description"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["open", "resolved", "accepted-risk"] },
+          "description": { "type": "string", "minLength": 1 },
+          "resolution": { "type": "string" },
+          "authority": { "enum": ["pm", "user"] },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "poolId": "agy-shared",
+  "accountProfile": "current",
+  "observedAt": "2026-09-14T00:00:00.000Z",
+  "source": "user-snapshot",
+  "windows": [
+    { "kind": "weekly", "remainingPercent": 95.84, "resetAt": null },
+    { "kind": "five-hour", "remainingPercent": 92.32, "resetAt": null }
+  ],
+  "otherActivity": "unknown"
+}

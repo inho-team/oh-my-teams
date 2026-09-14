@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams limited-edit task v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "revision", "kind", "id", "goal", "instruction", "nonGoals", "constraints", "files", "checks", "acceptance", "dependencies", "contractRefs", "openQuestions", "reviewRequirements", "environment", "baseRef", "risk"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "kind": { "const": "edit" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "goal": { "type": "string", "minLength": 1 },
+    "instruction": { "type": "string", "minLength": 1 },
+    "nonGoals": { "$ref": "#/$defs/strings" },
+    "constraints": { "$ref": "#/$defs/strings" },
+    "files": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "checks": { "type": "array", "minItems": 1, "items": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } },
+    "acceptance": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/acceptance" } },
+    "dependencies": { "type": "array", "items": { "$ref": "#/$defs/dependency" } },
+    "contractRefs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "contextRefs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "openQuestions": { "type": "array", "items": { "$ref": "#/$defs/question" } },
+    "reviewRequirements": { "type": "array", "items": { "$ref": "#/$defs/review" } },
+    "environment": { "type": "string", "minLength": 1 },
+    "baseRef": { "type": "string", "minLength": 1 },
+    "risk": { "enum": ["low", "normal", "high"] }
+  },
+  "$defs": {
+    "strings": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "ref": { "type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } } },
+    "acceptance": { "type": "object", "additionalProperties": false, "required": ["id", "description", "method"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "description": { "type": "string", "minLength": 1 }, "method": { "enum": ["check", "review"] }, "checkIndexes": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } } } },
+    "dependency": { "type": "object", "additionalProperties": false, "required": ["taskId", "revision", "acceptedResult"], "properties": { "taskId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "revision": { "type": "integer", "minimum": 1 }, "acceptedResult": { "type": "string", "minLength": 1 } } },
+    "question": { "type": "object", "additionalProperties": false, "required": ["id", "question", "blocking"], "properties": { "id": { "type": "string", "minLength": 1 }, "question": { "type": "string", "minLength": 1 }, "blocking": { "type": "boolean" }, "resolution": { "type": "string" } } },
+    "review": { "type": "object", "additionalProperties": false, "required": ["id", "kind", "role", "criteria"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "kind": { "const": "agent-review" }, "role": { "const": "senior" }, "criteria": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } } } }
+  }
+}

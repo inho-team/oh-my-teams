@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "expiry-workflow",
+  "goal": "Fix and accept the expiry boundary behavior.",
+  "repo": ".",
+  "tasks": [{ "file": "task.v2.json", "role": "intern" }],
+  "policy": { "maxRunning": 1, "maxReviewPending": 1 },
+  "budget": { "maxAttempts": 2, "maxCalls": 3 }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams incident input v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "source", "externalId", "dedupeKey", "summary", "evidence", "observedAt"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "externalId": { "type": "string", "minLength": 1 },
+    "dedupeKey": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "evidence": { "type": "string", "minLength": 1 },
+    "observedAt": { "type": "string", "format": "date-time" }
+  }
+}

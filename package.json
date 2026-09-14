@@ -1,8 +1,15 @@
 {
-  "name": "orca-skills",
-  "version": "1.0.0",
+  "name": "oh-my-teams",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test tests/*.test.mjs", "org": "node plugins/orca/scripts/orca-org.mjs" }
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "quality": "node scripts/check-code-quality.mjs",
+    "eval:organization": "node evals/organization/run.mjs",
+    "org": "node plugins/oh-my-teams/scripts/teams-org.mjs"
+  }
 }

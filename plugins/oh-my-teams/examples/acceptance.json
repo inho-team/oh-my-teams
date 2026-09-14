@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "accept-expiry-boundary",
+  "decider": { "kind": "pm", "executionId": "actual-pm-run-id" },
+  "criteria": ["expiry-boundary", "public-api"],
+  "basis": "The fixed-source checks and required independent review satisfy every acceptance criterion."
+}

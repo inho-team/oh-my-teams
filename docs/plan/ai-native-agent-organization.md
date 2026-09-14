@@ -1,11 +1,13 @@
 # AI-native SDLC 철학을 Orca 에이전트 조직에 연결하는 계획
 
 - 작성일: 2026-09-14
-- 상태: 구현 계획. 이 문서는 아래 기능이 이미 구현되었다는 의미가 아니다.
+- 상태: P1–P6 구현·로컬 eval 완료. 실제 모델 비교와 Orca/플러그인 연동 검증 완료
 - 관련 계획: [oh my teams 이름 변경과 Orca 연동 최소화](./oh-my-teams-rename-and-orca-integration.md). 이 문서의 현재 경로는 이름 변경 시 해당 계획의 매핑에 따라 이전한다.
-- 대상: 현재 `plugins/orca`의 조직 설정, 역할 skill, 제한 편집 런타임, Orca 감독 실행 연계
+- 대상: 현재 `plugins/oh-my-teams`의 조직 설정, 역할 skill, 제한 편집 런타임, Orca 감독 실행 연계
 - 목적: 에이전트 조직이 사용자 요청을 책임·작업 계약·검증 증거에 따라 끝까지 수행하고, 실패 경험을 다음 작업에 반영하도록 한다.
 - 범위: 설계 및 단계별 구현 계획. 본 문서 작성 자체로 런타임 변경, 설치, 모델 호출, PR 머지 또는 배포를 실행하지 않는다.
+
+구현 기록(2026-09-14): task v1 호환성을 유지하면서 `schemas/task.schema.json`, `scripts/contracts.mjs`, `examples/task.v2.json`을 추가했다. v2 `kind: edit`는 목표·제약·수용 기준·고정된 contract/context 참조를 제한 프롬프트에 포함하며 task revision/hash를 준비 snapshot과 실행 report에 기록한다. `review.schema.json`과 `gates.mjs`는 독립 실행 ID의 검토, finding 이력, source/task에 고정된 PM acceptance를 강제한다. 역할 지침과 `org-show`를 gate 상태에 연결했다. `workflow.schema.json`과 `workflow.mjs`는 dependency DAG, 역할/검토 동시 한도, 전체 예산, 실제 receipt, 중복·지연 event 및 running 상태 재대조를 관리한다. 실패 라우팅·재작업 이력·중복 제거 lesson 후보와 incident kill switch/dedupe/관찰/무진전 중단을 추가했다. `evals/organization`의 6개 결정적 시나리오는 모델 호출 없이 통과했다. 별도 30회 모델 실험은 [`../../experiments/ROUTING_REPORT.md`](../../experiments/ROUTING_REPORT.md)에 품질·토큰·시간·제한을 기록했으며 이를 로컬 eval 결과와 혼동하지 않는다.
 
 ## 1. 배경과 제품 방향
 
@@ -29,7 +31,7 @@ Orca-Skills는 PM / PL / Senior / Junior / Intern 역할을 모델·계정과 �
 | 작업 입력 | `scripts/worker.mjs`의 `validateTask`, `examples/task.json` | 파일 범위, 검사 argv, 환경, base, 위험도 | 목표·수용 기준·의존성·검토 요구 |
 | 편집 실행 | `makePrompt`, `applyEdits`, `work` | JSON 편집, 원본 해시, 전체 응답 검사 후 적용 | 작업 계약 revision과 실행 결과 연결 |
 | 검증 | `scripts/evidence.mjs` | HEAD·base·tree·검사·환경·원본 로그 대조 | 계약 변경과 의미 검토의 유효성 판정 |
-| 머지 전 확인 | `orca-org.mjs`의 `merge-check --task` | 신뢰한 task의 검사·환경과 증거 비교 | 최종 통합 대상의 검토·수용 조건 확인 |
+| 머지 전 확인 | `teams-org.mjs`의 `merge-check --task` | 신뢰한 task의 검사·환경과 증거 비교 | 최종 통합 대상의 검토·수용 조건 확인 |
 | 보고 취합 | `aggregate` | 누락·중복·실패·issues 차단, 취합과 승인 분리 | 문자열 검토 요구를 구조화된 gate로 전환 |
 | 감독 실행 | PM/PL skill | Orca Run/Task/Dispatch, accepted settlement, 안전한 회수 | 업무 상태와 Orca 실행 ID 연결 |
 | 비용·실험 | `experiments/`, 호출 기록 | 실제 usage와 미확인 비용 구분 | 조직 단위 품질·개입·시간 평가 |
@@ -279,7 +281,7 @@ lesson에는 실패 근거, 변경 후보, 담당자, 재현 방법을 넣는다
 ### P1 — 작업 계약 v2
 
 - 신규: `schemas/task.schema.json`, `scripts/contracts.mjs`, v2 작업 예제.
-- 수정: `worker.mjs`의 입력 검증·프롬프트 구성, `orca-org.mjs`의 prepare/work/verify.
+- 수정: `worker.mjs`의 입력 검증·프롬프트 구성, `teams-org.mjs`의 prepare/work/verify.
 - task hash와 revision을 snapshot과 report에 기록한다.
 - 수용 기준, 제약, 필요한 문맥을 제한된 프롬프트에 포함한다.
 - `prepare`에서 기존 base 고정과 함께 계약 스냅샷을 고정한다.
@@ -290,7 +292,7 @@ lesson에는 실패 근거, 변경 후보, 담당자, 재현 방법을 넣는다
 ### P2 — 구조화된 검토와 수용 gate
 
 - 신규: `schemas/review.schema.json`, `scripts/gates.mjs`.
-- 수정: `evidence.mjs`, `worker.mjs`, `orca-org.mjs`.
+- 수정: `evidence.mjs`, `worker.mjs`, `teams-org.mjs`.
 - report에 구현·검사 결과와 미완료 gate를 분리한다.
 - `review-record`, `gate-check`, `accept` 같은 명령을 추가한다.
 - `aggregate`는 구조화된 gate를 집계하되 실제 source 대조를 대신하지 않는다.
@@ -406,16 +408,16 @@ lesson에는 실패 근거, 변경 후보, 담당자, 재현 방법을 넣는다
 
 ## 13. 첫 출시 완료 조건
 
-- [ ] 기존 조직 설정과 task v1 경로가 유지된다.
-- [ ] task v2가 목표·기준·검토 요구를 실행 스냅샷과 연결한다.
-- [ ] 구현 결과, 기계적 검사, 의미 검토, 최종 수용을 구분한다.
-- [ ] 오래된 source나 계약에 대한 검토로 수용할 수 없다.
-- [ ] 작은 작업은 불필요한 조직 계층을 통과하지 않는다.
-- [ ] PM/PL/Senior/Junior/Intern 지침과 CLI 예제가 일치한다.
-- [ ] 누가 무엇을 근거로 판단했는지 로컬 기록에서 확인할 수 있다.
-- [ ] 기존 위임은 재사용하고 새 외부 권한을 임의로 만들지 않는다.
-- [ ] 단일 변경 및 통합 시나리오의 로컬 검증이 통과한다.
-- [ ] README는 구현된 범위와 후속 계획을 구분한다.
+- [x] 기존 조직 설정과 task v1 경로가 유지된다.
+- [x] task v2가 목표·기준·검토 요구를 실행 스냅샷과 연결한다.
+- [x] 구현 결과, 기계적 검사, 의미 검토, 최종 수용을 구분한다.
+- [x] 오래된 source나 계약에 대한 검토로 수용할 수 없다.
+- [x] 작은 작업은 불필요한 조직 계층을 통과하지 않는다.
+- [x] PM/PL/Senior/Junior/Intern 지침과 CLI 예제가 일치한다.
+- [x] 누가 무엇을 근거로 판단했는지 로컬 기록에서 확인할 수 있다.
+- [x] 기존 위임은 재사용하고 새 외부 권한을 임의로 만들지 않는다.
+- [x] 단일 변경 및 통합 시나리오의 로컬 검증이 통과한다.
+- [x] README는 구현된 범위와 후속 계획을 구분한다.
 
 ## 14. 구현 시 남겨둘 결정
 

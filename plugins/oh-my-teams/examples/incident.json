@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "source": "issue-tracker",
+  "externalId": "issue-123",
+  "dedupeKey": "service-a:expiry-boundary",
+  "summary": "Expiry boundary regression reported.",
+  "evidence": "https://tracker.example.invalid/issues/123",
+  "observedAt": "2026-09-14T00:00:00.000Z"
+}

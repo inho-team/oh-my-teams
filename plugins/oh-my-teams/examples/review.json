@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "review-expiry-boundary",
+  "requirementId": "semantic-review",
+  "reviewer": { "kind": "agent-review", "role": "senior", "executionId": "actual-review-dispatch-id" },
+  "implementationExecutionId": "actual-implementation-run-id",
+  "conclusion": "approved",
+  "criteria": [{ "id": "public-api", "conclusion": "approved", "evidence": "The exported function signature is unchanged in the reviewed diff." }],
+  "findings": []
+}

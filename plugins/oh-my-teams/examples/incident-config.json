@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "maxOpen": 3,
+  "maxProposalsPerWindow": 5,
+  "windowMs": 3600000,
+  "observationMs": 86400000,
+  "noProgressLimit": 2
+}

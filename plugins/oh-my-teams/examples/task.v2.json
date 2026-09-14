@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "revision": 1,
+  "kind": "edit",
+  "id": "fix-expiry-boundary",
+  "goal": "Treat an expiry time equal to the current time as expired.",
+  "instruction": "Fix the expiry boundary in src/expiry.mjs without changing its public API.",
+  "nonGoals": ["Change timezone policy", "Change the public API"],
+  "constraints": ["Keep existing callers compatible."],
+  "files": ["src/expiry.mjs"],
+  "checks": [["node", "--test", "tests/expiry.test.mjs"]],
+  "acceptance": [
+    { "id": "expiry-boundary", "description": "Before, equal, and after boundary cases pass.", "method": "check", "checkIndexes": [0] },
+    { "id": "public-api", "description": "The public function signature is unchanged.", "method": "review" }
+  ],
+  "dependencies": [],
+  "contractRefs": [],
+  "contextRefs": [],
+  "openQuestions": [],
+  "reviewRequirements": [{ "id": "semantic-review", "kind": "agent-review", "role": "senior", "criteria": ["public-api"] }],
+  "environment": "node22-lockfile-and-fixtures-revision-1",
+  "baseRef": "origin/main",
+  "risk": "normal"
+}

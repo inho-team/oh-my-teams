@@ -1,21 +1,86 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { assert, readJSON, writeJSON, run } from '../plugins/orca/scripts/core.mjs';
-import { work } from '../plugins/orca/scripts/worker.mjs';
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const state=path.join(root,'.orca'), setupDir=path.join(state,'smoke-setup');
-fs.mkdirSync(setupDir,{recursive:true});
-const org=readJSON(path.join(root,'plugins/orca/examples/organization.json'));org.name='experiment-only';
-writeJSON(path.join(setupDir,'organization.json'),org);
-const task={schemaVersion:1,id:'expiry-smoke',instruction:'Fix isExpired(now, expiresAt) so the exact expiry boundary counts as expired. Preserve the function signature and support numeric timestamps.',files:['smoke/expiry.mjs'],checks:[[process.execPath,'--test','smoke/acceptance.mjs']],environment:'node24-smoke-v1',baseRef:'HEAD',risk:'low'};
-writeJSON(path.join(setupDir,'task.json'),task);
-const prepare=await run([process.execPath,path.join(root,'plugins/orca/scripts/orca-org.mjs'),'prepare','--org',path.join(setupDir,'organization.json'),'--task',path.join(setupDir,'task.json'),'--repo',root,'--name',`intern-smoke-${Date.now()}`],{cwd:root,timeoutMs:90000});
-assert(prepare.code===0,prepare.stderr||prepare.stdout);const receipt=JSON.parse(prepare.stdout);
-writeJSON(path.join(setupDir,'receipt.json'),receipt);
-const cwd=receipt.worktree.path;fs.mkdirSync(path.join(cwd,'smoke'),{recursive:true});
-fs.writeFileSync(path.join(cwd,'smoke/expiry.mjs'),'export function isExpired(now, expiresAt) { return now > expiresAt; }\n');
-fs.writeFileSync(path.join(cwd,'smoke/acceptance.mjs'),"import assert from 'node:assert/strict';import {isExpired} from './expiry.mjs';assert.equal(isExpired(10,10),true);assert.equal(isExpired(9,10),false);assert.equal(isExpired(11,10),true);assert.equal(isExpired(0,0),true);assert.equal(isExpired(-2,-1),false);\n");
-const result=await work(cwd,readJSON(receipt.org),readJSON(receipt.task),{stateDir:state});
-console.log(JSON.stringify({status:result.status,calls:result.calls,issues:result.issues,reportPath:result.reportPath,worktree:receipt.worktree},null,2));
-assert(result.status==='passed','Harness smoke failed');
+/** Runs the historical live limited-edit harness smoke test. */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  assert,
+  readJSON,
+  writeJSON,
+  run,
+} from "../plugins/oh-my-teams/scripts/core.mjs";
+import { work } from "../plugins/oh-my-teams/scripts/worker.mjs";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const state = path.join(root, ".orca"),
+  setupDir = path.join(state, "smoke-setup");
+fs.mkdirSync(setupDir, { recursive: true });
+const org = readJSON(
+  path.join(root, "plugins/oh-my-teams/examples/organization.json"),
+);
+org.name = "experiment-only";
+writeJSON(path.join(setupDir, "organization.json"), org);
+const task = {
+  schemaVersion: 1,
+  id: "expiry-smoke",
+  instruction:
+    "Fix isExpired(now, expiresAt) so the exact expiry boundary counts as expired. Preserve the function signature and support numeric timestamps.",
+  files: ["smoke/expiry.mjs"],
+  checks: [[process.execPath, "--test", "smoke/acceptance.mjs"]],
+  environment: "node24-smoke-v1",
+  baseRef: "HEAD",
+  risk: "low",
+};
+writeJSON(path.join(setupDir, "task.json"), task);
+const prepare = await run(
+  [
+    process.execPath,
+    path.join(root, "plugins/oh-my-teams/scripts/teams-org.mjs"),
+    "prepare",
+    "--org",
+    path.join(setupDir, "organization.json"),
+    "--task",
+    path.join(setupDir, "task.json"),
+    "--repo",
+    root,
+    "--name",
+    `intern-smoke-${Date.now()}`,
+  ],
+  { cwd: root, timeoutMs: 90000 },
+);
+assert(prepare.code === 0, prepare.stderr || prepare.stdout);
+const receipt = JSON.parse(prepare.stdout);
+writeJSON(path.join(setupDir, "receipt.json"), receipt);
+const cwd = receipt.worktree.path;
+fs.mkdirSync(path.join(cwd, "smoke"), { recursive: true });
+fs.writeFileSync(
+  path.join(cwd, "smoke/expiry.mjs"),
+  "export function isExpired(now, expiresAt) { return now > expiresAt; }\n",
+);
+fs.writeFileSync(
+  path.join(cwd, "smoke/acceptance.mjs"),
+  `import assert from "node:assert/strict";
+import { isExpired } from "./expiry.mjs";
+
+assert.equal(isExpired(10, 10), true);
+assert.equal(isExpired(9, 10), false);
+assert.equal(isExpired(11, 10), true);
+assert.equal(isExpired(0, 0), true);
+assert.equal(isExpired(-2, -1), false);
+`,
+);
+const result = await work(cwd, readJSON(receipt.org), readJSON(receipt.task), {
+  stateDir: state,
+});
+console.log(
+  JSON.stringify(
+    {
+      status: result.status,
+      calls: result.calls,
+      issues: result.issues,
+      reportPath: result.reportPath,
+      worktree: receipt.worktree,
+    },
+    null,
+    2,
+  ),
+);
+assert(result.status === "passed", "Harness smoke failed");
