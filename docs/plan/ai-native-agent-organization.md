@@ -8,7 +8,7 @@
 - 목적: 에이전트 조직이 사용자 요청을 책임·작업 계약·검증 증거에 따라 끝까지 수행하고, 실패 경험을 다음 작업에 반영하도록 한다.
 - 범위: 설계 및 단계별 구현 계획과 구현 완료 기록이다. 원래 계획의 권한 경계는 런타임 변경, 설치, 모델 호출, PR 머지 또는 배포 권한을 별도로 부여하지 않는다.
 
-구현 기록(2026-09-14): task v1 호환성을 유지하면서 `schemas/task.schema.json`, `scripts/contracts.mjs`, `examples/task.v2.json`을 추가했다. v2 `kind: edit`는 목표·제약·수용 기준·고정된 contract/context 참조를 제한 프롬프트에 포함하며 task revision/hash를 준비 snapshot과 실행 report에 기록한다. `review.schema.json`과 `gates.mjs`는 독립 실행 ID의 검토, finding 이력, source/task에 고정된 PM acceptance를 강제한다. 역할 지침과 `org-show`를 gate 상태에 연결했다. `workflow.schema.json`과 `workflow.mjs`는 dependency DAG, 역할/검토 동시 한도, 전체 예산, 실제 receipt, 중복·지연 event 및 running 상태 재대조를 관리한다. 실패 라우팅·재작업 이력·중복 제거 lesson 후보와 incident kill switch/dedupe/관찰/무진전 중단을 추가했다. `evals/organization`의 6개 결정적 시나리오는 모델 호출 없이 통과했다. 별도 30회 모델 실험은 [`../../experiments/ROUTING_REPORT.md`](../../experiments/ROUTING_REPORT.md)에 품질·토큰·시간·제한을 기록했으며 이를 로컬 eval 결과와 혼동하지 않는다.
+구현 기록(2026-09-14): task v1 호환성을 유지하면서 `schemas/task.schema.json`, `scripts/contracts.mjs`, `examples/task.v2.json`을 추가했다. v2 `kind: edit`는 목표·제약·수용 기준·고정된 contract/context 참조를 제한 프롬프트에 포함하며 task revision/hash를 준비 snapshot과 실행 report에 기록한다. `review.schema.json`과 `gates.mjs`는 독립 실행 ID의 검토, finding 이력, source/task에 고정된 PM acceptance를 강제한다. 역할 지침과 `team-show`를 gate 상태에 연결했다. `workflow.schema.json`과 `workflow.mjs`는 dependency DAG, 역할/검토 동시 한도, 전체 예산, 실제 receipt, 중복·지연 event 및 running 상태 재대조를 관리한다. 실패 라우팅·재작업 이력·중복 제거 lesson 후보와 incident kill switch/dedupe/관찰/무진전 중단을 추가했다. `evals/organization`의 6개 결정적 시나리오는 모델 호출 없이 통과했다. 별도 30회 모델 실험은 [`../../experiments/ROUTING_REPORT.md`](../../experiments/ROUTING_REPORT.md)에 품질·토큰·시간·제한을 기록했으며 이를 로컬 eval 결과와 혼동하지 않는다.
 
 ## 1. 배경과 제품 방향
 
@@ -308,8 +308,8 @@ lesson에는 실패 근거, 변경 후보, 담당자, 재현 방법을 넣는다
 - PL: 공유 계약과 의존성, 결과 집합, 별도 통합 source 검증.
 - Senior: 기준별 검토, source에 연결된 결론, finding 해결.
 - Junior/Intern: 계약 준수, 수용 기준 변경 금지, 실패 반환 형식.
-- org-show: 단순 passed 대신 현재 차단 gate·다음 담당·증거 위치 표시.
-- org-setup/org-edit: 추가 정책은 필요한 기본값으로 시작하고 구독·모델을 다시 묻지 않음.
+- team-show: 단순 passed 대신 현재 차단 gate·다음 담당·증거 위치 표시.
+- team-setup/team-edit: 추가 정책은 필요한 기본값으로 시작하고 구독·모델을 다시 묻지 않음.
 
 완료 기준: 단일 변경과 두 작업 통합 시나리오를 역할 지침만 따라 일관되게 수행할 수 있다.
 

@@ -10,6 +10,8 @@
 
 구현 기록(2026-09-14): 활성 plugin/package/marketplace를 `oh-my-teams`와 `plugins/oh-my-teams`로 이전했고 `teams-org.mjs`를 기본 런타임으로 지정했다. 기존 `plugins/orca/scripts/orca-org.mjs`는 forwarding 진입점만 유지한다. 공통 Orca discovery 참조와 분리된 `prepare-input`/Orca adapter/`attach-workspace` 경로를 추가했다. 호환 `prepare`는 이 세 단계를 감싼다. 선택된 Orca CLI/runtime 1.4.200과 version-matched guide hash를 실제 조회했다. 상세 주석·공통 모듈 리팩터링을 포함한 plugin 1.4.0을 Claude에, cachebuster가 적용된 1.4.0을 Codex에 설치·발견 확인했다. Claude의 구 0.6.1은 rollback용 설치를 보존한 채 비활성화했다. 기존 `.orca` 데이터는 이동·삭제하지 않았다.
 
+호출명 갱신(2026-09-15): 제품 이름과 맞도록 `team-setup`, `team-show`, `team-edit`을 기본 스킬로 추가했다. 기존 `org-setup`, `org-show`, `org-edit`은 새 스킬을 읽는 호환 별칭으로 유지했으며 plugin 1.4.1에 반영했다.
+
 ## 1. 제품 정체성과 책임 경계
 
 **oh my teams는 에이전트로 조직을 구성하고 목표를 수행하는 제품이다.** Orca는 그 조직의 작업 공간과 실행을 제공하는 기반이다.
