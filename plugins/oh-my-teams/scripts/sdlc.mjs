@@ -143,6 +143,51 @@ function invalidateDownstream(directory, state, initialReference, now) {
   return invalidated;
 }
 
+function validateExecutionContent(artifact) {
+  const { content, kind } = artifact;
+  if (kind === "plan") {
+    assert(
+      typeof content.executionPlanId === "string" &&
+        content.executionPlanId.trim() &&
+        SHA.test(content.contractHash),
+      "Plan executionPlanId and contractHash required",
+    );
+  }
+  if (kind === "build") {
+    assert(
+      content.taskReport?.status === "submitted" &&
+        typeof content.taskReport.taskId === "string" &&
+        typeof content.taskReport.runId === "string" &&
+        SHA.test(content.sourceHash),
+      "Build submitted task report and sourceHash required",
+    );
+  }
+  if (kind === "verification") {
+    assert(
+      content.evidence?.status === "passed" &&
+        typeof content.evidence.key === "string" &&
+        SHA.test(content.sourceHash),
+      "Verification passed evidence and sourceHash required",
+    );
+  }
+  if (kind === "review") {
+    assert(
+      content.review?.conclusion === "approved" &&
+        typeof content.review.id === "string" &&
+        typeof content.review.implementationExecutionId === "string" &&
+        SHA.test(content.sourceHash),
+      "Approved independent review and sourceHash required",
+    );
+  }
+  if (kind === "release") {
+    assert(
+      content.acceptance?.state === "accepted" &&
+        content.acceptance.sourceHash === content.sourceHash,
+      "Release acceptance must bind sourceHash",
+    );
+  }
+}
+
 /**
  * Validates one immutable lifecycle artifact.
  * @param {object} artifact - Candidate artifact.
@@ -270,6 +315,8 @@ export function createSdlc(stateDir, request) {
       revision: 1,
       goal: request.goal,
       artifacts: {},
+      authorizations: {},
+      receipts: {},
       eventIds: ["lifecycle-created"],
       createdAt: now,
       updatedAt: now,
@@ -300,6 +347,184 @@ export function readSdlc(stateDir, lifecycleId) {
   const directory = sdlcDirectory(stateDir, lifecycleId);
   recoverSdlcTransaction(directory);
   return readJSON(path.join(directory, "state.json"));
+}
+
+/**
+ * Checks that an accepted release is current and has rollback and observation plans.
+ * @param {string} stateDir - Project `.omt` directory.
+ * @param {string} lifecycleId - Lifecycle identifier.
+ * @param {string} releaseId - Release artifact identifier.
+ * @returns {object} Current release reference and immutable artifact.
+ * @throws {Error} When the release is stale, unaccepted, or incomplete.
+ */
+export function checkRelease(stateDir, lifecycleId, releaseId) {
+  const state = readSdlc(stateDir, lifecycleId);
+  const reference = state.artifacts[releaseId];
+  assert(reference?.kind === "release", "Release artifact not found");
+  assert(reference.state === "accepted", "Release artifact not accepted");
+  const artifact = readCurrentArtifact(
+    sdlcDirectory(stateDir, lifecycleId),
+    reference,
+  );
+  assert(SHA.test(artifact.content.sourceHash), "Release sourceHash required");
+  assert(
+    typeof artifact.content.repository === "string" &&
+      artifact.content.repository.trim(),
+    "Release repository required",
+  );
+  assert(artifact.content.rollbackPlan, "Release rollback plan required");
+  assert(artifact.content.observationPlan, "Release observation plan required");
+  return { ready: true, reference, artifact, executesDeployment: false };
+}
+
+/**
+ * Records explicit deployment authority without executing an external action.
+ * @param {string} stateDir - Project `.omt` directory.
+ * @param {string} lifecycleId - Lifecycle identifier.
+ * @param {number} expectedRevision - Current lifecycle revision.
+ * @param {object} authorization - Scoped external authorization.
+ * @returns {object} Recorded authorization and next lifecycle state.
+ * @throws {Error} When the release, scope, time, or authority is invalid.
+ */
+export function recordDeploymentAuthorization(
+  stateDir,
+  lifecycleId,
+  expectedRevision,
+  authorization,
+) {
+  const directory = sdlcDirectory(stateDir, lifecycleId);
+  return withFileLock(path.join(directory, ".lock"), () => {
+    const state = readSdlc(stateDir, lifecycleId);
+    assert(state.revision === expectedRevision, "Stale lifecycle revision");
+    const release = checkRelease(stateDir, lifecycleId, authorization.releaseId);
+    validateDeploymentAuthorization(authorization, {
+      action: "deploy",
+      lifecycleId,
+      releaseId: release.reference.id,
+      releaseRevision: release.reference.revision,
+      sourceHash: release.artifact.content.sourceHash,
+      repository: release.artifact.content.repository,
+      environment: authorization.environment,
+    });
+    const target = path.join(
+      directory,
+      "authorizations",
+      `${authorization.id}.json`,
+    );
+    assert(!fs.existsSync(target), "Deployment authorization already recorded");
+    writeJSON(target, authorization);
+    state.authorizations ??= {};
+    state.authorizations[authorization.id] = {
+      id: authorization.id,
+      releaseId: authorization.releaseId,
+      environment: authorization.environment,
+      expiresAt: authorization.expiresAt,
+    };
+    state.revision += 1;
+    state.updatedAt = new Date().toISOString();
+    const event = queueEvent(
+      state,
+      `authorization-${authorization.id}`,
+      "deployment-authorized",
+      {
+        authorizationId: authorization.id,
+        releaseId: authorization.releaseId,
+        executesDeployment: false,
+      },
+    );
+    commitSdlcUpdate(directory, state, event);
+    return { authorization, state, executesDeployment: false };
+  });
+}
+
+/**
+ * Checks a submitted deployment against a stored, currently valid authorization.
+ * @param {string} stateDir - Project `.omt` directory.
+ * @param {string} lifecycleId - Lifecycle identifier.
+ * @param {string} deploymentId - Deployment artifact identifier.
+ * @param {string} authorizationId - Stored authorization identifier.
+ * @param {number} [now=Date.now()] - Validation clock.
+ * @returns {object} Readiness result that never executes deployment.
+ */
+export function checkDeployment(
+  stateDir,
+  lifecycleId,
+  deploymentId,
+  authorizationId,
+  now = Date.now(),
+) {
+  const directory = sdlcDirectory(stateDir, lifecycleId);
+  const state = readSdlc(stateDir, lifecycleId);
+  const reference = state.artifacts[deploymentId];
+  assert(reference?.kind === "deployment", "Deployment artifact not found");
+  assert(reference.state === "submitted", "Deployment artifact not submitted");
+  const deployment = readCurrentArtifact(directory, reference);
+  const authorization = readJSON(
+    path.join(directory, "authorizations", `${authorizationId}.json`),
+  );
+  validateDeploymentAuthorization(
+    authorization,
+    {
+      action: "deploy",
+      lifecycleId,
+      releaseId: deployment.content.releaseId,
+      releaseRevision: deployment.content.releaseRevision,
+      sourceHash: deployment.content.sourceHash,
+      repository: deployment.content.repository,
+      environment: deployment.content.environment,
+    },
+    now,
+  );
+  return {
+    ready: true,
+    deployment: reference,
+    authorizationId,
+    executesDeployment: false,
+  };
+}
+
+/**
+ * Records a successful external receipt and accepts the submitted deployment.
+ * @param {string} stateDir - Project `.omt` directory.
+ * @param {string} lifecycleId - Lifecycle identifier.
+ * @param {number} expectedRevision - Current lifecycle revision.
+ * @param {object} input - Deployment, authorization, receipt, event, and clock.
+ * @returns {object} Accepted deployment transition.
+ */
+export function recordDeployment(
+  stateDir,
+  lifecycleId,
+  expectedRevision,
+  input,
+) {
+  checkDeployment(
+    stateDir,
+    lifecycleId,
+    input.deploymentId,
+    input.authorizationId,
+    input.now,
+  );
+  const directory = sdlcDirectory(stateDir, lifecycleId);
+  const authorization = readJSON(
+    path.join(
+      directory,
+      "authorizations",
+      `${input.authorizationId}.json`,
+    ),
+  );
+  return transitionSdlcArtifact(
+    stateDir,
+    lifecycleId,
+    expectedRevision,
+    {
+      eventId: input.eventId,
+      artifactId: input.deploymentId,
+      toState: "accepted",
+      authorization,
+      receipt: input.receipt,
+      now: input.now,
+    },
+  );
 }
 
 /**
@@ -478,7 +703,22 @@ export function transitionSdlcArtifact(
         ),
         `${current.kind} requires ${PREVIOUS_KIND[current.kind]} upstream`,
       );
+      const previousKindReference = current.upstream.find(
+        (reference) =>
+          state.artifacts[reference.id]?.kind === PREVIOUS_KIND[current.kind],
+      );
+      const previousArtifact = readCurrentArtifact(
+        directory,
+        state.artifacts[previousKindReference.id],
+      );
+      if (current.content.sourceHash && previousArtifact.content.sourceHash) {
+        assert(
+          current.content.sourceHash === previousArtifact.content.sourceHash,
+          `${current.kind} sourceHash differs from upstream`,
+        );
+      }
     }
+    if (input.toState === "ready") validateExecutionContent(current);
     if (current.kind === "release" && input.toState === "ready") {
       assert(SHA.test(current.content.sourceHash), "Release sourceHash required");
       assert(typeof current.content.repository === "string" && current.content.repository.trim(), "Release repository required");
@@ -509,10 +749,25 @@ export function transitionSdlcArtifact(
         `${authorization.id}.json`,
       );
       const receiptFile = path.join(directory, "receipts", `${receipt.id}.json`);
-      assert(!fs.existsSync(authorizationFile), "Deployment authorization already recorded");
+      if (fs.existsSync(authorizationFile)) {
+        assert(
+          JSON.stringify(readJSON(authorizationFile)) ===
+            JSON.stringify(authorization),
+          "Conflicting deployment authorization",
+        );
+      }
       assert(!fs.existsSync(receiptFile), "Deployment receipt already recorded");
-      writeJSON(authorizationFile, authorization);
+      if (!fs.existsSync(authorizationFile)) {
+        writeJSON(authorizationFile, authorization);
+      }
       writeJSON(receiptFile, receipt);
+      state.receipts ??= {};
+      state.receipts[receipt.id] = {
+        id: receipt.id,
+        authorizationId: authorization.id,
+        externalId: receipt.externalId,
+        executedAt: receipt.executedAt,
+      };
     }
     const next = {
       ...current,

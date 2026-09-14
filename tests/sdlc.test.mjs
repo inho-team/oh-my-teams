@@ -453,12 +453,41 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
   ].entries()) {
     const id = `${kind}-a`;
     const content =
-      kind === "release"
+      kind === "plan"
+        ? {
+            executionPlanId: "workflow-a",
+            contractHash: "a".repeat(64),
+          }
+        : kind === "build"
+          ? {
+              sourceHash,
+              taskReport: {
+                status: "submitted",
+                taskId: "task-a",
+                runId: "run-a",
+              },
+            }
+          : kind === "verification"
+            ? {
+                sourceHash,
+                evidence: { status: "passed", key: "evidence-a" },
+              }
+            : kind === "review"
+              ? {
+                  sourceHash,
+                  review: {
+                    id: "review-a",
+                    conclusion: "approved",
+                    implementationExecutionId: "execution-review-a",
+                  },
+                }
+              : kind === "release"
         ? {
             sourceHash,
             repository: "inho-team/app",
             rollbackPlan: { command: "rollback" },
             observationPlan: { durationMinutes: 30 },
+            acceptance: { state: "accepted", sourceHash },
           }
         : kind === "deployment"
           ? {
@@ -468,7 +497,11 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
               repository: "inho-team/app",
               environment: "production",
             }
-          : { stage: kind };
+          : kind === "observation" ||
+              kind === "incident" ||
+              kind === "learning"
+            ? { stage: kind, sourceHash }
+            : { stage: kind };
     const recorded = recordSdlcArtifact(
       stateDir,
       lifecycleId,

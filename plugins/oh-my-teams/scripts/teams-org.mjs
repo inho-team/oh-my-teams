@@ -30,9 +30,13 @@ import {
 import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { organizationStatus } from "./status.mjs";
 import {
+  checkDeployment,
+  checkRelease,
   createSdlc,
   incidentToIntent,
   readSdlc,
+  recordDeployment,
+  recordDeploymentAuthorization,
   recordSdlcArtifact,
   transitionSdlcArtifact,
 } from "./sdlc.mjs";
@@ -78,6 +82,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   artifact-record --id SDLC_ID --artifact FILE --state DIR --revision N --event ID
   artifact-transition --id SDLC_ID --transition FILE --state DIR --revision N
   incident-to-intent --id SDLC_ID --incident FILE --state DIR --revision N --event ID
+  release-check --id SDLC_ID --release-id ID --state DIR
+  deployment-authorize --id SDLC_ID --authorization FILE --state DIR --revision N
+  deployment-check --id SDLC_ID --deployment-id ID --authorization-id ID --state DIR
+  deployment-record --id SDLC_ID --deployment-id ID --authorization-id ID
+                    --receipt FILE --state DIR --revision N --event ID
   aggregate --expected id,id --report FILE [--report FILE ...]
 
 Existing organizations are reused; init never asks for subscriptions again.
@@ -131,6 +140,18 @@ const ALLOWED_OPTIONS = {
   "artifact-record": ["id", "artifact", "state", "revision", "event"],
   "artifact-transition": ["id", "transition", "state", "revision"],
   "incident-to-intent": ["id", "incident", "state", "revision", "event"],
+  "release-check": ["id", "release-id", "state"],
+  "deployment-authorize": ["id", "authorization", "state", "revision"],
+  "deployment-check": ["id", "deployment-id", "authorization-id", "state"],
+  "deployment-record": [
+    "id",
+    "deployment-id",
+    "authorization-id",
+    "receipt",
+    "state",
+    "revision",
+    "event",
+  ],
 };
 
 const REQUIRED_OPTIONS = {
@@ -180,6 +201,18 @@ const REQUIRED_OPTIONS = {
   "artifact-record": ["id", "artifact", "state", "revision", "event"],
   "artifact-transition": ["id", "transition", "state", "revision"],
   "incident-to-intent": ["id", "incident", "state", "revision", "event"],
+  "release-check": ["id", "release-id", "state"],
+  "deployment-authorize": ["id", "authorization", "state", "revision"],
+  "deployment-check": ["id", "deployment-id", "authorization-id", "state"],
+  "deployment-record": [
+    "id",
+    "deployment-id",
+    "authorization-id",
+    "receipt",
+    "state",
+    "revision",
+    "event",
+  ],
 };
 
 /**
@@ -523,6 +556,38 @@ async function executeCommand(args) {
         Number(args.revision),
         readJSON(args.incident),
         args.event,
+      );
+    case "release-check":
+      return checkRelease(
+        path.resolve(args.state),
+        args.id,
+        args["release-id"],
+      );
+    case "deployment-authorize":
+      return recordDeploymentAuthorization(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.authorization),
+      );
+    case "deployment-check":
+      return checkDeployment(
+        path.resolve(args.state),
+        args.id,
+        args["deployment-id"],
+        args["authorization-id"],
+      );
+    case "deployment-record":
+      return recordDeployment(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        {
+          deploymentId: args["deployment-id"],
+          authorizationId: args["authorization-id"],
+          receipt: readJSON(args.receipt),
+          eventId: args.event,
+        },
       );
     case "merge-check":
       return mergeCheck(args);
