@@ -82,7 +82,7 @@ function poolStatuses(org, stateDir) {
  * Builds the read-only status shown by the organization CLI.
  *
  * @param {object} org - Valid organization configuration.
- * @param {string | undefined} stateDir - Optional coordinator `.orca` directory.
+ * @param {string | undefined} stateDir - Optional coordinator `.omt` directory.
  * @returns {object} Runs, explicit usage gaps, and quota-pool observations.
  * @throws {Error} When organization or persisted records are invalid.
  */

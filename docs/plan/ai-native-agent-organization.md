@@ -205,10 +205,10 @@ Orca의 accepted settlement는 워커 실행 결과와 소유권 처리에 관�
 
 ## 8. 기록 저장과 중단 복구
 
-기존 `.orca/runs`, `.orca/evidence`, `.orca/worktrees` 경로를 보존하고 새 업무 기록을 추가한다.
+oh my teams가 소유하는 실행 기록은 `.omt/runs`, `.omt/evidence`, `.omt/worktrees`에 저장한다.
 
 ```text
-.orca/
+.omt/
   workflows/<workflow-id>/
     request.json
     organization.json
@@ -229,7 +229,7 @@ Orca의 accepted settlement는 워커 실행 결과와 소유권 처리에 관�
 - 파일 기반 첫 구현은 한 coordinator 소유권 아래에서 실행한다. 다중 호스트 공유 파일시스템을 지원한다고 가정하지 않는다.
 - 외부 Orca 작업 호출 전에 작업 의도를 기록하고 반환 receipt를 저장한다. 호출 성공 후 기록 전 중단되면 재생성 전에 실제 Orca 상태를 조회해 대조한다.
 - 상태가 불명확하면 `blocked`로 남기고 중복 워커를 자동 생성하지 않는다.
-- `.orca`는 계속 Git 제외한다. 공유해야 할 결정·교훈은 비밀과 로컬 경로를 제거한 요약으로 명시적으로 내보낸다.
+- `.omt`는 계속 Git 제외한다. 공유해야 할 결정·교훈은 비밀과 로컬 경로를 제거한 요약으로 명시적으로 내보낸다.
 - Git 제외 로그를 영구 조직 기억으로 간주하지 않는다. 로컬 실행 기록과 버전 관리할 지식의 목적을 구분한다.
 
 ## 9. 실패 처리와 조직 기억

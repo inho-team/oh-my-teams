@@ -37,7 +37,7 @@ sh install.sh both   # claude | codex | both
 
 설치기는 현재 저장소를 호스트별 로컬 마켓으로 등록한다. 설치 후 **새 대화**에서 스킬을 사용한다. Claude 세션 전용 시험은 `claude --plugin-dir ./plugins/oh-my-teams`로 가능하다. 개발 변경 자체는 전역 설치나 사용자의 조직 설정을 자동 변경하지 않는다.
 
-새 설치 식별자는 `oh-my-teams@oh-my-teams`다. 기존 `/orca:director` 호출은 이전 설치에서만 유지되며 새 namespace에서는 `pm`을 사용한다. 기존 `.orca/organization.json`과 실행 기록은 그대로 재사용한다. `~/.orca-skills` 고정 링크는 사용하지 않는다. 이전 구현·실측은 [legacy/0.6.1](legacy/0.6.1/README.md)에 보존했고 자동 스킬 발견에서 제외했다.
+새 설치 식별자는 `oh-my-teams@oh-my-teams`다. 기존 `/orca:director` 호출은 이전 설치에서만 유지되며 새 namespace에서는 `pm`을 사용한다. 조직 설정과 실행 기록은 `.omt/`에 저장한다. `~/.orca-skills` 고정 링크는 사용하지 않는다. 이전 구현·실측은 [legacy/0.6.1](legacy/0.6.1/README.md)에 보존했고 자동 스킬 발견에서 제외했다.
 
 ## 모델과 구독
 
@@ -53,10 +53,10 @@ Agy에서 확인한 ID(2026-09-14): `gpt-oss-120b-medium`, `gemini-3.1-pro-high`
 node plugins/oh-my-teams/scripts/teams-org.mjs --help
 node plugins/oh-my-teams/scripts/teams-org.mjs validate --org plugins/oh-my-teams/examples/organization.json
 node plugins/oh-my-teams/scripts/teams-org.mjs show --org plugins/oh-my-teams/examples/organization.json
-node plugins/oh-my-teams/scripts/teams-org.mjs preset --org <project>/.orca/organization.json --name balanced --revision <revision>
-node plugins/oh-my-teams/scripts/teams-org.mjs gate-check --task <task-v2.json> --report <report.json> --repo <worktree> --state <coordinator>/.orca
-node plugins/oh-my-teams/scripts/teams-org.mjs workflow-status --id <workflow-id> --state <coordinator>/.orca
-node plugins/oh-my-teams/scripts/teams-org.mjs incident-status --state <coordinator>/.orca
+node plugins/oh-my-teams/scripts/teams-org.mjs preset --org <project>/.omt/organization.json --name balanced --revision <revision>
+node plugins/oh-my-teams/scripts/teams-org.mjs gate-check --task <task-v2.json> --report <report.json> --repo <worktree> --state <coordinator>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs workflow-status --id <workflow-id> --state <coordinator>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs incident-status --state <coordinator>/.omt
 node --test tests/runtime.test.mjs
 npm run eval:organization
 node experiments/run-routing.mjs --mode e1 --max-calls 18 --dry-run
@@ -67,7 +67,7 @@ npm run quality
 
 - 파일과 직전 실패만 모델에 전달하고, JSON 편집을 경로·원본 해시 대조 후 하네스가 적용한다.
 - 검사 명령은 argv 배열이다. 호출과 재시도에 한도가 있고 실패를 통과로 바꾸지 않는다. 실패 편집은 보존한다.
-- `.orca/runs/`에 조직 스냅샷·보고·사용량, `.orca/evidence/`에 검사 증거를 저장한다. `.orca/`는 Git에서 제외한다.
+- `.omt/runs/`에 조직 스냅샷·보고·사용량, `.omt/evidence/`에 검사 증거를 저장한다. `.omt/`는 Git에서 제외한다.
 - `aggregate`는 누락·중복·실패를 확인하고 짧은 결과를 만든다. 모델 호출은 없다. `ready-for-verification`은 머지 승인이 아니다.
 - task v2는 검사 통과 후 `submitted`가 되며, 다른 실행 ID의 필수 `review-record`와 PM의 `accept`가 같은 task/source에 고정되어야 최종 수용된다.
 - workflow는 dependency revision, 역할별 동시 실행, review 대기, 전체 attempt/call 예산을 고정한다. 실행 receipt와 event를 append-only로 보존하며 상태가 불명확한 running attempt는 재배정하지 않는다.

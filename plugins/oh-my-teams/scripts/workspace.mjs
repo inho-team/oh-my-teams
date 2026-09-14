@@ -140,7 +140,7 @@ export async function attachWorkspace(input) {
     "Frozen task base is not present in the parent repository",
   );
 
-  const snapshotDir = path.join(workspace, ".orca");
+  const snapshotDir = path.join(workspace, ".omt");
   const organizationFile = path.join(snapshotDir, "organization.json");
   const taskFile = path.join(snapshotDir, "task.json");
   const recordFile = path.join(stateDir, "worktrees", `${name}.json`);

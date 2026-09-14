@@ -46,7 +46,10 @@ async function workspaceContents(repo) {
     .split("\0")
     .filter(Boolean);
   const files = [...new Set([...tracked, ...untracked])]
-    .filter((file) => !file.startsWith(".orca/"))
+    .filter(
+      (file) =>
+        !file.startsWith(".omt/") && !file.startsWith(".orca/"),
+    )
     .sort();
 
   return files.map((relative) => {

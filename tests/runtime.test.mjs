@@ -102,7 +102,7 @@ async function repo(t) {
     const result = await run(["git", ...args], { cwd: dir });
     assert.equal(result.code, 0, result.stderr);
   }
-  fs.writeFileSync(path.join(dir, ".gitignore"), ".orca/\n");
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   fs.writeFileSync(path.join(dir, "value.txt"), "wrong\n");
   fs.writeFileSync(
     path.join(dir, "check.mjs"),
@@ -225,6 +225,8 @@ test("edit protocol validates every edit before writing and rejects traversal/st
   fs.writeFileSync(path.join(dir, "value.txt"), "old");
   assert.throws(() => inside(dir, "../outside"), /Forbidden/);
   assert.throws(() => inside(dir, ".git/config"), /Forbidden/);
+  assert.throws(() => inside(dir, ".orca/runtime.json"), /Forbidden/);
+  assert.throws(() => inside(dir, ".omt/organization.json"), /Forbidden/);
   assert.throws(
     () =>
       applyEdits(dir, task, {
@@ -246,7 +248,7 @@ test("edit protocol validates every edit before writing and rejects traversal/st
 });
 test("evidence is cached only for identical source, commands, base, environment and logs", async (t) => {
   const dir = await repo(t),
-    store = path.join(dir, ".orca", "evidence");
+    store = path.join(dir, ".omt", "evidence");
   fs.writeFileSync(path.join(dir, "value.txt"), "right\n");
   const options = {
     store,
@@ -275,7 +277,7 @@ test("evidence is cached only for identical source, commands, base, environment 
 test("checks that mutate source cannot produce reusable success", async (t) => {
   const dir = await repo(t);
   const result = await verify(dir, {
-    store: path.join(dir, ".orca", "evidence"),
+    store: path.join(dir, ".omt", "evidence"),
     baseRef: "HEAD",
     environment: "fixture",
     commands: [
@@ -354,7 +356,7 @@ test("failed OSS output promotes once to configured fallback and preserves org s
     org = clone();
   let calls = 0;
   const result = await work(dir, org, task, {
-    stateDir: path.join(dir, ".orca"),
+    stateDir: path.join(dir, ".omt"),
     call: async (profile) => {
       calls++;
       return calls === 1
@@ -389,7 +391,7 @@ test("quota stop does not switch subscriptions; repeated failure never becomes s
   org.policy.onExhaustion = "stop";
   let calls = 0;
   const result = await work(dir, org, task, {
-    stateDir: path.join(dir, ".orca"),
+    stateDir: path.join(dir, ".omt"),
     call: async () => {
       calls++;
       return response({}, { code: 1, exhausted: true });
@@ -398,7 +400,7 @@ test("quota stop does not switch subscriptions; repeated failure never becomes s
   assert.equal(result.status, "failed");
   assert.equal(calls, 1);
   const failed = await work(dir, clone(), task, {
-    stateDir: path.join(dir, ".orca"),
+    stateDir: path.join(dir, ".omt"),
     call: async () => response({ edits: [] }),
   });
   assert.equal(failed.status, "failed");
@@ -407,7 +409,7 @@ test("quota stop does not switch subscriptions; repeated failure never becomes s
 test("provider editing workspace outside JSON protocol is blocked and preserved", async (t) => {
   const dir = await repo(t);
   const result = await work(dir, clone(), task, {
-    stateDir: path.join(dir, ".orca"),
+    stateDir: path.join(dir, ".omt"),
     call: async () => {
       fs.writeFileSync(path.join(dir, "check.mjs"), "// weakened");
       return response({ edits: [] });
@@ -425,7 +427,7 @@ test("concurrency locks block extra workers and are released after settlement", 
   const dir = await repo(t),
     org = clone();
   org.roles.intern.concurrency = 1;
-  const stateDir = path.join(dir, ".orca");
+  const stateDir = path.join(dir, ".omt");
   fs.mkdirSync(path.join(stateDir, "slots"), { recursive: true });
   fs.writeFileSync(path.join(stateDir, "slots", "intern-0.lock"), "owned");
   await assert.rejects(
@@ -437,7 +439,7 @@ test("timed-out provider retains the slot and does not start fallback", async (t
   const dir = await repo(t),
     org = clone();
   org.roles.intern.concurrency = 1;
-  const stateDir = path.join(dir, ".orca");
+  const stateDir = path.join(dir, ".omt");
   const result = await work(dir, org, task, {
     stateDir,
     call: async () => response({}, { timedOut: true, pid: 123 }),
@@ -448,7 +450,7 @@ test("timed-out provider retains the slot and does not start fallback", async (t
 });
 test("base and check argv changes invalidate success even with identical source", async (t) => {
   const dir = await repo(t),
-    store = path.join(dir, ".orca", "evidence");
+    store = path.join(dir, ".omt", "evidence");
   fs.writeFileSync(path.join(dir, "value.txt"), "right\n");
   await run(["git", "add", "value.txt"], { cwd: dir });
   await run(["git", "commit", "-m", "fixed"], { cwd: dir });
@@ -543,7 +545,7 @@ test("confirmed shared-pool exhaustion skips fallback models in the same pool", 
     org = clone();
   let calls = 0;
   const result = await work(dir, org, task, {
-    stateDir: path.join(dir, ".orca"),
+    stateDir: path.join(dir, ".omt"),
     call: async () => {
       calls++;
       return response(
@@ -598,7 +600,7 @@ test("merge validation refuses evidence for weaker acceptance commands", async (
   const dir = await repo(t);
   fs.writeFileSync(path.join(dir, "value.txt"), "right\n");
   const evidence = await verify(dir, {
-    store: path.join(dir, ".orca", "evidence"),
+    store: path.join(dir, ".omt", "evidence"),
     commands: [[process.execPath, "-e", "process.exit(0)"]],
     environment: task.environment,
     baseRef: "HEAD",
@@ -630,7 +632,7 @@ test("task v2 prompt and report bind goal, acceptance, revision and immutable ha
   let observed = "";
   assert.match(makePrompt(dir, taskV2), /value-check/);
   const result = await work(dir, clone(), taskV2, {
-    stateDir: path.join(dir, ".orca"),
+    stateDir: path.join(dir, ".omt"),
     call: async (_profile, _repo, prompt) => {
       observed = prompt;
       return response({
@@ -685,7 +687,7 @@ test("legacy runtime path forwards to the renamed oh my teams runtime", async ()
 });
 test("task v2 cannot be accepted before independent review and stale source invalidates review", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
+    stateDir = path.join(dir, ".omt");
   const report = await work(dir, clone(), taskV2, {
     stateDir,
     call: async () =>
@@ -744,7 +746,7 @@ test("task v2 cannot be accepted before independent review and stale source inva
 });
 test("same execution cannot satisfy an independent review requirement", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
+    stateDir = path.join(dir, ".omt");
   const report = await work(dir, clone(), taskV2, {
     stateDir,
     call: async () =>
@@ -781,7 +783,7 @@ test("same execution cannot satisfy an independent review requirement", async (t
 });
 test("an open finding cannot be erased by omitting it from a later approved review", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
+    stateDir = path.join(dir, ".omt");
   const report = await work(dir, clone(), taskV2, {
     stateDir,
     call: async () =>
@@ -841,7 +843,7 @@ test("an open finding cannot be erased by omitting it from a later approved revi
 });
 test("org-show reports persisted gate owner and keeps unknown usage/cost explicit", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca"),
+    stateDir = path.join(dir, ".omt"),
     orgFile = path.join(stateDir, "organization.json");
   saveOrg(orgFile, clone());
   await work(dir, clone(), taskV2, {
@@ -876,7 +878,7 @@ test("org-show reports persisted gate owner and keeps unknown usage/cost explici
 });
 test("workspace preparation and receipt attachment are separated and bind actual Git state", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca"),
+    stateDir = path.join(dir, ".omt"),
     preparedDir = path.join(stateDir, "prepared", "value-task");
   const prepared = await prepareInput(clone(), taskV2, dir, preparedDir);
   assert.match(prepared.frozenTask.baseRef, /^[a-f0-9]{40}$/);
@@ -1041,7 +1043,7 @@ test("Orca worktree adapter uses the version-matched active parent contract", as
 });
 test("workflow schedules only dependency-ready tasks and requires reconciliation before restart", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
+    stateDir = path.join(dir, ".omt");
   const a = {
     ...structuredClone(taskV2),
     id: "task-a",
@@ -1137,7 +1139,7 @@ test("workflow schedules only dependency-ready tasks and requires reconciliation
 });
 test("workflow deduplicates settlements, ignores stale attempts, and enforces total call budget", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca"),
+    stateDir = path.join(dir, ".omt"),
     single = { ...structuredClone(taskV2), id: "single-task" };
   writeJSON(path.join(dir, "task.json"), single);
   const request = {
@@ -1207,7 +1209,7 @@ test("workflow deduplicates settlements, ignores stale attempts, and enforces to
 });
 test("workflow rejects dependency cycles and avoids parallel shared-contract conflicts", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca"),
+    stateDir = path.join(dir, ".omt"),
     sha = "a".repeat(64);
   const a = {
     ...structuredClone(taskV2),
@@ -1273,7 +1275,7 @@ test("workflow rejects dependency cycles and avoids parallel shared-contract con
 });
 test("workflow offers independent tasks together within role and workflow limits", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca");
+    stateDir = path.join(dir, ".omt");
   fs.writeFileSync(path.join(dir, "a.txt"), "a");
   fs.writeFileSync(path.join(dir, "b.txt"), "b");
   const a = {
@@ -1366,7 +1368,7 @@ test("failure routing uses deterministic signals and does not retry ambiguous wo
 });
 test("workflow retry preserves attempts and cumulative budget", async (t) => {
   const dir = await repo(t),
-    stateDir = path.join(dir, ".orca"),
+    stateDir = path.join(dir, ".omt"),
     single = { ...structuredClone(taskV2), id: "retry-task" };
   writeJSON(path.join(dir, "task.json"), single);
   const request = {
@@ -1439,7 +1441,7 @@ test("workflow retry preserves attempts and cumulative budget", async (t) => {
   assert.equal(second.tasks["retry-task"].attempts.length, 2);
 });
 test("lesson candidates are deduplicated and never auto-promoted", (t) => {
-  const stateDir = path.join(fixture(t), ".orca"),
+  const stateDir = path.join(fixture(t), ".omt"),
     lesson = {
       schemaVersion: 1,
       failureCategory: "implementation-error",
@@ -1456,7 +1458,7 @@ test("lesson candidates are deduplicated and never auto-promoted", (t) => {
   assert.equal(readJSON(first.file).status, "candidate");
 });
 test("incident adapter deduplicates events and never grants deployment authority", (t) => {
-  const stateDir = path.join(fixture(t), ".orca"),
+  const stateDir = path.join(fixture(t), ".omt"),
     now = Date.parse("2026-09-14T00:00:00Z");
   const config = {
     schemaVersion: 1,
@@ -1489,7 +1491,7 @@ test("incident adapter deduplicates events and never grants deployment authority
   assert.equal(Object.keys(incidentStatus(stateDir).incidents).length, 1);
 });
 test("incident kill switch, observation window, and no-progress limit stop unsafe loops", (t) => {
-  const stateDir = path.join(fixture(t), ".orca"),
+  const stateDir = path.join(fixture(t), ".omt"),
     now = Date.parse("2026-09-14T00:00:00Z");
   const config = {
     schemaVersion: 1,
@@ -1686,7 +1688,7 @@ test("routing summary requires matched quality and keeps recommendations provisi
   assert.equal(summary.runs[0].quota.attributable, false);
 });
 test("quota snapshots expire and mixed activity or reset windows are not attributable", (t) => {
-  const stateDir = path.join(fixture(t), ".orca"),
+  const stateDir = path.join(fixture(t), ".omt"),
     before = {
       schemaVersion: 1,
       poolId: "agy-shared",

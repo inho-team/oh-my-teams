@@ -12,7 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = readJSON(
   path.join(root, "experiments/results/2026-09-14T07-51-22-988Z/manifest.json"),
 );
-const smoke = readJSON(path.join(root, ".orca/smoke-setup/receipt.json"));
+const smoke = readJSON(path.join(root, ".omt/smoke-setup/receipt.json"));
 const owned = [
   ...manifest.records.map((r) => ({
     worktree: r.worktree,
@@ -21,7 +21,7 @@ const owned = [
   {
     worktree: smoke.worktree,
     comment:
-      "GPT-OSS harness smoke passed; evidence preserved in coordinator .orca/runs",
+      "GPT-OSS harness smoke passed; evidence preserved in coordinator .omt/runs",
   },
 ];
 async function orca(args) {
@@ -72,5 +72,5 @@ for (const { worktree, comment } of owned) {
     retainedForInspection: true,
   });
 }
-writeJSON(path.join(root, ".orca/experiment-cleanup.json"), results);
+writeJSON(path.join(root, ".omt/experiment-cleanup.json"), results);
 console.log(JSON.stringify(results, null, 2));

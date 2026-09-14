@@ -243,7 +243,7 @@ async function compatibilityPrepare(args) {
     /^[a-z][a-z0-9-]*$/.test(args.name),
     "Worktree name must be lower-case words/numbers/hyphens",
   );
-  const stateDir = path.join(repo, ".orca");
+  const stateDir = path.join(repo, ".omt");
   const prepared = await prepareInput(
     org,
     task,

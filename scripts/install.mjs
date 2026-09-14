@@ -242,7 +242,7 @@ async function installCodex(plan, root, commandRunner) {
  * Plans and optionally performs an idempotent two-host plugin installation.
  *
  * The new version is verified before the legacy Claude plugin is disabled or
- * removed. Existing `.orca` organization state is never read or modified.
+ * removed. Existing `.omt` organization state is never read or modified.
  *
  * @param {string[]} [argv=process.argv.slice(2)] - Installer arguments.
  * @param {object} [dependencies] - Injectable root and command runner for tests.
@@ -276,7 +276,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   console.log(JSON.stringify(plan, null, 2));
   console.log(
     "Installed oh my teams. Start a new conversation and invoke team-setup. " +
-      "Existing .orca organizations are reused. Legacy removal occurs only " +
+      "Existing .omt organizations are reused. Legacy removal occurs only " +
       "with --remove-legacy after new-plugin verification.",
   );
   return plan;
