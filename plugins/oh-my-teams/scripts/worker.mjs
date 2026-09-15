@@ -1,8 +1,16 @@
 /** Limited-edit worker harness with bounded provider calls and durable evidence. */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { assert, hash, inside, validateOrg, writeJSON } from "./core.mjs";
+import {
+  assert,
+  hash,
+  inside,
+  ownerHasExited,
+  validateOrg,
+  writeJSON,
+} from "./core.mjs";
 import { invoke, modelBinding, parseModelJSON } from "./providers.mjs";
 import {
   assertGroundedCitations,
@@ -119,26 +127,53 @@ export function applyEdits(repo, task, payload) {
   return [...seen];
 }
 
+function openSlot(lockFile) {
+  try {
+    return { descriptor: fs.openSync(lockFile, "wx"), reclaimed: false };
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    // A worker killed mid-run leaves its lease behind. Without this the slot was
+    // lost for the life of the state directory: there is no API or command that
+    // frees one, and the error message tells the operator not to delete it.
+    // Unknown, foreign, and live owners are still left alone.
+    if (!ownerHasExited(lockFile)) return null;
+    try {
+      fs.unlinkSync(lockFile);
+      return { descriptor: fs.openSync(lockFile, "wx"), reclaimed: true };
+    } catch {
+      return null;
+    }
+  }
+}
+
 function acquireSlot(stateDir, org, role) {
   const locksDir = path.join(stateDir, "slots");
   fs.mkdirSync(locksDir, { recursive: true });
   for (let slot = 0; slot < org.roles[role].concurrency; slot += 1) {
     const lockFile = path.join(locksDir, `${role}-${slot}.lock`);
-    try {
-      const descriptor = fs.openSync(lockFile, "wx");
-      fs.writeFileSync(
-        descriptor,
-        JSON.stringify({
-          pid: process.pid,
-          startedAt: new Date().toISOString(),
-        }),
-      );
-      fs.closeSync(descriptor);
+    const opened = openSlot(lockFile);
+    if (!opened) continue;
+    fs.writeFileSync(
+      opened.descriptor,
+      JSON.stringify({
+        pid: process.pid,
+        hostname: os.hostname(),
+        startedAt: new Date().toISOString(),
+      }),
+    );
+    fs.closeSync(opened.descriptor);
+    return {
+      slot: `${role}-${slot}`,
+      reclaimed: opened.reclaimed,
       // Unlike short state locks, this lease intentionally spans async model work.
-      return () => fs.unlinkSync(lockFile);
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-    }
+      release: () => {
+        try {
+          fs.unlinkSync(lockFile);
+        } catch {
+          // Already reclaimed or removed; releasing must not mask a real error.
+        }
+      },
+    };
   }
   throw new Error(
     `All ${role} slots occupied. Check recorded process liveness; ` +
@@ -287,7 +322,7 @@ export async function work(
   );
   task.files.forEach((file) => inside(repo, file));
 
-  const releaseSlot = acquireSlot(stateDir, org, role);
+  const lease = acquireSlot(stateDir, org, role);
   const runId = `${task.id}-${crypto.randomUUID()}`;
   const runDir = path.join(stateDir, "runs", runId);
   fs.mkdirSync(runDir, { recursive: true });
@@ -296,9 +331,19 @@ export async function work(
   const report = createRunReport(task, org, role, runId, runDir);
   report.modelPolicy = org.modelPolicy ?? null;
   report.workflow = workflowId ? { id: workflowId, attemptId } : null;
+  report.slot = { id: lease.slot, reclaimed: lease.reclaimed };
+  if (lease.reclaimed) {
+    // Reclaiming is a state change an operator must be able to see afterwards.
+    report.issues.push(
+      `Reclaimed ${lease.slot} from an exited worker before starting`,
+    );
+  }
 
   const binding = org.roles[role];
-  const profileIds = selectedProfileIds ?? [binding.profile, ...binding.fallbacks];
+  const profileIds = selectedProfileIds ?? [
+    binding.profile,
+    ...binding.fallbacks,
+  ];
   assert(
     profileIds.length > 0 &&
       profileIds.every((profile) => Object.hasOwn(org.profiles, profile)),
@@ -443,7 +488,7 @@ export async function work(
     writeJSON(report.reportPath, report);
     throw error;
   } finally {
-    if (!retainSlot) releaseSlot();
+    if (!retainSlot) lease.release();
   }
 }
 
@@ -527,10 +572,19 @@ export async function assist(
   assert(org.roles[role], "Unknown assistant caller role");
   const allowed = org.assistants?.[role] ?? [];
   const selected = profileId ?? allowed[0];
-  assert(selected && allowed.includes(selected), `Assistant profile not allowed: ${role}`);
+  assert(
+    selected && allowed.includes(selected),
+    `Assistant profile not allowed: ${role}`,
+  );
   const profile = org.profiles[selected];
-  assert(profile.model === "gpt-oss-120b-medium", "Assistant profile must use GPT-OSS-120B");
-  assert(["research", "checklist", "edit"].includes(kind), "Assist kind must be research, checklist, or edit");
+  assert(
+    profile.model === "gpt-oss-120b-medium",
+    "Assistant profile must use GPT-OSS-120B",
+  );
+  assert(
+    ["research", "checklist", "edit"].includes(kind),
+    "Assist kind must be research, checklist, or edit",
+  );
   assert(stateDir, "Shared coordinator state directory required");
 
   if (kind === "edit") {
@@ -551,7 +605,10 @@ export async function assist(
     `Assist kind: ${kind}. Caller role: ${role}. Task: ${task.instruction}. `,
     `Files: ${JSON.stringify(files)}`,
   ].join("");
-  assert(Buffer.byteLength(prompt) <= MAX_PROMPT_BYTES, "Task context too large; split it");
+  assert(
+    Buffer.byteLength(prompt) <= MAX_PROMPT_BYTES,
+    "Task context too large; split it",
+  );
   const response = await call(profile, repo, prompt, org.policy.timeoutMs);
   assert(
     response.code === 0 &&

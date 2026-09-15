@@ -18,8 +18,14 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "lint": "npm run quality && npm run format:check",
     "quality": "node scripts/check-code-quality.mjs",
+    "format": "prettier --write \"**/*.{mjs,json}\"",
+    "format:check": "prettier --check \"**/*.{mjs,json}\"",
     "eval:organization": "node evals/organization/run.mjs",
     "org": "node plugins/oh-my-teams/scripts/teams-org.mjs"
+  },
+  "devDependencies": {
+    "prettier": "3.9.6"
   }
 }

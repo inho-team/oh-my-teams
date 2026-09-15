@@ -170,7 +170,10 @@ test("a settled incident is not revived by a single progress observation", (t) =
       config,
     ).incident;
 
-  assert.equal(observe("a", "no-progress", "2026-09-14T00:01:10Z").status, "observing");
+  assert.equal(
+    observe("a", "no-progress", "2026-09-14T00:01:10Z").status,
+    "observing",
+  );
   const stopped = observe("b", "no-progress", "2026-09-14T00:02:10Z");
   assert.equal(stopped.status, "stopped");
   assert.equal(stopped.holdReason, "no-progress-limit");
@@ -212,20 +215,25 @@ test("a settled task never lets another task report the workflow as ready", asyn
   await createWorkflow(stateDir, request, structuredClone(organization), dir);
 
   const settle = (id, outcome) => {
-    attachExecution(stateDir, request.id, readWorkflow(stateDir, request.id).state.revision, {
-      schemaVersion: 1,
-      eventId: `attach-${id}`,
-      attemptId: `attempt-${id}`,
-      taskId: id,
-      callAllowance: 1,
-      receipt: {
-        executionId: id,
-        runId: id,
+    attachExecution(
+      stateDir,
+      request.id,
+      readWorkflow(stateDir, request.id).state.revision,
+      {
+        schemaVersion: 1,
+        eventId: `attach-${id}`,
+        attemptId: `attempt-${id}`,
         taskId: id,
-        dispatchId: id,
-        worktreeId: id,
+        callAllowance: 1,
+        receipt: {
+          executionId: id,
+          runId: id,
+          taskId: id,
+          dispatchId: id,
+          worktreeId: id,
+        },
       },
-    });
+    );
     return recordSettlement(
       stateDir,
       request.id,
@@ -255,7 +263,10 @@ test("a settled task never lets another task report the workflow as ready", asyn
   // The defect: settling beta successfully overwrote the workflow status with a
   // local "ready", hiding that alpha had already failed.
   assert.equal(settle("beta", "settled").status, "blocked");
-  assert.equal(readWorkflow(stateDir, request.id).state.tasks.alpha.state, "failed");
+  assert.equal(
+    readWorkflow(stateDir, request.id).state.tasks.alpha.state,
+    "failed",
+  );
 });
 
 test("a model that answered from another model is a profile fault, not a workspace fault", () => {
@@ -297,7 +308,7 @@ test("quality auditing is not disabled by a backtick inside a regular expression
     "/** Module. */",
     "const marker = /(?<!\\\\)`/g;",
     "// a comment holding a ` backtick",
-    "const quoted = \"a ` backtick\";",
+    'const quoted = "a ` backtick";',
     `const long = ${"x".repeat(200)};`,
     "export function afterAll() {",
     "  return 1;",

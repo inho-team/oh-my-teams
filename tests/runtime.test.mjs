@@ -247,7 +247,11 @@ test("default organization uses the responsibility hierarchy and routing", () =>
     org.profiles[org.roles.intern.profile].model,
     "claude-sonnet-4-6",
   );
-  assert.ok(Object.values(org.profiles).some((profile) => profile.model === "gpt-oss-120b-medium"));
+  assert.ok(
+    Object.values(org.profiles).some(
+      (profile) => profile.model === "gpt-oss-120b-medium",
+    ),
+  );
   for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
     assert.deepEqual(org.assistants[role], ["agy-oss"]);
   }
@@ -282,11 +286,16 @@ test("every role can use the configured GPT-OSS research assistant with an audit
     assert.equal(report.citations[0].verified, true);
     assert.ok(fs.existsSync(report.reportPath));
     assert.ok(fs.existsSync(report.log));
-    assert.equal(report.logHash, hash(`${JSON.stringify({
-      summary: "Found beta",
-      items: ["beta is present"],
-      citations: [{ file: "source.txt", line: 2, quote: "beta" }],
-    })}\n`));
+    assert.equal(
+      report.logHash,
+      hash(
+        `${JSON.stringify({
+          summary: "Found beta",
+          items: ["beta is present"],
+          citations: [{ file: "source.txt", line: 2, quote: "beta" }],
+        })}\n`,
+      ),
+    );
   }
 });
 test("assistant edit uses GPT-OSS while retaining caller role checks and scope", async (t) => {
@@ -1058,11 +1067,14 @@ test("terminal dispatches cannot be reported as active goal progress", () => {
     { id: "agy-design", status: "failed", liveness: "exited" },
     { id: "codex-pl", status: "blocked", liveness: "exited" },
   ];
-  assert.deepEqual(supervisedProgressStatus({ goalStatus: "blocked", workers }), {
-    status: "blocked",
-    activeWorkers: 0,
-    unverifiableWorkers: 0,
-  });
+  assert.deepEqual(
+    supervisedProgressStatus({ goalStatus: "blocked", workers }),
+    {
+      status: "blocked",
+      activeWorkers: 0,
+      unverifiableWorkers: 0,
+    },
+  );
   assert.equal(
     supervisedProgressStatus({ goalStatus: "active", workers }).status,
     "stopped",
@@ -1151,7 +1163,7 @@ test("workspace preparation and receipt attachment are separated and bind actual
         task: prepared.frozenTask,
         receipt: {
           ok: true,
-          result: { worktree: { id: "wrong", path: "/tmp" } },
+          result: { worktree: { id: "wrong", path: os.tmpdir() } },
         },
         executable: "orca",
         runtime,
@@ -2015,12 +2027,12 @@ test("assistant answers that cite another tree are rejected, not stored", async 
       role: "pm",
       kind: "research",
       stateDir,
-      call: async () =>
-        response({ summary: "s", items: ["i"], citations }),
+      call: async () => response({ summary: "s", items: ["i"], citations }),
     });
 
   await assert.rejects(
-    () => answer([{ file: "docs/architecture/overview.md", line: 1, quote: "x" }]),
+    () =>
+      answer([{ file: "docs/architecture/overview.md", line: 1, quote: "x" }]),
     /do not exist in this workspace/,
   );
   await assert.rejects(
@@ -2093,10 +2105,7 @@ test("a provider answering from another model is refused and left auditable", as
   assert.equal(result.calls[0].effectiveModel, "gemini-flash-3-8");
   assert.equal(result.calls[0].modelProof, "mismatched");
   assert.match(result.issues[0], /answered from gemini-flash-3-8/);
-  assert.equal(
-    fs.readFileSync(path.join(dir, "value.txt"), "utf8"),
-    "wrong\n",
-  );
+  assert.equal(fs.readFileSync(path.join(dir, "value.txt"), "utf8"), "wrong\n");
 });
 test("ungrounded answers route to workspace rebinding", () => {
   // A model-binding mismatch is routed separately, by boundary-and-gate tests:
@@ -2104,7 +2113,10 @@ test("ungrounded answers route to workspace rebinding", () => {
   for (const input of [
     { kind: "workspace-context" },
     { grounded: false },
-    { message: "Assistant cited 2 of 3 lines that do not exist in this workspace" },
+    {
+      message:
+        "Assistant cited 2 of 3 lines that do not exist in this workspace",
+    },
   ]) {
     assert.deepEqual(classifyFailure(input), {
       category: "environment-context",

@@ -3,7 +3,15 @@
   "title": "oh my teams incident input v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "source", "externalId", "dedupeKey", "summary", "evidence", "observedAt"],
+  "required": [
+    "schemaVersion",
+    "source",
+    "externalId",
+    "dedupeKey",
+    "summary",
+    "evidence",
+    "observedAt"
+  ],
   "properties": {
     "schemaVersion": { "const": 1 },
     "source": { "type": "string", "minLength": 1 },

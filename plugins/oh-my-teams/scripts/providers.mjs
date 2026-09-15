@@ -169,7 +169,8 @@ export function decodeOutput(stdout) {
 export function modelBinding(profile, decoded) {
   const requested = profile?.model ?? null;
   const effective = decoded?.effectiveModel ?? null;
-  if (requested === null) return { requested, effective, status: "unrequested" };
+  if (requested === null)
+    return { requested, effective, status: "unrequested" };
   if (effective === null) return { requested, effective, status: "unproven" };
   return {
     requested,

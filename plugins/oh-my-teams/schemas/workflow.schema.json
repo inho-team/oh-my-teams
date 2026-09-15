@@ -3,15 +3,51 @@
   "title": "oh my teams workflow request v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "id", "goal", "repo", "tasks", "policy", "budget"],
+  "required": [
+    "schemaVersion",
+    "id",
+    "goal",
+    "repo",
+    "tasks",
+    "policy",
+    "budget"
+  ],
   "properties": {
     "schemaVersion": { "const": 1 },
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
     "goal": { "type": "string", "minLength": 1 },
     "repo": { "type": "string", "minLength": 1 },
     "integrationTask": { "type": "string", "minLength": 1 },
-    "tasks": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["file", "role"], "properties": { "file": { "type": "string", "minLength": 1 }, "role": { "enum": ["pm", "pl", "senior", "junior", "intern"] } } } },
-    "policy": { "type": "object", "additionalProperties": false, "required": ["maxRunning", "maxReviewPending"], "properties": { "maxRunning": { "type": "integer", "minimum": 1 }, "maxReviewPending": { "type": "integer", "minimum": 1 } } },
-    "budget": { "type": "object", "additionalProperties": false, "required": ["maxAttempts", "maxCalls"], "properties": { "maxAttempts": { "type": "integer", "minimum": 1 }, "maxCalls": { "type": "integer", "minimum": 1 } } }
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "role"],
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "role": { "enum": ["pm", "pl", "senior", "junior", "intern"] }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxRunning", "maxReviewPending"],
+      "properties": {
+        "maxRunning": { "type": "integer", "minimum": 1 },
+        "maxReviewPending": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxAttempts", "maxCalls"],
+      "properties": {
+        "maxAttempts": { "type": "integer", "minimum": 1 },
+        "maxCalls": { "type": "integer", "minimum": 1 }
+      }
+    }
   }
 }
