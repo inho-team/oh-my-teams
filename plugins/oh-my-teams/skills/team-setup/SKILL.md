@@ -1,29 +1,8 @@
 ---
 name: team-setup
-description: 이전 팀 구성 스킬명의 호환 진입점이다. 새 상설 조직 결성에는 team-form을 사용한다.
+description: 이전 팀 구성 스킬명의 호환 진입점이다. 새 상설 조직 결성에는 team-form를 사용한다.
 ---
 
-# 팀 최초 구성
+# team-form 호환 별칭
 
-대상 프로젝트 `.omt/organization.json`을 먼저 확인한다. 있으면 `team-show`로 표시하고 저장된 구독을 그대로 사용한다. 다시 질문하거나 예제 설정으로 덮어쓰지 않는다.
-
-없으면 한 번의 구성 대화에서 다음을 묻는다. 모델은 선택의 추천값일 뿐, 사용자 답을 대신하지 않는다.
-
-- 팀 이름, 역할별 상위 역할과 동시 인원. PM이 유일한 루트이며 순환이 없어야 한다.
-- **각 직급마다** 사용할 구독/계정 프로필과 모델. 기존 직급의 구독 공유도 명시적으로 선택할 수 있다.
-- 사용할 대체 프로필과 순서, 할당량 소진 시 대체 또는 중단, 전체 호출 한도.
-
-실행기는 Claude·Codex·Agy, 설치 호스트는 Claude·Codex다. 먼저 설치된 `agy models`와 각 CLI 도움말에서 실제 모델 ID를 확인한다. 이 배포에서 확인한 Agy 선택지는 GPT-OSS-120B, Gemini Pro 3.1, Gemini Flash 3.8, Claude Sonnet 4.6, Opus 4.6이다. Agy의 GPT-OSS·Sonnet·Opus는 모두 프로필의 정확한 모델 ID를 `--model` 인자로 전달하며, 지원 여부를 확인하지 않은 `--effort`를 덧붙이지 않는다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 사용한다. 고정된 모델 능력 서열이나 구독 가격을 가정하지 않는다.
-
-최초 구성에서는 `opus-first`와 `balanced` 프리셋을 제안한다. `opus-first`는 Agy 역할의 기준선을 Opus로 통일하고, `balanced`는 Senior=Opus, Junior=Sonnet, Intern=GPT-OSS로 배정한다. PM·PL의 기존 Claude·Codex 선택은 두 프리셋 모두 바꾸지 않는다. 프리셋을 고른 뒤에도 직급별 구독·계정과 실제 모델 ID를 확인하며 사용자는 모두 변경할 수 있다. 구독별 청구/할당량은 토큰 수와 다른 값이다.
-
-[`../../examples/organization.json`](../../examples/organization.json), [`../../examples/organization.opus-first.json`](../../examples/organization.opus-first.json), [`../../examples/organization.balanced.json`](../../examples/organization.balanced.json)을 구조 참고로 사용하되 실제 답으로 채운다. `subscription`은 사용자가 알아볼 이름, `account`는 실행 계정 참조다. 이름만 붙여 계정이 전환됐다고 보고하지 않는다. 현재 CLI 인증을 쓸 때 `account: current`; 별도 계정은 CLI가 지원하는 프로필 인수 또는 `env`의 환경변수 **이름 참조**로 연결한다. 비밀값을 JSON에 넣지 않는다. Agy가 계정 선택 옵션을 제공하지 않으면 검증된 별도 실행 프로필이 필요하다.
-
-현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
-
-```text
-node <runtime> init --org <project>/.omt/organization.json --from <user-approved-config.json>
-node <runtime> show --org <project>/.omt/organization.json
-```
-
-인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 구독 선택 질문을 다시 시작하지 않는다. `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다.
+이전 호출과의 호환 진입점이다. [team-form](../team-form/SKILL.md)을 전체 읽고 같은 절차를 수행한다. 절차 본문은 그 스킬 한 곳에만 있으며 여기에 복제하지 않는다. 새 안내와 후속 호출에는 `team-form`, `team-kickoff`, `team-status`, `team-adjust`, `team-close`, `team-disband` 이름을 사용한다.
