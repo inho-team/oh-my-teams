@@ -113,6 +113,17 @@ function recoverSdlcTransaction(directory) {
       const file = path.join(directory, "transaction.json");
       if (!fs.existsSync(file)) return;
       const transaction = readJSON(file);
+      for (const record of transaction.records ?? []) {
+        if (fs.existsSync(record.file)) {
+          assert(
+            JSON.stringify(readJSON(record.file)) ===
+              JSON.stringify(record.value),
+            "Conflicting SDLC record during recovery",
+          );
+        } else {
+          writeJSON(record.file, record.value);
+        }
+      }
       const eventFile = path.join(
         directory,
         "events",
@@ -134,31 +145,55 @@ function recoverSdlcTransaction(directory) {
   );
 }
 
-function commitSdlcUpdate(directory, state, event) {
-  writeJSON(path.join(directory, "transaction.json"), { state, event });
+function commitSdlcUpdate(directory, state, event, records = []) {
+  writeJSON(path.join(directory, "transaction.json"), {
+    state,
+    event,
+    records,
+  });
   recoverSdlcTransaction(directory);
 }
 
-function invalidateDownstream(directory, state, initialReference, now) {
+function invalidateDownstream(
+  directory,
+  state,
+  initialReference,
+  now,
+  records,
+) {
   const queue = [initialReference];
   const invalidated = [];
+  const pendingArtifacts = new Map(
+    records
+      .filter(
+        (record) =>
+          record.value &&
+          typeof record.value.id === "string" &&
+          SDLC_KINDS.includes(record.value.kind),
+      )
+      .map((record) => [record.value.id, record.value]),
+  );
   while (queue.length > 0) {
     const obsolete = queue.shift();
     for (const currentReference of Object.values(state.artifacts)) {
       if (currentReference.id === obsolete.id) continue;
-      const current = readCurrentArtifact(directory, currentReference);
+      if (
+        ["invalidated", "superseded", "archived"].includes(
+          currentReference.state,
+        )
+      ) {
+        continue;
+      }
+      const current =
+        pendingArtifacts.get(currentReference.id) ??
+        readCurrentArtifact(directory, currentReference);
       const dependsOnObsolete = current.upstream.some(
         (item) =>
           item.id === obsolete.id &&
           item.revision === obsolete.revision &&
           item.sha256 === obsolete.sha256,
       );
-      if (
-        !dependsOnObsolete ||
-        ["invalidated", "superseded", "archived"].includes(current.state)
-      ) {
-        continue;
-      }
+      if (!dependsOnObsolete) continue;
       const next = {
         ...current,
         revision: current.revision + 1,
@@ -171,7 +206,8 @@ function invalidateDownstream(directory, state, initialReference, now) {
         },
       };
       const digest = sdlcArtifactHash(next);
-      writeJSON(artifactFile(directory, next), next);
+      records.push({ file: artifactFile(directory, next), value: next });
+      pendingArtifacts.set(next.id, next);
       state.artifacts[next.id] = referenceFor(next, digest);
       invalidated.push(state.artifacts[next.id]);
       queue.push(currentReference);
@@ -551,8 +587,6 @@ export function recordDeploymentAuthorization(
         JSON.stringify(readJSON(target)) === JSON.stringify(authorization),
         "Conflicting deployment authorization",
       );
-    } else {
-      writeJSON(target, authorization);
     }
     state.authorizations ??= {};
     state.authorizations[authorization.id] = {
@@ -573,7 +607,9 @@ export function recordDeploymentAuthorization(
         executesDeployment: false,
       },
     );
-    commitSdlcUpdate(directory, state, event);
+    commitSdlcUpdate(directory, state, event, [
+      { file: target, value: authorization },
+    ]);
     return { authorization, state, executesDeployment: false };
   });
 }
@@ -709,6 +745,10 @@ export function recordSdlcArtifact(
     }
     const previous = state.artifacts[artifact.id];
     assert(
+      !previous || previous.kind === artifact.kind,
+      "Artifact kind cannot change across revisions",
+    );
+    assert(
       !previous || artifact.revision === previous.revision + 1,
       "Artifact revision must advance by one",
     );
@@ -732,20 +772,25 @@ export function recordSdlcArtifact(
         JSON.stringify(readJSON(target)) === JSON.stringify(artifact),
         "Conflicting artifact revision",
       );
-    } else {
-      writeJSON(target, artifact);
     }
     state.artifacts[artifact.id] = referenceFor(artifact, digest);
     state.revision += 1;
     state.updatedAt = new Date().toISOString();
+    const records = [{ file: target, value: artifact }];
     const invalidated = previous
-      ? invalidateDownstream(directory, state, previous, state.updatedAt)
+      ? invalidateDownstream(
+          directory,
+          state,
+          previous,
+          state.updatedAt,
+          records,
+        )
       : [];
     const event = queueEvent(state, eventId, "artifact-recorded", {
       artifact: state.artifacts[artifact.id],
       invalidated,
     });
-    commitSdlcUpdate(directory, state, event);
+    commitSdlcUpdate(directory, state, event, records);
     return { artifact, sha256: digest, invalidated, state };
   });
 }
@@ -956,7 +1001,6 @@ export function transitionSdlcArtifact(
           "Conflicting deployment receipt",
         );
       }
-      if (!fs.existsSync(receiptFile)) writeJSON(receiptFile, receipt);
       state.receipts ??= {};
       state.receipts[receipt.id] = {
         id: receipt.id,
@@ -984,10 +1028,15 @@ export function transitionSdlcArtifact(
         JSON.stringify(readJSON(nextFile)) === JSON.stringify(next),
         "Conflicting artifact transition revision",
       );
-    } else {
-      writeJSON(nextFile, next);
     }
     state.artifacts[next.id] = referenceFor(next, digest);
+    const records = [{ file: nextFile, value: next }];
+    if (input.receipt) {
+      records.push({
+        file: path.join(directory, "receipts", `${input.receipt.id}.json`),
+        value: input.receipt,
+      });
+    }
     const invalidated =
       input.toState === "invalidated"
         ? invalidateDownstream(
@@ -995,6 +1044,7 @@ export function transitionSdlcArtifact(
             state,
             currentReference,
             next.createdAt,
+            records,
           )
         : [];
     state.revision += 1;
@@ -1006,7 +1056,7 @@ export function transitionSdlcArtifact(
       receiptId: input.receipt?.id ?? null,
       invalidated,
     });
-    commitSdlcUpdate(directory, state, event);
+    commitSdlcUpdate(directory, state, event, records);
     return { artifact: next, sha256: digest, state };
   });
 }
