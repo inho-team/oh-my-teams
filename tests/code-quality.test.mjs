@@ -124,7 +124,11 @@ test("no skill sends a reader to a compatibility name for the procedure", () => 
   for (const entry of fs.readdirSync(skills)) {
     if (aliases.includes(entry) || entry.startsWith("org-")) continue;
     if (listsAliases.has(entry)) continue;
-    const text = fs.readFileSync(path.join(skills, entry, "SKILL.md"), "utf8");
+    // A runtime state directory such as `.omc/` can sit beside the skills, so
+    // only a directory that actually holds a SKILL.md is a skill.
+    const file = path.join(skills, entry, "SKILL.md");
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, "utf8");
     for (const alias of aliases) {
       assert.ok(
         !text.includes(`\`${alias}\``),

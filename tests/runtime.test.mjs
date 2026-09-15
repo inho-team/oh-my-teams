@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  PROVIDER_EFFORTS,
   readJSON,
   writeJSON,
   validateOrg,
@@ -498,6 +499,128 @@ test("Agy selects GPT-OSS, Sonnet, and Opus with the same model argument", () =>
     assert.ok(modelIndex > 0);
     assert.equal(spec.argv[modelIndex + 1], model);
     assert.ok(!spec.argv.includes("--effort"));
+  }
+});
+test("a profile without effort sends no effort argument to any provider", () => {
+  for (const provider of ["agy", "claude", "codex"]) {
+    const spec = providerCommand(
+      { provider, command: [provider], model: "specific-id" },
+      "/tmp/task",
+      "prompt",
+    );
+    assert.ok(!spec.argv.includes("--effort"));
+    assert.ok(!spec.argv.some((v) => v.startsWith("model_reasoning_effort")));
+  }
+});
+test("each provider carries reasoning effort in its own verified CLI syntax", () => {
+  // `agy --help` (1.2.3) documents `--effort`; `codex exec --help` (0.154.0)
+  // has no such flag, so the level travels as a `-c` config override.
+  const agy = providerCommand(
+    {
+      provider: "agy",
+      command: ["agy"],
+      model: "gemini-3.8-flash-high",
+      effort: "high",
+    },
+    "/tmp/task",
+    "prompt",
+  );
+  assert.equal(agy.argv[agy.argv.indexOf("--effort") + 1], "high");
+
+  const codex = providerCommand(
+    {
+      provider: "codex",
+      command: ["codex"],
+      model: "gpt-5.6-terra",
+      effort: "xhigh",
+    },
+    "/tmp/task",
+    "prompt",
+  );
+  const override = codex.argv[codex.argv.indexOf("--config") + 1];
+  assert.equal(override, "model_reasoning_effort=xhigh");
+  assert.ok(!codex.argv.includes("--effort"));
+  // `-c` is `--continue` on the Agy CLI, so the short form must not appear.
+  assert.ok(!codex.argv.includes("-c"));
+  assert.ok(codex.argv.indexOf("--config") > codex.argv.indexOf("exec"));
+});
+test("an effort the provider cannot select fails instead of running at another depth", () => {
+  assert.throws(
+    () =>
+      providerCommand(
+        {
+          provider: "claude",
+          command: ["claude"],
+          model: null,
+          effort: "high",
+        },
+        "/tmp/task",
+        "prompt",
+      ),
+    /cannot select effort/,
+  );
+  assert.throws(
+    () =>
+      providerCommand(
+        {
+          provider: "agy",
+          command: ["agy"],
+          model: "gpt-oss-120b-medium",
+          effort: "xhigh",
+        },
+        "/tmp/task",
+        "prompt",
+      ),
+    /cannot select effort/,
+  );
+  assert.deepEqual(PROVIDER_EFFORTS.claude, []);
+  assert.ok(!PROVIDER_EFFORTS.agy.includes("xhigh"));
+  assert.ok(PROVIDER_EFFORTS.codex.includes("ultra"));
+});
+test("organization validation narrows effort per provider and rejects a self-contradicting Agy profile", () => {
+  const org = clone();
+  org.profiles["codex-terra"].effort = "ultra";
+  validateOrg(org);
+
+  const unsupported = clone();
+  unsupported.profiles["claude-current"].effort = "high";
+  assert.throws(() => validateOrg(unsupported), /no reasoning-effort selector/);
+
+  const tooDeep = clone();
+  tooDeep.profiles["agy-flash"].effort = "xhigh";
+  assert.throws(() => validateOrg(tooDeep), /must be one of low\|medium\|high/);
+
+  // `gemini-3.8-flash-high` already names its level, so `low` would leave the
+  // report claiming a depth the call did not use.
+  const contradicting = clone();
+  contradicting.profiles["agy-flash"].effort = "low";
+  assert.throws(() => validateOrg(contradicting), /contradicts model/);
+
+  // Agy Claude model IDs carry no level suffix, so they stay unconstrained.
+  const unsuffixed = clone();
+  unsuffixed.profiles["agy-opus"].effort = "low";
+  validateOrg(unsuffixed);
+});
+test("the example organization offers every listed Codex model as its own profile", () => {
+  const codex = Object.values(example.profiles)
+    .filter((profile) => profile.provider === "codex")
+    .map((profile) => profile.model);
+  for (const model of ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"]) {
+    assert.ok(codex.includes(model), `example must offer ${model}`);
+  }
+});
+test("the organization chart states the effort each role actually runs at", () => {
+  const org = clone();
+  assert.match(chart(org), /PL: codex-current .* effort=provider-default/);
+
+  org.profiles["codex-current"].effort = "high";
+  assert.match(chart(org), /PL: codex-current .* effort=high/);
+});
+test("no bound profile in the example changes the effort the call used to run at", () => {
+  // Adding the field must not silently deepen an existing organization's calls,
+  // so every profile a role actually binds still sends no effort argument.
+  for (const role of Object.values(example.roles)) {
+    assert.equal(example.profiles[role.profile].effort, undefined);
   }
 });
 test("failed OSS output promotes once to configured fallback and preserves org snapshot", async (t) => {
