@@ -3,8 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { assert, hash, inside, validateOrg, writeJSON } from "./core.mjs";
-import { invoke, parseModelJSON } from "./providers.mjs";
-import { checkCitations, fingerprint, verify } from "./evidence.mjs";
+import { invoke, modelBinding, parseModelJSON } from "./providers.mjs";
+import {
+  assertGroundedCitations,
+  checkCitations,
+  fingerprint,
+  verify,
+  workspaceBinding,
+} from "./evidence.mjs";
 import { taskContext, taskHash, validateTask } from "./contracts.mjs";
 import { claimWorkflowCall } from "./workflow.mjs";
 
@@ -176,12 +182,14 @@ function recordProviderCall(
   fs.mkdirSync(callDir, { recursive: true });
   const log = path.join(callDir, "output.txt");
   fs.writeFileSync(log, `${response.stdout}\n${response.stderr}`);
+  const binding = response.modelBinding ?? modelBinding(profile, response);
   report.calls.push({
     profile: profileId,
     pool: profile.pool ?? null,
     provider: profile.provider,
     requestedModel: profile.model,
     effectiveModel: response.effectiveModel ?? null,
+    modelProof: binding.status,
     selectionReason:
       callNumber === 1
         ? firstSelectionReason
@@ -197,6 +205,7 @@ function recordProviderCall(
     exhausted: response.exhausted,
     log,
   });
+  return binding;
 }
 
 function initialGates(task, report) {
@@ -331,7 +340,7 @@ export async function work(
           prompt,
           org.policy.timeoutMs,
         );
-        recordProviderCall(
+        const binding = recordProviderCall(
           runDir,
           report,
           profileId,
@@ -341,6 +350,12 @@ export async function work(
           failure,
           selectionReason,
         );
+        if (binding.status === "mismatched") {
+          failure =
+            `Provider answered from ${binding.effective} while ` +
+            `${binding.requested} was requested; routing evidence is invalid`;
+          break profileLoop;
+        }
 
         const sourceAfterCall = await fingerprint(
           repo,
@@ -478,8 +493,11 @@ export async function draft(
     "Draft provider failed",
   );
   const payload = parseModelJSON(response.text);
+  const citations = checkCitations(repo, payload.citations);
   return {
-    citations: checkCitations(repo, payload.citations),
+    citations,
+    grounding: assertGroundedCitations(citations, "Draft"),
+    workspace: await workspaceBinding(repo),
     usage: response.usage ?? null,
     elapsedMs: response.elapsedMs,
   };
@@ -545,6 +563,13 @@ export async function assist(
   const payload = parseModelJSON(response.text);
   assert(typeof payload.summary === "string", "Assistant summary required");
   assert(Array.isArray(payload.items), "Assistant items required");
+  const binding = response.modelBinding ?? modelBinding(profile, response);
+  assert(
+    binding.status !== "mismatched",
+    `Assistant answered from ${binding.effective} while ` +
+      `${binding.requested} was requested`,
+  );
+  const citations = checkCitations(repo, payload.citations ?? []);
   const report = {
     schemaVersion: 1,
     id: `${task.id}-${crypto.randomUUID()}`,
@@ -557,9 +582,12 @@ export async function assist(
     profile: selected,
     requestedModel: profile.model,
     effectiveModel: response.effectiveModel ?? null,
+    modelProof: binding.status,
+    workspace: await workspaceBinding(repo),
     summary: payload.summary,
     items: payload.items,
-    citations: checkCitations(repo, payload.citations ?? []),
+    citations,
+    grounding: assertGroundedCitations(citations, "Assistant"),
     usage: response.usage ?? null,
     costUsd: response.costUsd ?? null,
     elapsedMs: response.elapsedMs,

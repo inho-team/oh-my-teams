@@ -137,6 +137,30 @@ export function decodeOutput(stdout) {
 }
 
 /**
+ * Compares the requested profile model with the model the provider reported.
+ *
+ * Routing, quota, and cost decisions are all made from the requested model, so
+ * a provider that silently answers from another model invalidates them. Absent
+ * model metadata stays `unproven` instead of being read as agreement.
+ *
+ * @param {object} profile - Provider profile carrying the requested model.
+ * @param {object} decoded - Normalized output from {@link decodeOutput}.
+ * @returns {{requested: string | null, effective: string | null, status: string}}
+ * Status is `unrequested`, `unproven`, `matched`, or `mismatched`.
+ */
+export function modelBinding(profile, decoded) {
+  const requested = profile?.model ?? null;
+  const effective = decoded?.effectiveModel ?? null;
+  if (requested === null) return { requested, effective, status: "unrequested" };
+  if (effective === null) return { requested, effective, status: "unproven" };
+  return {
+    requested,
+    effective,
+    status: effective === requested ? "matched" : "mismatched",
+  };
+}
+
+/**
  * Classifies a failed provider call without treating arbitrary `429` text as quota.
  *
  * Only a structured pool scope proves shared-pool exhaustion. Ambiguous quota
@@ -215,6 +239,7 @@ export async function invoke(profile, cwd, prompt, timeoutMs, execute = run) {
   return {
     ...result,
     ...decoded,
+    modelBinding: modelBinding(profile, decoded),
     failureClass,
     exhausted: ["pool-exhausted", "quota-unknown", "rate-limit"].includes(
       failureClass,

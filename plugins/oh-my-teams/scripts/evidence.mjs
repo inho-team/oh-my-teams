@@ -364,3 +364,66 @@ export function checkCitations(repo, citations) {
     }
   });
 }
+
+/**
+ * Summarizes how much of a citation set was matched against real source lines.
+ *
+ * @param {object[]} citations - Annotated output of {@link checkCitations}.
+ * @returns {{total: number, verified: number, unverified: number, grounded: boolean}}
+ * Counts plus whether every citation resolved to an actual workspace line.
+ * @throws {Error} When `citations` itself is not an array.
+ */
+export function citationGrounding(citations) {
+  assert(Array.isArray(citations), "citations must be an array");
+  const verified = citations.filter((citation) => citation.verified).length;
+  return {
+    total: citations.length,
+    verified,
+    unverified: citations.length - verified,
+    grounded: citations.length > 0 && verified === citations.length,
+  };
+}
+
+/**
+ * Rejects a read-only result whose citations do not exist in this workspace.
+ *
+ * A model that describes a different repository still produces well-formed
+ * JSON, so an ungrounded answer must fail instead of being stored as success.
+ *
+ * @param {object[]} citations - Annotated output of {@link checkCitations}.
+ * @param {string} label - Caller name used in the failure message.
+ * @returns {{total: number, verified: number, unverified: number, grounded: boolean}}
+ * The same summary {@link citationGrounding} returns.
+ * @throws {Error} When no citation is supplied or any citation is unverified.
+ */
+export function assertGroundedCitations(citations, label) {
+  const grounding = citationGrounding(citations);
+  assert(
+    grounding.total > 0,
+    `${label} returned no source citation; an ungrounded answer is not evidence`,
+  );
+  assert(
+    grounding.grounded,
+    `${label} cited ${grounding.unverified} of ${grounding.total} lines that ` +
+      "do not exist in this workspace; the answer describes a different tree",
+  );
+  return grounding;
+}
+
+/**
+ * Binds a report to the workspace it was actually produced against.
+ *
+ * @param {string} repo - Workspace passed to the provider as its cwd.
+ * @returns {Promise<{repo: string, head: string | null}>} Resolved path and
+ * Git HEAD, with `head` left null outside a Git workspace.
+ * @throws {Error} When the workspace path does not exist.
+ */
+export async function workspaceBinding(repo) {
+  const resolved = path.resolve(repo);
+  assert(fs.existsSync(resolved), `Workspace does not exist: ${resolved}`);
+  try {
+    return { repo: resolved, head: await git(resolved, ["rev-parse", "HEAD"]) };
+  } catch {
+    return { repo: resolved, head: null };
+  }
+}
