@@ -14,8 +14,8 @@
     "pm": { "parent": null, "profile": "claude-current", "concurrency": 1, "attempts": 1, "fallbacks": [] },
     "pl": { "parent": "pm", "profile": "codex-current", "concurrency": 1, "attempts": 1, "fallbacks": [] },
     "senior": { "parent": "pl", "profile": "agy-opus", "concurrency": 1, "attempts": 1, "fallbacks": [] },
-    "junior": { "parent": "pl", "profile": "agy-sonnet", "concurrency": 2, "attempts": 1, "fallbacks": ["agy-opus"] },
-    "intern": { "parent": "junior", "profile": "agy-oss", "concurrency": 3, "attempts": 1, "fallbacks": ["agy-sonnet", "agy-opus"] }
+    "junior": { "parent": "pl", "profile": "agy-sonnet", "concurrency": 1, "attempts": 1, "fallbacks": ["agy-opus"] },
+    "intern": { "parent": "junior", "profile": "agy-oss", "concurrency": 1, "attempts": 1, "fallbacks": ["agy-sonnet"] }
   },
   "policy": { "onExhaustion": "fallback", "maxCalls": 3, "timeoutMs": 300000, "repeatFailureLimit": 1 }
 }

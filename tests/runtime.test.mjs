@@ -230,7 +230,9 @@ test("default organization uses the responsibility hierarchy and routing", () =>
     ["pm", "pl", "senior", "junior", "intern"].map(
       (role) => org.roles[role].concurrency,
     ),
-    [1, 1, 1, 2, 4],
+    // Every Agy role draws on one shared quota pool, so the shipped default
+    // holds a single slot each and extra parallelism is opted into per team.
+    [1, 1, 1, 1, 1],
   );
   assert.equal(org.profiles[org.roles.pl.profile].model, "gpt-5.6-sol");
   assert.equal(
@@ -812,6 +814,39 @@ test("model presets preview only changed roles and never mutate an existing orga
   assert.equal(balanced.organization.roles.pl.profile, org.roles.pl.profile);
   assert.equal(balanced.organization.roles.senior.profile, "agy-opus");
   assert.equal(balanced.organization.roles.junior.profile, "agy-sonnet");
+});
+test("presets pin one slot per shared-pool role and stop the intern chain before Opus", () => {
+  const org = clone();
+  for (const name of ["balanced", "opus-first"]) {
+    const preview = previewPreset(org, name);
+    for (const role of ["senior", "junior", "intern"]) {
+      assert.equal(
+        preview.organization.roles[role].concurrency,
+        1,
+        `${name}/${role} must hold a single shared-pool slot`,
+      );
+    }
+  }
+  const intern = previewPreset(org, "balanced").organization.roles.intern;
+  assert.deepEqual(intern.fallbacks, ["agy-sonnet"]);
+  assert.ok(!intern.fallbacks.includes("agy-opus"));
+});
+test("provider print timeout expires before the runtime kills the call", () => {
+  for (const timeoutMs of [60000, 300000, 600000]) {
+    const spec = providerCommand(
+      { provider: "agy", command: ["agy"], model: "claude-opus-4-6-thinking" },
+      "/tmp/task",
+      "prompt",
+      timeoutMs,
+    );
+    const seconds = Number(
+      spec.argv[spec.argv.indexOf("--print-timeout") + 1].replace("s", ""),
+    );
+    assert.ok(
+      seconds * 1000 < timeoutMs,
+      `provider must self-terminate before ${timeoutMs}ms and report its usage`,
+    );
+  }
 });
 test("legacy runtime path forwards to the renamed oh my teams runtime", async () => {
   const modern = await run([
@@ -1483,7 +1518,11 @@ test("workflow offers independent tasks together within role and workflow limits
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 2, maxCalls: 4 },
   };
-  await createWorkflow(stateDir, request, clone(), dir);
+  // Concurrent dispatch, not the shipped slot default, is under test, so this
+  // organization opts into the second intern slot explicitly.
+  const parallelOrganization = clone();
+  parallelOrganization.roles.intern.concurrency = 2;
+  await createWorkflow(stateDir, request, parallelOrganization, dir);
   assert.deepEqual(
     resumeWorkflow(stateDir, request.id, 1).actions.map(
       (action) => action.taskId,
