@@ -340,7 +340,10 @@ export async function work(
   }
 
   const binding = org.roles[role];
-  const profileIds = selectedProfileIds ?? [binding.profile, ...binding.fallbacks];
+  const profileIds = selectedProfileIds ?? [
+    binding.profile,
+    ...binding.fallbacks,
+  ];
   assert(
     profileIds.length > 0 &&
       profileIds.every((profile) => Object.hasOwn(org.profiles, profile)),
@@ -569,10 +572,19 @@ export async function assist(
   assert(org.roles[role], "Unknown assistant caller role");
   const allowed = org.assistants?.[role] ?? [];
   const selected = profileId ?? allowed[0];
-  assert(selected && allowed.includes(selected), `Assistant profile not allowed: ${role}`);
+  assert(
+    selected && allowed.includes(selected),
+    `Assistant profile not allowed: ${role}`,
+  );
   const profile = org.profiles[selected];
-  assert(profile.model === "gpt-oss-120b-medium", "Assistant profile must use GPT-OSS-120B");
-  assert(["research", "checklist", "edit"].includes(kind), "Assist kind must be research, checklist, or edit");
+  assert(
+    profile.model === "gpt-oss-120b-medium",
+    "Assistant profile must use GPT-OSS-120B",
+  );
+  assert(
+    ["research", "checklist", "edit"].includes(kind),
+    "Assist kind must be research, checklist, or edit",
+  );
   assert(stateDir, "Shared coordinator state directory required");
 
   if (kind === "edit") {
@@ -593,7 +605,10 @@ export async function assist(
     `Assist kind: ${kind}. Caller role: ${role}. Task: ${task.instruction}. `,
     `Files: ${JSON.stringify(files)}`,
   ].join("");
-  assert(Buffer.byteLength(prompt) <= MAX_PROMPT_BYTES, "Task context too large; split it");
+  assert(
+    Buffer.byteLength(prompt) <= MAX_PROMPT_BYTES,
+    "Task context too large; split it",
+  );
   const response = await call(profile, repo, prompt, org.policy.timeoutMs);
   assert(
     response.code === 0 &&

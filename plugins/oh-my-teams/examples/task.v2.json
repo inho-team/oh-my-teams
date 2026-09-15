@@ -10,14 +10,30 @@
   "files": ["src/expiry.mjs"],
   "checks": [["node", "--test", "tests/expiry.test.mjs"]],
   "acceptance": [
-    { "id": "expiry-boundary", "description": "Before, equal, and after boundary cases pass.", "method": "check", "checkIndexes": [0] },
-    { "id": "public-api", "description": "The public function signature is unchanged.", "method": "review" }
+    {
+      "id": "expiry-boundary",
+      "description": "Before, equal, and after boundary cases pass.",
+      "method": "check",
+      "checkIndexes": [0]
+    },
+    {
+      "id": "public-api",
+      "description": "The public function signature is unchanged.",
+      "method": "review"
+    }
   ],
   "dependencies": [],
   "contractRefs": [],
   "contextRefs": [],
   "openQuestions": [],
-  "reviewRequirements": [{ "id": "semantic-review", "kind": "agent-review", "role": "senior", "criteria": ["public-api"] }],
+  "reviewRequirements": [
+    {
+      "id": "semantic-review",
+      "kind": "agent-review",
+      "role": "senior",
+      "criteria": ["public-api"]
+    }
+  ],
   "environment": "node22-lockfile-and-fixtures-revision-1",
   "baseRef": "origin/main",
   "risk": "normal"
