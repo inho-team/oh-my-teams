@@ -12,10 +12,15 @@ import { assert, readJSON, writeJSON } from "./core.mjs";
  */
 export function validateQuotaSnapshot(snapshot) {
   assert(
-    snapshot?.schemaVersion === 1 &&
-      typeof snapshot.poolId === "string" &&
-      snapshot.poolId.trim(),
+    snapshot?.schemaVersion === 1 && typeof snapshot.poolId === "string",
     "Quota snapshot poolId required",
+  );
+  // recordQuotaSnapshot builds a state path from this value, so it must carry
+  // the same pool identity the organization declares. A free-form string here
+  // would let "../.." place a snapshot outside the coordinator state.
+  assert(
+    /^[a-z0-9][a-z0-9-]*$/.test(snapshot.poolId),
+    `Invalid pool id: ${snapshot.poolId}`,
   );
   assert(
     typeof snapshot.accountProfile === "string" &&

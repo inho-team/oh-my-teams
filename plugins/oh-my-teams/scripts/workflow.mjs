@@ -493,7 +493,9 @@ function deriveWorkflowStatus(state) {
       : "accepted";
   }
   if (items.some((item) => item.state === "failed")) return "blocked";
-  if (items.some((item) => item.state === "running")) return "running";
+  // A reserved attempt holds a slot and its budget, so work is in flight even
+  // before a worker attaches.
+  if (items.some(occupiesSlot)) return "running";
   return "ready";
 }
 
@@ -727,7 +729,7 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
         receipt: input.receipt,
       });
       state.revision += 1;
-      state.status = "running";
+      state.status = deriveWorkflowStatus(state);
       saveWorkflowState(stateDir, id, state);
       return state;
     }
@@ -803,7 +805,7 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
       receipt: input.receipt,
     });
     state.revision += 1;
-    state.status = "running";
+    state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return state;
   });
@@ -935,7 +937,9 @@ export function recordSettlement(stateDir, id, expectedRevision, input) {
       type: "execution-settled",
     });
     state.revision += 1;
-    state.status = input.outcome === "failed" ? "blocked" : "ready";
+    // A settled task never decides the whole workflow: another task may still
+    // be failed or in flight, and a local "ready" would hide it.
+    state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return { state, duplicate: false, stale: false };
   });
@@ -1019,7 +1023,7 @@ export function retryTask(stateDir, id, expectedRevision, input) {
       evidence: input.evidence,
     });
     state.revision += 1;
-    state.status = "ready";
+    state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return state;
   });

@@ -189,12 +189,26 @@ function acquireFileLock(lockFile, busyMessage) {
   };
 }
 
+const FORBIDDEN_SEGMENTS = new Set(["..", ".git", ".orca", ".omt"]);
+
+// Windows and macOS open ".GIT" as ".git", and Windows additionally ignores
+// trailing dots and spaces, so an exact-string comparison lets ".GIT/config"
+// and ".git./config" reach real repository state. Compare a normalized
+// segment instead, keeping the raw value when normalization empties it so
+// that ".." stays forbidden.
+function segment(part) {
+  const lowered = part.toLowerCase();
+  return lowered.replace(/[.\s]+$/, "") || lowered;
+}
+
 /**
  * Resolves an allowed relative path without permitting workspace escape.
  *
  * Both lexical traversal and symlink traversal through the nearest existing
  * ancestor are rejected. `.git`, `.orca`, and `.omt` are always outside edit
- * scope because they contain repository or coordinator-owned state.
+ * scope because they contain repository or coordinator-owned state, and the
+ * comparison is made on a normalized segment so that a case-insensitive or
+ * trailing-dot spelling cannot reach the same directory.
  *
  * @param {string} root - Existing workspace root.
  * @param {string} relative - Non-empty relative path within the workspace.
@@ -207,9 +221,7 @@ export function inside(root, relative) {
     "A relative file path is required",
   );
   assert(
-    !relative
-      .split(/[\\/]/)
-      .some((part) => ["..", ".git", ".orca", ".omt"].includes(part)),
+    !relative.split(/[\\/]/).some((part) => FORBIDDEN_SEGMENTS.has(segment(part))),
     `Forbidden path: ${relative}`,
   );
 

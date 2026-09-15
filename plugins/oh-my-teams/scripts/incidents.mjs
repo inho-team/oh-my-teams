@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { assert, hash, readJSON, withFileLock, writeJSON } from "./core.mjs";
 
 const OPEN_STATUSES = ["proposed", "observing"];
+const SETTLED_STATUSES = ["stopped", "resolved"];
 const OBSERVATION_OUTCOMES = [
   "progress",
   "no-progress",
@@ -183,6 +184,17 @@ function validateObservation(input) {
 }
 
 function transitionIncident(incident, input, config, observedAt) {
+  // A stopped or resolved incident is settled. Without this guard a single
+  // "progress" observation cleared noProgressCount and returned the incident to
+  // "observing", which disarmed the very no-progress limit that stopped it.
+  // Only an explicit regression reopens settled work.
+  if (SETTLED_STATUSES.includes(incident.status)) {
+    if (input.outcome !== "regressed") return;
+    incident.status = "proposed";
+    incident.holdReason = null;
+    incident.noProgressCount = 0;
+    return;
+  }
   incident.noProgressCount =
     input.outcome === "no-progress" ? incident.noProgressCount + 1 : 0;
   if (incident.noProgressCount >= config.noProgressLimit) {

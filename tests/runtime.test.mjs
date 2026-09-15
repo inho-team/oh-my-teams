@@ -2059,12 +2059,13 @@ test("a provider answering from another model is refused and left auditable", as
     "wrong\n",
   );
 });
-test("ungrounded and misrouted answers route to workspace rebinding", () => {
+test("ungrounded answers route to workspace rebinding", () => {
+  // A model-binding mismatch is routed separately, by boundary-and-gate tests:
+  // rebinding the workspace would leave the wrong model in place.
   for (const input of [
     { kind: "workspace-context" },
     { grounded: false },
     { message: "Assistant cited 2 of 3 lines that do not exist in this workspace" },
-    { message: "Provider answered from x; routing evidence is invalid" },
   ]) {
     assert.deepEqual(classifyFailure(input), {
       category: "environment-context",

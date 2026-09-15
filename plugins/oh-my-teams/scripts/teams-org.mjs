@@ -506,6 +506,20 @@ async function executeCommand(args) {
   }
 }
 
+const BLOCKING_STATUSES = ["failed", "blocked"];
+
+// Commands do not share one envelope: a worker report carries `status`, the
+// workflow mutations wrap the new state in `{state, ...}`, and the review and
+// acceptance commands report `gateStatus`. Reading only the top-level `status`
+// left a settled failure and a revoked approval exiting 0, so a coordinator
+// script saw success. Each known shape is checked explicitly.
+function blockingOutcome(output) {
+  if (!output || typeof output !== "object") return false;
+  return [output.status, output.state?.status, output.gateStatus?.status].some(
+    (value) => BLOCKING_STATUSES.includes(value),
+  );
+}
+
 /**
  * Runs the CLI, prints JSON output, and sets failure exit status when applicable.
  *
@@ -523,7 +537,7 @@ export async function main(argv = process.argv.slice(2)) {
   const output = await executeCommand(args);
   if (output === undefined) return;
   console.log(JSON.stringify(output, null, 2));
-  if (["failed", "blocked"].includes(output?.status)) process.exitCode = 1;
+  if (blockingOutcome(output)) process.exitCode = 1;
 }
 
 if (
