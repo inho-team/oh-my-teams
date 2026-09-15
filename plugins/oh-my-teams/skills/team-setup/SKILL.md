@@ -1,6 +1,6 @@
 ---
 name: team-setup
-description: 최초 oh my teams 조직을 만들고 PM/PL/Senior/Junior/Intern별 구독 계정과 모델을 사용자에게 한 번 선택받는다. 기존 조직 변경은 team-edit을 사용한다.
+description: 이전 팀 구성 스킬명의 호환 진입점이다. 새 상설 조직 결성에는 team-form을 사용한다.
 ---
 
 # 팀 최초 구성

@@ -15,6 +15,7 @@ import {
   run,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
+  assist,
   applyEdits,
   makePrompt,
   work,
@@ -211,6 +212,120 @@ test("graph validation accepts branches and rejects cycle/missing profile/second
   const root = clone();
   root.roles.senior.parent = null;
   assert.throws(() => validateOrg(root), /root/);
+  const assistant = clone();
+  assistant.assistants.pm = ["missing"];
+  assert.throws(() => validateOrg(assistant), /assistant profiles/);
+});
+test("default organization uses the responsibility hierarchy and routing", () => {
+  const org = validateOrg(clone());
+  assert.equal(org.roles.pl.parent, "pm");
+  assert.equal(org.roles.senior.parent, "pl");
+  assert.equal(org.roles.junior.parent, "senior");
+  assert.equal(org.roles.intern.parent, "junior");
+  assert.deepEqual(
+    ["pm", "pl", "senior", "junior", "intern"].map(
+      (role) => org.roles[role].concurrency,
+    ),
+    [1, 1, 1, 2, 4],
+  );
+  assert.equal(org.profiles[org.roles.pl.profile].model, "gpt-5.6-sol");
+  assert.equal(
+    org.profiles[org.roles.senior.profile].model,
+    "gemini-3.8-flash-high",
+  );
+  assert.equal(
+    org.profiles[org.roles.junior.profile].model,
+    "claude-opus-4-6-thinking",
+  );
+  assert.equal(
+    org.profiles[org.roles.intern.profile].model,
+    "claude-sonnet-4-6",
+  );
+  assert.ok(Object.values(org.profiles).some((profile) => profile.model === "gpt-oss-120b-medium"));
+  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+    assert.deepEqual(org.assistants[role], ["agy-oss"]);
+  }
+});
+test("every role can use the configured GPT-OSS research assistant with an audit record", async (t) => {
+  const dir = fixture(t);
+  fs.writeFileSync(path.join(dir, "source.txt"), "alpha\nbeta\n");
+  const assistantTask = {
+    ...task,
+    id: "assistant-research",
+    instruction: "Find the beta line",
+    files: ["source.txt"],
+    checks: [[process.execPath, "--version"]],
+  };
+  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+    const stateDir = path.join(dir, `.omt-${role}`);
+    const report = await assist(dir, clone(), assistantTask, {
+      role,
+      kind: "research",
+      stateDir,
+      call: async (profile) => {
+        assert.equal(profile.model, "gpt-oss-120b-medium");
+        return response({
+          summary: "Found beta",
+          items: ["beta is present"],
+          citations: [{ file: "source.txt", line: 2, quote: "beta" }],
+        });
+      },
+    });
+    assert.equal(report.callerRole, role);
+    assert.equal(report.profile, "agy-oss");
+    assert.equal(report.citations[0].verified, true);
+    assert.ok(fs.existsSync(report.reportPath));
+    assert.ok(fs.existsSync(report.log));
+    assert.equal(report.logHash, hash(`${JSON.stringify({
+      summary: "Found beta",
+      items: ["beta is present"],
+      citations: [{ file: "source.txt", line: 2, quote: "beta" }],
+    })}\n`));
+  }
+});
+test("assistant edit uses GPT-OSS while retaining caller role checks and scope", async (t) => {
+  const dir = await repo(t);
+  const result = await assist(dir, clone(), task, {
+    role: "junior",
+    kind: "edit",
+    stateDir: path.join(dir, ".omt"),
+    call: async (profile) => {
+      assert.equal(profile.model, "gpt-oss-120b-medium");
+      return response({
+        edits: [
+          {
+            file: "value.txt",
+            beforeHash: hash("wrong\n"),
+            content: "right\n",
+          },
+        ],
+      });
+    },
+  });
+  assert.equal(result.status, "passed");
+  assert.equal(result.role, "junior");
+  assert.equal(result.calls[0].profile, "agy-oss");
+  assert.equal(result.calls[0].selectionReason, "assistant:junior:edit");
+});
+test("assistant rejects profiles not authorized for the caller", async (t) => {
+  const dir = fixture(t);
+  fs.writeFileSync(path.join(dir, "source.txt"), "alpha\n");
+  const assistantTask = {
+    ...task,
+    files: ["source.txt"],
+    checks: [[process.execPath, "--version"]],
+  };
+  await assert.rejects(
+    () =>
+      assist(dir, clone(), assistantTask, {
+        role: "pm",
+        kind: "research",
+        profileId: "agy-sonnet",
+        stateDir: path.join(dir, ".omt"),
+        call: async () => response({}),
+      }),
+    /not allowed/,
+  );
 });
 test("account labels alone cannot pretend to switch subscriptions", () => {
   const org = clone();
@@ -372,6 +487,8 @@ test("Agy selects GPT-OSS, Sonnet, and Opus with the same model argument", () =>
 test("failed OSS output promotes once to configured fallback and preserves org snapshot", async (t) => {
   const dir = await repo(t),
     org = clone();
+  org.roles.intern.profile = "agy-oss";
+  org.roles.intern.fallbacks = ["agy-sonnet"];
   let calls = 0;
   const result = await work(dir, org, task, {
     stateDir: path.join(dir, ".omt"),
@@ -417,7 +534,10 @@ test("quota stop does not switch subscriptions; repeated failure never becomes s
   });
   assert.equal(result.status, "failed");
   assert.equal(calls, 1);
-  const failed = await work(dir, clone(), task, {
+  const retryOrg = clone();
+  retryOrg.roles.intern.profile = "agy-oss";
+  retryOrg.roles.intern.fallbacks = ["agy-sonnet"];
+  const failed = await work(dir, retryOrg, task, {
     stateDir: path.join(dir, ".omt"),
     call: async () => response({ edits: [] }),
   });

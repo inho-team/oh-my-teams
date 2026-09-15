@@ -275,7 +275,8 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   if (plan.clients.codex) await installCodex(plan, root, commandRunner);
   console.log(JSON.stringify(plan, null, 2));
   console.log(
-    "Installed oh my teams. Start a new conversation and invoke team-setup. " +
+    "Installed oh my teams. Start a new conversation and invoke team-form, " +
+      "then use team-kickoff for a development goal. " +
       "Existing .omt organizations are reused. Legacy removal occurs only " +
       "with --remove-legacy after new-plugin verification.",
   );

@@ -498,6 +498,23 @@ export function validateOrg(org) {
   );
   for (const role of ROLES) validateRole(role, org.roles[role], org);
 
+  if (org.assistants) {
+    for (const [role, profiles] of Object.entries(org.assistants)) {
+      assert(ROLES.includes(role), `Unknown assistant role: ${role}`);
+      assert(
+        Array.isArray(profiles) &&
+          profiles.length > 0 &&
+          new Set(profiles).size === profiles.length &&
+          profiles.every(
+            (profile) =>
+              Object.hasOwn(org.profiles, profile) &&
+              org.profiles[profile].model === "gpt-oss-120b-medium",
+          ),
+        `Invalid assistant profiles: ${role}`,
+      );
+    }
+  }
+
   assert(
     ["stop", "fallback"].includes(org.policy.onExhaustion),
     "onExhaustion must be stop or fallback",
