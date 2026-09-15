@@ -396,9 +396,18 @@ export function validateDeploymentAuthorization(
   return authorization;
 }
 
-function validateDeploymentReceipt(receipt, authorization, now) {
+function validateDeploymentReceipt(
+  receipt,
+  authorization,
+  deploymentId,
+  now,
+) {
   assert(receipt?.schemaVersion === 1 && ID.test(receipt.id), "Deployment receipt identity required");
   assert(receipt.authorizationId === authorization.id, "Deployment receipt authorization mismatch");
+  assert(
+    receipt.deploymentId === deploymentId,
+    "Deployment receipt deployment mismatch",
+  );
   for (const key of ["lifecycleId", "releaseId", "sourceHash", "repository", "environment"]) {
     assert(receipt[key] === authorization[key], `Deployment receipt ${key} mismatch`);
   }
@@ -977,6 +986,7 @@ export function transitionSdlcArtifact(
       const receipt = validateDeploymentReceipt(
         input.receipt,
         authorization,
+        current.id,
         input.now ?? Date.now(),
       );
       const authorizationFile = path.join(
@@ -985,6 +995,10 @@ export function transitionSdlcArtifact(
         `${authorization.id}.json`,
       );
       const receiptFile = path.join(directory, "receipts", `${receipt.id}.json`);
+      assert(
+        !state.receipts?.[receipt.id],
+        "Deployment receipt already consumed",
+      );
       assert(
         state.authorizations?.[authorization.id] &&
           fs.existsSync(authorizationFile),
@@ -1004,6 +1018,7 @@ export function transitionSdlcArtifact(
       state.receipts ??= {};
       state.receipts[receipt.id] = {
         id: receipt.id,
+        deploymentId: current.id,
         authorizationId: authorization.id,
         externalId: receipt.externalId,
         executedAt: receipt.executedAt,
@@ -1038,7 +1053,8 @@ export function transitionSdlcArtifact(
       });
     }
     const invalidated =
-      input.toState === "invalidated"
+      currentReference.state === "accepted" &&
+      ["invalidated", "superseded", "archived"].includes(input.toState)
         ? invalidateDownstream(
             directory,
             state,

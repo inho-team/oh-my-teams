@@ -894,6 +894,7 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
           schemaVersion: 1,
           id: "deploy-receipt",
           authorizationId: "deploy-auth",
+          deploymentId: id,
           lifecycleId,
           releaseId: "release-a",
           sourceHash,
@@ -1276,5 +1277,46 @@ test("explicit invalidation recursively invalidates accepted descendants", (t) =
     },
   );
   assert.equal(result.state.artifacts["intent-a"].state, "invalidated");
+  assert.equal(result.state.artifacts["research-a"].state, "invalidated");
+});
+
+test("superseding an accepted artifact invalidates descendants", (t) => {
+  const stateDir = fixture(t);
+  createSdlc(stateDir, {
+    schemaVersion: 1,
+    id: "release-a",
+    goal: "Supersede safely",
+  });
+  recordSdlcArtifact(stateDir, "release-a", 1, artifact(), "intent");
+  let revision = acceptArtifact(stateDir, "release-a", "intent-a", 2);
+  const acceptedIntent = readSdlc(stateDir, "release-a").artifacts["intent-a"];
+  recordSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    artifact({
+      id: "research-a",
+      kind: "research",
+      upstream: [acceptedIntent],
+    }),
+    "research",
+  );
+  revision = acceptArtifact(
+    stateDir,
+    "release-a",
+    "research-a",
+    revision + 1,
+  );
+  const result = transitionSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    {
+      eventId: "supersede-intent",
+      artifactId: "intent-a",
+      toState: "superseded",
+    },
+  );
+  assert.equal(result.state.artifacts["intent-a"].state, "superseded");
   assert.equal(result.state.artifacts["research-a"].state, "invalidated");
 });

@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "id": "deploy-receipt-example",
   "authorizationId": "deploy-auth-example",
+  "deploymentId": "deployment-example",
   "lifecycleId": "release-example",
   "releaseId": "release-artifact-example",
   "sourceHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
