@@ -29,7 +29,7 @@ description: 설치된 oh my teams 스킬을 생애주기, 내부 역할과 호�
 | `team-close` | 성공한 Goal의 전달·병합·자원 정리를 완료한다. | 수용 기준을 충족한 작업을 성공으로 종료할 때 사용한다. |
 | `team-disband` | 실패·취소된 실행 팀을 해체하고 기록을 보존한다. | 작업을 성공으로 종료할 수 없거나 사용자가 취소할 때 사용한다. |
 
-역할 스킬에는 `pm`, `pl`, `senior`, `junior`, `intern`을 표시하고, `intern`의 사용자 표시 명칭이 Worker라는 점을 함께 밝힌다. 호환 표에는 실제로 설치된 `team-setup`, `team-show`, `team-edit`, `org-setup`, `org-show`, `org-edit`, `director`만 표시한다.
+역할 스킬에는 `pm`, `pl`, `senior`, `junior`, `intern`을 표시하고, `intern`의 사용자 표시 명칭이 Worker라는 점을 함께 밝힌다. 호환 표에는 실제로 설치된 `team-setup`, `team-show`, `team-edit`, `org-setup`, `org-show`, `org-edit`, `director`만 표시하며, 이들은 절차 본문을 갖지 않고 정본 스킬로 연결하기만 한다는 점을 밝힌다. 생애주기에도 역할에도 속하지 않는 `fluent-korean`은 지원 스킬로 따로 표시한다.
 
 마지막에는 일반적인 시작 흐름을 한 줄로 안내한다.
 
