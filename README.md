@@ -70,7 +70,8 @@ node plugins/oh-my-teams/scripts/teams-org.mjs incident-status --state <coordina
 node --test tests/runtime.test.mjs
 npm run eval:organization
 node experiments/run-routing.mjs --mode e1 --max-calls 18 --dry-run
-npm run quality
+npm ci
+npm run lint
 ```
 
 제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 coordinator state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.

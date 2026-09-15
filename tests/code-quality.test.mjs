@@ -120,3 +120,13 @@ test("team lifecycle skills expose one kickoff loop and explicit outcomes", () =
   assert.match(kickoff, /team-close/);
   assert.match(kickoff, /team-disband/);
 });
+
+test("the repository's own modules satisfy the audit rules", () => {
+  const report = auditDirectory();
+  const offenders = report.files
+    .filter((file) => file.findings.length)
+    .map((file) => `${file.file}: ${file.findings.join("; ")}`);
+  assert.deepEqual(offenders, []);
+  assert.equal(report.status, "passed");
+  assert.ok(report.totals.files > 0, "the audit must inspect real modules");
+});

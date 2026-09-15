@@ -1128,7 +1128,7 @@ test("workspace preparation and receipt attachment are separated and bind actual
         task: prepared.frozenTask,
         receipt: {
           ok: true,
-          result: { worktree: { id: "wrong", path: "/tmp" } },
+          result: { worktree: { id: "wrong", path: os.tmpdir() } },
         },
         executable: "orca",
         runtime,

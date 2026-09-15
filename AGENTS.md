@@ -11,3 +11,13 @@
 # 버전 정책
 
 호환 가능한 기능 추가와 버그 수정은 `1.x.x` 범위에서 버전을 올립니다. 주 버전은 제품 계약을 크게 바꾸는 비호환 변경이 있을 때에만 사용자의 명시적인 결정에 따라 변경합니다.
+
+# 코드 품질과 포맷
+
+활성 `.mjs` 파일에는 모듈 JSDoc을 작성하고, 공개 export에는 인접 JSDoc과 `@param`·`@returns`를 붙입니다. 실행문은 180자를 넘기지 않습니다. 포맷은 Prettier가 결정하므로 직접 맞추려고 하지 말고 `npm run format`을 실행합니다.
+
+작업을 마치면 `npm run lint`와 `npm test`를 실행해 통과를 확인한 뒤에 커밋합니다. 포맷 검사는 devDependency로 설치한 Prettier를 사용하므로, 새로 클론한 작업 트리에서는 `npm ci`를 먼저 실행합니다. 두 명령은 GitHub Actions의 `CI` 워크플로에서도 실행되기 때문에, 병합하기 전에 그 결과를 확인합니다.
+
+검사 기준의 상세한 내용은 [코드 품질·문서화 기준](docs/CODE_QUALITY.md)에 정리되어 있습니다.
+
+버전을 올릴 때에는 `package.json`, `.claude-plugin/marketplace.json`, Claude와 Codex의 `plugin.json`을 함께 갱신합니다. Codex manifest만 `+codex.<타임스탬프>` 형태의 빌드 메타데이터를 덧붙이며, 그 앞의 기본 버전은 나머지 세 곳과 일치해야 합니다. `tests/repository-metadata.test.mjs`가 이 일치를 검사합니다. 버전을 바꾼 뒤에는 `npm install`을 실행해서 `package-lock.json`에 기록된 버전까지 함께 동기화합니다.
