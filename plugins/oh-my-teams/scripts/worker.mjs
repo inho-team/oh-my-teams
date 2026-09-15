@@ -430,7 +430,10 @@ export async function work(
         if (response.exhausted) {
           failure =
             `Provider capacity unavailable ` +
-            `(${response.failureClass ?? "unknown"}): ${profileId}`;
+            `(${response.failureClass ?? "unknown"}): ${profileId}` +
+            (response.capacityResetsIn
+              ? `; provider reports capacity resets in ${response.capacityResetsIn}`
+              : "");
           if (response.failureClass === "pool-exhausted" && profile.pool) {
             exhaustedPools.add(profile.pool);
           }
