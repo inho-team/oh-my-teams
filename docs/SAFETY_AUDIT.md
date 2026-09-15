@@ -54,7 +54,7 @@ workflow 전체 수용은 고정된 integrationTask와 현재 통합 evidence·r
 worktree 조회 결과와 ID·경로·instance를 대조한다. 실제 외부 Dispatch
 계약과의 연결은 별도 검증 범위다. GitHub 저장소 이름과 origin URL은
 `inho-team/oh-my-teams`로 변경했다. 로컬 폴더도
-`/Users/jinsungkim/orca/oh-my-teams`로 이전하고 Git worktree 연결을 복구했다.
+로컬 Orca 작업 폴더로 이전하고 Git worktree 연결을 복구했다.
 이전 경로에는 현재 Orca 세션을 위한 호환 심볼릭 링크를 유지한다.
 Claude·Codex marketplace를 새 경로에 연결하고 1.4.0을 설치했다.
 현재 문서의 과거 전체 완료 표시는 이러한

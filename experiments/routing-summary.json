@@ -18,7 +18,7 @@
         ],
         "consumption": null
       },
-      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::/Users/jinsungkim/orca/workspaces/orca-skills/routing-e1-1789392072315",
+      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::<local-orca-workspaces>/orca-skills/routing-e1-1789392072315",
       "cleanup": "completed"
     },
     {
@@ -37,7 +37,7 @@
         ],
         "consumption": null
       },
-      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::/Users/jinsungkim/orca/workspaces/orca-skills/routing-opus-first-1789392272291",
+      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::<local-orca-workspaces>/orca-skills/routing-opus-first-1789392272291",
       "cleanup": "completed"
     },
     {
@@ -56,7 +56,7 @@
         ],
         "consumption": null
       },
-      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::/Users/jinsungkim/orca/workspaces/orca-skills/routing-balanced-1789392354356",
+      "worktreeId": "1e0e02ee-e740-4d0a-a057-afd946ef37b6::<local-orca-workspaces>/orca-skills/routing-balanced-1789392354356",
       "cleanup": "completed"
     }
   ],

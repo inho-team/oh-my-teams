@@ -1,7 +1,17 @@
 {
   "name": "oh-my-teams",
   "version": "1.6.0",
+  "description": "A PM/PL/Senior/Junior/Worker agent organization plugin for Claude Code and Codex, running on Orca.",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inho-team/oh-my-teams.git"
+  },
+  "bugs": {
+    "url": "https://github.com/inho-team/oh-my-teams/issues"
+  },
+  "homepage": "https://github.com/inho-team/oh-my-teams#readme",
   "type": "module",
   "engines": {
     "node": ">=22"
