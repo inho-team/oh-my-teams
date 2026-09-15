@@ -127,52 +127,64 @@ export async function withAsyncFileLock(
   }
 }
 
-function acquireFileLock(lockFile, busyMessage) {
-  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
-  let descriptor;
+function discard(file) {
   try {
-    descriptor = fs.openSync(lockFile, "wx");
+    fs.unlinkSync(file);
+  } catch {
+    // Already gone, or owned by someone who will clean it up.
+  }
+}
+
+/**
+ * Reports whether a lock file names an owner on this host that has exited.
+ *
+ * Unknown, foreign, and live owners all answer `false`, so a lock is only ever
+ * reclaimed from a process this host can prove is gone.
+ *
+ * @param {string} file - Lock file recording `{pid, hostname}`.
+ * @returns {boolean} Whether the recorded owner is a dead local process.
+ */
+export function ownerHasExited(file) {
+  let owner;
+  try {
+    owner = readJSON(file);
+  } catch {
+    return false;
+  }
+  if (
+    owner?.hostname !== os.hostname() ||
+    !Number.isInteger(owner.pid) ||
+    owner.pid <= 0
+  ) {
+    return false;
+  }
+  try {
+    process.kill(owner.pid, 0);
+    return false;
   } catch (error) {
-    if (error.code === "EEXIST") {
-      // Serialize recovery separately. Unknown/foreign/live owners stay locked.
-      const recoveryFile = `${lockFile}.recovery`;
-      let recovery;
-      try {
-        recovery = fs.openSync(recoveryFile, "wx");
-      } catch {
-        throw new Error(busyMessage);
-      }
-      try {
-        let owner;
-        try {
-          owner = readJSON(lockFile);
-        } catch {
-          throw new Error(busyMessage);
-        }
-        assert(
-          owner.hostname === os.hostname() &&
-            Number.isInteger(owner.pid) &&
-            owner.pid > 0,
-          busyMessage,
-        );
-        let exited = false;
-        try {
-          process.kill(owner.pid, 0);
-        } catch (probeError) {
-          exited = probeError.code === "ESRCH";
-        }
-        assert(exited, busyMessage);
-        fs.unlinkSync(lockFile);
-        descriptor = fs.openSync(lockFile, "wx");
-      } finally {
-        fs.closeSync(recovery);
-        fs.unlinkSync(recoveryFile);
-      }
-    } else {
-      throw error;
+    return error.code === "ESRCH";
+  }
+}
+
+// Creates `file` exclusively, reclaiming it once when the recorded owner has
+// exited. The exclusive create is atomic, so a process that loses the race to
+// reclaim sees EEXIST again and is refused rather than sharing the lock.
+function claimExclusive(file, busyMessage) {
+  try {
+    return fs.openSync(file, "wx");
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    assert(ownerHasExited(file), busyMessage);
+    discard(file);
+    try {
+      return fs.openSync(file, "wx");
+    } catch {
+      throw new Error(busyMessage);
     }
   }
+}
 
+function recordOwner(descriptor, file) {
   try {
     fs.writeFileSync(
       descriptor,
@@ -180,12 +192,39 @@ function acquireFileLock(lockFile, busyMessage) {
     );
   } catch (error) {
     fs.closeSync(descriptor);
-    fs.unlinkSync(lockFile);
+    discard(file);
     throw error;
   }
+}
+
+function acquireFileLock(lockFile, busyMessage) {
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+  let descriptor;
+  try {
+    descriptor = fs.openSync(lockFile, "wx");
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    // Serialize recovery separately. The recovery file records its own owner:
+    // an empty marker left behind by a process killed mid-recovery used to
+    // fail every later attempt, stranding the lock until someone deleted it.
+    const recoveryFile = `${lockFile}.recovery`;
+    const recovery = claimExclusive(recoveryFile, busyMessage);
+    try {
+      recordOwner(recovery, recoveryFile);
+      assert(ownerHasExited(lockFile), busyMessage);
+      discard(lockFile);
+      descriptor = fs.openSync(lockFile, "wx");
+    } finally {
+      fs.closeSync(recovery);
+      discard(recoveryFile);
+    }
+  }
+
+  recordOwner(descriptor, lockFile);
   return () => {
     fs.closeSync(descriptor);
-    fs.unlinkSync(lockFile);
+    // Releasing must not replace the caller's own error in a finally block.
+    discard(lockFile);
   };
 }
 

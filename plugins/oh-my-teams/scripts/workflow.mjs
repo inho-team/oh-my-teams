@@ -955,6 +955,82 @@ function validateRetryInput(input) {
 }
 
 /**
+ * Releases a reservation whose external launch never produced a worker.
+ *
+ * A reservation holds a concurrency slot, one attempt of the budget, and its
+ * reserved calls. When the launcher fails there was no way to give any of that
+ * back: the task stayed `reserved`, every resume returned the same
+ * `launch-reconcile-required` action, and one failed launch cost a slot and an
+ * attempt for the life of the workflow. Releasing requires the same evidence a
+ * retry does, and returns the reserved calls but never the spent attempt, so a
+ * launch loop cannot become free.
+ *
+ * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - Event id, task, attempt, resolution, and evidence.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, the task is not reserved, the
+ * attempt does not match, or the resolution evidence is missing.
+ */
+export function releaseReservation(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    assert(
+      input?.schemaVersion === 1 &&
+        WORKFLOW_ID_PATTERN.test(input.eventId ?? "") &&
+        typeof input.taskId === "string" &&
+        typeof input.attemptId === "string",
+      "Release requires schemaVersion=1, eventId, taskId and attemptId",
+    );
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+    assert(
+      typeof input.resolution === "string" &&
+        input.resolution.trim() &&
+        typeof input.evidence === "string" &&
+        input.evidence.trim(),
+      "Release requires a resolution and evidence",
+    );
+
+    const item = state.tasks[input.taskId];
+    assert(item?.state === "reserved", "Task holds no reservation to release");
+    assert(
+      item.attemptId === input.attemptId,
+      "Release does not match the reserved attempt",
+    );
+
+    const attempt = item.attempts.find((entry) => entry.id === input.attemptId);
+    assert(attempt, "Reserved attempt is not recorded");
+    // The attempt itself stays spent: an unobserved launch is not free work.
+    attempt.status = "released";
+    attempt.releasedAt = new Date().toISOString();
+    attempt.resolution = input.resolution;
+    attempt.evidence = input.evidence;
+    item.state = "pending";
+    item.attemptId = null;
+    item.execution = null;
+
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "reservation-released",
+      taskId: input.taskId,
+      attemptId: input.attemptId,
+      resolution: input.resolution,
+      evidence: input.evidence,
+    });
+    state.revision += 1;
+    state.status = deriveWorkflowStatus(state);
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
+  });
+}
+
+/**
  * Requeues a routed, resolved failure without erasing attempt or budget history.
  *
  * @param {string} stateDir - Coordinator `.omt` state directory.
