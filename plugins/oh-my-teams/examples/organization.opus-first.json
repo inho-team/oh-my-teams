@@ -4,16 +4,70 @@
   "name": "example-opus-first-team",
   "pools": { "agy-shared": { "label": "User-selected shared Agy quota" } },
   "profiles": {
-    "claude-current": { "provider": "claude", "command": ["claude"], "account": "current", "subscription": "User-selected Claude subscription", "model": null },
-    "codex-current": { "provider": "codex", "command": ["codex"], "account": "current", "subscription": "User-selected Codex subscription", "model": null },
-    "agy-opus": { "provider": "agy", "command": ["agy"], "account": "current", "subscription": "User-selected shared Agy pool", "model": "claude-opus-4-6-thinking", "pool": "agy-shared" }
+    "claude-current": {
+      "provider": "claude",
+      "command": ["claude"],
+      "account": "current",
+      "subscription": "User-selected Claude subscription",
+      "model": null
+    },
+    "codex-current": {
+      "provider": "codex",
+      "command": ["codex"],
+      "account": "current",
+      "subscription": "User-selected Codex subscription",
+      "model": null
+    },
+    "agy-opus": {
+      "provider": "agy",
+      "command": ["agy"],
+      "account": "current",
+      "subscription": "User-selected shared Agy pool",
+      "model": "claude-opus-4-6-thinking",
+      "pool": "agy-shared"
+    }
   },
   "roles": {
-    "pm": { "parent": null, "profile": "claude-current", "concurrency": 1, "attempts": 1, "fallbacks": [] },
-    "pl": { "parent": "pm", "profile": "codex-current", "concurrency": 1, "attempts": 1, "fallbacks": [] },
-    "senior": { "parent": "pl", "profile": "agy-opus", "concurrency": 1, "attempts": 1, "fallbacks": [] },
-    "junior": { "parent": "pl", "profile": "agy-opus", "concurrency": 2, "attempts": 1, "fallbacks": [] },
-    "intern": { "parent": "junior", "profile": "agy-opus", "concurrency": 3, "attempts": 1, "fallbacks": [] }
+    "pm": {
+      "parent": null,
+      "profile": "claude-current",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "pl": {
+      "parent": "pm",
+      "profile": "codex-current",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "senior": {
+      "parent": "pl",
+      "profile": "agy-opus",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "junior": {
+      "parent": "pl",
+      "profile": "agy-opus",
+      "concurrency": 2,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "intern": {
+      "parent": "junior",
+      "profile": "agy-opus",
+      "concurrency": 3,
+      "attempts": 1,
+      "fallbacks": []
+    }
   },
-  "policy": { "onExhaustion": "stop", "maxCalls": 2, "timeoutMs": 300000, "repeatFailureLimit": 1 }
+  "policy": {
+    "onExhaustion": "stop",
+    "maxCalls": 2,
+    "timeoutMs": 300000,
+    "repeatFailureLimit": 1
+  }
 }

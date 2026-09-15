@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 /** Runs the deterministic organization scenarios and emits JSON evidence. */
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJSON, run } from "../../plugins/oh-my-teams/scripts/core.mjs";
@@ -10,25 +9,61 @@ const root = path.resolve(
   "../..",
 );
 const manifest = readJSON(path.join(root, "evals/organization/scenarios.json"));
-const result = await run(
-  [process.execPath, "--test", "tests/runtime.test.mjs"],
-  { cwd: root, timeoutMs: 120000 },
-);
-const text = `${result.stdout}\n${result.stderr}`;
+const evidenceTests = [
+  ...new Set(manifest.scenarios.flatMap((scenario) => scenario.evidenceTests)),
+];
+
+// Running the whole test file made every scenario share one verdict: an
+// unrelated failure elsewhere, or a machine slower than the timeout, reported
+// all seven as failed. Each evidence test is run by name instead, so a scenario
+// only fails on its own evidence and the run costs seconds rather than minutes.
+function escapeForPattern(name) {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function runEvidenceTest(name) {
+  const started = Date.now();
+  const result = await run(
+    [
+      process.execPath,
+      "--test",
+      "--test-reporter=tap",
+      "--test-name-pattern",
+      `^${escapeForPattern(name)}$`,
+      "tests/runtime.test.mjs",
+    ],
+    { cwd: root, timeoutMs: 180000 },
+  );
+  const text = `${result.stdout}\n${result.stderr}`;
+  // TAP marks a selected test `ok`; a name that matches nothing reports zero
+  // passes, which must read as missing evidence rather than as success.
+  const passed = /^# pass 1$/m.test(text);
+  return {
+    name,
+    passed: passed && result.code === 0 && !result.timedOut,
+    exitCode: result.code,
+    timedOut: result.timedOut,
+    elapsedMs: Date.now() - started,
+  };
+}
+
+const outcomes = new Map();
+for (const name of evidenceTests) {
+  outcomes.set(name, await runEvidenceTest(name));
+}
+
 const scenarios = manifest.scenarios.map((scenario) => {
-  const missing = scenario.evidenceTests.filter(
-    (name) => !text.includes(`✔ ${name}`),
+  const failing = scenario.evidenceTests.filter(
+    (name) => !outcomes.get(name).passed,
   );
   return {
     id: scenario.id,
-    status:
-      result.code === 0 && !result.timedOut && missing.length === 0
-        ? "passed"
-        : "failed",
+    status: failing.length === 0 ? "passed" : "failed",
     evidenceTests: scenario.evidenceTests,
-    missing,
+    missing: failing,
   };
 });
+
 const output = {
   schemaVersion: 1,
   kind: manifest.kind,
@@ -36,8 +71,7 @@ const output = {
     ? "passed"
     : "failed",
   scenarios,
-  testExitCode: result.code,
-  timedOut: result.timedOut,
+  evidence: [...outcomes.values()],
   note: "This evaluator uses deterministic local fixtures and makes no model-quality or subscription-cost claim.",
 };
 console.log(JSON.stringify(output, null, 2));

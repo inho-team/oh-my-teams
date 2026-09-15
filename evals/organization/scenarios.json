@@ -2,12 +2,56 @@
   "schemaVersion": 1,
   "kind": "deterministic-local",
   "scenarios": [
-    { "id": "narrow-boundary", "description": "A narrow edit preserves its task contract and records passing implementation evidence.", "evidenceTests": ["task v2 prompt and report bind goal, acceptance, revision and immutable hash"] },
-    { "id": "independent-wave", "description": "Independent files can be offered in the same bounded dispatch wave.", "evidenceTests": ["workflow offers independent tasks together within role and workflow limits"] },
-    { "id": "shared-contract-conflict", "description": "Tasks sharing an interface contract are not dispatched in parallel.", "evidenceTests": ["workflow rejects dependency cycles and avoids parallel shared-contract conflicts"] },
-    { "id": "missing-requirement", "description": "Passing checks do not bypass required semantic review and acceptance.", "evidenceTests": ["task v2 cannot be accepted before independent review and stale source invalidates review", "an open finding cannot be erased by omitting it from a later approved review"] },
-    { "id": "failure-routing", "description": "Requirement ambiguity and environment failures route to different owners.", "evidenceTests": ["failure routing uses deterministic signals and does not retry ambiguous work unchanged"] },
-    { "id": "resume-and-late-result", "description": "Restart reconciliation avoids duplicate work and late attempts do not settle the current task.", "evidenceTests": ["workflow schedules only dependency-ready tasks and requires reconciliation before restart", "workflow deduplicates settlements, ignores stale attempts, and enforces total call budget"] },
-    { "id": "no-false-progress", "description": "A blocked Goal with only terminal Dispatches cannot be reported as in progress.", "evidenceTests": ["terminal dispatches cannot be reported as active goal progress"] }
+    {
+      "id": "narrow-boundary",
+      "description": "A narrow edit preserves its task contract and records passing implementation evidence.",
+      "evidenceTests": [
+        "task v2 prompt and report bind goal, acceptance, revision and immutable hash"
+      ]
+    },
+    {
+      "id": "independent-wave",
+      "description": "Independent files can be offered in the same bounded dispatch wave.",
+      "evidenceTests": [
+        "workflow offers independent tasks together within role and workflow limits"
+      ]
+    },
+    {
+      "id": "shared-contract-conflict",
+      "description": "Tasks sharing an interface contract are not dispatched in parallel.",
+      "evidenceTests": [
+        "workflow rejects dependency cycles and avoids parallel shared-contract conflicts"
+      ]
+    },
+    {
+      "id": "missing-requirement",
+      "description": "Passing checks do not bypass required semantic review and acceptance.",
+      "evidenceTests": [
+        "task v2 cannot be accepted before independent review and stale source invalidates review",
+        "an open finding cannot be erased by omitting it from a later approved review"
+      ]
+    },
+    {
+      "id": "failure-routing",
+      "description": "Requirement ambiguity and environment failures route to different owners.",
+      "evidenceTests": [
+        "failure routing uses deterministic signals and does not retry ambiguous work unchanged"
+      ]
+    },
+    {
+      "id": "resume-and-late-result",
+      "description": "Restart reconciliation avoids duplicate work and late attempts do not settle the current task.",
+      "evidenceTests": [
+        "workflow schedules only dependency-ready tasks and requires reconciliation before restart",
+        "workflow deduplicates settlements, ignores stale attempts, and enforces total call budget"
+      ]
+    },
+    {
+      "id": "no-false-progress",
+      "description": "A blocked Goal with only terminal Dispatches cannot be reported as in progress.",
+      "evidenceTests": [
+        "terminal dispatches cannot be reported as active goal progress"
+      ]
+    }
   ]
 }

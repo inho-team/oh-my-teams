@@ -17,6 +17,7 @@ import {
   createWorkflow,
   readWorkflow,
   recordSettlement,
+  releaseReservation,
   resumeWorkflow,
   retryTask,
 } from "./workflow.mjs";
@@ -60,6 +61,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-reserve --id ID --state DIR --revision N --execution FILE
   workflow-accept --id ID --state DIR --revision N --repo DIR --report FILE
   workflow-settle --id ID --state DIR --revision N --settlement FILE
+  workflow-release --id ID --state DIR --revision N --release FILE
   workflow-retry --id ID --state DIR --revision N --retry FILE
   failure-classify --failure FILE
   lesson-record --lesson FILE --state DIR
@@ -110,6 +112,7 @@ export const ALLOWED_OPTIONS = {
   "workflow-reserve": ["id", "state", "revision", "execution"],
   "workflow-accept": ["id", "state", "revision", "repo", "report"],
   "workflow-settle": ["id", "state", "revision", "settlement"],
+  "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
@@ -156,6 +159,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-reserve": ["id", "state", "revision", "execution"],
   "workflow-accept": ["id", "state", "revision", "repo", "report"],
   "workflow-settle": ["id", "state", "revision", "settlement"],
+  "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
@@ -457,6 +461,13 @@ async function executeCommand(args) {
         args.id,
         Number(args.revision),
         readJSON(args.settlement),
+      );
+    case "workflow-release":
+      return releaseReservation(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.release),
       );
     case "workflow-retry":
       return retryTask(

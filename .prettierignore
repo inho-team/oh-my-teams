@@ -1,0 +1,16 @@
+node_modules/
+package-lock.json
+
+# 0.6.1 보존본은 원본 형태를 유지한다.
+legacy/
+
+# 생성물과 로컬 상태는 추적 대상이 아니다.
+experiments/results/
+.omc/
+.orca/
+.omt/
+
+# core.mjs의 writeJSON이 만드는 산출물이다. 직렬화 방식이 Prettier와
+# 다르므로, 포함하면 생성기를 다시 돌릴 때마다 포맷 검사가 거짓으로 실패한다.
+experiments/measurements.json
+experiments/routing-summary.json

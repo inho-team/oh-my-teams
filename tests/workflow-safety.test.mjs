@@ -552,9 +552,8 @@ test("resumeWorkflow rejects pending and stale-execution gates", async (t) => {
       "1.json",
     ),
   );
-  const { taskHash } = await import(
-    "../plugins/oh-my-teams/scripts/contracts.mjs"
-  );
+  const { taskHash } =
+    await import("../plugins/oh-my-teams/scripts/contracts.mjs");
   writeJSON(path.join(stateDir, "gates", "gated.json"), {
     runId: "wrong-execution",
     state: "accepted",
