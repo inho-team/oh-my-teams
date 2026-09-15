@@ -223,6 +223,29 @@ export function classifyProviderFailure(result, decoded) {
 }
 
 /**
+ * Reads how long a provider says its exhausted capacity stays unavailable.
+ *
+ * Agy reports exhaustion as a prose string rather than structured fields, so
+ * the reset it names is the only thing separating "retry after this window"
+ * from "escalate now". Discarding it leaves an operator with a dead pool and
+ * no idea when work can resume.
+ *
+ * @param {object} result - Raw command result.
+ * @param {object} decoded - Normalized output from {@link decodeOutput}.
+ * @returns {string | null} Provider-reported reset window, or `null`.
+ */
+export function capacityResetHint(result, decoded) {
+  if (!decoded.providerError) return null;
+  const envelope = tryParseJson(result.stdout);
+  const error = envelope?.error ?? envelope;
+  const text = typeof error === "string" ? error : `${result.stdout ?? ""}`;
+  const pattern =
+    /\bresets?\s+in\s+([0-9]+(?:\.[0-9]+)?[hms](?:[0-9]+(?:\.[0-9]+)?[hms])*)/i;
+  const match = pattern.exec(text);
+  return match ? match[1] : null;
+}
+
+/**
  * Extracts a JSON object from plain, fenced, or prose-wrapped model text.
  *
  * @param {string} text - Model response text.
@@ -267,6 +290,7 @@ export async function invoke(profile, cwd, prompt, timeoutMs, execute = run) {
     ...decoded,
     modelBinding: modelBinding(profile, decoded),
     failureClass,
+    capacityResetsIn: capacityResetHint(result, decoded),
     exhausted: ["pool-exhausted", "quota-unknown", "rate-limit"].includes(
       failureClass,
     ),

@@ -120,6 +120,36 @@
 모델 교체는 이 목록에 없다. Opus와 Sonnet의 토큰 차이는 호출당 약 80토큰인 반면 호출 한 번의
 비용은 약 17,600토큰이므로, 모델 선택보다 호출 구조가 220배 크게 작용한다.
 
+### 2.4 실제 소진 응답 실측 (2026-09-15)
+
+소진 상태의 계정으로 `agy --output-format json`을 1회 호출해 원본 응답을 확보했다.
+호출이 추론 전에 거부되므로 `usage`는 전 항목 0이며 토큰을 쓰지 않았다.
+
+```
+{"status":"ERROR","response":"",
+ "error":"API error (attempt 5): RESOURCE_EXHAUSTED (code 429): Individual quota
+           reached. ... Resets in 3h57m23s.",
+ "duration_seconds":51.09,"usage":{...전부 0}}
+```
+
+확인된 사실은 네 가지다.
+
+- **`error`가 객체가 아니라 문자열이다.** 따라서 4.3절이 요구하는 구조화된 `scope`가 없고,
+  `classifyProviderFailure`는 `pool-exhausted`에 도달할 수 없다. 실제 판정은 `quota-unknown`이며
+  `worker.mjs`는 이 경우 `break profileLoop`로 전체를 중단한다. 결론적으로 동작은 안전하지만,
+  P2에서 구현한 `exhaustedPools`와 `policy.onExhaustion`은 Agy 상대로는 실행되지 않는 경로다.
+  불명확한 신호를 보수적으로 처리한다는 4.3절의 방침에 부합하므로 승격시키지 않는다.
+- **갱신 시각이 오류 문자열 안에 있다.** `Resets in 3h57m23s`를 `capacityResetHint`가 추출해
+  실패 보고에 포함한다. 운영자가 재개 가능 시점을 알 수 있느냐가 달라진다. 공급자가 실패로
+  표시한 응답에서만 읽으므로, 모델이 우연히 같은 문구를 출력해도 용량 신호로 오독하지 않는다.
+- **Agy가 내부적으로 5회 재시도한다.** `attempt 5`와 `duration_seconds: 51`이 그 증거다.
+  소진된 풀에 대한 호출은 토큰이 0이어도 약 51초를 소모하므로, 슬롯을 1로 고정한 조치가
+  소진 상황에서도 유효하게 작동한다.
+- **소진된 창은 5시간 창이다.** 갱신까지 약 4시간으로 표시되었으므로 주간 창은 살아 있다.
+
+이 응답은 `tests/runtime.test.mjs`에 fixture로 보존했다. 그 전까지 분류기는 실제 소진 응답을
+한 번도 보지 못한 채 추측된 형태 위에서만 검증되고 있었다.
+
 ## 3. 비교할 운영 프리셋
 
 ### A. opus-first — 다음 평가의 기준선

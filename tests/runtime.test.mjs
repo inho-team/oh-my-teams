@@ -30,6 +30,7 @@ import {
   workspaceBinding,
 } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import {
+  capacityResetHint,
   classifyProviderFailure,
   decodeOutput,
   modelBinding,
@@ -692,6 +693,69 @@ test("429 in successful source code is not quota exhaustion", async () => {
     }),
   );
   assert.equal(failed.exhausted, true);
+});
+// Captured verbatim from agy 1.2.2 against a genuinely exhausted Antigravity
+// pool on 2026-09-15. The probe consumed zero tokens because the call is
+// refused before inference. Agy reports exhaustion as a prose string with no
+// structured code or scope, so the classifier cannot confirm pool scope and
+// must stop on the conservative quota-unknown path instead.
+const AGY_EXHAUSTED_STDOUT = JSON.stringify({
+  conversation_id: "2fe57b28-e436-4b84-a719-005ebcf43efa",
+  status: "ERROR",
+  response: "",
+  error:
+    "API error (attempt 5): RESOURCE_EXHAUSTED (code 429): Individual quota " +
+    "reached. Please upgrade your subscription to increase your limits. " +
+    "Resets in 3h57m23s.",
+  duration_seconds: 51.0886511,
+  num_turns: 1,
+  usage: {
+    input_tokens: 0,
+    output_tokens: 0,
+    thinking_tokens: 0,
+    cache_read_tokens: 0,
+    total_tokens: 0,
+  },
+});
+test("a real Agy exhaustion response stops the call and reports its reset window", async () => {
+  const result = await invoke(
+    {
+      provider: "agy",
+      command: ["agy"],
+      model: "gpt-oss-120b-medium",
+      pool: "agy-shared",
+    },
+    ".",
+    "prompt",
+    60000,
+    async () => ({ code: 0, stdout: AGY_EXHAUSTED_STDOUT, stderr: "" }),
+  );
+  assert.equal(result.failureClass, "quota-unknown");
+  assert.equal(result.exhausted, true);
+  // Prose-only exhaustion never proves pool scope, so the runtime must not
+  // claim it and must not keep probing other members of the same pool.
+  assert.notEqual(result.failureClass, "pool-exhausted");
+  assert.equal(result.capacityResetsIn, "3h57m23s");
+  assert.equal(result.usage.total_tokens, 0);
+});
+test("a reset window is read only from a response the provider marked failed", () => {
+  const answer = JSON.stringify({
+    result: "The retry banner should read: resets in 9h9m.",
+  });
+  assert.equal(
+    capacityResetHint(
+      { code: 0, stdout: answer, stderr: "" },
+      decodeOutput(answer),
+    ),
+    null,
+  );
+  assert.equal(
+    capacityResetHint(
+      { code: 0, stdout: AGY_EXHAUSTED_STDOUT, stderr: "" },
+      decodeOutput(AGY_EXHAUSTED_STDOUT),
+    ),
+    "3h57m23s",
+  );
 });
 test("confirmed shared-pool exhaustion skips fallback models in the same pool", async (t) => {
   const dir = await repo(t),
