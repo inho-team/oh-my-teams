@@ -1,6 +1,23 @@
 /** Provider command construction, output normalization, and failure classification. */
 import { assert, profileEnv, run } from "./core.mjs";
 
+/** Headroom so a provider self-terminates before the runtime kills the process. */
+const PRINT_TIMEOUT_MARGIN_MS = 5000;
+
+/**
+ * Converts the call budget into the provider's own print-mode wait.
+ *
+ * A provider killed mid-call still consumed shared-pool quota but returns no
+ * usage envelope, so its own wait must expire first and report what it spent.
+ *
+ * @param {number} timeoutMs - Call budget the runtime enforces.
+ * @returns {string} Go-style duration accepted by `--print-timeout`.
+ */
+function printTimeout(timeoutMs) {
+  const budget = Math.max(timeoutMs - PRINT_TIMEOUT_MARGIN_MS, 1000);
+  return `${Math.round(budget / 1000)}s`;
+}
+
 /**
  * Builds a shell-free command for one supported model provider.
  *
@@ -10,10 +27,11 @@ import { assert, profileEnv, run } from "./core.mjs";
  * @param {object} profile - Valid provider profile with command and optional model.
  * @param {string} cwd - Workspace exposed as read-only model context.
  * @param {string} prompt - Literal prompt passed through stdin or argv.
+ * @param {number} [timeoutMs=300000] - Call budget the runtime enforces.
  * @returns {{argv: string[], input: string}} Command arguments and stdin payload.
  * @throws {Error} When the provider is unsupported.
  */
-export function providerCommand(profile, cwd, prompt) {
+export function providerCommand(profile, cwd, prompt, timeoutMs = 300000) {
   const argv = [...profile.command];
   if (profile.provider === "agy") {
     argv.push(
@@ -26,7 +44,7 @@ export function providerCommand(profile, cwd, prompt) {
       "--output-format",
       "json",
       "--print-timeout",
-      "5m",
+      printTimeout(timeoutMs),
     );
     if (profile.model) argv.push("--model", profile.model);
     argv.push("-p", prompt);
@@ -235,7 +253,7 @@ export function parseModelJSON(text) {
  * @returns {Promise<object>} Process, output, usage, and failure metadata.
  */
 export async function invoke(profile, cwd, prompt, timeoutMs, execute = run) {
-  const { argv, input } = providerCommand(profile, cwd, prompt);
+  const { argv, input } = providerCommand(profile, cwd, prompt, timeoutMs);
   const result = await execute(argv, {
     cwd,
     input,

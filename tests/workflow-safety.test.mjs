@@ -326,7 +326,12 @@ test("parallel attempts reserve allowances and reject spending another attempt b
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 3 },
   };
-  await createWorkflow(stateDir, request, structuredClone(organization), dir);
+  // Reservation discipline, not slot exhaustion, is under test here, so this
+  // organization opts into a second intern slot instead of inheriting the
+  // single shared-pool slot the shipped examples pin.
+  const parallelOrganization = structuredClone(organization);
+  parallelOrganization.roles.intern.concurrency = 2;
+  await createWorkflow(stateDir, request, parallelOrganization, dir);
   const receipt = (id) => ({
     executionId: id,
     runId: id,

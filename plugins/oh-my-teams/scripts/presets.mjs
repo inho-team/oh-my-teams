@@ -11,6 +11,7 @@ export const PRESETS = {
       intern: "claude-opus-4-6-thinking",
     },
     fallbacks: { senior: [], junior: [], intern: [] },
+    concurrency: { senior: 1, junior: 1, intern: 1 },
   },
   balanced: {
     description:
@@ -23,8 +24,9 @@ export const PRESETS = {
     fallbacks: {
       senior: [],
       junior: ["claude-opus-4-6-thinking"],
-      intern: ["claude-sonnet-4-6", "claude-opus-4-6-thinking"],
+      intern: ["claude-sonnet-4-6"],
     },
+    concurrency: { senior: 1, junior: 1, intern: 1 },
   },
 };
 
@@ -46,6 +48,9 @@ function profileForModel(org, model) {
  * PM and PL bindings remain untouched. The function resolves models to the
  * caller's existing profiles so it never invents an account or subscription.
  *
+ * Presets also pin per-role concurrency. Roles sharing one quota pool draw from
+ * it simultaneously, so slot count governs pool drain more than model choice.
+ *
  * @param {object} org - Current validated organization.
  * @param {'opus-first' | 'balanced'} name - Preset identifier.
  * @returns {object} Preset metadata, changed role bindings, and proposed org.
@@ -66,8 +71,9 @@ export function previewPreset(org, name) {
     const before = {
       profile: org.roles[role].profile,
       fallbacks: org.roles[role].fallbacks,
+      concurrency: org.roles[role].concurrency,
     };
-    const after = { profile, fallbacks };
+    const after = { profile, fallbacks, concurrency: preset.concurrency[role] };
     organization.roles[role] = { ...organization.roles[role], ...after };
     if (JSON.stringify(before) !== JSON.stringify(after)) {
       changes.push({ role, before, after });

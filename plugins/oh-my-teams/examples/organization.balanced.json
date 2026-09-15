@@ -2,7 +2,11 @@
   "schemaVersion": 1,
   "revision": 1,
   "name": "example-balanced-team",
-  "pools": { "agy-shared": { "label": "User-selected shared Agy quota" } },
+  "pools": {
+    "agy-shared": {
+      "label": "User-selected shared Agy quota"
+    }
+  },
   "profiles": {
     "claude-current": {
       "provider": "claude",
@@ -68,16 +72,16 @@
     "junior": {
       "parent": "pl",
       "profile": "agy-sonnet",
-      "concurrency": 2,
+      "concurrency": 1,
       "attempts": 1,
       "fallbacks": ["agy-opus"]
     },
     "intern": {
       "parent": "junior",
       "profile": "agy-oss",
-      "concurrency": 3,
+      "concurrency": 1,
       "attempts": 1,
-      "fallbacks": ["agy-sonnet", "agy-opus"]
+      "fallbacks": ["agy-sonnet"]
     }
   },
   "policy": {

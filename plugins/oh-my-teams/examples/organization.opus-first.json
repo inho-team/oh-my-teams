@@ -2,7 +2,11 @@
   "schemaVersion": 1,
   "revision": 1,
   "name": "example-opus-first-team",
-  "pools": { "agy-shared": { "label": "User-selected shared Agy quota" } },
+  "pools": {
+    "agy-shared": {
+      "label": "User-selected shared Agy quota"
+    }
+  },
   "profiles": {
     "claude-current": {
       "provider": "claude",
@@ -52,14 +56,14 @@
     "junior": {
       "parent": "pl",
       "profile": "agy-opus",
-      "concurrency": 2,
+      "concurrency": 1,
       "attempts": 1,
       "fallbacks": []
     },
     "intern": {
       "parent": "junior",
       "profile": "agy-opus",
-      "concurrency": 3,
+      "concurrency": 1,
       "attempts": 1,
       "fallbacks": []
     }
