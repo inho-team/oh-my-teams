@@ -20,7 +20,7 @@ description: 최초 oh my teams 상설 조직을 구성하고 역할별 구독·
 
 최초 구성에서는 `opus-first`와 `balanced` 프리셋을 제안한다. `opus-first`는 Agy 역할의 기준선을 Opus로 통일하고, `balanced`는 Senior=Opus, Junior=Sonnet, Intern=GPT-OSS로 배정한다. PM·PL의 기존 Claude·Codex 선택은 두 프리셋 모두 바꾸지 않는다. 프리셋을 고른 뒤에도 직급별 구독·계정과 실제 모델 ID를 확인하며 사용자는 모두 변경할 수 있다. 프리셋은 보고 구조를 바꾸지 않으므로 예제의 상위 역할 배치는 참고일 뿐이다. 구독별 청구/할당량은 토큰 수와 다른 값이다.
 
-[`../../examples/organization.json`](../../examples/organization.json), [`../../examples/organization.opus-first.json`](../../examples/organization.opus-first.json), [`../../examples/organization.balanced.json`](../../examples/organization.balanced.json)을 구조 참고로 사용하되 실제 답으로 채운다. `subscription`은 사용자가 알아볼 이름, `account`는 실행 계정 참조다. 이름만 붙여 계정이 전환됐다고 보고하지 않는다. 현재 CLI 인증을 쓸 때 `account: current`; 별도 계정은 CLI가 지원하는 프로필 인수 또는 `env`의 환경변수 **이름 참조**로 연결한다. 비밀값을 JSON에 넣지 않는다. Agy가 계정 선택 옵션을 제공하지 않으면 검증된 별도 실행 프로필이 필요하다.
+[`../../examples/organization.json`](../../examples/organization.json)을 구조 참고로 사용하되 실제 답으로 채운다. 프리셋이 적용한 결과를 담은 예제도 있으나, 배정 내용은 위 문단에 이미 있고 정본은 `scripts/presets.mjs`이므로 구조를 볼 때는 한 파일이면 충분하다. `subscription`은 사용자가 알아볼 이름, `account`는 실행 계정 참조다. 이름만 붙여 계정이 전환됐다고 보고하지 않는다. 현재 CLI 인증을 쓸 때 `account: current`; 별도 계정은 CLI가 지원하는 프로필 인수 또는 `env`의 환경변수 **이름 참조**로 연결한다. 비밀값을 JSON에 넣지 않는다. Agy가 계정 선택 옵션을 제공하지 않으면 검증된 별도 실행 프로필이 필요하다.
 
 현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
 
@@ -29,4 +29,4 @@ node <runtime> init --org <project>/.omt/organization.json --from <user-approved
 node <runtime> show --org <project>/.omt/organization.json
 ```
 
-인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 구독 선택 질문을 다시 시작하지 않는다. `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다.
+`init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 구독 선택 질문을 다시 시작하지 않는다. `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다.
