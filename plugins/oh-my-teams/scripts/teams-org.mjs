@@ -73,7 +73,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
 Existing organizations are reused; init never asks for subscriptions again.
 No command automatically pushes, merges, deploys, publishes, or deletes.`;
 
-const ALLOWED_OPTIONS = {
+/** Options each subcommand accepts, keyed by command name. */
+export const ALLOWED_OPTIONS = {
   init: ["org", "from"],
   edit: ["org", "from", "revision"],
   preset: ["org", "name", "revision", "apply"],
@@ -119,7 +120,8 @@ const ALLOWED_OPTIONS = {
   "quota-compare": ["before", "after"],
 };
 
-const REQUIRED_OPTIONS = {
+/** Options each subcommand must receive, keyed by command name. */
+export const REQUIRED_OPTIONS = {
   init: ["org", "from"],
   edit: ["org", "from", "revision"],
   preset: ["org", "name", "revision"],
