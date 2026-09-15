@@ -89,6 +89,10 @@
         "account": { "type": "string", "minLength": 1 },
         "subscription": { "type": "string", "minLength": 1 },
         "model": { "type": ["string", "null"] },
+        "effort": {
+          "enum": ["low", "medium", "high", "xhigh", "max", "ultra"],
+          "$comment": "Reasoning effort. Omit to keep the provider default. core.mjs narrows the set per provider: agy low|medium|high, codex low|medium|high|xhigh|max|ultra, claude none."
+        },
         "pool": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
         "env": {
           "type": "object",
@@ -117,5 +121,5 @@
       }
     }
   },
-  "$comment": "core.mjs additionally verifies profile references, graph reachability/cycles, account binding and command constraints."
+  "$comment": "core.mjs additionally verifies profile references, graph reachability/cycles, account binding, per-provider reasoning effort and command constraints."
 }

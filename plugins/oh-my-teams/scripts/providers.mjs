@@ -1,5 +1,5 @@
 /** Provider command construction, output normalization, and failure classification. */
-import { assert, profileEnv, run } from "./core.mjs";
+import { assert, PROVIDER_EFFORTS, profileEnv, run } from "./core.mjs";
 
 /** Headroom so a provider self-terminates before the runtime kills the process. */
 const PRINT_TIMEOUT_MARGIN_MS = 5000;
@@ -19,10 +19,37 @@ function printTimeout(timeoutMs) {
 }
 
 /**
+ * Returns the effort a profile asks for after re-checking provider support.
+ *
+ * `validateOrg` already rejects an unsupported pairing, but a profile can also
+ * reach here from a caller that never loaded an organization document. Silently
+ * dropping the level would run the call at a different reasoning depth than the
+ * report later claims, so an unsupported pairing fails instead.
+ *
+ * @param {object} profile - Provider profile, possibly carrying `effort`.
+ * @returns {string | null} Validated effort, or `null` to keep the CLI default.
+ * @throws {Error} When the provider cannot select the requested effort.
+ */
+function requestedEffort(profile) {
+  if (profile.effort === undefined || profile.effort === null) return null;
+  const accepted = PROVIDER_EFFORTS[profile.provider] ?? [];
+  assert(
+    accepted.includes(profile.effort),
+    `Provider ${profile.provider} cannot select effort ${profile.effort}`,
+  );
+  return profile.effort;
+}
+
+/**
  * Builds a shell-free command for one supported model provider.
  *
  * Model identifiers are opaque configuration values. The runtime does not infer
  * price or quality, and it gives every provider read-only/no-tool constraints.
+ *
+ * A profile without `effort` sends no effort argument, so the provider keeps the
+ * default its own account settings define. Each provider carries the level
+ * differently: Agy takes an `--effort` flag, while Codex has no `exec` flag and
+ * takes a `--config model_reasoning_effort=<value>` override.
  *
  * @param {object} profile - Valid provider profile with command and optional model.
  * @param {string} cwd - Workspace exposed as read-only model context.
@@ -33,6 +60,7 @@ function printTimeout(timeoutMs) {
  */
 export function providerCommand(profile, cwd, prompt, timeoutMs = 300000) {
   const argv = [...profile.command];
+  const effort = requestedEffort(profile);
   if (profile.provider === "agy") {
     argv.push(
       "--mode",
@@ -47,6 +75,7 @@ export function providerCommand(profile, cwd, prompt, timeoutMs = 300000) {
       printTimeout(timeoutMs),
     );
     if (profile.model) argv.push("--model", profile.model);
+    if (effort) argv.push("--effort", effort);
     argv.push("-p", prompt);
     return { argv, input: "" };
   }
@@ -77,6 +106,9 @@ export function providerCommand(profile, cwd, prompt, timeoutMs = 300000) {
     cwd,
   );
   if (profile.model) argv.push("--model", profile.model);
+  // The long name is deliberate: `-c` means `--continue` on the Agy CLI, so the
+  // short form would read as the opposite of a one-shot call.
+  if (effort) argv.push("--config", `model_reasoning_effort=${effort}`);
   argv.push("-");
   return { argv, input: prompt };
 }

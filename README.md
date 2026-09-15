@@ -46,13 +46,31 @@ sh install.sh both   # claude | codex | both
 
 ## 모델과 구독
 
-Agy에서 확인한 ID(2026-09-15): `gpt-oss-120b-medium`, `gemini-3.1-pro-high`, `gemini-3.8-flash-high`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking`. 설치 때 `agy models`로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
+`agy models`가 반환한 ID(agy 1.2.3, 2026-09-15): `gemini-3.8-flash-{high,medium,low}`, `gemini-3.7-flash-{high,medium,low}`, `gemini-3.6-flash-{high,medium,low}`, `gemini-3.1-pro-{high,low}`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking`, `gpt-oss-120b-medium`.
 
-기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`, Worker=`claude-sonnet-4-6`으로 배정한다. 동시 인원은 `1 → 1 → 1 → 2 → 4`로 늘어난다. 조직의 `assistants`에 허용된 역할은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있다. 기본 예제에서는 Worker를 포함한 모든 역할이 허용되어 있으며, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
+Codex 계정의 모델 카탈로그(codex-cli 0.154.0, 2026-09-15)에는 `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`가 선택 가능한 모델로 들어 있다. 설치 때 `agy models`와 Codex 카탈로그로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
 
-Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 모델이 지원한다고 확인되지 않은 `--effort`는 추측해 추가하지 않으며, 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
+기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`, Worker=`claude-sonnet-4-6`으로 배정한다. 여기에 더해 `gpt-5.6-luna`와 `gpt-5.6-terra` 프로필을 미리 정의해 두므로, 역할의 `profile`만 바꾸면 다른 Codex 모델로 옮길 수 있다. 역할이 실제로 참조하는 프로필에는 강도를 적지 않았다. 강도 표기 예시는 어떤 역할도 참조하지 않는 `codex-terra`에만 두었으므로, 이 예제로 실행하는 호출의 추론 깊이는 이전과 같다. 공유 풀 소진 이후 모든 역할의 동시 실행 슬롯은 1로 고정했다. 조직의 `assistants`에 허용된 역할은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있다. 기본 예제에서는 Worker를 포함한 모든 역할이 허용되어 있으며, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
 
-[조직 예제](plugins/oh-my-teams/examples/organization.json)는 구조 참고이며 실제 구독 선택을 대신하지 않는다. 프로필에는 실행기·명령 argv·계정 참조·구독 표시 이름·모델을 저장한다. 구독 공유가 가능하다. 별도 계정은 실제 CLI 프로필 인수 또는 환경변수 이름 참조로 연결한다. 계정 이름만 붙여 전환됐다고 처리하지 않으며, 비밀값을 JSON에 넣지 않는다.
+Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
+
+### 추론 강도
+
+프로필의 선택적 `effort` 필드가 추론 강도를 지정한다. 생략하면 어떤 강도 인자도 전달하지 않으므로 해당 CLI의 기본값을 그대로 쓴다. 실행기마다 전달 방식과 허용값이 다르며, 각 값은 설치된 CLI에서 확인한 것이다.
+
+| 실행기 | 허용값 | 전달 방식 | 근거 |
+|---|---|---|---|
+| Agy | `low`, `medium`, `high` | `--effort <값>` | `agy --help`가 이 세 값을 명시한다. |
+| Codex | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `--config model_reasoning_effort=<값>` | `codex exec`에 전용 플래그가 없고, 값 목록은 계정의 모델 카탈로그에서 가져왔다. |
+| Claude | 없음 | 해당 없음 | CLI가 강도 선택 수단을 제공하지 않으므로 `effort`를 지정하면 설정 오류로 거부한다. |
+
+`effort`를 생략했을 때 실제로 적용되는 깊이는 런타임이 정하지 않고 각 CLI와 계정 설정이 정한다. Codex는 `~/.codex/config.toml`의 `model_reasoning_effort`가 있으면 그것을, 없으면 모델 카탈로그의 `default_reasoning_level`을 쓴다(확인 시점 기준 `gpt-5.6-sol`은 `low`, `gpt-5.6-luna`와 `gpt-5.6-terra`는 `medium`). Agy는 서버가 모델별로 내려주는 선택지에서 결정한다. 따라서 보고서의 `requestedEffort`가 `null`이라는 것은 기본 깊이를 뜻하지 않고 **런타임이 깊이를 지정하지 않았다**는 사실만 뜻한다. 실제 적용된 깊이는 측정하지 않았다.
+
+지원 범위는 모델마다 다르다. Codex 카탈로그에서 `gpt-5.6-luna`는 `ultra`를 제공하지 않으며, Codex CLI는 알 수 없는 값을 거부하지 않고 그대로 전달하므로 런타임이 저장 시점과 호출 시점에 값을 검증한다. Agy는 `--effort is not supported for model`이라는 오류를 가지고 있어 모델에 따라 이 플래그를 거부한다. `agy models`의 표시 이름을 보면 Gemini 계열만 High/Medium/Low로 나뉘고 `claude-sonnet-4-6`과 `claude-opus-4-6-thinking`은 Thinking, `gpt-oss-120b-medium`은 Medium으로 고정되어 있는데, 이 세 모델이 `--effort`를 받아들이는지는 확인하지 않았다. 런타임은 모델별 지원 표를 내장하지 않으므로, 모델이 거부한 강도는 일반적인 실행기 실패로 드러난다.
+
+Agy는 `gemini-3.8-flash-high`처럼 모델 ID 자체에 강도를 담는다. 이때 `effort`를 함께 적으면 같은 값이어야 하며, 서로 어긋나면 저장을 거부한다. 어느 쪽이 실제 호출에 적용되는지 확인하지 않은 채 보고서에 쓰이지 않은 강도를 기록하지 않기 위해서다. `claude-sonnet-4-6`과 `claude-opus-4-6-thinking`은 ID에 강도 접미사가 없으므로 이 제약을 받지 않는다.
+
+[조직 예제](plugins/oh-my-teams/examples/organization.json)는 구조 참고이며 실제 구독 선택을 대신하지 않는다. 프로필에는 실행기·명령 argv·계정 참조·구독 표시 이름·모델과 선택적 추론 강도를 저장한다. 구독 공유가 가능하다. 별도 계정은 실제 CLI 프로필 인수 또는 환경변수 이름 참조로 연결한다. 계정 이름만 붙여 전환됐다고 처리하지 않으며, 비밀값을 JSON에 넣지 않는다.
 
 `opus-first`는 Agy 역할을 Opus로 시작하는 평가 기준선이고, `balanced`는 Senior=Opus, Junior=Sonnet, Intern=GPT-OSS로 나눈다. [6유형 실측](experiments/ROUTING_REPORT.md)에서는 balanced가 6/6을 통과하며 Opus-first보다 토큰 9.7%, 모델 시간 16.0%를 줄여 잠정 권고가 됐다. 1회 배치이므로 기존 조직에는 자동 적용하지 않으며 `preset` 명령은 변경되는 역할만 먼저 보여준다. GPT-OSS 권고는 좁은 편집·인용으로 제한한다. 같은 공유 풀의 소진이 구조적으로 확인되면 그 풀의 다른 모델을 연쇄 호출하지 않는다. 구독의 실제 할당량 차감·가격은 토큰 수와 구분한다.
 

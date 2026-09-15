@@ -18,6 +18,7 @@ export function createUsageAccumulator() {
     callsWithCost: 0,
     knownCostUsd: null,
     requestedModels: [],
+    requestedEfforts: [],
     effectiveModels: [],
     selectionReasons: [],
   };
@@ -46,6 +47,11 @@ export function addCallUsage(accumulator, call) {
     call.requestedModel ?? call.model ?? null,
     { includeNull: true },
   );
+  // A call that ran at another reasoning depth is not comparable with the rest,
+  // so the depth is kept beside the model instead of being averaged away.
+  appendUnique(accumulator.requestedEfforts, call.requestedEffort ?? null, {
+    includeNull: true,
+  });
   appendUnique(accumulator.effectiveModels, call.effectiveModel);
   appendUnique(accumulator.selectionReasons, call.selectionReason);
 

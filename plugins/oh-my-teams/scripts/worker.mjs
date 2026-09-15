@@ -224,6 +224,7 @@ function recordProviderCall(
     pool: profile.pool ?? null,
     provider: profile.provider,
     requestedModel: profile.model,
+    requestedEffort: profile.effort ?? null,
     effectiveModel: response.effectiveModel ?? null,
     modelProof: binding.status,
     selectionReason:
@@ -648,6 +649,7 @@ export async function assist(
     kind,
     profile: selected,
     requestedModel: profile.model,
+    requestedEffort: profile.effort ?? null,
     effectiveModel: response.effectiveModel ?? null,
     modelProof: binding.status,
     workspace: await workspaceBinding(repo),

@@ -14,6 +14,31 @@ import { spawn } from "node:child_process";
 export const ROLES = ["pm", "pl", "senior", "junior", "intern"];
 
 /**
+ * Reasoning-effort values each provider CLI accepts, verified against the
+ * installed CLIs rather than assumed.
+ *
+ * `agy --help` (1.2.3) documents `--effort low|medium|high`. Codex exposes no
+ * `exec` flag; its levels come from the account's model catalog and travel as a
+ * `--config model_reasoning_effort=<value>` override, and Codex does not reject an
+ * unknown value, so the runtime has to. The Claude CLI exposes no selector at
+ * all, so an effort on a Claude profile is a configuration error, not a no-op.
+ *
+ * A level a provider accepts syntactically may still be unavailable on a given
+ * model. The runtime does not carry a per-model catalog, so a rejected level
+ * surfaces as an ordinary provider failure.
+ */
+export const PROVIDER_EFFORTS = {
+  agy: ["low", "medium", "high"],
+  codex: ["low", "medium", "high", "xhigh", "max", "ultra"],
+  claude: [],
+};
+
+// Agy encodes the level in the model ID itself (`gemini-3.8-flash-high`), so a
+// profile can state the level twice. Contradictory pairs are rejected instead of
+// letting an unverified precedence rule decide which one the call actually used.
+const AGY_MODEL_EFFORT = /-(low|medium|high)$/;
+
+/**
  * Produces a SHA-256 digest for a string or JSON-serializable value.
  *
  * @param {string | unknown} value - Data to hash. Non-strings use JSON encoding.
@@ -449,6 +474,26 @@ function validatePools(pools = {}) {
   }
 }
 
+function validateEffort(id, profile) {
+  if (profile.effort === undefined) return;
+  const accepted = PROVIDER_EFFORTS[profile.provider] ?? [];
+  assert(
+    accepted.length > 0,
+    `Provider ${profile.provider} has no reasoning-effort selector: ${id}`,
+  );
+  assert(
+    accepted.includes(profile.effort),
+    `Effort for ${id} must be one of ${accepted.join("|")}`,
+  );
+  if (profile.provider === "agy") {
+    const encoded = AGY_MODEL_EFFORT.exec(profile.model ?? "")?.[1];
+    assert(
+      !encoded || encoded === profile.effort,
+      `Effort ${profile.effort} contradicts model ${profile.model}: ${id}`,
+    );
+  }
+}
+
 function validateProfile(id, profile, pools) {
   assert(/^[a-z0-9][a-z0-9-]*$/.test(id), `Invalid profile id: ${id}`);
   assert(
@@ -477,6 +522,7 @@ function validateProfile(id, profile, pools) {
       (typeof profile.account === "string" && profile.account.trim()),
     `Account profile reference required: ${id}`,
   );
+  validateEffort(id, profile);
   assert(
     profile.pool === undefined || Object.hasOwn(pools, profile.pool),
     `Unknown pool for profile: ${id}`,
@@ -703,6 +749,7 @@ export function chart(org) {
       `${"  ".repeat(depth)}${role.toUpperCase()}: ${binding.profile}` +
         ` | ${profile.subscription}` +
         ` | ${profile.provider}/${profile.model ?? "host-default"}` +
+        ` | effort=${profile.effort ?? "provider-default"}` +
         ` | slots=${binding.concurrency}`,
     );
     ROLES.filter((child) => org.roles[child].parent === role).forEach((child) =>
