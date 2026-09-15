@@ -39,7 +39,7 @@ agy --model claude-opus-4-6-thinking ...
 `worker-start`가 제한 시간 안에 receipt를 반환하지 않으면 같은 명령을 다시 실행하지 않는다. 중복 실행은 회수할 자원을 늘릴 뿐이다. 다음 순서로 상태를 확인하고 정리한다.
 
 1. `worker-show`와 `worker-read`로 터미널이 살아 있는지, agent 프로세스가 실제로 시작됐는지 구분한다. 셸 프롬프트만 있고 구문 오류만 출력됐다면 터미널은 live이지만 agent는 시작되지 않은 상태다.
-2. `worker-stop`으로 해당 Dispatch의 터미널만 종료한다. 다른 Dispatch를 함께 종료하지 않는다.
+2. agent가 시작되지 않았음을 확인했으면 `worker-stop`으로 해당 Dispatch의 터미널만 종료한다. 다른 Dispatch를 함께 종료하지 않는다. **실제 종료를 확인하지 못했으면 `worker-stop` 대신 `worker-abandon`으로 봉인한다.** `worker-abandon`은 프로세스가 멈췄다고 주장하지 않고 살아 있을 수 있는 자원을 유지하며, `worker-release`는 정산이 끝난 worker 전용이므로 상태 불명 worker에 사용하지 않는다.
 3. `worker-release`로 작업 자원을 반납한다.
 4. 변경이 없는 자식 worktree는 제거한다. 변경이 남아 있으면 제거하지 않고 보존한 뒤 보고한다.
 
