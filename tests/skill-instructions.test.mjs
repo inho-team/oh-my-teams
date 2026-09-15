@@ -160,3 +160,76 @@ test("Korean object particles follow the sound of the skill name", () => {
     }
   }
 });
+
+test("the closing skills run the gates instead of judging by eye", () => {
+  const close = readSkill("team-close");
+  const disband = readSkill("team-disband");
+
+  // team-close carried no CLI command at all, so merge-check - the thing that
+  // mechanically refuses a merge without PM acceptance - was left to the
+  // model's reading of the situation.
+  for (const command of ["verify", "merge-check", "workflow-status"]) {
+    assert.ok(
+      close.includes(`node <runtime> ${command}`),
+      `team-close must run ${command}`,
+    );
+  }
+
+  // A kickoff disbanded with a running attempt left the workflow in "running"
+  // forever: recordSettlement requires "running" and releaseReservation
+  // requires "reserved", and neither was ever called.
+  for (const command of ["workflow-settle", "workflow-release"]) {
+    assert.ok(
+      disband.includes(`node <runtime> ${command}`),
+      `team-disband must run ${command}`,
+    );
+  }
+});
+
+test("a worker whose exit is unconfirmed is fenced, not released", () => {
+  const runtime = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/orca-runtime.md"),
+    "utf8",
+  );
+  // worker-release is documented by the CLI as post-completion cleanup for a
+  // settled worker; worker-abandon exists precisely for the unobserved case.
+  assert.match(runtime, /worker-abandon/);
+  for (const skill of ["team-close", "team-disband"]) {
+    assert.match(
+      readSkill(skill),
+      /worker-abandon/,
+      `${skill} must name the fence for an unconfirmed worker`,
+    );
+  }
+});
+
+test("the two meanings of blocked are kept apart", () => {
+  // deriveWorkflowStatus returns "blocked" for a single failed task, which
+  // workflow-retry can undo. A Goal is blocked only after a repeated, policy
+  // level obstruction. Copying one into the other freezes recoverable work.
+  for (const skill of ["team-status", "team-kickoff"]) {
+    const text = readSkill(skill);
+    assert.match(text, /workflow[^\n]*`blocked`/);
+    assert.ok(
+      /되돌릴 수 있는|그것만으로/.test(text),
+      `${skill} must say the workflow value is not the Goal value`,
+    );
+  }
+});
+
+test("every skill that queries worker-list pins the executable first", () => {
+  // orca-runtime requires one executable to be chosen and never silently
+  // swapped; team-status queried worker-list without referencing that rule and
+  // could report another Run's state.
+  for (const entry of fs.readdirSync(skills)) {
+    const file = path.join(skills, entry, "SKILL.md");
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, "utf8");
+    if (!text.includes("worker-list")) continue;
+    assert.match(
+      text,
+      /orca-runtime\.md/,
+      `${entry} queries worker-list without the discovery contract`,
+    );
+  }
+});
