@@ -1,5 +1,6 @@
 # PowerShell wrapper around the shared Node installer; no host logic lives here.
-param([ValidateSet('claude', 'codex', 'both')][string]$HostName = 'both')
+# Every argument is forwarded, so --dry-run and --remove-legacy work here too.
+# The installer validates them, which keeps one usage message for both wrappers.
 $ErrorActionPreference = 'Stop'
-node (Join-Path $PSScriptRoot 'scripts/install.mjs') $HostName
+node (Join-Path $PSScriptRoot 'scripts/install.mjs') @args
 exit $LASTEXITCODE
