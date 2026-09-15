@@ -170,3 +170,62 @@ test("the repository's own modules satisfy the audit rules", () => {
   assert.equal(report.status, "passed");
   assert.ok(report.totals.files > 0, "the audit must inspect real modules");
 });
+
+test("the help tables list exactly the installed skills", () => {
+  const skills = path.resolve("plugins/oh-my-teams/skills");
+  const installed = fs
+    .readdirSync(skills)
+    .filter((entry) => fs.existsSync(path.join(skills, entry, "SKILL.md")));
+  const help = fs.readFileSync(
+    path.join(skills, "team-help", "SKILL.md"),
+    "utf8",
+  );
+  const rendered = help.split("<!-- team-help:start -->")[1];
+  assert.ok(rendered, "the help output must be delimited for the drift check");
+
+  // The tables are precomputed so that answering team-help costs one already
+  // loaded file instead of reading every skill. That trade is only safe while
+  // something checks the tables against the skills that are actually there.
+  const listed = new Set(
+    [...rendered.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]),
+  );
+  for (const skill of installed) {
+    assert.ok(listed.has(skill), `team-help must list ${skill}`);
+  }
+  for (const name of listed) {
+    if (!installed.includes(name)) continue;
+    assert.ok(
+      fs.existsSync(path.join(skills, name, "SKILL.md")),
+      `team-help must not list a skill that is gone: ${name}`,
+    );
+  }
+
+  // A name that looks like a skill but is not installed would send the reader
+  // to something that does not exist.
+  const skillShaped = [...listed].filter((name) =>
+    /^(team|org)-|^(pm|pl|senior|junior|intern|director|fluent-korean)$/.test(
+      name,
+    ),
+  );
+  for (const name of skillShaped) {
+    assert.ok(
+      installed.includes(name),
+      `team-help names ${name}, which is not installed`,
+    );
+  }
+});
+
+test("team-help does not ask the model to rebuild what it already states", () => {
+  const help = fs.readFileSync(
+    path.resolve("plugins/oh-my-teams/skills/team-help/SKILL.md"),
+    "utf8",
+  );
+  const instructions = help.split("<!-- team-help:start -->")[0];
+  // Reading all twenty SKILL.md files cost about 48KB to produce 3KB of table,
+  // and the wording of each row changed on every call.
+  assert.ok(
+    !/skills\/\*\/SKILL\.md|frontmatter를 읽/.test(instructions),
+    "the instructions must not send the model back to every skill file",
+  );
+  assert.match(instructions, /그대로 출력한다/);
+});
