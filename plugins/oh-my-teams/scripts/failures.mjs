@@ -44,12 +44,22 @@ export function classifyFailure(input = {}) {
   ) {
     return route("scope-too-large", "pl", "split-task", false);
   }
+  // A model that answered from another model is a profile problem, not a
+  // workspace problem: rebinding the workspace would leave the wrong model in
+  // place, and retrying the same profile reproduces the mismatch.
+  if (
+    input.kind === "model-binding" ||
+    input.modelProof === "mismatched" ||
+    /answered from .+ while .+ was requested|routing evidence is invalid/i.test(
+      message,
+    )
+  ) {
+    return route("model-binding-mismatch", "pm", "rebind-profile-model", false);
+  }
   if (
     input.kind === "workspace-context" ||
     input.grounded === false ||
-    /different tree|do not exist in this workspace|routing evidence is invalid/i.test(
-      message,
-    )
+    /different tree|do not exist in this workspace/i.test(message)
   ) {
     return route("environment-context", "pl", "rebind-workspace", true);
   }

@@ -6,6 +6,14 @@ import { git } from "./evidence.mjs";
 import { taskHash, validateTask } from "./contracts.mjs";
 import { runOrcaJson } from "./orca-adapter.mjs";
 
+function resolvedOrNull(target) {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Freezes a task's symbolic base reference and writes its input snapshot.
  *
@@ -90,8 +98,11 @@ export async function attachWorkspace(input) {
     receipt.ok !== false && worktree?.id && worktree.path,
     "Orca receipt missing worktree identity",
   );
+  // A receipt naming a path that does not exist is a mismatched receipt, not a
+  // filesystem error: resolving it directly surfaced a raw lstat ENOENT with no
+  // indication of which claim failed.
   assert(
-    fs.realpathSync(worktree.path) === workspace,
+    resolvedOrNull(worktree.path) === workspace,
     "Receipt worktree path does not match the attached workspace",
   );
   // A supplied receipt is only a claim until the selected runtime returns it.

@@ -103,16 +103,78 @@ export function signatureHasParameters(signature) {
   return Boolean(before.replace(/^async\s+/, "").trim());
 }
 
+const REGEX_CAN_FOLLOW = /[A-Za-z0-9_$)\]]/;
+
+/** Mark which lines begin inside template text rather than in code.
+ *
+ * Counting backtick parity cannot answer this: backticks also occur in regular
+ * expressions, comments and quoted strings, and one such backtick inverts the
+ * parity for the rest of the file, silently exempting everything after it. This
+ * scanner tracks the lexical mode instead, and treats a `${...}` substitution as
+ * code so that a long expression inside a template is still audited.
+ *
+ * @param {string[]} lines source lines
+ * @returns {boolean[]} whether each line begins inside template text
+ */
+export function templateLineStarts(lines) {
+  const starts = new Array(lines.length);
+  const suspended = [];
+  let mode = "code";
+  let previous = "";
+
+  for (let index = 0; index < lines.length; index += 1) {
+    starts[index] = mode === "template";
+    const line = lines[index];
+    for (let at = 0; at < line.length; at += 1) {
+      const char = line[at];
+      const next = line[at + 1];
+      if (mode === "block-comment") {
+        if (char === "*" && next === "/") {
+          mode = "code";
+          at += 1;
+        }
+      } else if (mode !== "code" && char === "\\") {
+        at += 1;
+      } else if (mode === "single") {
+        if (char === "'") mode = "code";
+      } else if (mode === "double") {
+        if (char === '"') mode = "code";
+      } else if (mode === "class") {
+        if (char === "]") mode = "regex";
+      } else if (mode === "regex") {
+        if (char === "[") mode = "class";
+        else if (char === "/") mode = "code";
+      } else if (mode === "template") {
+        if (char === "`") mode = "code";
+        else if (char === "$" && next === "{") {
+          suspended.push("template");
+          mode = "code";
+          at += 1;
+        }
+      } else if (char === "/" && next === "/") {
+        break;
+      } else if (char === "/" && next === "*") {
+        mode = "block-comment";
+        at += 1;
+      } else if (char === "'") mode = "single";
+      else if (char === '"') mode = "double";
+      else if (char === "`") mode = "template";
+      else if (char === "}" && suspended.length > 0) mode = suspended.pop();
+      else if (char === "/" && !REGEX_CAN_FOLLOW.test(previous)) mode = "regex";
+      else if (char.trim()) previous = char;
+    }
+  }
+  return starts;
+}
+
 /** Find executable lines exceeding the readability limit.
  * @param {string[]} lines source lines
  * @returns {{line:number,length:number}[]} long line locations
  */
 export function longExecutableLines(lines) {
-  let inTemplateLiteral = false;
+  const templateStarts = templateLineStarts(lines);
   return lines.flatMap((line, index) => {
-    const startsInsideTemplate = inTemplateLiteral;
-    const templateMarkers = [...line.matchAll(/(?<!\\)`/g)].length;
-    if (templateMarkers % 2 === 1) inTemplateLiteral = !inTemplateLiteral;
+    const startsInsideTemplate = templateStarts[index];
     if (line.length <= 180) return [];
     const trimmed = line.trim();
     // Long prompt/test literals are task data; long executable statements are not.
@@ -146,13 +208,10 @@ export function auditFile(file, auditRoot = root) {
   let parameterTags = 0;
   let returnTags = 0;
   let throwsTags = 0;
-  let inTemplate = false;
+  const templateStarts = templateLineStarts(lines);
   for (let index = 0; index < lines.length; index += 1) {
-    const startsInsideTemplate = inTemplate;
-    const markers = [...lines[index].matchAll(/(?<!\\)`/g)].length;
-    if (markers % 2 === 1) inTemplate = !inTemplate;
     // Export-looking text in a prompt/template fixture is not a declaration.
-    if (startsInsideTemplate) continue;
+    if (templateStarts[index]) continue;
     const match = lines[index].match(
       /^export\s+(?:async\s+)?(function|const|class)\s+([A-Za-z0-9_]+)/,
     );
