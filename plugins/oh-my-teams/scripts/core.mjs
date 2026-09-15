@@ -260,7 +260,9 @@ export function inside(root, relative) {
     "A relative file path is required",
   );
   assert(
-    !relative.split(/[\\/]/).some((part) => FORBIDDEN_SEGMENTS.has(segment(part))),
+    !relative
+      .split(/[\\/]/)
+      .some((part) => FORBIDDEN_SEGMENTS.has(segment(part))),
     `Forbidden path: ${relative}`,
   );
 

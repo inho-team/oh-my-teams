@@ -193,14 +193,20 @@ test("a slot held by an exited worker is reclaimed and the reclaim is recorded",
 
   // An unparseable lease is left alone: the operator is told not to delete it.
   fs.writeFileSync(lockFile, "owned");
-  await assert.rejects(() => work(dir, org, task, { stateDir, call: edit }), /occupied/);
+  await assert.rejects(
+    () => work(dir, org, task, { stateDir, call: edit }),
+    /occupied/,
+  );
 
   // A live owner is left alone too.
   fs.writeFileSync(
     lockFile,
     JSON.stringify({ pid: process.pid, hostname: os.hostname() }),
   );
-  await assert.rejects(() => work(dir, org, task, { stateDir, call: edit }), /occupied/);
+  await assert.rejects(
+    () => work(dir, org, task, { stateDir, call: edit }),
+    /occupied/,
+  );
 
   fs.writeFileSync(
     lockFile,
@@ -265,7 +271,12 @@ test("an unlaunched reservation returns its slot and calls but not its attempt",
   );
   assert.throws(
     () =>
-      releaseReservation(stateDir, request.id, revision(), release({ evidence: " " })),
+      releaseReservation(
+        stateDir,
+        request.id,
+        revision(),
+        release({ evidence: " " }),
+      ),
     /resolution and evidence/,
   );
   assert.throws(
@@ -302,7 +313,13 @@ test("an unlaunched reservation returns its slot and calls but not its attempt",
     ["dispatch-ready"],
   );
   assert.throws(
-    () => releaseReservation(stateDir, request.id, revision(), release({ eventId: "release-two" })),
+    () =>
+      releaseReservation(
+        stateDir,
+        request.id,
+        revision(),
+        release({ eventId: "release-two" }),
+      ),
     /holds no reservation to release/,
   );
 });

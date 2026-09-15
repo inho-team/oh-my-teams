@@ -4,7 +4,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readJSON, run, writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
+import {
+  readJSON,
+  run,
+  writeJSON,
+} from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   acceptWorkflowIntegration,
   attachExecution,
@@ -53,7 +57,10 @@ async function repo(t) {
     (await run(["git", "add", ".gitignore", "seed.txt"], { cwd: dir })).code,
     0,
   );
-  assert.equal((await run(["git", "commit", "-m", "seed"], { cwd: dir })).code, 0);
+  assert.equal(
+    (await run(["git", "commit", "-m", "seed"], { cwd: dir })).code,
+    0,
+  );
   return dir;
 }
 
@@ -189,7 +196,10 @@ test("a workflow request is rejected field by field before any file is read", ()
     [{ tasks: [{ file: "a.json", role: "director" }] }, /file and role/],
     [{ tasks: [{ file: "", role: "intern" }] }, /file and role/],
     [{ policy: { maxRunning: 0, maxReviewPending: 1 } }, /maxRunning required/],
-    [{ policy: { maxRunning: 1, maxReviewPending: 0 } }, /maxReviewPending required/],
+    [
+      { policy: { maxRunning: 1, maxReviewPending: 0 } },
+      /maxReviewPending required/,
+    ],
     [{ budget: { maxAttempts: 0, maxCalls: 1 } }, /maxAttempts required/],
     [{ budget: { maxAttempts: 1, maxCalls: 0 } }, /maxCalls required/],
   ];
@@ -253,9 +263,15 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
       /required kind\/role\/execution identity/,
     ],
     // The reviewer must not be the execution that produced the work.
-    [{ implementationExecutionId: "review-exec" }, /different execution identity/],
+    [
+      { implementationExecutionId: "review-exec" },
+      /different execution identity/,
+    ],
     [{ conclusion: "maybe" }, /Invalid review conclusion/],
-    [{ criteria: [valid().criteria[0]] }, /every required criterion exactly once/],
+    [
+      { criteria: [valid().criteria[0]] },
+      /every required criterion exactly once/,
+    ],
     [
       { criteria: [valid().criteria[0], valid().criteria[0]] },
       /criteria do not match the requirement/,
@@ -300,7 +316,13 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
           conclusion: "changes-requested",
         })),
         findings: [
-          { id: "f1", status: "accepted-risk", description: "x", authority: "junior", reason: "ok" },
+          {
+            id: "f1",
+            status: "accepted-risk",
+            description: "x",
+            authority: "junior",
+            reason: "ok",
+          },
         ],
       },
       /Accepted risk needs PM\/user authority/,
@@ -316,7 +338,9 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
     ],
     // The defect this guards: an approved review that still carries open work.
     [
-      { findings: [{ id: "f1", status: "open", description: "leaks a handle" }] },
+      {
+        findings: [{ id: "f1", status: "open", description: "leaks a handle" }],
+      },
       /Approved review cannot contain open findings/,
     ],
   ];
@@ -330,24 +354,34 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
 });
 
 test("the Orca adapter refuses every unusable response instead of guessing", async () => {
-  const reply = (stdout, extra = {}) => async () => ({
-    code: 0,
-    stdout,
-    stderr: "",
-    timedOut: false,
-    ...extra,
-  });
+  const reply =
+    (stdout, extra = {}) =>
+    async () => ({
+      code: 0,
+      stdout,
+      stderr: "",
+      timedOut: false,
+      ...extra,
+    });
   const ready = JSON.stringify({
     ok: true,
-    result: { runtime: { reachable: true, state: "ready", appVersion: "1.4.200" } },
+    result: {
+      runtime: { reachable: true, state: "ready", appVersion: "1.4.200" },
+    },
   });
 
   await assert.rejects(
-    () => runOrcaJson("orca", ["status"], { execute: reply("", { code: 1, stderr: "boom" }) }),
+    () =>
+      runOrcaJson("orca", ["status"], {
+        execute: reply("", { code: 1, stderr: "boom" }),
+      }),
     /boom/,
   );
   await assert.rejects(
-    () => runOrcaJson("orca", ["status"], { execute: reply(ready, { timedOut: true }) }),
+    () =>
+      runOrcaJson("orca", ["status"], {
+        execute: reply(ready, { timedOut: true }),
+      }),
     /Orca command failed|ready/,
   );
   await assert.rejects(
@@ -366,8 +400,14 @@ test("the Orca adapter refuses every unusable response instead of guessing", asy
     let call = 0;
     return async () => {
       call += 1;
-      if (call === failing) return { code: 1, stdout: "", stderr: "stage fail", timedOut: false };
-      return { code: 0, stdout: call === 3 ? payload : "1.4.200", stderr: "", timedOut: false };
+      if (call === failing)
+        return { code: 1, stdout: "", stderr: "stage fail", timedOut: false };
+      return {
+        code: 0,
+        stdout: call === 3 ? payload : "1.4.200",
+        stderr: "",
+        timedOut: false,
+      };
     };
   };
   await assert.rejects(
@@ -391,23 +431,42 @@ test("the Orca adapter refuses every unusable response instead of guessing", asy
     { reachable: true, state: "starting" },
   ]) {
     await assert.rejects(
-      () => discoverOrcaRuntime("orca", stage(0, JSON.stringify({ ok: true, result: { runtime } }))),
+      () =>
+        discoverOrcaRuntime(
+          "orca",
+          stage(0, JSON.stringify({ ok: true, result: { runtime } })),
+        ),
       /runtime is not ready/,
     );
   }
-  assert.equal((await discoverOrcaRuntime("orca", stage(0, ready))).executable, "orca");
+  assert.equal(
+    (await discoverOrcaRuntime("orca", stage(0, ready))).executable,
+    "orca",
+  );
 });
 
 test("executable selection is explicit and never silently falls back", () => {
   assert.equal(selectOrcaExecutable("custom-orca", {}), "custom-orca");
-  assert.equal(selectOrcaExecutable("custom-orca", { ORCA_CLI_COMMAND: "x" }), "custom-orca");
-  assert.equal(selectOrcaExecutable(undefined, { ORCA_CLI_COMMAND: "from-env" }), "from-env");
-  assert.equal(selectOrcaExecutable(undefined, { ORCA_DEV_REPO_ROOT: "/repo" }), "orca-dev");
+  assert.equal(
+    selectOrcaExecutable("custom-orca", { ORCA_CLI_COMMAND: "x" }),
+    "custom-orca",
+  );
+  assert.equal(
+    selectOrcaExecutable(undefined, { ORCA_CLI_COMMAND: "from-env" }),
+    "from-env",
+  );
+  assert.equal(
+    selectOrcaExecutable(undefined, { ORCA_DEV_REPO_ROOT: "/repo" }),
+    "orca-dev",
+  );
   assert.equal(
     selectOrcaExecutable(undefined, {}),
     process.platform === "linux" ? "orca-ide" : "orca",
   );
-  assert.equal(selectOrcaExecutable(undefined, { TERM_PROGRAM: "Orca" }), "orca");
+  assert.equal(
+    selectOrcaExecutable(undefined, { TERM_PROGRAM: "Orca" }),
+    "orca",
+  );
 });
 
 test("every CLI subcommand enforces its declared required options", async () => {
@@ -420,7 +479,10 @@ test("every CLI subcommand enforces its declared required options", async () => 
     const allowed = ALLOWED_OPTIONS[command];
     assert.ok(allowed, `${command} has no allowed-option list`);
     for (const option of REQUIRED_OPTIONS[command]) {
-      assert.ok(allowed.includes(option), `${command} requires unusable --${option}`);
+      assert.ok(
+        allowed.includes(option),
+        `${command} requires unusable --${option}`,
+      );
     }
 
     const [first] = REQUIRED_OPTIONS[command];
@@ -433,5 +495,8 @@ test("every CLI subcommand enforces its declared required options", async () => 
   }
 
   await assert.rejects(() => main(["not-a-command"]), /Unknown command/);
-  await assert.rejects(() => main(["show", "--nope", "x"]), /Unknown option: --nope/);
+  await assert.rejects(
+    () => main(["show", "--nope", "x"]),
+    /Unknown option: --nope/,
+  );
 });
