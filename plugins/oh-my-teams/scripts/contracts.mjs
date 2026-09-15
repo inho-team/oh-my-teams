@@ -1,6 +1,27 @@
 /** Task v1/v2 validation, canonical hashing, and prompt-context loading. */
 import fs from "node:fs";
+import path from "node:path";
 import { assert, hash, inside } from "./core.mjs";
+
+// File ownership decides which tasks may run in parallel, and that decision is
+// made by comparing these strings. "src/a.js", "./src/a.js" and "src\\a.js" all
+// name one file but compare as three, so two tasks editing it were dispatched
+// together. The contract stores one canonical spelling instead.
+function assertCanonicalPath(value, name) {
+  assert(
+    typeof value === "string" && value.trim() && !path.isAbsolute(value),
+    `${name} must be a relative path`,
+  );
+  // normalize() keeps a leading "../", so escaping paths must be rejected on
+  // their own rather than assumed away by the equality below.
+  assert(
+    !value.includes("\\") &&
+      !value.startsWith("../") &&
+      value !== ".." &&
+      value === path.posix.normalize(value),
+    `${name} must be a normalized POSIX relative path: ${value}`,
+  );
+}
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -25,6 +46,7 @@ function validateCommonTask(task) {
       new Set(task.files).size === task.files.length,
     "Explicit unique task files required",
   );
+  task.files.forEach((file) => assertCanonicalPath(file, "Task file"));
   assert(
     Array.isArray(task.checks) &&
       task.checks.length > 0 &&
@@ -124,6 +146,7 @@ function validateReferences(references, name) {
         SHA256_PATTERN.test(reference.sha256),
       `${name} require path and sha256`,
     );
+    assertCanonicalPath(reference.path, `${name} path`);
   }
 }
 

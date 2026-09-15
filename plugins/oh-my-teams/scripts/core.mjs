@@ -283,6 +283,61 @@ export function inside(root, relative) {
   return target;
 }
 
+// Windows installs an npm CLI as a `.cmd` shim, and Node refuses to spawn one
+// without a shell. Using a shell is not an option here: model text travels in
+// these arguments. The package that declares the command is located instead and
+// its JS entry is run through this Node binary, which needs no shell. This used
+// to be hardcoded for `codex` alone, so every other npm-installed provider and
+// `claude plugin list` failed with a bare ENOENT.
+function npmGlobalEntry(name, env) {
+  const root = path.join(env.APPDATA || "", "npm", "node_modules");
+  if (!fs.existsSync(root)) return null;
+
+  const packages = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const directory = path.join(root, entry.name);
+    if (!entry.name.startsWith("@")) {
+      packages.push(directory);
+      continue;
+    }
+    for (const scoped of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (scoped.isDirectory())
+        packages.push(path.join(directory, scoped.name));
+    }
+  }
+
+  for (const directory of packages) {
+    let manifest;
+    try {
+      manifest = readJSON(path.join(directory, "package.json"));
+    } catch {
+      continue;
+    }
+    const declared =
+      typeof manifest.bin === "string"
+        ? manifest.name?.split("/").pop() === name
+          ? manifest.bin
+          : null
+        : manifest.bin?.[name];
+    if (!declared) continue;
+    const entry = path.resolve(directory, declared);
+    if (fs.existsSync(entry)) return entry;
+  }
+  return null;
+}
+
+function resolveCommand(argv, env) {
+  const [name, ...rest] = argv;
+  if (process.platform !== "win32") return argv;
+  // An explicit path or extension is already something spawn can execute.
+  if (path.isAbsolute(name) || /[\\/]/.test(name) || path.extname(name)) {
+    return argv;
+  }
+  const entry = npmGlobalEntry(name, env);
+  return entry ? [process.execPath, entry, ...rest] : argv;
+}
+
 /**
  * Executes an argv array without shell interpolation and captures bounded output.
  *
@@ -313,20 +368,7 @@ export function run(
     "Command must be an argv array",
   );
 
-  let command = argv;
-  if (process.platform === "win32" && command[0] === "codex") {
-    const entry = path.join(
-      env.APPDATA || "",
-      "npm",
-      "node_modules",
-      "@openai",
-      "codex",
-      "bin",
-      "codex.js",
-    );
-    if (fs.existsSync(entry))
-      command = [process.execPath, entry, ...command.slice(1)];
-  }
+  const command = resolveCommand(argv, env);
 
   return new Promise((resolve) => {
     const startedAt = Date.now();
