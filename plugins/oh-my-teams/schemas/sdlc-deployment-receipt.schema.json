@@ -3,7 +3,7 @@
   "title": "oh my teams deployment receipt v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "id", "authorizationId", "deploymentId", "lifecycleId", "releaseId", "sourceHash", "repository", "environment", "action", "status", "executedAt", "externalId"],
+  "required": ["schemaVersion", "id", "authorizationId", "deploymentId", "lifecycleId", "releaseId", "sourceHash", "repository", "environment", "action", "status", "executedAt", "externalId", "issuer"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
@@ -17,6 +17,7 @@
     "action": { "enum": ["deploy", "rollback"] },
     "status": { "const": "succeeded" },
     "executedAt": { "type": "string", "format": "date-time" },
-    "externalId": { "type": "string", "minLength": 1 }
+    "externalId": { "type": "string", "minLength": 1 },
+    "issuer": { "type": "object", "additionalProperties": false, "required": ["id", "signature"], "properties": { "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }, "signature": { "type": "string", "minLength": 1 } } }
   }
 }

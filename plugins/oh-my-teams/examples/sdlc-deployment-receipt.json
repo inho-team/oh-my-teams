@@ -11,5 +11,9 @@
   "action": "deploy",
   "status": "succeeded",
   "executedAt": "2026-09-15T01:00:00.000Z",
-  "externalId": "provider-deployment-reference"
+  "externalId": "provider-deployment-reference",
+  "issuer": {
+    "id": "deployment-provider-example",
+    "signature": "0it6CGlkHj6rV5y/d4D4xtOjqYpjpj1iAxh5RItSlJSvZSbgzh5cgxbdFMIRqVMZr0dnUmJpoC0/N7nu7Qn8DQ=="
+  }
 }

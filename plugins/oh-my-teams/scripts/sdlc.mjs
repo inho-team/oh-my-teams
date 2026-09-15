@@ -333,6 +333,17 @@ export function deploymentAuthorizationPayload(authorization) {
 }
 
 /**
+ * Creates the canonical bytes a deployment provider signs for its receipt.
+ * @param {object} receipt - Receipt with an optional issuer signature.
+ * @returns {string} Canonical JSON payload excluding only the signature.
+ */
+export function deploymentReceiptPayload(receipt) {
+  const value = structuredClone(receipt);
+  if (value.issuer) delete value.issuer.signature;
+  return JSON.stringify(canonical(value));
+}
+
+/**
  * Validates a scoped, expiring deployment authorization.
  * @param {object} authorization - Candidate authorization.
  * @param {object} expected - Required lifecycle, release, source, repository, environment, and action.
@@ -400,6 +411,7 @@ function validateDeploymentReceipt(
   receipt,
   authorization,
   deploymentId,
+  trustedAuthorities,
   now,
 ) {
   assert(receipt?.schemaVersion === 1 && ID.test(receipt.id), "Deployment receipt identity required");
@@ -414,6 +426,24 @@ function validateDeploymentReceipt(
   assert(receipt.action === "deploy", "Deployment receipt must prove deployment");
   assert(authorization.actions.includes(receipt.action), "Deployment receipt action not authorized");
   assert(receipt.status === "succeeded", "Deployment receipt must prove success");
+  const issuer = trustedAuthorities?.[receipt.issuer?.id];
+  assert(
+    issuer?.kind === "deployment-provider" &&
+      typeof receipt.issuer.signature === "string",
+    "Deployment receipt issuer is not trusted",
+  );
+  let receiptSignatureValid = false;
+  try {
+    receiptSignatureValid = crypto.verify(
+      null,
+      Buffer.from(deploymentReceiptPayload(receipt)),
+      issuer.publicKey,
+      Buffer.from(receipt.issuer.signature, "base64"),
+    );
+  } catch {
+    receiptSignatureValid = false;
+  }
+  assert(receiptSignatureValid, "Deployment receipt signature invalid");
   const executedAt = Date.parse(receipt.executedAt);
   assert(Number.isFinite(executedAt), "Deployment receipt executedAt required");
   assert(
@@ -460,7 +490,7 @@ export function createSdlc(stateDir, request) {
         request.trustedAuthorities.every((item) => {
           if (
             !ID.test(item?.id) ||
-            !["human", "policy"].includes(item.kind) ||
+            !["human", "policy", "deployment-provider"].includes(item.kind) ||
             typeof item.publicKey !== "string"
           ) {
             return false;
@@ -987,6 +1017,7 @@ export function transitionSdlcArtifact(
         input.receipt,
         authorization,
         current.id,
+        state.trustedAuthorities,
         input.now ?? Date.now(),
       );
       const authorizationFile = path.join(
@@ -1024,11 +1055,20 @@ export function transitionSdlcArtifact(
         executedAt: receipt.executedAt,
       };
     }
+    if (input.toState !== "submitted" && input.evidence !== undefined) {
+      assert(
+        JSON.stringify(input.evidence) === JSON.stringify(current.evidence),
+        "Evidence can change only during submission",
+      );
+    }
     const next = {
       ...current,
       revision: current.revision + 1,
       state: input.toState,
-      evidence: input.evidence ?? current.evidence,
+      evidence:
+        input.toState === "submitted"
+          ? input.evidence ?? current.evidence
+          : current.evidence,
       createdAt: new Date(input.now ?? Date.now()).toISOString(),
       supersedes: {
         id: current.id,

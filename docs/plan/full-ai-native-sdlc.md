@@ -79,7 +79,8 @@
 3. rollback 계획과 관찰 계획이 존재해야 한다.
 4. deployment authorization이 action, repository, environment, release ID, source hash와 만료 시각을 포함해야 한다.
 5. authorization의 승인 주체가 lifecycle에 고정된 human/policy public key로 canonical payload에 서명해야 한다.
-6. 모델 출력, PM 역할, task의 risk 값과 환경변수만으로 배포 권한을 만들 수 없어야 한다.
+6. deployment receipt도 lifecycle에 고정된 deployment-provider public key의 서명과 authorization 시간 범위를 충족해야 한다.
+7. 모델 출력, PM 역할, task의 risk 값과 환경변수만으로 배포 권한이나 실행 receipt를 만들 수 없어야 한다.
 
 권한 검사는 배포 준비를 판정할 뿐 외부 명령을 실행하지 않는다. 실제 배포는 별도 adapter가 기존 사용자 위임을 확인한 뒤 수행하고 receipt를 되돌려준다.
 

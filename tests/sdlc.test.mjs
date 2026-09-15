@@ -11,6 +11,7 @@ import {
   checkDeployment,
   createSdlc,
   deploymentAuthorizationPayload,
+  deploymentReceiptPayload,
   incidentToIntent,
   readSdlc,
   recordDeployment,
@@ -64,6 +65,24 @@ function authorityFixture(id = "user-1", kind = "human") {
           Buffer.from(deploymentAuthorizationPayload(value)),
           privateKey,
         )
+        .toString("base64");
+      return value;
+    },
+  };
+}
+
+function receiptIssuerFixture(id = "deployment-provider-1") {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  return {
+    trusted: {
+      id,
+      kind: "deployment-provider",
+      publicKey: publicKey.export({ type: "spki", format: "pem" }),
+    },
+    sign(receipt) {
+      const value = { ...receipt, issuer: { id, signature: "" } };
+      value.issuer.signature = crypto
+        .sign(null, Buffer.from(deploymentReceiptPayload(value)), privateKey)
         .toString("base64");
       return value;
     },
@@ -728,11 +747,12 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
   const stateDir = fixture(t);
   const lifecycleId = "complete-flow";
   const authority = authorityFixture();
+  const receiptIssuer = receiptIssuerFixture();
   createSdlc(stateDir, {
     schemaVersion: 1,
     id: lifecycleId,
     goal: "Complete the SDLC",
-    trustedAuthorities: [authority.trusted],
+    trustedAuthorities: [authority.trusted, receiptIssuer.trusted],
   });
   let lifecycleRevision = 1;
   let previous = null;
@@ -890,7 +910,7 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
           issuedAt: "2020-09-15T00:00:00.000Z",
           expiresAt: "2099-09-16T00:00:00.000Z",
         });
-        const receipt = {
+        const receipt = receiptIssuer.sign({
           schemaVersion: 1,
           id: "deploy-receipt",
           authorizationId: "deploy-auth",
@@ -904,7 +924,7 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
           status: "succeeded",
           executedAt: "2026-09-15T12:00:00.000Z",
           externalId: "provider-deployment-1",
-        };
+        });
         const authorized = recordDeploymentAuthorization(
           stateDir,
           lifecycleId,
@@ -952,11 +972,11 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
               {
                 deploymentId: id,
                 authorizationId: authorization.id,
-                receipt: {
+                receipt: receiptIssuer.sign({
                   ...receipt,
                   id: "future-receipt",
                   executedAt: "2100-09-15T12:00:00.000Z",
-                },
+                }),
                 eventId: "reject-future-receipt",
                 now: transition.now,
               },
@@ -972,11 +992,11 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
               {
                 deploymentId: id,
                 authorizationId: authorization.id,
-                receipt: {
+                receipt: receiptIssuer.sign({
                   ...receipt,
                   id: "rollback-receipt",
                   action: "rollback",
-                },
+                }),
                 eventId: "reject-rollback-receipt",
                 now: transition.now,
               },
@@ -1230,6 +1250,32 @@ test("critical submissions reject fabricated or stale evidence", (t) => {
         ],
       }),
     /Stale or unaccepted evidence/,
+  );
+  const submitted = transitionSdlcArtifact(
+    stateDir,
+    "release-a",
+    revision,
+    {
+      eventId: "verification-submitted-valid",
+      artifactId: "verification-a",
+      toState: "submitted",
+      evidence: [state.artifacts["build-a"]],
+    },
+  );
+  assert.throws(
+    () =>
+      transitionSdlcArtifact(
+        stateDir,
+        "release-a",
+        submitted.state.revision,
+        {
+          eventId: "verification-accepted-without-evidence",
+          artifactId: "verification-a",
+          toState: "accepted",
+          evidence: [],
+        },
+      ),
+    /Evidence can change only during submission/,
   );
 });
 

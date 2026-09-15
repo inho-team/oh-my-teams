@@ -7,6 +7,11 @@
       "id": "release-approver",
       "kind": "human",
       "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAiCIOOxG/IkpkPHak3JEUhlt2BF42491Uje6Xot6cDq8=\n-----END PUBLIC KEY-----\n"
+    },
+    {
+      "id": "deployment-provider-example",
+      "kind": "deployment-provider",
+      "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA7eQhmnfxE7qMPmoEX1iTmfP74sXF1zsdAzISq/Ln3Tw=\n-----END PUBLIC KEY-----\n"
     }
   ]
 }
