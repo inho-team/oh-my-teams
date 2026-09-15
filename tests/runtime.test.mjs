@@ -17,6 +17,7 @@ import {
 import {
   assist,
   applyEdits,
+  draft,
   makePrompt,
   work,
 } from "../plugins/oh-my-teams/scripts/worker.mjs";
@@ -25,10 +26,13 @@ import {
   validateEvidence,
   aggregate,
   checkCitations,
+  citationGrounding,
+  workspaceBinding,
 } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import {
   classifyProviderFailure,
   decodeOutput,
+  modelBinding,
   providerCommand,
   invoke,
 } from "../plugins/oh-my-teams/scripts/providers.mjs";
@@ -1955,4 +1959,128 @@ test("installer planning verifies versions before reversible legacy migration", 
   ]);
   assert.equal(plan.clients.codex.newCurrent, true);
   assert.throws(() => parseInstallArgs(["claude", "codex"]), /only one/);
+});
+test("assistant answers that cite another tree are rejected, not stored", async (t) => {
+  const dir = fixture(t);
+  fs.writeFileSync(path.join(dir, "source.txt"), "alpha\nbeta\n");
+  const stateDir = path.join(dir, ".omt");
+  const groundedTask = {
+    ...task,
+    id: "grounding",
+    instruction: "Find the beta line",
+    files: ["source.txt"],
+    checks: [[process.execPath, "--version"]],
+  };
+  const answer = (citations) =>
+    assist(dir, clone(), groundedTask, {
+      role: "pm",
+      kind: "research",
+      stateDir,
+      call: async () =>
+        response({ summary: "s", items: ["i"], citations }),
+    });
+
+  await assert.rejects(
+    () => answer([{ file: "docs/architecture/overview.md", line: 1, quote: "x" }]),
+    /do not exist in this workspace/,
+  );
+  await assert.rejects(
+    () => answer([{ file: "source.txt", line: 2, quote: "invented" }]),
+    /do not exist in this workspace/,
+  );
+  await assert.rejects(() => answer([]), /no source citation/);
+  assert.equal(fs.existsSync(path.join(stateDir, "assists")), false);
+
+  const accepted = await answer([
+    { file: "source.txt", line: 2, quote: "beta" },
+  ]);
+  assert.deepEqual(accepted.grounding, {
+    total: 1,
+    verified: 1,
+    unverified: 0,
+    grounded: true,
+  });
+  assert.equal(accepted.workspace.repo, path.resolve(dir));
+  assert.equal(accepted.workspace.head, null);
+});
+test("a read-only answer binds the Git head of the workspace it ran against", async (t) => {
+  const dir = await repo(t);
+  fs.writeFileSync(path.join(dir, "source.txt"), "alpha\nbeta\n");
+  const bound = await draft(
+    dir,
+    clone(),
+    {
+      ...task,
+      id: "binding",
+      files: ["source.txt"],
+      checks: [[process.execPath, "--version"]],
+    },
+    {
+      call: async () =>
+        response({
+          citations: [{ file: "source.txt", line: 2, quote: "beta" }],
+        }),
+    },
+  );
+  assert.equal(bound.workspace.repo, path.resolve(dir));
+  assert.match(bound.workspace.head, /^[0-9a-f]{40}$/);
+  assert.deepEqual(await workspaceBinding(dir), bound.workspace);
+});
+test("a provider answering from another model is refused and left auditable", async (t) => {
+  assert.equal(
+    modelBinding({ model: "a" }, { effectiveModel: "b" }).status,
+    "mismatched",
+  );
+  assert.equal(
+    modelBinding({ model: "a" }, { effectiveModel: "a" }).status,
+    "matched",
+  );
+  assert.equal(modelBinding({ model: "a" }, {}).status, "unproven");
+  assert.equal(modelBinding({}, { effectiveModel: "b" }).status, "unrequested");
+
+  const dir = await repo(t);
+  const result = await work(dir, clone(), task, {
+    stateDir: path.join(dir, ".omt"),
+    call: async () =>
+      response(
+        { edits: [] },
+        { effectiveModel: "gemini-flash-3-8", modelBinding: undefined },
+      ),
+  });
+  assert.equal(result.status, "failed");
+  assert.equal(result.calls.length, 1);
+  assert.ok(result.calls[0].requestedModel);
+  assert.notEqual(result.calls[0].requestedModel, "gemini-flash-3-8");
+  assert.equal(result.calls[0].effectiveModel, "gemini-flash-3-8");
+  assert.equal(result.calls[0].modelProof, "mismatched");
+  assert.match(result.issues[0], /answered from gemini-flash-3-8/);
+  assert.equal(
+    fs.readFileSync(path.join(dir, "value.txt"), "utf8"),
+    "wrong\n",
+  );
+});
+test("ungrounded and misrouted answers route to workspace rebinding", () => {
+  for (const input of [
+    { kind: "workspace-context" },
+    { grounded: false },
+    { message: "Assistant cited 2 of 3 lines that do not exist in this workspace" },
+    { message: "Provider answered from x; routing evidence is invalid" },
+  ]) {
+    assert.deepEqual(classifyFailure(input), {
+      category: "environment-context",
+      nextOwner: "pl",
+      action: "rebind-workspace",
+      retryable: true,
+    });
+  }
+  assert.equal(
+    classifyFailure({ kind: "environment" }).category,
+    "environment-failure",
+  );
+  assert.deepEqual(citationGrounding([]), {
+    total: 0,
+    verified: 0,
+    unverified: 0,
+    grounded: false,
+  });
 });

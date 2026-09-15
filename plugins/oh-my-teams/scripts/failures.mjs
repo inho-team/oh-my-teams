@@ -45,6 +45,15 @@ export function classifyFailure(input = {}) {
     return route("scope-too-large", "pl", "split-task", false);
   }
   if (
+    input.kind === "workspace-context" ||
+    input.grounded === false ||
+    /different tree|do not exist in this workspace|routing evidence is invalid/i.test(
+      message,
+    )
+  ) {
+    return route("environment-context", "pl", "rebind-workspace", true);
+  }
+  if (
     input.kind === "environment" ||
     input.exitCode === 127 ||
     /fixture|tool not found|environment/i.test(message)
