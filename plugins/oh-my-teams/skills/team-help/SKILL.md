@@ -7,7 +7,7 @@ description: 설치된 oh my teams 스킬을 생애주기, 내부 역할과 호�
 
 아래 안내문을 그대로 출력한다. 스킬 파일을 읽어 표를 다시 만들지 않는다. 이 표는 설치된 스킬 목록과 일치하도록 `tests/code-quality.test.mjs`가 검사하므로, 매번 다시 조사하면 같은 결과를 더 비싸게 얻을 뿐이다.
 
-호출 형식만 현재 호스트에 맞게 바꾼다. Claude Code는 `/oh-my-teams:<skill>`, Codex는 `$oh-my-teams:<skill>`을 사용한다. 확인할 수 없는 호출 문법은 추측하지 않는다.
+표는 스킬 이름만 담는다. 호스트 접두사는 마지막 추천 문장에서만 붙이며, Claude Code는 `/oh-my-teams:<skill>`, Codex는 `$oh-my-teams:<skill>`을 사용한다. 확인할 수 없는 호출 문법은 추측하지 않는다.
 
 도움말 조회만으로 `team-form`이나 `team-kickoff`를 실행하지 않으며, 사용자의 프로젝트나 조직 설정을 변경하지 않는다. 사용자가 특정 목적을 함께 말했으면 표를 출력한 뒤 가장 적절한 스킬 하나를 추천하되 자동으로 실행하지 않는다.
 
@@ -61,9 +61,11 @@ description: 설치된 oh my teams 스킬을 생애주기, 내부 역할과 호�
 ## 일반적인 흐름
 
 ```text
-team-form → team-kickoff → team-status → team-close
-                                      └→ team-disband
+team-form → team-kickoff → team-close
+                        └→ team-disband
 ```
+
+`team-status`와 `team-adjust`는 이 흐름의 단계가 아니라 언제든 호출할 수 있다. `team-status`는 현재 상태를 조회만 하고, `team-adjust`는 이후 kickoff에 적용할 조직을 바꾼다.
 
 조직이 이미 구성되어 있으면 `team-form`은 생략할 수 있다.
 

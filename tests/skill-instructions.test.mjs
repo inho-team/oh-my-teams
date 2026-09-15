@@ -294,3 +294,57 @@ test("the assist reference states what the code enforces, not what we wish", () 
     );
   }
 });
+
+test("team-form points at one structural example, not three overlapping ones", () => {
+  const form = readSkill("team-form");
+  // The preset files restate the model assignments the paragraph above already
+  // gives in prose, and presets.mjs is the source of truth for them, so reading
+  // all three cost about 7KB to see one structure.
+  const linked = [
+    ...form.matchAll(/examples\/(organization[.\w-]*\.json)/g),
+  ].map((match) => match[1]);
+  assert.deepEqual([...new Set(linked)], ["organization.json"]);
+});
+
+test("init is described as the no-op it can be", () => {
+  const form = readSkill("team-form");
+  // init returns { created: false } and exits 0 when the file already exists,
+  // so a run that changed nothing reads as a successful formation.
+  assert.match(form, /`created`가 `true`인 경우에만/);
+});
+
+test("the six aliases carry one identical body", () => {
+  const aliases = [
+    "team-setup",
+    "team-show",
+    "team-edit",
+    "org-setup",
+    "org-show",
+    "org-edit",
+  ];
+  // Two variants had drifted apart: half carried the no-duplication sentence
+  // and half did not, which is how the bodies start to diverge.
+  for (const alias of aliases) {
+    const text = readSkill(alias);
+    assert.match(
+      text,
+      /절차 본문은 그 스킬 한 곳에만 있으며 여기에 복제하지 않는다/,
+    );
+    assert.match(text, /이전 호출과의 호환 진입점이다/);
+  }
+});
+
+test("the help flow shows the path, and says what is not on it", () => {
+  const help = readSkill("team-help");
+  // team-status only reads and team-adjust applies to later kickoffs, so
+  // neither is a step; the diagram implied team-status was one and left
+  // team-adjust out of a list that had introduced it as a lifecycle skill.
+  const diagram = help.split("## 일반적인 흐름")[1];
+  assert.ok(diagram, "the flow section must exist");
+  assert.ok(!/team-form → team-kickoff → team-status/.test(diagram));
+  assert.match(diagram, /`team-status`와 `team-adjust`는/);
+
+  // "Print this verbatim" and "change the invocation prefix" contradicted each
+  // other, because the tables carry bare skill names and no prefix at all.
+  assert.match(help, /표는 스킬 이름만 담는다/);
+});
