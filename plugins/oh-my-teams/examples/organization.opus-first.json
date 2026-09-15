@@ -29,6 +29,14 @@
       "subscription": "User-selected shared Agy pool",
       "model": "claude-opus-4-6-thinking",
       "pool": "agy-shared"
+    },
+    "agy-oss": {
+      "provider": "agy",
+      "command": ["agy"],
+      "account": "current",
+      "subscription": "User-selected Agy subscription",
+      "model": "gpt-oss-120b-medium",
+      "pool": "agy-shared"
     }
   },
   "roles": {
@@ -73,5 +81,12 @@
     "maxCalls": 2,
     "timeoutMs": 300000,
     "repeatFailureLimit": 1
+  },
+  "assistants": {
+    "pm": ["agy-oss"],
+    "pl": ["agy-oss"],
+    "senior": ["agy-oss"],
+    "junior": ["agy-oss"],
+    "intern": ["agy-oss"]
   }
 }

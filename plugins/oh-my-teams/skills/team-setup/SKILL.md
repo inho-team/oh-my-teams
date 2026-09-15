@@ -1,6 +1,6 @@
 ---
 name: team-setup
-description: 이전 팀 구성 스킬명의 호환 진입점이다. 새 상설 조직 결성에는 team-form를 사용한다.
+description: 이전 팀 구성 스킬명의 호환 진입점이다. 새 상설 조직 결성에는 team-form을 사용한다.
 ---
 
 # team-form 호환 별칭

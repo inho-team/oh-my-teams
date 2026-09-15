@@ -1,6 +1,6 @@
 ---
 name: org-setup
-description: 이전 org-setup 호출의 호환 별칭이다. 신규 팀 구성 요청에는 team-form를 사용한다.
+description: 이전 org-setup 호출의 호환 별칭이다. 신규 팀 구성 요청에는 team-form을 사용한다.
 ---
 
 # team-form 호환 별칭

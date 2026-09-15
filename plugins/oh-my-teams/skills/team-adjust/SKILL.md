@@ -13,7 +13,7 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 2. 실제 계정 선택은 `team-form`의 프로필 연결 규칙을 따른다. 새 구독이나 과금 경로를 임의로 선택하지 않는다.
 3. 수정안을 별도 JSON에 쓰고 현재 스킬 기준 `../../scripts/teams-org.mjs`를 호출한다.
 
-프리셋은 먼저 `preset`으로 변경되는 역할 프로필만 미리 본다. 기존 구독·계정 프로필을 재사용하며, 없는 모델 프로필은 사용자가 `team-adjust`로 연결하기 전까지 적용하지 않는다. 명시적으로 적용할 때만 `--apply`를 붙인다.
+프리셋은 먼저 `preset`으로 변경되는 역할의 프로필, 대체 순서와 **동시 인원**을 미리 본다. 프리셋은 동시 인원을 1로 고정하므로 인원을 늘려 둔 조직은 줄어든다. 미리보기의 `concurrency` 변화를 사용자에게 그대로 알린다. 기존 구독·계정 프로필을 재사용하며, 없는 모델 프로필은 사용자가 `team-adjust`로 연결하기 전까지 적용하지 않는다. 명시적으로 적용할 때만 `--apply`를 붙인다.
 
 ```text
 node <runtime> preset --org <project>/.omt/organization.json --name balanced --revision <read-revision>
