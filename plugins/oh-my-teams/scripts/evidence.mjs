@@ -46,11 +46,24 @@ async function workspaceContents(repo) {
     .split("\0")
     .filter(Boolean);
   const files = [...new Set([...tracked, ...untracked])]
-    .filter((file) => !file.startsWith(".omt/") && !file.startsWith(".orca/"))
+    // Coordinator state is excluded whatever its spelling: on a
+    // case-insensitive filesystem ".OMT/" is the same directory, and it would
+    // otherwise reach inside() and be rejected as a forbidden segment.
+    .filter((file) => !/^\.(omt|orca)\//i.test(file))
     .sort();
 
   return files.map((relative) => {
-    const file = inside(repo, relative);
+    // One tracked entry must not abort the whole fingerprint. `inside` resolves
+    // symlinks, so a link pointing outside the repository used to throw here
+    // and take verify, gateCheck and validateEvidence down with it. An entry
+    // that cannot be contained is recorded as unreadable, which still changes
+    // the fingerprint if it ever appears or disappears.
+    let file;
+    try {
+      file = inside(repo, relative);
+    } catch {
+      return [relative, null, null];
+    }
     const exists = fs.existsSync(file);
     return [
       relative,

@@ -185,16 +185,23 @@ export function classifyProviderFailure(result, decoded) {
     return "pool-exhausted";
   }
 
-  const combined = `${result.stderr}\n${result.stdout}`;
+  // Text signals are read from the transport channel and from a payload the
+  // provider itself marked as an error. A successful answer's stdout is the
+  // model's own words: a task about rate limiting used to make its own output
+  // read as capacity loss, and the caller then abandoned every remaining
+  // fallback profile on what was only a model error.
+  const transport = decoded.providerError
+    ? `${result.stderr ?? ""}\n${result.stdout ?? ""}`
+    : String(result.stderr ?? "");
   if (
     String(error?.status ?? "") === "429" ||
     code === "429" ||
-    /RESOURCE_EXHAUSTED|quota.?exhausted/i.test(combined)
+    /RESOURCE_EXHAUSTED|quota.?exhausted/i.test(transport)
   ) {
     return "quota-unknown";
   }
-  if (/rate.?limit|too many requests/i.test(combined)) return "rate-limit";
-  return decoded.providerError || result.code !== 0 ? "model-error" : "unknown";
+  if (/rate.?limit|too many requests/i.test(transport)) return "rate-limit";
+  return "model-error";
 }
 
 /**

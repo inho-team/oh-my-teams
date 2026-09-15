@@ -739,10 +739,15 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
         dependenciesReady(tasks[input.taskId], state),
       "Task is not ready for execution",
     );
+    // Comparing only the current attemptId let a retired id come back: retry
+    // clears `attemptId` but keeps the attempt in `attempts`, so a second
+    // record with the same id was appended and every later lookup found the
+    // older one by `Array.find`, spending the settled attempt's allowance and
+    // overwriting its outcome. The whole history has to be consulted.
     assert(
       !Object.values(state.tasks).some(
         (other) =>
-          other.attemptId === input.attemptId ||
+          other.attempts.some((entry) => entry.id === input.attemptId) ||
           (input.receipt &&
             other.execution?.executionId === input.receipt.executionId),
       ),

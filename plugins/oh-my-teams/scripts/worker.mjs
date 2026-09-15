@@ -8,6 +8,7 @@ import {
   hash,
   inside,
   ownerHasExited,
+  profileEnv,
   validateOrg,
   writeJSON,
 } from "./core.mjs";
@@ -322,6 +323,22 @@ export async function work(
   );
   task.files.forEach((file) => inside(repo, file));
 
+  const binding = org.roles[role];
+  const profileIds = selectedProfileIds ?? [
+    binding.profile,
+    ...binding.fallbacks,
+  ];
+  assert(
+    profileIds.length > 0 &&
+      profileIds.every((profile) => Object.hasOwn(org.profiles, profile)),
+    "Unknown selected profile",
+  );
+  // Resolved before a slot is taken and before any call is claimed. profileEnv
+  // throws for a missing environment reference, and it used to throw after
+  // claimWorkflowCall had already counted the call: the settlement then
+  // reported "Workflow call budget exceeded" and hid the configuration error.
+  profileIds.forEach((profileId) => profileEnv(org.profiles[profileId]));
+
   const lease = acquireSlot(stateDir, org, role);
   const runId = `${task.id}-${crypto.randomUUID()}`;
   const runDir = path.join(stateDir, "runs", runId);
@@ -339,16 +356,6 @@ export async function work(
     );
   }
 
-  const binding = org.roles[role];
-  const profileIds = selectedProfileIds ?? [
-    binding.profile,
-    ...binding.fallbacks,
-  ];
-  assert(
-    profileIds.length > 0 &&
-      profileIds.every((profile) => Object.hasOwn(org.profiles, profile)),
-    "Unknown selected profile",
-  );
   const exhaustedPools = new Set();
   let failure = "";
   let previousFailureHash = "";
