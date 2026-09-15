@@ -16,7 +16,7 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 - 다섯 역할을 모두 상시 실행하지 않는다. 제한된 실무는 PM에서 PL·Senior·Junior를 모두 거치지 않고 Worker에게 직접 배정할 수 있다. 중단기 계획과 통합에는 PL을, 구체적인 구현 방법과 중요한 검토에는 Senior를 활성화한다.
 - 역할별 모델·계정·동시 인원과 fallback을 조직 파일에서 읽는다. 조직도는 보고 구조이며 모든 작업이 모든 단계를 통과해야 한다는 뜻이 아니다. Orca 중첩 깊이 제한에 걸리면 PM/PL이 평평한 작업 파동으로 배정한다.
 - 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다.
-- PM은 `teams-org.mjs assist --role pm --kind research|checklist`로 조직에 허용된 GPT-OSS 프로필을 분석 보조 도구로 호출할 수 있다. 자료 정리와 반론 수집은 맡길 수 있지만, 목표·우선순위·수용 결정은 위임하지 않으며 `.omt/assists`의 인용과 결과를 직접 검증한다.
+- PM은 자료 정리와 반론 수집을 보조 도구에 맡길 수 있으나 목표·우선순위·수용 결정은 위임하지 않는다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
 
 제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 PL의 감독 실행 경로를 쓴다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 준다.
 
@@ -34,7 +34,7 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 
 감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 
-진행 상황이나 최종 결과를 사용자에게 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. `live` worker가 0명이면 실제 구현이 실행 중이라고 표현하지 않는다. Goal이 `blocked`이면 표현을 완화하지 않고 그대로 전달하며, 모든 Dispatch가 terminal이고 coordinator가 직접 구현을 이어 가지 않았다면 작업이 멈춘 사실을 명시한다. `unverifiable` worker는 실행 중인 worker 수에 포함하지 않는다. 계획 커밋이나 예정된 다음 단계가 있다는 사실은 현재 구현이 진행 중이라는 근거로 사용하지 않는다. 보고에는 Goal 상태, `live` worker 수, 확인된 최근 코드 변경을 서로 구분하여 포함한다.
+진행 상황이나 최종 결과를 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. 진행 상태 판정은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 
 ## 사용자에게 결과 전달
 

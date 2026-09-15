@@ -51,4 +51,8 @@ agy --model claude-opus-4-6-thinking ...
 
 각 worker의 liveness는 `live`, `unverifiable`, `exited` 중 하나이며 세 값을 서로 대체하지 않는다. `live`는 프로세스가 확인된 상태, `exited`는 종료가 확인된 상태, `unverifiable`은 조회가 실패하여 **어느 쪽인지 알 수 없는 상태**다. `unverifiable`을 실행 중으로 추정하거나 종료로 단정하지 않고 그대로 보존해 보고한다.
 
-`live` worker가 0명이고 `unverifiable` worker도 없으면, 계획이나 다음 단계나 기존 커밋이 있더라도 `in-progress`가 아니라 `stopped`다. `scripts/status.mjs`는 권위 있는 `worker-list` 없이 진행 상태를 계산하지 않는다.
+`live` worker가 0명이고 `unverifiable` worker도 없으면, 계획이나 다음 단계나 기존 커밋이 있더라도 `in-progress`가 아니라 `stopped`다. `unverifiable` worker는 실행 중인 worker 수에 포함하지 않는다. `scripts/status.mjs`의 `supervisedProgressStatus`가 같은 판정을 결정적으로 계산하므로, 서술이 그 함수와 어긋나면 함수가 정본이다.
+
+Goal이 `blocked`이면 표현을 완화하지 않고 그대로 전달한다. 다만 `workflow-status`의 `blocked`는 실패한 task가 하나 있다는 뜻이며 `workflow-retry`로 되돌릴 수 있는 일시 상태이므로, Goal의 `blocked`와 서로 옮겨 적지 않는다.
+
+사용자에게 보고할 때에는 Goal 상태, `live` worker 수, 확인된 최근 코드 변경을 **서로 구분된 항목**으로 제시한다. 계획의 존재, 대기 중인 다음 단계, 완료된 변경, 현재 실행 중인 구현은 각각 다른 사실이다.

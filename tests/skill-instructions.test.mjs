@@ -207,14 +207,20 @@ test("the two meanings of blocked are kept apart", () => {
   // deriveWorkflowStatus returns "blocked" for a single failed task, which
   // workflow-retry can undo. A Goal is blocked only after a repeated, policy
   // level obstruction. Copying one into the other freezes recoverable work.
-  for (const skill of ["team-status", "team-kickoff"]) {
-    const text = readSkill(skill);
-    assert.match(text, /workflow[^\n]*`blocked`/);
-    assert.ok(
-      /되돌릴 수 있는|그것만으로/.test(text),
-      `${skill} must say the workflow value is not the Goal value`,
-    );
-  }
+  // The distinction is stated once in the runtime reference; team-status
+  // points at it and team-kickoff repeats only the part it must act on.
+  const runtime = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/orca-runtime.md"),
+    "utf8",
+  );
+  assert.match(runtime, /workflow-status`의 `blocked`/);
+  assert.match(runtime, /되돌릴 수 있는 일시 상태/);
+
+  assert.match(readSkill("team-status"), /orca-runtime\.md/);
+  assert.match(
+    readSkill("team-kickoff"),
+    /그것만으로 Goal을 차단 처리하지 않는다/,
+  );
 });
 
 test("every skill that queries worker-list pins the executable first", () => {
@@ -230,6 +236,61 @@ test("every skill that queries worker-list pins the executable first", () => {
       text,
       /orca-runtime\.md/,
       `${entry} queries worker-list without the discovery contract`,
+    );
+  }
+});
+
+test("one rule lives in one place", () => {
+  const references = path.join(root, "plugins/oh-my-teams/references");
+  const runtime = fs.readFileSync(
+    path.join(references, "orca-runtime.md"),
+    "utf8",
+  );
+  const assistRef = fs.readFileSync(path.join(references, "assist.md"), "utf8");
+
+  // The liveness verdict and the assist contract are fixed facts. Each used to
+  // be restated in four or five places, so a correction had to be applied in
+  // every one of them or the copies disagreed.
+  assert.match(runtime, /## worker-list와 liveness/);
+  assert.match(assistRef, /gpt-oss-120b-medium/);
+
+  const restatements = [
+    [/`live` worker가 0명이면.*표현하지 않는다/, "the liveness verdict"],
+    [/--role \w+ --kind research/, "the assist invocation"],
+  ];
+  for (const entry of fs.readdirSync(skills)) {
+    const file = path.join(skills, entry, "SKILL.md");
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, "utf8");
+    for (const [pattern, what] of restatements) {
+      assert.ok(
+        !pattern.test(text),
+        `${entry} restates ${what} instead of referencing it`,
+      );
+    }
+  }
+});
+
+test("the assist reference states what the code enforces, not what we wish", () => {
+  const assistRef = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/assist.md"),
+    "utf8",
+  );
+  const worker = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/scripts/worker.mjs"),
+    "utf8",
+  );
+
+  // worker.mjs accepts all three kinds from any role, so the per-role table is
+  // a convention. Presenting it as an enforced rule would be a new mismatch of
+  // exactly the kind this audit kept finding.
+  assert.match(worker, /\["research", "checklist", "edit"\]\.includes\(kind\)/);
+  assert.match(assistRef, /역할에 따라 `kind`를 제한하지 않는다/);
+
+  for (const option of REQUIRED_OPTIONS.assist) {
+    assert.ok(
+      assistRef.includes(`--${option}`),
+      `the reference must show the required --${option}`,
     );
   }
 });
