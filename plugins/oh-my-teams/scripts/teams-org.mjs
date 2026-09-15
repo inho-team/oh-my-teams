@@ -9,7 +9,11 @@ import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
 import { createWorktree, discoverOrcaRuntime } from "./orca-adapter.mjs";
-import { attachWorkspace, prepareInput } from "./workspace.mjs";
+import {
+  attachWorkspace,
+  prepareInput,
+  readPreparedInput,
+} from "./workspace.mjs";
 import {
   attachExecution,
   reserveExecution,
@@ -39,6 +43,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   validate --org FILE
   prepare --org FILE --task FILE --repo DIR --name NAME [--orca EXECUTABLE]
   prepare-input --org FILE --task FILE --repo DIR --output DIR
+  prepare-verify --input DIR
   attach-workspace --org FILE --task FILE --repo DIR --workspace DIR
                    --receipt FILE --runtime FILE --state DIR --name NAME
                    [--orca EXECUTABLE]
@@ -84,6 +89,7 @@ export const ALLOWED_OPTIONS = {
   validate: ["org"],
   prepare: ["org", "task", "repo", "name", "orca"],
   "prepare-input": ["org", "task", "repo", "output"],
+  "prepare-verify": ["input"],
   "attach-workspace": [
     "org",
     "task",
@@ -132,6 +138,7 @@ export const REQUIRED_OPTIONS = {
   validate: ["org"],
   prepare: ["org", "task", "repo", "name"],
   "prepare-input": ["org", "task", "repo", "output"],
+  "prepare-verify": ["input"],
   "attach-workspace": [
     "org",
     "task",
@@ -350,6 +357,19 @@ async function executeCommand(args) {
         path.resolve(args.repo),
         path.resolve(args.output),
       );
+    case "prepare-verify": {
+      // Nothing validated a prepared directory before attaching it, so a
+      // snapshot that had drifted from its organization or task was carried
+      // into the workspace unchecked.
+      const prepared = readPreparedInput(path.resolve(args.input));
+      return {
+        input: path.resolve(args.input),
+        taskId: prepared.task.id,
+        taskRevision: prepared.task.revision ?? 1,
+        organizationRevision: prepared.org.revision,
+        valid: true,
+      };
+    }
     case "attach-workspace":
       return attachExistingWorkspace(args);
     case "runtime-discover":

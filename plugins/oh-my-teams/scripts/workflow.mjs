@@ -20,6 +20,8 @@ import {
 const ROLES = ["pm", "pl", "senior", "junior", "intern"];
 const TERMINAL_OBSERVATIONS = ["settled", "failed"];
 const occupiesSlot = (item) => ["reserved", "running"].includes(item.state);
+// A gate can only advance a task that has already reported an outcome.
+const GATEABLE_STATES = ["submitted", "review-pending", "reviewed", "accepted"];
 
 /**
  * Validates a workflow request before task files or external state are read.
@@ -384,28 +386,16 @@ function applyGateState(stateDir, taskId, item) {
   // A gate is tied to the concrete execution that produced its evidence. Do
   // not let a pending task (or a gate from another workflow/attempt) advance.
   if (gate.runId !== (item.workerRunId ?? item.execution?.executionId)) return;
-  if (
-    !["submitted", "review-pending", "reviewed", "accepted"].includes(
-      item.state,
-    )
-  )
-    return;
+  // Only a task that has already reported can be advanced by a gate. The two
+  // branches below repeated this same guard, so neither could ever be false.
+  if (!GATEABLE_STATES.includes(item.state)) return;
 
   if (gate.state === "accepted") {
-    if (
-      !["submitted", "review-pending", "reviewed", "accepted"].includes(
-        item.state,
-      )
-    )
-      return;
     const decisionId = gate.gates?.["outcome-accepted"]?.decisionId;
     if (typeof decisionId !== "string" || !decisionId.trim()) return;
     item.state = "accepted";
     item.acceptedResult = decisionId;
-  } else if (
-    gate.gates?.["review-complete"]?.status === "pending" &&
-    ["submitted", "review-pending", "reviewed", "accepted"].includes(item.state)
-  ) {
+  } else if (gate.gates?.["review-complete"]?.status === "pending") {
     item.state = "review-pending";
     item.acceptedResult = null;
   } else if (gate.state === "reviewed") {
