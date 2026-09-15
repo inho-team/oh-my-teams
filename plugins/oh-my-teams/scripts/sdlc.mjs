@@ -366,6 +366,7 @@ function validateDeploymentReceipt(receipt, authorization, now) {
   for (const key of ["lifecycleId", "releaseId", "sourceHash", "repository", "environment"]) {
     assert(receipt[key] === authorization[key], `Deployment receipt ${key} mismatch`);
   }
+  assert(receipt.action === "deploy", "Deployment receipt must prove deployment");
   assert(authorization.actions.includes(receipt.action), "Deployment receipt action not authorized");
   assert(receipt.status === "succeeded", "Deployment receipt must prove success");
   const executedAt = Date.parse(receipt.executedAt);

@@ -208,7 +208,7 @@ test("deployment authorization is explicit, scoped, and expiring", () => {
           schemaVersion: 1,
           id: "deploy-auth-staging",
           environment: "staging",
-          actions: ["deploy"],
+          actions: ["deploy", "rollback"],
           issuedAt: "2026-09-15T00:00:00.000Z",
           expiresAt: "2026-09-16T00:00:00.000Z",
         }),
@@ -961,6 +961,26 @@ test("the complete lifecycle reaches learning with explicit deployment evidence"
               },
             ),
           /outside authorization window/,
+        );
+        assert.throws(
+          () =>
+            recordDeployment(
+              stateDir,
+              lifecycleId,
+              lifecycleRevision,
+              {
+                deploymentId: id,
+                authorizationId: authorization.id,
+                receipt: {
+                  ...receipt,
+                  id: "rollback-receipt",
+                  action: "rollback",
+                },
+                eventId: "reject-rollback-receipt",
+                now: transition.now,
+              },
+            ),
+          /must prove deployment/,
         );
         const deployed = recordDeployment(
           stateDir,
