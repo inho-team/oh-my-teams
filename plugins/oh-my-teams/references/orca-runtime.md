@@ -44,3 +44,11 @@ agy --model claude-opus-4-6-thinking ...
 4. 변경이 없는 자식 worktree는 제거한다. 변경이 남아 있으면 제거하지 않고 보존한 뒤 보고한다.
 
 `start_unknown` 또는 `turn_start_unobserved`는 시작 성공의 증거가 아니며, 실패의 증거도 아니다. 두 상태는 미관측으로 보존하고 위 절차로 실제 상태를 확인한 뒤에 판단한다.
+
+## worker-list와 liveness
+
+감독 작업의 실시간 상태는 해당 Run의 `worker-list`에서 확인한다. 이 조회 없이 계획의 존재나 최근 커밋만으로 실행 중이라고 판단하지 않는다.
+
+각 worker의 liveness는 `live`, `unverifiable`, `exited` 중 하나이며 세 값을 서로 대체하지 않는다. `live`는 프로세스가 확인된 상태, `exited`는 종료가 확인된 상태, `unverifiable`은 조회가 실패하여 **어느 쪽인지 알 수 없는 상태**다. `unverifiable`을 실행 중으로 추정하거나 종료로 단정하지 않고 그대로 보존해 보고한다.
+
+`live` worker가 0명이고 `unverifiable` worker도 없으면, 계획이나 다음 단계나 기존 커밋이 있더라도 `in-progress`가 아니라 `stopped`다. `scripts/status.mjs`는 권위 있는 `worker-list` 없이 진행 상태를 계산하지 않는다.

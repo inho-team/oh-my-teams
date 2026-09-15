@@ -77,20 +77,60 @@ test("signature helpers handle multiline parameters and single arrow parameters"
   );
 });
 
-test("team skills are primary and org names remain compatibility aliases", () => {
+test("the lifecycle skills hold the procedure and the aliases only forward", () => {
   const skills = path.resolve("plugins/oh-my-teams/skills");
-  for (const action of ["setup", "show", "edit"]) {
-    const primary = fs.readFileSync(
-      path.join(skills, `team-${action}`, "SKILL.md"),
-      "utf8",
+  const read = (name) =>
+    fs.readFileSync(path.join(skills, name, "SKILL.md"), "utf8");
+
+  // The hierarchy was inverted once: team-form, team-status and team-adjust
+  // were eight-line wrappers sending the reader to team-setup, while team-setup
+  // carried the procedure and called itself a compatibility entry point. A
+  // reader following either name bounced between two files.
+  const pairs = [
+    ["team-form", ["team-setup", "org-setup"]],
+    ["team-status", ["team-show", "org-show"]],
+    ["team-adjust", ["team-edit", "org-edit"]],
+  ];
+  for (const [primary, aliases] of pairs) {
+    const body = read(primary);
+    assert.match(body, new RegExp(`^name: ${primary}$`, "m"));
+    assert.ok(
+      body.split(/\r?\n/).length > 15,
+      `${primary} must carry the procedure itself`,
     );
-    const alias = fs.readFileSync(
-      path.join(skills, `org-${action}`, "SKILL.md"),
-      "utf8",
-    );
-    assert.match(primary, new RegExp(`^name: team-${action}$`, "m"));
-    assert.match(alias, new RegExp(`^name: org-${action}$`, "m"));
-    assert.match(alias, new RegExp(`\\.\\./team-${action}/SKILL\\.md`));
+    for (const alias of aliases) {
+      const text = read(alias);
+      assert.match(text, new RegExp(`^name: ${alias}$`, "m"));
+      assert.match(text, new RegExp(`\\.\\./${primary}/SKILL\\.md`));
+      assert.ok(
+        text.split(/\r?\n/).length <= 12,
+        `${alias} must stay a thin alias`,
+      );
+      // An alias repeating a command would drift from the primary unnoticed.
+      assert.ok(
+        !text.includes("node <runtime>"),
+        `${alias} must not duplicate the procedure`,
+      );
+    }
+  }
+});
+
+test("no skill sends a reader to a compatibility name for the procedure", () => {
+  const skills = path.resolve("plugins/oh-my-teams/skills");
+  const aliases = ["team-setup", "team-show", "team-edit"];
+  // team-help lists the compatibility names on purpose: that table is what it
+  // exists to show.
+  const listsAliases = new Set(["team-help"]);
+  for (const entry of fs.readdirSync(skills)) {
+    if (aliases.includes(entry) || entry.startsWith("org-")) continue;
+    if (listsAliases.has(entry)) continue;
+    const text = fs.readFileSync(path.join(skills, entry, "SKILL.md"), "utf8");
+    for (const alias of aliases) {
+      assert.ok(
+        !text.includes(`\`${alias}\``),
+        `${entry} must name the primary skill, not ${alias}`,
+      );
+    }
   }
 });
 

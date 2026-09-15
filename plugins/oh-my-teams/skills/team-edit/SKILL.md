@@ -3,24 +3,6 @@ name: team-edit
 description: 이전 팀 변경 스킬명의 호환 진입점이다. 상설 조직 조정에는 team-adjust를 사용한다.
 ---
 
-# 팀 구성 변경
+# team-adjust 호환 별칭
 
-프로젝트 `.omt/organization.json`을 읽는다. 없으면 `team-setup`으로 이동한다. 사용자 요청으로 바뀌는 항목에 대해서만 필요한 선택을 받는다. 기존 구독 배정을 전부 다시 묻지 않는다.
-
-1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리한다. 이름 변경, 직급별 부모와 인원, 구독/모델, 대체 순서, `opus-first`/`balanced` 프리셋을 지원한다. 역할 ID는 pm/pl/senior/junior/intern이다.
-2. 실제 계정 선택은 `team-setup`의 프로필 연결 규칙을 따른다. 새 구독이나 과금 경로를 임의로 선택하지 않는다.
-3. 수정안을 별도 JSON에 쓰고 현재 스킬 기준 `../../scripts/teams-org.mjs`를 호출한다.
-
-프리셋은 먼저 `preset`으로 변경되는 역할 프로필만 미리 본다. 기존 구독·계정 프로필을 재사용하며, 없는 모델 프로필은 사용자가 `team-edit`으로 연결하기 전까지 적용하지 않는다. 명시적으로 적용할 때만 `--apply`를 붙인다.
-
-```text
-node <runtime> preset --org <project>/.omt/organization.json --name balanced --revision <read-revision>
-node <runtime> preset --org <project>/.omt/organization.json --name balanced --revision <read-revision> --apply
-```
-
-```text
-node <runtime> edit --org <project>/.omt/organization.json --from <edited.json> --revision <read-revision>
-node <runtime> show --org <project>/.omt/organization.json
-```
-
-런타임은 순환·누락·없는 프로필·오래된 revision을 거부하고 이전 설정을 `.omt/history/`에 남긴다. 진행 중 작업은 생성 시의 스냅샷을 유지한다. 새 배정부터 변경을 적용한다. 이미 실행 중인 세션의 계정·모델을 바꾸거나 같은 편집 작업을 중복 실행하지 않는다.
+이전 호출과의 호환 진입점이다. [team-adjust](../team-adjust/SKILL.md)을 전체 읽고 같은 절차를 수행한다. 절차 본문은 그 스킬 한 곳에만 있으며 여기에 복제하지 않는다. 새 안내와 후속 호출에는 `team-form`, `team-kickoff`, `team-status`, `team-adjust`, `team-close`, `team-disband` 이름을 사용한다.

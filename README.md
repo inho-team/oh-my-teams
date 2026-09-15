@@ -42,13 +42,13 @@ sh install.sh both   # claude | codex | both
 
 설치기는 현재 저장소를 호스트별 로컬 마켓으로 등록한다. 설치 후 **새 대화**에서 스킬을 사용한다. Claude 세션 전용 시험은 `claude --plugin-dir ./plugins/oh-my-teams`로 가능하다. 개발 변경 자체는 전역 설치나 사용자의 조직 설정을 자동 변경하지 않는다.
 
-새 설치 식별자는 `oh-my-teams@oh-my-teams`다. 기존 `/orca:director` 호출은 이전 설치에서만 유지되며 새 namespace에서는 `pm`을 사용한다. 조직 설정과 실행 기록은 `.omt/`에 저장한다. `~/.orca-skills` 고정 링크는 사용하지 않는다. 이전 구현·실측은 [legacy/0.6.1](legacy/0.6.1/README.md)에 보존했고 자동 스킬 발견에서 제외했다.
+새 설치 식별자는 `oh-my-teams@oh-my-teams`다. 기존 `/orca:director` 호출에 대응하는 `director` 스킬은 새 namespace에도 호환 별칭으로 설치되며 `pm`으로 연결된다. 조직 설정과 실행 기록은 `.omt/`에 저장한다. `~/.orca-skills` 고정 링크는 사용하지 않는다. 이전 구현·실측은 [legacy/0.6.1](legacy/0.6.1/README.md)에 보존했고 자동 스킬 발견에서 제외했다.
 
 ## 모델과 구독
 
 Agy에서 확인한 ID(2026-09-15): `gpt-oss-120b-medium`, `gemini-3.1-pro-high`, `gemini-3.8-flash-high`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking`. 설치 때 `agy models`로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
 
-기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`, Worker=`claude-sonnet-4-6`으로 배정한다. 동시 인원은 `1 → 1 → 1 → 2 → 4`로 늘어난다. Junior 이상은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있지만, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
+기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`, Worker=`claude-sonnet-4-6`으로 배정한다. 동시 인원은 `1 → 1 → 1 → 2 → 4`로 늘어난다. 조직의 `assistants`에 허용된 역할은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있다. 기본 예제에서는 Worker를 포함한 모든 역할이 허용되어 있으며, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
 
 Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 모델이 지원한다고 확인되지 않은 `--effort`는 추측해 추가하지 않으며, 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
 
