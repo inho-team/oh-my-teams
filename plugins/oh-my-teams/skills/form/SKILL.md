@@ -1,6 +1,6 @@
 ---
 name: form
-description: 최초 oh my teams 상설 조직을 단계 수와 단계별 모델만 물어 구성하고, 나머지는 비용이 늘지 않는 기본값으로 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
+description: 최초 oh my teams 상설 조직을 다섯 역할의 모델만 물어 구성하고, 나머지는 비용이 늘지 않는 기본값으로 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
 ---
 
 # 팀 결성
@@ -11,26 +11,15 @@ description: 최초 oh my teams 상설 조직을 단계 수와 단계별 모델�
 
 ## 묻는 것
 
-조직이 없으면 **몇 단계로 운영할지와 단계마다 어떤 모델을 쓸지만** 묻는다. 묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 두 번으로 끝난다.
+조직이 없으면 **다섯 역할(PM·PL·Senior·Junior·Intern)이 각각 어떤 모델을 쓸지만** 묻는다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 다섯 역할을 모두 두고, 실제로 몇 개의 역할을 쓸지는 kickoff마다 PM이 과제의 난이도를 보고 실행 깊이로 정하기 때문이다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다.
 
-1. 첫 번째에는 단계 수와 1단계(PM) 모델을 함께 묻는다. PM은 단계 수와 무관하게 항상 있으므로 기다릴 이유가 없다.
-2. 두 번째에는 나머지 단계의 모델을 한 번에 묻는다. 5단계여도 남은 질문은 네 개이므로 한 번에 담긴다. 1단계를 고르면 두 번째 질문은 없다.
+묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 두 번으로 끝난다. 구조화된 선택 도구는 한 번에 질문 네 개까지 담을 수 있으므로 첫 번째에 PM·PL·Senior·Junior의 모델을, 두 번째에 Intern의 모델을 묻는다. 번호를 매긴 선택지로 묻는 호스트에서는 다섯 개를 한 번에 제시한다.
 
-단계 수 선택지는 다음 네 가지이며, 1단계는 자유 입력으로 받는다. 역할은 팀이 없을 때 가장 먼저 아쉬워지는 순서로 더해진다. 구현을 맡을 사람이 먼저이고, 독립 검토가 다음이며, 좁은 실무를 싸게 맡길 단계가 그다음이고, 병렬 작업을 나누고 통합하는 PL은 작업 파동이 여럿일 때에만 이득이므로 마지막이다.
+구독이 부족해 특정 역할을 아예 둘 수 없는 조직은 결성 후 `adjust`에서 그 역할을 뺀다. 뺀 역할이 맡던 일은 서열을 따라 위로 올라가 남은 가장 가까운 역할이 이어받으며, 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 역할 이름은 바꿀 수 없다. 실패 라우팅, 검토 요구사항과 스킬이 이 이름으로 역할을 지목하기 때문이다.
 
-| 선택지 | 선언하는 역할 |
-|---|---|
-| 2단계 | PM → Junior |
-| 3단계 | PM → Senior → Junior |
-| 4단계 | PM → Senior → Junior → Intern |
-| 5단계 | PM → PL → Senior → Junior → Intern |
-| 1단계(자유 입력) | PM |
+모델 선택지는 역할의 성격에 따라 네 개씩 제시하고, 목록에 없는 모델은 자유 입력으로 받는다. 각 선택지는 괄호 안의 `provider:model` 값으로 저장된다.
 
-선언하지 않은 역할이 맡던 일은 서열을 따라 위로 올라가, 선언된 가장 가까운 역할이 이어받는다. 예를 들어 3단계에서는 Intern에게 배정될 좁은 편집을 Junior가, PL의 작업 분할을 PM이 수행한다. 역할 이름은 바꿀 수 없다. 실패 라우팅, 검토 요구사항과 스킬이 이 이름으로 역할을 지목하기 때문이다. 축소된 조직의 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다.
-
-모델 선택지는 단계의 성격에 따라 네 개씩 제시하고, 목록에 없는 모델은 자유 입력으로 받는다. 각 선택지는 괄호 안의 `provider:model` 값으로 저장된다.
-
-| 단계 | 선택지 |
+| 역할 | 선택지 |
 |---|---|
 | PM·PL·Senior | Claude Code 기본(`claude:default`), Opus 4.6·Agy(`agy:claude-opus-4-6-thinking`), Gemini 3.1 Pro·Agy(`agy:gemini-3.1-pro-high`), Codex 기본(`codex:default`) |
 | Junior | Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-high`), Opus 4.6·Agy(`agy:claude-opus-4-6-thinking`), Codex 기본(`codex:default`) |
@@ -38,14 +27,14 @@ description: 최초 oh my teams 상설 조직을 단계 수와 단계별 모델�
 
 이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 묻기 전에 `claude`, `codex`, `agy`가 설치되어 있는지와 `agy models`에 해당 ID가 있는지 확인하고, 확인되지 않은 선택지는 빼고 제시한다. 이 배포에서 확인한 Agy 선택지는 Gemini Flash 3.8·3.7·3.6(각 high/medium/low), Gemini Pro 3.1(high/low), Claude Sonnet 4.6, Claude Opus 4.6, GPT-OSS-120B이고, Codex 카탈로그에서 확인한 선택지는 `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`다. Codex의 개별 모델은 능력 서열을 가정하지 않기 위해 선택지에 넣지 않고 자유 입력으로 받는다.
 
-Gemini 모델 ID는 추론 강도를 이름에 담고 있어서 강도를 비워 둘 수 없다. 결성 단계에서는 Pro 3.1과 Flash 3.8이 공통으로 제공하는 `-high`를 사용하고, 다른 강도는 `adjust`에서 바꾼다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 단계만 다시 묻는다.
+Gemini 모델 ID는 추론 강도를 이름에 담고 있어서 강도를 비워 둘 수 없다. 결성 단계에서는 Pro 3.1과 Flash 3.8이 공통으로 제공하는 `-high`를 사용하고, 다른 강도는 `adjust`에서 바꾼다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 역할만 다시 묻는다.
 
 ## 묻지 않고 정하는 것
 
 아래 값은 사용자가 고른 모델보다 더 많은 호출, 계정이나 권한을 쓰지 않는 쪽으로 고정되어 있으며, `scripts/org-draft.mjs`가 기록한다. 모두 `adjust`에서 바꿀 수 있다.
 
 - 팀 이름은 프로젝트 디렉터리 이름을 쓴다.
-- 각 역할의 상위 역할은 바로 위 단계이고, 모든 프로필은 각 실행기의 현재 로그인 계정(`account: current`)을 쓴다. 같은 실행기의 프로필은 하나의 `pool`로 묶어, 소진이 확인된 계정을 런타임이 건너뛸 수 있게 한다.
+- 각 역할의 상위 역할은 서열상 바로 위 역할이고, 모든 프로필은 각 실행기의 현재 로그인 계정(`account: current`)을 쓴다. 같은 실행기의 프로필은 하나의 `pool`로 묶어, 소진이 확인된 계정을 런타임이 건너뛸 수 있게 한다.
 - 역할별 동시 인원과 시도 횟수는 1이고, 대체 프로필은 두지 않으며, 할당량이 소진되면 중단하고, 전체 호출 한도는 3이다.
 - 추론 강도(`effort`)는 기록하지 않아 각 CLI의 기본값을 쓴다. 생략했을 때의 실제 강도는 CLI와 계정 설정이 정하므로 특정 값으로 단정해 알리지 않는다.
 - GPT-OSS 보조 도구 호출을 허용할지는 묻지 않고 `assistants`를 비워 둔다. 이 상태에서는 모든 역할의 `assist` 호출이 거부되므로, 필요해지면 `adjust`에서 역할별로 허용한다.
@@ -57,7 +46,7 @@ Gemini 모델 ID는 추론 강도를 이름에 담고 있어서 강도를 비워
 현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 초안 파일은 새 경로에 쓰며, 이미 있는 파일에는 쓰지 않는다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
 
 ```text
-node <runtime> org-draft --name <project-dir-name> --tiers <N> --models <tier1>,<tier2>,... --output <draft.json>
+node <runtime> org-draft --name <project-dir-name> --models <pm>,<pl>,<senior>,<junior>,<intern> --output <draft.json>
 node <runtime> init --org <project>/.omt/organization.json --from <draft.json>
 node <runtime> show --org <project>/.omt/organization.json
 ```
