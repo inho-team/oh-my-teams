@@ -121,20 +121,33 @@ function escapeRegExp(text) {
 const DEFAULT_TAB_TITLE = /^Terminal \d+$/;
 
 /**
- * Names the untitled plain shells beside a role terminal as `[shell]` tabs.
+ * Reports whether a screen shows a shell prompt and nothing else.
  *
- * A new worktree comes with a shell tab, and next to an agent that renamed
- * itself it read as another role's tab. Only tabs with no agent and no title
- * beyond Orca's default are renamed, so a tab a person named keeps its name.
+ * @param {string[]} lines - Screen lines, oldest first.
+ * @returns {boolean} Whether no command was typed or run in the shell.
+ */
+export function untouchedShell(lines) {
+  const rows = (lines ?? []).filter((line) => line.trim());
+  return rows.length === 1 && PROMPT_MARK.test(rows[0]);
+}
+
+/**
+ * Closes the unused plain shells beside a role terminal.
  *
- * @param {object} options - Labeling options.
+ * A new worktree comes with a shell tab, and next to the role's tab it read as
+ * another role. Renaming it did not last: Orca kept `Terminal <n>` for a tab it
+ * had not shown yet. The shell is closed instead, but only a tab with no agent,
+ * no title beyond Orca's default, and a screen holding just the prompt, so a
+ * shell someone named or used stays open.
+ *
+ * @param {object} options - Cleanup options.
  * @param {string} options.orca - Selected Orca executable.
  * @param {string} options.worktree - Worktree selector the role terminal is in.
  * @param {string} options.handle - The role terminal, which is left alone.
  * @param {Function} [options.execute=run] - Injectable command runner.
- * @returns {Promise<string[]>} Handles of the shells that were renamed.
+ * @returns {Promise<string[]>} Handles of the shells that were closed.
  */
-export async function labelPlainShells({
+export async function closeUnusedShells({
   orca,
   worktree,
   handle,
@@ -151,10 +164,7 @@ export async function labelPlainShells({
   } catch {
     return [];
   }
-  const title = worktreeLabel(worktree)
-    ? `[shell] ${worktreeLabel(worktree)}`
-    : "[shell]";
-  const renamed = [];
+  const closed = [];
   for (const terminal of terminals) {
     const plain =
       terminal?.handle &&
@@ -162,13 +172,20 @@ export async function labelPlainShells({
       !terminal.agentIdentity &&
       (!terminal.title || DEFAULT_TAB_TITLE.test(terminal.title));
     if (!plain) continue;
-    if (
-      await pinTerminalTitle({ orca, handle: terminal.handle, title, execute })
-    ) {
-      renamed.push(terminal.handle);
+    try {
+      const screen = await readScreen(orca, terminal.handle, execute);
+      if (!untouchedShell(screen)) continue;
+      await runOrcaJson(
+        orca,
+        ["terminal", "close", "--terminal", terminal.handle],
+        { execute },
+      );
+      closed.push(terminal.handle);
+    } catch {
+      // A shell that cannot be read or closed is only an extra tab.
     }
   }
-  return renamed;
+  return closed;
 }
 
 // Wrapping splits a long command over rows and may drop the space at the
@@ -390,8 +407,8 @@ async function launchOnce({
  * blocked instead of reopened in a loop.
  *
  * A ready terminal's tab title is set again once the agent runs, since the
- * title given at creation may not last, and the worktree's untitled plain
- * shells are named `[shell]`.
+ * title given at creation may not last, and the worktree's unused plain
+ * shells are closed.
  *
  * @param {object} options - Launch options.
  * @param {string} options.worktree - Orca worktree selector for the terminal.
@@ -463,8 +480,8 @@ export async function openRoleTerminal({
   const titlePinned = ready
     ? await pinTerminalTitle({ orca, handle, title: tabTitle, execute })
     : false;
-  const shellsLabeled = ready
-    ? await labelPlainShells({ orca, worktree, handle, execute })
+  const shellsClosed = ready
+    ? await closeUnusedShells({ orca, worktree, handle, execute })
     : [];
   return {
     role: command.role,
@@ -483,7 +500,7 @@ export async function openRoleTerminal({
     ready,
     title: tabTitle,
     titlePinned,
-    shellsLabeled,
+    shellsClosed,
     ...(ready ? {} : { status: "blocked" }),
     screenCheck: "required",
     screen: seen.screen,
