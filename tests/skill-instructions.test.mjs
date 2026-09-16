@@ -612,6 +612,14 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // charters forbade the raw command.
   assert.match(runtime, /### Agy 역할 시작/);
   assert.match(runtime, /--terminal <handle> --worktree id:<worktreeId>/);
+  // The terminal and the hand-over must read the same run, or an Agy terminal
+  // built for one role is accepted as the role the run folded it onto.
+  assert.match(
+    runtime,
+    /node <runtime> role-command --org <organization\.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state>/,
+  );
+  assert.doesNotMatch(readSkill("pl"), /custom argv/);
+  assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
   assert.match(runtime, /대괄호/);
   for (const role of ["pm", "pl"]) {
     assert.match(readSkill(role), /Agy 역할은 `role-command`로 연 터미널/);

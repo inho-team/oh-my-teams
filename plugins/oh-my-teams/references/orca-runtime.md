@@ -82,7 +82,7 @@ node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|i
 `--agent`, `--model`, `--effort`를 함께 적으면 프로필과 같을 때에만 받아들이고, 다르면 Orca를 호출하기 전에 거부한다. `--terminal`과는 세 값 모두 함께 쓸 수 없다. Orca가 이 조합을 거부하고, 터미널은 처음 열 때의 모델을 유지하기 때문이다. 다음 경우에도 호출 전에 거부한다.
 
 - 역할이 PM이거나 PM으로 접힌다. 거부 문구는 조직에 선언되지 않은 역할(`is not declared`)과 이번 실행의 깊이에서 빠진 역할(`is not in this run's roles`)을 구분한다. PM은 coordinator이며 아래 「coordinator 실행」으로 띄운다.
-- 프로필이 현재 계정이 아니거나, `env` 또는 추가 인자로 계정을 고른다. Orca agent ID는 실행 파일만 가리키므로 계정을 표현하지 못한다.
+- 프로필이 현재 계정이 아니거나, `env` 또는 추가 인자로 계정을 고른다. Orca agent ID는 실행 파일만 가리키므로 계정을 표현하지 못한다. 이런 프로필은 `role-command`도 거부하므로 감독 worker로 띄울 수 없고, 프로필의 명령과 환경변수 참조를 그대로 쓰는 `work` 하네스로 Ollama와 같이 실행한다.
 - 프로필이 모델 없이 강도만 기록한다. Orca는 `--model` 없는 `--effort`를 거부한다.
 
 `--spec` 앞에는 받는 역할의 머리글이 붙는다. 머리글에는 역할, 보고 대상, 이번 실행에 없어 이어받는 역할, 직접 배정할 수 있는 역할, 조직 파일 경로, workflow ID와 coordinator state 경로, 그리고 역할 스킬의 `권한·책임·한계` 절 전문이 들어간다. 중첩 worker로 실행되는 PL은 이 경로로 자기 하위 역할을 시작한다. `task-create`로 만든 Task를 `--task`로 시작할 때에는 래퍼가 머리글을 붙일 수 없으므로, Task 설명을 `node <runtime> role-spec --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state> --spec <작업>`의 출력으로 만든다.
@@ -104,13 +104,13 @@ Agy 역할은 모델을 명령줄에 담아 터미널을 먼저 열고, 모델�
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-command --org <organization.json> --role <역할>
+node <runtime> role-command --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state>
 <orca> terminal create --worktree id:<worktreeId> --command "<role-command의 command>" --json
 <orca> terminal read --terminal <handle> --screen --json
 node <runtime> worker-start --org <organization.json> --role <역할> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <handle> --worktree id:<worktreeId> --spec <작업>
 ```
 
-`role-command`는 `agy --model <model>`을, 프로필에 강도가 있으면 `--effort <effort>`까지 만든다. 화면에 표시된 모델이 프로필의 모델과 같을 때에만 `worker-start --terminal`을 호출한다. Orca는 `agy` 실행 파일을 `antigravity` agent로 인식해 작업을 전달한다. 이 경로의 `modelProof`는 항상 `unproven`이므로 작업을 넘긴 뒤에도 보고서에 모델을 적을 때에는 화면에서 확인한 사실로 적는다. Orca가 터미널의 agent를 인식하지 못해 `inject_rejected`로 거부하면 같은 명령을 반복하지 않고 거부 원문과 함께 상위에 보고한다.
+`role-command`와 `worker-start`에는 같은 `--workflow-id`와 `--state`를 넘긴다. 그래야 두 명령이 같은 조직 스냅샷과 이번 실행의 역할을 읽는다. 터미널은 한 역할의 프로필로 미리 만들어지므로, 두 명령 모두 요청한 역할이 이번 실행에 실제로 있을 때에만 받아들인다. 이번 실행에 없어 다른 역할로 접히는 역할을 요청하면 어느 역할로 접히는지 알리며 거부하고, 그때에는 접힌 역할의 터미널을 연다. `role-command`는 `agy --model <model>`을, 프로필에 강도가 있으면 `--effort <effort>`까지 만든다. 화면에 표시된 모델이 프로필의 모델과 같을 때에만 `worker-start --terminal`을 호출한다. Orca는 `agy` 실행 파일을 `antigravity` agent로 인식해 작업을 전달한다. 이 경로의 `modelProof`는 항상 `unproven`이므로 작업을 넘긴 뒤에도 보고서에 모델을 적을 때에는 화면에서 확인한 사실로 적는다. Orca가 터미널의 agent를 인식하지 못해 `inject_rejected`로 거부하면 같은 명령을 반복하지 않고 거부 원문과 함께 상위에 보고한다.
 
 이 래퍼는 argv를 배열로 전달하고, receipt에서 Dispatch 신원을 확인한 뒤, 시작이 `ready`에 이르지 못하면 3값 liveness와 번역된 실패 신호가 담긴 receipt를 돌려준다. 거부되어 Dispatch가 만들어지지 않은 경우에만 오류를 던지며, 그 오류에도 신호와 원본 receipt가 함께 실린다.
 

@@ -137,6 +137,31 @@ test("a stall already escalated is not escalated again every period", () => {
   assert.equal(resumed.reason, "recent-activity");
 });
 
+test("an exit or a human prompt after an escalation is still reported", () => {
+  // The already-escalated rule ran first, so a worker that exited without
+  // worker_done, or stopped on a prompt only a human can answer, after its
+  // stall was escalated read as a stall to keep waiting on.
+  const escalatedAt = minutesAgo(10);
+  const exited = next({
+    liveness: "exited",
+    lastActivityAt: minutesAgo(60),
+    unansweredRequests: 2,
+    escalatedAt,
+  });
+  assert.equal(exited.action, "escalate");
+  assert.equal(exited.reason, "exited-without-worker-done");
+
+  const prompted = next({
+    liveness: "live",
+    lastActivityAt: minutesAgo(60),
+    unansweredRequests: 2,
+    escalatedAt,
+    agentWait: { evidence: "prompt-text" },
+  });
+  assert.equal(prompted.action, "escalate");
+  assert.equal(prompted.reason, "waiting-on-human-prompt");
+});
+
 test("an unreadable clock is refused instead of printing NaN", () => {
   assert.throws(
     () =>

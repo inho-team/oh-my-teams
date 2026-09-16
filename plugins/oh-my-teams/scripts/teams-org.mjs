@@ -88,7 +88,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                [--retry-of ID] [--workflow-id ID --state DIR] [--orca EXECUTABLE]
                (with --workflow-id, the workflow's organization snapshot is used)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
-  role-command --org FILE --role ROLE
+  role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
   host-defaults [--project DIR] [--codex-home DIR]
   supervision-next --org FILE --observation FILE
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role intern]
@@ -152,7 +152,7 @@ export const ALLOWED_OPTIONS = {
   ],
   "runtime-discover": ["orca"],
   "role-spec": ["org", "role", "spec", "workflow-id", "state"],
-  "role-command": ["org", "role"],
+  "role-command": ["org", "role", "workflow-id", "state"],
   "host-defaults": ["project", "codex-home"],
   "supervision-next": ["org", "observation"],
   "worker-start": [
@@ -573,7 +573,9 @@ async function executeCommand(args) {
         spec: roleSpec(org, args.role, args.spec, run),
       }))(launchContext(args));
     case "role-command":
-      return roleCommand(readJSON(args.org), args.role);
+      return (({ org, run }) => roleCommand(org, args.role, run))(
+        launchContext(args),
+      );
     case "host-defaults":
       return resolveHostDefaults({
         project: args.project && path.resolve(args.project),

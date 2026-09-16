@@ -16,7 +16,7 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 - 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 사용자 결정을 요청한다.
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
 - `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
-- 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-command`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며, Ollama 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
+- 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-command`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
 - 커밋·PR·머지는 사용자가 허가한 범위에서만 PL 스킬의 머지 절차로 진행한다.

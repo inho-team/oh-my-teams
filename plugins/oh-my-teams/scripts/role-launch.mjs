@@ -108,6 +108,16 @@ function foldReason(org, roles, requestedRole) {
     : `${requestedRole} is not declared`;
 }
 
+// A terminal is built for one role's profile before any task reaches it, so
+// folding at hand-over time could accept it as a different role's worker. A
+// prebuilt launch therefore has to name a role the run actually holds.
+function assertHeldRole(org, roles, requestedRole, role) {
+  assert(
+    role === requestedRole,
+    `${foldReason(org, roles, requestedRole)}; its work folds to ${role}, so open and hand over a terminal for ${role} instead`,
+  );
+}
+
 function contradiction(role, what, explicit, saved) {
   assert(
     explicit === undefined || explicit === saved,
@@ -149,6 +159,7 @@ export function resolveRoleLaunch(
   launchableProfile(role, profileId, profile);
   const { agent, via } = ORCA_LAUNCH[profile.provider];
   if (terminal) {
+    assertHeldRole(org, roles, requestedRole, role);
     // Orca refuses a model, effort or agent beside --terminal, so none is
     // accepted here either, even one that restates the profile.
     assert(
@@ -198,11 +209,12 @@ export function launchBinding(launch, started) {
   let modelProof;
   if (launch.model === null) modelProof = "unrequested";
   else if (launch.via === "terminal" || !effective) modelProof = "unproven";
-  else if (
-    effective.model === launch.model &&
-    (launch.effort === null || effective.effort === launch.effort)
-  ) {
+  else if (effective.model !== launch.model) modelProof = "mismatched";
+  else if (launch.effort === null || effective.effort === launch.effort) {
     modelProof = "matched";
+  } else if (effective.effort === undefined || effective.effort === null) {
+    // A receipt that records no effort neither confirms nor contradicts it.
+    modelProof = "unproven";
   } else modelProof = "mismatched";
   return {
     requestedRole: launch.requestedRole,
@@ -236,14 +248,21 @@ function shellToken(token) {
  * opened with this command through `orca terminal create --command`. An Agy
  * role is opened the same way before `worker-start --terminal` hands it a task.
  *
+ * The role must be one the run holds. A terminal opened for a role the run
+ * folds elsewhere would run that role's model while `worker-start` hands it
+ * the work of the role it folded onto.
+ *
  * @param {object} requestedOrg - Organization document.
- * @param {string} requestedRole - Role to launch, declared or not.
+ * @param {string} requestedRole - Role to launch.
+ * @param {object} [run={}] - Run context.
+ * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
  * @returns {object} Role, profile, argv, shell command and requested model.
- * @throws {Error} When the profile cannot be expressed as a plain CLI launch.
+ * @throws {Error} When the role is not held or the profile cannot be launched.
  */
-export function roleCommand(requestedOrg, requestedRole) {
+export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
   const org = validateOrg(requestedOrg);
-  const role = foldRole(definedRoles(org), requestedRole);
+  const role = foldRole(activeRoles(org, roles), requestedRole);
+  assertHeldRole(org, roles, requestedRole, role);
   const profileId = org.roles[role].profile;
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);

@@ -188,6 +188,16 @@ test("the launch receipt proves the model only when Orca applied the request", (
     "mismatched",
   );
   assert.equal(launchBinding(launch, receipt(null)).modelProof, "unproven");
+  // A receipt that records no effort proves nothing about it.
+  const terraLaunch = (() => {
+    const org = example();
+    org.roles.pl.profile = "codex-terra";
+    return resolveRoleLaunch(org, "pl");
+  })();
+  assert.equal(
+    launchBinding(terraLaunch, receipt({ model: "gpt-5.6-terra" })).modelProof,
+    "unproven",
+  );
   const terra = example();
   terra.roles.pl.profile = "codex-terra";
   assert.equal(
@@ -325,6 +335,105 @@ test("worker-start requires the organization and role and refuses before Orca", 
     /role-command/,
   );
 });
+
+test("a terminal is opened and handed work only for a role the run holds", async (t) => {
+  // role-command folded against the live file while worker-start folded
+  // against the run, so an Agy terminal built for Intern was accepted as the
+  // Codex Junior the run folded Intern onto.
+  const org = example();
+  org.profiles["codex-55"] = {
+    provider: "codex",
+    command: ["codex"],
+    account: "current",
+    subscription: "Codex",
+    model: "gpt-5.5",
+  };
+  org.roles.junior.profile = "codex-55";
+  org.roles.intern.profile = "agy-oss";
+  const roles = ["pm", "senior", "junior"];
+  assert.throws(
+    () => roleCommand(org, "intern", { roles }),
+    /intern is not in this run's roles.*junior/s,
+  );
+  assert.throws(
+    () => resolveRoleLaunch(org, "intern", {}, { roles, terminal: "t1" }),
+    /intern is not in this run's roles.*junior/s,
+  );
+  // Folding still serves a fresh agent launch, where nothing was prebuilt.
+  assert.equal(resolveRoleLaunch(org, "intern", {}, { roles }).role, "junior");
+  // Asking for the role that does hold the work is fine, and PM is PM.
+  assert.equal(roleCommand(org, "junior", { roles }).argv[2], "gpt-5.5");
+  assert.equal(roleCommand(org, "pm", { roles }).role, "pm");
+  assert.throws(
+    () => roleCommand(org, "pl", { roles }),
+    /not in this run's roles/,
+  );
+
+  // Through the CLI, role-command reads the frozen organization and roles.
+  const state = tempDir(t);
+  const repo = await workflowRepo(t);
+  await createWorkflow(
+    state,
+    {
+      schemaVersion: 1,
+      id: "wf-2",
+      goal: "Fix a typo",
+      repo: ".",
+      depth: 3,
+      tasks: [{ file: "task-a.json", role: "junior" }],
+      policy: { maxRunning: 1, maxReviewPending: 1 },
+      budget: { maxAttempts: 1, maxCalls: 1 },
+    },
+    org,
+    repo,
+  );
+  const live = example();
+  live.profiles["agy-oss"].model = "gpt-oss-120b-medium";
+  live.roles.junior.profile = "codex-luna";
+  const orgFile = path.join(repo, "organization.json");
+  writeJSON(orgFile, live);
+  const common = ["--org", orgFile, "--workflow-id", "wf-2", "--state", state];
+  const printed = await capture(() =>
+    main(["role-command", "--role", "junior", ...common]),
+  );
+  assert.deepEqual(JSON.parse(printed).argv, ["codex", "--model", "gpt-5.5"]);
+  await assert.rejects(
+    () => main(["role-command", "--role", "intern", ...common]),
+    /not in this run's roles/,
+  );
+});
+
+async function workflowRepo(t) {
+  const repo = tempDir(t);
+  for (const args of [
+    ["init", "-q"],
+    ["config", "user.email", "t@example.invalid"],
+    ["config", "user.name", "t"],
+    ["commit", "-q", "--allow-empty", "-m", "base"],
+  ]) {
+    assert.equal((await run(["git", ...args], { cwd: repo })).code, 0);
+  }
+  writeJSON(path.join(repo, "task-a.json"), {
+    ...readJSON(
+      new URL("../plugins/oh-my-teams/examples/task.v2.json", import.meta.url),
+    ),
+    id: "task-a",
+    baseRef: "HEAD",
+  });
+  return repo;
+}
+
+async function capture(action) {
+  const output = [];
+  const log = console.log;
+  console.log = (line) => output.push(line);
+  try {
+    await action();
+  } finally {
+    console.log = log;
+  }
+  return output.join("\n");
+}
 
 test("a workflow launch reads the organization snapshot the workflow froze", async (t) => {
   const state = tempDir(t);

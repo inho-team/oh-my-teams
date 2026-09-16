@@ -111,10 +111,6 @@ export function nextSupervisionAction({
     ...extra,
   });
 
-  const escalated = Date.parse(escalatedAt ?? "");
-  if (!Number.isNaN(escalated) && (Number.isNaN(last) || last <= escalated)) {
-    return decide("wait", "already-escalated");
-  }
   if (liveness === "exited") {
     return decide("escalate", "exited-without-worker-done", {
       readOutput: true,
@@ -123,6 +119,12 @@ export function nextSupervisionAction({
   }
   if (agentWait) {
     return decide("escalate", "waiting-on-human-prompt", { readOutput: true });
+  }
+  // An exit or a human prompt is a new fact, not the stall already reported,
+  // so both are checked before the already-escalated rule.
+  const escalated = Date.parse(escalatedAt ?? "");
+  if (!Number.isNaN(escalated) && (Number.isNaN(last) || last <= escalated)) {
+    return decide("wait", "already-escalated");
   }
   if (liveness === "unverifiable") {
     return exhausted
