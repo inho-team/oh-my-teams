@@ -55,4 +55,4 @@ node <runtime> show --org <project>/.omt/organization.json
 
 결성을 보고할 때에는 역할별로 배정된 모델과 함께, 위 목록에서 묻지 않고 정한 값을 짧게 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 저장된 파일의 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서 확인할 수 있다.
 
-`.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다. 조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 활성 kickoff 점유 기록이 놓이는 자리가 된다. 한 프로젝트의 활성 kickoff는 하나이며, form 자체는 점유 기록을 만들지 않는다. 자세한 계약은 [`../../references/kickoff-lease.md`](../../references/kickoff-lease.md)에 있다.
+`.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다. 조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 kickoff 등록부가 놓이는 자리가 된다. 한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있으며, form 자체는 kickoff를 등록하지 않는다. 자세한 계약은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)에 있다.

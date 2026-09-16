@@ -293,7 +293,7 @@ test("one rule lives in one place", () => {
   const restatements = [
     [/`live` worker가 0명이면.*표현하지 않는다/, "the liveness verdict"],
     [/--role \w+ --kind research/, "the assist invocation"],
-    [/"coordinator": \{/, "the kickoff lease record"],
+    [/"coordinator": \{/, "the kickoff registry entry"],
   ];
   for (const entry of fs.readdirSync(skills)) {
     const file = path.join(skills, entry, "SKILL.md");
@@ -402,32 +402,36 @@ test("the help flow shows the path, and says what is not on it", () => {
   assert.match(help, /표는 스킬 이름만 담는다/);
 });
 
-test("one project holds one kickoff, and every lifecycle skill reads the lease", () => {
-  const lease = fs.readFileSync(
-    path.join(root, "plugins/oh-my-teams/references/kickoff-lease.md"),
+test("kickoffs run in parallel, and every lifecycle skill reads the registry", () => {
+  const registry = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/kickoff-registry.md"),
     "utf8",
   );
-  // workflow.mjs counts concurrency slots and the call budget inside a single
-  // workflow state, so two kickoffs sharing one organization file spend the
-  // same subscription twice while neither can see the other's slots. Nothing
-  // in teams-org.mjs refuses that, which is why the lease has to be read by
-  // every skill that starts, inspects or ends a kickoff.
-  assert.match(lease, /런타임이 거부로 강제한다/);
-  assert.match(lease, /active-kickoff\.json/);
+  // Worktrees keep parallel kickoffs from touching the same files, but not
+  // from drawing on the same subscription: slots and the call budget are
+  // counted inside each workflow state. Allowing parallel kickoffs is a choice,
+  // so the cost has to be stated where the choice is made.
+  assert.match(registry, /kickoff를 몇 개든 동시에 진행할 수 있다/);
+  assert.match(registry, /## 병렬 kickoff의 비용/);
+  assert.doesNotMatch(registry, /활성 kickoff는 하나/);
 
   for (const skill of ["form", "kickoff", "status", "close", "disband"]) {
     assert.match(
       readSkill(skill),
-      /references\/kickoff-lease\.md/,
-      `${skill} touches the single active kickoff and must read the contract`,
+      /references\/kickoff-registry\.md/,
+      `${skill} starts, shows or ends a kickoff and must read the contract`,
     );
   }
+  assert.match(
+    readSkill("kickoff"),
+    /할당량을 함께 소모한다는 점을 사용자에게 알린다/,
+  );
 });
 
 test("the Goal belongs to the session that can bind the Run", () => {
   const kickoff = readSkill("kickoff");
-  const lease = fs.readFileSync(
-    path.join(root, "plugins/oh-my-teams/references/kickoff-lease.md"),
+  const registry = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/kickoff-registry.md"),
     "utf8",
   );
   // worker-start is fenced to the terminal that created the Run, so a session
@@ -436,7 +440,7 @@ test("the Goal belongs to the session that can bind the Run", () => {
   // the coordinator creates the Goal and binds the Run in the same terminal.
   assert.match(kickoff, /coordinator 세션이 브리프를 읽고 하나 만들며/);
   assert.match(kickoff, /worker-start`가 Run에 바인딩된 coordinator 터미널/);
-  assert.match(lease, /Goal의 유일한 소유자는 B다/);
+  assert.match(registry, /Goal의 유일한 소유자는 B다/);
 });
 
 test("closing runs where the coordinator worktree can actually be reclaimed", () => {
@@ -451,16 +455,21 @@ test("closing runs where the coordinator worktree can actually be reclaimed", ()
   }
 });
 
-test("the lease is released by an ending, never by a reading", () => {
+test("a kickoff is released by its ending, never by a reading", () => {
   const close = readSkill("close");
   const disband = readSkill("disband");
   const status = readSkill("status");
-  // A lease left behind blocks every later kickoff on the project, and a lease
-  // cleared on an unverifiable coordinator would abandon a run that may still
-  // be alive. Both endings delete it; the read-only skill never does.
+  // An entry left behind shows a finished kickoff as running and blocks its
+  // worktree, and an entry cleared on an unverifiable coordinator would abandon
+  // a run that may still be alive. Both endings release the one kickoff they
+  // end; the read-only skill never touches an entry.
   assert.match(close, /kickoff-release .*--reason completed/);
   assert.match(disband, /kickoff-release .*--reason disbanded/);
-  assert.match(status, /점유 기록을 지우거나 고쳐 쓰지 않는다/);
+  for (const skill of [close, disband]) {
+    assert.match(skill, /kickoff-show --worktree <coordinator-id>/);
+    assert.match(skill, /사용자가 지목한 것만/);
+  }
+  assert.match(status, /등록 항목을 지우거나 고쳐 쓰지 않는다/);
 });
 
 test("form asks for the five role models, and not for a ladder size", () => {

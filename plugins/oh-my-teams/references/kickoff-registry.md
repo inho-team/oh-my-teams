@@ -1,14 +1,16 @@
-# 활성 kickoff 점유
+# kickoff 등록부
 
-한 프로젝트에서 동시에 살아 있는 kickoff는 하나다. `scripts/workflow.mjs`의 동시 인원 검사와 호출 예산 검사는 workflow 하나의 state만 세기 때문에, 같은 조직 파일을 읽는 kickoff가 둘이면 조직 파일에 적힌 `concurrency`와 `maxCalls`가 합산 기준으로는 지켜지지 않는다. 두 coordinator가 같은 구독을 동시에 소모하면서도 서로의 슬롯을 보지 못한다.
+한 프로젝트에서 kickoff를 몇 개든 동시에 진행할 수 있다. 각 kickoff는 자기 coordinator 워크트리에서 감독되며, 워커도 각자 자식 워크트리에서 일하므로 파일과 브랜치가 서로 겹치지 않는다. 등록부는 개수를 제한하지 않고, 어떤 kickoff가 어느 워크트리에서 돌고 있는지를 기록해 `status`·`close`·`disband`가 그 coordinator를 찾게 한다.
 
-이 규칙은 런타임이 거부로 강제한다. `scripts/kickoff-lease.mjs`가 점유를 배타적 잠금 아래에서 기록하므로, 프로젝트가 비어 있다고 동시에 판단한 두 세션 가운데 하나만 점유에 성공하고 나머지는 승자의 기록을 읽게 된다. 점유 파일을 직접 만들거나 지우지 않고 아래 명령을 사용한다.
+## 병렬 kickoff의 비용
 
-## 점유 기록의 위치와 내용
+워크트리 분리는 파일 충돌을 없애지만 구독 할당량까지 나누지는 않는다. 역할별 동시 인원(`concurrency`)과 호출 예산은 kickoff마다 자기 workflow state 안에서 따로 계산되고, 할당량 소진 스냅샷도 coordinator state마다 따로 쌓인다. 따라서 kickoff 두 개가 같은 구독을 쓰면 조직 파일에 적은 동시 인원의 두 배까지 워커가 동시에 돌 수 있고, 한쪽이 확인한 소진을 다른 쪽은 자기 호출이 실패할 때에야 안다. 여러 kickoff를 함께 진행할 때에는 이 점을 사용자에게 알리고, 필요하면 각 kickoff의 실행 깊이를 낮추거나 `adjust`로 동시 인원을 줄인다.
 
-점유 기록은 `organization.json`이 있는 **원본 프로젝트**의 `.omt/active-kickoff.json`이다. `.omt/`는 Git에서 제외되고 워크트리마다 별개의 디렉터리이므로, coordinator 워크트리 안에 두면 다른 세션이 읽지 못해 점유의 의미가 사라진다. 런타임은 `--org`로 받은 조직 파일과 같은 디렉터리에서만 점유를 찾으므로, 경로를 잘못 지정해 다른 자리에 점유를 만들 수 없다.
+## 등록 위치와 내용
 
-점유를 요청할 때 작성하는 파일은 다음 네 항목만 담는다. `createdAt`과 보관 이력은 런타임이 채우며, `runId`는 뒤따르는 `kickoff-bind`가 채운다.
+등록부는 `organization.json`이 있는 **원본 프로젝트**의 `.omt/kickoffs/<worktreeId>.json`이다. `.omt/`는 Git에서 제외되고 워크트리마다 별개의 디렉터리이므로, coordinator 워크트리 안에 두면 종료를 수행하는 세션이 읽지 못한다. 런타임은 `--org`로 받은 조직 파일과 같은 자리에서만 등록부를 찾는다.
+
+등록을 요청할 때 작성하는 파일은 다음 네 항목만 담는다. `createdAt`은 런타임이 채우고, `runId`는 뒤따르는 `kickoff-bind`가 채운다.
 
 ```json
 {
@@ -23,7 +25,13 @@
 }
 ```
 
-브리프 파일이 실제로 존재하지 않으면 점유가 거부된다. coordinator는 부모 대화 대신 이 파일을 읽고 시작하므로, 쓰지 않은 브리프를 가리키는 점유는 아무것도 넘겨주지 못한다. `organizationRevision`이 현재 조직 revision과 다를 때에도 거부되므로, 오래된 조직 스냅샷으로 팀을 띄우는 일이 생기지 않는다.
+런타임은 다음 경우에 등록을 거부한다.
+
+- 같은 워크트리가 이미 다른 kickoff를 감독하고 있을 때. coordinator 세션 하나는 Goal 하나를 소유하고 Run 하나를 바인딩하므로, 두 번째 kickoff에는 감독할 주체가 없다. 새 coordinator 워크트리를 만든다.
+- 브리프 파일이 실제로 없을 때. coordinator는 부모 대화 대신 이 파일을 읽고 시작한다.
+- `organizationRevision`이 현재 조직 revision과 다를 때. 오래된 조직 스냅샷으로 팀을 띄우지 않게 한다.
+
+단일 kickoff 시절의 `.omt/active-kickoff.json`이 남아 있으면 등록부를 처음 읽거나 쓸 때 그 coordinator의 항목으로 옮겨지므로, 그 kickoff도 그대로 종료할 수 있다.
 
 ## 명령
 
@@ -36,15 +44,13 @@ node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <i
 node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <id> --reason completed
 ```
 
-`kickoff-show`는 점유가 없으면 `active: false`를 돌려주며, 이는 조회 실패가 아니라 시작해도 된다는 뜻이다. `kickoff-claim`은 이미 점유가 있으면 현재 보유자와 목표를 알리며 실패한다. `kickoff-bind`는 점유를 가진 워크트리에서만 성공하고, 같은 `runId`를 다시 넣는 호출은 그대로 성공하지만 다른 Run을 넣으면 거부된다. receipt를 놓쳐 다시 실행하는 경우와 Run이 둘로 갈라지는 경우는 서로 다른 사건이기 때문이다. `kickoff-release`의 `--reason`은 `completed`, `disbanded`, `taken-over` 가운데 하나다.
-
-`workflow-create`도 같은 점유를 확인한다. 점유를 가진 coordinator의 `stateDir`이 아닌 곳에서 workflow를 만들려고 하면 거부되므로, 점유를 건너뛰고 두 번째 실행 팀을 만드는 경로가 남아 있지 않다.
+`kickoff-show`는 등록된 kickoff 전체를 돌려주며, `--worktree`를 주면 그 coordinator의 항목만 돌려준다. `kickoff-bind`는 같은 `runId`를 다시 넣는 호출은 그대로 성공하지만 다른 Run을 넣으면 거부한다. 수신 확인을 놓친 재실행과 Run이 둘로 갈라지는 상황은 서로 다른 사건이기 때문이다. `kickoff-release`의 `--reason`은 `completed`, `disbanded`, `taken-over` 가운데 하나이며, 다른 kickoff의 항목은 건드리지 않는다.
 
 ## 두 세션의 역할
 
 선언 세션과 coordinator 세션은 하는 일이 다르다.
 
-- **선언 세션(A)**: 사용자와 목표를 확정하고, coordinator 워크트리를 만들어 인계하고, 점유 기록을 쓴다. 이후에는 조회와 종료를 담당하는 관제 자리로 남는다. Goal을 만들지 않고 Run도 바인딩하지 않는다.
+- **선언 세션(A)**: 사용자와 목표를 확정하고, coordinator 워크트리를 만들어 인계하고, 등록한다. 이후에는 조회와 종료를 담당하는 관제 자리로 남는다. Goal을 만들지 않고 Run도 바인딩하지 않는다. 한 선언 세션이 여러 kickoff를 차례로 인계할 수 있다.
 - **coordinator 세션(B)**: Goal을 소유하고 PM 역할로 실행을 감독한다. `worker-start`는 Run에 바인딩된 coordinator 터미널에서만 호출할 수 있으므로([`orca-runtime.md`](orca-runtime.md)의 `worker-start 래퍼` 절), Run을 만드는 자리와 워커를 띄우는 자리는 반드시 B로 일치해야 한다.
 
 `close`와 `disband`는 A에서 수행한다. coordinator 워크트리를 회수하는 것이 종료 절차에 포함되는데, 자기가 서 있는 워크트리는 스스로 제거할 수 없기 때문이다.
@@ -53,29 +59,27 @@ node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree
 
 선언 세션(A)이 순서대로 수행한다.
 
-1. `kickoff-show`로 점유를 확인한다. 이미 점유되어 있으면 새로 시작하지 않는다. 같은 목표이면 기록된 coordinator에서 재개하도록 안내하고, 다른 목표이면 현재 점유자와 그 상태를 알린 뒤 사용자의 결정을 기다린다.
+1. `kickoff-show`로 등록된 kickoff를 확인한다. 같은 목표가 이미 진행 중이면 새로 시작하지 않고 기록된 coordinator에서 재개하도록 안내한다. 다른 목표라면 함께 진행해도 되며, 이때 병렬 kickoff의 비용을 알린다.
 2. 사용자에게 확인해야 하는 목표, 수용 기준, 비목표, 필수 검사와 전달 범위를 [`user-choice.md`](user-choice.md)의 방식으로 한 번에 확정한다.
 3. 확정한 내용을 브리프 파일로 쓴다. 부모 대화 전문을 넘기지 않고 작업 조건, 대상 파일, 근거 위치와 조직 파일 경로만 담는다.
 4. Orca 자식 워크트리를 만들고 coordinator 세션을 시작한 뒤 브리프 경로를 전달한다. 실제로 반환된 워크트리 ID를 그대로 보관한다.
-5. `kickoff-claim`으로 점유를 기록하고, 어느 워크트리가 무엇을 맡았는지 사용자에게 알린다. A는 여기서 감독을 시작하지 않는다.
+5. `kickoff-claim`으로 등록하고, 어느 워크트리가 무엇을 맡았는지 사용자에게 알린다. A는 여기서 감독을 시작하지 않는다.
 
-점유는 워크트리를 만든 뒤에 요청한다. 실제로 반환된 ID를 적어야 하므로 순서를 바꿀 수 없고, 점유가 거부되면 방금 만든 워크트리를 회수한 뒤 보고한다.
+등록은 워크트리를 만든 뒤에 요청한다. 실제로 반환된 ID를 적어야 하므로 순서를 바꿀 수 없고, 등록이 거부되면 방금 만든 워크트리를 회수한 뒤 보고한다.
 
 coordinator 세션(B)은 시작하자마자 다음을 수행한다.
 
 1. 브리프를 읽고 Goal을 하나 만든다. 이 Goal의 유일한 소유자는 B다.
 2. 같은 터미널에서 `orchestration run-create`로 Run을 만들어 바인딩한다.
-3. `kickoff-bind`로 점유 기록에 그 Run을 적는다. 이 호출이 거부되면 점유를 가진 워크트리가 아니라는 뜻이므로, Run을 그대로 두고 에스컬레이션한다.
+3. `kickoff-bind`로 등록부에 그 Run을 적는다. 이 호출이 거부되면 자기 워크트리 ID로 등록된 kickoff가 없다는 뜻이므로, Run을 그대로 두고 에스컬레이션한다.
 
-호스트가 자식 워크트리나 새 세션 생성을 지원하지 않으면 인계하지 않는다. 이때는 A가 그대로 coordinator가 되어 Goal과 Run을 소유하고, 점유 기록의 `coordinator`에 A를 적는다. 인계한 것처럼 보고하지 않으며, 이 경우 종료 절차에 회수할 자식 워크트리가 없다는 점을 함께 알린다.
+호스트가 자식 워크트리나 새 세션 생성을 지원하지 않으면 인계하지 않는다. 이때는 A가 그대로 coordinator가 되어 Goal과 Run을 소유하고, 등록 항목의 `coordinator`에 A를 적는다. 인계한 것처럼 보고하지 않으며, 이 경우 종료 절차에 회수할 자식 워크트리가 없다는 점을 함께 알린다. A는 Goal을 하나만 소유할 수 있으므로 이 환경에서는 한 세션이 kickoff를 하나씩만 감독한다.
 
-## 점유 해제
+## 종료
 
-점유는 `close` 또는 `disband`가 끝난 뒤에 `kickoff-release`로 해제한다. 목표를 달성하지 못했더라도 해체를 마쳤으면 해제해야 하며, 그러지 않으면 같은 프로젝트에서 다음 kickoff를 시작할 수 없다. 해제된 기록은 지워지지 않고 `.omt/history/`에 해제 시각, 해제를 요청한 워크트리와 사유가 붙어 보관된다.
+kickoff의 항목은 `close` 또는 `disband`가 끝난 뒤에 `kickoff-release`로 해제한다. 목표를 달성하지 못했더라도 해체를 마쳤으면 해제해야 한다. 그러지 않으면 `status`가 끝난 kickoff를 계속 진행 중으로 보여 주고, 그 워크트리에서 새 kickoff를 등록할 수 없다. 해제된 항목은 지워지지 않고 `.omt/history/`에 해제 시각과 사유가 붙어 보관된다.
 
-`--worktree`에는 자신이 끝내려는 coordinator의 ID를 적는다. 런타임은 이 값이 실제 보유자와 다르면 해제를 거부하므로, 오래된 정보를 가진 세션이 이미 교체된 kickoff를 끝내 버리는 일이 생기지 않는다.
-
-coordinator의 liveness가 `unverifiable`이라는 이유로 점유를 자동 해제하지 않는다. 세 값을 서로 대체하지 않는 규율은 [`orca-runtime.md`](orca-runtime.md)의 `worker-list와 liveness` 절을 따른다. 사용자가 강제로 점유를 인수하겠다고 결정한 경우에만 `--reason taken-over --force`를 사용하고, 마지막으로 확인한 liveness와 인수 사유를 보고에 남긴다. `taken-over`는 `--force` 없이는 거부되므로, 조회 실패가 곧바로 인수로 이어지지 않는다.
+coordinator의 liveness가 `unverifiable`이라는 이유로 항목을 자동 해제하지 않는다. 세 값을 서로 대체하지 않는 규율은 [`orca-runtime.md`](orca-runtime.md)의 `worker-list와 liveness` 절을 따른다. 사용자가 응답하지 않는 coordinator의 kickoff를 끝내기로 결정한 경우에만 `--reason taken-over --force`를 사용하고, 마지막으로 확인한 liveness와 결정 사유를 보고에 남긴다. `taken-over`는 `--force` 없이는 거부되므로, 조회 실패가 곧바로 종료로 이어지지 않는다.
 
 ## 치르는 비용
 

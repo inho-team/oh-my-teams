@@ -9,7 +9,7 @@ description: 저장된 oh my teams 조직으로 하나의 개발 목표를 시�
 
 ## 하나의 지속 실행 권한
 
-한 프로젝트에서 동시에 살아 있는 kickoff는 하나이며, 이 제약은 런타임이 배타적 잠금으로 강제한다. 시작하기 전에 점유를 조회하고, 인계를 마친 뒤에 점유를 요청한다. 현재 스킬 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석한다.
+한 프로젝트에서 kickoff를 몇 개든 동시에 진행할 수 있다. 각 kickoff는 자기 coordinator 워크트리에서 감독되고, 어떤 kickoff가 어느 워크트리에서 도는지는 등록부에 남는다. 시작하기 전에 등록된 kickoff를 조회하고, 인계를 마친 뒤에 등록한다. 현재 스킬 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석한다.
 
 ```text
 node <runtime> kickoff-show --org <project>/.omt/organization.json
@@ -17,9 +17,9 @@ node <runtime> kickoff-claim --org <project>/.omt/organization.json --from <clai
 node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <id> --run <runId>
 ```
 
-`kickoff-show`가 `active: true`를 돌려주면 같은 목표일 때 기록된 coordinator에서 재개하고, 다른 목표이면 이를 덮어쓰거나 경쟁하는 지속 루프를 시작하지 않는다. `kickoff-claim`은 이미 점유가 있으면 실패하므로 그 결과를 성공으로 보고하지 않는다. 요청 파일의 형식, 인계 절차와 해제 조건은 [`../../references/kickoff-lease.md`](../../references/kickoff-lease.md)를 따른다.
+`kickoff-show`에 같은 목표가 이미 있으면 새로 시작하지 않고 기록된 coordinator에서 재개한다. 다른 목표는 함께 진행해도 되지만, 같은 구독을 쓰는 kickoff가 늘면 할당량을 함께 소모한다는 점을 사용자에게 알린다. `kickoff-claim`은 같은 워크트리가 이미 kickoff를 감독하고 있으면 실패하므로 그 결과를 성공으로 보고하지 않는다. 요청 파일의 형식, 병렬 kickoff의 비용, 인계 절차와 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
-kickoff를 선언한 세션은 목표를 확정해 브리프로 넘기고 coordinator 워크트리를 만든 뒤, 점유를 기록하고 인계 사실을 알린다. 감독은 그 자리에서 시작하지 않는다. 네이티브 Goal은 coordinator 세션이 브리프를 읽고 하나 만들며, Run도 같은 세션에서 바인딩한 뒤 `kickoff-bind`로 점유 기록에 적는다. 이 분리는 취향이 아니라 `worker-start`가 Run에 바인딩된 coordinator 터미널만 허용하기 때문에 필요하다. `workflow-create` 역시 점유를 가진 coordinator의 state 디렉터리에서만 성공하므로, 점유를 건너뛰고 실행 팀을 만들 수 없다.
+kickoff를 선언한 세션은 목표를 확정해 브리프로 넘기고 coordinator 워크트리를 만든 뒤, 등록하고 인계 사실을 알린다. 감독은 그 자리에서 시작하지 않는다. 네이티브 Goal은 coordinator 세션이 브리프를 읽고 하나 만들며, Run도 같은 세션에서 바인딩한 뒤 `kickoff-bind`로 등록부에 적는다. 이 분리는 취향이 아니라 `worker-start`가 Run에 바인딩된 coordinator 터미널만 허용하기 때문에 필요하다. 등록을 건너뛴 kickoff는 `status`·`close`·`disband`가 찾지 못하므로 반드시 등록한다.
 
 Goal의 objective에는 사용자가 원하는 결과, 측정 가능한 수용 기준, 비목표, 필수 검사와 요청된 전달 범위를 포함한다. 이 가운데 사용자 요청과 저장소 상태에서 확정할 수 없는 항목은 선언 세션이 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 한 번에 확인해 브리프에 담고, coordinator 세션은 그 브리프로 Goal을 만든다. 확인하지 못한 수용 기준을 추측해 채우지 않으며, 사용자가 이미 답한 항목을 coordinator 세션에서 다시 묻지 않는다. 사용자가 토큰 예산을 명시하지 않았다면 임의의 토큰 예산을 설정하지 않는다. 네이티브 Goal이 없는 호스트에서는 같은 계약을 oh my teams workflow와 Orca Run에 보존하되, 네이티브 기능이 있는 것처럼 보고하지 않는다.
 
@@ -39,6 +39,6 @@ kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook �
 
 ## 종료 경계
 
-완료 조건이 충족되면 `close` 절차로 전달, 병합과 실행 자원 정리를 수행한다. `close`와 `disband`는 coordinator 워크트리 자체를 회수하므로 coordinator 세션이 아니라 선언 세션에서 수행하며, 점유 기록은 그 절차가 끝난 뒤에 해제된다. PR/MR 생성이나 병합처럼 아직 허가되지 않은 외부 변경이 필요하면 Goal을 완료 처리하지 않고 사용자 결정을 기다린다.
+완료 조건이 충족되면 `close` 절차로 전달, 병합과 실행 자원 정리를 수행한다. `close`와 `disband`는 coordinator 워크트리 자체를 회수하므로 coordinator 세션이 아니라 선언 세션에서 수행하며, 등록 항목은 그 절차가 끝난 뒤에 해제된다. 다른 kickoff의 항목은 건드리지 않는다. PR/MR 생성이나 병합처럼 아직 허가되지 않은 외부 변경이 필요하면 Goal을 완료 처리하지 않고 사용자 결정을 기다린다.
 
 완료를 선언할 때에만 네이티브 Goal을 `complete`로 갱신한다. 실제 완료가 아니거나 예산이 얼마 남지 않았다는 이유로 완료 처리하지 않는다. 같은 장애 조건이 반복되어 호스트 Goal 정책의 차단 기준을 충족한 경우에만 `blocked`로 갱신한다. `workflow-status`가 보고하는 `blocked`는 실패한 task 하나를 뜻할 뿐이므로 그것만으로 Goal을 차단 처리하지 않는다. 사용자가 취소하거나 실패로 정리하라고 요청하면 `disband`를 사용한다.

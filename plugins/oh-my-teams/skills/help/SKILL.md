@@ -67,7 +67,7 @@ form → kickoff → close
               └→ disband
 ```
 
-한 프로젝트에서 활성 kickoff는 하나다. `kickoff`를 선언한 세션은 실행을 감독할 워크트리를 만들어 목표를 넘기고, 이후 `status`·`close`·`disband`는 넘긴 쪽에서 수행한다.
+한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있다. `kickoff`를 선언한 세션은 kickoff마다 감독할 워크트리를 만들어 목표를 넘기고, 이후 `status`·`close`·`disband`는 넘긴 쪽에서 수행한다.
 
 `status`와 `adjust`는 이 흐름의 단계가 아니라 언제든 호출할 수 있다. `status`는 현재 상태를 조회만 하고, `adjust`는 이후 kickoff에 적용할 조직을 바꾼다.
 
