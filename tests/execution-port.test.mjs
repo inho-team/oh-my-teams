@@ -80,14 +80,18 @@ test("runtime codes route without naming the runtime in failure routing", () => 
     assert.deepEqual(classifyFailure(signal), expected, code);
   }
 
-  // The adapter built the argv, so no profile change repairs this. Routing it
-  // to the role that owns profiles would hand the work to someone with no way
-  // to fix it, which is worse than escalating with the evidence.
-  assert.equal(
-    classifyFailure(translateOrcaFailure("invalid_argument", "bad flag"))
-      .category,
-    "unknown",
-  );
+  // Both of these say the call itself was wrong: built with bad argv, or made
+  // from a terminal that does not hold the Run. `consumer_fenced` is what a
+  // live runtime actually answered when the wrapper ran outside a coordinator
+  // terminal, so it is known and unmapped rather than merely unseen.
+  for (const code of ["invalid_argument", "consumer_fenced"]) {
+    assert.equal(
+      classifyFailure(translateOrcaFailure(code, "the call was wrong"))
+        .category,
+      "unknown",
+      code,
+    );
+  }
   assert.equal(
     classifyFailure(translateOrcaFailure("incompatible_runtime", "old host"))
       .action,

@@ -13,11 +13,13 @@ import {
  * execution runtime be added without teaching the classifier Orca's words.
  * Codes absent from this table stay unclassified on purpose: inventing a route
  * for an unrecognized refusal would send work to an owner who cannot fix it.
- * `invalid_argument`, `task_not_found`, and `task_not_startable` are deliberate
- * omissions rather than gaps. The first reports that this adapter built the
- * argv wrongly, which no profile change repairs; the other two report that the
- * coordinator named a Task the Run does not hold, which is a bookkeeping fault
- * whose owner only the surrounding evidence can name.
+ * `invalid_argument`, `consumer_fenced`, `task_not_found`, and
+ * `task_not_startable` are deliberate omissions rather than gaps. The first two
+ * report that the call itself was wrong: built with bad argv, or issued from a
+ * terminal that does not hold the Run. Neither a profile change nor a process
+ * reconciliation repairs those, and a retry from the same place reproduces
+ * them. The last two report that the coordinator named a Task the Run does not
+ * hold, a bookkeeping fault whose owner only the surrounding evidence can name.
  */
 const ORCA_FAILURE_HINTS = Object.freeze({
   // A runtime that does not list the requested agent refuses every attempt
