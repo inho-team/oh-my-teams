@@ -8,7 +8,12 @@ import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
-import { createWorktree, discoverOrcaRuntime } from "./orca-adapter.mjs";
+import {
+  createWorktree,
+  discoverOrcaRuntime,
+  startWorker,
+} from "./orca-adapter.mjs";
+import { withRuntimeSignal } from "./adapters.mjs";
 import {
   attachWorkspace,
   prepareInput,
@@ -102,6 +107,19 @@ export const ALLOWED_OPTIONS = {
     "orca",
   ],
   "runtime-discover": ["orca"],
+  "worker-start": [
+    "repo",
+    "task",
+    "spec",
+    "worktree",
+    "agent",
+    "terminal",
+    "model",
+    "effort",
+    "run",
+    "retry-of",
+    "orca",
+  ],
   work: ["org", "task", "repo", "state", "role", "workflow-id", "attempt-id"],
   draft: ["org", "task", "repo", "kind"],
   assist: ["org", "task", "repo", "state", "role", "kind", "profile"],
@@ -150,6 +168,7 @@ export const REQUIRED_OPTIONS = {
     "name",
   ],
   "runtime-discover": [],
+  "worker-start": ["repo"],
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
   assist: ["org", "task", "repo", "state", "role", "kind"],
@@ -274,7 +293,7 @@ async function compatibilityPrepare(args) {
   });
   const attached = await attachWorkspace({
     parentRepo: repo,
-    workspace: created.worktree.path,
+    workspace: created.path,
     stateDir,
     name: args.name,
     org,
@@ -289,6 +308,35 @@ async function compatibilityPrepare(args) {
       "Compatibility prepare completed. New integrations should use " +
       "prepare-input, current Orca discovery, then attach-workspace.",
   };
+}
+
+// The receipt is returned whether or not the start reached `ready`, because a
+// start that failed still names the Dispatch and the resources someone has to
+// reclaim. A refusal that produced no Dispatch throws, and its neutral signal
+// travels with the error so the caller can route it rather than reread prose.
+async function startSupervisedWorker(args) {
+  try {
+    return await startWorker(path.resolve(args.repo), {
+      task: args.task,
+      spec: args.spec,
+      worktree: args.worktree ?? "current",
+      agent: args.agent,
+      terminal: args.terminal,
+      model: args.model,
+      effort: args.effort,
+      runId: args.run,
+      retryOf: args["retry-of"],
+      executable: args.orca,
+    });
+  } catch (error) {
+    if (!error.signal) throw error;
+    error.message = `${error.message}\n${JSON.stringify(
+      { signal: error.signal, receipt: error.receipt ?? null },
+      null,
+      2,
+    )}`;
+    throw error;
+  }
 }
 
 async function attachExistingWorkspace(args) {
@@ -374,6 +422,8 @@ async function executeCommand(args) {
       return attachExistingWorkspace(args);
     case "runtime-discover":
       return discoverOrcaRuntime(args.orca);
+    case "worker-start":
+      return startSupervisedWorker(args);
     case "work":
       return work(
         path.resolve(args.repo),
@@ -497,7 +547,9 @@ async function executeCommand(args) {
         readJSON(args.retry),
       );
     case "failure-classify":
-      return classifyFailure(validateFailureEvidence(readJSON(args.failure)));
+      return classifyFailure(
+        withRuntimeSignal(validateFailureEvidence(readJSON(args.failure))),
+      );
     case "lesson-record":
       return recordLessonCandidate(
         path.resolve(args.state),

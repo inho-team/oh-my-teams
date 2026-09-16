@@ -1,10 +1,10 @@
-/** Prepares immutable task inputs and attaches verified Orca workspaces. */
+/** Prepares immutable task inputs and attaches verified runtime workspaces. */
 import fs from "node:fs";
 import path from "node:path";
 import { assert, hash, readJSON, validateOrg, writeJSON } from "./core.mjs";
 import { git } from "./evidence.mjs";
 import { taskHash, validateTask } from "./contracts.mjs";
-import { runOrcaJson } from "./orca-adapter.mjs";
+import { executionAdapter } from "./adapters.mjs";
 
 function resolvedOrNull(target) {
   try {
@@ -60,24 +60,16 @@ export async function prepareInput(org, task, repo, outputDir) {
   };
 }
 
-function validateRuntimeReceipt(runtime, executable) {
-  assert(
-    runtime?.schemaVersion === 1 &&
-      runtime.executable === executable &&
-      runtime.guide?.id === "orca-cli" &&
-      /^[a-f0-9]{64}$/.test(runtime.guide.sha256),
-    "Version-matched Orca runtime discovery receipt required",
-  );
-  assert(
-    runtime.versionsMatch !== false,
-    "Orca CLI and runtime versions differ; rediscover before attaching",
-  );
-}
-
 /**
- * Attaches an existing Orca receipt after checking its actual Git workspace.
+ * Attaches an existing workspace receipt after checking its actual Git state.
  *
- * @param {object} input - Parent/workspace paths, snapshots, and Orca receipts.
+ * The runtime that issued the receipt is the only one that can confirm it, so
+ * reading the claim and re-observing it are delegated to that runtime's
+ * adapter. What stays here is what holds for any of them: the confirmed path
+ * has to be the workspace being attached, and the Git tree there has to be the
+ * one the frozen task named.
+ *
+ * @param {object} input - Paths, snapshots, receipts, and optional runtime name.
  * @returns {Promise<object>} Attached identity and persisted record paths.
  * @throws {Error} When runtime identity, receipt path, Git root, or base differs.
  */
@@ -89,15 +81,14 @@ export async function attachWorkspace(input) {
     /^[a-z][a-z0-9-]*$/.test(name),
     "Worktree name must be lower-case words/numbers/hyphens",
   );
-  validateRuntimeReceipt(runtime, executable);
+  // Records written before the port existed name no runtime, and every one of
+  // them came from Orca, so that is what an absent name still means.
+  const adapter = executionAdapter(input.runtimeName ?? "orca");
+  adapter.assertDiscovery(runtime, executable);
 
   const parentRepo = fs.realpathSync(input.parentRepo);
   const workspace = fs.realpathSync(input.workspace);
-  const worktree = receipt?.result?.worktree;
-  assert(
-    receipt.ok !== false && worktree?.id && worktree.path,
-    "Orca receipt missing worktree identity",
-  );
+  const worktree = adapter.readWorkspaceClaim(receipt);
   // A receipt naming a path that does not exist is a mismatched receipt, not a
   // filesystem error: resolving it directly surfaced a raw lstat ENOENT with no
   // indication of which claim failed.
@@ -106,30 +97,17 @@ export async function attachWorkspace(input) {
     "Receipt worktree path does not match the attached workspace",
   );
   // A supplied receipt is only a claim until the selected runtime returns it.
-  const observed = await runOrcaJson(
+  const confirmed = await adapter.confirmWorkspace(worktree, {
+    parentRepo,
     executable,
-    ["worktree", "show", "--worktree", `id:${worktree.id}`],
-    { cwd: parentRepo, execute: input.execute },
-  );
-  const current = observed.result?.worktree;
+    runtime,
+    execute: input.execute,
+  });
+  const observed = confirmed.observed;
   assert(
-    current?.id === worktree.id &&
-      current.path &&
-      fs.realpathSync(current.path) === workspace,
-    "Orca lookup does not match the supplied worktree receipt",
+    resolvedOrNull(confirmed.path) === workspace,
+    "Runtime lookup does not match the attached workspace",
   );
-  if (runtime.runtimeId && observed._meta?.runtimeId) {
-    assert(
-      runtime.runtimeId === observed._meta.runtimeId,
-      "Orca runtime changed since discovery",
-    );
-  }
-  if (worktree.instanceId) {
-    assert(
-      current.instanceId === worktree.instanceId,
-      "Orca worktree instance changed",
-    );
-  }
 
   const topLevel = fs.realpathSync(
     await git(workspace, ["rev-parse", "--show-toplevel"]),

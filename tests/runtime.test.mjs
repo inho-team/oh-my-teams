@@ -1357,6 +1357,69 @@ test("workspace preparation and receipt attachment are separated and bind actual
       }),
     /does not match/,
   );
+
+  // The same attachment, driven by a runtime that has no Orca receipt, no
+  // discovery step and no worktree envelope. Nothing outside the adapter had
+  // to learn which runtime it was.
+  const localAttached = await attachWorkspace({
+    parentRepo: dir,
+    workspace: dir,
+    stateDir,
+    name: "local-task",
+    runtimeName: "local",
+    org: clone(),
+    task: prepared.frozenTask,
+    receipt: { id: "work", path: dir },
+    executable: "git",
+    runtime: null,
+    execute: async () => ({
+      code: 0,
+      stdout: `${dir}\nwork`,
+      stderr: "",
+      timedOut: false,
+    }),
+  });
+  assert.equal(readJSON(localAttached.record).worktree.id, "work");
+
+  await assert.rejects(
+    () =>
+      attachWorkspace({
+        parentRepo: dir,
+        workspace: dir,
+        stateDir,
+        name: "local-forged",
+        runtimeName: "local",
+        org: clone(),
+        task: prepared.frozenTask,
+        receipt: { id: "work", path: dir },
+        executable: "git",
+        runtime: null,
+        execute: async () => ({
+          code: 0,
+          stdout: `${dir}\nsomething-else`,
+          stderr: "",
+          timedOut: false,
+        }),
+      }),
+    /does not match/,
+  );
+
+  await assert.rejects(
+    () =>
+      attachWorkspace({
+        parentRepo: dir,
+        workspace: dir,
+        stateDir,
+        name: "unknown-runtime",
+        runtimeName: "paseo",
+        org: clone(),
+        task: prepared.frozenTask,
+        receipt,
+        executable: "orca",
+        runtime,
+      }),
+    /Unknown execution runtime: paseo/,
+  );
 });
 test("Orca discovery binds the selected executable, runtime version and guide hash", async () => {
   const execute = async (argv) =>
@@ -1761,6 +1824,19 @@ test("failure routing uses deterministic signals and does not retry ambiguous wo
       checkFailed: true,
     }).category,
     "implementation-error",
+  );
+  assert.deepEqual(
+    classifyFailure({
+      message: "the execution runtime does not launch this agent",
+      evidence: "start.json",
+      kind: "execution-unconfigured",
+    }),
+    {
+      category: "execution-unconfigured",
+      nextOwner: "pm",
+      action: "rebind-profile-agent",
+      retryable: false,
+    },
   );
   assert.equal(
     classifyFailure({ message: "unrecognized failure", evidence: "run.log" })

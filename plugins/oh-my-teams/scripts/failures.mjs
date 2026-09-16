@@ -56,6 +56,13 @@ export function classifyFailure(input = {}) {
   ) {
     return route("model-binding-mismatch", "pm", "rebind-profile-model", false);
   }
+  // An execution runtime that does not know the requested agent refuses every
+  // attempt carrying the same profile, so a retry reproduces the refusal. Only
+  // rebinding the profile to an agent that runtime does launch changes the
+  // outcome, and that binding is owned by the role that assigned the profile.
+  if (input.kind === "execution-unconfigured") {
+    return route("execution-unconfigured", "pm", "rebind-profile-agent", false);
+  }
   if (
     input.kind === "workspace-context" ||
     input.grounded === false ||

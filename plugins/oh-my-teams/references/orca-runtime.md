@@ -45,6 +45,34 @@ agy --model claude-opus-4-6-thinking ...
 
 `start_unknown` 또는 `turn_start_unobserved`는 시작 성공의 증거가 아니며, 실패의 증거도 아니다. 두 상태는 미관측으로 보존하고 위 절차로 실제 상태를 확인한 뒤에 판단한다.
 
+## 실패 어휘 번역
+
+실행 기반이 반환하는 실패 코드는 그 실행 기반의 어휘이며 실패 분류기의 어휘가 아니다. `scripts/orca-adapter.mjs`의 `translateOrcaFailure`가 Orca의 코드를 중립 신호로 옮기고, `scripts/failures.mjs`의 `classifyFailure`는 중립 신호만 읽는다. Orca 고유 문자열을 `failures.mjs`에 넣지 않으며, `tests/execution-port.test.mjs`가 이 경계를 검사한다.
+
+`agent_unconfigured`는 `execution-unconfigured`로 옮겨 PM의 프로필 재바인딩으로 보낸다. 같은 프로필로 재시도하면 같은 거부가 재현되기 때문이다. `inject_rejected`, `runtime_error`, `failed`, `outcome_unknown`, `start_unknown`, `turn_start_unobserved`는 프로세스 상태를 미상으로 표시해 `process-unknown`으로 보낸다. 이 경로의 재시도는 실제 종료를 확인해야 열리므로, 잔여 자원을 점검한 뒤에 대체 실행을 시작하라는 Orca의 요구와 같은 규율이 된다.
+
+표에 없는 코드는 중립 신호 없이 원문만 보존한다. 알지 못하는 거부에 임의로 경로를 부여하면 해결할 수 없는 담당자에게 작업이 전달된다.
+
+실패 기록을 남길 때에는 실행 기반이 반환한 코드를 그대로 적고 어느 실행 기반인지 함께 밝힌다. `failure-classify`가 번역까지 수행하므로 중립 어휘로 바꾸어 적으려 하지 않는다.
+
+```json
+{ "message": "관측한 내용", "evidence": "run_...", "runtime": "orca", "code": "agent_unconfigured" }
+```
+
+`runtime`은 `orca` 또는 `local`이며, `runtime`을 적었으면 `code`도 반드시 적는다. 둘 다 없는 기록은 이전과 똑같이 분류된다.
+
+## worker-start 래퍼
+
+감독 실행을 시작할 때에는 `npm run org -- worker-start --repo <경로> --task <id> --agent <agent>`를 사용한다. 이 래퍼는 argv를 배열로 전달하고, receipt에서 Dispatch 신원을 확인한 뒤, 시작이 `ready`에 이르지 못하면 3값 liveness와 번역된 실패 신호가 담긴 receipt를 돌려준다. 거부되어 Dispatch가 만들어지지 않은 경우에만 오류를 던지며, 그 오류에도 신호와 원본 receipt가 함께 실린다.
+
+`--model`은 `--effort`보다 먼저 있어야 하고, `--terminal`로 기존 터미널을 재사용할 때에는 `--model`과 `--effort`를 함께 쓸 수 없다. 래퍼가 호출 전에 이를 거부하므로 잘못된 조합이 실행 기반에 도달하지 않는다.
+
+**`worker-start`는 해당 Run에 바인딩된 coordinator 터미널에서만 호출할 수 있다.** 바인딩된 Run이 없는 상태에서 호출하면 Task의 존재 여부와 무관하게 `consumer_fenced`로 거부되므로, 먼저 같은 터미널에서 `orchestration run-create`로 Run을 만들어 바인딩한다. 이 코드는 호출한 자리가 잘못되었다는 뜻이므로 재시도로 해소되지 않으며, 번역표에 넣지 않고 증거와 함께 에스컬레이션한다.
+
+Run을 바인딩한 뒤에는 `--spec`으로 Task와 첫 시도를 한 번에 만들 수 있고, 성공한 시작은 `state: "ready"`와 함께 `runId`, `taskId`, `dispatchId`를 돌려준다. receipt의 `launch.requested`와 `launch.effective`에는 요청한 agent·모델·강도와 실제로 적용된 값이 나란히 들어 있다.
+
+`worker-start`는 `ready`에서만 0으로 종료하고, `failed`와 `outcome_unknown`에서는 1로 종료하면서도 `dispatchId`, `failedStage`, `residualResources`를 담은 receipt를 반환한다. 따라서 종료 코드만으로 실패를 단정하지 않고 receipt를 읽는다. receipt 자체가 오지 않은 경우에만 미관측으로 처리하며, 이때에도 같은 명령을 다시 실행하지 않는다.
+
 ## worker-list와 liveness
 
 감독 작업의 실시간 상태는 해당 Run의 `worker-list`에서 확인한다. 이 조회 없이 계획의 존재나 최근 커밋만으로 실행 중이라고 판단하지 않는다.

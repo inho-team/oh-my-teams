@@ -18,6 +18,14 @@
 
 추론 강도와 Codex 모델 확대(2026-09-15): 설치된 CLI에서 강도 전달 수단을 직접 확인했다. `agy --help`(1.2.3)에 `--effort low|medium|high`가 존재하므로 이전 기록의 "지원되지 않는다"는 판단을 **확인 결과 지원됨**으로 정정한다. `codex exec --help`(0.154.0)에는 전용 플래그가 없고 `--config model_reasoning_effort=<값>` 설정 오버라이드만 가능하며, Codex CLI가 알 수 없는 값을 거부하지 않고 그대로 전달하는 것을 확인했으므로 런타임이 값을 검증한다. Claude CLI에는 강도 선택 수단이 없다. 프로필의 선택적 `effort` 필드로만 강도를 전달하며, 생략하면 이전과 똑같이 어떤 강도 인자도 붙이지 않는다. Agy 모델 ID가 이미 강도를 담는 경우(`gemini-3.8-flash-high`) 어느 쪽이 우선하는지 확인하지 않았으므로, 두 값이 어긋나는 프로필은 저장을 거부한다. 같은 날 Codex 모델 카탈로그에서 `gpt-5.6-luna`와 `gpt-5.6-terra`를 확인해 예제 조직에 프로필로 추가했다. 예제 조직에서 역할이 참조하는 프로필에는 강도를 넣지 않아 이 예제의 호출 깊이는 변경 전과 같다. 생략 시 적용되는 깊이는 Codex의 경우 `config.toml` 설정이 없으면 카탈로그의 `default_reasoning_level`이고, Agy는 서버가 모델별로 정한다. Agy 바이너리에 `--effort is not supported for model` 오류가 있어 모델에 따라 플래그가 거부되는데, Agy의 Claude 두 모델과 GPT-OSS가 이를 받아들이는지는 호출 검증을 하지 않아 미확인으로 남는다. 강도 변경이 결과나 할당량 차감에 미치는 영향도 측정하지 않았다.
 
+실행 기반 port 추상화(2026-09-16): 실행 기반을 바꿀 수 있는 경계를 만들되 Orca를 대체하지는 않았다. `scripts/execution.mjs`가 receipt 계약(확인된 식별자, 3값 liveness, 구조화된 실패 신호)을 정의하고, 구현체를 둘 두었다. `scripts/orca-adapter.mjs`에 `startWorker`, `stopWorker`, `abandonWorker`, `releaseWorker`를 추가했고, `scripts/local-adapter.mjs`는 `git worktree add`와 기존 `providers.mjs`의 비대화형 호출을 감싼다. 로컬 어댑터는 관측할 수 없는 생존을 주장하지 않도록 항상 `exited`만 반환한다. 실패 어휘는 각 어댑터가 중립 신호로 번역하며, `failures.mjs`에는 `execution-unconfigured` 범주 하나만 추가하고 실행 기반 고유 문자열은 넣지 않았다. 이 경계는 `tests/execution-port.test.mjs`의 테스트가 검사한다.
+
+port 연결(2026-09-16): 정의만으로는 증상이 해소되지 않으므로 실행 경로에 연결했다. `scripts/adapters.mjs`가 실행 기반 이름을 번역기로 해석하는 유일한 지점이고, `failure-classify`는 failure 기록이 `runtime`과 `code`를 담고 있으면 분류 전에 중립 신호로 번역한다. 따라서 `agent_unconfigured`를 그대로 기록해도 PM의 프로필 재바인딩으로 라우팅되며, 재시도가 통째로 막히던 증상이 실제 경로에서 사라진다. `runtime`을 적지 않은 기록은 이전과 완전히 동일하게 분류된다. 새 `worker-start` CLI 명령이 Orca 어댑터의 래퍼를 노출하고, `prepare`는 port가 정의한 workspace receipt 필드를 사용한다.
+
+`attachWorkspace` 중립화(2026-09-16): receipt에서 workspace 주장을 읽는 일과 그 주장을 실행 기반에 다시 물어 확인하는 일은 해당 어댑터가 맡는다. `workspace.mjs`에는 어느 실행 기반에나 성립하는 검사만 남았다. 확인된 경로가 붙이려는 workspace와 같아야 하고, 그곳의 Git 트리가 고정된 task가 지목한 트리여야 한다는 두 가지다. Orca 고유였던 `receipt.result.worktree` 경로, `worktree show` 조회, `runtimeId`와 `instanceId` 대조, `orca-cli` guide 검증은 전부 `orca-adapter.mjs`로 옮겼다. `runtimeName`을 적지 않은 호출은 `orca`로 해석되므로 기존 기록과 호출자는 그대로 동작한다. 같은 함수가 `runtimeName: "local"`로 Orca receipt도 discovery도 없는 workspace를 붙일 수 있다는 것을 테스트가 확인한다.
+
+Orca 1.4.201 계약을 실제로 조회해 확인한 사실도 함께 기록한다. `worker-start`는 `ready`에서만 0으로 종료하고 `failed`/`outcome_unknown`에서는 1로 종료하면서 `dispatchId`, `failedStage`, `residualResources`를 담은 receipt를 반환하므로, 이슈 #4가 요구한 "구조화된 시작 실패 반환"은 이미 충족되어 있다. 반면 `agy`는 Orca의 `TuiAgent` 목록에 없어 `--agent agy`가 항상 `agent_unconfigured`로 거부되며, `--model`이 지원하는 범위도 Claude, Codex, Cursor로 한정된다. 이슈 #2의 Agy launcher 연결은 이 저장소에서 해결할 수 없음이 추정이 아니라 확인된 사실이 되었다. 조회 결과는 `.omc/research/orca-worker-start-contract.md`에 보존했다.
+
 ## 1. 제품 정체성과 책임 경계
 
 **oh my teams는 에이전트로 조직을 구성하고 목표를 수행하는 제품이다.** Orca는 그 조직의 작업 공간과 실행을 제공하는 기반이다.
