@@ -1,4 +1,4 @@
-/** Role terminals: bypass flags, and a typed command that Orca left unsubmitted. */
+/** Role terminals: bypass flags, unsubmitted commands, and role tab titles. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -12,7 +12,10 @@ import {
   agentStarted,
   commandPending,
   openRoleTerminal,
+  roleTitle,
   trustQuestion,
+  workerTerminal,
+  worktreeLabel,
 } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 
 const example = () =>
@@ -20,7 +23,7 @@ const example = () =>
 const PROMPT = "me@host project %";
 
 // Plays Orca's terminal verbs; the last screen repeats once the script ends.
-function fakeOrca(screens) {
+function fakeOrca(screens, terminals = []) {
   const calls = [];
   const execute = async (argv) => {
     const [, noun, verb] = argv;
@@ -31,6 +34,7 @@ function fakeOrca(screens) {
       stdout: JSON.stringify({ ok: true, result }),
     });
     if (verb === "create") return reply({ terminal: { handle: "term_1" } });
+    if (verb === "list") return reply({ terminals });
     // An idle shell satisfies tui-idle too, so the wait decides nothing.
     if (verb === "wait") return reply({ wait: { satisfied: true } });
     if (verb === "read") {
@@ -38,10 +42,12 @@ function fakeOrca(screens) {
       return reply({ terminal: { tail } });
     }
     if (verb === "send") return reply({ send: { accepted: true } });
+    if (verb === "rename") return reply({ rename: { title: argv.at(-2) } });
     throw new Error(`unexpected verb ${verb}`);
   };
   const sends = () => calls.filter((call) => call[1] === "send");
-  return { calls, execute, sends };
+  const renames = () => calls.filter((call) => call[1] === "rename");
+  return { calls, execute, sends, renames };
 }
 
 const fast = { settleMs: 5, readyMs: 20, pollMs: 1 };
@@ -128,11 +134,13 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
     "--worktree",
     "id:repo::/tmp/wt",
     "--title",
-    "omt-senior",
+    "[Senior] wt",
     "--command",
     command.command,
   ]);
   assert.deepEqual(orca.sends(), []);
+  assert.equal(opened.title, "[Senior] wt");
+  assert.equal(opened.titlePinned, true);
 });
 
 test("a typed but unsubmitted command is sent Enter exactly once", async () => {
@@ -164,6 +172,123 @@ test("a typed but unsubmitted command is sent Enter exactly once", async () => {
   assert.deepEqual(stuck.sends(), [
     ["terminal", "send", "--terminal", "term_1", "--text", "", "--enter"],
   ]);
+  // A terminal that never became ready is not named as a working role.
+  assert.deepEqual(stuck.renames(), []);
+  assert.equal(blocked.titlePinned, false);
+});
+
+test("a ready role tab is renamed with its role tag after the agent starts", async () => {
+  // A PM opened with --title later showed the agent's session title, because
+  // Orca can rebuild a tab without the title given at creation.
+  const command = roleCommand(example(), "pm");
+  const orca = fakeOrca([[`${PROMPT} ${command.command}`, "Claude Code", "❯"]]);
+  const opened = await openRoleTerminal({
+    worktree: "id:repo::/work/literacy-site-research-2",
+    command,
+    title: "PM coordinator: 문해력 사이트 조사",
+    execute: orca.execute,
+    ...fast,
+  });
+  const title = "[PM] PM coordinator: 문해력 사이트 조사";
+  assert.equal(orca.calls[0][5], title);
+  assert.deepEqual(orca.renames(), [
+    ["terminal", "rename", "--terminal", "term_1", "--title", title],
+  ]);
+  assert.ok(
+    orca.calls.findIndex((call) => call[1] === "rename") >
+      orca.calls.findLastIndex((call) => call[1] === "read"),
+  );
+  assert.equal(opened.titlePinned, true);
+
+  // A failed rename leaves an unnamed tab, not a failed launch.
+  const refusing = async (argv, options) =>
+    argv[2] === "rename"
+      ? { code: 1, stdout: "", stderr: "no tab" }
+      : orca.execute(argv, options);
+  const unnamed = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute: refusing,
+    ...fast,
+  });
+  assert.equal(unnamed.ready, true);
+  assert.equal(unnamed.title, "[PM]");
+  assert.equal(unnamed.titlePinned, false);
+});
+
+test("the worktree's untitled plain shell is named, other tabs are not", async () => {
+  // The literacy-test coordinator worktree held the PM tab and an untitled
+  // shell that `worktree create` opened, with nothing saying which was PM.
+  const command = roleCommand(example(), "pm");
+  const orca = fakeOrca(
+    [[`${PROMPT} ${command.command}`, "Claude Code", "❯"]],
+    [
+      { handle: "term_1", title: "✳ Claude Code", agentIdentity: "claude" },
+      { handle: "term_shell", title: null },
+      { handle: "term_default", title: "Terminal 3" },
+      { handle: "term_named", title: "dev server" },
+      { handle: "term_agent", title: "Terminal 4", agentIdentity: "codex" },
+    ],
+  );
+  const opened = await openRoleTerminal({
+    worktree: "id:repo::/work/literacy-site-research-2",
+    command,
+    execute: orca.execute,
+    ...fast,
+  });
+  assert.equal(opened.title, "[PM] literacy-site-research-2");
+  assert.deepEqual(opened.shellsLabeled, ["term_shell", "term_default"]);
+  assert.deepEqual(
+    orca.renames().map((call) => [call[3], call[5]]),
+    [
+      ["term_1", "[PM] literacy-site-research-2"],
+      ["term_shell", "[shell] literacy-site-research-2"],
+      ["term_default", "[shell] literacy-site-research-2"],
+    ],
+  );
+});
+
+test("role titles lead with the role tag and name the worktree", () => {
+  assert.equal(roleTitle("pl", "literacy-pl"), "[PL] literacy-pl");
+  assert.equal(
+    roleTitle("junior", "[Junior] already tagged"),
+    "[Junior] already tagged",
+  );
+  assert.equal(roleTitle("intern", null), "[Intern]");
+  assert.throws(() => roleTitle("owner", "x"), /No title tag/);
+  assert.equal(
+    worktreeLabel("id:repo-1::/Users/me/orca/workspaces/app/feat-a"),
+    "feat-a",
+  );
+  assert.equal(worktreeLabel("path:C:\\work\\app\\feat-b"), "feat-b");
+  assert.equal(worktreeLabel("name:feat-c"), "feat-c");
+  assert.equal(worktreeLabel("active"), null);
+  assert.equal(worktreeLabel(undefined), null);
+
+  // The shape Orca returned for a worker it started in a new terminal.
+  const receipt = {
+    ok: true,
+    result: {
+      effects: [
+        {
+          kind: "worktree",
+          action: "created",
+          id: "repo-1::/w/app/literacy-junior",
+        },
+        { kind: "setup", action: "not_applicable" },
+        { kind: "terminal", role: "agent", action: "created", id: "term_9" },
+      ],
+    },
+  };
+  assert.deepEqual(workerTerminal(receipt), {
+    handle: "term_9",
+    place: "literacy-junior",
+  });
+  assert.deepEqual(workerTerminal({ result: {} }, "term_2"), {
+    handle: "term_2",
+    place: null,
+  });
+  assert.deepEqual(workerTerminal(undefined), { handle: null, place: null });
 });
 
 test("Agy's folder trust question is answered once, only when trust is selected", async () => {
@@ -227,4 +352,9 @@ test("the launch documents open role terminals through role-terminal", () => {
   assert.match(runtime, /Enter를 한 번/);
   assert.match(runtime, /폴더 신뢰/);
   assert.match(runtime, /--dangerously-skip-permissions/);
+  // A title given only at creation was lost, so the documents keep the tag
+  // and the rename after start together.
+  assert.match(runtime, /### 역할 탭 제목/);
+  assert.match(runtime, /`\[PM\]`, `\[PL\]`/);
+  assert.match(runtime, /agent가 뜬 뒤 `terminal rename`으로 다시 지정한다/);
 });

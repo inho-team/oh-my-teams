@@ -10,14 +10,165 @@
  * Readiness is judged from the screen alone. Orca's `tui-idle` wait is also
  * satisfied by an idle shell holding the unsubmitted command, so it cannot
  * tell a started agent from a stuck prompt.
+ *
+ * The tab title names the role. A title given only at creation did not always
+ * survive: a PM tab opened with one was later shown under the agent's own
+ * session title, because Orca can rebuild a tab record without its custom
+ * title. `terminal rename` sets that custom title again, and Orca shows a
+ * custom title ahead of any title the agent sends.
  */
 import { assert, run } from "./core.mjs";
 import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
 
 const PROMPT_MARK = /[%$#>❯]\s*$/;
 
+/** Tag each role's tab title starts with, so PM and PL tabs are told apart. */
+export const ROLE_TITLE_TAGS = Object.freeze({
+  pm: "[PM]",
+  pl: "[PL]",
+  senior: "[Senior]",
+  junior: "[Junior]",
+  intern: "[Intern]",
+});
+
+/**
+ * Names the worktree a selector or Orca worktree ID points at.
+ *
+ * @param {string} [selector] - Selector such as `id:<repo>::<path>`, or an ID.
+ * @returns {string | null} Last path segment or name, or null for `active`.
+ */
+export function worktreeLabel(selector) {
+  const value = String(selector ?? "")
+    .trim()
+    .replace(/^(id|path|name|branch|identity|issue):/, "");
+  if (!value || value === "active" || value === "current") return null;
+  const place = value.includes("::")
+    ? value.slice(value.lastIndexOf("::") + 2)
+    : value;
+  return place.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
+}
+
+/**
+ * Builds a tab title that starts with the role's tag.
+ *
+ * A caller's text is kept after the tag rather than replacing it, so a title
+ * written by hand still says which role the tab holds.
+ *
+ * @param {string} role - Role the terminal runs.
+ * @param {string | null} [detail] - Worktree or task the tab is about.
+ * @returns {string} Title such as `[PM] literacy-site-research-2`.
+ */
+export function roleTitle(role, detail) {
+  const tag = ROLE_TITLE_TAGS[role];
+  assert(tag, `No title tag for role ${role}`);
+  const text = String(detail ?? "").trim();
+  if (text.startsWith(tag)) return text;
+  return text ? `${tag} ${text}` : tag;
+}
+
+/**
+ * Finds the agent terminal and worktree a worker-start receipt names.
+ *
+ * @param {object} [receipt] - Orca's worker-start envelope.
+ * @param {string} [terminal] - Terminal the caller handed the task to, if any.
+ * @returns {{handle: string | null, place: string | null}} Terminal handle and
+ *   worktree name, each null when the receipt does not name one.
+ */
+export function workerTerminal(receipt, terminal) {
+  const effects = receipt?.result?.effects ?? [];
+  const agent = effects.find(
+    (effect) => effect?.kind === "terminal" && effect.role === "agent",
+  );
+  const worktree = effects.find((effect) => effect?.kind === "worktree");
+  return {
+    handle: agent?.id ?? terminal ?? null,
+    place: worktreeLabel(worktree?.id),
+  };
+}
+
+/**
+ * Sets a terminal's tab title with `terminal rename`.
+ *
+ * A failed rename leaves an unnamed tab, not a broken role, so it is reported
+ * as `false` instead of failing a launch that already started an agent.
+ *
+ * @param {object} options - Rename options.
+ * @param {string} options.orca - Selected Orca executable.
+ * @param {string} options.handle - Terminal to rename.
+ * @param {string} options.title - Title to set.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<boolean>} Whether Orca accepted the title.
+ */
+export async function pinTerminalTitle({ orca, handle, title, execute = run }) {
+  try {
+    await runOrcaJson(
+      orca,
+      ["terminal", "rename", "--terminal", handle, "--title", title],
+      { execute },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// `worktree create` opens a plain shell tab that Orca names `Terminal <n>`;
+// the runtime reports it with no title or with that default.
+const DEFAULT_TAB_TITLE = /^Terminal \d+$/;
+
+/**
+ * Names the untitled plain shells beside a role terminal as `[shell]` tabs.
+ *
+ * A new worktree comes with a shell tab, and next to an agent that renamed
+ * itself it read as another role's tab. Only tabs with no agent and no title
+ * beyond Orca's default are renamed, so a tab a person named keeps its name.
+ *
+ * @param {object} options - Labeling options.
+ * @param {string} options.orca - Selected Orca executable.
+ * @param {string} options.worktree - Worktree selector the role terminal is in.
+ * @param {string} options.handle - The role terminal, which is left alone.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<string[]>} Handles of the shells that were renamed.
+ */
+export async function labelPlainShells({
+  orca,
+  worktree,
+  handle,
+  execute = run,
+}) {
+  let terminals;
+  try {
+    const listed = await runOrcaJson(
+      orca,
+      ["terminal", "list", "--worktree", worktree],
+      { execute },
+    );
+    terminals = listed.result?.terminals ?? [];
+  } catch {
+    return [];
+  }
+  const title = worktreeLabel(worktree)
+    ? `[shell] ${worktreeLabel(worktree)}`
+    : "[shell]";
+  const renamed = [];
+  for (const terminal of terminals) {
+    const plain =
+      terminal?.handle &&
+      terminal.handle !== handle &&
+      !terminal.agentIdentity &&
+      (!terminal.title || DEFAULT_TAB_TITLE.test(terminal.title));
+    if (!plain) continue;
+    if (
+      await pinTerminalTitle({ orca, handle: terminal.handle, title, execute })
+    ) {
+      renamed.push(terminal.handle);
+    }
+  }
+  return renamed;
 }
 
 // Wrapping splits a long command over rows and may drop the space at the
@@ -155,12 +306,14 @@ async function observe(orca, handle, command, execute) {
  * still at the shell prompt after `settleMs`, Enter is sent exactly once; a
  * second Enter could reach the started agent as input. The result carries the
  * final screen, which the caller compares with the requested model before
- * handing the terminal any work.
+ * handing the terminal any work. A ready terminal's tab title is set again
+ * once the agent runs, since the title given at creation may not last.
  *
  * @param {object} options - Launch options.
  * @param {string} options.worktree - Orca worktree selector for the terminal.
  * @param {object} options.command - Result of `roleCommand`.
- * @param {string} [options.title] - Terminal title.
+ * @param {string} [options.title] - Text after the role tag; the worktree
+ *   name when omitted.
  * @param {string} [options.executable] - Orca executable to use.
  * @param {number} [options.settleMs=8000] - Wait before sending Enter.
  * @param {number} [options.readyMs=90000] - Wait for the agent's interface.
@@ -185,6 +338,7 @@ export async function openRoleTerminal({
     "role-terminal needs a role command",
   );
   const orca = selectOrcaExecutable(executable);
+  const tabTitle = roleTitle(command.role, title ?? worktreeLabel(worktree));
   const created = await runOrcaJson(
     orca,
     [
@@ -193,7 +347,7 @@ export async function openRoleTerminal({
       "--worktree",
       worktree,
       "--title",
-      title ?? `omt-${command.role}`,
+      tabTitle,
       "--command",
       command.command,
     ],
@@ -244,6 +398,12 @@ export async function openRoleTerminal({
     }
   }
   const ready = seen.started && !trustQuestion(seen.screen);
+  const titlePinned = ready
+    ? await pinTerminalTitle({ orca, handle, title: tabTitle, execute })
+    : false;
+  const shellsLabeled = ready
+    ? await labelPlainShells({ orca, worktree, handle, execute })
+    : [];
   return {
     role: command.role,
     profile: command.profile,
@@ -257,6 +417,9 @@ export async function openRoleTerminal({
     submission,
     trust,
     ready,
+    title: tabTitle,
+    titlePinned,
+    shellsLabeled,
     ...(ready ? {} : { status: "blocked" }),
     screenCheck: "required",
     screen: seen.screen,

@@ -19,7 +19,12 @@ import {
   roleSpec,
 } from "./role-launch.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
-import { openRoleTerminal } from "./role-terminal.mjs";
+import {
+  openRoleTerminal,
+  pinTerminalTitle,
+  roleTitle,
+  workerTerminal,
+} from "./role-terminal.mjs";
 import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
@@ -86,12 +91,15 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   runtime-discover [--orca EXECUTABLE]
   worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
                [--worktree SELECTOR] [--terminal HANDLE] [--run ID]
-               [--retry-of ID] [--workflow-id ID --state DIR] [--orca EXECUTABLE]
-               (with --workflow-id, the workflow's organization snapshot is used)
+               [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
+               [--orca EXECUTABLE]
+               (with --workflow-id, the workflow's organization snapshot is used;
+               the worker's tab title starts with its role tag, e.g. [PL])
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
   role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
   role-terminal --org FILE --role ROLE --worktree SELECTOR [--title TEXT]
                 [--workflow-id ID --state DIR] [--orca EXECUTABLE]
+                (the tab title is the role tag, e.g. [PM], then TEXT or the worktree)
   host-defaults [--project DIR] [--codex-home DIR]
   supervision-next --org FILE --observation FILE
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role intern]
@@ -180,6 +188,7 @@ export const ALLOWED_OPTIONS = {
     "effort",
     "run",
     "retry-of",
+    "title",
     "workflow-id",
     "state",
     "orca",
@@ -419,8 +428,24 @@ async function startSupervisedWorker(args) {
       executable: args.orca,
     });
     const binding = launchBinding(launch, started);
+    // Orca names a new worker's tab after the agent, which does not say which
+    // role it holds; the tab gets the role tag once the terminal exists.
+    const worker = workerTerminal(started.receipt, args.terminal);
+    const title = worker.handle
+      ? roleTitle(launch.role, args.title ?? worker.place)
+      : null;
+    const titlePinned = Boolean(
+      title &&
+      (await pinTerminalTitle({
+        orca: started.executable,
+        handle: worker.handle,
+        title,
+      })),
+    );
     return {
       ...started,
+      title,
+      titlePinned,
       binding: { ...binding, roleHeader: Boolean(args.spec) },
       // A launch Orca recorded with another model must not be handed work.
       ...(binding.modelProof === "mismatched" ? { status: "blocked" } : {}),
