@@ -8,7 +8,7 @@
 
 ## 등록 위치와 내용
 
-등록부는 `organization.json`이 있는 **원본 프로젝트**의 `.omt/kickoffs/<worktreeId>.json`이다. `.omt/`는 Git에서 제외되고 워크트리마다 별개의 디렉터리이므로, coordinator 워크트리 안에 두면 종료를 수행하는 세션이 읽지 못한다. 런타임은 `--org`로 받은 조직 파일과 같은 자리에서만 등록부를 찾는다.
+등록부는 `organization.json`이 있는 **원본 프로젝트**의 `.omt/kickoffs/<해시>.json`이다. Orca 워크트리 ID는 `<repoId>::<워크트리 경로>` 형식이라 `:`와 `/`를 포함하므로 파일 이름으로 쓸 수 없다. 그래서 런타임은 ID의 SHA-256 해시로 파일 이름을 정하고, 원래 ID는 항목 안의 `coordinator.worktreeId`에 그대로 보관한다. 해시에는 경로 구분자나 `..`가 들어가지 않으므로 어떤 ID를 받아도 항목이 등록부 밖에 쓰이지 않는다. 해시를 도입하기 전에 ID를 그대로 파일 이름으로 쓴 항목도 계속 조회·종료할 수 있다. `.omt/`는 Git에서 제외되고 워크트리마다 별개의 디렉터리이므로, coordinator 워크트리 안에 두면 종료를 수행하는 세션이 읽지 못한다. 런타임은 `--org`로 받은 조직 파일과 같은 자리에서만 등록부를 찾는다.
 
 등록을 요청할 때 작성하는 파일은 다음 네 항목만 담는다. `createdAt`은 런타임이 채우고, `runId`는 뒤따르는 `kickoff-bind`가 채운다.
 
@@ -16,7 +16,7 @@
 {
   "goal": "사용자가 승인한 목표 한 문장",
   "coordinator": {
-    "worktreeId": "<Orca가 실제로 반환한 ID>",
+    "worktreeId": "<Orca가 실제로 반환한 ID 전체, 예: 5a8b…::/Users/me/orca/workspaces/app/task>",
     "path": "<coordinator 워크트리 절대 경로>",
     "stateDir": "<coordinator 워크트리>/.omt"
   },

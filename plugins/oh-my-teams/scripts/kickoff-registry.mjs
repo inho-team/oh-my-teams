@@ -1,4 +1,5 @@
 /** Registry of the kickoffs running in a project, one entry per coordinator. */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -11,7 +12,8 @@ import {
 
 /** Reasons a registered kickoff may be ended, in the order they end one. */
 export const RELEASE_REASONS = ["completed", "disbanded", "taken-over"];
-const WORKTREE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// Entries written before ids were hashed are named after the id itself.
+const LEGACY_ENTRY_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const LEGACY_LEASE = "active-kickoff.json";
 
 function text(value) {
@@ -34,12 +36,33 @@ export function registryDirectory(orgFile) {
   return path.join(path.dirname(path.resolve(orgFile)), "kickoffs");
 }
 
+// Orca worktree ids are `<repoId>::<worktreePath>`, so they hold `:` and `/`.
+// Any such string is accepted as given; only control characters are refused.
+function isWorktreeId(value) {
+  return Boolean(text(value)) && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+// The id cannot be a file name, so the file is named after its digest. A digest
+// never contains a separator or `..`, which keeps every entry in the registry.
+function entryName(worktreeId) {
+  assert(isWorktreeId(worktreeId), "Coordinator worktree id required");
+  return crypto.createHash("sha256").update(worktreeId).digest("hex");
+}
+
 function entryFile(orgFile, worktreeId) {
-  assert(
-    WORKTREE_ID_PATTERN.test(worktreeId ?? ""),
-    "Coordinator worktree id required",
-  );
-  return path.join(registryDirectory(orgFile), `${worktreeId}.json`);
+  return path.join(registryDirectory(orgFile), `${entryName(worktreeId)}.json`);
+}
+
+// Finds the stored entry for a coordinator, including one an earlier release
+// named after the id itself, so kickoffs registered before stay closable.
+function locateEntry(orgFile, worktreeId) {
+  const file = entryFile(orgFile, worktreeId);
+  if (fs.existsSync(file)) return file;
+  if (!LEGACY_ENTRY_NAME.test(worktreeId)) return undefined;
+  const legacy = path.join(registryDirectory(orgFile), `${worktreeId}.json`);
+  if (!fs.existsSync(legacy)) return undefined;
+  const entry = validateEntry(readJSON(legacy));
+  return entry.coordinator.worktreeId === worktreeId ? legacy : undefined;
 }
 
 /**
@@ -69,7 +92,7 @@ export function validateEntry(entry) {
     "Kickoff coordinator required",
   );
   assert(
-    WORKTREE_ID_PATTERN.test(coordinator.worktreeId ?? ""),
+    isWorktreeId(coordinator.worktreeId),
     "Kickoff coordinator worktreeId required",
   );
   for (const key of ["path", "stateDir"]) {
@@ -119,10 +142,13 @@ export function listKickoffs(orgFile, worktreeId) {
   const names = fs.existsSync(directory) ? fs.readdirSync(directory) : [];
   const kickoffs = names
     .filter((name) => name.endsWith(".json"))
-    .sort()
     .map((name) => validateEntry(readJSON(path.join(directory, name))))
     .filter(
       (entry) => !worktreeId || entry.coordinator.worktreeId === worktreeId,
+    )
+    // File names are digests, so order by the id they stand for.
+    .sort((a, b) =>
+      a.coordinator.worktreeId < b.coordinator.worktreeId ? -1 : 1,
     );
   return { active: kickoffs.length > 0, kickoffs };
 }
@@ -144,8 +170,9 @@ export function registerKickoff(orgFile, claim) {
   return withRegistry(orgFile, () => {
     const worktreeId = claim?.coordinator?.worktreeId;
     const file = entryFile(orgFile, worktreeId);
-    if (fs.existsSync(file)) {
-      const existing = validateEntry(readJSON(file));
+    const held = locateEntry(orgFile, worktreeId);
+    if (held) {
+      const existing = validateEntry(readJSON(held));
       throw new Error(
         `Worktree ${worktreeId} already supervises a kickoff ` +
           `(goal: ${existing.goal}); use another coordinator worktree`,
@@ -190,11 +217,8 @@ export function registerKickoff(orgFile, claim) {
  */
 export function bindKickoffRun(orgFile, { worktreeId, runId }) {
   return withRegistry(orgFile, () => {
-    const file = entryFile(orgFile, worktreeId);
-    assert(
-      fs.existsSync(file),
-      `Worktree ${worktreeId} supervises no registered kickoff`,
-    );
+    const file = locateEntry(orgFile, worktreeId);
+    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
     const entry = validateEntry(readJSON(file));
     assert(text(runId), "Run identifier required");
     // Re-running the same bind after a lost receipt is not a conflict; a
@@ -227,11 +251,8 @@ export function bindKickoffRun(orgFile, { worktreeId, runId }) {
  */
 export function releaseKickoff(orgFile, { worktreeId, reason, force = false }) {
   return withRegistry(orgFile, () => {
-    const file = entryFile(orgFile, worktreeId);
-    assert(
-      fs.existsSync(file),
-      `Worktree ${worktreeId} supervises no registered kickoff`,
-    );
+    const file = locateEntry(orgFile, worktreeId);
+    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
     const entry = validateEntry(readJSON(file));
     assert(
       RELEASE_REASONS.includes(reason),
@@ -244,7 +265,7 @@ export function releaseKickoff(orgFile, { worktreeId, reason, force = false }) {
     const archived = path.join(
       path.dirname(registryDirectory(orgFile)),
       "history",
-      `kickoff-${worktreeId}-${entry.createdAt.replace(/[:.]/g, "-")}.json`,
+      `kickoff-${entryName(worktreeId)}-${entry.createdAt.replace(/[:.]/g, "-")}.json`,
     );
     writeJSON(archived, {
       ...entry,
