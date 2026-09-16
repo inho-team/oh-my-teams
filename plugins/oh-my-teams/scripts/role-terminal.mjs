@@ -148,43 +148,19 @@ async function observe(orca, handle, command, execute) {
   };
 }
 
-/**
- * Creates a terminal running a role command and makes sure the command runs.
- *
- * The screen is read until the agent draws its interface. When the command is
- * still at the shell prompt after `settleMs`, Enter is sent exactly once; a
- * second Enter could reach the started agent as input. The result carries the
- * final screen, which the caller compares with the requested model before
- * handing the terminal any work.
- *
- * @param {object} options - Launch options.
- * @param {string} options.worktree - Orca worktree selector for the terminal.
- * @param {object} options.command - Result of `roleCommand`.
- * @param {string} [options.title] - Terminal title.
- * @param {string} [options.executable] - Orca executable to use.
- * @param {number} [options.settleMs=8000] - Wait before sending Enter.
- * @param {number} [options.readyMs=90000] - Wait for the agent's interface.
- * @param {number} [options.pollMs=1500] - Interval between screen reads.
- * @param {Function} [options.execute=run] - Injectable command runner.
- * @returns {Promise<object>} Handle, submission, readiness and final screen.
- * @throws {Error} When the terminal cannot be created or read.
- */
-export async function openRoleTerminal({
+// Launches the command in a new terminal and answers a folder trust question
+// when `answerTrust` allows it. The terminal is returned whatever its state.
+async function launchOnce({
+  orca,
   worktree,
   command,
   title,
-  executable,
-  settleMs = 8000,
-  readyMs = 90000,
-  pollMs = 1500,
-  execute = run,
+  settleMs,
+  readyMs,
+  pollMs,
+  answerTrust,
+  execute,
 }) {
-  assert(worktree, "role-terminal needs a worktree selector");
-  assert(
-    Array.isArray(command?.argv) && command.argv.length > 0,
-    "role-terminal needs a role command",
-  );
-  const orca = selectOrcaExecutable(executable);
   const created = await runOrcaJson(
     orca,
     [
@@ -229,7 +205,7 @@ export async function openRoleTerminal({
     // returned screen shows the model the caller must compare.
     await settle(orca, handle, execute);
     seen = await observe(orca, handle, command.command, execute);
-    if (trustQuestion(seen.screen)) {
+    if (answerTrust && trustQuestion(seen.screen)) {
       // The worktree was created for this role from the user's repository,
       // and the role already runs without approval prompts. Enter is sent
       // once, for the selected "trust" answer only.
@@ -243,7 +219,82 @@ export async function openRoleTerminal({
       seen = await observe(orca, handle, command.command, execute);
     }
   }
-  const ready = seen.started && !trustQuestion(seen.screen);
+  return { handle, seen, submission, trust };
+}
+
+/**
+ * Creates a terminal running a role command and makes sure the command runs.
+ *
+ * The screen is read until the agent draws its interface. When the command is
+ * still at the shell prompt after `settleMs`, Enter is sent exactly once; a
+ * second Enter could reach the started agent as input. The result carries the
+ * final screen, which the caller compares with the requested model before
+ * handing the terminal any work.
+ *
+ * Answering Agy's folder trust question leaves the question in the terminal
+ * buffer, and Orca's startup check blocks a worker whose buffer still asks
+ * for trust. Once the answer is recorded, that terminal is closed and the
+ * command is opened once more in a clean one. A question shown again there is
+ * not answered: the trust was not recorded, and the terminal is reported
+ * blocked instead of reopened in a loop.
+ *
+ * @param {object} options - Launch options.
+ * @param {string} options.worktree - Orca worktree selector for the terminal.
+ * @param {object} options.command - Result of `roleCommand`.
+ * @param {string} [options.title] - Terminal title.
+ * @param {string} [options.executable] - Orca executable to use.
+ * @param {number} [options.settleMs=8000] - Wait before sending Enter.
+ * @param {number} [options.readyMs=90000] - Wait for the agent's interface.
+ * @param {number} [options.pollMs=1500] - Interval between screen reads.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<object>} Handle, submission, readiness and final screen.
+ * @throws {Error} When the terminal cannot be created or read.
+ */
+export async function openRoleTerminal({
+  worktree,
+  command,
+  title,
+  executable,
+  settleMs = 8000,
+  readyMs = 90000,
+  pollMs = 1500,
+  execute = run,
+}) {
+  assert(worktree, "role-terminal needs a worktree selector");
+  assert(
+    Array.isArray(command?.argv) && command.argv.length > 0,
+    "role-terminal needs a role command",
+  );
+  const orca = selectOrcaExecutable(executable);
+  const launch = { orca, worktree, command, title, settleMs, readyMs, pollMs };
+  const first = await launchOnce({ ...launch, answerTrust: true, execute });
+  let { handle, seen, submission } = first;
+  let reopened = null;
+  let closeError = null;
+  if (first.trust === "accepted" && !trustQuestion(seen.screen)) {
+    try {
+      await runOrcaJson(orca, ["terminal", "close", "--terminal", handle], {
+        execute,
+      });
+      reopened = {
+        closedTerminal: handle,
+        reason: "trust-question-in-buffer",
+      };
+    } catch (error) {
+      // A second terminal beside one that would not close only adds a
+      // resource to reclaim, so the first is reported as it is.
+      closeError = error.message;
+    }
+    if (reopened) {
+      ({ handle, seen, submission } = await launchOnce({
+        ...launch,
+        answerTrust: false,
+        execute,
+      }));
+    }
+  }
+  const trustBlocked = trustQuestion(seen.screen);
+  const ready = seen.started && !trustBlocked && !closeError;
   return {
     role: command.role,
     profile: command.profile,
@@ -255,7 +306,9 @@ export async function openRoleTerminal({
     modelRequested: command.modelRequested,
     effortRequested: command.effortRequested,
     submission,
-    trust,
+    trust: first.trust,
+    reopened,
+    ...(closeError ? { closeError } : {}),
     ready,
     ...(ready ? {} : { status: "blocked" }),
     screenCheck: "required",
