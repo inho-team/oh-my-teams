@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "name": "example-single-subscription-team",
+  "modelPolicy": {
+    "preset": "single-subscription",
+    "revision": 1
+  },
+  "pools": {
+    "solo": {
+      "label": "User-selected single subscription shared by every role"
+    }
+  },
+  "profiles": {
+    "agy-opus": {
+      "provider": "agy",
+      "command": ["agy"],
+      "account": "current",
+      "subscription": "User-selected Agy subscription",
+      "model": "claude-opus-4-6-thinking",
+      "pool": "solo"
+    },
+    "agy-sonnet": {
+      "provider": "agy",
+      "command": ["agy"],
+      "account": "current",
+      "subscription": "User-selected Agy subscription",
+      "model": "claude-sonnet-4-6",
+      "pool": "solo"
+    },
+    "agy-oss": {
+      "provider": "agy",
+      "command": ["agy"],
+      "account": "current",
+      "subscription": "User-selected Agy subscription",
+      "model": "gpt-oss-120b-medium",
+      "pool": "solo"
+    }
+  },
+  "assistants": {
+    "pm": ["agy-oss"],
+    "junior": ["agy-oss"]
+  },
+  "roles": {
+    "pm": {
+      "parent": null,
+      "profile": "agy-opus",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "junior": {
+      "parent": "pm",
+      "profile": "agy-sonnet",
+      "concurrency": 1,
+      "attempts": 2,
+      "fallbacks": []
+    }
+  },
+  "policy": {
+    "onExhaustion": "stop",
+    "maxCalls": 3,
+    "timeoutMs": 300000,
+    "repeatFailureLimit": 1
+  }
+}

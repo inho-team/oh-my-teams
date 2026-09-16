@@ -43,7 +43,8 @@ import { organizationStatus } from "./status.mjs";
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
-  preset --org FILE --name opus-first|balanced --revision N [--apply]
+  preset --org FILE --name opus-first|balanced|single-subscription --revision N
+         [--apply]
   show --org FILE [--state DIR] [--json]
   validate --org FILE
   prepare --org FILE --task FILE --repo DIR --name NAME [--orca EXECUTABLE]

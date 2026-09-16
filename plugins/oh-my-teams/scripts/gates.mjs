@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  ROLES,
   assert,
   readJsonDirectory,
   writeJSON,
@@ -20,6 +21,17 @@ const decisionFile = (stateDir, id) =>
   path.join(stateDir, "decisions", `${id}.json`);
 const gateFile = (stateDir, taskId) =>
   path.join(stateDir, "gates", `${taskId}.json`);
+
+// A task contract names the role that reviews it in a full ladder. An
+// organization that omits that role folds the duty onto a more senior one, so a
+// reviewer at or above the required rank satisfies the requirement while a more
+// junior one still cannot. Reviewer independence is a separate check on
+// execution identity, so this never weakens it.
+function seniorEnoughToReview(reviewerRole, requiredRole) {
+  const required = ROLES.indexOf(requiredRole);
+  const reviewer = ROLES.indexOf(reviewerRole);
+  return required >= 0 && reviewer >= 0 && reviewer <= required;
+}
 
 function validateFinding(finding) {
   assert(finding && ID_PATTERN.test(finding.id), "Finding id required");
@@ -73,7 +85,7 @@ export function validateReviewInput(input, task) {
   const requirement = reviewRequirement(task, input.requirementId);
   assert(
     input.reviewer?.kind === requirement.kind &&
-      input.reviewer.role === requirement.role &&
+      seniorEnoughToReview(input.reviewer.role, requirement.role) &&
       typeof input.reviewer.executionId === "string" &&
       input.reviewer.executionId.trim(),
     "Reviewer does not satisfy the required kind/role/execution identity",

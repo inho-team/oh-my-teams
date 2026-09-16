@@ -1,7 +1,7 @@
 /** Read-only organization run, gate, usage, and quota status projection. */
 import fs from "node:fs";
 import path from "node:path";
-import { readJSON, validateOrg } from "./core.mjs";
+import { readJSON, resolveRole, validateOrg } from "./core.mjs";
 import { latestQuotaSnapshots, quotaStatus } from "./quota.mjs";
 import {
   addCallUsage,
@@ -56,14 +56,21 @@ function currentGateStatus(stateDir, report) {
     : null;
 }
 
-function nextOwner(report, gateStatus, gates) {
-  if (gates?.["review-complete"]?.status === "pending") return "senior";
-  if (gates?.["outcome-accepted"]?.status === "pending") return "pm";
+// A reduced organization may not declare the role that owns a pending gate in a
+// full ladder, so the hint names the declared role that took the duty over
+// rather than a role the reader cannot assign work to.
+function nextOwner(org, report, gateStatus, gates) {
+  if (gates?.["review-complete"]?.status === "pending") {
+    return resolveRole(org, "senior");
+  }
+  if (gates?.["outcome-accepted"]?.status === "pending") {
+    return resolveRole(org, "pm");
+  }
   if (gateStatus?.state === "accepted") return null;
   return report.status === "failed" ? report.role : null;
 }
 
-function runStatus(stateDir, runId, usage) {
+function runStatus(org, stateDir, runId, usage) {
   const reportFile = path.join(stateDir, "runs", runId, "report.json");
   if (!fs.existsSync(reportFile)) {
     return {
@@ -82,7 +89,7 @@ function runStatus(stateDir, runId, usage) {
     taskId: report.taskId,
     role: report.role,
     status: gateStatus?.state ?? report.status,
-    nextOwner: nextOwner(report, gateStatus, gates),
+    nextOwner: nextOwner(org, report, gateStatus, gates),
     gates,
     issues: report.issues,
   };
@@ -131,7 +138,7 @@ export function organizationStatus(org, stateDir) {
       ? fs
           .readdirSync(runsDir)
           .sort()
-          .map((runId) => runStatus(stateDir, runId, usage))
+          .map((runId) => runStatus(org, stateDir, runId, usage))
       : [];
   return {
     runs,
