@@ -92,6 +92,27 @@ test("a multi-task workflow is told about the integration it cannot add later", 
 });
 
 test("the commands written in the skills carry the options the CLI requires", () => {
+  // Every skill that prints a command is checked, not only pl: a lifecycle
+  // skill whose example omits a required option fails at the moment a user is
+  // starting or ending a kickoff.
+  for (const entry of fs.readdirSync(skills)) {
+    const file = path.join(skills, entry, "SKILL.md");
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, "utf8");
+    for (const [, command, rest] of text.matchAll(
+      /node <runtime> ([a-z-]+)([^\n`]*)/g,
+    )) {
+      const required = REQUIRED_OPTIONS[command];
+      assert.ok(required, `${entry} names an unknown command: ${command}`);
+      for (const option of required) {
+        assert.ok(
+          rest.includes(`--${option}`),
+          `${entry}'s ${command} example omits required --${option}`,
+        );
+      }
+    }
+  }
+
   const commands = [
     ...readSkill("pl").matchAll(/node <runtime> ([a-z-]+)([^\n`]*)/g),
   ];
@@ -269,6 +290,7 @@ test("one rule lives in one place", () => {
   const restatements = [
     [/`live` worker가 0명이면.*표현하지 않는다/, "the liveness verdict"],
     [/--role \w+ --kind research/, "the assist invocation"],
+    [/"coordinator": \{/, "the kickoff lease record"],
   ];
   for (const entry of fs.readdirSync(skills)) {
     const file = path.join(skills, entry, "SKILL.md");
@@ -375,4 +397,65 @@ test("the help flow shows the path, and says what is not on it", () => {
   // "Print this verbatim" and "change the invocation prefix" contradicted each
   // other, because the tables carry bare skill names and no prefix at all.
   assert.match(help, /표는 스킬 이름만 담는다/);
+});
+
+test("one project holds one kickoff, and every lifecycle skill reads the lease", () => {
+  const lease = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/kickoff-lease.md"),
+    "utf8",
+  );
+  // workflow.mjs counts concurrency slots and the call budget inside a single
+  // workflow state, so two kickoffs sharing one organization file spend the
+  // same subscription twice while neither can see the other's slots. Nothing
+  // in teams-org.mjs refuses that, which is why the lease has to be read by
+  // every skill that starts, inspects or ends a kickoff.
+  assert.match(lease, /런타임이 거부로 강제한다/);
+  assert.match(lease, /active-kickoff\.json/);
+
+  for (const skill of ["form", "kickoff", "status", "close", "disband"]) {
+    assert.match(
+      readSkill(skill),
+      /references\/kickoff-lease\.md/,
+      `${skill} touches the single active kickoff and must read the contract`,
+    );
+  }
+});
+
+test("the Goal belongs to the session that can bind the Run", () => {
+  const kickoff = readSkill("kickoff");
+  const lease = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/kickoff-lease.md"),
+    "utf8",
+  );
+  // worker-start is fenced to the terminal that created the Run, so a session
+  // that hands the work to a child worktree and keeps the Goal would own a
+  // Goal it can never dispatch for. The declaring session hands over a brief;
+  // the coordinator creates the Goal and binds the Run in the same terminal.
+  assert.match(kickoff, /coordinator 세션이 브리프를 읽고 하나 만들며/);
+  assert.match(kickoff, /worker-start`가 Run에 바인딩된 coordinator 터미널/);
+  assert.match(lease, /Goal의 유일한 소유자는 B다/);
+});
+
+test("closing runs where the coordinator worktree can actually be reclaimed", () => {
+  // A worktree cannot remove itself, so close and disband belong to the
+  // declaring session rather than the coordinator that did the work.
+  for (const skill of ["close", "disband"]) {
+    assert.match(
+      readSkill(skill),
+      /선언한 세션에서 수행한다/,
+      `${skill} must not run inside the worktree it reclaims`,
+    );
+  }
+});
+
+test("the lease is released by an ending, never by a reading", () => {
+  const close = readSkill("close");
+  const disband = readSkill("disband");
+  const status = readSkill("status");
+  // A lease left behind blocks every later kickoff on the project, and a lease
+  // cleared on an unverifiable coordinator would abandon a run that may still
+  // be alive. Both endings delete it; the read-only skill never does.
+  assert.match(close, /kickoff-release .*--reason completed/);
+  assert.match(disband, /kickoff-release .*--reason disbanded/);
+  assert.match(status, /점유 기록을 지우거나 고쳐 쓰지 않는다/);
 });

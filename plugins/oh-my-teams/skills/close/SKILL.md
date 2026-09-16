@@ -7,6 +7,8 @@ description: 성공한 oh my teams kickoff를 검증하고 허가된 PR/MR 생�
 
 성공한 kickoff의 전달과 정리를 담당한다. 활성 kickoff가 없으면 삭제나 병합을 추측해서 수행하지 않는다.
 
+원본 프로젝트의 `.omt/active-kickoff.json`을 먼저 읽는다. 기록된 `coordinator.stateDir`이 아래 명령의 `<shared-state>`이고, 회수 대상은 기록된 coordinator 워크트리와 그 아래의 자식 워크트리다. 이 절차는 coordinator 세션이 아니라 kickoff를 선언한 세션에서 수행한다. 자기가 서 있는 워크트리는 스스로 제거할 수 없기 때문이다. 점유 기록의 형식은 [`../../references/kickoff-lease.md`](../../references/kickoff-lease.md)를 따른다.
+
 1. 원래 Goal의 모든 수용 기준, 필수 검토, 최신 HEAD의 검사와 미해결 사항을 확인한다.
 2. 눈으로 확인하지 말고 게이트를 실행한다. `merge-check`는 필수 검토와 PM 수용이 source·task hash에 연결되기 전에는 병합을 거부하며, 비정상 종료는 병합 중단 조건이다.
 
@@ -22,5 +24,10 @@ node <runtime> workflow-status --id <workflow> --state <shared-state>
 6. Orca의 현재 가이드에 따라 정산이 끝난 worker를 release하고 child worktree를 회수한다. 보존되지 않은 변경, 살아 있는 프로세스, 상태 불명 worker가 있으면 삭제하지 않으며, 종료를 확인하지 못한 worker는 `worker-abandon`으로 봉인한다.
 7. 환경이 워크트리 삭제를 지원하지만 별도 최종 승인이 필요한 경우에는 정확한 대상을 제시하고 승인을 받은 뒤 삭제한다. 승인은 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 받으며, 삭제 대상과 되돌릴 수 없다는 사실을 선택지에 함께 적는다. 환경이 삭제 자체를 지원하지 않으면 불가능한 승인을 요구하지 않고 사용자가 실행할 정리 절차를 제공한다.
 8. 요청된 전달과 정리가 모두 끝난 뒤에만 kickoff Goal을 완료 처리한다. 환경 제약으로 정리를 사용자에게 넘긴 경우에는 남은 정리 항목을 명시해 보고한 뒤 완료 처리한다.
+9. 마지막으로 점유를 해제한다. 이 단계를 건너뛰면 같은 프로젝트에서 다음 kickoff를 시작할 수 없다. 사용자에게 넘긴 정리 항목이 남아 있어도 Goal을 완료 처리했으면 점유는 해제하고, 남은 항목을 보고에 함께 적는다.
+
+```text
+node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <coordinator-id> --reason completed
+```
 
 최종 기록에는 Goal 결과, PR/MR 주소 또는 식별자, 병합 커밋, 검사 근거, 회수·삭제한 워크트리와 보존한 후속 항목을 포함한다. 사용자에게 전달하는 문장은 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)의 기준을 따른다.

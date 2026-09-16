@@ -38,3 +38,5 @@ node <runtime> show --org <project>/.omt/organization.json
 ```
 
 `init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 구독 선택 질문을 다시 시작하지 않는다. `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다.
+
+조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 활성 kickoff 점유 기록이 놓이는 자리가 된다. 한 프로젝트의 활성 kickoff는 하나이며, form 자체는 점유 기록을 만들지 않는다. 자세한 계약은 [`../../references/kickoff-lease.md`](../../references/kickoff-lease.md)에 있다.
