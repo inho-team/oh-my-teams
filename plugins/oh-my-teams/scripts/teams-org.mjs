@@ -23,6 +23,15 @@ import {
 import { resolveHostDefaults } from "./host-defaults.mjs";
 import { assertNotKickoffOwner, deliverKickoff } from "./delivery.mjs";
 import {
+  answerHeadless,
+  HEADLESS_PROTOCOL,
+  HEADLESS_PROVIDERS,
+  listHeadless,
+  startHeadlessWorker,
+  stopHeadless,
+  waitHeadless,
+} from "./headless.mjs";
+import {
   openRoleTerminal,
   pinTerminalTitle,
   roleTitle,
@@ -106,6 +115,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                [--orca EXECUTABLE]
                (with --workflow-id, the workflow's organization snapshot is used;
                the worker's tab title starts with its role tag, e.g. [PL])
+  headless-start --org FILE --role ROLE --cwd DIR --spec TEXT --state DIR
+                 [--workflow-id ID] [--timeout-ms N] [--worker ID]
+                 (runs the role as a non-interactive process, without Orca)
+  headless-status --state DIR --worker ID [--wait-ms N]
+  headless-answer --state DIR --worker ID --text TEXT [--timeout-ms N]
+  headless-stop --state DIR --worker ID
+  headless-list --state DIR
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
@@ -191,6 +207,20 @@ export const ALLOWED_OPTIONS = {
   "runtime-discover": ["orca"],
   "role-spec": ["org", "role", "spec", "workflow-id", "state", "text"],
   "terminal-idle-check": ["terminal", "orca"],
+  "headless-start": [
+    "org",
+    "role",
+    "cwd",
+    "spec",
+    "state",
+    "workflow-id",
+    "timeout-ms",
+    "worker",
+  ],
+  "headless-status": ["state", "worker", "wait-ms"],
+  "headless-answer": ["state", "worker", "text", "timeout-ms"],
+  "headless-stop": ["state", "worker"],
+  "headless-list": ["state"],
   "role-command": ["org", "role", "workflow-id", "state"],
   "role-terminal": [
     "org",
@@ -281,6 +311,11 @@ export const REQUIRED_OPTIONS = {
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
   "terminal-idle-check": ["terminal"],
+  "headless-start": ["org", "role", "cwd", "spec", "state"],
+  "headless-status": ["state", "worker"],
+  "headless-answer": ["state", "worker", "text"],
+  "headless-stop": ["state", "worker"],
+  "headless-list": ["state"],
   "role-command": ["org", "role"],
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
@@ -328,7 +363,11 @@ export function parseArgs(argv) {
     const key = rest[index];
     assert(key.startsWith("--"), `Unexpected argument: ${key}`);
     const option = key.slice(2);
-    if (["json", "apply", "force", "text"].includes(option)) {
+    // `--text` is a flag only for role-spec; headless-answer takes a value.
+    if (
+      ["json", "apply", "force"].includes(option) ||
+      (option === "text" && command === "role-spec")
+    ) {
       args[option] = true;
       continue;
     }
@@ -512,6 +551,52 @@ async function startSupervisedWorker(args) {
     )}`;
     throw error;
   }
+}
+
+// A role run as a non-interactive process gets the same checks a terminal
+// launch does: its profile, whether this run holds the role, the owner
+// checkout, and another role's worktree. The instruction carries the role's
+// charter and the headless protocol, since no one answers a prompt.
+function startHeadlessRole(args) {
+  // `--state` is where the worker is recorded; it names workflow state only
+  // together with `--workflow-id`.
+  const { org, run } = launchContext(
+    args["workflow-id"] ? args : { ...args, state: undefined },
+  );
+  const command = roleCommand(org, args.role, run);
+  // roleCommand also serves the PM coordinator's terminal; a worker is never PM.
+  assert(
+    command.role !== "pm",
+    args.role === "pm"
+      ? "PM is the coordinator; it is not started as a headless worker"
+      : `${args.role} folds to pm, the coordinator, which does its work itself`,
+  );
+  assert(
+    HEADLESS_PROVIDERS.includes(command.provider),
+    `Role ${command.role} uses ${command.provider}, which has no headless runtime; ` +
+      `supported: ${HEADLESS_PROVIDERS.join(", ")}`,
+  );
+  const cwd = path.resolve(args.cwd);
+  assertNotKickoffOwner(cwd, `starting ${command.role}`);
+  assertWorktreeUnshared(run.workflowState, command.role, `path:${cwd}`, cwd);
+  const workerId = args.worker ?? `${command.role}-${Date.now().toString(36)}`;
+  return startHeadlessWorker({
+    stateDir: args.state,
+    workerId,
+    role: command.role,
+    profile: command.profile,
+    provider: command.provider,
+    binary: [command.argv[0]],
+    model: command.modelRequested,
+    effort: command.effortRequested,
+    cwd,
+    prompt: `${roleSpec(org, command.role, args.spec, run)}
+${HEADLESS_PROTOCOL}
+`,
+    ...(args["timeout-ms"] === undefined
+      ? {}
+      : { timeoutMs: Number(args["timeout-ms"]) }),
+  });
 }
 
 // The exception path #41 asked for. An Agy terminal Orca cannot see idle is
@@ -710,6 +795,25 @@ async function executeCommand(args) {
       return discoverOrcaRuntime(args.orca);
     case "worker-start":
       return startSupervisedWorker(args);
+    case "headless-start":
+      return startHeadlessRole(args);
+    case "headless-status":
+      return waitHeadless(
+        args.state,
+        args.worker,
+        args["wait-ms"] === undefined ? 0 : Number(args["wait-ms"]),
+      );
+    case "headless-answer":
+      return answerHeadless(args.state, args.worker, args.text, {
+        timeoutMs:
+          args["timeout-ms"] === undefined
+            ? undefined
+            : Number(args["timeout-ms"]),
+      });
+    case "headless-stop":
+      return stopHeadless(args.state, args.worker);
+    case "headless-list":
+      return listHeadless(args.state);
     case "terminal-idle-check":
       return checkTerminalIdle(args.terminal, {
         executable: args.orca,
