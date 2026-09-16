@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "review-expiry-boundary-first-pass",
+  "requirementId": "semantic-review",
+  "reviewer": {
+    "kind": "agent-review",
+    "role": "senior",
+    "executionId": "actual-review-dispatch-id"
+  },
+  "implementationExecutionId": "actual-implementation-run-id",
+  "conclusion": "changes-requested",
+  "criteria": [
+    {
+      "id": "public-api",
+      "conclusion": "changes-requested",
+      "evidence": "The diff keeps the signature, but the boundary test accepts an expired token."
+    }
+  ],
+  "findings": [
+    {
+      "id": "expiry-off-by-one",
+      "status": "open",
+      "description": "The boundary test compares with <= and accepts a token one second after expiry (src/token.mjs line 42)."
+    }
+  ]
+}
