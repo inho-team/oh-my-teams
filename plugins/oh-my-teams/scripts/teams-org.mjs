@@ -49,12 +49,11 @@ import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { organizationStatus } from "./status.mjs";
 import { draftOrganization } from "./org-draft.mjs";
 import {
-  assertCoordinator,
   bindKickoffRun,
-  claimKickoff,
-  readLease,
+  listKickoffs,
+  registerKickoff,
   releaseKickoff,
-} from "./kickoff-lease.mjs";
+} from "./kickoff-registry.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
@@ -65,7 +64,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   show --org FILE [--state DIR] [--json]
   validate --org FILE
   kickoff-claim --org FILE --from CLAIM
-  kickoff-show --org FILE
+  kickoff-show --org FILE [--worktree ID]
   kickoff-bind --org FILE --worktree ID --run ID
   kickoff-release --org FILE --worktree ID
                   --reason completed|disbanded|taken-over [--force]
@@ -118,7 +117,7 @@ export const ALLOWED_OPTIONS = {
   show: ["org", "state", "json"],
   validate: ["org"],
   "kickoff-claim": ["org", "from"],
-  "kickoff-show": ["org"],
+  "kickoff-show": ["org", "worktree"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
   prepare: ["org", "task", "repo", "name", "orca"],
@@ -449,9 +448,9 @@ async function executeCommand(args) {
     case "validate":
       return { valid: Boolean(validateOrg(readJSON(args.org))) };
     case "kickoff-claim":
-      return claimKickoff(args.org, readJSON(args.from));
+      return registerKickoff(args.org, readJSON(args.from));
     case "kickoff-show":
-      return readLease(args.org);
+      return listKickoffs(args.org, args.worktree);
     case "kickoff-bind":
       return bindKickoffRun(args.org, {
         worktreeId: args.worktree,
@@ -555,10 +554,6 @@ async function executeCommand(args) {
         path.resolve(args.state),
       );
     case "workflow-create":
-      // A second coordinator would reserve slots and spend the call budget in
-      // its own workflow state, invisible to the one that already holds the
-      // project. The lease is what makes that state the only one.
-      assertCoordinator(args.org, args.state);
       return createWorkflow(
         path.resolve(args.state),
         readJSON(args.workflow),
