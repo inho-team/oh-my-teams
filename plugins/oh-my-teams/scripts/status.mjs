@@ -71,6 +71,7 @@ const LIVENESS = new Set(["live", "unverifiable", "exited"]);
  * @param {number} [observation.unansweredRequests=0] - Progress requests still unanswered.
  * @param {number} [observation.inspections=0] - Inspections since the last activity.
  * @param {string} [observation.escalatedAt] - When this stall was last escalated.
+ * @param {string} [observation.escalatedReason] - Reason that escalation reported.
  * @param {object|null} [observation.agentWait] - `worker-show` evidence of a human prompt.
  * @param {object} observation.policy - Result of `supervisionPolicy`.
  * @returns {object} Action, reason, silence in minutes, and the user-facing label.
@@ -83,6 +84,7 @@ export function nextSupervisionAction({
   unansweredRequests = 0,
   inspections = 0,
   escalatedAt,
+  escalatedReason,
   agentWait = null,
   policy,
 }) {
@@ -111,18 +113,26 @@ export function nextSupervisionAction({
     ...extra,
   });
 
+  const escalated = Date.parse(escalatedAt ?? "");
+  // An exit or a human prompt is a new fact when the last escalation reported
+  // something else, such as the stall before it, so both are checked before the
+  // already-escalated rule. Once that same fact has been reported, repeating it
+  // on every check only buries the report under copies of itself.
+  const reported = (reason) =>
+    !Number.isNaN(escalated) && escalatedReason === reason;
   if (liveness === "exited") {
-    return decide("escalate", "exited-without-worker-done", {
-      readOutput: true,
-      failureClassify: true,
-    });
+    return reported("exited-without-worker-done")
+      ? decide("wait", "already-escalated")
+      : decide("escalate", "exited-without-worker-done", {
+          readOutput: true,
+          failureClassify: true,
+        });
   }
   if (agentWait) {
-    return decide("escalate", "waiting-on-human-prompt", { readOutput: true });
+    return reported("waiting-on-human-prompt")
+      ? decide("wait", "already-escalated")
+      : decide("escalate", "waiting-on-human-prompt", { readOutput: true });
   }
-  // An exit or a human prompt is a new fact, not the stall already reported,
-  // so both are checked before the already-escalated rule.
-  const escalated = Date.parse(escalatedAt ?? "");
   if (!Number.isNaN(escalated) && (Number.isNaN(last) || last <= escalated)) {
     return decide("wait", "already-escalated");
   }
