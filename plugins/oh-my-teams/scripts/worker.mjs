@@ -28,6 +28,15 @@ const MAX_EDIT_BYTES = 96000;
 const MAX_PROMPT_BYTES = 96000;
 const FAILURE_CONTEXT_CHARS = 4000;
 
+/**
+ * Failure classes that disqualify a profile outright instead of one attempt.
+ *
+ * These describe the profile's configuration or reachability rather than the
+ * model's answer, so another attempt against the same profile cannot change the
+ * outcome, while another profile still can.
+ */
+const UNUSABLE_PROFILE_FAILURES = ["provider-unavailable", "context-truncated"];
+
 export { validateTask } from "./contracts.mjs";
 
 function readTaskFiles(repo, task) {
@@ -444,6 +453,18 @@ export async function work(
           ) {
             break profileLoop;
           }
+          break;
+        }
+
+        // An unreachable local server, or a prompt the configured context window
+        // cannot hold, fails identically on every remaining attempt against this
+        // profile. Retrying would spend the call budget the next profile needs.
+        if (UNUSABLE_PROFILE_FAILURES.includes(response.failureClass)) {
+          failure =
+            `Profile ${profileId} unusable (${response.failureClass}): ` +
+            String(response.stderr || response.text || "")
+              .slice(0, 400)
+              .trim();
           break;
         }
 

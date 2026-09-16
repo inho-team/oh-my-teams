@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "name": "local-first-team",
+  "pools": {
+    "agy-shared": {
+      "label": "User-selected shared Agy quota"
+    }
+  },
+  "profiles": {
+    "claude-current": {
+      "provider": "claude",
+      "command": ["claude"],
+      "account": "current",
+      "subscription": "User-selected Claude subscription",
+      "model": null
+    },
+    "codex-current": {
+      "provider": "codex",
+      "command": ["codex"],
+      "account": "current",
+      "subscription": "User-selected Codex subscription",
+      "model": "gpt-5.6-sol"
+    },
+    "ollama-qwen-http": {
+      "provider": "ollama",
+      "endpoint": "http://127.0.0.1:11434",
+      "account": "current",
+      "subscription": "Local Ollama server",
+      "model": "qwen3-coder:30b",
+      "contextTokens": 65536,
+      "keepAlive": "10m"
+    },
+    "ollama-gptoss-cli": {
+      "provider": "ollama",
+      "command": ["ollama"],
+      "account": "current",
+      "subscription": "Local Ollama CLI",
+      "model": "gpt-oss:20b",
+      "contextTokens": 32768,
+      "effort": "medium"
+    },
+    "agy-sonnet": {
+      "provider": "agy",
+      "command": ["agy"],
+      "account": "current",
+      "subscription": "User-selected Agy subscription",
+      "model": "claude-sonnet-4-6",
+      "pool": "agy-shared"
+    },
+    "agy-opus": {
+      "provider": "agy",
+      "command": ["agy"],
+      "account": "current",
+      "subscription": "User-selected Agy subscription",
+      "model": "claude-opus-4-6-thinking",
+      "pool": "agy-shared"
+    },
+    "agy-oss": {
+      "provider": "agy",
+      "command": ["agy"],
+      "account": "current",
+      "subscription": "User-selected Agy subscription",
+      "model": "gpt-oss-120b-medium",
+      "pool": "agy-shared"
+    }
+  },
+  "assistants": {
+    "pm": ["agy-oss"],
+    "pl": ["agy-oss"],
+    "senior": ["agy-oss"],
+    "junior": ["agy-oss"],
+    "intern": ["agy-oss"]
+  },
+  "roles": {
+    "pm": {
+      "parent": null,
+      "profile": "claude-current",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "pl": {
+      "parent": "pm",
+      "profile": "codex-current",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "senior": {
+      "parent": "pl",
+      "profile": "agy-opus",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "junior": {
+      "parent": "senior",
+      "profile": "ollama-qwen-http",
+      "concurrency": 1,
+      "attempts": 2,
+      "fallbacks": ["agy-sonnet"]
+    },
+    "intern": {
+      "parent": "junior",
+      "profile": "ollama-gptoss-cli",
+      "concurrency": 1,
+      "attempts": 2,
+      "fallbacks": ["ollama-qwen-http", "agy-sonnet"]
+    }
+  },
+  "policy": {
+    "onExhaustion": "fallback",
+    "maxCalls": 4,
+    "timeoutMs": 300000,
+    "repeatFailureLimit": 1
+  }
+}
