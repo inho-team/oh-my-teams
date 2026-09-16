@@ -194,7 +194,10 @@ test("the runtime reference explains the narrow launch and the exception path", 
     runtime,
     /node <runtime> terminal-idle-check --terminal <handle>\nnode <runtime> workflow-reserve/,
   );
-  assert.match(runtime, /`stty cols 44;`를 앞에 붙여 띄운다/);
+  assert.match(
+    runtime,
+    /`stty cols 44;`를, Windows의 PowerShell에서는 `mode con: cols=44;`를 앞에 붙여 띄운다/,
+  );
   assert.match(runtime, /\*\*주입 예외 경로\.\*\*/);
   assert.match(runtime, /`--inject-fallback "<누가 무엇을 승인했는지>"`/);
   assert.match(runtime, /그 객체를 `signal` 필드에 그대로 옮긴다/);
