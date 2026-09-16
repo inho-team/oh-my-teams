@@ -3,7 +3,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assert, chart, readJSON, saveOrg, validateOrg } from "./core.mjs";
+import {
+  assert,
+  chart,
+  readJSON,
+  saveOrg,
+  validateOrg,
+  writeJSON,
+} from "./core.mjs";
 import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
@@ -39,6 +46,7 @@ import {
 } from "./incidents.mjs";
 import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { organizationStatus } from "./status.mjs";
+import { draftOrganization } from "./org-draft.mjs";
 import {
   assertCoordinator,
   bindKickoffRun,
@@ -48,6 +56,7 @@ import {
 } from "./kickoff-lease.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
+  org-draft --name NAME --tiers 1-5 --models provider:model,... --output FILE
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
   preset --org FILE --name opus-first|balanced|single-subscription --revision N
@@ -100,6 +109,7 @@ No command automatically pushes, merges, deploys, publishes, or deletes.`;
 
 /** Options each subcommand accepts, keyed by command name. */
 export const ALLOWED_OPTIONS = {
+  "org-draft": ["name", "tiers", "models", "output"],
   init: ["org", "from"],
   edit: ["org", "from", "revision"],
   preset: ["org", "name", "revision", "apply"],
@@ -166,6 +176,7 @@ export const ALLOWED_OPTIONS = {
 
 /** Options each subcommand must receive, keyed by command name. */
 export const REQUIRED_OPTIONS = {
+  "org-draft": ["name", "tiers", "models", "output"],
   init: ["org", "from"],
   edit: ["org", "from", "revision"],
   preset: ["org", "name", "revision"],
@@ -400,8 +411,24 @@ async function mergeCheck(args) {
   };
 }
 
+function writeDraft(args) {
+  const output = path.resolve(args.output);
+  // A draft path that already holds a file may be the live organization, and
+  // writing over it would skip the no-overwrite rule init keeps.
+  assert(!fs.existsSync(output), "Draft output exists; choose a new path");
+  const organization = draftOrganization({
+    name: args.name,
+    tiers: Number(args.tiers),
+    models: args.models.split(","),
+  });
+  writeJSON(output, organization);
+  return { output, organization };
+}
+
 async function executeCommand(args) {
   switch (args.command) {
+    case "org-draft":
+      return writeDraft(args);
     case "init":
       return fs.existsSync(args.org)
         ? { created: false, organization: validateOrg(readJSON(args.org)) }
