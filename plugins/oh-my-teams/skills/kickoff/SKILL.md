@@ -13,7 +13,7 @@ description: 저장된 oh my teams 조직으로 하나의 개발 목표를 시�
 
 Goal의 objective에는 사용자가 원하는 결과, 측정 가능한 수용 기준, 비목표, 필수 검사와 요청된 전달 범위를 포함한다. 이 가운데 사용자 요청과 저장소 상태에서 확정할 수 없는 항목이 있으면 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 한 번에 확인한 뒤 Goal을 만든다. 확인하지 못한 수용 기준을 추측해 채우지 않는다. 사용자가 토큰 예산을 명시하지 않았다면 임의의 토큰 예산을 설정하지 않는다. 네이티브 Goal이 없는 호스트에서는 같은 계약을 oh my teams workflow와 Orca Run에 보존하되, 네이티브 기능이 있는 것처럼 보고하지 않는다.
 
-kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이고, PM·PL·Worker는 그 아래의 실행 주체다.
+kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이고, PM·PL·Intern은 그 아래의 실행 주체다.
 
 ## 실행 주기
 
