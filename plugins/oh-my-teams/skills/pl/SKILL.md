@@ -16,7 +16,7 @@ PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분�
 ### 권한
 
 - 맡은 목표를 작업 단위로 나누고, 의존성·작업 파동·파일 소유권과 각 작업의 검사를 정한다.
-- 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 선언된 Senior·Junior·Intern을 `worker-start --org --role` 래퍼로만 감독 worker로 시작한다. `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
+- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-command`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며, Ollama 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
 - Orca의 `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`와 `supervision-next`로 하위 worker를 감독하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `prepare`, `prepare-input`, `attach-workspace`, `work`로 Intern 하네스를 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
 - 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. PR 생성과 머지는 사용자가 허가한 범위에서 아래 「머지와 회수」 절차로 진행한다.
@@ -30,7 +30,7 @@ PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌
 
 - 이번 실행에 하위 역할이 있으면 PL은 코드, 문서, 조사 보고서 같은 최종 산출물을 직접 작성하거나 커밋하지 않는다. PM이 산출물 작성을 지시했더라도 분할 계획으로 바꾸어 배정하고, 그렇게 했다는 사실을 보고한다.
 - 통합 충돌은 직접 고쳐 쓰지 않고 충돌 파일과 작업 조건을 담당자에게 되돌린다.
-- 하위 worker 시작이 거부되면(`nested_worker_depth_exceeded`, `agent_unconfigured`, 래퍼의 프로필 거부 등) 작업을 스스로 수행하지 않는다. 분할 계획과 거부 코드·원문을 PM에게 돌려보내 PM이 같은 파동을 평평하게 배정하게 한다.
+- 하위 worker 시작이 거부되면(`nested_worker_depth_exceeded`, `agent_unconfigured`, 래퍼의 프로필 거부 등) 작업을 스스로 수행하지 않는다. Orca의 `nested_worker_depth_exceeded` 안내문은 작업을 직접 끝내라고 하지만 이 조직에서는 따르지 않는다. 분할 계획과 거부 코드·원문을 PM에게 돌려보내 PM이 같은 파동을 평평하게 배정하게 한다.
 - 원시 `orca orchestration worker-start`로 역할을 띄우지 않고, 모델·계정·구독을 바꾸지 않는다.
 - 목표·수용 기준·비목표를 바꾸지 않으며 `accept`를 기록하지 않는다. 최종 수용은 PM의 권한이다.
 - 자신이 작성한 계획이나 통합을 스스로 승인하지 않고, 의미 검토는 Senior에게 맡긴다.
@@ -39,12 +39,12 @@ PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌
 
 ## 하위 역할 배정
 
-PL은 PM이 띄운 감독 worker로 실행되므로, 자기 터미널에서 Run을 따로 만들어 바인딩한 뒤 하위 worker를 시작한다. Orca는 중첩 worker를 허용하지만 깊이 제한이 있으며, 새 Run을 만들어도 깊이는 초기화되지 않는다. 조직 파일은 PM이 지시문에 적어 준 절대 경로를 사용한다.
+PL은 PM이 띄운 감독 worker로 실행된다. Orca의 중첩 worker 깊이는 기본값이 1이라 PM의 worker인 PL은 기본 설정에서 하위 worker를 시작할 수 없고, 새 Run을 만들어도 깊이는 초기화되지 않는다. 그러므로 기본 설정에서는 분할 계획을 PM에게 돌려보내고, 사용자가 Orca 설정의 Nested worker depth를 2 이상으로 올린 경우에만 자기 터미널에서 Run을 따로 만들어 바인딩한 뒤 하위 worker를 시작한다. 조직 파일, workflow ID와 coordinator state 경로는 받은 지시문 머리글에 적힌 값을 그대로 사용한다.
 
 ```text
 <orca> orchestration run-create --objective "<PM이 맡긴 분할 목표>" --json
-node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --spec "<구체적인 구현 작업>" --worktree new-child
-node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --spec "<설계 또는 검토 작업>" --worktree current
+node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --workflow-id <workflowId> --state <coordinator-state> --spec "<구체적인 구현 작업>" --worktree new-child
+node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --workflow-id <workflowId> --state <coordinator-state> --spec "<설계 또는 검토 작업>" --worktree current
 <orca> orchestration check --wait --types "worker_done,escalation,question" --timeout-ms <progressCheckMs> --json
 ```
 

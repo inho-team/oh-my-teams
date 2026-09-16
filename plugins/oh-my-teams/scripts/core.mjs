@@ -805,9 +805,18 @@ export const SUPERVISION_DEFAULTS = Object.freeze({
 // a half-written edit is refused rather than silently merged.
 function validateSupervision(supervision) {
   if (supervision === undefined) return;
+  // An unknown key is most likely a misspelled one, which would otherwise be
+  // ignored while the default it meant to replace keeps applying.
   assert(
     supervision &&
-      Number.isInteger(supervision.progressCheckMs) &&
+      typeof supervision === "object" &&
+      Object.keys(supervision).every((key) =>
+        Object.hasOwn(SUPERVISION_DEFAULTS, key),
+      ),
+    "supervision accepts only progressCheckMs and unansweredLimit",
+  );
+  assert(
+    Number.isInteger(supervision.progressCheckMs) &&
       supervision.progressCheckMs >= 60000 &&
       supervision.progressCheckMs <= 86400000,
     "supervision.progressCheckMs must be 60000..86400000",

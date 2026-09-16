@@ -580,6 +580,13 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   const runtime = readReference("orca-runtime.md");
   for (const text of [readSkill("pm"), readSkill("pl"), runtime]) {
     assert.match(text, /worker-start --org <\S+ --role/);
+    // Every launch example names the workflow, so roles fold to the run's
+    // depth and the organization comes from the snapshot the workflow froze.
+    for (const [line] of text.matchAll(
+      /node <runtime> (?:worker-start|role-spec) [^\n`]*/g,
+    )) {
+      assert.match(line, /--workflow-id <\S+> --state <\S+>/, line);
+    }
   }
   for (const entry of fs.readdirSync(skills)) {
     const file = path.join(skills, entry, "SKILL.md");
@@ -601,6 +608,18 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(runtime, /node <runtime> role-command --org/);
   assert.match(runtime, /terminal read --terminal <handle> --screen/);
   assert.match(runtime, /`antigravity`/);
+  // Agy roles had no sanctioned launch: the wrapper refused them and the
+  // charters forbade the raw command.
+  assert.match(runtime, /### Agy 역할 시작/);
+  assert.match(runtime, /--terminal <handle> --worktree id:<worktreeId>/);
+  assert.match(runtime, /대괄호/);
+  for (const role of ["pm", "pl"]) {
+    assert.match(readSkill(role), /Agy 역할은 `role-command`로 연 터미널/);
+  }
+  // Orca refuses nested workers by default, so PL cannot be the dispatcher.
+  assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
+  assert.match(readSkill("pl"), /기본값이 1/);
+  assert.match(readSkill("senior"), /- Junior가 이번 실행에 있으면 기능 구현/);
   assert.match(readSkill("kickoff"), /coordinator 실행/);
   assert.match(
     readReference("kickoff-registry.md"),

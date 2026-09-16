@@ -45,6 +45,9 @@ function readSettingsModel(file) {
   }
 }
 
+const rank = (model) =>
+  Number.isFinite(model.priority) ? model.priority : Number.POSITIVE_INFINITY;
+
 async function codexDefault({ home, env, codexHome: explicitHome, execute }) {
   const codexHome = explicitHome || env.CODEX_HOME || path.join(home, ".codex");
   const configFile = path.join(codexHome, "config.toml");
@@ -55,13 +58,17 @@ async function codexDefault({ home, env, codexHome: explicitHome, execute }) {
   });
   let listed = [];
   let error = null;
-  if (result.code !== 0 || result.timedOut) {
+  if (result.timedOut) {
+    error = "codex debug models timed out";
+  } else if (result.code !== 0) {
     error = result.stderr || result.stdout || "codex debug models failed";
   } else {
     try {
       listed = JSON.parse(result.stdout)
         .models.filter((model) => model.visibility === "list")
-        .sort((left, right) => left.priority - right.priority)
+        // A priority that is not a number sorts after every numbered one
+        // instead of making the whole order undefined.
+        .sort((left, right) => rank(left) - rank(right))
         .map((model) => model.slug);
     } catch {
       error = "codex debug models did not return a JSON catalog";

@@ -44,6 +44,7 @@ test("supervision settings outside their range are refused", () => {
     { progressCheckMs: 1000, unansweredLimit: 2 },
     { progressCheckMs: 900000, unansweredLimit: 0 },
     { progressCheckMs: 900000 },
+    { progressCheckMs: 900000, unansweredLimit: 2, retry: true },
   ]) {
     org.policy.supervision = supervision;
     assert.throws(() => validateOrg(org), /supervision/);
@@ -87,16 +88,61 @@ test("an unverifiable worker is inspected, never assumed alive", () => {
   assert.equal(inspected.action, "inspect");
   assert.notEqual(inspected.display, "진행 중");
 
+  // Inspections count toward the limit too: only a progress request used to,
+  // so a worker that stayed unverifiable was inspected forever.
   const escalated = next({
     liveness: "unverifiable",
     lastActivityAt: minutesAgo(1),
-    unansweredRequests: 2,
+    inspections: 2,
   });
   assert.equal(escalated.action, "escalate");
 });
 
-test("a worker with no observed activity is inspected before anything else", () => {
-  assert.equal(next({ liveness: "live" }).action, "inspect");
+test("a worker with no observed activity is inspected, then escalated", () => {
+  const first = next({ liveness: "live" });
+  assert.equal(first.action, "inspect");
+  assert.equal(first.display, "활동 기록 없음");
+  assert.equal(next({ liveness: "live", inspections: 1 }).action, "inspect");
+  assert.equal(next({ liveness: "live", inspections: 2 }).action, "escalate");
+  // A mix of requests and inspections still reaches the limit.
+  assert.equal(
+    next({
+      liveness: "live",
+      lastActivityAt: minutesAgo(50),
+      unansweredRequests: 1,
+      inspections: 1,
+    }).action,
+    "escalate",
+  );
+});
+
+test("a stall already escalated is not escalated again every period", () => {
+  const escalatedAt = minutesAgo(10);
+  const quiet = next({
+    liveness: "live",
+    lastActivityAt: minutesAgo(60),
+    unansweredRequests: 2,
+    escalatedAt,
+  });
+  assert.equal(quiet.action, "wait");
+  assert.equal(quiet.reason, "already-escalated");
+  assert.equal(quiet.display, "무응답 60분");
+
+  // New activity after the escalation starts a fresh assessment.
+  const resumed = next({
+    liveness: "live",
+    lastActivityAt: minutesAgo(1),
+    escalatedAt,
+  });
+  assert.equal(resumed.reason, "recent-activity");
+});
+
+test("an unreadable clock is refused instead of printing NaN", () => {
+  assert.throws(
+    () =>
+      next({ liveness: "live", lastActivityAt: minutesAgo(5), now: "later" }),
+    /now/,
+  );
 });
 
 test("an exit without worker_done is escalated as a failure to classify", () => {

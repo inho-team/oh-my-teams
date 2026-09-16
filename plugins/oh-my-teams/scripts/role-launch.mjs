@@ -20,15 +20,18 @@ import {
 } from "./core.mjs";
 
 /**
- * Orca agent ids for the providers whose model Orca can pin at launch.
+ * How each provider's role reaches an Orca terminal, and under which agent id.
  *
- * `orchestration worker-start --model` supports Claude, Codex and Cursor. Agy
- * is `antigravity` to Orca, which launches it without a model selector, and
- * Ollama has no Orca agent at all, so neither appears here.
+ * `orchestration worker-start --model` pins a model for Claude, Codex and
+ * Cursor only, so those start with `agent`. Orca knows Agy as `antigravity`
+ * but cannot pass it a model, so an Agy role is opened in a terminal with its
+ * model on the command line first and then handed its task with `--terminal`.
+ * Ollama has no interactive agent in Orca and runs through the `work` harness.
  */
-export const ORCA_LAUNCH_AGENTS = Object.freeze({
-  claude: "claude",
-  codex: "codex",
+export const ORCA_LAUNCH = Object.freeze({
+  claude: Object.freeze({ agent: "claude", via: "agent" }),
+  codex: Object.freeze({ agent: "codex", via: "agent" }),
+  agy: Object.freeze({ agent: "antigravity", via: "terminal" }),
 });
 
 /**
@@ -57,14 +60,13 @@ const skillsDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../skills",
 );
-const CUSTOM_ARGV =
-  "use the custom argv path in references/orca-runtime.md (Agy 모델 선택)";
+const BARE_COMMAND = /^[A-Za-z0-9._-]+$/;
 
 function launchableProfile(role, profileId, profile) {
   assert(
-    Object.hasOwn(ORCA_LAUNCH_AGENTS, profile.provider),
-    `Role ${role} uses provider ${profile.provider} (profile ${profileId}), which Orca cannot launch with a pinned model; ` +
-      CUSTOM_ARGV,
+    Object.hasOwn(ORCA_LAUNCH, profile.provider),
+    `Role ${role} uses provider ${profile.provider} (profile ${profileId}), which has no interactive Orca agent; ` +
+      "run its work through the work harness (references/orca-runtime.md)",
   );
   // An Orca agent id names a binary, not an account. A profile that selects an
   // account through extra arguments or environment references would silently
@@ -74,7 +76,7 @@ function launchableProfile(role, profileId, profile) {
       !profile.env &&
       profile.command.length === 1,
     `Role ${role} profile ${profileId} does not use the current account with a plain command; ` +
-      CUSTOM_ARGV,
+      "Orca cannot launch it (references/orca-runtime.md)",
   );
   // Orca refuses --effort without --model, and dropping the effort would launch
   // something other than what was saved.
@@ -98,6 +100,14 @@ function activeRoles(org, roles) {
   return ROLES.filter((role) => roles.includes(role));
 }
 
+// Says why a role landed elsewhere: a role the organization never declared and
+// a declared role this run's depth left out need different fixes.
+function foldReason(org, roles, requestedRole) {
+  return definedRoles(org).includes(requestedRole) && roles !== undefined
+    ? `${requestedRole} is not in this run's roles`
+    : `${requestedRole} is not declared`;
+}
+
 function contradiction(role, what, explicit, saved) {
   assert(
     explicit === undefined || explicit === saved,
@@ -106,7 +116,7 @@ function contradiction(role, what, explicit, saved) {
 }
 
 /**
- * Resolves the Orca agent, model and effort a dispatched role must launch with.
+ * Resolves how a dispatched role must launch, and with which model and effort.
  *
  * @param {object} requestedOrg - Organization document.
  * @param {string} requestedRole - Role the caller addresses, declared or not.
@@ -116,14 +126,15 @@ function contradiction(role, what, explicit, saved) {
  * @param {string} [explicit.effort] - Effort the caller named.
  * @param {object} [run={}] - Run context.
  * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
- * @returns {object} Role, profile, provider, agent, model and effort to launch.
+ * @param {string} [run.terminal] - Terminal handle the role was opened in.
+ * @returns {object} Role, profile, provider, agent, launch path, model, effort.
  * @throws {Error} For PM, an unlaunchable profile, or a contradicting value.
  */
 export function resolveRoleLaunch(
   requestedOrg,
   requestedRole,
   explicit = {},
-  { roles } = {},
+  { roles, terminal } = {},
 ) {
   const org = validateOrg(requestedOrg);
   const role = foldRole(activeRoles(org, roles), requestedRole);
@@ -131,68 +142,87 @@ export function resolveRoleLaunch(
     role !== ROOT_ROLE,
     requestedRole === ROOT_ROLE
       ? "PM is the coordinator; launch it with role-command, not worker-start"
-      : `${requestedRole} is not declared and its work folds to pm, the coordinator, which does it itself`,
+      : `${foldReason(org, roles, requestedRole)} and its work folds to pm, the coordinator, which does it itself`,
   );
   const profileId = org.roles[role].profile;
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
-  const agent = ORCA_LAUNCH_AGENTS[profile.provider];
-  const effort = profile.effort ?? null;
-  contradiction(role, "agent", explicit.agent, agent);
-  contradiction(role, "model", explicit.model, profile.model);
-  contradiction(role, "effort", explicit.effort, effort ?? undefined);
+  const { agent, via } = ORCA_LAUNCH[profile.provider];
+  if (terminal) {
+    // Orca refuses a model, effort or agent beside --terminal, so none is
+    // accepted here either, even one that restates the profile.
+    assert(
+      [explicit.agent, explicit.model, explicit.effort].every(
+        (value) => value === undefined,
+      ),
+      `Role ${role}: --agent, --model and --effort cannot combine with --terminal; the terminal keeps the model it was opened with`,
+    );
+  } else {
+    assert(
+      via === "agent",
+      `Role ${role} uses agy (profile ${profileId}), which Orca cannot start with a model; ` +
+        "open it with role-command and orca terminal create, confirm the model on screen, then pass --terminal",
+    );
+    contradiction(role, "agent", explicit.agent, agent);
+    contradiction(role, "model", explicit.model, profile.model);
+    contradiction(role, "effort", explicit.effort, profile.effort);
+  }
   return {
     requestedRole,
     role,
     profile: profileId,
     provider: profile.provider,
     agent,
+    via: terminal ? "terminal" : via,
     model: profile.model,
-    effort,
+    effort: profile.effort ?? null,
   };
 }
 
 /**
- * Records what a launch requested and whether Orca's receipt proves the model.
+ * Records what a launch requested and whether Orca's receipt proves it.
  *
  * `launch.effective` is Orca's record of the launch arguments it applied, not
  * the model's own report, so `matched` still leaves the interactive screen to
  * confirm. A null requested model is `unrequested`: the agent runs its account
- * default, and no report may name a specific model from this receipt.
+ * default, and no report may name a specific model from this receipt. A role
+ * handed its task in an existing terminal is `unproven` until the screen shows
+ * the model.
  *
  * @param {object} launch - Result of {@link resolveRoleLaunch}.
  * @param {object} started - Worker receipt from the Orca adapter.
- * @param {object} [options={}] - Launch circumstances.
- * @param {boolean} [options.reusedTerminal=false] - Whether a terminal was reused.
- * @returns {object} Requested values and a `modelProof` verdict.
+ * @returns {object} Requested values, a `modelProof` verdict and `screenCheck`.
  */
-export function launchBinding(
-  launch,
-  started,
-  { reusedTerminal = false } = {},
-) {
+export function launchBinding(launch, started) {
   const effective = started?.receipt?.result?.launch?.effective;
   let modelProof;
   if (launch.model === null) modelProof = "unrequested";
-  else if (reusedTerminal || !effective) modelProof = "unproven";
-  else if (effective.model === launch.model) modelProof = "matched";
-  else modelProof = "mismatched";
+  else if (launch.via === "terminal" || !effective) modelProof = "unproven";
+  else if (
+    effective.model === launch.model &&
+    (launch.effort === null || effective.effort === launch.effort)
+  ) {
+    modelProof = "matched";
+  } else modelProof = "mismatched";
   return {
     requestedRole: launch.requestedRole,
     role: launch.role,
     profile: launch.profile,
     provider: launch.provider,
     agent: launch.agent,
+    via: launch.via,
     modelRequested: launch.model,
     effortRequested: launch.effort,
     modelProof,
+    screenCheck: modelProof === "unrequested" ? "not-applicable" : "required",
   };
 }
 
 const SAFE_TOKEN = /^[A-Za-z0-9._:=/@+-]+$/;
 
 // Single quotes are literal in both POSIX shells and PowerShell, the shells an
-// Orca terminal runs, so one quoting rule serves both.
+// Orca terminal runs, so one quoting rule serves both. Only arguments are ever
+// quoted: PowerShell would read a quoted command name as a string.
 function shellToken(token) {
   if (SAFE_TOKEN.test(token)) return token;
   assert(!token.includes("'"), `Cannot quote argument: ${token}`);
@@ -200,10 +230,11 @@ function shellToken(token) {
 }
 
 /**
- * Builds the interactive CLI command that launches a role with its saved model.
+ * Builds the interactive CLI command that opens a role with its saved model.
  *
- * `orca worktree create --agent` has no model option, so the coordinator is
- * launched with this command through `orca terminal create --command`.
+ * `orca worktree create --agent` has no model option, so the PM coordinator is
+ * opened with this command through `orca terminal create --command`. An Agy
+ * role is opened the same way before `worker-start --terminal` hands it a task.
  *
  * @param {object} requestedOrg - Organization document.
  * @param {string} requestedRole - Role to launch, declared or not.
@@ -216,12 +247,20 @@ export function roleCommand(requestedOrg, requestedRole) {
   const profileId = org.roles[role].profile;
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
+  assert(
+    BARE_COMMAND.test(profile.command[0]),
+    `Role ${role} profile ${profileId} must name a bare executable name on PATH, not ${profile.command[0]}`,
+  );
   const argv = [...profile.command];
   if (profile.model) argv.push("--model", profile.model);
-  // Codex takes effort only as a config override; Claude profiles cannot
-  // record one, so this branch is Codex's alone.
   if (profile.effort) {
-    argv.push("--config", `model_reasoning_effort=${profile.effort}`);
+    // Codex takes effort only as a config override; Agy has a flag. Claude
+    // profiles cannot record an effort.
+    argv.push(
+      ...(profile.provider === "codex"
+        ? ["--config", `model_reasoning_effort=${profile.effort}`]
+        : ["--effort", profile.effort]),
+    );
   }
   return {
     role,
@@ -263,17 +302,26 @@ const names = (list) =>
  * A dispatched worker sees only the spec, so a spec that opens with the task
  * leaves the worker to guess where its role ends. The header is derived from
  * the organization and the run: the parent it reports to, the roles absent from
- * the run whose work folds onto this one, and the roles it may start as workers.
+ * the run whose work folds onto this one, the roles it may start as workers,
+ * and the organization and workflow files a nested supervisor launches from.
  *
  * @param {object} requestedOrg - Organization document.
  * @param {string} requestedRole - Role receiving the task, declared or not.
  * @param {string} spec - Concrete task text.
  * @param {object} [run={}] - Run context.
  * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
+ * @param {string} [run.orgFile] - Organization file the launch read.
+ * @param {string} [run.workflowId] - Workflow the task belongs to.
+ * @param {string} [run.stateDir] - Coordinator state directory of that workflow.
  * @returns {string} Header, charter and task, in that order.
  * @throws {Error} When the role is unknown or the task is empty.
  */
-export function roleSpec(requestedOrg, requestedRole, spec, { roles } = {}) {
+export function roleSpec(
+  requestedOrg,
+  requestedRole,
+  spec,
+  { roles, orgFile, workflowId, stateDir } = {},
+) {
   const org = validateOrg(requestedOrg);
   assert(typeof spec === "string" && spec.trim(), "Spec text required");
   const declared = activeRoles(org, roles);
@@ -296,6 +344,8 @@ export function roleSpec(requestedOrg, requestedRole, spec, { roles } = {}) {
     `보고 대상: ${parent ? ROLE_NAMES[parent] : "사용자"}`,
     `이번 실행에 없어 이어받는 역할: ${names(inherited)}`,
     `직접 배정할 수 있는 역할: ${names(ROLES.filter((r) => dispatchable.includes(r)))}`,
+    ...(orgFile ? [`조직 파일: ${orgFile}`] : []),
+    ...(workflowId ? [`workflow: ${workflowId} (state ${stateDir})`] : []),
     `역할 스킬 전문: ${path.join(skillsDir, role, "SKILL.md")}`,
     "",
     "아래 권한·책임·한계를 벗어나는 요청은 수행하지 않고, 거부 사유와 함께 보고 대상에게 돌려보낸다.",

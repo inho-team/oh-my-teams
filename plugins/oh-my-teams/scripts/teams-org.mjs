@@ -86,6 +86,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
                [--worktree SELECTOR] [--terminal HANDLE] [--run ID]
                [--retry-of ID] [--workflow-id ID --state DIR] [--orca EXECUTABLE]
+               (with --workflow-id, the workflow's organization snapshot is used)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
   role-command --org FILE --role ROLE
   host-defaults [--project DIR] [--codex-home DIR]
@@ -383,29 +384,28 @@ async function compatibilityPrepare(args) {
 // it was started with, so it gets no model arguments and its proof stays
 // unproven.
 async function startSupervisedWorker(args) {
-  const org = readJSON(args.org);
-  const run = runRoles(args);
+  const { org, run } = launchContext(args);
   const launch = resolveRoleLaunch(
     org,
     args.role,
     { agent: args.agent, model: args.model, effort: args.effort },
-    run,
+    { ...run, terminal: args.terminal },
   );
-  const reusedTerminal = Boolean(args.terminal);
+  const viaTerminal = launch.via === "terminal";
   try {
     const started = await startWorker(path.resolve(args.repo), {
       task: args.task,
       spec: args.spec && roleSpec(org, launch.role, args.spec, run),
       worktree: args.worktree ?? "current",
-      agent: reusedTerminal ? undefined : launch.agent,
+      agent: viaTerminal ? undefined : launch.agent,
       terminal: args.terminal,
-      model: reusedTerminal ? undefined : (launch.model ?? undefined),
-      effort: reusedTerminal ? undefined : (launch.effort ?? undefined),
+      model: viaTerminal ? undefined : (launch.model ?? undefined),
+      effort: viaTerminal ? undefined : (launch.effort ?? undefined),
       runId: args.run,
       retryOf: args["retry-of"],
       executable: args.orca,
     });
-    const binding = launchBinding(launch, started, { reusedTerminal });
+    const binding = launchBinding(launch, started);
     return {
       ...started,
       binding: { ...binding, roleHeader: Boolean(args.spec) },
@@ -423,16 +423,32 @@ async function startSupervisedWorker(args) {
   }
 }
 
-// A workflow may run fewer roles than the organization declares. A workflow
-// that recorded no role list folds onto the organization, as before.
-function runRoles(args) {
-  if (!args["workflow-id"] && !args.state) return {};
+// A workflow freezes the organization it was created with and may run fewer
+// roles than that organization declares. Launching from the live file instead
+// would pick up a later adjust mid-run, or fail on a role adjust removed. A
+// launch without a workflow reads the organization file as given.
+function launchContext(args) {
+  const located = {
+    orgFile: path.resolve(args.org),
+  };
+  if (!args["workflow-id"] && !args.state) {
+    return { org: readJSON(args.org), run: located };
+  }
   assert(
     args["workflow-id"] && args.state,
     "--workflow-id and --state must be given together",
   );
-  const { state } = readWorkflow(path.resolve(args.state), args["workflow-id"]);
-  return state.roles ? { roles: state.roles } : {};
+  const stateDir = path.resolve(args.state);
+  const snapshot = readWorkflow(stateDir, args["workflow-id"]);
+  return {
+    org: snapshot.organization,
+    run: {
+      ...located,
+      ...(snapshot.state.roles ? { roles: snapshot.state.roles } : {}),
+      workflowId: args["workflow-id"],
+      stateDir,
+    },
+  };
 }
 
 async function attachExistingWorkspace(args) {
@@ -552,15 +568,10 @@ async function executeCommand(args) {
     case "worker-start":
       return startSupervisedWorker(args);
     case "role-spec":
-      return {
+      return (({ org, run }) => ({
         role: args.role,
-        spec: roleSpec(
-          readJSON(args.org),
-          args.role,
-          args.spec,
-          runRoles(args),
-        ),
-      };
+        spec: roleSpec(org, args.role, args.spec, run),
+      }))(launchContext(args));
     case "role-command":
       return roleCommand(readJSON(args.org), args.role);
     case "host-defaults":

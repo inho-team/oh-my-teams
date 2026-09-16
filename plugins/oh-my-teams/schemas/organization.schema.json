@@ -74,6 +74,7 @@
           "type": "object",
           "$comment": "Omitted in organizations saved before this policy; core.mjs reads the defaults 900000 and 2.",
           "required": ["progressCheckMs", "unansweredLimit"],
+          "additionalProperties": false,
           "properties": {
             "progressCheckMs": {
               "type": "integer",

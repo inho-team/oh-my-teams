@@ -58,21 +58,31 @@ const LIVENESS = new Set(["live", "unverifiable", "exited"]);
  * never treated as alive, and an exit without worker_done is a failure to
  * classify rather than a worker to wait for.
  *
+ * Every check that found no new activity counts toward the limit, whether it
+ * asked for progress or inspected output, so a worker that stays unverifiable
+ * or never shows activity is escalated instead of inspected forever. Once a
+ * stall is escalated, the same stall is not escalated again until the worker
+ * shows new activity.
+ *
  * @param {object} observation - Current facts about the worker.
  * @param {string} observation.liveness - `live`, `unverifiable` or `exited`.
  * @param {string} [observation.lastActivityAt] - Last heartbeat, message or output change.
  * @param {string|number} [observation.now=Date.now()] - Time of this check.
  * @param {number} [observation.unansweredRequests=0] - Progress requests still unanswered.
+ * @param {number} [observation.inspections=0] - Inspections since the last activity.
+ * @param {string} [observation.escalatedAt] - When this stall was last escalated.
  * @param {object|null} [observation.agentWait] - `worker-show` evidence of a human prompt.
  * @param {object} observation.policy - Result of `supervisionPolicy`.
  * @returns {object} Action, reason, silence in minutes, and the user-facing label.
- * @throws {Error} When liveness or the policy is missing or unknown.
+ * @throws {Error} When liveness, the clock or the policy is missing or unknown.
  */
 export function nextSupervisionAction({
   liveness,
   lastActivityAt,
   now = Date.now(),
   unansweredRequests = 0,
+  inspections = 0,
+  escalatedAt,
   agentWait = null,
   policy,
 }) {
@@ -82,18 +92,18 @@ export function nextSupervisionAction({
   if (!policy?.progressCheckMs || !policy.unansweredLimit) {
     throw new Error("Supervision policy required");
   }
+  const nowMs = new Date(now).getTime();
+  if (Number.isNaN(nowMs)) throw new Error(`Invalid now: ${now}`);
   const last = Date.parse(lastActivityAt ?? "");
-  const silentMs = Number.isNaN(last)
-    ? null
-    : Math.max(0, new Date(now).getTime() - last);
+  const silentMs = Number.isNaN(last) ? null : Math.max(0, nowMs - last);
   const silentMinutes = silentMs === null ? null : Math.floor(silentMs / 60000);
-  const exhausted = unansweredRequests >= policy.unansweredLimit;
+  const exhausted = unansweredRequests + inspections >= policy.unansweredLimit;
   const decide = (action, reason, extra = {}) => ({
     action,
     reason,
     silentMinutes,
     display:
-      action === "wait"
+      reason === "recent-activity"
         ? "진행 중"
         : silentMinutes === null
           ? "활동 기록 없음"
@@ -101,6 +111,10 @@ export function nextSupervisionAction({
     ...extra,
   });
 
+  const escalated = Date.parse(escalatedAt ?? "");
+  if (!Number.isNaN(escalated) && (Number.isNaN(last) || last <= escalated)) {
+    return decide("wait", "already-escalated");
+  }
   if (liveness === "exited") {
     return decide("escalate", "exited-without-worker-done", {
       readOutput: true,
@@ -112,12 +126,17 @@ export function nextSupervisionAction({
   }
   if (liveness === "unverifiable") {
     return exhausted
-      ? decide("escalate", "unverifiable-unanswered", { readOutput: true })
+      ? decide("escalate", "unverifiable-after-checks", { readOutput: true })
       : decide("inspect", "unverifiable");
   }
-  if (silentMs === null) return decide("inspect", "no-observed-activity");
-  if (silentMs < policy.progressCheckMs)
+  if (silentMs === null) {
+    return exhausted
+      ? decide("escalate", "no-activity-after-checks", { readOutput: true })
+      : decide("inspect", "no-observed-activity");
+  }
+  if (silentMs < policy.progressCheckMs) {
     return decide("wait", "recent-activity");
+  }
   return exhausted
     ? decide("escalate", "silent-after-progress-requests", { readOutput: true })
     : decide("ask-progress", "silent");

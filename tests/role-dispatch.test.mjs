@@ -7,8 +7,10 @@ import path from "node:path";
 import {
   ROLES,
   readJSON,
+  run,
   writeJSON,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
+import { createWorkflow } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import {
   launchBinding,
   readRoleCharter,
@@ -91,26 +93,69 @@ test("an explicit agent, model or effort that contradicts the profile is refused
   assert.equal(launch.effort, "high");
 });
 
-test("a provider Orca cannot launch with a model points at the custom argv path", () => {
-  // Senior in the example is an Agy profile. Orca has no `agy` agent and its
-  // --model covers Claude, Codex and Cursor only.
+test("an Agy role starts in a terminal opened with its model, never by agent id", () => {
+  // Senior in the example is an Agy profile. Orca's --model covers Claude,
+  // Codex and Cursor only, so refusing Agy outright left every Agy role with
+  // no sanctioned launch at all.
   assert.throws(
     () => resolveRoleLaunch(example(), "senior"),
-    /agy.*custom argv.*orca-runtime\.md/s,
+    /agy.*role-command.*--terminal/s,
+  );
+  const launch = resolveRoleLaunch(example(), "senior", {}, { terminal: "t1" });
+  assert.equal(launch.via, "terminal");
+  assert.equal(launch.agent, "antigravity");
+  assert.equal(launch.model, "gemini-3.8-flash-high");
+  const binding = launchBinding(launch, { receipt: { result: {} } });
+  assert.equal(binding.modelProof, "unproven");
+  assert.equal(binding.screenCheck, "required");
+
+  const command = roleCommand(example(), "senior");
+  assert.deepEqual(command.argv, ["agy", "--model", "gemini-3.8-flash-high"]);
+
+  // Ollama has no interactive agent in Orca; its roles run through `work`.
+  const org = example();
+  org.profiles.local = {
+    provider: "ollama",
+    endpoint: "http://127.0.0.1:11434",
+    account: "current",
+    subscription: "Local",
+    model: "qwen3:8b",
+    contextTokens: 32768,
+  };
+  org.roles.intern.profile = "local";
+  assert.throws(
+    () => resolveRoleLaunch(org, "intern", {}, { terminal: "t1" }),
+    /ollama.*work/s,
   );
 });
 
-test("a named account cannot be expressed by an Orca agent id", () => {
+test("a reused terminal takes no launch values, matching or not", () => {
+  // Orca refuses --model and --effort with --terminal. Accepting a matching
+  // value there while dropping it silently read as if it had been applied.
+  for (const explicit of [
+    { model: "gpt-5.6-sol" },
+    { effort: "high" },
+    { agent: "codex" },
+  ]) {
+    assert.throws(
+      () => resolveRoleLaunch(example(), "pl", explicit, { terminal: "t1" }),
+      /--terminal/,
+    );
+  }
+});
+
+test("a named account or a path command cannot be launched as a plain name", () => {
   const org = example();
   org.profiles["codex-current"] = {
     ...org.profiles["codex-current"],
     account: "work",
     command: ["codex", "--profile", "work"],
   };
-  assert.throws(
-    () => resolveRoleLaunch(org, "pl"),
-    /current account.*custom argv/s,
-  );
+  assert.throws(() => resolveRoleLaunch(org, "pl"), /current account/);
+  // PowerShell runs a quoted path as a string, not as a command.
+  const pathOrg = example();
+  pathOrg.profiles["claude-current"].command = ["C:\\Tools\\claude.cmd"];
+  assert.throws(() => roleCommand(pathOrg, "pm"), /bare executable name/);
 });
 
 test("PM is the coordinator and is never started as a worker", () => {
@@ -121,7 +166,12 @@ test("PM is the coordinator and is never started as a worker", () => {
     tiers: 2,
     models: ["claude:default", "codex:default"],
   });
-  assert.throws(() => resolveRoleLaunch(org, "pl"), /pl.*folds to pm/s);
+  assert.throws(() => resolveRoleLaunch(org, "pl"), /pl is not declared/);
+  // A declared role left out of this run's depth says so instead.
+  assert.throws(
+    () => resolveRoleLaunch(example(), "pl", {}, { roles: ["pm", "junior"] }),
+    /pl is not in this run's roles/,
+  );
 });
 
 test("the launch receipt proves the model only when Orca applied the request", () => {
@@ -138,10 +188,20 @@ test("the launch receipt proves the model only when Orca applied the request", (
     "mismatched",
   );
   assert.equal(launchBinding(launch, receipt(null)).modelProof, "unproven");
+  const terra = example();
+  terra.roles.pl.profile = "codex-terra";
   assert.equal(
-    launchBinding(launch, receipt({ model: "gpt-5.6-sol" }), {
-      reusedTerminal: true,
-    }).modelProof,
+    launchBinding(
+      resolveRoleLaunch(terra, "pl"),
+      receipt({ model: "gpt-5.6-terra", effort: "low" }),
+    ).modelProof,
+    "mismatched",
+  );
+  assert.equal(
+    launchBinding(
+      { ...launch, via: "terminal" },
+      receipt({ model: "gpt-5.6-sol" }),
+    ).modelProof,
     "unproven",
   );
 });
@@ -172,7 +232,11 @@ test("the coordinator command carries the model the PM profile pins", () => {
   assert.equal(unpinned.modelRequested, null);
 
   org.roles.pm.profile = "agy-opus";
-  assert.throws(() => roleCommand(org, "pm"), /custom argv/);
+  assert.deepEqual(roleCommand(org, "pm").argv, [
+    "agy",
+    "--model",
+    "claude-opus-4-6-thinking",
+  ]);
 });
 
 test("every role skill states its authority, responsibility and limits", () => {
@@ -214,8 +278,17 @@ test("a spec handed to a subordinate opens with that role's charter", () => {
   assert.match(shallow, /이번 실행에 없어 이어받는 역할: Intern/);
   assert.throws(
     () => resolveRoleLaunch(example(), "pl", {}, { roles: ["pm", "junior"] }),
-    /pl.*folds to pm/s,
+    /folds to pm/,
   );
+
+  // A nested supervisor is told where the organization and the workflow live.
+  const located = roleSpec(example(), "pl", "나눈다.", {
+    orgFile: "/p/.omt/organization.json",
+    workflowId: "wf-1",
+    stateDir: "/c/.omt",
+  });
+  assert.match(located, /조직 파일: \/p\/\.omt\/organization\.json/);
+  assert.match(located, /workflow: wf-1 \(state \/c\/\.omt\)/);
   assert.equal(
     resolveRoleLaunch(example(), "intern", {}, { roles: ["pm", "pl"] }).role,
     "pl",
@@ -249,7 +322,99 @@ test("worker-start requires the organization and role and refuses before Orca", 
         "--orca",
         path.join(dir, "missing-orca"),
       ]),
-    /custom argv/,
+    /role-command/,
+  );
+});
+
+test("a workflow launch reads the organization snapshot the workflow froze", async (t) => {
+  const state = tempDir(t);
+  const repo = tempDir(t);
+  for (const args of [
+    ["init", "-q"],
+    ["config", "user.email", "t@example.invalid"],
+    ["config", "user.name", "t"],
+    ["commit", "-q", "--allow-empty", "-m", "base"],
+  ]) {
+    assert.equal((await run(["git", ...args], { cwd: repo })).code, 0);
+  }
+  writeJSON(path.join(repo, "task-a.json"), {
+    ...readJSON(
+      new URL("../plugins/oh-my-teams/examples/task.v2.json", import.meta.url),
+    ),
+    id: "task-a",
+    baseRef: "HEAD",
+  });
+  const frozen = example();
+  frozen.roles.pl.profile = "codex-terra";
+  await createWorkflow(
+    state,
+    {
+      schemaVersion: 1,
+      id: "wf-1",
+      goal: "Split the work",
+      repo: ".",
+      tasks: [{ file: "task-a.json", role: "junior" }],
+      policy: { maxRunning: 1, maxReviewPending: 1 },
+      budget: { maxAttempts: 1, maxCalls: 1 },
+    },
+    frozen,
+    repo,
+  );
+
+  // The live organization later drops PL entirely.
+  const live = example();
+  delete live.roles.pl;
+  live.roles.senior.parent = "pm";
+  const orgFile = path.join(repo, "organization.json");
+  writeJSON(orgFile, live);
+
+  const output = [];
+  const log = console.log;
+  console.log = (line) => output.push(line);
+  try {
+    await main([
+      "role-spec",
+      "--org",
+      orgFile,
+      "--role",
+      "pl",
+      "--spec",
+      "나눈다.",
+      "--workflow-id",
+      "wf-1",
+      "--state",
+      state,
+    ]);
+  } finally {
+    console.log = log;
+  }
+  const spec = JSON.parse(output.join("\n")).spec;
+  assert.match(spec, /역할: PL/);
+  assert.match(spec, /workflow: wf-1/);
+
+  await assert.rejects(
+    () =>
+      main([
+        "worker-start",
+        "--org",
+        orgFile,
+        "--role",
+        "pl",
+        "--repo",
+        repo,
+        "--spec",
+        "x",
+        "--workflow-id",
+        "wf-1",
+        "--state",
+        state,
+        "--model",
+        "gpt-5.6-sol",
+        "--orca",
+        path.join(repo, "missing-orca"),
+      ]),
+    // The frozen snapshot pins terra, so sol contradicts it.
+    /gpt-5\.6-sol contradicts .*gpt-5\.6-terra/,
   );
 });
 
@@ -322,4 +487,28 @@ test("host defaults name what a default profile runs today", async (t) => {
   });
   assert.equal(missing.codex.model, null);
   assert.match(missing.codex.error, /nope/);
+
+  const slow = await resolveHostDefaults({
+    home: tempDir(t),
+    env: {},
+    execute: async () => ({ code: -1, stdout: "", stderr: "", timedOut: true }),
+  });
+  assert.match(slow.codex.error, /timed out/);
+
+  const odd = await resolveHostDefaults({
+    home: tempDir(t),
+    env: {},
+    execute: async () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        models: [
+          { slug: "b", visibility: "list", priority: "x" },
+          { slug: "a", visibility: "list", priority: 2 },
+        ],
+      }),
+      stderr: "",
+      timedOut: false,
+    }),
+  });
+  assert.deepEqual(odd.codex.listed, ["a", "b"]);
 });
