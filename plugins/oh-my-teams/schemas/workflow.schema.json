@@ -18,6 +18,12 @@
     "goal": { "type": "string", "minLength": 1 },
     "repo": { "type": "string", "minLength": 1 },
     "integrationTask": { "type": "string", "minLength": 1 },
+    "depth": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "Roles this run uses: 1 PM; 2 +Junior; 3 +Senior; 4 +Intern; 5 +PL. Omitted means every role the organization declares."
+    },
     "tasks": {
       "type": "array",
       "minItems": 1,

@@ -5,13 +5,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  DEPTH_ROLES,
   readJSON,
   resolveRole,
   run,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   DRAFT_DEFAULTS,
-  TIER_ROLES,
   draftOrganization,
 } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 
@@ -22,7 +22,7 @@ function models(count) {
 }
 
 test("each ladder size declares its roles as a single chain under PM", () => {
-  for (const [tiers, roles] of Object.entries(TIER_ROLES)) {
+  for (const [tiers, roles] of Object.entries(DEPTH_ROLES)) {
     const org = draftOrganization({
       name: "team",
       tiers: Number(tiers),

@@ -30,6 +30,45 @@ export const ROLES = ["pm", "pl", "senior", "junior", "intern"];
 export const ROOT_ROLE = "pm";
 
 /**
+ * Roles a run of each depth uses, from the most senior down.
+ *
+ * Roles join in the order a team misses them most. Implementation comes first,
+ * because a PM alone has nobody to hand work to; independent review comes next;
+ * a cheap depth for narrow edits after that; and PL last, since splitting and
+ * integrating parallel waves only pays off once there are several of them.
+ * A role left out of a depth has its work folded upward by `foldRole`.
+ */
+export const DEPTH_ROLES = Object.freeze({
+  1: Object.freeze(["pm"]),
+  2: Object.freeze(["pm", "junior"]),
+  3: Object.freeze(["pm", "senior", "junior"]),
+  4: Object.freeze(["pm", "senior", "junior", "intern"]),
+  5: Object.freeze([...ROLES]),
+});
+
+/** Depth that uses every role an organization declares. */
+export const FULL_DEPTH = 5;
+
+/**
+ * Lists the roles a run of one depth uses within an organization's ladder.
+ *
+ * An organization reduced through adjust may not declare every role a depth
+ * names, so the result is the depth's roles that the organization declares.
+ * PM is always among them because every organization declares it.
+ *
+ * @param {string[]} declared - Roles the organization declares.
+ * @param {number} depth - Run depth from 1 to 5.
+ * @returns {string[]} Active roles in ladder order.
+ * @throws {Error} When the depth is outside 1..5.
+ */
+export function depthRoles(declared, depth) {
+  const roles = DEPTH_ROLES[depth];
+  assert(roles, "Depth must be 1..5");
+  const present = new Set(declared);
+  return roles.filter((role) => present.has(role));
+}
+
+/**
  * Model-policy values an organization may record.
  *
  * `custom` means the roles were bound by hand. Every other value names a preset
