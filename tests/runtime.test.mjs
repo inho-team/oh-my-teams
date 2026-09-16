@@ -1762,6 +1762,19 @@ test("failure routing uses deterministic signals and does not retry ambiguous wo
     }).category,
     "implementation-error",
   );
+  assert.deepEqual(
+    classifyFailure({
+      message: "the execution runtime does not launch this agent",
+      evidence: "start.json",
+      kind: "execution-unconfigured",
+    }),
+    {
+      category: "execution-unconfigured",
+      nextOwner: "pm",
+      action: "rebind-profile-agent",
+      retryable: false,
+    },
+  );
   assert.equal(
     classifyFailure({ message: "unrecognized failure", evidence: "run.log" })
       .nextOwner,

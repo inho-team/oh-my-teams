@@ -1,5 +1,88 @@
 /** Version-matched, narrow adapter for the external Orca CLI. */
 import { assert, hash, run } from "./core.mjs";
+import {
+  assertFailureSignal,
+  assertWorkerReceipt,
+  assertWorkspaceReceipt,
+} from "./execution.mjs";
+
+/**
+ * Neutral routing hints for the codes this Orca contract actually returns.
+ *
+ * Keeping the table here rather than in failure routing is what lets a second
+ * execution runtime be added without teaching the classifier Orca's words.
+ * Codes absent from this table stay unclassified on purpose: inventing a route
+ * for an unrecognized refusal would send work to an owner who cannot fix it.
+ * `invalid_argument`, `task_not_found`, and `task_not_startable` are deliberate
+ * omissions rather than gaps. The first reports that this adapter built the
+ * argv wrongly, which no profile change repairs; the other two report that the
+ * coordinator named a Task the Run does not hold, which is a bookkeeping fault
+ * whose owner only the surrounding evidence can name.
+ */
+const ORCA_FAILURE_HINTS = Object.freeze({
+  // A runtime that does not list the requested agent refuses every attempt
+  // carrying it, so only rebinding the profile changes the outcome.
+  agent_unconfigured: { kind: "execution-unconfigured" },
+  incompatible_runtime: { kind: "environment" },
+  // The remaining codes leave the worker process unsettled. `reconcile-execution`
+  // and its `processExitConfirmed` retry gate are exactly what Orca demands
+  // before a replacement starts: inspect residual resources, then decide.
+  inject_rejected: { processState: "unknown" },
+  no_agent_detected: { processState: "unknown" },
+  runtime_error: { processState: "unknown" },
+  failed: { processState: "unknown" },
+  outcome_unknown: { processState: "unknown" },
+  start_unknown: { processState: "unknown" },
+  turn_start_unobserved: { processState: "unknown" },
+  unverifiable: { processState: "unknown" },
+});
+
+/**
+ * Translates one Orca code into the neutral signal failure routing consumes.
+ *
+ * @param {string} code - Orca `error.code`, receipt state, or observed state.
+ * @param {string} [message] - Orca's own explanation, when it supplied one.
+ * @returns {object} Validated neutral failure signal retaining the Orca code.
+ * @throws {Error} When the resulting signal violates the port contract.
+ */
+export function translateOrcaFailure(code, message) {
+  const normalized = String(code ?? "").trim();
+  const explanation = String(message ?? "").trim();
+  // A failure Orca did not name is not a `runtime_error`: inventing that code
+  // would put a word the runtime never said where the contract promises its
+  // original one. The absence is recorded as itself, and an unnamed failure
+  // leaves the process unsettled, so it routes like the other unsettled ones.
+  if (!normalized) {
+    return assertFailureSignal({
+      processState: "unknown",
+      code: "code_absent",
+      message: explanation || "Orca returned a failure without naming a code",
+    });
+  }
+  return assertFailureSignal({
+    ...(ORCA_FAILURE_HINTS[normalized] ?? {}),
+    code: normalized,
+    message: explanation || `Orca reported ${normalized}`,
+  });
+}
+
+/**
+ * Translates a state whose worker the adapter has already judged unverifiable.
+ *
+ * A start that did not reach `ready` is unverifiable regardless of whether its
+ * state appears in the hint table, so the conclusion is carried into the signal
+ * instead of being left behind when an unfamiliar state arrives.
+ *
+ * @param {string} code - Receipt state Orca reported for the attempt.
+ * @param {string} [message] - Orca's own explanation, when it supplied one.
+ * @returns {object} Neutral signal that always reaches a reconciling route.
+ * @throws {Error} When the resulting signal violates the port contract.
+ */
+export function translateUnverifiableState(code, message) {
+  const signal = translateOrcaFailure(code, message);
+  if (signal.kind || signal.processState) return signal;
+  return assertFailureSignal({ ...signal, processState: "unknown" });
+}
 
 /**
  * Selects one Orca executable for a session without silent fallback.
@@ -43,12 +126,23 @@ export async function runOrcaJson(
     cwd,
     timeoutMs,
   });
-  assert(
-    result.code === 0 && !result.timedOut,
-    result.stderr || result.stdout || "Orca command failed",
-  );
+  if (result.code !== 0 || result.timedOut) {
+    const detail = result.stderr || result.stdout || "Orca command failed";
+    throw orcaError(
+      detail,
+      translateOrcaFailure(
+        result.timedOut ? "start_unknown" : "runtime_error",
+        detail,
+      ),
+    );
+  }
   const parsed = parseJsonResponse(result, "Orca response is not valid JSON");
-  assert(parsed.ok !== false, JSON.stringify(parsed));
+  if (parsed.ok === false) {
+    throw orcaError(
+      JSON.stringify(parsed),
+      translateOrcaFailure(parsed.error?.code, parsed.error?.message),
+    );
+  }
   return parsed;
 }
 
@@ -138,14 +232,10 @@ export async function createWorktree(
     ["inherit", "run", "skip"].includes(setup),
     "Invalid Orca setup policy",
   );
-  const selected = selectOrcaExecutable(
-    executable ?? suppliedDiscovery?.executable,
-  );
-  const discovery =
-    suppliedDiscovery ?? (await discoverOrcaRuntime(selected, execute));
-  assert(
-    discovery.executable === selected && discovery.versionsMatch !== false,
-    "Supplied Orca discovery does not match the selected executable",
+  const { selected, discovery } = await resolvedDiscovery(
+    executable,
+    suppliedDiscovery,
+    execute,
   );
   const started = await execute(
     [
@@ -180,10 +270,218 @@ export async function createWorktree(
       receipt.result.worktree.id,
     "Orca receipt missing worktree identity",
   );
-  return {
+  return assertWorkspaceReceipt({
     executable: selected,
     discovery,
     receipt,
+    // `worktree` stays for the callers that already read it; `id` and `path`
+    // are what the port names, so a caller can hold either adapter's workspace
+    // without knowing which runtime produced it.
     worktree: receipt.result.worktree,
-  };
+    id: receipt.result.worktree.id,
+    path: receipt.result.worktree.path,
+  });
+}
+
+// A refusal Orca explained is only useful if the explanation survives the
+// throw. The message stays what a reader sees, while `signal` and `receipt`
+// carry the routing hint and any resources the caller still has to reclaim.
+function orcaError(message, signal, receipt) {
+  const error = new Error(message);
+  if (signal) error.signal = signal;
+  if (receipt) error.receipt = receipt;
+  return error;
+}
+
+async function resolvedDiscovery(executable, supplied, execute) {
+  const selected = selectOrcaExecutable(executable ?? supplied?.executable);
+  const discovery = supplied ?? (await discoverOrcaRuntime(selected, execute));
+  assert(
+    discovery.executable === selected && discovery.versionsMatch !== false,
+    "Supplied Orca discovery does not match the selected executable",
+  );
+  return { selected, discovery };
+}
+
+/**
+ * Starts one supervised Orca worker and returns a port-shaped receipt.
+ *
+ * Orca exits non-zero for `failed` and `outcome_unknown` while still returning
+ * a receipt that names the Dispatch and its residual resources, so the exit
+ * code alone is not read as a crash. A start that produced no receipt at all
+ * is the one case that throws, because there is no Dispatch to address and
+ * relaunching would only add resources to reclaim.
+ *
+ * @param {string} repo - Worktree the coordinator issues the command from.
+ * @param {object} options - Task selection, placement, and launch options.
+ * @returns {Promise<object>} Worker receipt satisfying the execution port.
+ * @throws {Error} When the arguments are invalid or no receipt came back. The
+ * thrown error carries a translated `signal` whenever Orca named a cause.
+ */
+export async function startWorker(
+  repo,
+  {
+    task,
+    spec,
+    worktree = "current",
+    agent,
+    terminal,
+    model,
+    effort,
+    runId,
+    retryOf,
+    timeoutMs = 300000,
+    discovery: suppliedDiscovery,
+    executable,
+    execute = run,
+  },
+) {
+  assert(
+    Boolean(task) !== Boolean(spec),
+    "Orca worker-start needs exactly one of task or spec",
+  );
+  assert(
+    Boolean(agent) !== Boolean(terminal),
+    "Orca worker-start needs exactly one of agent or terminal",
+  );
+  assert(!effort || Boolean(model), "Orca requires a model before an effort");
+  assert(
+    !terminal || !(model || effort),
+    "Orca rejects model or effort when reusing an existing terminal",
+  );
+  const { selected, discovery } = await resolvedDiscovery(
+    executable,
+    suppliedDiscovery,
+    execute,
+  );
+
+  const argv = [selected, "orchestration", "worker-start"];
+  if (task) argv.push("--task", task);
+  if (spec) argv.push("--spec", spec);
+  argv.push("--worktree", worktree);
+  if (agent) argv.push("--agent", agent);
+  if (terminal) argv.push("--terminal", terminal);
+  if (model) argv.push("--model", model);
+  if (effort) argv.push("--effort", effort);
+  if (runId) argv.push("--run", runId);
+  if (retryOf) argv.push("--retry-of", retryOf);
+  argv.push("--json");
+
+  const started = await execute(argv, { cwd: repo, timeoutMs });
+  if (started.timedOut || !String(started.stdout ?? "").trim()) {
+    const unobserved = translateOrcaFailure(
+      "start_unknown",
+      "Orca worker-start returned no receipt; inspect the Run before relaunching",
+    );
+    throw orcaError(unobserved.message, unobserved);
+  }
+
+  const receipt = parseJsonResponse(
+    started,
+    "Orca worker receipt is not valid JSON",
+  );
+  if (receipt.ok === false) {
+    const refused = translateOrcaFailure(
+      receipt.error?.code,
+      receipt.error?.message,
+    );
+    throw orcaError(refused.message, refused, receipt);
+  }
+
+  const result = receipt.result ?? {};
+  // Only the Dispatch is required. A receipt that named the Dispatch but not
+  // the Task still names the terminal someone has to reclaim, and discarding
+  // it to enforce a field Orca does not guarantee would lose that address.
+  if (typeof result.dispatchId !== "string" || !result.dispatchId) {
+    const unusable = translateUnverifiableState(result.state, result.lastError);
+    throw orcaError(
+      "Orca worker receipt missing dispatch identity",
+      unusable,
+      receipt,
+    );
+  }
+  const ready = result.state === "ready";
+  const stage = result.failedStage
+    ? `Orca worker-start stopped at stage ${result.failedStage}`
+    : undefined;
+  return assertWorkerReceipt({
+    executable: selected,
+    discovery,
+    receipt,
+    workerId: result.dispatchId,
+    taskId: result.taskId ?? null,
+    runId: result.runId ?? null,
+    // A start that did not reach `ready` proves nothing about the process it
+    // may have left behind, and absence never authorizes cleanup on its own.
+    // `live` here is the verdict at this instant; `worker-list` stays the
+    // authority on whether the agent is still running later.
+    liveness: ready ? "live" : "unverifiable",
+    residualResources: result.residualResources ?? [],
+    failure: ready
+      ? null
+      : translateUnverifiableState(result.state, result.lastError ?? stage),
+  });
+}
+
+async function dispatchVerb(verb, dispatchId, options) {
+  const { executable, discovery: supplied, execute = run, cwd } = options;
+  assert(
+    typeof dispatchId === "string" && dispatchId.trim(),
+    `Orca ${verb} requires a dispatch identifier`,
+  );
+  const { selected } = await resolvedDiscovery(executable, supplied, execute);
+  return runOrcaJson(
+    selected,
+    ["orchestration", verb, "--dispatch", dispatchId],
+    {
+      cwd,
+      execute,
+    },
+  );
+}
+
+/**
+ * Closes the proven supervised terminal owned by one settled Dispatch.
+ *
+ * Use this only with positive proof the agent exited. Without that proof Orca
+ * requires {@link abandonWorker}, which keeps possibly-live resources instead
+ * of claiming a stop that was never observed.
+ *
+ * @param {string} dispatchId - Dispatch whose terminal is proven stopped.
+ * @param {object} [options={}] - Executable, discovery, cwd, and runner.
+ * @returns {Promise<object>} Parsed Orca envelope for the stop.
+ * @throws {Error} When the dispatch is missing or Orca refuses the stop.
+ */
+export function stopWorker(dispatchId, options = {}) {
+  return dispatchVerb("worker-stop", dispatchId, options);
+}
+
+/**
+ * Fences a Dispatch whose process state could not be established.
+ *
+ * This performs no remote, process, or filesystem action: it records that
+ * orchestration has let the attempt go while its resources may still be live.
+ *
+ * @param {string} dispatchId - Dispatch to fence without claiming an exit.
+ * @param {object} [options={}] - Executable, discovery, cwd, and runner.
+ * @returns {Promise<object>} Parsed Orca envelope for the abandonment.
+ * @throws {Error} When the dispatch is missing or Orca refuses the call.
+ */
+export function abandonWorker(dispatchId, options = {}) {
+  return dispatchVerb("worker-abandon", dispatchId, options);
+}
+
+/**
+ * Releases the resources of a Dispatch whose settlement Orca accepted.
+ *
+ * Release is post-settlement cleanup rather than cancellation, so an accepted
+ * outcome is the only thing that authorizes it.
+ *
+ * @param {string} dispatchId - Dispatch that reported a settled outcome.
+ * @param {object} [options={}] - Executable, discovery, cwd, and runner.
+ * @returns {Promise<object>} Parsed Orca envelope for the release.
+ * @throws {Error} When the dispatch is missing or Orca refuses the release.
+ */
+export function releaseWorker(dispatchId, options = {}) {
+  return dispatchVerb("worker-release", dispatchId, options);
 }
