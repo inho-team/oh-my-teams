@@ -93,8 +93,11 @@ node --test tests/runtime.test.mjs
 npm run eval:organization
 node experiments/run-routing.mjs --mode e1 --max-calls 18 --dry-run
 npm ci
+npm run sync
 npm run lint
 ```
+
+버전과 감사 수치처럼 여러 파일이 되풀이하는 값은 `scripts/metadata.mjs`가 정본에서 파생한다. 파일마다 직접 고치지 않고 정본만 바꾼 뒤 `npm run sync`를 실행하며, `npm run sync:check`는 고치지 않고 어긋난 곳만 보고한다. 정본과 따라가는 파일의 대응은 [AGENTS.md](AGENTS.md)에 표로 정리했다.
 
 제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 coordinator state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.
 
