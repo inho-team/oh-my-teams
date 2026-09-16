@@ -1,24 +1,61 @@
 /** Execution runtime registry: one name to the adapter that speaks for it. */
 import { assert } from "./core.mjs";
-import { translateOrcaFailure } from "./orca-adapter.mjs";
-import { translateLocalCode } from "./local-adapter.mjs";
+import {
+  assertOrcaDiscovery,
+  confirmOrcaWorkspace,
+  readOrcaWorkspaceClaim,
+  translateOrcaFailure,
+} from "./orca-adapter.mjs";
+import {
+  assertLocalDiscovery,
+  confirmLocalWorkspace,
+  readLocalWorkspaceClaim,
+  translateLocalCode,
+} from "./local-adapter.mjs";
 
 /**
- * Code translators keyed by the runtime that produced the code.
+ * Execution adapters keyed by the runtime name a caller can write down.
  *
  * This is the one place a runtime name is resolved. Adding a runtime means
- * adding its adapter and one entry here; nothing in failure routing changes,
- * which is the property the execution port exists to hold.
+ * adding its adapter and one entry here; nothing in failure routing or
+ * workspace attachment changes, which is the property the port exists to hold.
  */
-const RUNTIME_TRANSLATORS = Object.freeze({
-  orca: translateOrcaFailure,
-  local: translateLocalCode,
+const EXECUTION_ADAPTERS = Object.freeze({
+  orca: Object.freeze({
+    translateCode: translateOrcaFailure,
+    assertDiscovery: assertOrcaDiscovery,
+    readWorkspaceClaim: readOrcaWorkspaceClaim,
+    confirmWorkspace: confirmOrcaWorkspace,
+  }),
+  local: Object.freeze({
+    translateCode: translateLocalCode,
+    assertDiscovery: assertLocalDiscovery,
+    readWorkspaceClaim: readLocalWorkspaceClaim,
+    confirmWorkspace: confirmLocalWorkspace,
+  }),
 });
 
-/** Runtime names a failure record may name, in registration order. */
+/** Runtime names a failure or workspace record may name, in registration order. */
 export const EXECUTION_RUNTIMES = Object.freeze(
-  Object.keys(RUNTIME_TRANSLATORS),
+  Object.keys(EXECUTION_ADAPTERS),
 );
+
+/**
+ * Resolves one registered runtime name to the adapter that speaks for it.
+ *
+ * @param {string} runtime - Registered execution runtime name.
+ * @returns {object} Adapter exposing the port operations for that runtime.
+ * @throws {Error} When the name is not registered.
+ */
+export function executionAdapter(runtime) {
+  const adapter = EXECUTION_ADAPTERS[runtime];
+  assert(
+    adapter,
+    `Unknown execution runtime: ${runtime}. ` +
+      `Registered runtimes are ${EXECUTION_RUNTIMES.join(", ")}`,
+  );
+  return adapter;
+}
 
 /**
  * Translates a runtime's own failure code into the neutral signal.
@@ -30,13 +67,7 @@ export const EXECUTION_RUNTIMES = Object.freeze(
  * @throws {Error} When the runtime is not registered or the signal is invalid.
  */
 export function translateRuntimeFailure(runtime, code, message) {
-  const translate = RUNTIME_TRANSLATORS[runtime];
-  assert(
-    translate,
-    `Unknown execution runtime: ${runtime}. ` +
-      `Registered runtimes are ${EXECUTION_RUNTIMES.join(", ")}`,
-  );
-  return translate(code, message);
+  return executionAdapter(runtime).translateCode(code, message);
 }
 
 /**

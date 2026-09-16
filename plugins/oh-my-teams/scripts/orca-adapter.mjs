@@ -286,6 +286,91 @@ export async function createWorktree(
 // A refusal Orca explained is only useful if the explanation survives the
 // throw. The message stays what a reader sees, while `signal` and `receipt`
 // carry the routing hint and any resources the caller still has to reclaim.
+/**
+ * Asserts a discovery receipt belongs to the executable about to be used.
+ *
+ * @param {object} runtime - Discovery receipt from {@link discoverOrcaRuntime}.
+ * @param {string} executable - Executable the caller intends to keep using.
+ * @returns {object} The same receipt, unchanged.
+ * @throws {Error} When the receipt is foreign, malformed, or version-mismatched.
+ */
+export function assertOrcaDiscovery(runtime, executable) {
+  assert(
+    runtime?.schemaVersion === 1 &&
+      runtime.executable === executable &&
+      runtime.guide?.id === "orca-cli" &&
+      /^[a-f0-9]{64}$/.test(runtime.guide.sha256),
+    "Version-matched Orca runtime discovery receipt required",
+  );
+  assert(
+    runtime.versionsMatch !== false,
+    "Orca CLI and runtime versions differ; rediscover before attaching",
+  );
+  return runtime;
+}
+
+/**
+ * Reads the workspace that a raw Orca worktree receipt claims.
+ *
+ * @param {object} receipt - Envelope returned by an Orca worktree command.
+ * @returns {object} Neutral workspace claim, keeping the Orca instance id.
+ * @throws {Error} When the envelope failed or names no worktree identity.
+ */
+export function readOrcaWorkspaceClaim(receipt) {
+  const worktree = receipt?.result?.worktree;
+  assert(
+    receipt?.ok !== false && worktree?.id && worktree.path,
+    "Orca receipt missing worktree identity",
+  );
+  return assertWorkspaceReceipt({
+    id: worktree.id,
+    path: worktree.path,
+    instanceId: worktree.instanceId ?? null,
+  });
+}
+
+/**
+ * Re-observes a claimed workspace through the runtime that issued the claim.
+ *
+ * A receipt a caller hands over is a claim about the past. Asking the runtime
+ * again is what turns it into a current fact, and it is also where a runtime
+ * that restarted, or a worktree that was recreated under the same id, shows up.
+ *
+ * @param {object} claim - Claim from {@link readOrcaWorkspaceClaim}.
+ * @param {object} options - Parent repo, executable, discovery, and runner.
+ * @returns {Promise<object>} Confirmed workspace plus the raw observation.
+ * @throws {Error} When the lookup, runtime identity, or instance disagrees.
+ */
+export async function confirmOrcaWorkspace(claim, options) {
+  const { parentRepo, executable, runtime, execute } = options;
+  const observed = await runOrcaJson(
+    executable,
+    ["worktree", "show", "--worktree", `id:${claim.id}`],
+    { cwd: parentRepo, execute },
+  );
+  const current = observed.result?.worktree;
+  assert(
+    current?.id === claim.id && current.path,
+    "Orca lookup does not match the supplied worktree receipt",
+  );
+  if (runtime?.runtimeId && observed._meta?.runtimeId) {
+    assert(
+      runtime.runtimeId === observed._meta.runtimeId,
+      "Orca runtime changed since discovery",
+    );
+  }
+  if (claim.instanceId) {
+    assert(
+      current.instanceId === claim.instanceId,
+      "Orca worktree instance changed",
+    );
+  }
+  return {
+    ...assertWorkspaceReceipt({ id: current.id, path: current.path }),
+    observed,
+  };
+}
+
 function orcaError(message, signal, receipt) {
   const error = new Error(message);
   if (signal) error.signal = signal;

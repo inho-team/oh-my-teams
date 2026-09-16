@@ -22,6 +22,8 @@
 
 port 연결(2026-09-16): 정의만으로는 증상이 해소되지 않으므로 실행 경로에 연결했다. `scripts/adapters.mjs`가 실행 기반 이름을 번역기로 해석하는 유일한 지점이고, `failure-classify`는 failure 기록이 `runtime`과 `code`를 담고 있으면 분류 전에 중립 신호로 번역한다. 따라서 `agent_unconfigured`를 그대로 기록해도 PM의 프로필 재바인딩으로 라우팅되며, 재시도가 통째로 막히던 증상이 실제 경로에서 사라진다. `runtime`을 적지 않은 기록은 이전과 완전히 동일하게 분류된다. 새 `worker-start` CLI 명령이 Orca 어댑터의 래퍼를 노출하고, `prepare`는 port가 정의한 workspace receipt 필드를 사용한다.
 
+`attachWorkspace` 중립화(2026-09-16): receipt에서 workspace 주장을 읽는 일과 그 주장을 실행 기반에 다시 물어 확인하는 일은 해당 어댑터가 맡는다. `workspace.mjs`에는 어느 실행 기반에나 성립하는 검사만 남았다. 확인된 경로가 붙이려는 workspace와 같아야 하고, 그곳의 Git 트리가 고정된 task가 지목한 트리여야 한다는 두 가지다. Orca 고유였던 `receipt.result.worktree` 경로, `worktree show` 조회, `runtimeId`와 `instanceId` 대조, `orca-cli` guide 검증은 전부 `orca-adapter.mjs`로 옮겼다. `runtimeName`을 적지 않은 호출은 `orca`로 해석되므로 기존 기록과 호출자는 그대로 동작한다. 같은 함수가 `runtimeName: "local"`로 Orca receipt도 discovery도 없는 workspace를 붙일 수 있다는 것을 테스트가 확인한다.
+
 Orca 1.4.201 계약을 실제로 조회해 확인한 사실도 함께 기록한다. `worker-start`는 `ready`에서만 0으로 종료하고 `failed`/`outcome_unknown`에서는 1로 종료하면서 `dispatchId`, `failedStage`, `residualResources`를 담은 receipt를 반환하므로, 이슈 #4가 요구한 "구조화된 시작 실패 반환"은 이미 충족되어 있다. 반면 `agy`는 Orca의 `TuiAgent` 목록에 없어 `--agent agy`가 항상 `agent_unconfigured`로 거부되며, `--model`이 지원하는 범위도 Claude, Codex, Cursor로 한정된다. 이슈 #2의 Agy launcher 연결은 이 저장소에서 해결할 수 없음이 추정이 아니라 확인된 사실이 되었다. 조회 결과는 `.omc/research/orca-worker-start-contract.md`에 보존했다.
 
 ## 1. 제품 정체성과 책임 경계

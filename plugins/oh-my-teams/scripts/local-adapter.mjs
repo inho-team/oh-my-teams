@@ -156,6 +156,68 @@ export async function createWorkspace(
 }
 
 /**
+ * Accepts the discovery step this runtime does not have.
+ *
+ * Git is already on the path or the worktree command would not have run, so
+ * there is nothing to discover and nothing to version-match. Saying so here
+ * keeps the caller from having to ask which runtime it is holding.
+ *
+ * @param {object} [runtime] - Ignored; no discovery receipt exists.
+ * @returns {object | undefined} Whatever was passed, unchanged.
+ */
+export function assertLocalDiscovery(runtime) {
+  return runtime;
+}
+
+/**
+ * Reads the workspace a local creation receipt claims.
+ *
+ * @param {object} receipt - Receipt from {@link createWorkspace}.
+ * @returns {object} Validated neutral workspace claim.
+ * @throws {Error} When the receipt names no identity or path.
+ */
+export function readLocalWorkspaceClaim(receipt) {
+  return assertWorkspaceReceipt({ id: receipt?.id, path: receipt?.path });
+}
+
+/**
+ * Re-reads a claimed workspace from Git to confirm it is still that workspace.
+ *
+ * @param {object} claim - Claim from {@link readLocalWorkspaceClaim}.
+ * @param {object} options - Parent repository and injectable runner.
+ * @returns {Promise<object>} Confirmed workspace plus the raw observation.
+ * @throws {Error} When Git reports no identity or a different branch.
+ */
+export async function confirmLocalWorkspace(claim, options) {
+  const { parentRepo, execute = run } = options;
+  const observed = await execute(
+    [
+      "git",
+      "-C",
+      claim.path,
+      "rev-parse",
+      "--show-toplevel",
+      "--abbrev-ref",
+      "HEAD",
+    ],
+    { cwd: parentRepo, timeoutMs: 30000 },
+  );
+  assert(
+    observed.code === 0 && !observed.timedOut,
+    "Git lookup does not match the supplied workspace claim",
+  );
+  const [toplevel, branch] = String(observed.stdout).trim().split(/\r?\n/);
+  assert(
+    branch === claim.id,
+    "Git lookup does not match the supplied workspace claim",
+  );
+  return {
+    ...assertWorkspaceReceipt({ id: branch, path: toplevel }),
+    observed,
+  };
+}
+
+/**
  * Runs one non-interactive provider call and returns a port-shaped receipt.
  *
  * This adapter starts a call that has already finished by the time it returns,
