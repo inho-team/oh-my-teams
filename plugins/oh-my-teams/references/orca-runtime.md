@@ -53,6 +53,20 @@ agy --model claude-opus-4-6-thinking ...
 
 표에 없는 코드는 중립 신호 없이 원문만 보존한다. 알지 못하는 거부에 임의로 경로를 부여하면 해결할 수 없는 담당자에게 작업이 전달된다.
 
+실패 기록을 남길 때에는 실행 기반이 반환한 코드를 그대로 적고 어느 실행 기반인지 함께 밝힌다. `failure-classify`가 번역까지 수행하므로 중립 어휘로 바꾸어 적으려 하지 않는다.
+
+```json
+{ "message": "관측한 내용", "evidence": "run_...", "runtime": "orca", "code": "agent_unconfigured" }
+```
+
+`runtime`은 `orca` 또는 `local`이며, `runtime`을 적었으면 `code`도 반드시 적는다. 둘 다 없는 기록은 이전과 똑같이 분류된다.
+
+## worker-start 래퍼
+
+감독 실행을 시작할 때에는 `npm run org -- worker-start --repo <경로> --task <id> --agent <agent>`를 사용한다. 이 래퍼는 argv를 배열로 전달하고, receipt에서 Dispatch 신원을 확인한 뒤, 시작이 `ready`에 이르지 못하면 3값 liveness와 번역된 실패 신호가 담긴 receipt를 돌려준다. 거부되어 Dispatch가 만들어지지 않은 경우에만 오류를 던지며, 그 오류에도 신호와 원본 receipt가 함께 실린다.
+
+`--model`은 `--effort`보다 먼저 있어야 하고, `--terminal`로 기존 터미널을 재사용할 때에는 `--model`과 `--effort`를 함께 쓸 수 없다. 래퍼가 호출 전에 이를 거부하므로 잘못된 조합이 실행 기반에 도달하지 않는다.
+
 `worker-start`는 `ready`에서만 0으로 종료하고, `failed`와 `outcome_unknown`에서는 1로 종료하면서도 `dispatchId`, `failedStage`, `residualResources`를 담은 receipt를 반환한다. 따라서 종료 코드만으로 실패를 단정하지 않고 receipt를 읽는다. receipt 자체가 오지 않은 경우에만 미관측으로 처리하며, 이때에도 같은 명령을 다시 실행하지 않는다.
 
 ## worker-list와 liveness

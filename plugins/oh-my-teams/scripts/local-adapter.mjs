@@ -59,6 +59,42 @@ export function translateLocalFailure(response) {
 }
 
 /**
+ * Neutral routing hints for the codes this adapter's own receipts carry.
+ *
+ * A coordinator writing a failure record after the fact holds the code, not
+ * the response object {@link translateLocalFailure} reads, so the same
+ * vocabulary has to be translatable from the code alone. `model-error` is
+ * absent on purpose: the provider rejected the request for a reason only the
+ * recorded evidence can place.
+ */
+const LOCAL_FAILURE_HINTS = Object.freeze({
+  call_unobserved: { processState: "unknown" },
+  "model-mismatch": { kind: "model-binding" },
+  "pool-exhausted": { failureClass: "pool-exhausted" },
+  "quota-unknown": { failureClass: "quota-unknown" },
+  "rate-limit": { failureClass: "rate-limit" },
+});
+
+/**
+ * Translates one local outcome code into the neutral signal.
+ *
+ * @param {string} code - Code a local worker receipt recorded.
+ * @param {string} [message] - Explanation captured alongside the code.
+ * @returns {object} Validated neutral failure signal retaining the code.
+ * @throws {Error} When the resulting signal violates the port contract.
+ */
+export function translateLocalCode(code, message) {
+  const normalized = String(code ?? "").trim();
+  assert(normalized, "A local failure code is required to translate");
+  const explanation = String(message ?? "").trim();
+  return assertFailureSignal({
+    ...(LOCAL_FAILURE_HINTS[normalized] ?? {}),
+    code: normalized,
+    message: explanation || `The local runtime reported ${normalized}`,
+  });
+}
+
+/**
  * Creates a plain Git worktree and confirms the identity Git reports back.
  *
  * The receipt is read from Git rather than from the arguments that were sent,

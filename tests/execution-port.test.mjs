@@ -17,6 +17,10 @@ import {
   translateLocalFailure,
 } from "../plugins/oh-my-teams/scripts/local-adapter.mjs";
 import { classifyFailure } from "../plugins/oh-my-teams/scripts/failures.mjs";
+import {
+  EXECUTION_RUNTIMES,
+  withRuntimeSignal,
+} from "../plugins/oh-my-teams/scripts/adapters.mjs";
 
 const discovery = { executable: "orca", versionsMatch: true };
 
@@ -380,6 +384,62 @@ test("a receipt that omits liveness or residual resources is refused", () => {
       }),
     /resources left behind/,
   );
+});
+
+test("a failure record naming a runtime is routed by that runtime's code", () => {
+  const record = {
+    message: "Orca refused the start",
+    evidence: "run_ae5452be5779",
+    runtime: "orca",
+    code: "agent_unconfigured",
+  };
+  const routed = withRuntimeSignal(record);
+
+  assert.equal(routed.message, record.message, "the written evidence survives");
+  assert.deepEqual(classifyFailure(routed), {
+    category: "execution-unconfigured",
+    nextOwner: "pm",
+    action: "rebind-profile-agent",
+    retryable: false,
+  });
+  assert.equal(
+    classifyFailure(record).category,
+    "unknown",
+    "the same record without translation is what used to block the retry",
+  );
+});
+
+test("each registered runtime translates its own vocabulary", () => {
+  assert.deepEqual([...EXECUTION_RUNTIMES], ["orca", "local"]);
+  assert.equal(
+    classifyFailure(
+      withRuntimeSignal({
+        message: "the call was killed",
+        evidence: "call.log",
+        runtime: "local",
+        code: "call_unobserved",
+      }),
+    ).action,
+    "reconcile-execution",
+  );
+  assert.throws(
+    () => withRuntimeSignal({ runtime: "paseo", code: "nope" }),
+    /Unknown execution runtime: paseo/,
+  );
+  assert.throws(
+    () => withRuntimeSignal({ runtime: "orca" }),
+    /must also name the code/,
+  );
+});
+
+test("a record that names no runtime routes exactly as it did before", () => {
+  const record = {
+    message: "tests failed",
+    evidence: "check.log",
+    checkFailed: true,
+  };
+  assert.equal(withRuntimeSignal(record), record);
+  assert.equal(classifyFailure(record).category, "implementation-error");
 });
 
 test("a local model mismatch routes to the profile owner, not the workspace", () => {
