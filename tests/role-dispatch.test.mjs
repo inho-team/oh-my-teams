@@ -10,8 +10,13 @@ import {
   run,
   writeJSON,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
-import { createWorkflow } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import {
+  attachExecution,
+  createWorkflow,
+  readWorkflow,
+} from "../plugins/oh-my-teams/scripts/workflow.mjs";
+import {
+  assertWorktreeUnshared,
   launchBinding,
   readRoleCharter,
   resolveRoleLaunch,
@@ -421,6 +426,154 @@ test("a terminal is opened and handed work only for a role the run holds", async
     () => main(["role-command", "--role", "intern", ...common]),
     /not in this run's roles/,
   );
+});
+
+test("a role does not start in the worktree another role's task works in", async (t) => {
+  // literacy-test: PM opened the Agy Senior reviewer in Junior's worktree
+  // because Agy had been trusted there, and the review's Playwright files were
+  // left uncommitted beside Junior's report.
+  const juniorId = "repo-1::/w/literacy-test/literacy-report-junior";
+  const plId = "repo-1::/w/literacy-test/literacy-pl";
+  const state = {
+    tasks: {
+      report: {
+        role: "junior",
+        execution: { worktreeId: juniorId },
+        attempts: [{ receipt: { worktreeId: juniorId, role: "junior" } }],
+      },
+      split: { role: "pl", attempts: [{ receipt: { worktreeId: plId } }] },
+      waiting: { role: "intern", attempts: [{ id: "reserved" }] },
+    },
+  };
+  const coordinator = "/w/literacy-test/literacy-site-research-2";
+  assert.throws(
+    () =>
+      assertWorktreeUnshared(state, "senior", `id:${juniorId}`, coordinator),
+    /literacy-report-junior is where junior works on task report; senior does not start there/,
+  );
+  assert.throws(
+    () =>
+      assertWorktreeUnshared(
+        state,
+        "senior",
+        "current",
+        "/w/literacy-test/literacy-report-junior",
+      ),
+    /where junior works/,
+  );
+  assert.throws(
+    () =>
+      assertWorktreeUnshared(
+        state,
+        "pl",
+        `path:/w/literacy-test/literacy-report-junior`,
+        coordinator,
+      ),
+    /where junior works/,
+  );
+  // The owner itself, a role the owner supervises, a new child worktree, the
+  // coordinator's own worktree, and a launch outside any workflow all pass.
+  assertWorktreeUnshared(state, "junior", `id:${juniorId}`, coordinator);
+  assertWorktreeUnshared(
+    state,
+    "senior",
+    "current",
+    "/w/literacy-test/literacy-pl",
+  );
+  assertWorktreeUnshared(
+    state,
+    "senior",
+    "new-child",
+    "/w/literacy-test/literacy-report-junior",
+  );
+  assertWorktreeUnshared(state, "senior", "current", coordinator);
+  assertWorktreeUnshared(undefined, "senior", `id:${juniorId}`, coordinator);
+
+  // Through the CLI, role-terminal reads the workflow's record and refuses
+  // before any terminal is created.
+  const stateDir = tempDir(t);
+  const repo = await workflowRepo(t);
+  await createWorkflow(
+    stateDir,
+    {
+      schemaVersion: 1,
+      id: "wf-share",
+      goal: "Write a report",
+      repo: ".",
+      depth: 5,
+      tasks: [{ file: "task-a.json", role: "junior" }],
+      policy: { maxRunning: 1, maxReviewPending: 1 },
+      budget: { maxAttempts: 1, maxCalls: 2 },
+    },
+    example(),
+    repo,
+  );
+  const { revision } = readWorkflow(stateDir, "wf-share").state;
+  attachExecution(stateDir, "wf-share", revision, {
+    schemaVersion: 1,
+    eventId: "attach-1",
+    attemptId: "attempt-1",
+    taskId: "task-a",
+    receipt: {
+      executionId: "ctx_1",
+      runId: "run_1",
+      taskId: "task_1",
+      dispatchId: "ctx_1",
+      worktreeId: juniorId,
+    },
+  });
+  const orgFile = path.join(repo, "organization.json");
+  writeJSON(orgFile, example());
+  const common = [
+    "--org",
+    orgFile,
+    "--workflow-id",
+    "wf-share",
+    "--state",
+    stateDir,
+  ];
+  for (const command of [
+    ["role-terminal", "--role", "senior", "--worktree", `id:${juniorId}`],
+    [
+      "worker-start",
+      "--role",
+      "senior",
+      "--repo",
+      repo,
+      "--spec",
+      "x",
+      "--worktree",
+      `id:${juniorId}`,
+      "--terminal",
+      "term_1",
+    ],
+  ]) {
+    await assert.rejects(
+      () =>
+        main([
+          ...command,
+          ...common,
+          "--orca",
+          path.join(repo, "missing-orca"),
+        ]),
+      /is where junior works on task task-a; senior does not start there/,
+    );
+  }
+});
+
+test("the launch documents keep each role out of another role's worktree", () => {
+  const read = (file) =>
+    fs.readFileSync(
+      new URL(`../plugins/oh-my-teams/${file}`, import.meta.url),
+      "utf8",
+    );
+  const runtime = read("references/orca-runtime.md");
+  assert.match(runtime, /### 역할과 워크트리/);
+  assert.match(runtime, /검토 대상을 \*\*경로와 커밋으로 읽고\*\*/);
+  assert.match(runtime, /is where <역할> works on task <task>/);
+  for (const skill of ["skills/pm/SKILL.md", "skills/pl/SKILL.md"]) {
+    assert.match(read(skill), /`역할과 워크트리` 절/);
+  }
 });
 
 async function workflowRepo(t) {

@@ -63,6 +63,66 @@ export const DISPATCH_AUTHORITY = Object.freeze({
   intern: [],
 });
 
+// The worktree a selector names, as the path after `::` in an Orca worktree
+// ID, or null when the selector cannot be compared with a recorded ID.
+function selectedWorktreePath(selector, callerDir) {
+  const value = String(selector ?? "current").trim();
+  if (value === "current" || value === "active") return path.resolve(callerDir);
+  if (value.startsWith("id:")) return worktreePath(value.slice(3));
+  if (value.startsWith("path:")) return path.resolve(value.slice(5));
+  return null;
+}
+
+function worktreePath(worktreeId) {
+  const text = String(worktreeId ?? "");
+  const at = text.lastIndexOf("::");
+  return at === -1 ? null : path.resolve(text.slice(at + 2));
+}
+
+/**
+ * Refuses to start a role in a worktree another role's task works in.
+ *
+ * In the literacy-test kickoff PM opened the Agy Senior reviewer in Junior's
+ * worktree, because Agy had already been trusted there. Playwright files the
+ * review needed were left uncommitted beside Junior's report. A reviewer reads
+ * another role's work by path and commit from its own worktree. The workflow
+ * records which role each attempt ran in which worktree, so that record is the
+ * check. A role that supervises the owner may still work there, as Senior does
+ * in PL's worktree with `--worktree current`.
+ *
+ * @param {object} [workflowState] - Workflow state; nothing is checked without one.
+ * @param {string} role - Role about to start, after folding.
+ * @param {string} [selector] - Orca worktree selector the role is given.
+ * @param {string} callerDir - Directory `current` and `active` resolve to.
+ * @returns {void}
+ * @throws {Error} When the worktree belongs to a role that does not supervise `role`.
+ */
+export function assertWorktreeUnshared(
+  workflowState,
+  role,
+  selector,
+  callerDir,
+) {
+  const target = selectedWorktreePath(selector, callerDir);
+  if (!workflowState?.tasks || !target) return;
+  for (const [taskId, item] of Object.entries(workflowState.tasks)) {
+    const receipts = [
+      item.execution,
+      ...(item.attempts ?? []).map((attempt) => attempt.receipt),
+    ];
+    for (const receipt of receipts) {
+      if (worktreePath(receipt?.worktreeId) !== target) continue;
+      const owner = receipt.role ?? item.role;
+      if (owner === role || DISPATCH_AUTHORITY[owner]?.includes(role)) continue;
+      throw new Error(
+        `Worktree ${target} is where ${owner} works on task ${taskId}; ` +
+          `${role} does not start there. Read that work by path and commit from ` +
+          `this role's own worktree, or create a worktree for ${role}.`,
+      );
+    }
+  }
+}
+
 const CHARTER_HEADING = "## 권한·책임·한계";
 const ROLE_NAMES = {
   pm: "PM",

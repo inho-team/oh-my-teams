@@ -91,6 +91,7 @@ node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|i
 - 역할이 PM이거나 PM으로 접힌다. 거부 문구는 조직에 선언되지 않은 역할(`is not declared`)과 이번 실행의 깊이에서 빠진 역할(`is not in this run's roles`)을 구분한다. PM은 coordinator이며 아래 「coordinator 실행」으로 띄운다.
 - 프로필이 현재 계정이 아니거나, `env` 또는 추가 인자로 계정을 고른다. Orca agent ID는 실행 파일만 가리키므로 계정을 표현하지 못한다. 이런 프로필은 `role-command`도 거부하므로 감독 worker로 띄울 수 없고, 프로필의 명령과 환경변수 참조를 그대로 쓰는 `work` 하네스로 Ollama와 같이 실행한다.
 - 프로필이 모델 없이 강도만 기록한다. Orca는 `--model` 없는 `--effort`를 거부한다.
+- 받은 워크트리가 이번 workflow에서 다른 역할의 task가 작업하는 워크트리다. 아래 「역할과 워크트리」 절을 따른다.
 
 `--spec` 앞에는 받는 역할의 머리글이 붙는다. 머리글에는 역할, 보고 대상, 이번 실행에 없어 이어받는 역할, 직접 배정할 수 있는 역할, 조직 파일 경로, workflow ID와 coordinator state 경로, 그리고 역할 스킬의 `권한·책임·한계` 절 전문이 들어간다. 중첩 worker로 실행되는 PL은 이 경로로 자기 하위 역할을 시작한다. `task-create`로 만든 Task를 `--task`로 시작할 때에는 래퍼가 머리글을 붙일 수 없으므로, Task 설명을 `node <runtime> role-spec --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state> --spec <작업>`의 출력으로 만든다.
 
@@ -104,6 +105,14 @@ node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|i
 | `unrequested` | 프로필 모델이 `null`이라 모델을 요청하지 않았다.                                                    | 보고서에 특정 모델명을 쓰지 않고 계정 기본값이라고 적는다. 현재 해석값이 필요하면 `host-defaults` 결과를 `현재 해석값`으로 구분해 덧붙인다. |
 
 `launch.effective`는 Orca가 적용한 실행 인자의 기록이지 모델이 스스로 보고한 값이 아니다. 그러므로 `screenCheck`가 `required`이면 `matched`여도 시작 직후 `worker-read --dispatch <id> --source terminal`이나 `terminal read --screen`으로 대화형 화면에 표시된 현재 모델을 확인하고, `modelRequested`와 다르면 추가 지시를 보내지 않고 상위에 보고한다.
+
+### 역할과 워크트리
+
+역할은 다른 역할의 task가 작업하는 워크트리에서 시작하지 않는다. literacy-test kickoff에서 PM은 Agy가 이미 신뢰를 받아 둔 Junior의 워크트리에 Agy Senior 검토자를 띄웠고, 검토 뒤 그 워크트리에는 URL 확인용 Playwright 파일(`package.json`, `node_modules/`, 테스트 스크립트)이 커밋되지 않은 채 Junior의 보고서 옆에 남았다. 같은 워크트리를 쓰면 한 역할의 부산물이 다른 역할의 산출물에 섞이고, 누가 남긴 변경인지도 가릴 수 없다.
+
+- 검토 역할은 검토 대상을 **경로와 커밋으로 읽고**, 자기 워크트리에서 실행한다. PL이나 PM이 띄운 Senior는 `--worktree current`로 띄운 역할의 워크트리를 쓰고, 파일을 만들어야 하는 검토는 새 워크트리를 만든다.
+- Agy의 폴더 신뢰 질문은 `role-terminal`이 답하고 터미널을 다시 열어 처리하므로, 신뢰를 피하려고 이미 신뢰된 다른 역할의 워크트리를 빌리지 않는다.
+- `role-terminal`과 `worker-start`는 `--workflow-id`와 `--state`를 받으면, workflow의 각 시도에 기록된 `worktreeId`와 역할을 대조해 이 규칙을 강제한다. 워크트리가 다른 역할의 것이면 터미널을 만들기 전에 `is where <역할> works on task <task>`로 거부한다. 워크트리를 기록한 역할 자신과, 그 역할이 배정할 수 있는 하위 역할은 허용한다. 예를 들어 PL의 워크트리에서 Senior는 실행할 수 있지만, Junior의 워크트리에서 Senior는 실행할 수 없다. `new-child`는 아직 아무도 쓰지 않는 워크트리라 대조하지 않으며, `current`와 `active`는 `worker-start`에서는 `--repo`, `role-terminal`에서는 명령을 실행한 디렉터리로 해석한다. 이 거부를 우회하려고 워크트리 선택자를 바꾸지 않는다.
 
 ### Agy 역할 시작
 
