@@ -91,7 +91,24 @@ node <runtime> headless-list   --state DIR
 
 `headless-start`는 `role-terminal`·`worker-start`와 같은 역할 검사를 한다. 주인 체크아웃 거부, 다른 역할의 워크트리 거부, 이번 실행에 없는 역할 거부, 프로필의 실행 파일 검사가 여기에 해당한다.
 
-## 8. 이번 단계 범위 밖
+## 8. 실제 CLI 검증 (2026-09-17, macOS)
+
+임시 Git 저장소에서 역할마다 워크트리를 만들고, 임시 조직(PL=Codex `gpt-5.6-sol`, Senior=Agy `gemini-3.8-flash-high`, Junior=Claude `sonnet`)으로 세 worker를 **동시에** `headless-start`했다. 과제는 "파일을 만들기 전에 파일 이름을 질문하고, 답을 받으면 만들어 커밋하라"였다.
+
+| 단계 | Codex (PL) | Agy (Senior) | Claude (Junior) |
+|---|---|---|---|
+| 1턴 결과 | `question`, 12.8초 | `question`, 8.8초 | `question`, 4.8초 |
+| 1턴 뒤 워크트리 | 변경 없음 | 변경 없음 | 변경 없음 |
+| 모델 판정 | `matched` (세션 기록에서 `gpt-5.6-sol`) | `matched` | `alias` (`sonnet` → `claude-sonnet-5`) |
+| `headless-answer` 뒤 2턴 | `done`, 22.7초, 같은 세션 | `done`, 26.4초, 같은 세션 | `done`, 12.0초, 같은 세션 |
+| 커밋과 파일 | `step2: pl`, 내용 일치 | `step2: senior`, 일치 | `step2: junior`, 일치 |
+| 남은 파일 | 없음 | 없음 | 없음 |
+
+시간 제한은 Agy worker에 `sleep 120`을 시키고 `--timeout-ms 25000`으로 확인했다. 25.9초에 `timed-out`(`exit.code: 1`, `timedOut: true`)으로 기록되었고, `sleep` 프로세스는 남지 않았다.
+
+검증 중에 `headless-answer --text`의 답변 문장이 별도 인자로 거부되는 문제를 찾았다. `role-spec --text` 플래그가 모든 명령에 적용된 탓이며, `role-spec`에만 적용하도록 고쳤다.
+
+## 9. 이번 단계 범위 밖
 
 - PM·PL 스킬의 기본 실행 경로 전환과 kickoff 전체를 이 런타임으로 끝까지 실행하는 일(4단계 전환 전 별도 확인).
 - 폰에서 보는 대시보드(3단계).

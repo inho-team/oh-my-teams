@@ -363,7 +363,11 @@ export function parseArgs(argv) {
     const key = rest[index];
     assert(key.startsWith("--"), `Unexpected argument: ${key}`);
     const option = key.slice(2);
-    if (["json", "apply", "force", "text"].includes(option)) {
+    // `--text` is a flag only for role-spec; headless-answer takes a value.
+    if (
+      ["json", "apply", "force"].includes(option) ||
+      (option === "text" && command === "role-spec")
+    ) {
       args[option] = true;
       continue;
     }

@@ -17,7 +17,7 @@ import {
   stopHeadless,
   waitHeadless,
 } from "../plugins/oh-my-teams/scripts/headless.mjs";
-import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { main, parseArgs } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const FAKE = path.resolve("tests/fake-agent.mjs");
 
@@ -382,4 +382,27 @@ test("headless-start keeps the role checks of a terminal launch", async (t) => {
     /Workflow|no such file|ENOENT/i,
   );
   assert.deepEqual(listHeadless(box.state), []);
+});
+
+test("headless-answer takes its text as a value, while role-spec --text is a flag", () => {
+  // --text became a flag for every command with role-spec --text, so the
+  // answer sentence was read as a stray argument.
+  assert.deepEqual(
+    parseArgs([
+      "headless-answer",
+      "--state",
+      "s",
+      "--worker",
+      "w",
+      "--text",
+      "use notes.md",
+    ]),
+    {
+      command: "headless-answer",
+      state: "s",
+      worker: "w",
+      text: "use notes.md",
+    },
+  );
+  assert.equal(parseArgs(["role-spec", "--text", "--role", "pl"]).text, true);
 });
