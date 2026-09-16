@@ -48,6 +48,8 @@ node <runtime> worker-start --org <organization.json> --role senior --repo <pl-w
 <orca> orchestration check --wait --types "worker_done,escalation,question" --timeout-ms <progressCheckMs> --json
 ```
 
+Senior는 PL의 워크트리(`current`)나 새 워크트리에서 실행하고, Junior나 Intern의 워크트리에 띄우지 않는다. 검토할 결과는 경로와 커밋으로 넘긴다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
+
 `worker-start`가 `nested_worker_depth_exceeded`나 다른 코드로 거부되면 한계 절에 적힌 대로 계획과 거부 원문을 PM에게 보내고 `worker_done --outcome failed`로 끝낸다. PM은 그 계획의 작업을 자기 Run에서 같은 래퍼로 배정한다.
 
 ## 실행 경로

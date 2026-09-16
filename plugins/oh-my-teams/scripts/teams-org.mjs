@@ -13,6 +13,7 @@ import {
   writeJSON,
 } from "./core.mjs";
 import {
+  assertWorktreeUnshared,
   launchBinding,
   resolveRoleLaunch,
   roleCommand,
@@ -413,6 +414,14 @@ async function startSupervisedWorker(args) {
     { agent: args.agent, model: args.model, effort: args.effort },
     { ...run, terminal: args.terminal },
   );
+  // `new-child` makes a worktree nobody works in yet, so only a named or
+  // current worktree can belong to another role's task.
+  assertWorktreeUnshared(
+    run.workflowState,
+    launch.role,
+    args.worktree ?? "current",
+    args.repo,
+  );
   const viaTerminal = launch.via === "terminal";
   try {
     const started = await startWorker(path.resolve(args.repo), {
@@ -485,6 +494,7 @@ function launchContext(args) {
       ...(snapshot.state.roles ? { roles: snapshot.state.roles } : {}),
       workflowId: args["workflow-id"],
       stateDir,
+      workflowState: snapshot.state,
     },
   };
 }
@@ -615,13 +625,21 @@ async function executeCommand(args) {
         launchContext(args),
       );
     case "role-terminal":
-      return (({ org, run }) =>
-        openRoleTerminal({
+      return (({ org, run }) => {
+        const command = roleCommand(org, args.role, run);
+        assertWorktreeUnshared(
+          run.workflowState,
+          command.role,
+          args.worktree,
+          process.cwd(),
+        );
+        return openRoleTerminal({
           worktree: args.worktree,
-          command: roleCommand(org, args.role, run),
+          command,
           title: args.title,
           executable: args.orca,
-        }))(launchContext(args));
+        });
+      })(launchContext(args));
     case "host-defaults":
       return resolveHostDefaults({
         project: args.project && path.resolve(args.project),
