@@ -39,6 +39,13 @@ import {
 } from "./incidents.mjs";
 import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { organizationStatus } from "./status.mjs";
+import {
+  assertCoordinator,
+  bindKickoffRun,
+  claimKickoff,
+  readLease,
+  releaseKickoff,
+} from "./kickoff-lease.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   init --org FILE --from CONFIG
@@ -47,6 +54,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
          [--apply]
   show --org FILE [--state DIR] [--json]
   validate --org FILE
+  kickoff-claim --org FILE --from CLAIM
+  kickoff-show --org FILE
+  kickoff-bind --org FILE --worktree ID --run ID
+  kickoff-release --org FILE --worktree ID
+                  --reason completed|disbanded|taken-over [--force]
   prepare --org FILE --task FILE --repo DIR --name NAME [--orca EXECUTABLE]
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
@@ -93,6 +105,10 @@ export const ALLOWED_OPTIONS = {
   preset: ["org", "name", "revision", "apply"],
   show: ["org", "state", "json"],
   validate: ["org"],
+  "kickoff-claim": ["org", "from"],
+  "kickoff-show": ["org"],
+  "kickoff-bind": ["org", "worktree", "run"],
+  "kickoff-release": ["org", "worktree", "reason", "force"],
   prepare: ["org", "task", "repo", "name", "orca"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
@@ -155,6 +171,10 @@ export const REQUIRED_OPTIONS = {
   preset: ["org", "name", "revision"],
   show: ["org"],
   validate: ["org"],
+  "kickoff-claim": ["org", "from"],
+  "kickoff-show": ["org"],
+  "kickoff-bind": ["org", "worktree", "run"],
+  "kickoff-release": ["org", "worktree", "reason"],
   prepare: ["org", "task", "repo", "name"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
@@ -211,7 +231,7 @@ export function parseArgs(argv) {
     const key = rest[index];
     assert(key.startsWith("--"), `Unexpected argument: ${key}`);
     const option = key.slice(2);
-    if (["json", "apply"].includes(option)) {
+    if (["json", "apply", "force"].includes(option)) {
       args[option] = true;
       continue;
     }
@@ -397,6 +417,21 @@ async function executeCommand(args) {
       return showOrganization(args);
     case "validate":
       return { valid: Boolean(validateOrg(readJSON(args.org))) };
+    case "kickoff-claim":
+      return claimKickoff(args.org, readJSON(args.from));
+    case "kickoff-show":
+      return readLease(args.org);
+    case "kickoff-bind":
+      return bindKickoffRun(args.org, {
+        worktreeId: args.worktree,
+        runId: args.run,
+      });
+    case "kickoff-release":
+      return releaseKickoff(args.org, {
+        worktreeId: args.worktree,
+        reason: args.reason,
+        force: Boolean(args.force),
+      });
     case "prepare":
       return compatibilityPrepare(args);
     case "prepare-input":
@@ -489,6 +524,10 @@ async function executeCommand(args) {
         path.resolve(args.state),
       );
     case "workflow-create":
+      // A second coordinator would reserve slots and spend the call budget in
+      // its own workflow state, invisible to the one that already holds the
+      // project. The lease is what makes that state the only one.
+      assertCoordinator(args.org, args.state);
       return createWorkflow(
         path.resolve(args.state),
         readJSON(args.workflow),
