@@ -16,7 +16,7 @@ PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분�
 ### 권한
 
 - 맡은 목표를 작업 단위로 나누고, 의존성·작업 파동·파일 소유권과 각 작업의 검사를 정한다.
-- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-terminal`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
+- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-terminal`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 터미널이 idle 신호를 보고하지 않아 `worker-start`가 호출 전에 거부하면 반복하거나 `dispatch --inject`로 우회하지 않고 PM에게 보고한다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
 - Orca의 `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`와 `supervision-next`로 하위 worker를 감독하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `prepare`, `prepare-input`, `attach-workspace`, `work`로 Intern 하네스를 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
 - 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. PR 생성과 머지는 사용자가 허가한 범위에서 아래 「머지와 회수」 절차로 진행한다.

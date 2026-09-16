@@ -310,6 +310,110 @@ test("launch arguments the runtime rejects are refused before the call", async (
   assert.equal(calls.length, 0, "no refused start reaches the runtime");
 });
 
+// Answers `terminal wait` with `wait` and everything else with `start`.
+const orcaVerbs = ({ wait, start = orcaReceipt("ready") }) => {
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    const answer = argv[1] === "terminal" ? wait : { stdout: start };
+    return { code: 0, stderr: "", timedOut: false, ...answer };
+  };
+  return { calls, execute };
+};
+
+test("a reused terminal is checked for tui-idle before worker-start", async () => {
+  const { calls, execute } = orcaVerbs({
+    wait: { stdout: JSON.stringify({ ok: true, result: {} }) },
+  });
+  const receipt = await startOrcaWorker("/repo", {
+    task: "task_1",
+    terminal: "term_1",
+    discovery,
+    execute,
+  });
+  assert.equal(receipt.liveness, "live");
+  assert.deepEqual(calls[0].slice(0, 8), [
+    "orca",
+    "terminal",
+    "wait",
+    "--terminal",
+    "term_1",
+    "--for",
+    "tui-idle",
+    "--timeout-ms",
+  ]);
+  assert.deepEqual(calls[1].slice(0, 3), [
+    "orca",
+    "orchestration",
+    "worker-start",
+  ]);
+
+  // A launch by agent opens its own terminal, so nothing is probed.
+  const byAgent = orcaVerbs({ wait: { stdout: "unused" } });
+  await startOrcaWorker("/repo", {
+    task: "task_1",
+    agent: "codex",
+    discovery,
+    execute: byAgent.execute,
+  });
+  assert.equal(byAgent.calls.length, 1);
+  assert.equal(byAgent.calls[0][1], "orchestration");
+});
+
+test("a terminal that never reports idle is refused before any Dispatch", async () => {
+  // Orca 1.4.204 answered an Agy terminal this way; the exit code is not
+  // relied on, so both are covered.
+  const timedOut = JSON.stringify({ ok: false, error: { code: "timeout" } });
+  for (const code of [0, 1]) {
+    const { calls, execute } = orcaVerbs({ wait: { stdout: timedOut, code } });
+    await assert.rejects(
+      () =>
+        startOrcaWorker("/repo", {
+          task: "task_1",
+          terminal: "term_1",
+          discovery,
+          execute,
+        }),
+      (error) => {
+        assert.equal(error.signal.code, "timeout");
+        assert.equal(error.signal.kind, "execution-unconfigured");
+        assert.match(error.message, /no Dispatch was created/);
+        const routed = classifyFailure(error.signal);
+        assert.equal(routed.nextOwner, "pm");
+        assert.equal(routed.retryable, false);
+        return true;
+      },
+    );
+    assert.equal(calls.length, 1, "worker-start is never called");
+  }
+
+  // Any other wait failure keeps Orca's own code instead of this route.
+  const missing = orcaVerbs({
+    wait: {
+      code: 1,
+      stdout: JSON.stringify({
+        ok: false,
+        error: { code: "terminal_not_found", message: "no such terminal" },
+      }),
+    },
+  });
+  await assert.rejects(
+    () =>
+      startOrcaWorker("/repo", {
+        task: "task_1",
+        terminal: "term_x",
+        discovery,
+        execute: missing.execute,
+      }),
+    (error) => {
+      assert.equal(error.signal.code, "terminal_not_found");
+      assert.equal(error.signal.kind, undefined);
+      return true;
+    },
+  );
+  assert.equal(missing.calls.length, 1);
+});
+
 test("the local adapter reports an exited worker and never claims liveness", async () => {
   const stdout = JSON.stringify({
     result: "done",

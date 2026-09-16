@@ -390,6 +390,72 @@ async function resolvedDiscovery(executable, supplied, execute) {
   return { selected, discovery };
 }
 
+const IDLE_PROBE_MS = 20000;
+
+// Orca creates the Dispatch before it waits for a reused terminal to reach
+// `tui-idle`, so a terminal that never reports idle leaves a failed Dispatch
+// and a spent attempt behind. Orca 1.4.204 reports no idle for `antigravity`
+// terminals. The same wait is run first, and a terminal that times out is
+// refused before any Dispatch exists. The probe names no agent, so a runtime
+// that starts reporting idle reopens the path without a code change.
+async function assertTerminalIdle(orca, terminal, { cwd, execute }) {
+  const waited = await execute(
+    [
+      orca,
+      "terminal",
+      "wait",
+      "--terminal",
+      terminal,
+      "--for",
+      "tui-idle",
+      "--timeout-ms",
+      String(IDLE_PROBE_MS),
+      "--json",
+    ],
+    { cwd, timeoutMs: IDLE_PROBE_MS + 25000 },
+  );
+  // Orca reports the timeout in its JSON envelope; whether it also exits
+  // non-zero is not relied on, so the envelope is read before the exit code.
+  let envelope = null;
+  try {
+    envelope = JSON.parse(waited.stdout);
+  } catch {
+    // Not JSON: the exit code below decides.
+  }
+  if (!waited.timedOut && envelope?.ok === false) {
+    if (envelope.error?.code === "timeout") {
+      // `timeout` means "not idle" only for this wait, so the route is chosen
+      // here rather than in the hint table. Handing the same profile's
+      // terminal over again reproduces it; only another profile changes it.
+      const refused = assertFailureSignal({
+        kind: "execution-unconfigured",
+        code: "timeout",
+        message:
+          `Terminal ${terminal} did not report tui-idle within ${IDLE_PROBE_MS}ms, ` +
+          "which Orca worker-start waits for before handing over a task; no Dispatch was created. " +
+          "Do not repeat the start (references/orca-runtime.md)",
+      });
+      throw orcaError(refused.message, refused, envelope);
+    }
+    const failed = translateOrcaFailure(
+      envelope.error?.code,
+      envelope.error?.message,
+    );
+    throw orcaError(JSON.stringify(envelope), failed, envelope);
+  }
+  if (waited.code !== 0 || waited.timedOut || !envelope) {
+    const detail =
+      waited.stderr || waited.stdout || "Orca terminal wait failed";
+    throw orcaError(
+      detail,
+      translateOrcaFailure(
+        waited.timedOut ? "start_unknown" : "runtime_error",
+        detail,
+      ),
+    );
+  }
+}
+
 /**
  * Starts one supervised Orca worker and returns a port-shaped receipt.
  *
@@ -399,11 +465,16 @@ async function resolvedDiscovery(executable, supplied, execute) {
  * is the one case that throws, because there is no Dispatch to address and
  * relaunching would only add resources to reclaim.
  *
+ * A reused terminal is first checked for `tui-idle`, the condition Orca waits
+ * for before injecting, and one that never reports it is refused without
+ * calling `worker-start`.
+ *
  * @param {string} repo - Worktree the coordinator issues the command from.
  * @param {object} options - Task selection, placement, and launch options.
  * @returns {Promise<object>} Worker receipt satisfying the execution port.
- * @throws {Error} When the arguments are invalid or no receipt came back. The
- * thrown error carries a translated `signal` whenever Orca named a cause.
+ * @throws {Error} When the arguments are invalid, a reused terminal is not
+ * idle, or no receipt came back. The thrown error carries a translated
+ * `signal` whenever Orca named a cause.
  */
 export async function startWorker(
   repo,
@@ -441,6 +512,9 @@ export async function startWorker(
     suppliedDiscovery,
     execute,
   );
+  if (terminal) {
+    await assertTerminalIdle(selected, terminal, { cwd: repo, execute });
+  }
 
   const argv = [selected, "orchestration", "worker-start"];
   if (task) argv.push("--task", task);

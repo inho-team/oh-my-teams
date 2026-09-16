@@ -626,7 +626,15 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(runtime, /대괄호/);
   for (const role of ["pm", "pl"]) {
     assert.match(readSkill(role), /Agy 역할은 `role-terminal`로 연 터미널/);
+    // An Agy terminal never reports tui-idle, and the inject workaround
+    // escapes worker-stop and model checks.
+    assert.match(readSkill(role), /`dispatch --inject`로 우회하지 않고/);
   }
+  assert.match(
+    runtime,
+    /호출하기 전에 같은 터미널에 `terminal wait --for tui-idle`/,
+  );
+  assert.match(runtime, /멈춘 뒤 거부 원문과 함께 사용자에게 보고한다/);
   // Orca refuses nested workers by default, so PL cannot be the dispatcher.
   assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
   assert.match(readSkill("pl"), /기본값이 1/);

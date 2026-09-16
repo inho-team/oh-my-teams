@@ -49,7 +49,7 @@ agy --model claude-opus-4-6-thinking ...
 
 실행 기반이 반환하는 실패 코드는 그 실행 기반의 어휘이며 실패 분류기의 어휘가 아니다. `scripts/orca-adapter.mjs`의 `translateOrcaFailure`가 Orca의 코드를 중립 신호로 옮기고, `scripts/failures.mjs`의 `classifyFailure`는 중립 신호만 읽는다. Orca 고유 문자열을 `failures.mjs`에 넣지 않으며, `tests/execution-port.test.mjs`가 이 경계를 검사한다.
 
-`agent_unconfigured`는 `execution-unconfigured`로 옮겨 PM의 프로필 재바인딩으로 보낸다. 같은 프로필로 재시도하면 같은 거부가 재현되기 때문이다. `inject_rejected`, `runtime_error`, `failed`, `outcome_unknown`, `start_unknown`, `turn_start_unobserved`는 프로세스 상태를 미상으로 표시해 `process-unknown`으로 보낸다. 이 경로의 재시도는 실제 종료를 확인해야 열리므로, 잔여 자원을 점검한 뒤에 대체 실행을 시작하라는 Orca의 요구와 같은 규율이 된다.
+`agent_unconfigured`는 `execution-unconfigured`로 옮겨 PM의 프로필 재바인딩으로 보낸다. 같은 프로필로 재시도하면 같은 거부가 재현되기 때문이다. `worker-start --terminal`이 호출 전 `tui-idle` 점검에서 받은 `timeout`도 같은 이유로 이 래퍼가 직접 `execution-unconfigured`로 옮긴다. 다른 명령의 `timeout`에는 이 경로를 적용하지 않으므로 번역표에는 넣지 않는다. `inject_rejected`, `runtime_error`, `failed`, `outcome_unknown`, `start_unknown`, `turn_start_unobserved`는 프로세스 상태를 미상으로 표시해 `process-unknown`으로 보낸다. 이 경로의 재시도는 실제 종료를 확인해야 열리므로, 잔여 자원을 점검한 뒤에 대체 실행을 시작하라는 Orca의 요구와 같은 규율이 된다.
 
 표에 없는 코드는 중립 신호 없이 원문만 보존한다. 알지 못하는 거부에 임의로 경로를 부여하면 해결할 수 없는 담당자에게 작업이 전달된다.
 
@@ -116,6 +116,10 @@ node <runtime> worker-start --org <organization.json> --role <역할> --repo <co
 ```
 
 `role-terminal`과 `worker-start`에는 같은 `--workflow-id`와 `--state`를 넘긴다. 그래야 두 명령이 같은 조직 스냅샷과 이번 실행의 역할을 읽는다. 터미널은 한 역할의 프로필로 미리 만들어지므로, 두 명령 모두 요청한 역할이 이번 실행에 실제로 있을 때에만 받아들인다. 이번 실행에 없어 다른 역할로 접히는 역할을 요청하면 어느 역할로 접히는지 알리며 거부하고, 그때에는 접힌 역할의 터미널을 연다. `role-terminal`이 여는 명령은 `role-command`와 같으며, 아래 「역할 터미널 열기」 절을 따른다. 결과의 `screen`에 표시된 모델이 프로필의 모델과 같을 때에만 결과의 `terminal`을 `worker-start --terminal`에 넘긴다. 신뢰 질문 때문에 터미널을 다시 열었다면 넘기는 값은 `reopened.closedTerminal`이 아니라 결과의 `terminal`이다. Orca는 `agy` 실행 파일을 `antigravity` agent로 인식해 작업을 전달한다. 이 경로의 `modelProof`는 항상 `unproven`이므로 작업을 넘긴 뒤에도 보고서에 모델을 적을 때에는 화면에서 확인한 사실로 적는다. Orca가 터미널의 agent를 인식하지 못해 `inject_rejected`로 거부하면 같은 명령을 반복하지 않고 거부 원문과 함께 상위에 보고한다.
+
+Orca의 `worker-start`는 Dispatch를 먼저 만든 뒤, 넘겨받은 터미널이 `tui-idle`에 이를 때까지 기다리고 이르지 않으면 작업을 주입하지 못한 채 실패한다. 이렇게 실패하면 회수할 Dispatch가 남고 시도 예산도 줄어든다. 그래서 `worker-start --terminal`은 Orca를 호출하기 전에 같은 터미널에 `terminal wait --for tui-idle`을 20초 동안 실행하고, `timeout`이 돌아오면 Orca를 호출하지 않고 거부한다. 이때 Dispatch는 만들어지지 않는다. Orca 1.4.204에서 `antigravity` 터미널은 입력 대기 화면에서도 `tui-idle`을 보고하지 않으므로, 현재 Agy 역할은 이 점검에서 거부된다. 점검은 agent 이름을 보지 않으므로 Orca가 idle 신호를 보고하게 되면 코드 변경 없이 이 경로가 다시 열린다.
+
+이 거부의 신호는 `code: "timeout"`, `kind: "execution-unconfigured"`이며 `failure-classify`는 PM의 `rebind-profile-agent`로 보낸다. 같은 프로필의 터미널로 다시 시작해도 같은 거부가 재현되므로 같은 명령을 반복하지 않는다. `adjust`는 진행 중인 kickoff의 조직 스냅샷을 바꾸지 않고 실행 중 프로필을 다시 묶는 절차도 없으므로, PM은 그 역할에 작업을 넘기지 않고 멈춘 뒤 거부 원문과 함께 사용자에게 보고한다. 원시 `orchestration dispatch --inject`로 주입해 우회하지 않는다. 그 경로는 `worker-stop`·`worker-abandon`으로 회수할 수 없고 모델 확인도 거치지 않는다. 다음 kickoff부터는 `adjust`로 그 역할을 Claude·Codex 프로필로 바꾸도록 안내한다.
 
 ### 역할 터미널 열기
 
