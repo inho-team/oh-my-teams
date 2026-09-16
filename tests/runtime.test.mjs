@@ -527,6 +527,14 @@ test("each provider carries reasoning effort in its own verified CLI syntax", ()
   );
   assert.equal(agy.argv[agy.argv.indexOf("--effort") + 1], "high");
 
+  // `claude --help` (2.1.273) documents `--effort` with five levels.
+  const claude = providerCommand(
+    { provider: "claude", command: ["claude"], model: null, effort: "xhigh" },
+    "/tmp/task",
+    "prompt",
+  );
+  assert.equal(claude.argv[claude.argv.indexOf("--effort") + 1], "xhigh");
+
   const codex = providerCommand(
     {
       provider: "codex",
@@ -552,7 +560,7 @@ test("an effort the provider cannot select fails instead of running at another d
           provider: "claude",
           command: ["claude"],
           model: null,
-          effort: "high",
+          effort: "ultra",
         },
         "/tmp/task",
         "prompt",
@@ -573,7 +581,13 @@ test("an effort the provider cannot select fails instead of running at another d
       ),
     /cannot select effort/,
   );
-  assert.deepEqual(PROVIDER_EFFORTS.claude, []);
+  assert.deepEqual(PROVIDER_EFFORTS.claude, [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ]);
   assert.ok(!PROVIDER_EFFORTS.agy.includes("xhigh"));
   assert.ok(PROVIDER_EFFORTS.codex.includes("ultra"));
 });
@@ -583,8 +597,9 @@ test("organization validation narrows effort per provider and rejects a self-con
   validateOrg(org);
 
   const unsupported = clone();
-  unsupported.profiles["claude-current"].effort = "high";
-  assert.throws(() => validateOrg(unsupported), /no reasoning-effort selector/);
+  // Claude accepts five levels; `ultra` is Codex's alone.
+  unsupported.profiles["claude-current"].effort = "ultra";
+  assert.throws(() => validateOrg(unsupported), /must be one of/);
 
   const tooDeep = clone();
   tooDeep.profiles["agy-flash"].effort = "xhigh";

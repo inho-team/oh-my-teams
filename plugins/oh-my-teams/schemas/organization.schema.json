@@ -121,7 +121,7 @@
         "model": { "type": ["string", "null"] },
         "effort": {
           "enum": ["low", "medium", "high", "xhigh", "max", "ultra"],
-          "$comment": "Reasoning effort. Omit to keep the provider default. Each adapter in scripts/providers/ states the levels it accepts and core.mjs narrows the set from that registry: agy and ollama low|medium|high, codex low|medium|high|xhigh|max|ultra, claude none."
+          "$comment": "Reasoning effort. Omit to keep the provider default. Each adapter in scripts/providers/ states the levels it accepts and core.mjs narrows the set from that registry: agy and ollama low|medium|high, codex low|medium|high|xhigh|max|ultra, claude low|medium|high|xhigh|max."
         },
         "pool": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
         "env": {

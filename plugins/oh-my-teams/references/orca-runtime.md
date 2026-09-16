@@ -139,7 +139,7 @@ node <runtime> role-command --org <project>/.omt/organization.json --role pm
 `check --wait`의 제한 시간은 완료나 실패의 근거가 아니지만, 아무것도 하지 않고 다시 기다리는 근거도 아니다. 감독 역할(PM, PL)은 제한 시간을 조직의 `policy.supervision.progressCheckMs`로 두고, 제한 시간이 지날 때마다 `worker_done`을 보내지 않은 worker 각각에 대해 다음을 수행한다. 값이 없는 조직은 기본값 15분(`900000`)과 `unansweredLimit` 2를 쓴다.
 
 1. `worker-list`로 liveness를, `worker-show --dispatch <id>`로 `observation.agentWait`를 조회한다.
-2. 관측 파일에 다음을 적어 `node <runtime> supervision-next --org <organization.json> --observation <observation.json>`을 실행한다. 마지막 heartbeat, 메시지, 출력 변화 가운데 가장 최근 시각은 `lastActivityAt`, 그 뒤로 답을 받지 못한 진행 요청 수는 `unansweredRequests`, 그 뒤로 수행한 확인 횟수는 `inspections`, 이 정체를 이미 상위에 보고했으면 그 시각은 `escalatedAt`이다. 새 활동이 관측되면 세 값을 비운다. 진행 요청과 확인을 합한 횟수가 `unansweredLimit`에 이르면 보고로 넘어가므로, 상태를 확인할 수 없는 worker도 무한히 확인만 반복하지 않는다.
+2. 관측 파일에 다음을 적어 `node <runtime> supervision-next --org <organization.json> --observation <observation.json>`을 실행한다. 마지막 heartbeat, 메시지, 출력 변화 가운데 가장 최근 시각은 `lastActivityAt`, 그 뒤로 답을 받지 못한 진행 요청 수는 `unansweredRequests`, 그 뒤로 수행한 확인 횟수는 `inspections`, 이 정체를 이미 상위에 보고했으면 그 시각은 `escalatedAt`, 그때 보고한 `reason`은 `escalatedReason`이다. 새 활동이 관측되면 세 값을 비운다. 진행 요청과 확인을 합한 횟수가 `unansweredLimit`에 이르면 보고로 넘어가므로, 상태를 확인할 수 없는 worker도 무한히 확인만 반복하지 않는다.
 3. 결과의 `action`대로 행동한다.
 
 | action | 행동 |
@@ -147,7 +147,7 @@ node <runtime> role-command --org <project>/.omt/organization.json --role pm
 | `wait` | 다시 `check --wait`로 기다린다. `reason`이 `already-escalated`이면 같은 정체를 다시 보고하지 않고, 사용자 보고에는 `display`를 그대로 적는다. |
 | `ask-progress` | `<orca> orchestration send --to dispatch:<id> --type question --subject "진행 상황 요청" --body "현재 단계, 끝낸 항목과 남은 항목, 장애물을 알려 주세요." --json`으로 묻고, 요청 수를 하나 늘린다. |
 | `inspect` | `worker-show`와 `worker-read --dispatch <id> --source auto --limit <n>`으로 상태와 최근 출력을 확인하고 `inspections`를 하나 늘린다. 확인에서 새 활동을 찾았으면 관측값을 고쳐 다시 판정한다. |
-| `escalate` | `worker-read`의 제한된 출력, liveness, 무응답 시간과 보낸 요청을 증거로 붙여 상위에 보고한다. PL은 `orchestration send --type escalation`으로 PM에게, PM은 사용자에게 보고한다. `failureClassify`가 `true`이면 그 증거로 `failure-classify`를 실행한다. 보고한 시각을 `escalatedAt`으로 기록한다. |
+| `escalate` | `worker-read`의 제한된 출력, liveness, 무응답 시간과 보낸 요청을 증거로 붙여 상위에 보고한다. PL은 `orchestration send --type escalation`으로 PM에게, PM은 사용자에게 보고한다. `failureClassify`가 `true`이면 그 증거로 `failure-classify`를 실행한다. 보고한 시각을 `escalatedAt`으로, 판정의 `reason`을 `escalatedReason`으로 기록한다. 같은 종료나 같은 입력 대기는 다시 보고하지 않고, 보고한 뒤 사실이 바뀌었을 때만 다시 보고한다. |
 
 이 판정은 재시도나 종료를 결정하지 않는다. 종료와 재시도는 위 「worker-start 실패 복구」와 `failure-classify` 결과를 따른다. `unverifiable` worker는 살아 있다고 간주하지 않고 확인이나 보고로 보낸다. 사용자에게 상태를 알릴 때 무응답 worker는 `진행 중`이 아니라 결과의 `display`대로 `무응답 N분`으로 적는다.
 
