@@ -242,6 +242,93 @@ test("worker enforces persisted workflow allowance before a second provider call
   );
 });
 
+test("a one-task workflow closes on its task's acceptance, without an integration task", async (t) => {
+  // #39: createWorkflow makes integration optional for a single task, yet
+  // workflow-accept demanded integration-task.json and refused to close it.
+  const dir = await repo(t),
+    stateDir = path.join(dir, ".omt");
+  writeJSON(path.join(dir, "a.json"), task("a"));
+  const request = {
+    schemaVersion: 1,
+    id: "single-task",
+    goal: "Write one report",
+    repo: ".",
+    tasks: [{ file: "a.json", role: "intern" }],
+    policy: { maxRunning: 1, maxReviewPending: 1 },
+    budget: { maxAttempts: 1, maxCalls: 1 },
+  };
+  await createWorkflow(stateDir, request, structuredClone(organization), dir);
+  assert.equal(
+    readWorkflow(stateDir, request.id).state.integration.required,
+    false,
+  );
+  let current = readWorkflow(stateDir, request.id);
+  attachExecution(stateDir, request.id, current.state.revision, {
+    schemaVersion: 1,
+    eventId: "attach-a",
+    attemptId: "attempt-a",
+    taskId: "a",
+    callAllowance: 1,
+    receipt: {
+      executionId: "a",
+      runId: "a",
+      taskId: "a",
+      dispatchId: "a",
+      worktreeId: "a",
+    },
+  });
+  current = readWorkflow(stateDir, request.id);
+  recordSettlement(stateDir, request.id, current.state.revision, {
+    schemaVersion: 1,
+    eventId: "settle-a",
+    attemptId: "attempt-a",
+    taskId: "a",
+    executionId: "a",
+    outcome: "settled",
+    callsUsed: 0,
+  });
+  // Before the task is accepted, the refusal names what is still open.
+  await assert.rejects(
+    acceptWorkflowIntegration(
+      stateDir,
+      request.id,
+      readWorkflow(stateDir, request.id).state.revision,
+    ),
+    /must be accepted first: a \(submitted\)/,
+  );
+  writeJSON(path.join(stateDir, "gates", "a.json"), {
+    runId: "a",
+    state: "accepted",
+    gates: {
+      "contract-ready": { taskHash: taskHash(current.tasks.a) },
+      "outcome-accepted": { decisionId: "accept-a" },
+    },
+  });
+  resumeWorkflow(
+    stateDir,
+    request.id,
+    readWorkflow(stateDir, request.id).state.revision,
+  );
+  const before = readWorkflow(stateDir, request.id).state;
+  const accepted = await acceptWorkflowIntegration(
+    stateDir,
+    request.id,
+    before.revision,
+  );
+  assert.equal(accepted.status, "accepted");
+  assert.equal(
+    accepted.integration.decision.componentResults.a.acceptedResult,
+    "accept-a",
+  );
+  // Closing it again changes nothing.
+  const again = await acceptWorkflowIntegration(
+    stateDir,
+    request.id,
+    accepted.revision,
+  );
+  assert.equal(again.revision, accepted.revision);
+});
+
 const organization = readJSON(
   new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
 );

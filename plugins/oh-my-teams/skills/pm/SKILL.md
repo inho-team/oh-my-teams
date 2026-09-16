@@ -90,7 +90,7 @@ node <runtime> workflow-depth --id <workflow> --state <shared-state> --revision 
 
 task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../examples/acceptance.json) 형식으로 원래 목표의 모든 기준을 확인하고 `accept`를 기록한다. PM 수용은 구현자의 완료 주장이나 Orca accepted settlement와 다르다. 기존 사용자 위임은 재사용하지만 PR·머지·배포·외부 발송 권한을 acceptance 기록에서 새로 만들지 않는다.
 
-다중 작업은 [`../../examples/workflow.json`](../../examples/workflow.json)처럼 workflow 전체 budget과 동시 실행·review 대기 한도를 먼저 정한다. **task가 둘 이상이면 같은 요청에 `integrationTask`를 반드시 포함한다.** 통합은 자동으로 필수가 되는데 생성 뒤에는 추가할 수 없어, 빠뜨리면 모든 task를 수용해도 `integration-pending`에서 닫히지 않는다. 재개 시 running attempt의 실제 실행 상태를 대조하며 상태 불명은 새 worker를 만드는 근거가 아니다.
+다중 작업은 [`../../examples/workflow.json`](../../examples/workflow.json)처럼 workflow 전체 budget과 동시 실행·review 대기 한도를 먼저 정한다. **task가 둘 이상이면 같은 요청에 `integrationTask`를 반드시 포함한다.** 통합은 자동으로 필수가 되는데 생성 뒤에는 추가할 수 없어, 빠뜨리면 모든 task를 수용해도 `integration-pending`에서 닫히지 않는다. task가 하나이고 `integrationTask`가 없는 workflow는 통합이 필요 없으므로, 그 task가 `accepted`가 된 뒤 `--repo`·`--report` 없이 `workflow-accept`로 닫는다. 재개 시 running attempt의 실제 실행 상태를 대조하며 상태 불명은 새 worker를 만드는 근거가 아니다.
 
 실패는 `failure-classify` 결과의 next owner/action으로 보낸다. 분류는 report의 `modelProof`, `failureClass`, `grounding.grounded`, 종료 코드로 결정되므로 이 신호를 failure 파일에 그대로 옮긴다. 실행 기반이 시작을 거부한 경우에는 그 코드를 해석하지 말고 `runtime`과 `code`에 원문 그대로 적는다(`"runtime": "orca", "code": "agent_unconfigured"`). 번역은 `failure-classify`가 수행한다. 신호가 없으면 `unknown`으로 떨어져 재시도까지 막힌다. 재시도 가능한 실패도 `workflow-retry`에 해결 근거를 기록하고 기존 attempt·전체 예산을 유지한다. `resolvedBy`는 분류가 지정한 `nextOwner`와 같아야 하며, `process-unknown`은 실제 종료를 확인한 뒤 `processExitConfirmed`를 함께 넣어야 재시도할 수 있다. 반복 가능한 교훈은 `lesson-record` 후보로만 저장하며 검증 없이 역할 skill을 바꾸지 않는다. 외부 이슈·알림은 명시적으로 활성화된 incident config 안에서만 받고, 중복·제안 한도·관찰 기간·무진전 중단을 적용한다.
 
