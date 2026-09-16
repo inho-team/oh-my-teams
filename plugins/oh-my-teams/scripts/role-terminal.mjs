@@ -22,6 +22,43 @@ import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
 
 const PROMPT_MARK = /[%$#>❯]\s*$/;
 
+/**
+ * Terminal width an Agy Gemini role is launched at.
+ *
+ * Orca decides that an `antigravity` terminal is idle from its screen: after
+ * the `Antigravity CLI` banner it needs a line that starts with `gemini` and a
+ * line holding only `>`. At the width Orca opens a terminal, Agy 1.2.4 draws
+ * its logo to the left of the banner, so the model line starts with logo glyphs
+ * and the terminal never reads as idle; worker-start then refuses it. Below
+ * this width Agy draws the logo above the banner and the model line starts
+ * with the model name. A model whose name does not start with `gemini` fails
+ * Orca's check at any width, so only Gemini models are launched narrow.
+ */
+export const AGY_BANNER_COLUMNS = 44;
+
+/**
+ * Returns the shell command a role terminal types, narrowed for Agy Gemini.
+ *
+ * `stty` exists only in POSIX shells, so a Windows host keeps the plain command.
+ *
+ * @param {object} command - Result of `roleCommand`.
+ * @param {string} [platform=process.platform] - Host platform.
+ * @returns {{typed: string, columns: number | null}} Command to type, and the
+ *   width it sets or null.
+ */
+export function launchLine(command, platform = process.platform) {
+  const narrow =
+    command.provider === "agy" &&
+    /^gemini/i.test(command.modelRequested ?? "") &&
+    platform !== "win32";
+  return narrow
+    ? {
+        typed: `stty cols ${AGY_BANNER_COLUMNS}; ${command.command}`,
+        columns: AGY_BANNER_COLUMNS,
+      }
+    : { typed: command.command, columns: null };
+}
+
 /** Tag each role's tab title starts with, so PM and PL tabs are told apart. */
 export const ROLE_TITLE_TAGS = Object.freeze({
   pm: "[PM]",
@@ -322,6 +359,7 @@ async function launchOnce({
   orca,
   worktree,
   command,
+  typed,
   title,
   settleMs,
   readyMs,
@@ -339,7 +377,7 @@ async function launchOnce({
       "--title",
       title,
       "--command",
-      command.command,
+      typed,
     ],
     { execute },
   );
@@ -348,10 +386,10 @@ async function launchOnce({
 
   const until = async (budgetMs) => {
     const deadline = Date.now() + budgetMs;
-    let seen = await observe(orca, handle, command.command, execute);
+    let seen = await observe(orca, handle, typed, execute);
     while (!seen.started && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
-      seen = await observe(orca, handle, command.command, execute);
+      seen = await observe(orca, handle, typed, execute);
     }
     return seen;
   };
@@ -372,7 +410,7 @@ async function launchOnce({
     // The interface may still be drawing its header; let it settle so the
     // returned screen shows the model the caller must compare.
     await settle(orca, handle, execute);
-    seen = await observe(orca, handle, command.command, execute);
+    seen = await observe(orca, handle, typed, execute);
     if (answerTrust && trustQuestion(seen.screen)) {
       // The worktree was created for this role from the user's repository,
       // and the role already runs without approval prompts. Enter is sent
@@ -384,7 +422,7 @@ async function launchOnce({
       );
       trust = "accepted";
       await settle(orca, handle, execute);
-      seen = await observe(orca, handle, command.command, execute);
+      seen = await observe(orca, handle, typed, execute);
     }
   }
   return { handle, seen, submission, trust };
@@ -419,6 +457,8 @@ async function launchOnce({
  * @param {number} [options.settleMs=8000] - Wait before sending Enter.
  * @param {number} [options.readyMs=90000] - Wait for the agent's interface.
  * @param {number} [options.pollMs=1500] - Interval between screen reads.
+ * @param {string} [options.platform=process.platform] - Host platform, which
+ *   decides whether an Agy Gemini role is launched narrow.
  * @param {Function} [options.execute=run] - Injectable command runner.
  * @returns {Promise<object>} Handle, submission, readiness and final screen.
  * @throws {Error} When the terminal cannot be created or read.
@@ -431,6 +471,7 @@ export async function openRoleTerminal({
   settleMs = 8000,
   readyMs = 90000,
   pollMs = 1500,
+  platform = process.platform,
   execute = run,
 }) {
   assert(worktree, "role-terminal needs a worktree selector");
@@ -440,10 +481,12 @@ export async function openRoleTerminal({
   );
   const orca = selectOrcaExecutable(executable);
   const tabTitle = roleTitle(command.role, title ?? worktreeLabel(worktree));
+  const { typed, columns } = launchLine(command, platform);
   const launch = {
     orca,
     worktree,
     command,
+    typed,
     title: tabTitle,
     settleMs,
     readyMs,
@@ -490,6 +533,8 @@ export async function openRoleTerminal({
     terminal: handle,
     worktree,
     command: command.command,
+    launched: typed,
+    columns,
     permissionBypass: command.permissionBypass ?? null,
     modelRequested: command.modelRequested,
     effortRequested: command.effortRequested,

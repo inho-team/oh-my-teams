@@ -33,8 +33,10 @@ import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
 import {
+  checkTerminalIdle,
   createWorktree,
   discoverOrcaRuntime,
+  injectTask,
   startWorker,
 } from "./orca-adapter.mjs";
 import { withRuntimeSignal } from "./adapters.mjs";
@@ -100,10 +102,14 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
                [--worktree SELECTOR] [--terminal HANDLE] [--run ID]
                [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
+               [--inject-fallback "USER APPROVAL"]
                [--orca EXECUTABLE]
                (with --workflow-id, the workflow's organization snapshot is used;
                the worker's tab title starts with its role tag, e.g. [PL])
+  terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
+               (run before workflow-reserve for a reused terminal)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
+            [--text]
   role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
   role-terminal --org FILE --role ROLE --worktree SELECTOR [--title TEXT]
                 [--workflow-id ID --state DIR] [--orca EXECUTABLE]
@@ -183,7 +189,8 @@ export const ALLOWED_OPTIONS = {
     "orca",
   ],
   "runtime-discover": ["orca"],
-  "role-spec": ["org", "role", "spec", "workflow-id", "state"],
+  "role-spec": ["org", "role", "spec", "workflow-id", "state", "text"],
+  "terminal-idle-check": ["terminal", "orca"],
   "role-command": ["org", "role", "workflow-id", "state"],
   "role-terminal": [
     "org",
@@ -210,6 +217,7 @@ export const ALLOWED_OPTIONS = {
     "run",
     "retry-of",
     "title",
+    "inject-fallback",
     "workflow-id",
     "state",
     "orca",
@@ -272,6 +280,7 @@ export const REQUIRED_OPTIONS = {
   "runtime-discover": [],
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
+  "terminal-idle-check": ["terminal"],
   "role-command": ["org", "role"],
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
@@ -319,7 +328,7 @@ export function parseArgs(argv) {
     const key = rest[index];
     assert(key.startsWith("--"), `Unexpected argument: ${key}`);
     const option = key.slice(2);
-    if (["json", "apply", "force"].includes(option)) {
+    if (["json", "apply", "force", "text"].includes(option)) {
       args[option] = true;
       continue;
     }
@@ -488,6 +497,14 @@ async function startSupervisedWorker(args) {
     };
   } catch (error) {
     if (!error.signal) throw error;
+    if (
+      args["inject-fallback"] &&
+      viaTerminal &&
+      error.signal.kind === "execution-unconfigured" &&
+      error.signal.code === "timeout"
+    ) {
+      return injectFallback(args, org, run, launch, error.signal);
+    }
     error.message = `${error.message}\n${JSON.stringify(
       { signal: error.signal, receipt: error.receipt ?? null },
       null,
@@ -495,6 +512,46 @@ async function startSupervisedWorker(args) {
     )}`;
     throw error;
   }
+}
+
+// The exception path #41 asked for. An Agy terminal Orca cannot see idle is
+// refused by worker-start; with the user's approval the same task is injected
+// instead, and the result says plainly what supervision it lacks, so the
+// coordinator records it rather than improvising a format each time.
+async function injectFallback(args, org, run, launch, refusal) {
+  const approval = String(args["inject-fallback"]).trim();
+  assert(
+    approval.length >= 10,
+    "--inject-fallback takes the user's approval in words, e.g. who approved it and why",
+  );
+  const injected = await injectTask(path.resolve(args.repo), {
+    task: args.task,
+    spec: args.spec && roleSpec(org, launch.role, args.spec, run),
+    terminal: args.terminal,
+    runId: args.run,
+    executable: args.orca,
+  });
+  return {
+    via: "dispatch-inject",
+    supervised: false,
+    approval,
+    refusal,
+    ...injected,
+    workerId: injected.dispatchId,
+    liveness: "unverifiable",
+    binding: {
+      ...launchBinding(launch, {}),
+      via: "dispatch-inject",
+      modelProof: "unproven",
+      roleHeader: Boolean(args.spec),
+    },
+    limitations: [
+      "worker-list does not report this Dispatch's liveness; read the terminal to follow it",
+      "worker-release does not reclaim the terminal; close it after the task settles",
+      "the model is not proven; report the model shown on the terminal screen",
+    ],
+    ...(injected.injected ? {} : { status: "blocked" }),
+  };
 }
 
 // A workflow freezes the organization it was created with and may run fewer
@@ -653,6 +710,11 @@ async function executeCommand(args) {
       return discoverOrcaRuntime(args.orca);
     case "worker-start":
       return startSupervisedWorker(args);
+    case "terminal-idle-check":
+      return checkTerminalIdle(args.terminal, {
+        executable: args.orca,
+        cwd: process.cwd(),
+      });
     case "role-spec":
       return (({ org, run }) => ({
         role: args.role,
@@ -901,6 +963,12 @@ export async function main(argv = process.argv.slice(2)) {
   validateArgs(args);
   const output = await executeCommand(args);
   if (output === undefined) return;
+  // The spec goes straight into task-create; printed as JSON it arrived there
+  // escaped, quotes and all (#41).
+  if (args.command === "role-spec" && args.text) {
+    console.log(output.spec);
+    return;
+  }
   console.log(JSON.stringify(output, null, 2));
   if (blockingOutcome(output)) process.exitCode = 1;
 }

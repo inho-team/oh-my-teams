@@ -457,6 +457,94 @@ async function assertTerminalIdle(orca, terminal, { cwd, execute }) {
 }
 
 /**
+ * Checks, without creating anything, that a terminal reports `tui-idle`.
+ *
+ * worker-start runs the same check, but a coordinator reserves the attempt
+ * before calling it, and a released reservation keeps the attempt spent. Run
+ * first, this check refuses a terminal Orca cannot hand work to before any
+ * attempt is reserved.
+ *
+ * @param {string} terminal - Terminal handle to check.
+ * @param {object} [options={}] - Executable, cwd, and injectable runner.
+ * @returns {Promise<{terminal: string, idle: true}>} The idle terminal.
+ * @throws {Error} Carrying the translated signal when the terminal is not idle.
+ */
+export async function checkTerminalIdle(
+  terminal,
+  { executable, cwd, execute = run } = {},
+) {
+  assert(terminal, "A terminal handle is required");
+  const selected = selectOrcaExecutable(executable);
+  await assertTerminalIdle(selected, terminal, { cwd, execute });
+  return { terminal, idle: true };
+}
+
+/**
+ * Hands a task to a terminal with `dispatch --inject`, outside supervision.
+ *
+ * This is the exception path for a role whose terminal Orca cannot supervise,
+ * used only with the user's recorded approval. Orca types the task into the
+ * terminal but owns no worker: `worker-list` does not report its liveness,
+ * `worker-release` does not reclaim it, and nothing proves the model.
+ *
+ * @param {string} repo - Coordinator worktree the commands run from.
+ * @param {object} options - Task or spec, terminal, run, and runner.
+ * @param {string} [options.task] - Existing Orca task to dispatch.
+ * @param {string} [options.spec] - Task description when no task is given.
+ * @param {string} options.terminal - Terminal to inject into.
+ * @param {string} [options.runId] - Run the task belongs to.
+ * @param {string} [options.executable] - Orca executable to use.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<object>} Task, Dispatch and whether Orca injected it.
+ * @throws {Error} When Orca refuses the task or the dispatch.
+ */
+export async function injectTask(
+  repo,
+  { task, spec, terminal, runId, executable, execute = run },
+) {
+  assert(
+    Boolean(task) !== Boolean(spec),
+    "Inject needs exactly one of task or spec",
+  );
+  assert(terminal, "Inject needs a terminal");
+  const selected = selectOrcaExecutable(executable);
+  const runArgs = runId ? ["--run", runId] : [];
+  let taskId = task;
+  if (!taskId) {
+    const created = await runOrcaJson(
+      selected,
+      ["orchestration", "task-create", "--spec", spec, ...runArgs],
+      { cwd: repo, execute },
+    );
+    taskId = created.result?.task?.id;
+    assert(taskId, "Orca task-create returned no task id");
+  }
+  const dispatched = await runOrcaJson(
+    selected,
+    [
+      "orchestration",
+      "dispatch",
+      "--task",
+      taskId,
+      "--to",
+      terminal,
+      "--inject",
+      ...runArgs,
+    ],
+    { cwd: repo, execute },
+  );
+  const dispatch = dispatched.result?.dispatch;
+  assert(dispatch?.id, "Orca dispatch returned no dispatch id");
+  return {
+    taskId,
+    dispatchId: dispatch.id,
+    runId: dispatch.run_id ?? runId ?? null,
+    terminal,
+    injected: dispatched.result?.injected === true,
+  };
+}
+
+/**
  * Starts one supervised Orca worker and returns a port-shaped receipt.
  *
  * Orca exits non-zero for `failed` and `outcome_unknown` while still returning
