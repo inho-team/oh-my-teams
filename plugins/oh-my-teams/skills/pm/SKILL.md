@@ -15,7 +15,7 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 
 - 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 사용자 결정을 요청한다.
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
-- `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
+- `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
 - 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-terminal`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 터미널이 idle 신호를 보고하지 않아 `worker-start`가 호출 전에 거부하면 반복하거나 `dispatch --inject`로 우회하지 않고 멈춰 보고한다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
@@ -92,6 +92,19 @@ node <runtime> workflow-depth --id <workflow> --state <shared-state> --revision 
 task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../examples/acceptance.json) 형식으로 원래 목표의 모든 기준을 확인하고 `accept`를 기록한다. PM 수용은 구현자의 완료 주장이나 Orca accepted settlement와 다르다. 기존 사용자 위임은 재사용하지만 PR·머지·배포·외부 발송 권한을 acceptance 기록에서 새로 만들지 않는다.
 
 다중 작업은 [`../../examples/workflow.json`](../../examples/workflow.json)처럼 workflow 전체 budget과 동시 실행·review 대기 한도를 먼저 정한다. **task가 둘 이상이면 같은 요청에 `integrationTask`를 반드시 포함한다.** 통합은 자동으로 필수가 되는데 생성 뒤에는 추가할 수 없어, 빠뜨리면 모든 task를 수용해도 `integration-pending`에서 닫히지 않는다. task가 하나이고 `integrationTask`가 없는 workflow는 통합이 필요 없으므로, 그 task가 `accepted`가 된 뒤 `--repo`·`--report` 없이 `workflow-accept`로 닫는다. 재개 시 running attempt의 실제 실행 상태를 대조하며 상태 불명은 새 worker를 만드는 근거가 아니다.
+
+필수 검토가 `changes-requested`나 `inconclusive`로 끝나거나 열린 finding을 남기면, 그것은 실패가 아니므로 `workflow-retry`가 아니라 검토 반려 루프로 처리한다.
+
+1. 반려한 검토의 finding을 구현 역할에게 그대로 넘겨 같은 워크트리에서 고치게 한다. 새 Orca Dispatch를 만들면 그 receipt를 받는다.
+2. `workflow-rework`로 그 receipt를 현재 attempt에 연결한다. 입력은 `eventId`, `taskId`, 현재 `attemptId`, 반려한 검토의 `reviewId`, 수정 실행의 `receipt`다. 런타임은 그 검토가 이 task의 현재 실행을 검토했는지, attempt의 호출 한도가 남았는지 확인하며, 새 attempt를 쓰지 않는다. 한도가 남지 않았으면 거부되므로 사용자에게 예산 결정을 받는다.
+3. 수정 실행이 끝나면 `workflow-settle`로 정산하고, 검토자가 **수정 실행의 ID**를 `implementationExecutionId`로 적어 다시 검토한다. 앞선 검토의 finding은 같은 `id`에 `resolved`와 `resolution`을 적어 닫는다. 생략하면 열린 채로 남는다.
+4. `accept` 뒤 `workflow-resume`을 실행하면 수정 실행의 gate가 task를 `accepted`로 올린다.
+
+```text
+node <runtime> workflow-rework --id <workflowId> --state <coordinator>/.omt --revision <n> --rework <rework.json>
+```
+
+workflow 밖에서 수정을 진행하고 로그 파일에만 경위를 남기지 않는다. 그렇게 하면 gate가 수용되어도 task는 `submitted`에 머문다.
 
 실패는 `failure-classify` 결과의 next owner/action으로 보낸다. 분류는 report의 `modelProof`, `failureClass`, `grounding.grounded`, 종료 코드로 결정되므로 이 신호를 failure 파일에 그대로 옮긴다. 실행 기반이 시작을 거부한 경우에는 그 코드를 해석하지 말고 `runtime`과 `code`에 원문 그대로 적는다(`"runtime": "orca", "code": "agent_unconfigured"`). 번역은 `failure-classify`가 수행한다. 신호가 없으면 `unknown`으로 떨어져 재시도까지 막힌다. 재시도 가능한 실패도 `workflow-retry`에 해결 근거를 기록하고 기존 attempt·전체 예산을 유지한다. `resolvedBy`는 분류가 지정한 `nextOwner`와 같아야 하며, `process-unknown`은 실제 종료를 확인한 뒤 `processExitConfirmed`를 함께 넣어야 재시도할 수 있다. 반복 가능한 교훈은 `lesson-record` 후보로만 저장하며 검증 없이 역할 skill을 바꾸지 않는다. 외부 이슈·알림은 명시적으로 활성화된 incident config 안에서만 받고, 중복·제안 한도·관찰 기간·무진전 중단을 적용한다.
 

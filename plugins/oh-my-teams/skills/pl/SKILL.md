@@ -75,7 +75,7 @@ node <runtime> verify --task <integration-task.json> --repo <integration-worktre
 node <runtime> merge-check --evidence <evidence.json> --task <coordinator-integration-task.json> --repo <integration-worktree> --base origin/main --report <report.json> --state <shared-state>
 ```
 
-task v1의 `merge-check`는 review gate를 조회하지 않고 통과시키므로, v1 경로에서는 report의 `issues`를 직접 확인한다. task v2는 구현 report가 `submitted`인 뒤 `review-record`와 `gate-check`를 거친다. 모든 필수 review와 PM acceptance가 source/task hash에 연결되기 전에는 `merge-check`가 거부된다. v1의 문자열 `issues`는 호환 입력이며 구조화된 review 완료로 자동 승격하지 않는다.
+task v1의 `merge-check`는 review gate를 조회하지 않고 통과시키므로, v1 경로에서는 report의 `issues`를 직접 확인한다. task v2는 구현 report가 `submitted`인 뒤 `review-record`와 `gate-check`를 거친다. 검토가 반려되면 PM 스킬의 「완료 판단」에 적힌 검토 반려 루프(`workflow-rework`)로 수정 실행을 같은 attempt에 연결한다. 모든 필수 review와 PM acceptance가 source/task hash에 연결되기 전에는 `merge-check`가 거부된다. v1의 문자열 `issues`는 호환 입력이며 구조화된 review 완료로 자동 승격하지 않는다.
 
 여러 task는 `workflow-create`로 dependency DAG와 전체 호출/attempt 예산을 고정한다. `workflow-resume`의 `dispatch-ready`만 배정하고, 실제 Execution/Run/Task/Dispatch/worktree ID 다섯 개를 모두 받은 뒤 `workflow-attach`로 attempt에 연결한다. 하나라도 비면 receipt가 거부된다. 재개 시 running attempt는 현재 Orca 가이드로 조회한 관측값을 제공하기 전까지 `reconcile-required`이며 중복 생성하지 않는다. settlement event ID는 중복 제거되고 다른 attempt의 늦은 결과는 현재 작업을 완료시키지 않는다.
 

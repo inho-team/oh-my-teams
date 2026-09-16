@@ -1,6 +1,7 @@
 /** The review record format reaches the reviewer, so nobody rewrites a review. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { validateReviewInput } from "../plugins/oh-my-teams/scripts/gates.mjs";
@@ -60,4 +61,25 @@ test("the reviewer's own instructions carry the record format", () => {
   assert.match(spec, /`review-record`의 입력 형식으로 직접 작성한다/);
   assert.match(spec, /`status`\(`open`·`resolved`·`accepted-risk`\)/);
   assert.match(spec, /review\.changes-requested\.json/);
+});
+
+test("every role's instructions keep scratch files out of the worktree", () => {
+  // #38: Junior and Senior left node_modules, package.json and scratch scripts
+  // in the report worktree, and untracked files change verify's fingerprint.
+  const org = example("organization.json");
+  for (const role of ["pl", "senior", "junior", "intern"]) {
+    assert.match(
+      roleSpec(org, role, "작업"),
+      /워크트리 밖의 임시 디렉터리에서 만든다/,
+    );
+  }
+});
+
+test("the PM skill runs a rejected review through workflow-rework", () => {
+  const read = (file) =>
+    fs.readFileSync(path.resolve("plugins/oh-my-teams/skills", file), "utf8");
+  const pm = read("pm/SKILL.md");
+  assert.match(pm, /node <runtime> workflow-rework --id/);
+  assert.match(pm, /retry`가 아니라 검토 반려 루프/);
+  assert.match(read("pl/SKILL.md"), /workflow-rework/);
 });
