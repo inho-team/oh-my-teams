@@ -1,6 +1,6 @@
 {
   "name": "oh-my-teams",
-  "version": "2.1.3+codex.20260916143455",
+  "version": "2.1.4+codex.20260916211848",
   "description": "oh my teams: an agent organization with role subscriptions and reusable evidence, running on Orca.",
   "author": {
     "name": "inho-team"
