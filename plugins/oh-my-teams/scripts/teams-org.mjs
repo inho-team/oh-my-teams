@@ -15,11 +15,13 @@ import {
 import {
   assertWorktreeUnshared,
   launchBinding,
+  selectedWorktreePath,
   resolveRoleLaunch,
   roleCommand,
   roleSpec,
 } from "./role-launch.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
+import { assertNotKickoffOwner, deliverKickoff } from "./delivery.mjs";
 import {
   openRoleTerminal,
   pinTerminalTitle,
@@ -83,6 +85,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   kickoff-bind --org FILE --worktree ID --run ID
   kickoff-release --org FILE --worktree ID
                   --reason completed|disbanded|taken-over [--force]
+  deliver --org FILE --worktree ID --source DIR --head SHA
+          --evidence FILE --task TRUSTED_TASK [--report FILE --state DIR]
+          (merges a verified kickoff result into the branch its claim recorded;
+          run by the declaring session in close)
   prepare --org FILE --task FILE --repo DIR --name NAME [--orca EXECUTABLE]
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
@@ -148,6 +154,16 @@ export const ALLOWED_OPTIONS = {
   "kickoff-show": ["org", "worktree"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
+  deliver: [
+    "org",
+    "worktree",
+    "source",
+    "head",
+    "evidence",
+    "task",
+    "report",
+    "state",
+  ],
   prepare: ["org", "task", "repo", "name", "orca"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
@@ -234,6 +250,7 @@ export const REQUIRED_OPTIONS = {
   "kickoff-show": ["org"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason"],
+  deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
@@ -415,7 +432,11 @@ async function startSupervisedWorker(args) {
     { ...run, terminal: args.terminal },
   );
   // `new-child` makes a worktree nobody works in yet, so only a named or
-  // current worktree can belong to another role's task.
+  // current worktree can belong to another role's task or to the owner.
+  assertNotKickoffOwner(
+    selectedWorktreePath(args.worktree ?? "current", args.repo) ?? args.repo,
+    `starting ${launch.role}`,
+  );
   assertWorktreeUnshared(
     run.workflowState,
     launch.role,
@@ -516,6 +537,9 @@ async function attachExistingWorkspace(args) {
 
 async function mergeCheck(args) {
   const repo = path.resolve(args.repo);
+  // The owner branch is merged only by deliver; a gate passing there would
+  // read as permission to merge a worker's result into it directly.
+  assertNotKickoffOwner(repo, "merge-check");
   const task = validateTask(readJSON(args.task));
   await validateEvidence(repo, readJSON(args.evidence), args.base, task);
   if (task.schemaVersion === 2) {
@@ -581,6 +605,14 @@ async function executeCommand(args) {
         worktreeId: args.worktree,
         runId: args.run,
       });
+    case "deliver":
+      return deliverKickoff({
+        orgFile: args.org,
+        worktreeId: args.worktree,
+        source: args.source,
+        head: args.head,
+        gate: ({ source, base }) => mergeCheck({ ...args, repo: source, base }),
+      });
     case "kickoff-release":
       return releaseKickoff(args.org, {
         worktreeId: args.worktree,
@@ -627,6 +659,8 @@ async function executeCommand(args) {
     case "role-terminal":
       return (({ org, run }) => {
         const command = roleCommand(org, args.role, run);
+        const target = selectedWorktreePath(args.worktree, process.cwd());
+        if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
         assertWorktreeUnshared(
           run.workflowState,
           command.role,

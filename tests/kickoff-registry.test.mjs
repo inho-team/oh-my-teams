@@ -44,6 +44,8 @@ function claimFor(fixture, worktreeId) {
     },
     organizationRevision: readJSON(fixture.org).revision,
     brief: fixture.brief,
+    // These tests are about the registry itself; delivery has its own tests.
+    delivery: { mode: "none" },
   };
 }
 

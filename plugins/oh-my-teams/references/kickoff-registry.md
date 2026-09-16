@@ -10,7 +10,7 @@
 
 등록부는 `organization.json`이 있는 **원본 프로젝트**의 `.omt/kickoffs/<해시>.json`이다. Orca 워크트리 ID는 `<repoId>::<워크트리 경로>` 형식이라 `:`와 `/`를 포함하므로 파일 이름으로 쓸 수 없다. 그래서 런타임은 ID의 SHA-256 해시로 파일 이름을 정하고, 원래 ID는 항목 안의 `coordinator.worktreeId`에 그대로 보관한다. 해시에는 경로 구분자나 `..`가 들어가지 않으므로 어떤 ID를 받아도 항목이 등록부 밖에 쓰이지 않는다. 해시를 도입하기 전에 ID를 그대로 파일 이름으로 쓴 항목도 계속 조회·종료할 수 있다. `.omt/`는 Git에서 제외되고 워크트리마다 별개의 디렉터리이므로, coordinator 워크트리 안에 두면 종료를 수행하는 세션이 읽지 못한다. 런타임은 `--org`로 받은 조직 파일과 같은 자리에서만 등록부를 찾는다.
 
-등록을 요청할 때 작성하는 파일은 다음 네 항목만 담는다. `createdAt`은 런타임이 채우고, `runId`는 뒤따르는 `kickoff-bind`가 채운다.
+등록을 요청할 때 작성하는 파일은 다음 다섯 항목만 담는다. `createdAt`은 런타임이 채우고, `runId`는 뒤따르는 `kickoff-bind`가 채운다.
 
 ```json
 {
@@ -21,15 +21,25 @@
     "stateDir": "<coordinator 워크트리>/.omt"
   },
   "organizationRevision": 3,
-  "brief": "<브리프 파일 절대 경로>"
+  "brief": "<브리프 파일 절대 경로>",
+  "delivery": { "mode": "local-merge", "branch": "main" }
 }
 ```
+
+`delivery`는 브리프에 사용자가 확정한 전달 방식을 그대로 옮긴 값이며, 종료할 때 원본 프로젝트(주인 체크아웃)에 결과를 넣는 허가로 쓰인다. `mode`는 다음 셋 중 하나다.
+
+| `mode` | 뜻 | `branch` |
+|---|---|---|
+| `local-merge` | `close`에서 `deliver`로 주인 체크아웃의 브랜치에 병합한다. 원격 저장소가 없거나 브리프가 로컬 커밋을 요구할 때 쓴다. | 병합할 브랜치, 필수 |
+| `pull-request` | 그 브랜치를 base로 PR/MR을 만들어 병합한다. | PR의 base 브랜치, 필수 |
+| `none` | 주인 체크아웃에 병합하지 않는다. | 기록하지 않는다 |
 
 런타임은 다음 경우에 등록을 거부한다.
 
 - 같은 워크트리가 이미 다른 kickoff를 감독하고 있을 때. coordinator 세션 하나는 Goal 하나를 소유하고 Run 하나를 바인딩하므로, 두 번째 kickoff에는 감독할 주체가 없다. 새 coordinator 워크트리를 만든다.
 - 브리프 파일이 실제로 없을 때. coordinator는 부모 대화 대신 이 파일을 읽고 시작한다.
 - `organizationRevision`이 현재 조직 revision과 다를 때. 오래된 조직 스냅샷으로 팀을 띄우지 않게 한다.
+- `delivery`가 없거나, `mode`가 세 값이 아니거나, `local-merge`·`pull-request`인데 `branch`가 없을 때. 전달 허가가 기록되지 않은 kickoff는 종료할 때 무엇을 병합해도 되는지 알 수 없다.
 
 단일 kickoff 시절의 `.omt/active-kickoff.json`이 남아 있으면 등록부를 처음 읽거나 쓸 때 그 coordinator의 항목으로 옮겨지므로, 그 kickoff도 그대로 종료할 수 있다.
 
@@ -42,9 +52,22 @@ node <runtime> kickoff-show --org <project>/.omt/organization.json
 node <runtime> kickoff-claim --org <project>/.omt/organization.json --from <claim.json>
 node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <id> --run <runId>
 node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <id> --reason completed
+node <runtime> deliver --org <project>/.omt/organization.json --worktree <id> --source <통합 워크트리> --head <검증한 HEAD> --evidence <evidence.json> --task <task.json> [--report <report.json> --state <state>]
 ```
 
-`kickoff-show`는 등록된 kickoff 전체를 돌려주며, `--worktree`를 주면 그 coordinator의 항목만 돌려준다. `kickoff-bind`는 같은 `runId`를 다시 넣는 호출은 그대로 성공하지만 다른 Run을 넣으면 거부한다. 수신 확인을 놓친 재실행과 Run이 둘로 갈라지는 상황은 서로 다른 사건이기 때문이다. `kickoff-release`의 `--reason`은 `completed`, `disbanded`, `taken-over` 가운데 하나이며, 다른 kickoff의 항목은 건드리지 않는다.
+`kickoff-show`는 등록된 kickoff 전체를 돌려주며, `--worktree`를 주면 그 coordinator의 항목만 돌려준다. `kickoff-bind`는 같은 `runId`를 다시 넣는 호출은 그대로 성공하지만 다른 Run을 넣으면 거부한다. 수신 확인을 놓친 재실행과 Run이 둘로 갈라지는 상황은 서로 다른 사건이기 때문이다. `kickoff-release`의 `--reason`은 `completed`, `disbanded`, `taken-over` 가운데 하나이며, 다른 kickoff의 항목은 건드리지 않는다. `deliver`는 `delivery.mode`가 `local-merge`인 kickoff만 병합하고, 병합한 HEAD와 주인 브랜치의 병합 커밋을 항목의 `delivered`에 남긴다. `local-merge` kickoff는 `delivered`가 없으면 `--reason completed`로 해제되지 않으며, 사용자가 전달 없이 닫기로 결정한 경우에만 `--force`를 붙인다.
+
+## 주인 체크아웃과 병합
+
+원본 프로젝트, 즉 `organization.json`과 등록부가 있는 체크아웃은 kickoff의 **주인 체크아웃**이다. kickoff의 워크트리끼리 합치는 병합은 팀 내부 작업이므로 PM·PL이 게이트를 통과시킨 뒤 자유롭게 진행한다. 주인 체크아웃으로 들어가는 병합만 `close`에서 선언 세션이 `delivery`에 기록된 방식으로 수행한다.
+
+런타임은 이 경계를 다음과 같이 강제한다. 판단 기준은 그 체크아웃의 `.omt/kickoffs`에 진행 중인 kickoff가 있는지이며, kickoff 워크트리는 자기 등록부가 없으므로 주인으로 오인되지 않는다.
+
+- `merge-check`는 주인 체크아웃을 `--repo`로 받으면 거부한다. 게이트는 통합 워크트리에서 실행한다.
+- `role-terminal`과 `worker-start`는 주인 체크아웃에서 역할을 띄우는 요청을 거부한다. 역할이 주인 체크아웃에서 일하면 그 커밋이 곧바로 주인 브랜치에 쌓이기 때문이다.
+- `deliver`는 통합 워크트리가 검증한 HEAD에 그대로 있는지, 주인 체크아웃이 기록된 브랜치이고 커밋되지 않은 변경이 없는지 확인하고, 병합 직전에 `merge-check`를 다시 실행한다. 충돌하면 병합을 되돌리고 실패로 보고하므로 주인 브랜치가 반쯤 병합된 채 남지 않는다.
+
+이 검사는 런타임을 거치는 병합만 막는다. 역할이 주인 체크아웃에서 `git merge`나 `git commit`을 직접 실행하는 것은 막지 못하므로, 역할 스킬과 지시문도 같은 금지를 적는다.
 
 ## 두 세션의 역할
 

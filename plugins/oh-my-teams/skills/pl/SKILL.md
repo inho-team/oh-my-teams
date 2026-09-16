@@ -19,7 +19,7 @@ PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분�
 - Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-terminal`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 터미널이 idle 신호를 보고하지 않아 `worker-start`가 호출 전에 거부하면 반복하거나 `dispatch --inject`로 우회하지 않고 PM에게 보고한다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
 - Orca의 `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`와 `supervision-next`로 하위 worker를 감독하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `prepare`, `prepare-input`, `attach-workspace`, `work`로 Intern 하네스를 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
-- 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. PR 생성과 머지는 사용자가 허가한 범위에서 아래 「머지와 회수」 절차로 진행한다.
+- 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. kickoff 워크트리 사이의 병합은 게이트를 통과시킨 뒤 별도 허가 없이 진행하고, 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않는다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 조사와 점검 목록 초안에 쓴다.
 
 ### 책임
@@ -87,6 +87,6 @@ task v1의 `merge-check`는 review gate를 조회하지 않고 통과시키므�
 
 ## 머지와 회수
 
-사용자의 머지 권한이 있는 경우에만 실제 PR을 머지한다. 최신 remote base와 PR HEAD를 조회하고, 통합 검증 결과와 일치하는지 확인한다. `gh pr merge --match-head-commit <verified-pr-head>` 등 현재 설치된 도구가 지원하는 HEAD 제한을 사용한다. base 변경이나 경쟁 머지로 검증 전제가 달라지면 새 통합 검사 후 진행한다. 머지 뒤 실제 착지 커밋을 확인한다.
+주인 체크아웃으로의 전달은 선언 세션이 `close`에서 브리프의 전달 방식으로 수행하며, PL은 그 입력이 될 통합 워크트리와 검증한 HEAD를 준비한다. 전달 방식이 `pull-request`여서 PR을 머지할 때에만 다음을 따른다. 최신 remote base와 PR HEAD를 조회하고, 통합 검증 결과와 일치하는지 확인한다. `gh pr merge --match-head-commit <verified-pr-head>` 등 현재 설치된 도구가 지원하는 HEAD 제한을 사용한다. base 변경이나 경쟁 머지로 검증 전제가 달라지면 새 통합 검사 후 진행한다. 머지 뒤 실제 착지 커밋을 확인한다.
 
 부모 보고에는 작업 ID·검증 키·변경 요약·실패/미해결 사항·원본 경로만 올린다. 전체 로그를 단계마다 다시 붙이지 않는다. accepted settlement 후 Orca worker-release를 사용하고, 워크트리 삭제는 코드와 증거가 보존되고 프로세스 종료가 입증된 경우에만 한다. 강제 종료/자동 clean/reset으로 실패 증거를 버리지 않는다.
