@@ -14,6 +14,7 @@ import {
   openRoleTerminal,
   roleTitle,
   trustQuestion,
+  untouchedShell,
   workerTerminal,
   worktreeLabel,
 } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
@@ -24,8 +25,12 @@ const PROMPT = "me@host project %";
 
 // Plays Orca's terminal verbs; the last screen repeats once the script ends.
 // Each create issues the next handle, `closeFails` makes close refuse, and
-// `terminals` is what list reports for the worktree.
-function fakeOrca(screens, { closeFails = false, terminals = [] } = {}) {
+// `terminals` is what list reports for the worktree, and `screens` by handle
+// gives other terminals' screens.
+function fakeOrca(
+  screens,
+  { closeFails = false, terminals = [], screens: others = {} } = {},
+) {
   const calls = [];
   let created = 0;
   const execute = async (argv) => {
@@ -43,6 +48,8 @@ function fakeOrca(screens, { closeFails = false, terminals = [] } = {}) {
     // An idle shell satisfies tui-idle too, so the wait decides nothing.
     if (verb === "wait") return reply({ wait: { satisfied: true } });
     if (verb === "read") {
+      const other = others[argv[argv.indexOf("--terminal") + 1]];
+      if (other) return reply({ terminal: { tail: other } });
       const tail = screens.length > 1 ? screens.shift() : screens[0];
       return reply({ terminal: { tail } });
     }
@@ -234,22 +241,28 @@ test("a ready role tab is renamed with its role tag after the agent starts", asy
   assert.equal(unnamed.titlePinned, false);
 });
 
-test("the worktree's untitled plain shell is named, other tabs are not", async () => {
+test("the worktree's unused plain shell is closed, other tabs are not", async () => {
   // The literacy-test coordinator worktree held the PM tab and an untitled
-  // shell that `worktree create` opened, with nothing saying which was PM.
+  // shell that `worktree create` opened. Renaming that shell did not last:
+  // Orca kept `Terminal 1` for a tab it had not shown.
   const command = roleCommand(example(), "pm");
-  const orca = fakeOrca(
-    [[`${PROMPT} ${command.command}`, "Claude Code", "❯"]],
-    {
-      terminals: [
-        { handle: "term_1", title: "✳ Claude Code", agentIdentity: "claude" },
-        { handle: "term_shell", title: null },
-        { handle: "term_default", title: "Terminal 3" },
-        { handle: "term_named", title: "dev server" },
-        { handle: "term_agent", title: "Terminal 4", agentIdentity: "codex" },
-      ],
-    },
-  );
+  const agent = [`${PROMPT} ${command.command}`, "Claude Code", "❯"];
+  const screens = {
+    term_shell: [PROMPT, ""],
+    term_default: [PROMPT],
+    term_used: [`${PROMPT} npm run dev`, "ready on :5173"],
+  };
+  const orca = fakeOrca([agent], {
+    terminals: [
+      { handle: "term_1", title: "✳ Claude Code", agentIdentity: "claude" },
+      { handle: "term_shell", title: null },
+      { handle: "term_default", title: "Terminal 3" },
+      { handle: "term_used", title: "Terminal 4" },
+      { handle: "term_named", title: "dev server" },
+      { handle: "term_agent", title: "Terminal 5", agentIdentity: "codex" },
+    ],
+    screens,
+  });
   const opened = await openRoleTerminal({
     worktree: "id:repo::/work/literacy-site-research-2",
     command,
@@ -257,15 +270,19 @@ test("the worktree's untitled plain shell is named, other tabs are not", async (
     ...fast,
   });
   assert.equal(opened.title, "[PM] literacy-site-research-2");
-  assert.deepEqual(opened.shellsLabeled, ["term_shell", "term_default"]);
+  assert.deepEqual(opened.shellsClosed, ["term_shell", "term_default"]);
   assert.deepEqual(
-    orca.renames().map((call) => [call[3], call[5]]),
-    [
-      ["term_1", "[PM] literacy-site-research-2"],
-      ["term_shell", "[shell] literacy-site-research-2"],
-      ["term_default", "[shell] literacy-site-research-2"],
-    ],
+    orca.closes().map((call) => call[3]),
+    ["term_shell", "term_default"],
   );
+  // Only the role terminal is renamed; no shell is.
+  assert.deepEqual(
+    orca.renames().map((call) => call[3]),
+    ["term_1"],
+  );
+  assert.equal(untouchedShell([PROMPT]), true);
+  assert.equal(untouchedShell([`${PROMPT} ls`, "README.md", PROMPT]), false);
+  assert.equal(untouchedShell([]), false);
 });
 
 test("role titles lead with the role tag and name the worktree", () => {
