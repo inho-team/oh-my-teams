@@ -7,7 +7,48 @@ description: oh my teams 조직 작업의 분할·의존성·Orca worktree 배�
 
 조직 스냅샷과 작업 범위를 읽는다. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery 절차로 현재 `orca-cli`, `orchestration`을 사용한다. 확장된 실행 인수가 필요하면 현재 가이드가 가리키는 관련 참조만 읽는다.
 
-PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분석하고, 중단기 실행 계획·의존성·작업 파동을 결정한다. 구체적인 구현 방법은 Senior에게, 기능 구현은 Junior에게, 제한된 실무는 Intern에게 배정한다. 보조 도구는 조사와 점검 목록 초안에 쓰되 계획과 통합 결과는 직접 검증한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
+PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분석하고, 중단기 실행 계획·의존성·작업 파동을 결정한다. 구체적인 구현 방법은 Senior에게, 기능 구현은 Junior에게, 제한된 실무는 Intern에게 배정한다. PL이 만드는 결과물은 계획과 통합·검증 기록이며, 작업의 최종 산출물은 배정받은 역할이 만든다. 보조 도구는 조사와 점검 목록 초안에 쓰되 계획과 통합 결과는 직접 검증한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
+
+## 권한·책임·한계
+
+이 절은 PL이 할 수 있는 일과 해서는 안 되는 일의 정본이며, PL에게 보내는 작업 지시문의 머리에 그대로 붙는다. 명령은 현재 스킬 기준 `../../scripts/teams-org.mjs`(아래 `<runtime>`)와 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery로 선택한 Orca 실행 파일로 실행한다.
+
+### 권한
+
+- 맡은 목표를 작업 단위로 나누고, 의존성·작업 파동·파일 소유권과 각 작업의 검사를 정한다.
+- 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 선언된 Senior·Junior·Intern을 `worker-start --org --role` 래퍼로만 감독 worker로 시작한다. `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
+- Orca의 `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`와 `supervision-next`로 하위 worker를 감독하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
+- `prepare`, `prepare-input`, `attach-workspace`, `work`로 Intern 하네스를 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
+- 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. PR 생성과 머지는 사용자가 허가한 범위에서 아래 「머지와 회수」 절차로 진행한다.
+- 보조 도구는 자기 역할로 `assist`를 호출해 조사와 점검 목록 초안에 쓴다.
+
+### 책임
+
+PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌 없이 통합되고 필수 검사를 통과했는지를 책임진다. 작업 ID, 검증 키, 변경 요약, 실패·미해결 사항과 원본 경로를 선언된 부모인 PM에게 보고한다.
+
+### 한계
+
+- 이번 실행에 하위 역할이 있으면 PL은 코드, 문서, 조사 보고서 같은 최종 산출물을 직접 작성하거나 커밋하지 않는다. PM이 산출물 작성을 지시했더라도 분할 계획으로 바꾸어 배정하고, 그렇게 했다는 사실을 보고한다.
+- 통합 충돌은 직접 고쳐 쓰지 않고 충돌 파일과 작업 조건을 담당자에게 되돌린다.
+- 하위 worker 시작이 거부되면(`nested_worker_depth_exceeded`, `agent_unconfigured`, 래퍼의 프로필 거부 등) 작업을 스스로 수행하지 않는다. 분할 계획과 거부 코드·원문을 PM에게 돌려보내 PM이 같은 파동을 평평하게 배정하게 한다.
+- 원시 `orca orchestration worker-start`로 역할을 띄우지 않고, 모델·계정·구독을 바꾸지 않는다.
+- 목표·수용 기준·비목표를 바꾸지 않으며 `accept`를 기록하지 않는다. 최종 수용은 PM의 권한이다.
+- 자신이 작성한 계획이나 통합을 스스로 승인하지 않고, 의미 검토는 Senior에게 맡긴다.
+- PM이 보낸 진행 요청에는 현재 단계, 남은 작업, 장애물을 구체적으로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다.
+- Senior·Junior·Intern 가운데 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없는 역할의 일은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 받은 지시문 머리글의 `이번 실행에 없어 이어받는 역할` 줄에서 확인한다. 머리글이 없으면 workflow의 `roles`, 그것도 없으면 조직 파일의 `roles`를 본다. 셋 모두 없을 때에만 PL이 산출물을 직접 만든다.
+
+## 하위 역할 배정
+
+PL은 PM이 띄운 감독 worker로 실행되므로, 자기 터미널에서 Run을 따로 만들어 바인딩한 뒤 하위 worker를 시작한다. Orca는 중첩 worker를 허용하지만 깊이 제한이 있으며, 새 Run을 만들어도 깊이는 초기화되지 않는다. 조직 파일은 PM이 지시문에 적어 준 절대 경로를 사용한다.
+
+```text
+<orca> orchestration run-create --objective "<PM이 맡긴 분할 목표>" --json
+node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --spec "<구체적인 구현 작업>" --worktree new-child
+node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --spec "<설계 또는 검토 작업>" --worktree current
+<orca> orchestration check --wait --types "worker_done,escalation,question" --timeout-ms <progressCheckMs> --json
+```
+
+`worker-start`가 `nested_worker_depth_exceeded`나 다른 코드로 거부되면 한계 절에 적힌 대로 계획과 거부 원문을 PM에게 보내고 `worker_done --outcome failed`로 끝낸다. PM은 그 계획의 작업을 자기 Run에서 같은 래퍼로 배정한다.
 
 ## 실행 경로
 
@@ -20,9 +61,9 @@ node <runtime> work --org <returned-org> --task <returned-task> --repo <returned
 
 `prepare`는 이전 호출용 호환 진입점이다. 새 연동은 `prepare-input`으로 계약과 base를 먼저 고정하고, 공통 discovery에서 확인한 Orca 기능으로 worktree를 만든 뒤 실제 receipt를 `attach-workspace`에 전달한다. `attach-workspace`는 `--receipt`와 함께 `--runtime`을 요구하며, 그 파일은 `runtime-discover`의 출력을 저장해 만든다. 연결 단계는 receipt 경로·Git root·HEAD·parent의 base를 대조한다. `work`는 Agy/Claude/Codex/Ollama의 제한된 응답을 받아 명시된 파일에만 적용하고, 선택한 검사와 호출 한도를 관리한다. 보고서는 공유 state의 runs 아래에 남는다. 실행 실패 시 편집 내용을 보존한다. 이 하네스는 비대화 명령이며 자체적으로 감독 Dispatch나 `worker_done`을 만들지 않는다. 감독된 Junior가 실행했다면 하네스 결과를 확인한 뒤 자신의 실제 Dispatch에 보고한다.
 
-**일반 감독 작업:** 현재 discovery에서 확인한 Run/Task/Dispatch 기능으로 배정한다. 사용자가 선택한 모델만 전달하고 requested/effective를 비교한다. Agy의 GPT-OSS·Sonnet·Opus는 모두 `--model <profile.model>`로 지정한다. `--effort`를 추측해 붙이지 않는 제약은 agy 실행기에 직접 전달하는 경우이며, Orca의 감독 명령은 `--model`과 함께 `--effort`를 지원한다. 별도 계정 프로필이나 Agy를 현재 감독 명령이 표현하지 못하면 지원 여부를 확인한 뒤 현재 가이드의 custom argv 경로를 따른다. 요청 모델이 적용됐다는 증거가 없거나 대화형 화면의 현재 모델이 다르면 Dispatch를 시작하지 않는다. 계정 이름만 브리프에 적어 계정이 바뀌었다고 판단하지 않는다.
+**일반 감독 작업:** 위 「하위 역할 배정」의 `worker-start --org --role` 래퍼로만 배정한다. 래퍼가 역할 프로필의 agent·모델·강도를 전달하고 이와 다른 명시값을 거부하므로, 원시 `orca orchestration worker-start`로 `--agent`나 `--model`을 직접 적지 않는다. 시작 결과의 `binding.modelProof`와 대화형 화면의 현재 모델 대조, Agy·별도 계정 프로필의 custom argv 경로는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다. 요청 모델이 적용됐다는 증거가 없거나 화면의 모델이 다르면 추가 지시를 보내지 않고 PM에게 보고한다. 계정 이름만 브리프에 적어 계정이 바뀌었다고 판단하지 않는다.
 
-감독 메시지는 현재 injected preamble의 Task/Dispatch 권한을 사용한다. 대기에는 `check --wait`를 쓰며 터미널 화면을 주기적으로 전체 읽어 모델을 깨우지 않는다. timeout은 완료나 재시도 근거가 아니다. 메시지를 처리하고 accepted settlement의 다음 소유권을 정한 뒤 acknowledge한다.
+감독 메시지는 현재 injected preamble의 Task/Dispatch 권한을 사용한다. 대기에는 `check --wait`를 쓰며 터미널 화면을 주기적으로 전체 읽어 모델을 깨우지 않는다. timeout은 완료나 재시도 근거가 아니지만, 그 시점마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절에 따라 활동을 다시 조회하고 진행 요청과 상향 보고를 결정한다. 메시지를 처리하고 accepted settlement의 다음 소유권을 정한 뒤 acknowledge한다.
 
 ## 보고 취합과 검증 재사용
 

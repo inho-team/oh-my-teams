@@ -784,7 +784,50 @@ export function validateOrg(org) {
       org.policy.repeatFailureLimit >= 1,
     "repeatFailureLimit required",
   );
+  validateSupervision(org.policy.supervision);
   return org;
+}
+
+/**
+ * Stall-handling values used when an organization records none.
+ *
+ * A supervisor asks a silent worker for progress after 15 minutes and escalates
+ * after two unanswered requests. Asking costs one message and escalating costs
+ * none, so the defaults spend nothing beyond what the organization already runs.
+ */
+export const SUPERVISION_DEFAULTS = Object.freeze({
+  progressCheckMs: 900000,
+  unansweredLimit: 2,
+});
+
+// Organizations saved before this policy existed carry no `supervision`, and
+// they stay valid by reading the defaults. A present block must be complete, so
+// a half-written edit is refused rather than silently merged.
+function validateSupervision(supervision) {
+  if (supervision === undefined) return;
+  assert(
+    supervision &&
+      Number.isInteger(supervision.progressCheckMs) &&
+      supervision.progressCheckMs >= 60000 &&
+      supervision.progressCheckMs <= 86400000,
+    "supervision.progressCheckMs must be 60000..86400000",
+  );
+  assert(
+    Number.isInteger(supervision.unansweredLimit) &&
+      supervision.unansweredLimit >= 1 &&
+      supervision.unansweredLimit <= 10,
+    "supervision.unansweredLimit must be 1..10",
+  );
+}
+
+/**
+ * Reads an organization's stall-handling policy, filling in the defaults.
+ *
+ * @param {object} org - Validated organization.
+ * @returns {{progressCheckMs: number, unansweredLimit: number}} Effective policy.
+ */
+export function supervisionPolicy(org) {
+  return { ...SUPERVISION_DEFAULTS, ...(org.policy?.supervision ?? {}) };
 }
 
 /**

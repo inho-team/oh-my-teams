@@ -25,7 +25,22 @@ description: 최초 oh my teams 상설 조직을 다섯 역할의 모델만 물�
 | Junior | Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-high`), Opus 4.6·Agy(`agy:claude-opus-4-6-thinking`), Codex 기본(`codex:default`) |
 | Intern | GPT-OSS 120B·Agy(`agy:gpt-oss-120b-medium`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-high`), Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Codex 기본(`codex:default`) |
 
-이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 묻기 전에 `claude`, `codex`, `agy`가 설치되어 있는지와 `agy models`에 해당 ID가 있는지 확인하고, 확인되지 않은 선택지는 빼고 제시한다. 이 배포에서 확인한 Agy 선택지는 Gemini Flash 3.8·3.7·3.6(각 high/medium/low), Gemini Pro 3.1(high/low), Claude Sonnet 4.6, Claude Opus 4.6, GPT-OSS-120B이고, Codex 카탈로그에서 확인한 선택지는 `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`다. Codex의 개별 모델은 능력 서열을 가정하지 않기 위해 선택지에 넣지 않고 자유 입력으로 받는다.
+이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 묻기 전에 `claude`, `codex`, `agy`가 설치되어 있는지와 `agy models`에 해당 ID가 있는지 확인하고, 확인되지 않은 선택지는 빼고 제시한다. 이 배포에서 확인한 Agy 선택지는 Gemini Flash 3.8·3.7·3.6(각 high/medium/low), Gemini Pro 3.1(high/low), Claude Sonnet 4.6, Claude Opus 4.6, GPT-OSS-120B다. Codex의 개별 모델은 능력 서열을 가정하지 않기 위해 선택지에 넣지 않고 자유 입력으로 받는다.
+
+### 기본 선택지가 지금 실행하는 모델
+
+`기본` 선택지는 모델을 `null`로 저장하므로, 사용자가 고르는 시점에 실제로 어떤 모델이 실행되는지 선택지만 보고는 알 수 없다. 첫 질문을 만들기 전에 다음을 실행한다. `<runtime>`은 아래 「저장」 절과 같이 해석한다.
+
+```text
+node <runtime> host-defaults --project <project>
+```
+
+- Codex는 `$CODEX_HOME/config.toml`(기본 `~/.codex/config.toml`)의 최상위 `model`을 쓰고, 없으면 `codex debug models`에서 `visibility`가 `list`인 항목 가운데 `priority`가 가장 작은 모델을 쓴다. 출력의 `codex.model`과 `codex.source`가 이 결과이고, `codex.listed`는 지금 선택할 수 있는 Codex 모델 ID 목록이다. Orca처럼 실행기가 자기 `CODEX_HOME`으로 Codex를 띄우는 환경이면 그 경로를 `--codex-home`으로 넘기고, 경로를 확인하지 못했으면 출력의 `codex.configFile`이 실제 실행과 다를 수 있다고 함께 적는다.
+- Claude는 `ANTHROPIC_MODEL`, 프로젝트와 사용자 settings의 `model` 순서로 확인한다. `claude.model`이 `null`이면 Claude Code가 정하는 모델이며, 특정 모델이라고 단정하지 않는다.
+
+각 `기본` 선택지의 설명에는 이 결과를 적는다. 예를 들어 Codex 기본은 "`codex:default`로 저장되며 지금은 gpt-6-astra가 실행됩니다. 계정 기본값이 바뀌면 함께 바뀝니다."처럼, Claude Code 기본은 settings에 모델이 있으면 같은 형식으로 그 모델을 적고, 없으면 "`claude:default`로 저장되며 Claude Code가 정한 모델이 실행됩니다. 어떤 모델인지는 확인하지 못했습니다."처럼 적는다. `codex debug models`가 실패했으면 확인하지 못했다고 적고 모델명을 추측하지 않는다.
+
+Codex 모델 목록은 카탈로그가 계정과 CLI 버전에 따라 달라지므로 이 문서에 적어 두지 않는다. 질문 본문에 `codex.listed`의 ID를 나열하고, 그 가운데 하나를 쓰려면 자유 입력으로 `codex:<id>`를 적으면 된다고 안내한다. 이 안내는 질문 본문에 넣으므로 질문 수와 선택지 수는 늘지 않고, 목록은 카탈로그 순서 그대로 적어 서열을 매기지 않는다.
 
 Gemini 모델 ID는 추론 강도를 이름에 담고 있어서 강도를 비워 둘 수 없다. 결성 단계에서는 Pro 3.1과 Flash 3.8이 공통으로 제공하는 `-high`를 사용하고, 다른 강도는 `adjust`에서 바꾼다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 역할만 다시 묻는다.
 
@@ -37,6 +52,7 @@ Gemini 모델 ID는 추론 강도를 이름에 담고 있어서 강도를 비워
 - 각 역할의 상위 역할은 서열상 바로 위 역할이고, 모든 프로필은 각 실행기의 현재 로그인 계정(`account: current`)을 쓴다. 같은 실행기의 프로필은 하나의 `pool`로 묶어, 소진이 확인된 계정을 런타임이 건너뛸 수 있게 한다.
 - 역할별 동시 인원과 시도 횟수는 1이고, 대체 프로필은 두지 않으며, 할당량이 소진되면 중단하고, 전체 호출 한도는 3이다.
 - 추론 강도(`effort`)는 기록하지 않아 각 CLI의 기본값을 쓴다. 생략했을 때의 실제 강도는 CLI와 계정 설정이 정하므로 특정 값으로 단정해 알리지 않는다.
+- 감독 역할은 `worker_done`을 보내지 않은 worker가 15분(`policy.supervision.progressCheckMs: 900000`) 동안 활동이 없으면 진행 상황을 묻고, 답이 없는 요청이 2회(`unansweredLimit: 2`)에 이르면 상위에 보고한다. 이 정책은 메시지 한 통 외에 호출을 쓰지 않으며, 재시도나 종료를 스스로 하지 않는다.
 - GPT-OSS 보조 도구 호출을 허용할지는 묻지 않고 `assistants`를 비워 둔다. 이 상태에서는 모든 역할의 `assist` 호출이 거부되므로, 필요해지면 `adjust`에서 역할별로 허용한다.
 
 로컬 Ollama 모델은 결성 단계에서 받지 않는다. 컨텍스트 창을 `ollama show`로 확인해 기록해야 하는데, 추측한 값으로 저장하면 잘린 프롬프트에 대한 답이 정상 응답처럼 보이기 때문이다. 결성 후 `adjust`에서 추가한다.
@@ -53,6 +69,6 @@ node <runtime> show --org <project>/.omt/organization.json
 
 `init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 질문을 처음부터 다시 시작하지 않는다.
 
-결성을 보고할 때에는 역할별로 배정된 모델과 함께, 위 목록에서 묻지 않고 정한 값을 짧게 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 저장된 파일의 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서 확인할 수 있다.
+결성을 보고할 때에는 역할별로 배정된 모델과 함께, 모델이 `null`인 `기본` 프로필마다 `host-defaults`를 다시 실행해 얻은 현재 해석값을 적는다. 예를 들어 "PL: Codex 기본(지금은 gpt-6-astra, 계정 기본값을 따름)"처럼 저장값과 현재 해석값을 구분하고, Claude의 해석값이 `null`이면 확인하지 못했다고 적는다. 이어서 위 목록에서 묻지 않고 정한 값을 짧게 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 저장된 파일의 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서 확인할 수 있다.
 
 `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다. 조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 kickoff 등록부가 놓이는 자리가 된다. 한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있으며, form 자체는 kickoff를 등록하지 않는다. 자세한 계약은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)에 있다.

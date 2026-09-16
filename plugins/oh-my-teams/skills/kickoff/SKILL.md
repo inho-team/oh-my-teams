@@ -19,7 +19,7 @@ node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <i
 
 `kickoff-show`에 같은 목표가 이미 있으면 새로 시작하지 않고 기록된 coordinator에서 재개한다. 다른 목표는 함께 진행해도 되지만, 같은 구독을 쓰는 kickoff가 늘면 할당량을 함께 소모한다는 점을 사용자에게 알린다. `kickoff-claim`은 같은 워크트리가 이미 kickoff를 감독하고 있으면 실패하므로 그 결과를 성공으로 보고하지 않는다. 요청 파일의 형식, 병렬 kickoff의 비용, 인계 절차와 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
-kickoff를 선언한 세션은 목표를 확정해 브리프로 넘기고 coordinator 워크트리를 만든 뒤, 등록하고 인계 사실을 알린다. 감독은 그 자리에서 시작하지 않는다. 네이티브 Goal은 coordinator 세션이 브리프를 읽고 하나 만들며, Run도 같은 세션에서 바인딩한 뒤 `kickoff-bind`로 등록부에 적는다. 이 분리는 취향이 아니라 `worker-start`가 Run에 바인딩된 coordinator 터미널만 허용하기 때문에 필요하다. 등록을 건너뛴 kickoff는 `status`·`close`·`disband`가 찾지 못하므로 반드시 등록한다.
+kickoff를 선언한 세션은 목표를 확정해 브리프로 넘기고 coordinator 워크트리를 만든 뒤, 등록하고 인계 사실을 알린다. coordinator는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `coordinator 실행` 절에 따라 `role-command`가 PM 프로필에서 만든 명령으로 띄운다. `orca worktree create --agent`에는 모델 옵션이 없으므로 이 방식으로 띄우지 않으며, PM 프로필의 모델을 전달할 수 없거나 화면의 모델이 다르면 멈추고 보고한다. 감독은 그 자리에서 시작하지 않는다. 네이티브 Goal은 coordinator 세션이 브리프를 읽고 하나 만들며, Run도 같은 세션에서 바인딩한 뒤 `kickoff-bind`로 등록부에 적는다. 이 분리는 취향이 아니라 `worker-start`가 Run에 바인딩된 coordinator 터미널만 허용하기 때문에 필요하다. 등록을 건너뛴 kickoff는 `status`·`close`·`disband`가 찾지 못하므로 반드시 등록한다.
 
 Goal의 objective에는 사용자가 원하는 결과, 측정 가능한 수용 기준, 비목표, 필수 검사와 요청된 전달 범위를 포함한다. 이 가운데 사용자 요청과 저장소 상태에서 확정할 수 없는 항목은 선언 세션이 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 한 번에 확인해 브리프에 담고, coordinator 세션은 그 브리프로 Goal을 만든다. 확인하지 못한 수용 기준을 추측해 채우지 않으며, 사용자가 이미 답한 항목을 coordinator 세션에서 다시 묻지 않는다. 사용자가 토큰 예산을 명시하지 않았다면 임의의 토큰 예산을 설정하지 않는다. 네이티브 Goal이 없는 호스트에서는 같은 계약을 oh my teams workflow와 Orca Run에 보존하되, 네이티브 기능이 있는 것처럼 보고하지 않는다.
 
@@ -30,10 +30,11 @@ kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook �
 [pm](../pm/SKILL.md)과 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)을 읽고 다음 주기를 수행한다.
 
 1. 원래 Goal과 현재 저장소 상태를 대조하고, 아직 충족되지 않은 수용 기준 가운데 다음으로 의미 있는 작업을 선택한다.
-2. PM이 과제 난이도로 정한 실행 깊이의 역할만 활성화하여 구현·검토·통합을 진행하고, 판단이 바뀌면 깊이를 조정한다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 독립 편집에는 Orca child worktree를 사용한다.
+2. PM이 과제 난이도로 정한 실행 깊이의 역할만 활성화하여 구현·검토·통합을 진행하고, 판단이 바뀌면 깊이를 조정한다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 독립 편집에는 Orca child worktree를 사용한다. 역할은 원시 `orca orchestration worker-start`가 아니라 `worker-start --org --role --workflow-id --state` 래퍼로만 띄우고, 산출물은 PM·PL이 아니라 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할이 만든다.
 3. 각 주기마다 코드 변경, 새 검사 결과, 검토 결과, 명확해진 장애물 중 하나 이상의 확인 가능한 진전을 남긴다.
 4. 실패하면 같은 시도를 무한 반복하지 않는다. 실패 원인과 시도를 기록하고 접근 방법이나 담당 역할을 바꾼다. 전체 호출·attempt 한도와 사용자가 정한 중단 조건을 지킨다.
-5. 대화가 이어지거나 재개되면 authoritative Goal, workflow, Run과 worker 상태를 먼저 대조한다. 계획만 존재하거나 worker 상태가 불명확하다는 이유로 새 작업을 중복 생성하지 않는다.
+5. worker를 기다리는 동안 `check --wait`의 제한 시간마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.
+6. 대화가 이어지거나 재개되면 authoritative Goal, workflow, Run과 worker 상태를 먼저 대조한다. 계획만 존재하거나 worker 상태가 불명확하다는 이유로 새 작업을 중복 생성하지 않는다.
 
 단순히 모델이 완료했다고 말했거나 일부 테스트가 통과했다는 이유로 루프를 끝내지 않는다. 모든 수용 기준, 필수 검토, 최신 소스에 대한 검증과 사용자가 요청한 전달 범위가 충족되어야 한다.
 

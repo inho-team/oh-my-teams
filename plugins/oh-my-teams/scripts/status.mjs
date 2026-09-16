@@ -46,6 +46,83 @@ export function supervisedProgressStatus({ goalStatus, workers }) {
   return { status, activeWorkers, unverifiableWorkers };
 }
 
+const LIVENESS = new Set(["live", "unverifiable", "exited"]);
+
+/**
+ * Decides a supervisor's next step for one worker that has not sent worker_done.
+ *
+ * A check timeout is a checkpoint, and without a rule a supervisor waits on a
+ * silent worker indefinitely. The answer is one of `wait`, `ask-progress`,
+ * `inspect` or `escalate`. Retrying or stopping always needs evidence someone
+ * weighed, so no observation produces either one. An `unverifiable` worker is
+ * never treated as alive, and an exit without worker_done is a failure to
+ * classify rather than a worker to wait for.
+ *
+ * @param {object} observation - Current facts about the worker.
+ * @param {string} observation.liveness - `live`, `unverifiable` or `exited`.
+ * @param {string} [observation.lastActivityAt] - Last heartbeat, message or output change.
+ * @param {string|number} [observation.now=Date.now()] - Time of this check.
+ * @param {number} [observation.unansweredRequests=0] - Progress requests still unanswered.
+ * @param {object|null} [observation.agentWait] - `worker-show` evidence of a human prompt.
+ * @param {object} observation.policy - Result of `supervisionPolicy`.
+ * @returns {object} Action, reason, silence in minutes, and the user-facing label.
+ * @throws {Error} When liveness or the policy is missing or unknown.
+ */
+export function nextSupervisionAction({
+  liveness,
+  lastActivityAt,
+  now = Date.now(),
+  unansweredRequests = 0,
+  agentWait = null,
+  policy,
+}) {
+  if (!LIVENESS.has(liveness)) {
+    throw new Error(`Unknown worker liveness: ${liveness}`);
+  }
+  if (!policy?.progressCheckMs || !policy.unansweredLimit) {
+    throw new Error("Supervision policy required");
+  }
+  const last = Date.parse(lastActivityAt ?? "");
+  const silentMs = Number.isNaN(last)
+    ? null
+    : Math.max(0, new Date(now).getTime() - last);
+  const silentMinutes = silentMs === null ? null : Math.floor(silentMs / 60000);
+  const exhausted = unansweredRequests >= policy.unansweredLimit;
+  const decide = (action, reason, extra = {}) => ({
+    action,
+    reason,
+    silentMinutes,
+    display:
+      action === "wait"
+        ? "진행 중"
+        : silentMinutes === null
+          ? "활동 기록 없음"
+          : `무응답 ${silentMinutes}분`,
+    ...extra,
+  });
+
+  if (liveness === "exited") {
+    return decide("escalate", "exited-without-worker-done", {
+      readOutput: true,
+      failureClassify: true,
+    });
+  }
+  if (agentWait) {
+    return decide("escalate", "waiting-on-human-prompt", { readOutput: true });
+  }
+  if (liveness === "unverifiable") {
+    return exhausted
+      ? decide("escalate", "unverifiable-unanswered", { readOutput: true })
+      : decide("inspect", "unverifiable");
+  }
+  if (silentMs === null) return decide("inspect", "no-observed-activity");
+  if (silentMs < policy.progressCheckMs)
+    return decide("wait", "recent-activity");
+  return exhausted
+    ? decide("escalate", "silent-after-progress-requests", { readOutput: true })
+    : decide("ask-progress", "silent");
+}
+
 function currentGateStatus(stateDir, report) {
   const file = path.join(stateDir, "gates", `${report.taskId}.json`);
   if (!fs.existsSync(file)) return null;

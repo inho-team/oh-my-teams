@@ -69,7 +69,24 @@
         "onExhaustion": { "enum": ["stop", "fallback"] },
         "maxCalls": { "type": "integer", "minimum": 1, "maximum": 20 },
         "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 600000 },
-        "repeatFailureLimit": { "type": "integer", "minimum": 1 }
+        "repeatFailureLimit": { "type": "integer", "minimum": 1 },
+        "supervision": {
+          "type": "object",
+          "$comment": "Omitted in organizations saved before this policy; core.mjs reads the defaults 900000 and 2.",
+          "required": ["progressCheckMs", "unansweredLimit"],
+          "properties": {
+            "progressCheckMs": {
+              "type": "integer",
+              "minimum": 60000,
+              "maximum": 86400000
+            },
+            "unansweredLimit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            }
+          }
+        }
       }
     }
   },

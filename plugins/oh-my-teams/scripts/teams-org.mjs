@@ -8,9 +8,17 @@ import {
   chart,
   readJSON,
   saveOrg,
+  supervisionPolicy,
   validateOrg,
   writeJSON,
 } from "./core.mjs";
+import {
+  launchBinding,
+  resolveRoleLaunch,
+  roleCommand,
+  roleSpec,
+} from "./role-launch.mjs";
+import { resolveHostDefaults } from "./host-defaults.mjs";
 import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
@@ -46,7 +54,7 @@ import {
   observeIncident,
 } from "./incidents.mjs";
 import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
-import { organizationStatus } from "./status.mjs";
+import { nextSupervisionAction, organizationStatus } from "./status.mjs";
 import { draftOrganization } from "./org-draft.mjs";
 import {
   bindKickoffRun,
@@ -75,6 +83,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                    --receipt FILE --runtime FILE --state DIR --name NAME
                    [--orca EXECUTABLE]
   runtime-discover [--orca EXECUTABLE]
+  worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
+               [--worktree SELECTOR] [--terminal HANDLE] [--run ID]
+               [--retry-of ID] [--workflow-id ID --state DIR] [--orca EXECUTABLE]
+  role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
+  role-command --org FILE --role ROLE
+  host-defaults [--project DIR] [--codex-home DIR]
+  supervision-next --org FILE --observation FILE
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role intern]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
@@ -135,7 +150,13 @@ export const ALLOWED_OPTIONS = {
     "orca",
   ],
   "runtime-discover": ["orca"],
+  "role-spec": ["org", "role", "spec", "workflow-id", "state"],
+  "role-command": ["org", "role"],
+  "host-defaults": ["project", "codex-home"],
+  "supervision-next": ["org", "observation"],
   "worker-start": [
+    "org",
+    "role",
     "repo",
     "task",
     "spec",
@@ -146,6 +167,8 @@ export const ALLOWED_OPTIONS = {
     "effort",
     "run",
     "retry-of",
+    "workflow-id",
+    "state",
     "orca",
   ],
   work: ["org", "task", "repo", "state", "role", "workflow-id", "attempt-id"],
@@ -202,7 +225,11 @@ export const REQUIRED_OPTIONS = {
     "name",
   ],
   "runtime-discover": [],
-  "worker-start": ["repo"],
+  "worker-start": ["org", "role", "repo"],
+  "role-spec": ["org", "role", "spec"],
+  "role-command": ["org", "role"],
+  "host-defaults": [],
+  "supervision-next": ["org", "observation"],
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
   assist: ["org", "task", "repo", "state", "role", "kind"],
@@ -349,20 +376,42 @@ async function compatibilityPrepare(args) {
 // start that failed still names the Dispatch and the resources someone has to
 // reclaim. A refusal that produced no Dispatch throws, and its neutral signal
 // travels with the error so the caller can route it rather than reread prose.
+//
+// The agent, model and effort come from the role's saved profile. Explicit
+// values are accepted only when they restate it, so a hand-typed launch can no
+// longer drop the model the user chose. A reused terminal keeps whatever model
+// it was started with, so it gets no model arguments and its proof stays
+// unproven.
 async function startSupervisedWorker(args) {
+  const org = readJSON(args.org);
+  const run = runRoles(args);
+  const launch = resolveRoleLaunch(
+    org,
+    args.role,
+    { agent: args.agent, model: args.model, effort: args.effort },
+    run,
+  );
+  const reusedTerminal = Boolean(args.terminal);
   try {
-    return await startWorker(path.resolve(args.repo), {
+    const started = await startWorker(path.resolve(args.repo), {
       task: args.task,
-      spec: args.spec,
+      spec: args.spec && roleSpec(org, launch.role, args.spec, run),
       worktree: args.worktree ?? "current",
-      agent: args.agent,
+      agent: reusedTerminal ? undefined : launch.agent,
       terminal: args.terminal,
-      model: args.model,
-      effort: args.effort,
+      model: reusedTerminal ? undefined : (launch.model ?? undefined),
+      effort: reusedTerminal ? undefined : (launch.effort ?? undefined),
       runId: args.run,
       retryOf: args["retry-of"],
       executable: args.orca,
     });
+    const binding = launchBinding(launch, started, { reusedTerminal });
+    return {
+      ...started,
+      binding: { ...binding, roleHeader: Boolean(args.spec) },
+      // A launch Orca recorded with another model must not be handed work.
+      ...(binding.modelProof === "mismatched" ? { status: "blocked" } : {}),
+    };
   } catch (error) {
     if (!error.signal) throw error;
     error.message = `${error.message}\n${JSON.stringify(
@@ -372,6 +421,18 @@ async function startSupervisedWorker(args) {
     )}`;
     throw error;
   }
+}
+
+// A workflow may run fewer roles than the organization declares. A workflow
+// that recorded no role list folds onto the organization, as before.
+function runRoles(args) {
+  if (!args["workflow-id"] && !args.state) return {};
+  assert(
+    args["workflow-id"] && args.state,
+    "--workflow-id and --state must be given together",
+  );
+  const { state } = readWorkflow(path.resolve(args.state), args["workflow-id"]);
+  return state.roles ? { roles: state.roles } : {};
 }
 
 async function attachExistingWorkspace(args) {
@@ -490,6 +551,28 @@ async function executeCommand(args) {
       return discoverOrcaRuntime(args.orca);
     case "worker-start":
       return startSupervisedWorker(args);
+    case "role-spec":
+      return {
+        role: args.role,
+        spec: roleSpec(
+          readJSON(args.org),
+          args.role,
+          args.spec,
+          runRoles(args),
+        ),
+      };
+    case "role-command":
+      return roleCommand(readJSON(args.org), args.role);
+    case "host-defaults":
+      return resolveHostDefaults({
+        project: args.project && path.resolve(args.project),
+        codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+      });
+    case "supervision-next":
+      return nextSupervisionAction({
+        ...readJSON(args.observation),
+        policy: supervisionPolicy(validateOrg(readJSON(args.org))),
+      });
     case "work":
       return work(
         path.resolve(args.repo),

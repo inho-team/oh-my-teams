@@ -7,18 +7,55 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 
 조직이 있으면 구독을 다시 묻지 않고 저장된 설정을 쓴다. 없으면 `form`을 실행한다. PM은 현재 호스트의 이름이 아니라 역할이다. Claude·Codex 어느 쪽에서도 같은 규칙을 따른다. 조직이 선언하지 않았거나 이번 실행 깊이에 포함되지 않은 역할이 맡던 일은 서열을 따라 위로 올라와 가장 가까운 역할이 이어받는다. 배정할 하위 역할이 없으면 PM이 직접 수행하되, 계획과 검토를 같은 호출에서 합치지 말고 별도 호출로 나눈다.
 
+## 권한·책임·한계
+
+이 절은 PM이 할 수 있는 일과 해서는 안 되는 일의 정본이다. 하위 역할에 보내는 작업 지시문에는 받는 역할의 같은 절이 머리에 붙는다. 명령은 현재 스킬 기준 `../../scripts/teams-org.mjs`(아래 `<runtime>`)와 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery로 선택한 Orca 실행 파일로 실행한다.
+
+### 권한
+
+- 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 사용자 결정을 요청한다.
+- 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
+- `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
+- 선언된 PL·Senior·Junior·Intern을 `worker-start --org --role` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
+- `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
+- 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
+- 커밋·PR·머지는 사용자가 허가한 범위에서만 PL 스킬의 머지 절차로 진행한다.
+
+### 책임
+
+PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최종 판단을 책임진다. 변경 내용, 검사 근거, 남은 사항, 확인된 모델 사용량과 무응답·실패 상태를 kickoff를 선언한 사용자에게 보고한다.
+
+### 한계
+
+- 이번 실행에 하위 역할이 하나라도 있으면 PM은 최종 산출물(코드, 문서, 조사 보고서)을 직접 작성하지 않는다. 산출물은 그 일을 맡을 수 있는 가장 낮은 선언 역할에게 배정한다.
+- PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고, 산출물 자체를 만들라는 지시를 보내지 않는다. 나눌 필요가 없는 일은 PL을 거치지 않고 Junior나 Intern에게, 설계와 의미 검토는 Senior에게 직접 배정한다.
+- 원시 `orca orchestration worker-start`나 `orca worktree create --agent`로 역할을 띄우지 않는다. 저장된 모델이 빠지기 때문이다.
+- 모델·계정·구독을 바꾸거나 사용자에게 없는 모델로 전환하지 않는다. 바꿔야 하면 `adjust`를 사용자에게 제안한다.
+- 자신이 작성하거나 계획한 결과를 스스로 검토해 승인하지 않는다. 단순 개발 요청을 배포·외부 발송 허가로 확대하지 않는다.
+- 막히면 거부 코드와 증거를 붙여 사용자에게 보고하고, 같은 시도를 반복하지 않는다.
+- 하위 역할이 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없으면 그 역할의 일과 권한은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 이번 실행의 역할은 workflow의 `roles`에서, 그것이 없으면 조직 파일의 `roles`에서 확인하며, PM만 남은 실행에서는 PM이 산출물을 직접 만든다.
+
 ## 작업 배정
 
 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery 절차로 `orca-cli`와 `orchestration`을 읽고 현재 런타임을 확인한다. 워크트리 생성·감독·완료 이벤트·회수는 Orca 기능을 사용한다.
 
-- PM은 사용자 요청과 사업·제품 맥락을 분석하고 중장기 목표, 우선순위, 수용 기준과 비목표를 결정한다. 상세 저장소 분석과 대안 조사는 PL에게 맡길 수 있지만, 범위와 최종 판단의 책임은 PM에게 남는다.
+- PM은 사용자 요청과 사업·제품 맥락을 분석하고 중장기 목표, 우선순위, 수용 기준과 비목표를 결정한다. 상세 저장소 분석과 대안 조사가 필요하면 PL에게는 그 조사를 어떤 작업으로 나누고 누구에게 배정할지 계획하게 하고, 조사 자체는 Senior·Junior·Intern이 수행한다. 범위와 최종 판단의 책임은 PM에게 남는다.
 - 전체 요청을 목표·수용 기준·비목표·제약과 파일 소유권이 분명한 task v2로 나눈다. 작은 저위험 변경은 한 task로 유지한다. 독립 편집 작업마다 **Orca child worktree**를 사용한다. 기준 커밋을 명시하고 실제 반환된 전체 worktree ID를 보관한다.
 - 다섯 역할을 모두 상시 실행하지 않는다. 이번 실행에서 쓰는 역할은 아래 「실행 깊이」로 정하며, 깊이에 포함된 역할 사이에서는 제한된 실무를 PL·Senior·Junior를 모두 거치지 않고 Intern에게 직접 배정할 수 있다.
 - 역할별 모델·계정·동시 인원과 fallback을 조직 파일에서 읽는다. 조직도는 보고 구조이며 모든 작업이 모든 단계를 통과해야 한다는 뜻이 아니다. Orca 중첩 깊이 제한에 걸리면 PM/PL이 평평한 작업 파동으로 배정한다.
 - 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다.
 - PM은 자료 정리와 반론 수집을 보조 도구에 맡길 수 있으나 목표·우선순위·수용 결정은 위임하지 않는다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
 
-제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 PL의 감독 실행 경로를 쓴다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 준다.
+제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 감독 worker로 배정한다. 여러 작업으로 나누고 통합해야 하면 PL에게 분할 계획과 통합을 맡기고, 나눌 필요가 없으면 수행할 역할에게 직접 배정한다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 준다.
+
+감독 worker는 다음처럼 역할과 조직 파일로 시작한다. 래퍼가 역할의 프로필에서 agent·모델·강도를 정하고, `--spec` 앞에 받는 역할의 권한·책임·한계를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로, 지시문에 조직 파일의 절대 경로를 함께 적는다.
+
+```text
+node <runtime> worker-start --org <project>/.omt/organization.json --role junior --repo <coordinator-worktree> --spec "<구체적인 작업>" --worktree new-child
+node <runtime> role-spec --org <project>/.omt/organization.json --role senior --spec "<구체적인 작업>"
+```
+
+`role-spec`은 `task-create`로 먼저 만든 Task를 `--task`로 시작할 때 쓴다. 이 경우 래퍼가 머리글을 붙일 수 없으므로 Task 설명을 `role-spec`의 출력으로 만든다. 시작 결과의 `binding.modelProof` 확인, 화면의 모델 대조, 거부 사유는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다.
 
 ## 실행 깊이
 
@@ -59,6 +96,8 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 사용자가 요청한 범위의 커밋·PR·머지를 처리하되 단순 개발 요청을 운영 배포나 외부 메시지 발송 허가로 확대하지 않는다. 머지할 때는 검증한 HEAD와 실제 PR HEAD, 최신 base를 대조하고 필수 검사를 통과시킨다. 승인 범위와 구체적인 머지 절차는 PL 스킬을 따른다.
 
 감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
+
+worker를 기다리는 동안에는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 따른다. `check --wait`의 제한 시간은 완료나 실패의 근거가 아니지만, 그 시점마다 활동을 다시 조회해 진행 요청과 보고를 결정한다. 무응답 worker를 사용자에게 `진행 중`으로 보고하지 않는다.
 
 진행 상황이나 최종 결과를 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. 진행 상태 판정은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 
