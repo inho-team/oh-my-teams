@@ -1,6 +1,6 @@
 # oh my teams
 
-Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior / Worker의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 런타임의 `intern` 역할 ID는 이전 조직과의 호환성을 위해 유지한다. 내부 실행기는 **Claude, Codex, Agy, Ollama**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
+Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior / Intern의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 내부 실행기는 **Claude, Codex, Agy, Ollama**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
 
 ## 시작
 
@@ -26,8 +26,8 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 PM       분석·중장기 계획·최종 결과
 └─ PL    분석·중단기 계획·분할·통합
    └─ Senior  구체적인 구현 방법·중요 변경 검토
-      └─ Junior  기능 구현·Worker 통합
-         └─ Worker  제한된 편집·테스트·반복 실무
+      └─ Junior  기능 구현·Intern 통합
+         └─ Intern  제한된 편집·테스트·반복 실무
 ```
 
 작은 작업에 다섯 세션을 모두 만들지 않는다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`, 웹 검증에는 `orca-browser-use`, 외부 앱에는 `computer-use` 스킬을 필요할 때 사용한다.
@@ -54,7 +54,7 @@ sh install.sh both   # claude | codex | both
 
 Codex 계정의 모델 카탈로그(codex-cli 0.154.0, 2026-09-15)에는 `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`가 선택 가능한 모델로 들어 있다. 설치 때 `agy models`와 Codex 카탈로그로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
 
-기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`, Worker=`claude-sonnet-4-6`으로 배정한다. 여기에 더해 `gpt-5.6-luna`와 `gpt-5.6-terra` 프로필을 미리 정의해 두므로, 역할의 `profile`만 바꾸면 다른 Codex 모델로 옮길 수 있다. 역할이 실제로 참조하는 프로필에는 강도를 적지 않았다. 강도 표기 예시는 어떤 역할도 참조하지 않는 `codex-terra`에만 두었으므로, 이 예제로 실행하는 호출의 추론 깊이는 이전과 같다. 공유 풀 소진 이후 모든 역할의 동시 실행 슬롯은 1로 고정했다. 조직의 `assistants`에 허용된 역할은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있다. 기본 예제에서는 Worker를 포함한 모든 역할이 허용되어 있으며, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
+기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`, Intern=`claude-sonnet-4-6`으로 배정한다. 여기에 더해 `gpt-5.6-luna`와 `gpt-5.6-terra` 프로필을 미리 정의해 두므로, 역할의 `profile`만 바꾸면 다른 Codex 모델로 옮길 수 있다. 역할이 실제로 참조하는 프로필에는 강도를 적지 않았다. 강도 표기 예시는 어떤 역할도 참조하지 않는 `codex-terra`에만 두었으므로, 이 예제로 실행하는 호출의 추론 깊이는 이전과 같다. 공유 풀 소진 이후 모든 역할의 동시 실행 슬롯은 1로 고정했다. 조직의 `assistants`에 허용된 역할은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있다. 기본 예제에서는 Intern을 포함한 모든 역할이 허용되어 있으며, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
 
 Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
 
