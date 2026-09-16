@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { readJSON, validateOrg } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { assist } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { removedSkillNames } from "./removed-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const examples = path.join(root, "plugins/oh-my-teams/examples");
@@ -64,8 +65,8 @@ test("every example organization can run the assist the skills advertise", async
   }
 });
 
-test("team-form asks for the assistant allowlist it cannot infer", () => {
-  const form = readSkill("team-form");
+test("form asks for the assistant allowlist it cannot infer", () => {
+  const form = readSkill("form");
   // Nothing else establishes `assistants`, and worker.mjs refuses an assist
   // call for a role that is absent from it.
   assert.match(form, /assistants/);
@@ -110,26 +111,27 @@ test("the commands written in the skills carry the options the CLI requires", ()
   }
 });
 
-test("no skill or runtime message sends the reader to a retired skill name", () => {
-  const retired = ["team-setup", "team-show", "team-edit"];
+test("no runtime message sends the reader to a name 2.0.0 removed", () => {
+  const removed = removedSkillNames();
   const scripts = path.join(root, "plugins/oh-my-teams/scripts");
 
   // The earlier guard only walked skills/, so two runtime error messages kept
-  // telling the user to run a name that is now only a thin alias.
+  // telling the user to run a name that was by then only a thin alias. Those
+  // aliases are gone now, so the same message would name nothing at all.
   for (const entry of fs.readdirSync(scripts)) {
     if (!entry.endsWith(".mjs")) continue;
     const text = fs.readFileSync(path.join(scripts, entry), "utf8");
-    for (const name of retired) {
+    for (const name of removed) {
       assert.ok(
         !text.includes(`run ${name}`) && !text.includes(`with ${name}`),
-        `${entry} names the retired ${name}`,
+        `${entry} names the removed ${name}`,
       );
     }
   }
 });
 
 test("the preset preview is described as changing what it actually changes", () => {
-  const adjust = readSkill("team-adjust");
+  const adjust = readSkill("adjust");
   // presets.mjs pins concurrency to 1, so an organization with more workers is
   // silently reduced. The skill used to promise a profile-only preview.
   assert.match(adjust, /동시 인원/);
@@ -142,14 +144,18 @@ test("the preset preview is described as changing what it actually changes", () 
 test("Korean object particles follow the sound of the skill name", () => {
   // The particle follows how the name is read aloud, not its spelling. "form"
   // is read 폼 and ends in a final consonant, so it takes 을; "adjust",
-  // "status", "close" and "kickoff" are read 어저스트, 스테이터스, 클로즈 and
-  // 킥오프, all ending in a vowel, so they take 를. These lines are generated
-  // from a template, so the wrong pair is easy to reintroduce.
+  // "status", "close", "kickoff", "disband" and "help" are read 어저스트,
+  // 스테이터스, 클로즈, 킥오프, 디스밴드 and 헬프, all ending in a vowel, so
+  // they take 를. Dropping the team- prefix did not change any of these,
+  // because the particle was already following the last syllable.
   const wrong = [
-    "team-form를",
-    "team-adjust을",
-    "team-status을",
-    "team-close을",
+    "form를",
+    "adjust을",
+    "status을",
+    "close을",
+    "kickoff을",
+    "disband을",
+    "help을",
   ];
   for (const entry of fs.readdirSync(skills)) {
     const file = path.join(skills, entry, "SKILL.md");
@@ -162,16 +168,16 @@ test("Korean object particles follow the sound of the skill name", () => {
 });
 
 test("the closing skills run the gates instead of judging by eye", () => {
-  const close = readSkill("team-close");
-  const disband = readSkill("team-disband");
+  const close = readSkill("close");
+  const disband = readSkill("disband");
 
-  // team-close carried no CLI command at all, so merge-check - the thing that
+  // close carried no CLI command at all, so merge-check - the thing that
   // mechanically refuses a merge without PM acceptance - was left to the
   // model's reading of the situation.
   for (const command of ["verify", "merge-check", "workflow-status"]) {
     assert.ok(
       close.includes(`node <runtime> ${command}`),
-      `team-close must run ${command}`,
+      `close must run ${command}`,
     );
   }
 
@@ -181,7 +187,7 @@ test("the closing skills run the gates instead of judging by eye", () => {
   for (const command of ["workflow-settle", "workflow-release"]) {
     assert.ok(
       disband.includes(`node <runtime> ${command}`),
-      `team-disband must run ${command}`,
+      `disband must run ${command}`,
     );
   }
 });
@@ -194,7 +200,7 @@ test("a worker whose exit is unconfirmed is fenced, not released", () => {
   // worker-release is documented by the CLI as post-completion cleanup for a
   // settled worker; worker-abandon exists precisely for the unobserved case.
   assert.match(runtime, /worker-abandon/);
-  for (const skill of ["team-close", "team-disband"]) {
+  for (const skill of ["close", "disband"]) {
     assert.match(
       readSkill(skill),
       /worker-abandon/,
@@ -207,8 +213,8 @@ test("the two meanings of blocked are kept apart", () => {
   // deriveWorkflowStatus returns "blocked" for a single failed task, which
   // workflow-retry can undo. A Goal is blocked only after a repeated, policy
   // level obstruction. Copying one into the other freezes recoverable work.
-  // The distinction is stated once in the runtime reference; team-status
-  // points at it and team-kickoff repeats only the part it must act on.
+  // The distinction is stated once in the runtime reference; status
+  // points at it and kickoff repeats only the part it must act on.
   const runtime = fs.readFileSync(
     path.join(root, "plugins/oh-my-teams/references/orca-runtime.md"),
     "utf8",
@@ -216,16 +222,13 @@ test("the two meanings of blocked are kept apart", () => {
   assert.match(runtime, /workflow-status`의 `blocked`/);
   assert.match(runtime, /되돌릴 수 있는 일시 상태/);
 
-  assert.match(readSkill("team-status"), /orca-runtime\.md/);
-  assert.match(
-    readSkill("team-kickoff"),
-    /그것만으로 Goal을 차단 처리하지 않는다/,
-  );
+  assert.match(readSkill("status"), /orca-runtime\.md/);
+  assert.match(readSkill("kickoff"), /그것만으로 Goal을 차단 처리하지 않는다/);
 });
 
 test("every skill that queries worker-list pins the executable first", () => {
   // orca-runtime requires one executable to be chosen and never silently
-  // swapped; team-status queried worker-list without referencing that rule and
+  // swapped; status queried worker-list without referencing that rule and
   // could report another Run's state.
   for (const entry of fs.readdirSync(skills)) {
     const file = path.join(skills, entry, "SKILL.md");
@@ -295,8 +298,8 @@ test("the assist reference states what the code enforces, not what we wish", () 
   }
 });
 
-test("team-form points at one structural example, not three overlapping ones", () => {
-  const form = readSkill("team-form");
+test("form points at one structural example, not three overlapping ones", () => {
+  const form = readSkill("form");
   // The preset files restate the model assignments the paragraph above already
   // gives in prose, and presets.mjs is the source of truth for them, so reading
   // all three cost about 7KB to see one structure.
@@ -307,42 +310,53 @@ test("team-form points at one structural example, not three overlapping ones", (
 });
 
 test("init is described as the no-op it can be", () => {
-  const form = readSkill("team-form");
+  const form = readSkill("form");
   // init returns { created: false } and exits 0 when the file already exists,
   // so a run that changed nothing reads as a successful formation.
   assert.match(form, /`created`가 `true`인 경우에만/);
 });
 
-test("the six aliases carry one identical body", () => {
-  const aliases = [
-    "team-setup",
-    "team-show",
-    "team-edit",
-    "org-setup",
-    "org-show",
-    "org-edit",
-  ];
-  // Two variants had drifted apart: half carried the no-duplication sentence
-  // and half did not, which is how the bodies start to diverge.
-  for (const alias of aliases) {
-    const text = readSkill(alias);
+test("every skill that asks the user a question points at one contract", () => {
+  // form asked its questions in prose that named no tool, so each host
+  // improvised: Claude Code has AskUserQuestion and Codex has nothing
+  // equivalent, and a skill that hard-codes either name is wrong on the other.
+  for (const skill of ["form", "adjust", "kickoff", "close"]) {
     assert.match(
-      text,
-      /절차 본문은 그 스킬 한 곳에만 있으며 여기에 복제하지 않는다/,
+      readSkill(skill),
+      /references\/user-choice\.md/,
+      `${skill} takes a decision from the user and must follow the contract`,
     );
-    assert.match(text, /이전 호출과의 호환 진입점이다/);
   }
 });
 
+test("the user-choice contract picks a method by capability, not by host", () => {
+  const contract = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/user-choice.md"),
+    "utf8",
+  );
+  // Naming AskUserQuestion as the method rather than as one host's
+  // implementation is what would break Codex, where `codex features list`
+  // reports default_mode_request_user_input as under development and off.
+  assert.match(contract, /구조화된 선택 도구를 실제로 사용할 수 있는지/);
+  assert.match(contract, /번호를 매긴 선택지/);
+  assert.match(contract, /AskUserQuestion/);
+  assert.match(contract, /Codex CLI에는 \*\*이 용도로 확인된 도구가 없다/);
+
+  // A default silently standing in for an answer is the failure this contract
+  // exists to prevent: the organization file would record a subscription the
+  // user never chose.
+  assert.match(contract, /권장값을 답으로 삼지 않는다/);
+});
+
 test("the help flow shows the path, and says what is not on it", () => {
-  const help = readSkill("team-help");
-  // team-status only reads and team-adjust applies to later kickoffs, so
-  // neither is a step; the diagram implied team-status was one and left
-  // team-adjust out of a list that had introduced it as a lifecycle skill.
+  const help = readSkill("help");
+  // status only reads and adjust applies to later kickoffs, so
+  // neither is a step; the diagram implied status was one and left
+  // adjust out of a list that had introduced it as a lifecycle skill.
   const diagram = help.split("## 일반적인 흐름")[1];
   assert.ok(diagram, "the flow section must exist");
-  assert.ok(!/team-form → team-kickoff → team-status/.test(diagram));
-  assert.match(diagram, /`team-status`와 `team-adjust`는/);
+  assert.ok(!/form → kickoff → status/.test(diagram));
+  assert.match(diagram, /`status`와 `adjust`는/);
 
   // "Print this verbatim" and "change the invocation prefix" contradicted each
   // other, because the tables carry bare skill names and no prefix at all.

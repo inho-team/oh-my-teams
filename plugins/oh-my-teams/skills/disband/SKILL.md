@@ -1,5 +1,5 @@
 ---
-name: team-disband
+name: disband
 description: 실패·취소·중단된 oh my teams kickoff의 실행 팀을 안전하게 해체하고 원인과 복구 가능한 결과를 보존한다.
 ---
 

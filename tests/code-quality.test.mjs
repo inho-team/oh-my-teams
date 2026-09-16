@@ -10,6 +10,7 @@ import {
   longExecutableLines,
   signatureHasParameters,
 } from "../scripts/check-code-quality.mjs";
+import { removedSkillNames } from "./removed-skills.mjs";
 
 function fixture(source) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "quality-audit-"));
@@ -77,63 +78,54 @@ test("signature helpers handle multiline parameters and single arrow parameters"
   );
 });
 
-test("the lifecycle skills hold the procedure and the aliases only forward", () => {
+test("the lifecycle skills hold the procedure themselves", () => {
   const skills = path.resolve("plugins/oh-my-teams/skills");
-  const read = (name) =>
-    fs.readFileSync(path.join(skills, name, "SKILL.md"), "utf8");
-
-  // The hierarchy was inverted once: team-form, team-status and team-adjust
-  // were eight-line wrappers sending the reader to team-setup, while team-setup
-  // carried the procedure and called itself a compatibility entry point. A
-  // reader following either name bounced between two files.
-  const pairs = [
-    ["team-form", ["team-setup", "org-setup"]],
-    ["team-status", ["team-show", "org-show"]],
-    ["team-adjust", ["team-edit", "org-edit"]],
-  ];
-  for (const [primary, aliases] of pairs) {
-    const body = read(primary);
-    assert.match(body, new RegExp(`^name: ${primary}$`, "m"));
+  // The hierarchy was inverted once: form, status and adjust were eight-line
+  // wrappers sending the reader to an alias that carried the procedure and
+  // called itself a compatibility entry point, so a reader following either
+  // name bounced between two files. 2.0.0 removed every alias, which only
+  // makes that inversion worse if it comes back: the wrapper would now point
+  // at a name that is not installed at all.
+  for (const name of ["form", "status", "adjust", "close", "disband"]) {
+    const body = fs.readFileSync(path.join(skills, name, "SKILL.md"), "utf8");
+    assert.match(body, new RegExp(`^name: ${name}$`, "m"));
     assert.ok(
       body.split(/\r?\n/).length > 15,
-      `${primary} must carry the procedure itself`,
+      `${name} must carry the procedure itself`,
     );
-    for (const alias of aliases) {
-      const text = read(alias);
-      assert.match(text, new RegExp(`^name: ${alias}$`, "m"));
-      assert.match(text, new RegExp(`\\.\\./${primary}/SKILL\\.md`));
-      assert.ok(
-        text.split(/\r?\n/).length <= 12,
-        `${alias} must stay a thin alias`,
-      );
-      // An alias repeating a command would drift from the primary unnoticed.
-      assert.ok(
-        !text.includes("node <runtime>"),
-        `${alias} must not duplicate the procedure`,
-      );
-    }
   }
 });
 
-test("no skill sends a reader to a compatibility name for the procedure", () => {
+test("the names 2.0.0 removed are gone and nothing tells the user to run them", () => {
   const skills = path.resolve("plugins/oh-my-teams/skills");
-  const aliases = ["team-setup", "team-show", "team-edit"];
-  // team-help lists the compatibility names on purpose: that table is what it
-  // exists to show.
-  const listsAliases = new Set(["team-help"]);
-  for (const entry of fs.readdirSync(skills)) {
-    if (aliases.includes(entry) || entry.startsWith("org-")) continue;
-    if (listsAliases.has(entry)) continue;
-    // A runtime state directory such as `.omc/` can sit beside the skills, so
-    // only a directory that actually holds a SKILL.md is a skill.
-    const file = path.join(skills, entry, "SKILL.md");
-    if (!fs.existsSync(file)) continue;
-    const text = fs.readFileSync(file, "utf8");
-    for (const alias of aliases) {
-      assert.ok(
-        !text.includes(`\`${alias}\``),
-        `${entry} must name the primary skill, not ${alias}`,
-      );
+  // help states the mapping so a user arriving with an old name is redirected,
+  // and it writes the removed names as plain text while every installed skill
+  // is written in backticks. That spelling is what separates "this name is
+  // gone" from "run this name", so the guard below reads backticks only.
+  const removed = removedSkillNames();
+  assert.ok(removed.length >= 7, "the help table must list the removed names");
+
+  for (const name of removed) {
+    assert.ok(
+      !fs.existsSync(path.join(skills, name, "SKILL.md")),
+      `${name} was removed in 2.0.0 but is still installed`,
+    );
+  }
+
+  const roots = [skills, path.resolve("plugins/oh-my-teams/references")];
+  for (const root of roots) {
+    for (const entry of fs.readdirSync(root)) {
+      const file = fs.statSync(path.join(root, entry)).isDirectory()
+        ? path.join(root, entry, "SKILL.md")
+        : path.join(root, entry);
+      if (!file.endsWith(".md") || !fs.existsSync(file)) continue;
+      const text = fs.readFileSync(file, "utf8");
+      for (const name of removed) {
+        assert.ok(
+          !text.includes(`\`${name}\``),
+          `${path.basename(file)} names the removed ${name} as a skill to run`,
+        );
+      }
     }
   }
 });
@@ -150,19 +142,21 @@ test("team lifecycle skills expose one kickoff loop and explicit outcomes", () =
     "disband",
   ]) {
     const skill = fs.readFileSync(
-      path.join(skills, `team-${action}`, "SKILL.md"),
+      path.join(skills, action, "SKILL.md"),
       "utf8",
     );
-    assert.match(skill, new RegExp(`name: team-${action}`));
+    assert.match(skill, new RegExp(`^name: ${action}$`, "m"));
   }
 
   const kickoff = fs.readFileSync(
-    path.join(skills, "team-kickoff", "SKILL.md"),
+    path.join(skills, "kickoff", "SKILL.md"),
     "utf8",
   );
   assert.match(kickoff, /유일한 지속 실행 권한/);
-  assert.match(kickoff, /team-close/);
-  assert.match(kickoff, /team-disband/);
+  // The names are now ordinary words, so a bare match would pass on any
+  // sentence that happens to contain them; only the backticked call counts.
+  assert.match(kickoff, /`close`/);
+  assert.match(kickoff, /`disband`/);
 });
 
 test("the repository's own modules satisfy the audit rules", () => {
@@ -180,52 +174,52 @@ test("the help tables list exactly the installed skills", () => {
   const installed = fs
     .readdirSync(skills)
     .filter((entry) => fs.existsSync(path.join(skills, entry, "SKILL.md")));
-  const help = fs.readFileSync(
-    path.join(skills, "team-help", "SKILL.md"),
-    "utf8",
-  );
-  const rendered = help.split("<!-- team-help:start -->")[1];
+  const help = fs.readFileSync(path.join(skills, "help", "SKILL.md"), "utf8");
+  const rendered = help.split("<!-- help:start -->")[1];
   assert.ok(rendered, "the help output must be delimited for the drift check");
 
-  // The tables are precomputed so that answering team-help costs one already
+  // The tables are precomputed so that answering help costs one already
   // loaded file instead of reading every skill. That trade is only safe while
   // something checks the tables against the skills that are actually there.
   const listed = new Set(
     [...rendered.matchAll(/`([a-z-]+)`/g)].map((match) => match[1]),
   );
   for (const skill of installed) {
-    assert.ok(listed.has(skill), `team-help must list ${skill}`);
+    assert.ok(listed.has(skill), `help must list ${skill}`);
   }
   for (const name of listed) {
     if (!installed.includes(name)) continue;
     assert.ok(
       fs.existsSync(path.join(skills, name, "SKILL.md")),
-      `team-help must not list a skill that is gone: ${name}`,
+      `help must not list a skill that is gone: ${name}`,
     );
   }
 
-  // A name that looks like a skill but is not installed would send the reader
-  // to something that does not exist.
-  const skillShaped = [...listed].filter((name) =>
-    /^(team|org)-|^(pm|pl|senior|junior|intern|director|fluent-korean)$/.test(
-      name,
+  // The removed-names table redirects an old call to the name that replaced
+  // it, so a typo in its right column would send the reader to nothing. The
+  // left column is checked elsewhere; here only the destinations matter.
+  const mapping = rendered.split("## 2.0.0에서 삭제된 이름")[1] ?? "";
+  const destinations = new Set(
+    [...mapping.split("\n## ")[0].matchAll(/`([a-z-]+)`/g)].map(
+      (match) => match[1],
     ),
   );
-  for (const name of skillShaped) {
+  assert.ok(destinations.size > 0, "the removed-names table must redirect");
+  for (const name of destinations) {
     assert.ok(
       installed.includes(name),
-      `team-help names ${name}, which is not installed`,
+      `the removed-names table sends the reader to ${name}, which is not installed`,
     );
   }
 });
 
-test("team-help does not ask the model to rebuild what it already states", () => {
+test("help does not ask the model to rebuild what it already states", () => {
   const help = fs.readFileSync(
-    path.resolve("plugins/oh-my-teams/skills/team-help/SKILL.md"),
+    path.resolve("plugins/oh-my-teams/skills/help/SKILL.md"),
     "utf8",
   );
-  const instructions = help.split("<!-- team-help:start -->")[0];
-  // Reading all twenty SKILL.md files cost about 48KB to produce 3KB of table,
+  const instructions = help.split("<!-- help:start -->")[0];
+  // Reading every SKILL.md file cost about 48KB to produce 3KB of table,
   // and the wording of each row changed on every call.
   assert.ok(
     !/skills\/\*\/SKILL\.md|frontmatter를 읽/.test(instructions),

@@ -6,7 +6,7 @@
 - 대상: Claude·Codex 플러그인의 조직 설정, Agy 모델 배정, 사용량 기록, Orca worktree 기반 실험
 - 관련 문서: [기존 실험](../../experiments/REPORT.md), [실측 데이터](../../experiments/measurements.json), [조직 업무 흐름 계획](ai-native-agent-organization.md)
 
-구현 기록(2026-09-14): `opus-first`와 `balanced` 예제 및 변경 미리보기/명시적 적용 명령을 추가했다. 기존 PM/PL과 구독 프로필은 재사용한다. 조직 v1에는 선택적 pool 연결을 호환 방식으로 추가했고, 공급자 오류를 model/rate-limit/confirmed pool exhaustion/unknown quota로 구분한다. 구조적으로 확인된 같은 pool 소진 뒤에는 해당 pool의 fallback 모델을 호출하지 않는다. 호출 report는 requested/effective 모델, 선택·승격 이유, preset revision, usage와 알려진 비용을 분리하며 `aggregate`/`team-show`는 누락값과 pool 상태 미확인을 0으로 표시하지 않는다. 수동/지원 소스 quota snapshot은 만료·창 reset·다른 활동을 검사해 귀속 불가를 구분한다. 6개 유형 E1 18회와 E2 12회를 자동 재시도 없이 실행했다. balanced는 6/6, 95,449토큰, 60.8초로 Opus-first 5/6, 105,658토큰, 72.3초보다 이번 배치에서 나았으며 세 worktree는 완료 상태로 보존했다. 상세 결과는 [`../../experiments/ROUTING_REPORT.md`](../../experiments/ROUTING_REPORT.md)에 있다.
+구현 기록(2026-09-14): `opus-first`와 `balanced` 예제 및 변경 미리보기/명시적 적용 명령을 추가했다. 기존 PM/PL과 구독 프로필은 재사용한다. 조직 v1에는 선택적 pool 연결을 호환 방식으로 추가했고, 공급자 오류를 model/rate-limit/confirmed pool exhaustion/unknown quota로 구분한다. 구조적으로 확인된 같은 pool 소진 뒤에는 해당 pool의 fallback 모델을 호출하지 않는다. 호출 report는 requested/effective 모델, 선택·승격 이유, preset revision, usage와 알려진 비용을 분리하며 `aggregate`/`status`는 누락값과 pool 상태 미확인을 0으로 표시하지 않는다. 수동/지원 소스 quota snapshot은 만료·창 reset·다른 활동을 검사해 귀속 불가를 구분한다. 6개 유형 E1 18회와 E2 12회를 자동 재시도 없이 실행했다. balanced는 6/6, 95,449토큰, 60.8초로 Opus-first 5/6, 105,658토큰, 72.3초보다 이번 배치에서 나았으며 세 worktree는 완료 상태로 보존했다. 상세 결과는 [`../../experiments/ROUTING_REPORT.md`](../../experiments/ROUTING_REPORT.md)에 있다.
 
 ## 1. 결정 제안
 
@@ -20,7 +20,7 @@
 4. 모델이 필요 없는 보고 취합·증거 대조·조직도·검사 실행은 스크립트로 처리한다.
 5. 직급과 모델은 분리한다. Intern에게 Opus를 배정할 수 있고, Senior의 기계적 자료 수집에 GPT-OSS를 사용할 수 있다.
 
-기본 예제의 `Intern: GPT-OSS → Sonnet` 경로와 `opus-first`, `balanced` 프리셋은 모두 구현돼 있다. 사용자의 실제 조직에 적용할 때는 `preset --apply` 또는 `team-edit`으로 바뀌는 항목만 확인한다. 조직을 매번 재구성하거나 기존 구독 선택을 다시 묻지 않는다.
+기본 예제의 `Intern: GPT-OSS → Sonnet` 경로와 `opus-first`, `balanced` 프리셋은 모두 구현돼 있다. 사용자의 실제 조직에 적용할 때는 `preset --apply` 또는 `adjust`로 바뀌는 항목만 확인한다. 조직을 매번 재구성하거나 기존 구독 선택을 다시 묻지 않는다.
 
 ## 2. 판단 근거와 확인되지 않은 것
 
@@ -189,7 +189,7 @@ GPT-OSS에 배정하려면 수정 범위와 검증 조건이 모두 명확해야
 - 조직은 `pm/pl/senior/junior/intern` 구조를 유지한다.
 - 모델 경로는 각 역할이 선택한 구독 프로필 안에서만 바뀐다.
 - 별도 native Claude/Codex 계정이나 Gemini 구독으로 이동하는 것은 같은 풀 안의 모델 전환과 구분한다.
-- 새로운 프로필을 사용하려면 `team-edit`에서 해당 변경만 설정한다. 이미 지정된 fallback은 다시 질문하지 않는다.
+- 새로운 프로필을 사용하려면 `adjust`에서 해당 변경만 설정한다. 이미 지정된 fallback은 다시 질문하지 않는다.
 - 실행 당시의 조직 revision과 모델 배정 스냅샷을 고정하고 진행 중 작업에 설정 변경을 소급하지 않는다.
 
 ### 4.2 오류별 처리
@@ -343,8 +343,8 @@ E1/E2 결과와 제한은 [모델 라우팅 결과](../../experiments/ROUTING_RE
 ### P1 — 선택 가능한 모델 프리셋: 완료
 
 - `examples/`에 opus-first와 balanced 예제를 추가한다.
-- `team-setup`에서 최초 구성 시 프리셋을 제안하고 직급별 구독/모델을 확인한다.
-- `team-edit`에서 프리셋 적용 전후와 바뀌는 프로필만 표시한다.
+- `form`에서 최초 구성 시 프리셋을 제안하고 직급별 구독/모델을 확인한다.
+- `adjust`에서 프리셋 적용 전후와 바뀌는 프로필만 표시한다.
 - 기존 조직 파일은 자동 변경하지 않는다. 새 작업만 변경된 revision을 사용한다.
 - 실제 사용 가능한 모델 ID는 Agy에서 확인한다: `claude-opus-4-6-thinking`, `claude-sonnet-4-6`, `gpt-oss-120b-medium`.
 
@@ -360,14 +360,14 @@ E1/E2 결과와 제한은 [모델 라우팅 결과](../../experiments/ROUTING_RE
 
 - 작업에 requested/effective 모델, 선택 이유, 프리셋 revision, 승격 이유를 기록한다.
 - usage와 할당량 스냅샷은 서로 다른 레코드로 보존한다.
-- `aggregate`와 `team-show`에 완료까지 누적 사용량, 확인 가능한 풀 상태, 미확인 항목을 표시한다.
+- `aggregate`와 `status`에 완료까지 누적 사용량, 확인 가능한 풀 상태, 미확인 항목을 표시한다.
 - API에서 실제 모델이 확인되지 않으면 requested만 기록하고 effective를 지어내지 않는다.
 
 ### P4 — 확대 실험과 프리셋 선택: 완료
 
 - E1/E2 평가기와 과제 fixture를 추가한다.
 - 기존 보고서와 새 실험 결과를 구분하고 결과를 재현 가능한 요약으로 내보낸다.
-- 업무별 배정표를 확정하고 사용자가 선택한 조직에 `preset --apply` 또는 `team-edit`으로 적용할 수 있게 한다.
+- 업무별 배정표를 확정하고 사용자가 선택한 조직에 `preset --apply` 또는 `adjust`로 적용할 수 있게 한다.
 - E3 실제 업무 검증은 후속 운영 표본으로 분리한다.
 
 ## 10. 검증과 완료 조건
@@ -394,4 +394,4 @@ E1/E2 결과와 제한은 [모델 라우팅 결과](../../experiments/ROUTING_RE
 
 ## 11. 이번 변경의 경계
 
-현재 구현은 프리셋 선택·공유 풀 인식·배정/사용량 기록을 제공하지만 기존 조직에 Opus나 balanced를 자동 적용하지 않는다. E1/E2 결과에 따라 balanced를 잠정 권고할 뿐이며, 기존 조직 설정은 사용자가 `preset --apply` 또는 `team-edit`을 실행할 때만 변경한다. E3와 반복 실험은 실제 업무의 위임 범위와 별도 호출 예산이 있을 때 진행한다.
+현재 구현은 프리셋 선택·공유 풀 인식·배정/사용량 기록을 제공하지만 기존 조직에 Opus나 balanced를 자동 적용하지 않는다. E1/E2 결과에 따라 balanced를 잠정 권고할 뿐이며, 기존 조직 설정은 사용자가 `preset --apply` 또는 `adjust`를 실행할 때만 변경한다. E3와 반복 실험은 실제 업무의 위임 범위와 별도 호출 예산이 있을 때 진행한다.

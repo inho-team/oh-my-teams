@@ -1,5 +1,5 @@
 ---
-name: team-status
+name: status
 description: oh my teams 상설 조직과 현재 kickoff Goal, 실행 팀, 워크트리, 검증 상태를 서로 구분하여 표시한다.
 ---
 
