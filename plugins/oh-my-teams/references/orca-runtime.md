@@ -67,7 +67,9 @@ agy --model claude-opus-4-6-thinking ...
 
 `--model`은 `--effort`보다 먼저 있어야 하고, `--terminal`로 기존 터미널을 재사용할 때에는 `--model`과 `--effort`를 함께 쓸 수 없다. 래퍼가 호출 전에 이를 거부하므로 잘못된 조합이 실행 기반에 도달하지 않는다.
 
-**`worker-start`는 해당 Run에 바인딩된 coordinator 터미널에서만 호출할 수 있다.** 일반 셸에서 호출하면 Task의 존재 여부와 무관하게 `consumer_fenced`로 거부된다. 이 코드는 호출한 자리가 잘못되었다는 뜻이므로 재시도로 해소되지 않으며, 번역표에 넣지 않고 증거와 함께 에스컬레이션한다.
+**`worker-start`는 해당 Run에 바인딩된 coordinator 터미널에서만 호출할 수 있다.** 바인딩된 Run이 없는 상태에서 호출하면 Task의 존재 여부와 무관하게 `consumer_fenced`로 거부되므로, 먼저 같은 터미널에서 `orchestration run-create`로 Run을 만들어 바인딩한다. 이 코드는 호출한 자리가 잘못되었다는 뜻이므로 재시도로 해소되지 않으며, 번역표에 넣지 않고 증거와 함께 에스컬레이션한다.
+
+Run을 바인딩한 뒤에는 `--spec`으로 Task와 첫 시도를 한 번에 만들 수 있고, 성공한 시작은 `state: "ready"`와 함께 `runId`, `taskId`, `dispatchId`를 돌려준다. receipt의 `launch.requested`와 `launch.effective`에는 요청한 agent·모델·강도와 실제로 적용된 값이 나란히 들어 있다.
 
 `worker-start`는 `ready`에서만 0으로 종료하고, `failed`와 `outcome_unknown`에서는 1로 종료하면서도 `dispatchId`, `failedStage`, `residualResources`를 담은 receipt를 반환한다. 따라서 종료 코드만으로 실패를 단정하지 않고 receipt를 읽는다. receipt 자체가 오지 않은 경우에만 미관측으로 처리하며, 이때에도 같은 명령을 다시 실행하지 않는다.
 
