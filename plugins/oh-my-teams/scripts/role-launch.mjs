@@ -455,6 +455,9 @@ export function roleSpec(
     `역할 스킬 전문: ${path.join(skillsDir, role, "SKILL.md")}`,
     "",
     "아래 권한·책임·한계를 벗어나는 요청은 수행하지 않고, 거부 사유와 함께 보고 대상에게 돌려보낸다.",
+    // Untracked files count toward verify's fingerprint, and the literacy-test
+    // workers left node_modules and scratch scripts beside their report.
+    "조사용 임시 스크립트, 의존성 설치, 내려받은 파일은 작업 워크트리가 아니라 워크트리 밖의 임시 디렉터리에서 만든다. 추적되지 않은 파일도 검증 증거의 지문에 들어가므로, 워크트리에 남기면 검증과 검토를 다시 해야 한다.",
     "",
     readRoleCharter(role),
     "",

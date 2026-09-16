@@ -355,11 +355,14 @@ function consumeCalls(state, item, callsUsed, errorMessage) {
     attempt && Number.isInteger(attempt.callAllowance),
     "Attempt has no recorded call allowance; reconcile legacy execution explicitly",
   );
+  // A reworked attempt already settled calls for its earlier executions; this
+  // settlement reports only the latest one, and the allowance covers them all.
+  const total = (attempt.priorCallsUsed ?? 0) + callsUsed;
   assert(
     Number.isInteger(callsUsed) &&
       callsUsed >= 0 &&
-      callsUsed >= (attempt.callsStarted ?? 0) &&
-      callsUsed <= attempt.callAllowance &&
+      total >= (attempt.callsStarted ?? 0) &&
+      total <= attempt.callAllowance &&
       state.budget.callsUsed + callsUsed <= state.budget.maxCalls,
     errorMessage,
   );
@@ -374,7 +377,9 @@ function availableCalls(state) {
       (candidate) => candidate.id === item.attemptId,
     );
     // Unknown legacy reservations consume the remaining pool until reconciled.
-    return total + (attempt?.callAllowance ?? state.budget.maxCalls);
+    // Calls a reworked attempt already settled are counted in callsUsed.
+    if (!attempt?.callAllowance) return total + state.budget.maxCalls;
+    return total + attempt.callAllowance - (attempt.priorCallsUsed ?? 0);
   }, 0);
   return Math.max(0, state.budget.maxCalls - state.budget.callsUsed - reserved);
 }
@@ -1124,6 +1129,144 @@ export function releaseReservation(stateDir, id, expectedRevision, input) {
     state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return { state, duplicate: false };
+  });
+}
+
+function validateReworkInput(input) {
+  validateExecutionInput(input);
+  assert(
+    typeof input.reviewId === "string" && input.reviewId.trim(),
+    "Rework needs the review that asked for changes",
+  );
+}
+
+/**
+ * Hands a task back to its implementer after a required review asked for changes.
+ *
+ * A review that concluded `changes-requested` or `inconclusive`, or left a
+ * finding open, is not a failure, so `workflow-retry` refused it; and the gate
+ * a corrected execution produced was ignored, because the task stayed bound to
+ * the execution first attached. This attaches the corrected execution to the
+ * same attempt, within that attempt's remaining call allowance, and records the
+ * review in `rework`. It spends no new attempt: the review, not a fault, sent
+ * the work back. The corrected execution then settles, is reviewed and accepted
+ * like the first, and its gate advances the task.
+ *
+ * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} id - Workflow ID.
+ * @param {number} expectedRevision - Optimistic state revision.
+ * @param {object} input - Event, task, current attempt, review ID, and the
+ *   corrected execution's Orca receipt.
+ * @returns {object} Updated workflow state, or an idempotent duplicate response.
+ * @throws {Error} When the review did not ask for changes to this execution, the
+ *   task is not waiting on review, or no call or capacity remains.
+ */
+export function reworkTask(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, organization, dir } = readWorkflow(stateDir, id);
+    validateReworkInput(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+    const item = state.tasks[input.taskId];
+    assert(item, "Unknown rework task");
+    assert(
+      ["submitted", "review-pending", "reviewed"].includes(item.state),
+      `Task ${input.taskId} is ${item.state}; only a reported task waiting on review is reworked`,
+    );
+    assert(
+      item.attemptId === input.attemptId,
+      "Rework must continue the task's current attempt",
+    );
+    const attempt = item.attempts.find(
+      (candidate) => candidate.id === input.attemptId,
+    );
+    assert(attempt, "Attempt history missing");
+
+    const reviewPath = path.join(stateDir, "reviews", `${input.reviewId}.json`);
+    assert(fs.existsSync(reviewPath), `Review not recorded: ${input.reviewId}`);
+    const review = readJSON(reviewPath);
+    const executionId = item.workerRunId ?? item.execution?.executionId;
+    assert(
+      review.taskId === input.taskId &&
+        review.taskHash === item.taskHash &&
+        review.implementationExecutionId === executionId,
+      `Review ${input.reviewId} did not review this task's current execution`,
+    );
+    const openFindings = (review.findings ?? [])
+      .filter((finding) => finding.status === "open")
+      .map((finding) => finding.id);
+    assert(
+      review.conclusion !== "approved" || openFindings.length > 0,
+      `Review ${input.reviewId} approved the execution; there is nothing to rework`,
+    );
+
+    const executions = Object.values(state.tasks).flatMap((other) => [
+      other.execution?.executionId,
+      ...other.attempts.flatMap((entry) => [
+        entry.receipt?.executionId,
+        ...(entry.previousReceipts ?? []).map((prior) => prior.executionId),
+      ]),
+    ]);
+    assert(
+      !executions.includes(input.receipt.executionId),
+      "Rework needs a new execution, not one already recorded",
+    );
+    const spent = (attempt.priorCallsUsed ?? 0) + (attempt.callsUsed ?? 0);
+    assert(
+      spent < attempt.callAllowance &&
+        state.budget.callsUsed < state.budget.maxCalls,
+      `Attempt ${input.attemptId} has used ${spent} of ${attempt.callAllowance} calls; ` +
+        "no call remains for rework",
+    );
+    assert(
+      Object.values(state.tasks).filter(occupiesSlot).length <
+        state.policy.maxRunning,
+      "Workflow running capacity exhausted",
+    );
+    assert(
+      roleRunningCount(state, item.role) <
+        organization.roles[item.role].concurrency,
+      `No ${item.role} concurrency slot available`,
+    );
+
+    item.rework.push({
+      fromAttempt: item.attemptId,
+      category: "review-changes-requested",
+      reviewId: input.reviewId,
+      conclusion: review.conclusion,
+      openFindings,
+      fromExecution: executionId,
+      toExecution: input.receipt.executionId,
+      recordedAt: new Date().toISOString(),
+    });
+    attempt.previousReceipts = [
+      ...(attempt.previousReceipts ?? []),
+      attempt.receipt,
+    ];
+    attempt.priorCallsUsed = spent;
+    attempt.callsUsed = undefined;
+    attempt.receipt = input.receipt;
+    attempt.status = "running";
+    item.execution = input.receipt;
+    item.workerRunId = null;
+    item.acceptedResult = null;
+    item.state = "running";
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "review-rework-attached",
+      taskId: input.taskId,
+      attemptId: input.attemptId,
+      reviewId: input.reviewId,
+      receipt: input.receipt,
+    });
+    state.revision += 1;
+    state.status = deriveWorkflowStatus(state);
+    saveWorkflowState(stateDir, id, state);
+    return state;
   });
 }
 

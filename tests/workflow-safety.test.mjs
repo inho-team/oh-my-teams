@@ -18,6 +18,7 @@ import {
   resumeWorkflow,
   recordSettlement,
   readWorkflow,
+  reworkTask,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { work } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
@@ -327,6 +328,156 @@ test("a one-task workflow closes on its task's acceptance, without an integratio
     accepted.revision,
   );
   assert.equal(again.revision, accepted.revision);
+});
+
+test("a review that asks for changes hands the task back within its attempt", async (t) => {
+  // #38: the corrected execution's gate was accepted, yet the task stayed
+  // submitted, because it was bound to the execution first attached and no
+  // command could attach the correction.
+  const dir = await repo(t),
+    stateDir = path.join(dir, ".omt");
+  writeJSON(path.join(dir, "a.json"), task("a"));
+  const request = {
+    schemaVersion: 1,
+    id: "rework-loop",
+    goal: "Write a report a reviewer accepts",
+    repo: ".",
+    tasks: [{ file: "a.json", role: "intern" }],
+    policy: { maxRunning: 1, maxReviewPending: 1 },
+    budget: { maxAttempts: 1, maxCalls: 3 },
+  };
+  await createWorkflow(stateDir, request, structuredClone(organization), dir);
+  const revision = () => readWorkflow(stateDir, request.id).state.revision;
+  const receipt = (executionId) => ({
+    executionId,
+    runId: "run",
+    taskId: "orca-task",
+    dispatchId: executionId,
+    worktreeId: "repo::/w/report",
+  });
+  attachExecution(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "attach-first",
+    attemptId: "attempt-1",
+    taskId: "a",
+    callAllowance: 2,
+    receipt: receipt("first"),
+  });
+  recordSettlement(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "settle-first",
+    attemptId: "attempt-1",
+    taskId: "a",
+    executionId: "first",
+    outcome: "settled",
+    callsUsed: 1,
+  });
+  const { taskHash: hashOfA } = readWorkflow(stateDir, request.id).state.tasks
+    .a;
+  const review = (id, implementationExecutionId, conclusion, findings) =>
+    writeJSON(path.join(stateDir, "reviews", `${id}.json`), {
+      schemaVersion: 1,
+      id,
+      taskId: "a",
+      taskHash: hashOfA,
+      implementationExecutionId,
+      conclusion,
+      findings,
+    });
+  const rework = (eventId, reviewId, executionId) =>
+    reworkTask(stateDir, request.id, revision(), {
+      schemaVersion: 1,
+      eventId,
+      taskId: "a",
+      attemptId: "attempt-1",
+      reviewId,
+      receipt: receipt(executionId),
+    });
+  review("approve-first", "first", "approved", []);
+  review("reject-first", "first", "changes-requested", [
+    { id: "unsupported-claim", status: "open", description: "No source." },
+  ]);
+  review("reject-other", "someone-else", "changes-requested", []);
+
+  assert.throws(
+    () => rework("rw-approved", "approve-first", "second"),
+    /nothing to rework/,
+  );
+  assert.throws(
+    () => rework("rw-other", "reject-other", "second"),
+    /did not review this task's current execution/,
+  );
+  assert.throws(
+    () => rework("rw-missing", "never-recorded", "second"),
+    /Review not recorded/,
+  );
+  assert.throws(
+    () => rework("rw-same", "reject-first", "first"),
+    /new execution/,
+  );
+
+  const reworked = rework("rw-1", "reject-first", "second");
+  assert.equal(reworked.tasks.a.state, "running");
+  assert.equal(reworked.tasks.a.execution.executionId, "second");
+  // The review sent the work back, so no new attempt is spent.
+  assert.equal(reworked.budget.attemptsUsed, 1);
+  const attempt = reworked.tasks.a.attempts[0];
+  assert.equal(attempt.previousReceipts[0].executionId, "first");
+  assert.equal(attempt.priorCallsUsed, 1);
+  assert.deepEqual(reworked.tasks.a.rework[0].openFindings, [
+    "unsupported-claim",
+  ]);
+  // Replaying the same event changes nothing.
+  assert.equal(rework("rw-1", "reject-first", "second").duplicate, true);
+
+  // The allowance covers both executions: 1 + 2 would exceed 2.
+  const settle = (eventId, callsUsed) =>
+    recordSettlement(stateDir, request.id, revision(), {
+      schemaVersion: 1,
+      eventId,
+      attemptId: "attempt-1",
+      taskId: "a",
+      executionId: "second",
+      outcome: "settled",
+      callsUsed,
+    });
+  assert.throws(() => settle("settle-over", 2), /call budget exceeded/);
+  settle("settle-second", 1);
+
+  // A gate from the first execution still does not advance the task; the
+  // corrected execution's accepted gate does.
+  const gate = (runId, decisionId) =>
+    writeJSON(path.join(stateDir, "gates", "a.json"), {
+      runId,
+      state: "accepted",
+      gates: {
+        "contract-ready": { taskHash: hashOfA },
+        "outcome-accepted": { decisionId },
+      },
+    });
+  gate("first", "accept-first");
+  assert.equal(
+    resumeWorkflow(stateDir, request.id, revision()).state.tasks.a.state,
+    "submitted",
+  );
+
+  // With both calls spent, another rejection has no call left to rework with.
+  review("reject-second", "second", "inconclusive", []);
+  assert.throws(
+    () => rework("rw-2", "reject-second", "third"),
+    /used 2 of 2 calls/,
+  );
+
+  gate("second", "accept-second");
+  const resumed = resumeWorkflow(stateDir, request.id, revision()).state;
+  assert.equal(resumed.tasks.a.state, "accepted");
+  assert.equal(resumed.tasks.a.acceptedResult, "accept-second");
+  const accepted = await acceptWorkflowIntegration(
+    stateDir,
+    request.id,
+    resumed.revision,
+  );
+  assert.equal(accepted.status, "accepted");
 });
 
 const organization = readJSON(

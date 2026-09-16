@@ -53,6 +53,7 @@ import {
   releaseReservation,
   resumeWorkflow,
   retryTask,
+  reworkTask,
   setWorkflowDepth,
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
@@ -130,6 +131,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-settle --id ID --state DIR --revision N --settlement FILE
   workflow-release --id ID --state DIR --revision N --release FILE
   workflow-retry --id ID --state DIR --revision N --retry FILE
+  workflow-rework --id ID --state DIR --revision N --rework FILE
+                  (attaches the corrected execution after a review asked for changes)
   workflow-depth --id ID --state DIR --revision N --change FILE
   failure-classify --failure FILE
   lesson-record --lesson FILE --state DIR
@@ -229,6 +232,7 @@ export const ALLOWED_OPTIONS = {
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
+  "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
@@ -290,6 +294,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
+  "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
@@ -799,6 +804,13 @@ async function executeCommand(args) {
         args.id,
         Number(args.revision),
         readJSON(args.release),
+      );
+    case "workflow-rework":
+      return reworkTask(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.rework),
       );
     case "workflow-retry":
       return retryTask(
