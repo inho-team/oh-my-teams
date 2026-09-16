@@ -9,34 +9,24 @@ import path from "node:path";
 import crypto from "node:crypto";
 import os from "node:os";
 import { spawn } from "node:child_process";
+import {
+  adapterFor,
+  PROVIDER_EFFORTS as REGISTERED_EFFORTS,
+  PROVIDER_IDS,
+  transportFor,
+} from "./providers/index.mjs";
 
 /** Stable role identifiers used by schemas, organization graphs, and reports. */
 export const ROLES = ["pm", "pl", "senior", "junior", "intern"];
 
 /**
- * Reasoning-effort values each provider CLI accepts, verified against the
- * installed CLIs rather than assumed.
+ * Reasoning-effort values each provider accepts, re-exported from the registry.
  *
- * `agy --help` (1.2.3) documents `--effort low|medium|high`. Codex exposes no
- * `exec` flag; its levels come from the account's model catalog and travel as a
- * `--config model_reasoning_effort=<value>` override, and Codex does not reject an
- * unknown value, so the runtime has to. The Claude CLI exposes no selector at
- * all, so an effort on a Claude profile is a configuration error, not a no-op.
- *
- * A level a provider accepts syntactically may still be unavailable on a given
- * model. The runtime does not carry a per-model catalog, so a rejected level
- * surfaces as an ordinary provider failure.
+ * Each adapter states the levels its own provider accepts, verified against the
+ * installed CLI or documented API rather than assumed, so adding a provider does
+ * not mean editing a table here.
  */
-export const PROVIDER_EFFORTS = {
-  agy: ["low", "medium", "high"],
-  codex: ["low", "medium", "high", "xhigh", "max", "ultra"],
-  claude: [],
-};
-
-// Agy encodes the level in the model ID itself (`gemini-3.8-flash-high`), so a
-// profile can state the level twice. Contradictory pairs are rejected instead of
-// letting an unverified precedence rule decide which one the call actually used.
-const AGY_MODEL_EFFORT = /-(low|medium|high)$/;
+export const PROVIDER_EFFORTS = REGISTERED_EFFORTS;
 
 /**
  * Produces a SHA-256 digest for a string or JSON-serializable value.
@@ -485,31 +475,24 @@ function validateEffort(id, profile) {
     accepted.includes(profile.effort),
     `Effort for ${id} must be one of ${accepted.join("|")}`,
   );
-  if (profile.provider === "agy") {
-    const encoded = AGY_MODEL_EFFORT.exec(profile.model ?? "")?.[1];
-    assert(
-      !encoded || encoded === profile.effort,
-      `Effort ${profile.effort} contradicts model ${profile.model}: ${id}`,
-    );
-  }
 }
 
 function validateProfile(id, profile, pools) {
   assert(/^[a-z0-9][a-z0-9-]*$/.test(id), `Invalid profile id: ${id}`);
-  assert(
-    ["claude", "codex", "agy"].includes(profile.provider),
-    `Invalid provider: ${id}`,
-  );
+  assert(PROVIDER_IDS.includes(profile.provider), `Invalid provider: ${id}`);
   assert(
     typeof profile.subscription === "string" && profile.subscription.trim(),
     `Subscription label required: ${id}`,
   );
+  // Throws when the profile names neither transport, names both, or names one
+  // its provider cannot serve, so the checks below know which shape applies.
+  const transport = transportFor(profile);
   assert(
-    Array.isArray(profile.command) &&
-      profile.command.length > 0 &&
-      profile.command.every(
-        (argument) => typeof argument === "string" && argument,
-      ),
+    transport !== "process" ||
+      (profile.command.length > 0 &&
+        profile.command.every(
+          (argument) => typeof argument === "string" && argument,
+        )),
     `Command argv required: ${id}`,
   );
   assert(
@@ -539,10 +522,13 @@ function validateProfile(id, profile, pools) {
   if (profile.account !== "current") {
     assert(
       (profile.env && Object.keys(profile.env).length > 0) ||
-        profile.command.length > 1,
+        (transport === "process" && profile.command.length > 1),
       `Named account ${id} needs an actual command/profile or environment binding`,
     );
   }
+  // Rules only the provider itself can state, such as a required context window
+  // or an effort the model identifier already contradicts.
+  adapterFor(profile).validateProfile?.(id, profile);
 }
 
 function validateRole(role, binding, org) {
