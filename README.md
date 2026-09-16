@@ -1,6 +1,6 @@
 # oh my teams
 
-Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior / Worker의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 런타임의 `intern` 역할 ID는 이전 조직과의 호환성을 위해 유지한다. 내부 실행기는 **Claude, Codex, Agy**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
+Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior / Worker의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 런타임의 `intern` 역할 ID는 이전 조직과의 호환성을 위해 유지한다. 내부 실행기는 **Claude, Codex, Agy, Ollama**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
 
 ## 시작
 
@@ -63,6 +63,7 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 | Agy | `low`, `medium`, `high` | `--effort <값>` | `agy --help`가 이 세 값을 명시한다. |
 | Codex | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `--config model_reasoning_effort=<값>` | `codex exec`에 전용 플래그가 없고, 값 목록은 계정의 모델 카탈로그에서 가져왔다. |
 | Claude | 없음 | 해당 없음 | CLI가 강도 선택 수단을 제공하지 않으므로 `effort`를 지정하면 설정 오류로 거부한다. |
+| Ollama | `low`, `medium`, `high` | HTTP 본문의 `think`, CLI의 `--think <값>` | Ollama 문서가 gpt-oss 같은 thinking 모델에 이 값을 명시한다. thinking 모드가 없는 모델은 요청을 거부하므로 일반적인 실행기 실패로 드러난다. |
 
 `effort`를 생략했을 때 실제로 적용되는 깊이는 런타임이 정하지 않고 각 CLI와 계정 설정이 정한다. Codex는 `~/.codex/config.toml`의 `model_reasoning_effort`가 있으면 그것을, 없으면 모델 카탈로그의 `default_reasoning_level`을 쓴다(확인 시점 기준 `gpt-5.6-sol`은 `low`, `gpt-5.6-luna`와 `gpt-5.6-terra`는 `medium`). Agy는 서버가 모델별로 내려주는 선택지에서 결정한다. 따라서 보고서의 `requestedEffort`가 `null`이라는 것은 기본 깊이를 뜻하지 않고 **런타임이 깊이를 지정하지 않았다**는 사실만 뜻한다. 실제 적용된 깊이는 측정하지 않았다.
 
@@ -73,6 +74,25 @@ Agy는 `gemini-3.8-flash-high`처럼 모델 ID 자체에 강도를 담는다. �
 [조직 예제](plugins/oh-my-teams/examples/organization.json)는 구조 참고이며 실제 구독 선택을 대신하지 않는다. 프로필에는 실행기·명령 argv·계정 참조·구독 표시 이름·모델과 선택적 추론 강도를 저장한다. 구독 공유가 가능하다. 별도 계정은 실제 CLI 프로필 인수 또는 환경변수 이름 참조로 연결한다. 계정 이름만 붙여 전환됐다고 처리하지 않으며, 비밀값을 JSON에 넣지 않는다.
 
 `opus-first`는 Agy 역할을 Opus로 시작하는 평가 기준선이고, `balanced`는 Senior=Opus, Junior=Sonnet, Intern=GPT-OSS로 나눈다. [6유형 실측](experiments/ROUTING_REPORT.md)에서는 balanced가 6/6을 통과하며 Opus-first보다 토큰 9.7%, 모델 시간 16.0%를 줄여 잠정 권고가 됐다. 1회 배치이므로 기존 조직에는 자동 적용하지 않으며 `preset` 명령은 변경되는 역할만 먼저 보여준다. GPT-OSS 권고는 좁은 편집·인용으로 제한한다. 같은 공유 풀의 소진이 구조적으로 확인되면 그 풀의 다른 모델을 연쇄 호출하지 않는다. 구독의 실제 할당량 차감·가격은 토큰 수와 구분한다.
+
+### 실행기 어댑터와 로컬 Ollama
+
+실행기별 동작은 `plugins/oh-my-teams/scripts/providers/`의 어댑터 모듈 한 개에 모여 있다. 어댑터는 자신이 지원하는 전송 방식, 허용하는 추론 강도, 요청 구성, 출력 해석, 실패 분류를 스스로 선언하고, 레지스트리가 이를 모아 공개한다. 런타임이 인정하는 실행기 목록과 강도 표는 모두 이 레지스트리에서 파생되므로, 실행기를 추가하는 작업은 어댑터 파일 하나와 레지스트리 한 줄, 그리고 스키마의 열거값 추가로 끝난다. 라우팅·증거·사용량 보고는 실행기 이름을 보지 않는다.
+
+프로필은 전송 방식을 정확히 하나만 선언한다. `command`를 적으면 자식 프로세스로 CLI를 실행하고, `endpoint`를 적으면 HTTP API를 호출한다. 둘을 함께 적거나 하나도 적지 않으면 저장을 거부한다. Claude·Codex·Agy는 프로세스 전송만 지원하고, Ollama는 두 방식을 모두 지원한다.
+
+Ollama 프로필에는 다음 제약이 적용된다.
+
+| 항목 | 규칙 | 이유 |
+|---|---|---|
+| `model` | 필수 | 호스트 기본 모델이라는 개념이 없어서 생략하면 어떤 모델이 답했는지 증명할 수 없다. |
+| `contextTokens` | 필수(2048 이상) | Ollama는 컨텍스트 창을 넘는 프롬프트를 오류 없이 잘라낸다. 이 값을 `num_ctx`로 전달하고, 응답의 `prompt_eval_count`가 창에 도달하면 절단으로 판정해 실패시킨다. |
+| `pool` | 금지 | 로컬 추론은 공유 할당량을 쓰지 않는다. 서버가 응답하지 않는 상황은 풀 소진이 아니라 `provider-unavailable`로 분류되어 다음 프로필로 넘어간다. |
+| 비용 | 항상 `0` | API 지출이 실제로 없다. `null`로 두면 로컬 프로필이 한 번이라도 참여한 실행의 총비용이 영구히 미상으로 남는다. |
+
+HTTP 전송을 권장한다. 토큰 수와 실제 응답 모델을 함께 받으므로 사용량과 모델 확인 증거가 남고, `format`으로 JSON 응답을 서버 측에서 강제할 수 있으며, thinking 모델의 추론 흔적이 답변과 분리되어 도착한다. CLI 전송은 이 세 가지를 제공하지 못하므로 절단 여부를 사후에 확인할 수 없다.
+
+Ollama는 저장소 파일을 직접 열지 못한다. 작업 계약의 `contextRefs`는 내용이 프롬프트에 포함되지만 `contractRefs`는 경로와 해시만 전달되므로, 그 내용을 읽어야 하는 작업은 Ollama 프로필에 배정하지 않는다. 또한 로컬 서버는 요청을 사실상 직렬로 처리하므로 해당 역할의 `concurrency`는 1로 두는 편이 낫다. [로컬 우선 조직 예제](plugins/oh-my-teams/examples/organization.local-ollama.json)가 두 전송 방식과 클라우드 fallback을 함께 보여준다.
 
 ## 실행과 검증
 
