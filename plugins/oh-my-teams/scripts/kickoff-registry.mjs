@@ -98,6 +98,10 @@ export function validateEntry(entry) {
   for (const key of ["path", "stateDir"]) {
     assert(text(coordinator[key]), `Kickoff coordinator ${key} required`);
   }
+  assert(
+    entry.selfCoordinator === undefined || text(entry.selfCoordinator),
+    "Kickoff selfCoordinator must state why no handoff was possible",
+  );
   return entry;
 }
 
@@ -185,6 +189,17 @@ export function registerKickoff(orgFile, claim) {
     );
     assert(fs.existsSync(orgFile), "No organization; run the form skill first");
     const revision = validateOrg(readJSON(orgFile)).revision;
+    // The organization sits at <project>/.omt/organization.json. A coordinator
+    // at the project itself is the declaring session supervising its own
+    // kickoff, which is allowed only where no handoff exists and the user
+    // agreed, so the claim has to say so.
+    const project = path.dirname(path.dirname(path.resolve(orgFile)));
+    const coordinatorPath = path.resolve(text(claim.coordinator.path) ?? "");
+    assert(
+      coordinatorPath !== project || text(claim.selfCoordinator),
+      "The declaring session cannot be the coordinator; hand the kickoff to a child worktree, " +
+        "or record selfCoordinator with why no handoff exists and the user's approval",
+    );
     assert(
       claim.organizationRevision === revision,
       `Organization is at revision ${revision}; read it again before registering`,
@@ -194,12 +209,15 @@ export function registerKickoff(orgFile, claim) {
       goal: claim.goal,
       coordinator: {
         worktreeId,
-        path: path.resolve(text(claim.coordinator.path) ?? ""),
+        path: coordinatorPath,
         stateDir: path.resolve(text(claim.coordinator.stateDir) ?? ""),
       },
       runId: claim.runId ?? null,
       organizationRevision: revision,
       brief,
+      ...(claim.selfCoordinator === undefined
+        ? {}
+        : { selfCoordinator: claim.selfCoordinator }),
       createdAt: new Date().toISOString(),
     });
     writeJSON(file, entry);

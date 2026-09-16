@@ -605,8 +605,11 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     assert.ok(runtime.includes(`\`${verdict}\``), `modelProof ${verdict}`);
   }
   assert.match(runtime, /## coordinator 실행/);
-  assert.match(runtime, /node <runtime> role-command --org/);
-  assert.match(runtime, /terminal read --terminal <handle> --screen/);
+  // A hand-typed `terminal create --command` left the command unsubmitted at
+  // the prompt, so role terminals open through role-terminal, which reads the
+  // screen and submits the command once.
+  assert.match(runtime, /node <runtime> role-terminal --org/);
+  assert.match(runtime, /결과의 `screen`/);
   assert.match(runtime, /`antigravity`/);
   // Agy roles had no sanctioned launch: the wrapper refused them and the
   // charters forbade the raw command.
@@ -616,19 +619,22 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // built for one role is accepted as the role the run folded it onto.
   assert.match(
     runtime,
-    /node <runtime> role-command --org <organization\.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state>/,
+    /node <runtime> role-terminal --org <organization\.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <coordinator-state>/,
   );
   assert.doesNotMatch(readSkill("pl"), /custom argv/);
   assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
   assert.match(runtime, /대괄호/);
   for (const role of ["pm", "pl"]) {
-    assert.match(readSkill(role), /Agy 역할은 `role-command`로 연 터미널/);
+    assert.match(readSkill(role), /Agy 역할은 `role-terminal`로 연 터미널/);
   }
   // Orca refuses nested workers by default, so PL cannot be the dispatcher.
   assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
   assert.match(readSkill("pl"), /기본값이 1/);
   assert.match(readSkill("senior"), /- Junior가 이번 실행에 있으면 기능 구현/);
   assert.match(readSkill("kickoff"), /coordinator 실행/);
+  // A session that could not start the coordinator went on as PM itself.
+  assert.match(readSkill("kickoff"), /선언 세션은 PM을 대신 맡지 않는다/);
+  assert.match(readReference("kickoff-registry.md"), /인계에 실패한 것이다/);
   assert.match(
     readReference("kickoff-registry.md"),
     /worktree create --agent`를 쓰지 않고/,
