@@ -69,6 +69,8 @@ agy --model claude-opus-4-6-thinking ...
 node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|intern> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --spec <작업> [--worktree new-child] [--run <runId>]
 ```
 
+래퍼는 worker가 시작되면 receipt의 `effects`에 기록된 agent 터미널의 탭 제목을 역할 태그로 시작하게 바꾼다. 제목은 `[PL] <워크트리 이름>` 형식이며, `--title`을 주면 워크트리 이름 대신 그 문구가 태그 뒤에 온다. 같은 워크트리에서 같은 역할을 둘 이상 띄울 때에는 `--title`로 작업을 구분한다. 결과의 `title`과 `titlePinned`가 적용한 제목과 성공 여부를 나타내며, 제목 변경에 실패해도 이미 시작된 worker를 실패로 처리하지 않는다. 탭 제목을 붙이는 이유는 아래 「역할 탭 제목」 절에 있다.
+
 `--workflow-id`와 `--state`를 주면 래퍼는 조직 파일 대신 그 workflow가 만들어질 때 고정한 조직 스냅샷을 읽고, workflow에 기록된 이번 실행의 역할 목록으로 역할을 접는다. 실행 도중 `adjust`로 바뀐 조직이나 삭제된 역할이 진행 중인 kickoff에 섞이지 않게 하기 위해서다. workflow를 주지 않으면 `--org`의 파일을 읽고 조직이 선언한 역할로 접는다.
 
 그다음 역할 프로필에서 시작 경로와 Orca agent, `--model`, `--effort`를 정한다.
@@ -118,7 +120,14 @@ node <runtime> worker-start --org <organization.json> --role <역할> --repo <co
 2. 짧게 `tui-idle`을 기다린 뒤 화면을 읽고, 마지막 줄에 명령이 프롬프트에 입력된 채 남아 있으면 Enter를 한 번 보낸다. 결과의 `submission`은 Orca가 스스로 실행했으면 `orca`, Enter를 보냈으면 `enter-sent`다. 시작된 agent에 입력이 들어가지 않도록 Enter는 두 번 보내지 않는다.
 3. agent가 명령 아래에 자기 화면을 그릴 때까지 화면을 다시 읽는다. Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족되므로 준비 여부를 판단하는 근거로 쓰지 않는다. 화면 너비 때문에 명령이 여러 줄로 나뉘어도 같은 명령으로 인식한다.
 4. Agy는 처음 여는 폴더마다 폴더 신뢰 질문("Do you trust the contents of this project?")을 띄우며, 권한 우회 플래그로도 건너뛰지 않는다. 역할의 워크트리는 사용자 저장소에서 이 실행을 위해 만든 것이고 역할은 이미 승인 없이 도구를 실행하므로, "Yes, I trust this folder"가 선택된 경우에만 Enter를 한 번 보내 신뢰한다. 결과의 `trust`는 질문이 없었으면 `not-asked`, 답했으면 `accepted`다. 신뢰한 폴더는 Agy 설정의 `trustedWorkspaces`에 남는다.
-5. 마지막 화면을 `screen`에 담는다. agent가 끝내 화면을 그리지 않았거나, 명령이 여전히 프롬프트에 남아 있거나, 신뢰 질문이 남아 있으면 `ready: false`, `status: "blocked"`로 종료 코드 1을 돌려준다. 이때는 브리프나 작업을 보내지 않고 화면을 증거로 붙여 보고한다.
+5. 준비가 확인되면 탭 제목을 `terminal rename`으로 다시 지정하고, 같은 워크트리에서 agent가 없고 Orca 기본 이름(`Terminal <n>`)이거나 이름이 없는 셸 탭을 `[shell] <워크트리 이름>`으로 바꾼다. 사람이 이름을 붙인 탭과 다른 agent의 탭은 건드리지 않는다. 셸 탭의 새 이름은 `terminal list`에 바로 반영되지만, Orca 화면에 아직 한 번도 열리지 않은 탭은 저장된 탭 이름이 `Terminal <n>`으로 남을 수 있다. 결과의 `title`, `titlePinned`, `shellsLabeled`에 적용 내용이 담긴다. 이유는 아래 「역할 탭 제목」 절에 있다.
+6. 마지막 화면을 `screen`에 담는다. agent가 끝내 화면을 그리지 않았거나, 명령이 여전히 프롬프트에 남아 있거나, 신뢰 질문이 남아 있으면 `ready: false`, `status: "blocked"`로 종료 코드 1을 돌려준다. 이때는 브리프나 작업을 보내지 않고 화면을 증거로 붙여 보고한다.
+
+### 역할 탭 제목
+
+역할 터미널의 탭 제목은 `[PM]`, `[PL]`, `[Senior]`, `[Junior]`, `[Intern]` 태그로 시작한다. 태그가 없으면 Orca 탭에는 agent가 스스로 보내는 세션 요약 제목(예: `✳ Oh my teams kickoff coordinator`)만 보여서 어느 탭이 PM이고 어느 탭이 PL인지 구분할 수 없다. `role-terminal`의 `--title`은 태그를 대신하지 않고 태그 뒤에 붙으며, 생략하면 워크트리 이름이 붙는다.
+
+제목은 터미널을 만들 때 한 번 주는 것으로 끝내지 않고, agent가 뜬 뒤 `terminal rename`으로 다시 지정한다. literacy-test kickoff에서 `terminal create --title`로 연 PM 탭이 나중에 사용자 지정 제목을 잃고 agent의 세션 제목으로 표시되었다. Orca는 탭 기록이 없는 터미널을 넘겨받을 때 사용자 지정 제목 없이 탭을 다시 만들기 때문이다. Orca 탭은 사용자 지정 제목을 agent가 보내는 제목보다 먼저 표시하므로, 다시 지정한 제목은 agent가 작업하는 동안에도 유지된다. 반면 `terminal show`와 `terminal list`의 `title`은 agent가 보낸 실시간 제목이므로, 이 값이 태그로 시작하지 않는다고 해서 탭 제목이 사라진 것은 아니다. agent의 제목 기능 자체는 끄지 않는다. Orca가 그 제목으로 agent의 작업 상태를 판단하기 때문이다.
 
 역할 명령에는 실행기별 권한 우회 플래그가 붙는다. Claude와 Agy에는 `--dangerously-skip-permissions`, Codex에는 `--dangerously-bypass-approvals-and-sandbox`다. 역할 터미널에는 도구 승인 창에 답할 사람이 없고 상위 역할이 대신 승인하는 절차도 없으므로, 플래그 없이 뜬 역할은 첫 도구 호출에서 멈춘다. Orca도 설정의 기본 인자로 같은 플래그를 붙이지만 명령이 agent 이름 하나뿐일 때만 붙이므로, `--model`이 붙은 명령이나 agent ID가 `antigravity`인 `agy`에는 붙지 않는다. 역할 프로필의 `command`는 실행 파일 이름 하나만 허용되므로 플래그가 두 번 붙지 않는다. Codex는 같은 플래그가 두 번 오면 실행을 거부한다.
 
@@ -136,7 +145,7 @@ PM coordinator는 감독 worker가 아니므로 `worker-start`로 띄우지 않�
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --worktree id:<worktreeId>
+node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --worktree id:<worktreeId> [--title <kickoff 요약>]
 <orca> terminal send --terminal <handle> --text "<브리프 경로와 시작 지시>" --enter --json
 ```
 
