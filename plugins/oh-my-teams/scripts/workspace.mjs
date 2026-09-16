@@ -6,9 +6,16 @@ import { git } from "./evidence.mjs";
 import { taskHash, validateTask } from "./contracts.mjs";
 import { executionAdapter } from "./adapters.mjs";
 
+// Paths are compared after the operating system resolves them. The JavaScript
+// realpath leaves a Windows 8.3 short name such as RUNNER~1 as it is, while Git
+// reports the long name, so the same directory compared unequal and a correct
+// worktree was refused as not being its own root. The native call returns the
+// name the file system itself uses.
+const realPath = (target) => fs.realpathSync.native(target);
+
 function resolvedOrNull(target) {
   try {
-    return fs.realpathSync(target);
+    return realPath(target);
   } catch {
     return null;
   }
@@ -27,7 +34,7 @@ function resolvedOrNull(target) {
 export async function prepareInput(org, task, repo, outputDir) {
   validateOrg(org);
   validateTask(task);
-  const repository = fs.realpathSync(repo);
+  const repository = realPath(repo);
   const base = await git(repository, [
     "rev-parse",
     "--verify",
@@ -86,8 +93,8 @@ export async function attachWorkspace(input) {
   const adapter = executionAdapter(input.runtimeName ?? "orca");
   adapter.assertDiscovery(runtime, executable);
 
-  const parentRepo = fs.realpathSync(input.parentRepo);
-  const workspace = fs.realpathSync(input.workspace);
+  const parentRepo = realPath(input.parentRepo);
+  const workspace = realPath(input.workspace);
   const worktree = adapter.readWorkspaceClaim(receipt);
   // A receipt naming a path that does not exist is a mismatched receipt, not a
   // filesystem error: resolving it directly surfaced a raw lstat ENOENT with no
@@ -109,7 +116,7 @@ export async function attachWorkspace(input) {
     "Runtime lookup does not match the attached workspace",
   );
 
-  const topLevel = fs.realpathSync(
+  const topLevel = realPath(
     await git(workspace, ["rev-parse", "--show-toplevel"]),
   );
   assert(

@@ -39,7 +39,9 @@ export const AGY_BANNER_COLUMNS = 44;
 /**
  * Returns the shell command a role terminal types, narrowed for Agy Gemini.
  *
- * `stty` exists only in POSIX shells, so a Windows host keeps the plain command.
+ * Role commands run in a POSIX shell or in PowerShell, and both separate two
+ * commands with `;`. A POSIX shell narrows the terminal with `stty`; Windows
+ * has no `stty`, so PowerShell narrows the console with `mode con:`.
  *
  * @param {object} command - Result of `roleCommand`.
  * @param {string} [platform=process.platform] - Host platform.
@@ -48,15 +50,16 @@ export const AGY_BANNER_COLUMNS = 44;
  */
 export function launchLine(command, platform = process.platform) {
   const narrow =
-    command.provider === "agy" &&
-    /^gemini/i.test(command.modelRequested ?? "") &&
-    platform !== "win32";
-  return narrow
-    ? {
-        typed: `stty cols ${AGY_BANNER_COLUMNS}; ${command.command}`,
-        columns: AGY_BANNER_COLUMNS,
-      }
-    : { typed: command.command, columns: null };
+    command.provider === "agy" && /^gemini/i.test(command.modelRequested ?? "");
+  if (!narrow) return { typed: command.command, columns: null };
+  const width =
+    platform === "win32"
+      ? `mode con: cols=${AGY_BANNER_COLUMNS}`
+      : `stty cols ${AGY_BANNER_COLUMNS}`;
+  return {
+    typed: `${width}; ${command.command}`,
+    columns: AGY_BANNER_COLUMNS,
+  };
 }
 
 /** Tag each role's tab title starts with, so PM and PL tabs are told apart. */

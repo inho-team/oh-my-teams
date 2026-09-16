@@ -14,8 +14,16 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Role terminals, shell quoting and paths differ by host; the suite has to
+    # pass the same way on Linux and Windows.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

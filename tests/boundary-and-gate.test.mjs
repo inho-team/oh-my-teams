@@ -105,8 +105,12 @@ test("a case-insensitive or trailing-dot spelling cannot reach protected state",
       `must reject ${relative}`,
     );
   }
+  // inside() answers with the real path. The temporary directory is reached
+  // through a link on macOS (/var -> /private/var) and may be a short 8.3 name
+  // on Windows, so the expectation is resolved the same way.
+  const real = fs.realpathSync(root);
   for (const relative of [".gitignore", ".gitkeep", "src/ok.txt", "omt.txt"]) {
-    assert.equal(inside(root, relative), path.resolve(root, relative));
+    assert.equal(inside(root, relative), path.resolve(real, relative));
   }
 });
 

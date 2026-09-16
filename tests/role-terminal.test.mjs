@@ -75,9 +75,10 @@ function fakeOrca(
   };
 }
 
-// The screens below show the plain command; the narrow Agy launch, which only
-// POSIX shells get, has its own test.
-const fast = { settleMs: 5, readyMs: 20, pollMs: 1, platform: "win32" };
+const fast = { settleMs: 5, readyMs: 20, pollMs: 1 };
+// Screens in the tests below show the typed command, which for the example's
+// Gemini Senior carries the width prefix of the host the test runs on.
+const typedFor = (command) => launchLine(command).typed;
 
 test("every role command runs tools without an approval prompt", () => {
   // Nobody answers an approval prompt in a role terminal, and Orca adds its
@@ -118,11 +119,16 @@ test("an Agy Gemini role is launched narrow enough for Orca to see it idle", asy
     typed: `stty cols ${AGY_BANNER_COLUMNS}; ${gemini.command}`,
     columns: AGY_BANNER_COLUMNS,
   });
-  // No stty on Windows, and a non-Gemini model fails Orca's check at any width.
+  // Windows has no stty; PowerShell narrows the console with mode con:.
   assert.deepEqual(launchLine(gemini, "win32"), {
-    typed: gemini.command,
-    columns: null,
+    typed: `mode con: cols=${AGY_BANNER_COLUMNS}; ${gemini.command}`,
+    columns: AGY_BANNER_COLUMNS,
   });
+  assert.equal(
+    launchLine(gemini, "linux").typed,
+    launchLine(gemini, "darwin").typed,
+  );
+  // A non-Gemini model fails Orca's check at any width.
   const claudeOnAgy = roleCommand(org, "junior");
   assert.equal(launchLine(claudeOnAgy, "linux").columns, null);
   assert.equal(launchLine(roleCommand(org, "pl"), "linux").columns, null);
@@ -185,7 +191,9 @@ test("a command left at the prompt is told apart from a started agent", () => {
 
 test("a role terminal Orca started itself gets no extra Enter", async () => {
   const command = roleCommand(example(), "senior");
-  const orca = fakeOrca([[`${PROMPT} ${command.command}`, "Antigravity", ">"]]);
+  const orca = fakeOrca([
+    [`${PROMPT} ${typedFor(command)}`, "Antigravity", ">"],
+  ]);
   const opened = await openRoleTerminal({
     worktree: "id:repo::/tmp/wt",
     command,
@@ -207,7 +215,7 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
     "--title",
     "[Senior] wt",
     "--command",
-    command.command,
+    typedFor(command),
   ]);
   assert.deepEqual(orca.sends(), []);
   assert.deepEqual(orca.closes(), []);
@@ -217,7 +225,7 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
 
 test("a typed but unsubmitted command is sent Enter exactly once", async () => {
   const command = roleCommand(example(), "senior");
-  const typed = [`${PROMPT} ${command.command}`];
+  const typed = [`${PROMPT} ${typedFor(command)}`];
   const started = fakeOrca([typed, typed, [...typed, "Antigravity", ">"]]);
   const opened = await openRoleTerminal({
     worktree: "active",
@@ -226,7 +234,6 @@ test("a typed but unsubmitted command is sent Enter exactly once", async () => {
     settleMs: 0,
     readyMs: 50,
     pollMs: 1,
-    platform: "win32",
   });
   assert.equal(opened.submission, "enter-sent");
   assert.equal(opened.ready, true);
@@ -254,7 +261,9 @@ test("a ready role tab is renamed with its role tag after the agent starts", asy
   // A PM opened with --title later showed the agent's session title, because
   // Orca can rebuild a tab without the title given at creation.
   const command = roleCommand(example(), "pm");
-  const orca = fakeOrca([[`${PROMPT} ${command.command}`, "Claude Code", "❯"]]);
+  const orca = fakeOrca([
+    [`${PROMPT} ${typedFor(command)}`, "Claude Code", "❯"],
+  ]);
   const opened = await openRoleTerminal({
     worktree: "id:repo::/work/literacy-site-research-2",
     command,
@@ -294,7 +303,7 @@ test("the worktree's unused plain shell is closed, other tabs are not", async ()
   // shell that `worktree create` opened. Renaming that shell did not last:
   // Orca kept `Terminal 1` for a tab it had not shown.
   const command = roleCommand(example(), "pm");
-  const agent = [`${PROMPT} ${command.command}`, "Claude Code", "❯"];
+  const agent = [`${PROMPT} ${typedFor(command)}`, "Claude Code", "❯"];
   const screens = {
     term_shell: [PROMPT, ""],
     term_default: [PROMPT],
@@ -379,7 +388,7 @@ test("role titles lead with the role tag and name the worktree", () => {
 test("Agy's folder trust question is answered once, only when trust is selected", async () => {
   const command = roleCommand(example(), "senior");
   const asked = [
-    `${PROMPT} ${command.command}`,
+    `${PROMPT} ${typedFor(command)}`,
     "Do you trust the contents of this project?",
     "> Yes, I trust this folder",
     "  No, exit",
@@ -395,7 +404,7 @@ test("Agy's folder trust question is answered once, only when trust is selected"
     false,
   );
 
-  const agent = [`${PROMPT} ${command.command}`, "Antigravity", ">"];
+  const agent = [`${PROMPT} ${typedFor(command)}`, "Antigravity", ">"];
   const trusted = fakeOrca([asked, asked, agent]);
   const opened = await openRoleTerminal({
     worktree: "active",
@@ -446,11 +455,11 @@ test("Agy's folder trust question is answered once, only when trust is selected"
 test("a reopened terminal asking for trust again is blocked, not reopened", async () => {
   const command = roleCommand(example(), "senior");
   const asked = [
-    `${PROMPT} ${command.command}`,
+    `${PROMPT} ${typedFor(command)}`,
     "Do you trust the contents of this project?",
     "> Yes, I trust this folder",
   ];
-  const answered = [`${PROMPT} ${command.command}`, ">"];
+  const answered = [`${PROMPT} ${typedFor(command)}`, ">"];
   // The question comes back in the second terminal: the trust was not kept.
   const forgot = fakeOrca([asked, asked, answered, answered, asked]);
   const opened = await openRoleTerminal({
@@ -472,12 +481,12 @@ test("a reopened terminal asking for trust again is blocked, not reopened", asyn
 test("a trusted terminal that will not close is reported, not doubled", async () => {
   const command = roleCommand(example(), "senior");
   const asked = [
-    `${PROMPT} ${command.command}`,
+    `${PROMPT} ${typedFor(command)}`,
     "Do you trust the contents of this project?",
     "> Yes, I trust this folder",
   ];
   const stuck = fakeOrca(
-    [asked, asked, [`${PROMPT} ${command.command}`, ">"]],
+    [asked, asked, [`${PROMPT} ${typedFor(command)}`, ">"]],
     {
       closeFails: true,
     },
