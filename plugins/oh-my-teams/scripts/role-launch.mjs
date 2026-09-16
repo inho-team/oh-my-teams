@@ -273,8 +273,7 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
   const argv = [...profile.command];
   if (profile.model) argv.push("--model", profile.model);
   if (profile.effort) {
-    // Codex takes effort only as a config override; Agy has a flag. Claude
-    // profiles cannot record an effort.
+    // Codex takes effort only as a config override; Agy and Claude have a flag.
     argv.push(
       ...(profile.provider === "codex"
         ? ["--config", `model_reasoning_effort=${profile.effort}`]

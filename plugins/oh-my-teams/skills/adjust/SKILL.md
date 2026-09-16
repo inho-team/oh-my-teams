@@ -47,7 +47,7 @@ node <runtime> show --org <project>/.omt/organization.json
 
 ## 추론 강도
 
-추론 강도는 해당 프로필의 선택적 `effort` 필드로 정한다. Agy는 `--effort`로 `low|medium|high`를 받고, Codex는 전용 플래그가 없어 `--config model_reasoning_effort=<값>`으로 `low|medium|high|xhigh|max|ultra`를 받으며, Claude CLI에는 강도 선택 수단이 없으므로 `effort`를 지정하면 런타임이 저장을 거부하고, Ollama는 thinking 모델에 한해 `low|medium|high`를 받는다. 강도별 지원 범위는 모델마다 다르므로(예: `gpt-5.6-luna`에는 `ultra`가 없고, Agy는 모델에 따라 `--effort` 자체를 거부한다) 확인되지 않은 조합을 사용자에게 권하지 않는다.
+추론 강도는 해당 프로필의 선택적 `effort` 필드로 정한다. Agy는 `--effort`로 `low|medium|high`를 받고, Codex는 전용 플래그가 없어 `--config model_reasoning_effort=<값>`으로 `low|medium|high|xhigh|max|ultra`를 받으며, Claude CLI는 `--effort`로 `low|medium|high|xhigh|max`를 받고, Ollama는 thinking 모델에 한해 `low|medium|high`를 받는다. 강도별 지원 범위는 모델마다 다르므로(예: `gpt-5.6-luna`에는 `ultra`가 없고, Agy는 모델에 따라 `--effort` 자체를 거부한다) 확인되지 않은 조합을 사용자에게 권하지 않는다.
 
 Agy 모델 ID가 이미 `-high`처럼 강도를 담고 있으면 `effort`는 같은 값이어야 하고, 어긋나면 런타임이 거부한다. 그런 모델의 강도를 바꿀 때에는 `effort`만 고치지 말고 `agy models`에서 확인한 다른 강도의 ID로 프로필의 `model`을 바꾼다. 강도를 CLI 기본값으로 되돌릴 때는 `effort`를 지운다. 빈 문자열이나 `null`로 두지 않는다. 프리셋은 역할이 참조하는 프로필 자체를 교체하므로, 적용 뒤의 강도는 새 프로필에 저장된 값을 따른다. 미리보기에서 바뀐 프로필의 `effort`를 함께 확인해 사용자에게 알린다.
 

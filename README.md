@@ -86,7 +86,7 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 |---|---|---|---|
 | Agy | `low`, `medium`, `high` | `--effort <값>` | `agy --help`가 이 세 값을 명시한다. |
 | Codex | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `--config model_reasoning_effort=<값>` | `codex exec`에 전용 플래그가 없고, 값 목록은 계정의 모델 카탈로그에서 가져왔다. |
-| Claude | 없음 | 해당 없음 | CLI가 강도 선택 수단을 제공하지 않으므로 `effort`를 지정하면 설정 오류로 거부한다. |
+| Claude | `low`, `medium`, `high`, `xhigh`, `max` | `--effort <값>` | `claude --help`(2.1.273)가 이 다섯 값을 명시한다. |
 | Ollama | `low`, `medium`, `high` | HTTP 본문의 `think`, CLI의 `--think <값>` | Ollama 문서가 gpt-oss 같은 thinking 모델에 이 값을 명시한다. thinking 모드가 없는 모델은 요청을 거부하므로 일반적인 실행기 실패로 드러난다. |
 
 `effort`를 생략했을 때 실제로 적용되는 깊이는 런타임이 정하지 않고 각 CLI와 계정 설정이 정한다. Codex는 `~/.codex/config.toml`의 `model_reasoning_effort`가 있으면 그것을, 없으면 모델 카탈로그의 `default_reasoning_level`을 쓴다(확인 시점 기준 `gpt-5.6-sol`은 `low`, `gpt-5.6-luna`와 `gpt-5.6-terra`는 `medium`). Agy는 서버가 모델별로 내려주는 선택지에서 결정한다. 따라서 보고서의 `requestedEffort`가 `null`이라는 것은 기본 깊이를 뜻하지 않고 **런타임이 깊이를 지정하지 않았다**는 사실만 뜻한다. 실제 적용된 깊이는 측정하지 않았다.

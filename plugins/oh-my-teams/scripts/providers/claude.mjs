@@ -8,21 +8,22 @@ import {
 /**
  * Adapter for the `claude` CLI.
  *
- * The CLI exposes no reasoning-effort selector, so `efforts` is empty and an
- * effort on a Claude profile is rejected as a configuration error rather than
- * silently ignored at a different reasoning depth than the report claims.
+ * `claude --help` (2.1.273) documents `--effort <level>` with low, medium,
+ * high, xhigh and max. An earlier CLI had no such flag, and this adapter kept
+ * rejecting every Claude effort after it appeared, so a Claude role could not
+ * have its depth set at all.
  */
 export default {
   id: "claude",
   transports: ["process"],
-  efforts: [],
+  efforts: ["low", "medium", "high", "xhigh", "max"],
   workspaceAccess: true,
 
   /**
    * Builds the argv and stdin payload for one print-mode Claude call.
    *
    * @param {object} profile - Provider profile with command and optional model.
-   * @param {object} context - Call context carrying the prompt.
+   * @param {object} context - Call context carrying the prompt and effort.
    * @returns {{argv: string[], input: string}} Command arguments and stdin payload.
    */
   request(profile, context) {
@@ -38,6 +39,7 @@ export default {
       "--no-session-persistence",
     ];
     if (profile.model) argv.push("--model", profile.model);
+    if (context.effort) argv.push("--effort", context.effort);
     return { argv, input: context.prompt };
   },
 
