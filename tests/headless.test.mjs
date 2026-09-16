@@ -181,83 +181,90 @@ test("the last marker line decides the outcome, and the model is judged", () => 
   assert.equal(modelVerdict("gpt-5.6-sol", null), "unproven");
 });
 
-for (const provider of ["claude", "codex", "agy"]) {
-  test(`${provider}: a question ends the turn and the answer resumes the same session`, async (t) => {
-    const box = sandbox(t);
-    process.env.FAKE_CODEX_HOME = box.codexHome;
-    t.after(() => delete process.env.FAKE_CODEX_HOME);
-    const model = {
-      claude: "claude-sonnet-5",
-      codex: "gpt-fake",
-      agy: "gemini-fake",
-    }[provider];
-    const started = start(
-      box,
-      provider,
-      `${provider}-ask`,
-      "ASK before writing",
-      { model },
-    );
-    assert.equal(started.turn, 1);
+// Declared once per provider at top level: the documents count tests from
+// top-level declarations, which a loop would hide.
+async function questionThenAnswer(t, provider) {
+  const box = sandbox(t);
+  process.env.FAKE_CODEX_HOME = box.codexHome;
+  t.after(() => delete process.env.FAKE_CODEX_HOME);
+  const model = {
+    claude: "claude-sonnet-5",
+    codex: "gpt-fake",
+    agy: "gemini-fake",
+  }[provider];
+  const started = start(
+    box,
+    provider,
+    `${provider}-ask`,
+    "ASK before writing",
+    { model },
+  );
+  assert.equal(started.turn, 1);
 
-    const asked = await waitHeadless(box.state, `${provider}-ask`, 15000, {
-      pollMs: 100,
-      codexHome: box.codexHome,
-    });
-    assert.equal(asked.liveness, "exited");
-    assert.equal(asked.outcome, "question");
-    assert.equal(asked.marker.detail, "which file name?");
-    assert.equal(asked.exit.code, 0);
-    assert.equal(asked.modelProof, "matched");
-    assert.ok(asked.session);
-    // Codex names its model only in the rollout, which the status reads.
-    if (provider === "codex")
-      assert.equal(codexRolloutModel(asked.session, box.codexHome), "gpt-fake");
-
-    const answered = answerHeadless(
-      box.state,
-      `${provider}-ask`,
-      "use notes.md",
-      { codexHome: box.codexHome },
-    );
-    assert.equal(answered.turn, 2);
-    const done = await waitHeadless(box.state, `${provider}-ask`, 15000, {
-      pollMs: 100,
-      codexHome: box.codexHome,
-    });
-    assert.equal(done.turn, 2);
-    assert.equal(done.outcome, "done");
-    assert.equal(done.session, asked.session);
-    const turn = JSON.parse(
-      fs.readFileSync(
-        path.join(
-          box.state,
-          "headless",
-          `${provider}-ask`,
-          "turns",
-          "2",
-          "turn.json",
-        ),
-        "utf8",
-      ),
-    );
-    assert.equal(turn.session, asked.session);
-    assert.match(
-      fs.readFileSync(
-        path.join(
-          box.state,
-          "headless",
-          `${provider}-ask`,
-          "turns",
-          "2",
-          "prompt.txt",
-        ),
-        "utf8",
-      ),
-      /^use notes\.md\n\n## 비대화형 실행 규약/,
-    );
+  const asked = await waitHeadless(box.state, `${provider}-ask`, 15000, {
+    pollMs: 100,
+    codexHome: box.codexHome,
   });
+  assert.equal(asked.liveness, "exited");
+  assert.equal(asked.outcome, "question");
+  assert.equal(asked.marker.detail, "which file name?");
+  assert.equal(asked.exit.code, 0);
+  assert.equal(asked.modelProof, "matched");
+  assert.ok(asked.session);
+  // Codex names its model only in the rollout, which the status reads.
+  if (provider === "codex")
+    assert.equal(codexRolloutModel(asked.session, box.codexHome), "gpt-fake");
+
+  const answered = answerHeadless(
+    box.state,
+    `${provider}-ask`,
+    "use notes.md",
+    { codexHome: box.codexHome },
+  );
+  assert.equal(answered.turn, 2);
+  const done = await waitHeadless(box.state, `${provider}-ask`, 15000, {
+    pollMs: 100,
+    codexHome: box.codexHome,
+  });
+  assert.equal(done.turn, 2);
+  assert.equal(done.outcome, "done");
+  assert.equal(done.session, asked.session);
+  const turn = JSON.parse(
+    fs.readFileSync(
+      path.join(
+        box.state,
+        "headless",
+        `${provider}-ask`,
+        "turns",
+        "2",
+        "turn.json",
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(turn.session, asked.session);
+  assert.match(
+    fs.readFileSync(
+      path.join(
+        box.state,
+        "headless",
+        `${provider}-ask`,
+        "turns",
+        "2",
+        "prompt.txt",
+      ),
+      "utf8",
+    ),
+    /^use notes\.md\n\n## 비대화형 실행 규약/,
+  );
 }
+
+test("claude: a question ends the turn and the answer resumes the same session", (t) =>
+  questionThenAnswer(t, "claude"));
+test("codex: a question ends the turn and the answer resumes the same session", (t) =>
+  questionThenAnswer(t, "codex"));
+test("agy: a question ends the turn and the answer resumes the same session", (t) =>
+  questionThenAnswer(t, "agy"));
 
 test("a turn past its time limit is stopped and reported as timed out", async (t) => {
   const box = sandbox(t);
