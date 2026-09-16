@@ -125,7 +125,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-resume --id ID --state DIR --revision N [--observations FILE]
   workflow-attach --id ID --state DIR --revision N --execution FILE
   workflow-reserve --id ID --state DIR --revision N --execution FILE
-  workflow-accept --id ID --state DIR --revision N --repo DIR --report FILE
+  workflow-accept --id ID --state DIR --revision N [--repo DIR --report FILE]
+                  (repo and report only when the workflow requires integration)
   workflow-settle --id ID --state DIR --revision N --settlement FILE
   workflow-release --id ID --state DIR --revision N --release FILE
   workflow-retry --id ID --state DIR --revision N --retry FILE
@@ -285,7 +286,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-resume": ["id", "state", "revision"],
   "workflow-attach": ["id", "state", "revision", "execution"],
   "workflow-reserve": ["id", "state", "revision", "execution"],
-  "workflow-accept": ["id", "state", "revision", "repo", "report"],
+  "workflow-accept": ["id", "state", "revision"],
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
@@ -761,8 +762,8 @@ async function executeCommand(args) {
         path.resolve(args.state),
         args.id,
         Number(args.revision),
-        path.resolve(args.repo),
-        readJSON(args.report),
+        args.repo && path.resolve(args.repo),
+        args.report && readJSON(args.report),
       );
     case "workflow-resume":
       return resumeWorkflow(

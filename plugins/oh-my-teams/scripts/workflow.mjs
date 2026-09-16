@@ -534,13 +534,63 @@ function deriveWorkflowStatus(state) {
   return "ready";
 }
 
+// A workflow created without integration (one task and no integrationTask)
+// is closed by its task's own review and PM acceptance. workflow-accept used to
+// demand the integration file regardless, so such a workflow could not close.
+function acceptWithoutIntegration(stateDir, id, expectedRevision) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+    const pending = Object.entries(state.tasks)
+      .filter(([, item]) => item.state !== "accepted")
+      .map(([taskId, item]) => `${taskId} (${item.state})`);
+    assert(
+      pending.length === 0,
+      `All component tasks must be accepted first: ${pending.join(", ")}. ` +
+        "This workflow has no integration task, so each task's review and PM acceptance close it",
+    );
+    if (state.integration.decision) return state;
+    state.integration.decision = {
+      runId: null,
+      evidenceKey: null,
+      decisionId: null,
+      componentResults: Object.fromEntries(
+        Object.entries(state.tasks).map(([taskId, item]) => [
+          taskId,
+          {
+            revision: item.revision,
+            attemptId: item.attemptId,
+            acceptedResult: item.acceptedResult,
+          },
+        ]),
+      ),
+    };
+    state.status = "accepted";
+    appendWorkflowEvent(dir, state, {
+      id: `accepted-${crypto.randomUUID()}`,
+      type: "workflow-accepted-without-integration",
+      decision: state.integration.decision,
+    });
+    state.revision += 1;
+    saveWorkflowState(stateDir, id, state);
+    return state;
+  });
+}
+
 /**
- * Accepts a multi-task workflow against its frozen integration contract.
+ * Accepts a workflow, against its frozen integration contract when it has one.
+ *
+ * A workflow whose integration is not required closes once every task is
+ * accepted, and needs no checkout or integration report.
+ *
  * @param {string} stateDir - Coordinator store.
  * @param {string} id - Workflow identifier.
  * @param {number} expectedRevision - Revision observed before verification.
- * @param {string} repo - Final integration checkout.
- * @param {object} report - Implementation report for the frozen integration task.
+ * @param {string} [repo] - Final integration checkout, when integration is required.
+ * @param {object} [report] - Report for the frozen integration task, when required.
  * @returns {Promise<object>} Accepted workflow bound to integration and task results.
  * @throws {Error} On missing contract, stale evidence, incomplete review or changed state.
  */
@@ -555,6 +605,13 @@ export async function acceptWorkflowIntegration(
   assert(
     snapshot.state.revision === expectedRevision,
     "Workflow changed; read state again",
+  );
+  if (!snapshot.state.integration?.required) {
+    return acceptWithoutIntegration(stateDir, id, expectedRevision);
+  }
+  assert(
+    repo && report,
+    "This workflow requires integration; pass the integration checkout and report",
   );
   const file = path.join(snapshot.dir, "integration-task.json");
   assert(
