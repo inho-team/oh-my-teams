@@ -1,6 +1,6 @@
 ---
 name: form
-description: 최초 oh my teams 상설 조직을 구성하고 역할별 구독·계정·모델과 보고 구조를 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
+description: 최초 oh my teams 상설 조직을 단계 수와 단계별 모델만 물어 구성하고, 나머지는 비용이 늘지 않는 기본값으로 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
 ---
 
 # 팀 결성
@@ -9,34 +9,61 @@ description: 최초 oh my teams 상설 조직을 구성하고 역할별 구독·
 
 대상 프로젝트 `.omt/organization.json`을 먼저 확인한다. 있으면 `status`로 표시하고 저장된 구독을 그대로 사용한다. 다시 질문하거나 예제 설정으로 덮어쓰지 않는다.
 
-없으면 한 번의 구성 대화에서 다음을 묻는다. 묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따른다. 구조화된 선택 도구를 쓸 수 있으면 그것으로 묻고, 없으면 번호를 매긴 선택지를 한 번에 제시한다. 모델은 선택의 추천값일 뿐, 사용자 답을 대신하지 않는다.
+## 묻는 것
 
-- 팀 이름, 실제로 운영할 역할과 역할별 상위 역할, 동시 인원. PM이 유일한 루트이며 순환이 없어야 한다.
-- **각 직급마다** 사용할 구독/계정 프로필과 모델. 기존 직급의 구독 공유도 명시적으로 선택할 수 있다.
-- 사용할 대체 프로필과 순서, 할당량 소진 시 대체 또는 중단, 전체 호출 한도.
-- 역할별로 GPT-OSS 보조 도구 호출을 허용할지 여부. 허용한 역할만 `assistants`에 기록되며, 비워 두면 그 역할의 `assist` 호출은 전부 거부된다.
+조직이 없으면 **몇 단계로 운영할지와 단계마다 어떤 모델을 쓸지만** 묻는다. 묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 두 번으로 끝난다.
 
-실행기는 Claude·Codex·Agy·Ollama, 설치 호스트는 Claude·Codex다. 먼저 설치된 `agy models`와 각 CLI 도움말에서 실제 모델 ID를 확인한다. 이 배포에서 확인한 Agy 선택지는 Gemini Flash 3.8·3.7·3.6(각 high/medium/low), Gemini Pro 3.1(high/low), Claude Sonnet 4.6, Claude Opus 4.6, GPT-OSS-120B다. Codex 카탈로그에서 확인한 선택지는 `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`다. Agy의 GPT-OSS·Sonnet·Opus는 모두 프로필의 정확한 모델 ID를 `--model` 인자로 전달한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 사용한다. 고정된 모델 능력 서열이나 구독 가격을 가정하지 않는다.
+1. 첫 번째에는 단계 수와 1단계(PM) 모델을 함께 묻는다. PM은 단계 수와 무관하게 항상 있으므로 기다릴 이유가 없다.
+2. 두 번째에는 나머지 단계의 모델을 한 번에 묻는다. 5단계여도 남은 질문은 네 개이므로 한 번에 담긴다. 1단계를 고르면 두 번째 질문은 없다.
 
-로컬 모델을 쓰겠다는 요청을 받으면 Ollama 프로필을 만든다. 프로필에는 `command`(CLI 실행)와 `endpoint`(HTTP API) 중 정확히 하나만 적고, HTTP 쪽을 권한다. 토큰 사용량과 실제 응답 모델이 함께 돌아와 증거가 남기 때문이다. 모델 ID와 `contextTokens`는 반드시 적는다. Ollama는 컨텍스트 창을 넘는 프롬프트를 오류 없이 잘라내므로, 이 값이 없으면 잘린 계약을 읽고 답한 결과를 정상 응답과 구분할 수 없다. 설치된 모델과 창 크기는 `ollama list`와 `ollama show <모델>`로 확인하고 추측하지 않는다. 로컬 추론은 공유 할당량을 쓰지 않으므로 `pool`을 붙이지 않으며, 저장소 파일을 직접 열지 못하므로 계약 파일 내용을 읽어야 하는 역할에는 배정하지 않는다. 로컬 서버는 요청을 사실상 직렬로 처리하므로 해당 역할의 `concurrency`는 1로 제안한다.
+단계 수 선택지는 다음 네 가지이며, 1단계는 자유 입력으로 받는다. 역할은 팀이 없을 때 가장 먼저 아쉬워지는 순서로 더해진다. 구현을 맡을 사람이 먼저이고, 독립 검토가 다음이며, 좁은 실무를 싸게 맡길 단계가 그다음이고, 병렬 작업을 나누고 통합하는 PL은 작업 파동이 여럿일 때에만 이득이므로 마지막이다.
 
-프로필의 선택적 `effort` 필드가 추론 강도를 정한다. 사용자가 강도를 요청하지 않았으면 이 필드를 생략해 각 CLI의 기본값을 쓴다. Agy는 `--effort`로 `low|medium|high`를 받고, Codex는 전용 플래그가 없어 `--config model_reasoning_effort=<값>`으로 `low|medium|high|xhigh|max|ultra`를 받으며, Claude CLI에는 강도 선택 수단이 없으므로 `effort`를 지정하면 런타임이 저장을 거부하고, Ollama는 thinking 모델에 한해 `low|medium|high`를 받는다. 강도별 지원 범위는 모델마다 다르므로(예: `gpt-5.6-luna`에는 `ultra`가 없고, Agy는 모델에 따라 `--effort` 자체를 거부한다) 확인되지 않은 조합을 사용자에게 권하지 않는다. 생략했을 때 적용되는 깊이는 CLI와 계정 설정이 정하므로, 특정 기본 강도를 사용자에게 단정해 알리지 않는다. Agy 모델 ID가 이미 `-high`처럼 강도를 담고 있으면 `effort`는 같은 값이어야 하고, 어긋나면 런타임이 거부한다.
+| 선택지 | 선언하는 역할 |
+|---|---|
+| 2단계 | PM → Junior |
+| 3단계 | PM → Senior → Junior |
+| 4단계 | PM → Senior → Junior → Intern |
+| 5단계 | PM → PL → Senior → Junior → Intern |
+| 1단계(자유 입력) | PM |
 
-구독을 하나만 쓰는 사용자에게는 역할마다 계정을 나누지 말고, 그 구독으로 만든 프로필 여러 개를 모델만 다르게 두어 역할별로 배정한다. 이때 **그 프로필들을 하나의 `pool`로 묶어야 한다.** 런타임은 소진이 확인된 pool에 속한 프로필을 남은 대체 순서에서 건너뛰므로, pool을 붙이지 않으면 이미 소진된 같은 계정으로 계속 시도하다가 호출 예산만 소모한다. 같은 이유로 같은 pool 안에서의 대체 지정은 의미가 없고, 역할별 동시 인원은 1을 권한다. 하나의 구독을 여러 역할이 동시에 끌어 쓰면 모델 선택보다 슬롯 수가 소진 속도를 더 크게 좌우한다. 이 조합은 `single-subscription` 프리셋이 한 번에 적용한다.
+선언하지 않은 역할이 맡던 일은 서열을 따라 위로 올라가, 선언된 가장 가까운 역할이 이어받는다. 예를 들어 3단계에서는 Intern에게 배정될 좁은 편집을 Junior가, PL의 작업 분할을 PM이 수행한다. 역할 이름은 바꿀 수 없다. 실패 라우팅, 검토 요구사항과 스킬이 이 이름으로 역할을 지목하기 때문이다. 축소된 조직의 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다.
 
-역할은 다섯 개를 모두 둘 필요가 없다. PM만 필수이며 PL·Senior·Junior·Intern은 생략할 수 있고, 남긴 역할의 상위 역할도 반드시 조직이 선언한 역할이어야 한다. 생략한 역할이 맡던 일은 서열을 따라 위로 올라가 조직이 선언한 가장 가까운 역할이 이어받는다. 예를 들어 PM과 Junior만 두면 Intern에게 배정된 작업은 Junior가, Senior가 맡던 검토는 PM이 수행한다. 역할 이름 자체는 바꿀 수 없다. 실패 라우팅, 검토 요구사항과 스킬이 이 이름으로 역할을 지목하기 때문이다. 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다.
+모델 선택지는 단계의 성격에 따라 네 개씩 제시하고, 목록에 없는 모델은 자유 입력으로 받는다. 각 선택지는 괄호 안의 `provider:model` 값으로 저장된다.
 
-최초 구성에서는 `opus-first`와 `balanced` 프리셋을 제안한다. `opus-first`는 Agy 역할의 기준선을 Opus로 통일하고, `balanced`는 Senior=Opus, Junior=Sonnet, Intern=GPT-OSS로 배정한다. PM·PL의 기존 Claude·Codex 선택은 두 프리셋 모두 바꾸지 않는다. 프리셋을 고른 뒤에도 직급별 구독·계정과 실제 모델 ID를 확인하며 사용자는 모두 변경할 수 있다. 프리셋은 보고 구조를 바꾸지 않으므로 예제의 상위 역할 배치는 참고일 뿐이다. 구독별 청구/할당량은 토큰 수와 다른 값이다.
+| 단계 | 선택지 |
+|---|---|
+| PM·PL·Senior | Claude Code 기본(`claude:default`), Opus 4.6·Agy(`agy:claude-opus-4-6-thinking`), Gemini 3.1 Pro·Agy(`agy:gemini-3.1-pro-high`), Codex 기본(`codex:default`) |
+| Junior | Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-high`), Opus 4.6·Agy(`agy:claude-opus-4-6-thinking`), Codex 기본(`codex:default`) |
+| Intern | GPT-OSS 120B·Agy(`agy:gpt-oss-120b-medium`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-high`), Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Codex 기본(`codex:default`) |
 
-[`../../examples/organization.json`](../../examples/organization.json)을 구조 참고로 사용하되 실제 답으로 채운다. 프리셋이 적용한 결과를 담은 예제도 있으나, 배정 내용은 위 문단에 이미 있고 정본은 `scripts/presets.mjs`이므로 구조를 볼 때는 한 파일이면 충분하다. `subscription`은 사용자가 알아볼 이름, `account`는 실행 계정 참조다. 이름만 붙여 계정이 전환됐다고 보고하지 않는다. 현재 CLI 인증을 쓸 때 `account: current`; 별도 계정은 CLI가 지원하는 프로필 인수 또는 `env`의 환경변수 **이름 참조**로 연결한다. 비밀값을 JSON에 넣지 않는다. Agy가 계정 선택 옵션을 제공하지 않으면 검증된 별도 실행 프로필이 필요하다.
+이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 묻기 전에 `claude`, `codex`, `agy`가 설치되어 있는지와 `agy models`에 해당 ID가 있는지 확인하고, 확인되지 않은 선택지는 빼고 제시한다. 이 배포에서 확인한 Agy 선택지는 Gemini Flash 3.8·3.7·3.6(각 high/medium/low), Gemini Pro 3.1(high/low), Claude Sonnet 4.6, Claude Opus 4.6, GPT-OSS-120B이고, Codex 카탈로그에서 확인한 선택지는 `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.6-terra`다. Codex의 개별 모델은 능력 서열을 가정하지 않기 위해 선택지에 넣지 않고 자유 입력으로 받는다.
 
-현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
+Gemini 모델 ID는 추론 강도를 이름에 담고 있어서 강도를 비워 둘 수 없다. 결성 단계에서는 Pro 3.1과 Flash 3.8이 공통으로 제공하는 `-high`를 사용하고, 다른 강도는 `adjust`에서 바꾼다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 단계만 다시 묻는다.
+
+## 묻지 않고 정하는 것
+
+아래 값은 사용자가 고른 모델보다 더 많은 호출, 계정이나 권한을 쓰지 않는 쪽으로 고정되어 있으며, `scripts/org-draft.mjs`가 기록한다. 모두 `adjust`에서 바꿀 수 있다.
+
+- 팀 이름은 프로젝트 디렉터리 이름을 쓴다.
+- 각 역할의 상위 역할은 바로 위 단계이고, 모든 프로필은 각 실행기의 현재 로그인 계정(`account: current`)을 쓴다. 같은 실행기의 프로필은 하나의 `pool`로 묶어, 소진이 확인된 계정을 런타임이 건너뛸 수 있게 한다.
+- 역할별 동시 인원과 시도 횟수는 1이고, 대체 프로필은 두지 않으며, 할당량이 소진되면 중단하고, 전체 호출 한도는 3이다.
+- 추론 강도(`effort`)는 기록하지 않아 각 CLI의 기본값을 쓴다. 생략했을 때의 실제 강도는 CLI와 계정 설정이 정하므로 특정 값으로 단정해 알리지 않는다.
+- GPT-OSS 보조 도구 호출을 허용할지는 묻지 않고 `assistants`를 비워 둔다. 이 상태에서는 모든 역할의 `assist` 호출이 거부되므로, 필요해지면 `adjust`에서 역할별로 허용한다.
+
+로컬 Ollama 모델은 결성 단계에서 받지 않는다. 컨텍스트 창을 `ollama show`로 확인해 기록해야 하는데, 추측한 값으로 저장하면 잘린 프롬프트에 대한 답이 정상 응답처럼 보이기 때문이다. 결성 후 `adjust`에서 추가한다.
+
+## 저장
+
+현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 초안 파일은 새 경로에 쓰며, 이미 있는 파일에는 쓰지 않는다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
 
 ```text
-node <runtime> init --org <project>/.omt/organization.json --from <user-approved-config.json>
+node <runtime> org-draft --name <project-dir-name> --tiers <N> --models <tier1>,<tier2>,... --output <draft.json>
+node <runtime> init --org <project>/.omt/organization.json --from <draft.json>
 node <runtime> show --org <project>/.omt/organization.json
 ```
 
-`init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 구독 선택 질문을 다시 시작하지 않는다. `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다.
+`init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 질문을 처음부터 다시 시작하지 않는다.
 
-조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 활성 kickoff 점유 기록이 놓이는 자리가 된다. 한 프로젝트의 활성 kickoff는 하나이며, form 자체는 점유 기록을 만들지 않는다. 자세한 계약은 [`../../references/kickoff-lease.md`](../../references/kickoff-lease.md)에 있다.
+결성을 보고할 때에는 역할별로 배정된 모델과 함께, 위 목록에서 묻지 않고 정한 값을 짧게 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 저장된 파일의 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서 확인할 수 있다.
+
+`.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다. 조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 활성 kickoff 점유 기록이 놓이는 자리가 된다. 한 프로젝트의 활성 kickoff는 하나이며, form 자체는 점유 기록을 만들지 않는다. 자세한 계약은 [`../../references/kickoff-lease.md`](../../references/kickoff-lease.md)에 있다.

@@ -12,6 +12,10 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { assist } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import {
+  TIER_ROLES,
+  parseModelChoice,
+} from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { removedSkillNames } from "./removed-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -74,10 +78,11 @@ test("every example organization can run the assist the skills advertise", async
   }
 });
 
-test("form asks for the assistant allowlist it cannot infer", () => {
+test("form says the assistant allowlist starts empty, and what that refuses", () => {
   const form = readSkill("form");
-  // Nothing else establishes `assistants`, and worker.mjs refuses an assist
-  // call for a role that is absent from it.
+  // form no longer asks for `assistants`, and worker.mjs refuses an assist call
+  // for a role that is absent from it, so an unmentioned empty list would read
+  // as a broken assist rather than a default adjust can change.
   assert.match(form, /assistants/);
   assert.match(form, /보조 도구 호출을 허용할지/);
 });
@@ -458,4 +463,75 @@ test("the lease is released by an ending, never by a reading", () => {
   assert.match(close, /kickoff-release .*--reason completed/);
   assert.match(disband, /kickoff-release .*--reason disbanded/);
   assert.match(status, /점유 기록을 지우거나 고쳐 쓰지 않는다/);
+});
+
+test("form asks for the ladder and its models, and nothing else", () => {
+  const form = readSkill("form");
+  // Formation used to ask for the name, parents, slots, subscriptions,
+  // fallbacks, exhaustion policy, call limit and assistant allowlist before a
+  // team existed. Everything but the ladder and its models now has a default
+  // that org-draft records and adjust changes.
+  assert.match(form, /질문은 두 번으로 끝난다/);
+  assert.match(form, /node <runtime> org-draft/);
+  assert.match(form, /묻지 않고 정하는 것/);
+});
+
+test("the ladder form describes is the ladder org-draft builds", () => {
+  const form = readSkill("form");
+  const names = {
+    PM: "pm",
+    PL: "pl",
+    Senior: "senior",
+    Junior: "junior",
+    Intern: "intern",
+  };
+  // The table is prose a model reads to explain the choice; the mapping in
+  // org-draft.mjs is what gets saved. A mismatch would tell the user one team
+  // and store another.
+  const rows = new Map(
+    [...form.matchAll(/^\| (\d)단계[^|]* \| ([^|]+) \|$/gm)].map((match) => [
+      match[1],
+      match[2],
+    ]),
+  );
+  for (const [tiers, roles] of Object.entries(TIER_ROLES)) {
+    const row = rows.get(tiers);
+    assert.ok(row, `form must describe the ${tiers}-tier ladder`);
+    const described = row.split(" → ").map((name) => names[name.trim()]);
+    assert.deepEqual(described, roles, `${tiers}-tier ladder drifted`);
+  }
+});
+
+test("every model form offers is a choice org-draft accepts, Gemini included", () => {
+  const table = readSkill("form")
+    .split("| 단계 | 선택지 |")[1]
+    ?.split("\n\n")[0];
+  assert.ok(table, "form must keep its model option table");
+  const offered = [...table.matchAll(/`([a-z]+:[a-z0-9.-]+)`/g)].map(
+    (match) => match[1],
+  );
+  // Gemini 3.1 Pro and 3.8 Flash were listed as confirmed choices yet never
+  // offered, because the only proposals were presets that assign Opus, Sonnet
+  // and GPT-OSS.
+  assert.ok(offered.includes("agy:gemini-3.1-pro-high"));
+  assert.ok(offered.includes("agy:gemini-3.8-flash-high"));
+  for (const choice of offered) {
+    assert.doesNotThrow(() => parseModelChoice(choice), choice);
+  }
+});
+
+test("effort is set in adjust, which carries the ranges form no longer does", () => {
+  // form records no effort, so the per-executor ranges belong where a value is
+  // first chosen. Keeping them in both would be two copies of one fact.
+  assert.doesNotMatch(readSkill("form"), /model_reasoning_effort/);
+  assert.match(readSkill("adjust"), /model_reasoning_effort/);
+  assert.match(readSkill("adjust"), /contextTokens/);
+
+  const contract = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/user-choice.md"),
+    "utf8",
+  );
+  // A default saved without asking is only acceptable when it spends no more
+  // than what the user chose and the user is told where to change it.
+  assert.match(contract, /묻지 않고 정한다고 명시한/);
 });
