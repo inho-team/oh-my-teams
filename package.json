@@ -1,6 +1,6 @@
 {
   "name": "oh-my-teams",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "A PM/PL/Senior/Junior/Intern agent organization plugin for Claude Code and Codex, running on Orca.",
   "private": true,
   "license": "MIT",
