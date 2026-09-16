@@ -53,7 +53,15 @@ agy --model claude-opus-4-6-thinking ...
 
 표에 없는 코드는 중립 신호 없이 원문만 보존한다. 알지 못하는 거부에 임의로 경로를 부여하면 해결할 수 없는 담당자에게 작업이 전달된다.
 
-실패 기록을 남길 때에는 실행 기반이 반환한 코드를 그대로 적고 어느 실행 기반인지 함께 밝힌다. `failure-classify`가 번역까지 수행하므로 중립 어휘로 바꾸어 적으려 하지 않는다.
+실패 기록을 남길 때 **래퍼(`worker-start`, `terminal-idle-check` 등)가 거부 결과에 `signal`을 돌려주었으면 그 객체를 `signal` 필드에 그대로 옮긴다.** 래퍼는 이미 번역을 마쳤고, 사전 점검의 `timeout`처럼 번역표에 일부러 넣지 않은 코드도 있으므로 `runtime`·`code`로 다시 적으면 `unknown`으로 분류된다. 래퍼 없이 Orca 명령을 직접 실행해 받은 거부만 실행 기반이 반환한 코드를 그대로 적고 어느 실행 기반인지 함께 밝힌다. `failure-classify`가 번역까지 수행하므로 중립 어휘로 바꾸어 적으려 하지 않는다.
+
+```json
+{
+  "message": "관측한 내용",
+  "evidence": "receipt ...",
+  "signal": { "kind": "execution-unconfigured", "code": "timeout", "message": "래퍼가 돌려준 문장" }
+}
+```
 
 ```json
 {
@@ -121,20 +129,32 @@ Agy 역할은 모델을 명령줄에 담아 터미널을 먼저 열고, 모델�
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
 node <runtime> role-terminal --org <organization.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <coordinator-state>
+node <runtime> terminal-idle-check --terminal <handle>
+node <runtime> workflow-reserve --id <workflowId> --state <coordinator-state> --revision <n> --execution <reserve.json>
 node <runtime> worker-start --org <organization.json> --role <역할> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <handle> --worktree id:<worktreeId> --spec <작업>
 ```
 
 `role-terminal`과 `worker-start`에는 같은 `--workflow-id`와 `--state`를 넘긴다. 그래야 두 명령이 같은 조직 스냅샷과 이번 실행의 역할을 읽는다. 터미널은 한 역할의 프로필로 미리 만들어지므로, 두 명령 모두 요청한 역할이 이번 실행에 실제로 있을 때에만 받아들인다. 이번 실행에 없어 다른 역할로 접히는 역할을 요청하면 어느 역할로 접히는지 알리며 거부하고, 그때에는 접힌 역할의 터미널을 연다. `role-terminal`이 여는 명령은 `role-command`와 같으며, 아래 「역할 터미널 열기」 절을 따른다. 결과의 `screen`에 표시된 모델이 프로필의 모델과 같을 때에만 결과의 `terminal`을 `worker-start --terminal`에 넘긴다. 신뢰 질문 때문에 터미널을 다시 열었다면 넘기는 값은 `reopened.closedTerminal`이 아니라 결과의 `terminal`이다. Orca는 `agy` 실행 파일을 `antigravity` agent로 인식해 작업을 전달한다. 이 경로의 `modelProof`는 항상 `unproven`이므로 작업을 넘긴 뒤에도 보고서에 모델을 적을 때에는 화면에서 확인한 사실로 적는다. Orca가 터미널의 agent를 인식하지 못해 `inject_rejected`로 거부하면 같은 명령을 반복하지 않고 거부 원문과 함께 상위에 보고한다.
 
-Orca의 `worker-start`는 Dispatch를 먼저 만든 뒤, 넘겨받은 터미널이 `tui-idle`에 이를 때까지 기다리고 이르지 않으면 작업을 주입하지 못한 채 실패한다. 이렇게 실패하면 회수할 Dispatch가 남고 시도 예산도 줄어든다. 그래서 `worker-start --terminal`은 Orca를 호출하기 전에 같은 터미널에 `terminal wait --for tui-idle`을 20초 동안 실행하고, `timeout`이 돌아오면 Orca를 호출하지 않고 거부한다. 이때 Dispatch는 만들어지지 않는다. Orca 1.4.204에서 `antigravity` 터미널은 입력 대기 화면에서도 `tui-idle`을 보고하지 않으므로, 현재 Agy 역할은 이 점검에서 거부된다. 점검은 agent 이름을 보지 않으므로 Orca가 idle 신호를 보고하게 되면 코드 변경 없이 이 경로가 다시 열린다.
+Orca의 `worker-start`는 Dispatch를 먼저 만든 뒤, 넘겨받은 터미널이 `tui-idle`에 이를 때까지 기다리고 이르지 않으면 작업을 주입하지 못한 채 실패한다. 이렇게 실패하면 회수할 Dispatch가 남고 시도 예산도 줄어든다. 그래서 `worker-start --terminal`은 Orca를 호출하기 전에 같은 터미널에 `terminal wait --for tui-idle`을 20초 동안 실행하고, `timeout`이 돌아오면 Orca를 호출하지 않고 거부한다. 이때 Dispatch는 만들어지지 않는다. `workflow-reserve`로 시도를 예약한 뒤 이 거부를 받으면, `workflow-release`로 예약을 반납해도 시도는 소진된 채 남는다. 그래서 같은 점검을 `terminal-idle-check`로 **예약보다 먼저** 실행하고, 통과한 터미널에만 시도를 예약한다. 이 명령은 아무것도 만들지 않으며, 거부할 때 `worker-start`와 같은 신호를 돌려준다.
 
-이 거부의 신호는 `code: "timeout"`, `kind: "execution-unconfigured"`이며 `failure-classify`는 PM의 `rebind-profile-agent`로 보낸다. 같은 프로필의 터미널로 다시 시작해도 같은 거부가 재현되므로 같은 명령을 반복하지 않는다. `adjust`는 진행 중인 kickoff의 조직 스냅샷을 바꾸지 않고 실행 중 프로필을 다시 묶는 절차도 없으므로, PM은 그 역할에 작업을 넘기지 않고 멈춘 뒤 거부 원문과 함께 사용자에게 보고한다. 원시 `orchestration dispatch --inject`로 주입해 우회하지 않는다. 그 경로는 `worker-stop`·`worker-abandon`으로 회수할 수 없고 모델 확인도 거치지 않는다. 다음 kickoff부터는 `adjust`로 그 역할을 Claude·Codex 프로필로 바꾸도록 안내한다.
+Orca는 `antigravity` 터미널의 대기 상태를 화면으로 판정한다. `Antigravity CLI` 배너 뒤에 `gemini`로 시작하는 줄과 `>`만 있는 줄이 모두 있어야 대기로 본다. Orca가 여는 폭에서 Agy 1.2.4는 로고를 배너 **왼쪽에** 그리므로 모델 줄이 로고 문자로 시작하고, 이 판정이 끝내 실패한다. Agy가 보내는 `Stop` 훅은 이 판정을 대신하지 않는다. 그래서 `role-terminal`은 모델이 `gemini`로 시작하는 Agy 역할을 POSIX 셸에서 `stty cols 44;`를 앞에 붙여 띄운다. 이 폭에서는 로고가 배너 위로 올라가므로 Orca가 대기를 보고하고, `worker-start --terminal`이 감독 worker로 시작한다. 결과의 `launched`와 `columns`에 실제로 입력한 명령과 폭이 남는다. 이 폭은 그 터미널의 작업 화면에도 적용된다. 모델 이름이 `gemini`로 시작하지 않는 Agy 프로필(예: Agy에서 실행하는 Claude, GPT-OSS)과 `stty`가 없는 Windows는 폭과 무관하게 이 판정을 통과하지 못하므로 아래 예외 경로의 대상이다. 원인과 재현 방법은 Orca에 보고했다.
+
+이 거부의 신호는 `code: "timeout"`, `kind: "execution-unconfigured"`이며 `failure-classify`는 PM의 `rebind-profile-agent`로 보낸다. 같은 프로필의 터미널로 다시 시작해도 같은 거부가 재현되므로 같은 명령을 반복하지 않는다. `adjust`는 진행 중인 kickoff의 조직 스냅샷을 바꾸지 않고 실행 중 프로필을 다시 묶는 절차도 없으므로, PM은 그 역할에 작업을 넘기지 않고 멈춘 뒤 거부 원문과 함께 사용자에게 보고한다. 원시 `orchestration dispatch --inject`로 직접 주입해 우회하지 않는다.
+
+**주입 예외 경로.** 사용자가 이 한계를 알고 주입을 승인한 경우에만, 같은 `worker-start` 명령에 `--inject-fallback "<누가 무엇을 승인했는지>"`를 붙여 다시 실행한다. 래퍼는 사전 점검이 `timeout`으로 거부한 Agy 터미널에 한해 `task-create`와 `dispatch --inject`로 작업을 넘기고, 다음을 결과에 남긴다.
+
+- `via: "dispatch-inject"`, `supervised: false`, `approval`(받은 승인 문장), `refusal`(사전 점검의 거부 신호), `taskId`, `dispatchId`, `injected`.
+- `liveness: "unverifiable"`, `binding.modelProof: "unproven"`.
+- `limitations`: `worker-list`가 liveness를 보고하지 않고, `worker-release`가 터미널을 회수하지 않으며, 모델이 증명되지 않는다는 세 가지.
+
+workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 `via`와 화면에서 확인한 모델을 함께 적는다. 진행은 `check --wait`와 터미널 화면으로 따라가고, 작업이 끝나면 터미널을 직접 닫는다. `injected`가 `false`이면 결과에 `status: "blocked"`가 붙으므로 작업이 넘어간 것으로 보고하지 않는다. 다음 kickoff부터는 Gemini 모델 프로필이나 Claude·Codex 프로필로 바꾸도록 안내한다.
 
 ### 역할 터미널 열기
 
 `<orca> terminal create --command`를 직접 호출해 역할 터미널을 열지 않는다. Orca는 명령을 새 셸의 프롬프트에 입력만 하고 실행하지 않는 경우가 잦으며, 이 상태에서 보낸 브리프나 작업은 agent가 아니라 셸에 입력된다. `role-terminal`은 다음을 한 번에 수행한다.
 
-1. `role-command`와 같은 명령으로 터미널을 만든다.
+1. `role-command`와 같은 명령으로 터미널을 만든다. 모델이 `gemini`로 시작하는 Agy 역할은 POSIX 셸에서 `stty cols 44;`를 앞에 붙인다(위 「Agy 역할 시작」 절).
 2. 짧게 `tui-idle`을 기다린 뒤 화면을 읽고, 마지막 줄에 명령이 프롬프트에 입력된 채 남아 있으면 Enter를 한 번 보낸다. 결과의 `submission`은 Orca가 스스로 실행했으면 `orca`, Enter를 보냈으면 `enter-sent`다. 시작된 agent에 입력이 들어가지 않도록 Enter는 두 번 보내지 않는다.
 3. agent가 명령 아래에 자기 화면을 그릴 때까지 화면을 다시 읽는다. Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족되므로 준비 여부를 판단하는 근거로 쓰지 않는다. 화면 너비 때문에 명령이 여러 줄로 나뉘어도 같은 명령으로 인식한다.
 4. Agy는 처음 여는 폴더마다 폴더 신뢰 질문("Do you trust the contents of this project?")을 띄우며, 권한 우회 플래그로도 건너뛰지 않는다. 역할의 워크트리는 사용자 저장소에서 이 실행을 위해 만든 것이고 역할은 이미 승인 없이 도구를 실행하므로, "Yes, I trust this folder"가 선택된 경우에만 Enter를 한 번 보내 신뢰한다. 결과의 `trust`는 질문이 없었으면 `not-asked`, 답했으면 `accepted`다. 신뢰한 폴더는 Agy 설정의 `trustedWorkspaces`에 남는다.

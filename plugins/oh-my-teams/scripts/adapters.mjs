@@ -1,5 +1,6 @@
 /** Execution runtime registry: one name to the adapter that speaks for it. */
 import { assert } from "./core.mjs";
+import { assertFailureSignal } from "./execution.mjs";
 import {
   assertOrcaDiscovery,
   confirmOrcaWorkspace,
@@ -82,6 +83,13 @@ export function translateRuntimeFailure(runtime, code, message) {
  * @throws {Error} When the runtime is named without a code, or is unregistered.
  */
 export function withRuntimeSignal(failure) {
+  // A wrapper that already translated the refusal returns it as `signal`; the
+  // record carries that signal as given, so it is not translated again from a
+  // raw code that the table deliberately leaves out, such as a probe timeout.
+  if (failure.signal !== undefined) {
+    const signal = assertFailureSignal(failure.signal);
+    return { ...failure, ...signal, message: failure.message };
+  }
   if (!failure.runtime) return failure;
   assert(
     typeof failure.code === "string" && failure.code.trim(),

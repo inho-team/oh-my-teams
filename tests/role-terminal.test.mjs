@@ -11,6 +11,8 @@ import {
 import {
   agentStarted,
   commandPending,
+  AGY_BANNER_COLUMNS,
+  launchLine,
   openRoleTerminal,
   roleTitle,
   trustQuestion,
@@ -73,7 +75,9 @@ function fakeOrca(
   };
 }
 
-const fast = { settleMs: 5, readyMs: 20, pollMs: 1 };
+// The screens below show the plain command; the narrow Agy launch, which only
+// POSIX shells get, has its own test.
+const fast = { settleMs: 5, readyMs: 20, pollMs: 1, platform: "win32" };
 
 test("every role command runs tools without an approval prompt", () => {
   // Nobody answers an approval prompt in a role terminal, and Orca adds its
@@ -101,6 +105,49 @@ test("every role command runs tools without an approval prompt", () => {
     "--dangerously-bypass-approvals-and-sandbox",
   ];
   assert.throws(() => roleCommand(org, "pm"), /plain command/);
+});
+
+test("an Agy Gemini role is launched narrow enough for Orca to see it idle", async () => {
+  // #41: at Orca's width Agy 1.2.4 draws its logo left of the banner, the
+  // model line starts with logo glyphs, and Orca never reports tui-idle, so
+  // worker-start refused every Agy role.
+  const org = example();
+  const gemini = roleCommand(org, "senior");
+  assert.equal(gemini.modelRequested, "gemini-3.8-flash-high");
+  assert.deepEqual(launchLine(gemini, "darwin"), {
+    typed: `stty cols ${AGY_BANNER_COLUMNS}; ${gemini.command}`,
+    columns: AGY_BANNER_COLUMNS,
+  });
+  // No stty on Windows, and a non-Gemini model fails Orca's check at any width.
+  assert.deepEqual(launchLine(gemini, "win32"), {
+    typed: gemini.command,
+    columns: null,
+  });
+  const claudeOnAgy = roleCommand(org, "junior");
+  assert.equal(launchLine(claudeOnAgy, "linux").columns, null);
+  assert.equal(launchLine(roleCommand(org, "pl"), "linux").columns, null);
+
+  const { typed } = launchLine(gemini, "darwin");
+  const orca = fakeOrca([
+    [
+      `${PROMPT} ${typed}`,
+      "  Antigravity CLI 1.2.4",
+      "  Gemini 3.8 Flash (High)",
+      ">",
+    ],
+  ]);
+  const opened = await openRoleTerminal({
+    worktree: "id:repo::/tmp/wt",
+    command: gemini,
+    execute: orca.execute,
+    ...fast,
+    platform: "darwin",
+  });
+  assert.equal(orca.creates()[0][7], typed);
+  assert.equal(opened.ready, true);
+  assert.equal(opened.submission, "orca");
+  assert.equal(opened.launched, typed);
+  assert.equal(opened.columns, AGY_BANNER_COLUMNS);
 });
 
 test("a command left at the prompt is told apart from a started agent", () => {
@@ -179,6 +226,7 @@ test("a typed but unsubmitted command is sent Enter exactly once", async () => {
     settleMs: 0,
     readyMs: 50,
     pollMs: 1,
+    platform: "win32",
   });
   assert.equal(opened.submission, "enter-sent");
   assert.equal(opened.ready, true);
