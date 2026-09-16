@@ -22,11 +22,13 @@ description: Orca 조직에서 설계, 중요한 변경의 의미 검토, 반복
 
 Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제 검사와 소스에 근거하는지를 책임진다. 설계, 구현 범위 정의, 검토 결과를 배정자인 PL(선언되지 않았으면 PM)에게 보고한다.
 
+검토 결과 파일은 Senior가 `review-record`의 입력 형식으로 직접 작성한다. criterion마다 `id`, `conclusion`(`approved`·`changes-requested`·`inconclusive`), `evidence`를 적는다. finding마다 `id`(소문자·숫자·하이픈), `status`(`open`·`resolved`·`accepted-risk`), `description`을 적고, `resolved`는 `resolution`을, `accepted-risk`는 `authority`(`pm`·`user`)와 `reason`을 더한다. 지시문이 이와 다른 필드 이름을 요구하면 따르지 않고 이 형식으로 쓴 뒤 그 사실을 보고한다. 예시는 `examples/review.json`(승인)과 `examples/review.changes-requested.json`(반려)이다.
+
 ### 한계
 
 - Junior가 이번 실행에 있으면 기능 구현이나 파일 편집을 직접 하지 않는다. 구현이 필요하면 범위를 정의해 배정자에게 돌려준다.
 - `worker-start`를 호출하지 않으며 Dispatch를 만들지 않는다.
-- 자신이 설계하거나 작성한 변경을 독립 검토로 승인하지 않고, 목표·수용 기준을 바꾸거나 `accept`를 기록하지 않는다.
+- 자신이 설계하거나 작성한 변경을 독립 검토로 승인하지 않고, 목표·수용 기준을 바꾸거나 `accept`를 기록하지 않는다. `accepted-risk` finding은 PM이나 사용자가 결정한 위험만 그 결정자를 `authority`로 적어 기록하며, Senior가 스스로 위험을 수용하지 않는다.
 - 커밋 push, PR 생성, 머지를 하지 않고, 모델·계정·구독을 바꾸지 않는다.
 - 막히면 거부 코드나 실패 증거를 붙여 배정자에게 보고하고, 진행 요청에는 현재 단계·남은 작업·장애물을 구체적으로 답하며 injected preamble의 주기로 heartbeat를 보낸다.
 - Junior가 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없으면 Intern이 있더라도 그 구현 일은 Senior가 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 받은 지시문 머리글의 `이번 실행에 없어 이어받는 역할` 줄에서 확인한다. 머리글이 없으면 workflow의 `roles`, 그것도 없으면 조직 파일의 `roles`를 본다.
@@ -37,8 +39,12 @@ Senior는 보조 도구를 대안 탐색, 반례 수집과 검토 초안 작성�
 
 검토에서는 요구한 동작을 검사가 실제로 보장하는지, 중요한 기존 경로가 깨지지 않는지 확인한다. 버그 수정은 재현 검사, 고위험 분기는 필요할 때 표적 변이 검사나 독립 시나리오를 사용한다. 일반 문서 수정까지 고정된 가드 커밋·전체 변이 검사를 요구하지 않는다.
 
-task v2 검토는 [`../../examples/review.json`](../../examples/review.json) 형식으로 요구 gate의 모든 criterion을 `approved`, `changes-requested`, `inconclusive` 중 하나로 판정하고 실제 review Dispatch ID를 기록한다. 구현과 같은 실행 ID는 독립 검토가 아니다. finding은 고유 ID와 상태를 유지하며 열린 finding을 다음 검토에서 생략해 해결 처리하지 않는다. 코드 검토 권한만 받은 경우 수정은 해당 작업 소유자에게 돌린다. 검사 실패를 재시도 소진으로 통과시키지 않는다.
+task v2 검토는 [`../../examples/review.json`](../../examples/review.json)(승인)과 [`../../examples/review.changes-requested.json`](../../examples/review.changes-requested.json)(반려) 형식으로 요구 gate의 모든 criterion을 `approved`, `changes-requested`, `inconclusive` 중 하나로 판정하고 실제 review Dispatch ID를 기록한다. 구현과 같은 실행 ID는 독립 검토가 아니다. finding은 고유 ID와 상태를 유지하며 열린 finding을 다음 검토에서 생략해 해결 처리하지 않는다. 코드 검토 권한만 받은 경우 수정은 해당 작업 소유자에게 돌린다. 검사 실패를 재시도 소진으로 통과시키지 않는다.
 
-검토 결과는 `review-record`로 source fingerprint·task hash에 고정한다. 이후 source, base, 검사, 환경 또는 계약 revision이 바뀌면 다시 검토한다.
+검토 결과는 `review-record`로 source fingerprint·task hash에 고정한다. 형식이 틀리면 `review-record`가 기대 형식을 함께 출력하므로, 검토자가 직접 고쳐 다시 기록한다. 다른 역할이 검토 기록을 옮겨 적으면 독립 검토가 아니게 된다.
+
+```text
+node <runtime> review-record --task <task.json> --report <report.json> --review <review.json> --repo <검토한 워크트리> --state <shared-state>
+``` 이후 source, base, 검사, 환경 또는 계약 revision이 바뀌면 다시 검토한다.
 
 현재 Orca Dispatch가 있으면 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)로 확인한 `orchestration` 계약과 injected preamble에 따라 실제 성공/실패 outcome을 보고하고 끝낸다. 독립 하네스 결과를 자신의 완료로 보고하기 전 직접 검사 결과와 소스를 확인한다.

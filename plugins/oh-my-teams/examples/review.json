@@ -16,5 +16,19 @@
       "evidence": "The exported function signature is unchanged in the reviewed diff."
     }
   ],
-  "findings": []
+  "findings": [
+    {
+      "id": "expiry-off-by-one",
+      "status": "resolved",
+      "description": "The boundary test compared with <= and accepted a token one second after expiry.",
+      "resolution": "Commit 4f2c1a9 changes the comparison to < and adds the boundary case; the reviewed check passes."
+    },
+    {
+      "id": "clock-skew-tolerance",
+      "status": "accepted-risk",
+      "description": "Tokens issued by a host whose clock runs ahead are rejected until the clocks agree.",
+      "authority": "pm",
+      "reason": "Hosts sync with NTP; the brief leaves skew handling out of scope."
+    }
+  ]
 }

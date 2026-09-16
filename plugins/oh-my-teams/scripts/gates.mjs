@@ -12,8 +12,17 @@ import { taskHash, validateTask } from "./contracts.mjs";
 import { validateEvidence } from "./evidence.mjs";
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+// RegExp#test turns a missing value into the string "undefined", which the
+// pattern accepts, so a finding with no id at all passed the id check.
+const isId = (value) => typeof value === "string" && ID_PATTERN.test(value);
 const REVIEW_CONCLUSIONS = ["approved", "changes-requested", "inconclusive"];
 const FINDING_STATUSES = ["open", "resolved", "accepted-risk"];
+// Printed with every finding refusal, so the reviewer can fix its own record
+// instead of another role rewriting the review into this shape.
+const FINDING_FORMAT =
+  "Each finding is {id: lowercase letters, digits and hyphens; status: open|resolved|accepted-risk; " +
+  "description}; a resolved finding adds resolution, an accepted-risk finding adds authority (pm|user) " +
+  "and reason. See examples/review.json and examples/review.changes-requested.json.";
 
 const reviewFile = (stateDir, id) =>
   path.join(stateDir, "reviews", `${id}.json`);
@@ -33,24 +42,29 @@ function seniorEnoughToReview(reviewerRole, requiredRole) {
   return required >= 0 && reviewer >= 0 && reviewer <= required;
 }
 
-function validateFinding(finding) {
-  assert(finding && ID_PATTERN.test(finding.id), "Finding id required");
-  assert(
+function validateFinding(finding, index) {
+  const check = (condition, message) =>
+    assert(condition, `${message}. ${FINDING_FORMAT}`);
+  check(
+    finding && isId(finding.id),
+    `Finding id required (finding ${index + 1})`,
+  );
+  check(
     FINDING_STATUSES.includes(finding.status),
     `Invalid finding status: ${finding.id}`,
   );
-  assert(
+  check(
     typeof finding.description === "string" && finding.description.trim(),
     `Finding description required: ${finding.id}`,
   );
   if (finding.status === "resolved") {
-    assert(
+    check(
       typeof finding.resolution === "string" && finding.resolution.trim(),
       `Resolved finding needs evidence: ${finding.id}`,
     );
   }
   if (finding.status === "accepted-risk") {
-    assert(
+    check(
       ["pm", "user"].includes(finding.authority) &&
         typeof finding.reason === "string" &&
         finding.reason.trim(),
@@ -79,7 +93,7 @@ export function validateReviewInput(input, task) {
   validateTask(task);
   assert(task.schemaVersion === 2, "Structured reviews require task v2");
   assert(
-    input?.schemaVersion === 1 && ID_PATTERN.test(input.id),
+    input?.schemaVersion === 1 && isId(input.id),
     "Review schemaVersion=1 and id required",
   );
   const requirement = reviewRequirement(task, input.requirementId);
@@ -121,7 +135,10 @@ export function validateReviewInput(input, task) {
     ),
     "Each review criterion needs a conclusion and evidence",
   );
-  assert(Array.isArray(input.findings), "Review findings array required");
+  assert(
+    Array.isArray(input.findings),
+    `Review findings array required. ${FINDING_FORMAT}`,
+  );
   input.findings.forEach(validateFinding);
 
   if (input.conclusion === "approved") {
@@ -387,7 +404,7 @@ async function acceptOutcomeLocked(repo, task, report, input, stateDir) {
   validateTask(task);
   assert(task.schemaVersion === 2, "Structured acceptance requires task v2");
   assert(
-    input?.schemaVersion === 1 && ID_PATTERN.test(input.id),
+    input?.schemaVersion === 1 && isId(input.id),
     "Acceptance schemaVersion=1 and id required",
   );
   assert(
