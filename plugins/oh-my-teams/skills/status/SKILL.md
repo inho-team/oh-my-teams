@@ -18,6 +18,8 @@ node <runtime> show --org <project>/.omt/organization.json --state <coordinator-
 
 조직도에는 선언된 역할만 나타난다. 다섯 역할을 모두 두지 않은 조직에서 생략된 역할을 누락으로 보고하지 않고, 그 역할의 일을 이어받은 역할이 무엇인지 함께 알린다. 설정된 조직도와 실제 실행 상태를 구분해 전달한다. 로컬 하네스 보고서가 없으면 실행 상태는 `unsettled`이며 종료 증거가 아니다. 감독 작업의 실시간 상태는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery로 kickoff가 기록한 실행 파일을 그대로 사용해 해당 Run의 `worker-list`에서 확인한다. 이 세션에서 discovery를 이미 마쳤으면 기록된 실행 파일로 조회만 하고 가이드를 다시 읽지 않는다. `live / unverifiable / exited`를 그대로 보존한다.
 
+workflow가 있으면 `workflow-status`가 돌려주는 현재 `depth`와 이번 실행이 쓰는 `roles`, 그리고 `depthHistory`의 변경 사유를 함께 표시한다. 조직도에 있지만 이번 실행 깊이에 포함되지 않은 역할은 누락이 아니라 이번 실행에서 쓰지 않는 역할로 표시한다.
+
 상태를 사용자에게 표시하기 직전에 해당 Goal과 `worker-list`를 다시 조회한다. `live` worker 수를 함께 표시한다. 무엇을 `in-progress`·`stopped`·`unverifiable`·`blocked`로 표시할지, 그리고 workflow의 `blocked`를 Goal의 `blocked`와 구분하는 규칙은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 
 status는 조회만 하므로 점유 기록을 지우거나 고쳐 쓰지 않는다. coordinator가 응답하지 않아 liveness가 `unverifiable`로 남아도 마찬가지이며, 해제는 `close`와 `disband`만 수행한다.

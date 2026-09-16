@@ -36,6 +36,7 @@ import {
   releaseReservation,
   resumeWorkflow,
   retryTask,
+  setWorkflowDepth,
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
@@ -56,7 +57,7 @@ import {
 } from "./kickoff-lease.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
-  org-draft --name NAME --tiers 1-5 --models provider:model,... --output FILE
+  org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
   preset --org FILE --name opus-first|balanced|single-subscription --revision N
@@ -95,6 +96,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-settle --id ID --state DIR --revision N --settlement FILE
   workflow-release --id ID --state DIR --revision N --release FILE
   workflow-retry --id ID --state DIR --revision N --retry FILE
+  workflow-depth --id ID --state DIR --revision N --change FILE
   failure-classify --failure FILE
   lesson-record --lesson FILE --state DIR
   incident-ingest --event FILE --config FILE --state DIR
@@ -165,6 +167,7 @@ export const ALLOWED_OPTIONS = {
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
+  "workflow-depth": ["id", "state", "revision", "change"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
   "incident-ingest": ["event", "config", "state"],
@@ -176,7 +179,7 @@ export const ALLOWED_OPTIONS = {
 
 /** Options each subcommand must receive, keyed by command name. */
 export const REQUIRED_OPTIONS = {
-  "org-draft": ["name", "tiers", "models", "output"],
+  "org-draft": ["name", "models", "output"],
   init: ["org", "from"],
   edit: ["org", "from", "revision"],
   preset: ["org", "name", "revision"],
@@ -219,6 +222,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
+  "workflow-depth": ["id", "state", "revision", "change"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
   "incident-ingest": ["event", "config", "state"],
@@ -418,7 +422,7 @@ function writeDraft(args) {
   assert(!fs.existsSync(output), "Draft output exists; choose a new path");
   const organization = draftOrganization({
     name: args.name,
-    tiers: Number(args.tiers),
+    tiers: args.tiers === undefined ? undefined : Number(args.tiers),
     models: args.models.split(","),
   });
   writeJSON(output, organization);
@@ -612,6 +616,13 @@ async function executeCommand(args) {
         args.id,
         Number(args.revision),
         readJSON(args.retry),
+      );
+    case "workflow-depth":
+      return setWorkflowDepth(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.change),
       );
     case "failure-classify":
       return classifyFailure(

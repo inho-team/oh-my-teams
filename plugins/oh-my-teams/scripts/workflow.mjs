@@ -3,13 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import {
+  FULL_DEPTH,
   ROLES,
   assert,
   definedRoles,
+  depthRoles,
   foldRole,
   hash,
   readJSON,
-  resolveRole,
   validateOrg,
   writeJSON,
 } from "./core.mjs";
@@ -65,6 +66,13 @@ export function validateWorkflowRequest(request) {
         ROLES.includes(item.role),
     ),
     "Each workflow task needs a file and role",
+  );
+  assert(
+    request.depth === undefined ||
+      (Number.isInteger(request.depth) &&
+        request.depth >= 1 &&
+        request.depth <= FULL_DEPTH),
+    "Workflow depth must be 1..5 when given",
   );
   assert(
     Number.isInteger(request.policy?.maxRunning) &&
@@ -142,14 +150,19 @@ async function freezeTasks(request, baseDir, repo) {
   return tasks;
 }
 
-function createTaskState(task, requestedRole, role) {
-  return {
+// Kept only when the run does not use the requested role, so a report can say
+// which role the work was written for and which one ran it. The invariant that
+// an absent requestedRole means the role itself was requested is what lets a
+// depth change fold the work again from the original request.
+function assignRole(item, roles, requestedRole) {
+  item.role = foldRole(roles, requestedRole);
+  item.requestedRole = requestedRole === item.role ? undefined : requestedRole;
+}
+
+function createTaskState(task, requestedRole, roles) {
+  const item = {
     revision: task.revision,
     taskHash: taskHash(task),
-    role,
-    // Kept only when the organization does not declare the requested role, so a
-    // report can say which role the work was written for and which one ran it.
-    requestedRole: requestedRole === role ? undefined : requestedRole,
     state: "pending",
     attemptId: null,
     acceptedResult: null,
@@ -157,6 +170,8 @@ function createTaskState(task, requestedRole, role) {
     attempts: [],
     rework: [],
   };
+  assignRole(item, roles, requestedRole);
+  return item;
 }
 
 function createInitialState(request, org, tasks) {
@@ -164,6 +179,8 @@ function createInitialState(request, org, tasks) {
   const roleByTask = Object.fromEntries(
     request.tasks.map((item, index) => [tasks[index].id, item.role]),
   );
+  const depth = request.depth ?? FULL_DEPTH;
+  const roles = depthRoles(definedRoles(org), depth);
   return {
     schemaVersion: 1,
     id: request.id,
@@ -172,9 +189,13 @@ function createInitialState(request, org, tasks) {
     goal: request.goal,
     organizationRevision: org.revision,
     organizationHash: hash(org),
-    // Recorded so routing decisions made later fold onto a role this workflow
-    // was actually created with, even if the organization file changes.
-    roles: definedRoles(org),
+    // The roles this run uses, selected by its depth from the organization's
+    // ladder. Routing, dispatch and bound work fold onto these rather than onto
+    // the organization file, so neither a depth change nor a later edit of the
+    // organization can hand work to a role this run is not using.
+    depth,
+    roles,
+    depthHistory: [],
     budget: {
       ...request.budget,
       attemptsUsed: 0,
@@ -184,11 +205,7 @@ function createInitialState(request, org, tasks) {
     tasks: Object.fromEntries(
       tasks.map((task) => [
         task.id,
-        createTaskState(
-          task,
-          roleByTask[task.id],
-          resolveRole(org, roleByTask[task.id]),
-        ),
+        createTaskState(task, roleByTask[task.id], roles),
       ]),
     ),
     eventIds: [],
@@ -1113,6 +1130,9 @@ export function retryTask(stateDir, id, expectedRevision, input) {
     item.attemptId = null;
     item.execution = null;
     item.failure = null;
+    // The depth may have changed since this task was dispatched; the retry runs
+    // on whichever role the current depth gives its original request.
+    assignRole(item, state.roles ?? ROLES, item.requestedRole ?? item.role);
     appendWorkflowEvent(dir, state, {
       id: input.eventId,
       type: "task-retry-ready",
@@ -1125,5 +1145,103 @@ export function retryTask(stateDir, id, expectedRevision, input) {
     state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return state;
+  });
+}
+
+function validateDepthInput(input) {
+  assert(
+    input?.schemaVersion === 1 && WORKFLOW_ID_PATTERN.test(input.eventId ?? ""),
+    "Depth change requires schemaVersion=1 and eventId",
+  );
+  assert(
+    Number.isInteger(input.depth) &&
+      input.depth >= 1 &&
+      input.depth <= FULL_DEPTH,
+    "Depth must be 1..5",
+  );
+  assert(
+    typeof input.reason === "string" &&
+      input.reason.trim() &&
+      typeof input.evidence === "string" &&
+      input.evidence.trim(),
+    "Depth change requires a reason and evidence",
+  );
+}
+
+/**
+ * Changes how many roles a running workflow uses, and records why.
+ *
+ * Raising the depth is always safe: it only adds roles that pending work may
+ * now fold onto. Lowering it removes roles, so it is refused while any of them
+ * holds a reserved or running attempt; a worker whose exit is unconfirmed stays
+ * `running` until settled, so an unobserved worker is never assumed gone.
+ * Pending tasks fold again from the role they were written for; tasks that
+ * already ran keep the role that ran them.
+ *
+ * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - Event id, target depth, reason and evidence.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, the depth is unchanged, or a
+ *   removed role still holds reserved or running work.
+ */
+export function setWorkflowDepth(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    validateDepthInput(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+
+    const org = readJSON(path.join(dir, "organization.json"));
+    const from = state.depth ?? FULL_DEPTH;
+    const previous = state.roles ?? definedRoles(org);
+    const roles = depthRoles(definedRoles(org), input.depth);
+    assert(
+      input.depth !== from || roles.join() !== previous.join(),
+      `Workflow already runs at depth ${from}`,
+    );
+
+    const removed = previous.filter((role) => !roles.includes(role));
+    const busy = Object.entries(state.tasks).filter(
+      ([, item]) => occupiesSlot(item) && removed.includes(item.role),
+    );
+    assert(
+      busy.length === 0,
+      `Cannot lower depth while ${busy
+        .map(([taskId, item]) => `${taskId} (${item.role})`)
+        .join(
+          ", ",
+        )} holds reserved or running work; settle or release it first`,
+    );
+
+    for (const item of Object.values(state.tasks)) {
+      if (item.state === "pending")
+        assignRole(item, roles, item.requestedRole ?? item.role);
+    }
+    const change = {
+      from,
+      to: input.depth,
+      roles,
+      reason: input.reason,
+      evidence: input.evidence,
+      recordedAt: new Date().toISOString(),
+    };
+    state.depth = input.depth;
+    state.roles = roles;
+    state.depthHistory = [...(state.depthHistory ?? []), change];
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "depth-changed",
+      ...change,
+    });
+    state.revision += 1;
+    state.status = deriveWorkflowStatus(state);
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
   });
 }

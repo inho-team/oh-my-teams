@@ -1,7 +1,8 @@
 /** Read-only organization run, gate, usage, and quota status projection. */
 import fs from "node:fs";
 import path from "node:path";
-import { readJSON, resolveRole, validateOrg } from "./core.mjs";
+import { definedRoles, foldRole, readJSON, validateOrg } from "./core.mjs";
+import { workflowStateFile } from "./workflow-store.mjs";
 import { latestQuotaSnapshots, quotaStatus } from "./quota.mjs";
 import {
   addCallUsage,
@@ -56,15 +57,29 @@ function currentGateStatus(stateDir, report) {
     : null;
 }
 
-// A reduced organization may not declare the role that owns a pending gate in a
-// full ladder, so the hint names the declared role that took the duty over
-// rather than a role the reader cannot assign work to.
-function nextOwner(org, report, gateStatus, gates) {
+// The roles a run folds onto: the ones its workflow uses at its current depth,
+// or the organization's ladder for work that was never bound to a workflow.
+// status only reads, so a workflow that cannot be found is not an error here.
+function runRoles(org, stateDir, report) {
+  const id = report.workflow?.id;
+  if (id) {
+    const file = workflowStateFile(stateDir, id);
+    const roles = fs.existsSync(file) ? readJSON(file).roles : undefined;
+    if (roles) return roles;
+  }
+  return definedRoles(org);
+}
+
+// A run may not use the role that owns a pending gate in a full ladder, either
+// because the organization omits it or because the run's depth leaves it out,
+// so the hint names the role that took the duty over rather than a role the
+// reader cannot assign work to.
+function nextOwner(roles, report, gateStatus, gates) {
   if (gates?.["review-complete"]?.status === "pending") {
-    return resolveRole(org, "senior");
+    return foldRole(roles, "senior");
   }
   if (gates?.["outcome-accepted"]?.status === "pending") {
-    return resolveRole(org, "pm");
+    return foldRole(roles, "pm");
   }
   if (gateStatus?.state === "accepted") return null;
   return report.status === "failed" ? report.role : null;
@@ -89,7 +104,12 @@ function runStatus(org, stateDir, runId, usage) {
     taskId: report.taskId,
     role: report.role,
     status: gateStatus?.state ?? report.status,
-    nextOwner: nextOwner(org, report, gateStatus, gates),
+    nextOwner: nextOwner(
+      runRoles(org, stateDir, report),
+      report,
+      gateStatus,
+      gates,
+    ),
     gates,
     issues: report.issues,
   };

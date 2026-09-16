@@ -1,22 +1,5 @@
 /** Drafts a first organization from a ladder size and one model per tier. */
-import { assert, ROLES, validateOrg } from "./core.mjs";
-
-/**
- * Roles a ladder of each size declares, from the first tier down.
- *
- * Roles join in the order a team misses them most. Implementation comes first,
- * because a PM alone has nobody to hand work to; independent review comes next;
- * a cheap tier for narrow edits after that; and PL last, since splitting and
- * integrating parallel waves only pays off once there are several of them.
- * Every omitted role's work folds upward through `resolveRole`.
- */
-export const TIER_ROLES = {
-  1: ["pm"],
-  2: ["pm", "junior"],
-  3: ["pm", "senior", "junior"],
-  4: ["pm", "senior", "junior", "intern"],
-  5: [...ROLES],
-};
+import { DEPTH_ROLES, FULL_DEPTH, assert, validateOrg } from "./core.mjs";
 
 /**
  * Operating values a drafted organization starts with.
@@ -82,13 +65,15 @@ function profileId({ provider, model }) {
  *
  * @param {object} request - Draft request.
  * @param {string} request.name - Organization name.
- * @param {number} request.tiers - Ladder size from 1 to 5.
+ * @param {number} [request.tiers=FULL_DEPTH] - Ladder size from 1 to 5.
  * @param {string[]} request.models - One `provider:model` choice per tier.
  * @returns {object} Validated organization ready for `init --from`.
  * @throws {Error} When the ladder, a choice, or the result is invalid.
  */
-export function draftOrganization({ name, tiers, models }) {
-  const roles = TIER_ROLES[tiers];
+export function draftOrganization({ name, tiers = FULL_DEPTH, models }) {
+  // Formation declares every role; how many a run uses is chosen per kickoff.
+  // A smaller ladder stays available for an organization that cannot staff one.
+  const roles = DEPTH_ROLES[tiers];
   assert(roles, "tiers must be 1..5");
   assert(
     Array.isArray(models) && models.length === roles.length,

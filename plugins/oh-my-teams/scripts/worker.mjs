@@ -5,6 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import {
   assert,
+  foldRole,
   hash,
   inside,
   ownerHasExited,
@@ -22,7 +23,7 @@ import {
   workspaceBinding,
 } from "./evidence.mjs";
 import { taskContext, taskHash, validateTask } from "./contracts.mjs";
-import { claimWorkflowCall } from "./workflow.mjs";
+import { claimWorkflowCall, readWorkflow } from "./workflow.mjs";
 
 const MAX_FILE_BYTES = 48000;
 const MAX_EDIT_BYTES = 96000;
@@ -326,15 +327,23 @@ export async function work(
 ) {
   validateOrg(org);
   validateTask(task);
-  // A reduced organization need not declare the requested role, so the work
-  // folds onto the declared role that took its duties over instead of failing
-  // for naming a rung this ladder does not have.
-  const role = resolveRole(org, requestedRole);
   assert(stateDir, "Shared coordinator state directory required");
   assert(
     Boolean(workflowId) === Boolean(attemptId),
     "workflowId and attemptId must be supplied together",
   );
+  // A reduced organization need not declare the requested role, so the work
+  // folds onto the role that took its duties over instead of failing for
+  // naming a rung this ladder does not have. Work bound to a workflow folds
+  // onto the roles that run uses at its current depth: folding onto the
+  // organization instead would run a role the PM had taken out of the run.
+  // A workflow recorded before roles were stored folds onto the organization.
+  const runRoles = workflowId
+    ? readWorkflow(stateDir, workflowId).state.roles
+    : undefined;
+  const role = runRoles
+    ? foldRole(runRoles, requestedRole)
+    : resolveRole(org, requestedRole);
   task.files.forEach((file) => inside(repo, file));
 
   const binding = org.roles[role];

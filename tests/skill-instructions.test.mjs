@@ -6,16 +6,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  DEPTH_ROLES,
   readJSON,
   resolveRole,
   validateOrg,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { assist } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import {
-  TIER_ROLES,
-  parseModelChoice,
-} from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { parseModelChoice } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { removedSkillNames } from "./removed-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -465,19 +463,22 @@ test("the lease is released by an ending, never by a reading", () => {
   assert.match(status, /점유 기록을 지우거나 고쳐 쓰지 않는다/);
 });
 
-test("form asks for the ladder and its models, and nothing else", () => {
+test("form asks for the five role models, and not for a ladder size", () => {
   const form = readSkill("form");
   // Formation used to ask for the name, parents, slots, subscriptions,
   // fallbacks, exhaustion policy, call limit and assistant allowlist before a
-  // team existed. Everything but the ladder and its models now has a default
-  // that org-draft records and adjust changes.
+  // team existed, and then for a ladder size. Every organization now declares
+  // all five roles; how many a run uses is the PM's depth decision per kickoff.
   assert.match(form, /질문은 두 번으로 끝난다/);
-  assert.match(form, /node <runtime> org-draft/);
+  assert.match(form, /몇 단계로 운영할지는 묻지 않는다/);
   assert.match(form, /묻지 않고 정하는 것/);
+  const draft = /node <runtime> org-draft([^\n`]*)/.exec(form);
+  assert.ok(draft, "form must draft the organization");
+  assert.doesNotMatch(draft[1], /--tiers/);
 });
 
-test("the ladder form describes is the ladder org-draft builds", () => {
-  const form = readSkill("form");
+test("the depth table the PM reads is the depth the runtime applies", () => {
+  const pm = readSkill("pm");
   const names = {
     PM: "pm",
     PL: "pl",
@@ -485,26 +486,46 @@ test("the ladder form describes is the ladder org-draft builds", () => {
     Junior: "junior",
     Intern: "intern",
   };
-  // The table is prose a model reads to explain the choice; the mapping in
-  // org-draft.mjs is what gets saved. A mismatch would tell the user one team
-  // and store another.
+  // The table is what the PM reasons from when it picks a depth; DEPTH_ROLES is
+  // what workflow creation and workflow-depth record. A mismatch would have the
+  // PM choose one team and the runtime run another.
   const rows = new Map(
-    [...form.matchAll(/^\| (\d)단계[^|]* \| ([^|]+) \|$/gm)].map((match) => [
+    [...pm.matchAll(/^\| (\d) \| ([^|]+) \| [^|]+ \|$/gm)].map((match) => [
       match[1],
       match[2],
     ]),
   );
-  for (const [tiers, roles] of Object.entries(TIER_ROLES)) {
-    const row = rows.get(tiers);
-    assert.ok(row, `form must describe the ${tiers}-tier ladder`);
+  for (const [depth, roles] of Object.entries(DEPTH_ROLES)) {
+    const row = rows.get(depth);
+    assert.ok(row, `pm must describe depth ${depth}`);
     const described = row.split(" → ").map((name) => names[name.trim()]);
-    assert.deepEqual(described, roles, `${tiers}-tier ladder drifted`);
+    assert.deepEqual(described, [...roles], `depth ${depth} drifted`);
+  }
+});
+
+test("the depth is decided by the PM, reported, and changed through the runtime", () => {
+  const pm = readSkill("pm");
+  // The user chose not to be asked for a depth, so the PM must at least say
+  // which one it picked and why; a change made only in prose would leave the
+  // runtime dispatching to the roles of the old depth.
+  assert.match(pm, /깊이는 사용자에게 묻지 않고 PM이 정하되/);
+  assert.match(pm, /node <runtime> workflow-depth/);
+  assert.match(
+    pm,
+    /내리기는 빠지는 역할에 예약되었거나 실행 중인 작업이 없을 때만/,
+  );
+  for (const skill of ["kickoff", "form", "adjust"]) {
+    assert.match(
+      readSkill(skill),
+      /「실행 깊이」/,
+      `${skill} must point at the one place the depth rules live`,
+    );
   }
 });
 
 test("every model form offers is a choice org-draft accepts, Gemini included", () => {
   const table = readSkill("form")
-    .split("| 단계 | 선택지 |")[1]
+    .split("| 역할 | 선택지 |")[1]
     ?.split("\n\n")[0];
   assert.ok(table, "form must keep its model option table");
   const offered = [...table.matchAll(/`([a-z]+:[a-z0-9.-]+)`/g)].map(
