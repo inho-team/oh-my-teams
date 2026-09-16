@@ -170,6 +170,97 @@ test("ending one kickoff archives it and leaves the others running", (t) => {
   );
 });
 
+test("the id Orca returns registers, binds and releases as given", (t) => {
+  const fixture = project(t);
+  // Orca addresses a worktree as `<repoId>::<worktreePath>`, so the id holds
+  // `:` and `/`, and the path may be in any script.
+  const worktreeId =
+    "5a8b6a7e-f8f0-4db8-aa52-8f887725741f::/Users/me/orca/workspaces/문해력/site-research";
+  const claim = {
+    ...claimFor(fixture, "wt-orca"),
+    goal: "deliver the Orca-addressed kickoff",
+  };
+  claim.coordinator = { ...claim.coordinator, worktreeId };
+
+  const claimed = registerKickoff(fixture.org, claim);
+  assert.equal(path.dirname(claimed.file), registryDirectory(fixture.org));
+  assert.deepEqual(ids(fixture), [worktreeId]);
+  assert.throws(
+    () => registerKickoff(fixture.org, claim),
+    /already supervises a kickoff/,
+  );
+
+  assert.equal(
+    bindKickoffRun(fixture.org, { worktreeId, runId: "run-orca" }).entry.runId,
+    "run-orca",
+  );
+  const released = releaseKickoff(fixture.org, {
+    worktreeId,
+    reason: "completed",
+  });
+  assert.equal(
+    path.dirname(released.archived),
+    path.join(fixture.dir, ".omt", "history"),
+  );
+  assert.equal(readJSON(released.archived).coordinator.worktreeId, worktreeId);
+  assert.deepEqual(ids(fixture), []);
+});
+
+test("no worktree id writes outside the registry", (t) => {
+  const fixture = project(t);
+  const worktreeId = "../../escaped";
+  const claim = claimFor(fixture, "wt-escape");
+  claim.coordinator = { ...claim.coordinator, worktreeId };
+
+  const claimed = registerKickoff(fixture.org, claim);
+  assert.equal(path.dirname(claimed.file), registryDirectory(fixture.org));
+  assert.equal(fs.existsSync(path.join(fixture.dir, "escaped.json")), false);
+  const released = releaseKickoff(fixture.org, {
+    worktreeId,
+    reason: "disbanded",
+  });
+  assert.equal(
+    path.dirname(released.archived),
+    path.join(fixture.dir, ".omt", "history"),
+  );
+
+  // A blank id or one carrying a control character names no worktree.
+  for (const bad of ["", "wt\nnext"]) {
+    const refused = claimFor(fixture, "wt-bad");
+    refused.coordinator = { ...refused.coordinator, worktreeId: bad };
+    assert.throws(
+      () => registerKickoff(fixture.org, refused),
+      /worktree id required/,
+    );
+  }
+});
+
+test("an entry named after its id by an earlier release stays closable", (t) => {
+  const fixture = project(t);
+  const entry = {
+    schemaVersion: 1,
+    ...claimFor(fixture, "wt-named"),
+    runId: null,
+    createdAt: "2026-09-16T00:00:00.000Z",
+  };
+  const legacy = path.join(registryDirectory(fixture.org), "wt-named.json");
+  writeJSON(legacy, entry);
+
+  assert.deepEqual(ids(fixture), ["wt-named"]);
+  assert.throws(
+    () => registerKickoff(fixture.org, claimFor(fixture, "wt-named")),
+    /already supervises a kickoff/,
+  );
+  assert.equal(
+    bindKickoffRun(fixture.org, { worktreeId: "wt-named", runId: "run-n" })
+      .entry.runId,
+    "run-n",
+  );
+  releaseKickoff(fixture.org, { worktreeId: "wt-named", reason: "completed" });
+  assert.equal(fs.existsSync(legacy), false);
+  assert.deepEqual(ids(fixture), []);
+});
+
 test("ending a kickoff whose coordinator cannot be reached is a forced decision", (t) => {
   const fixture = project(t);
   registerKickoff(fixture.org, claimFor(fixture, "wt-a"));
