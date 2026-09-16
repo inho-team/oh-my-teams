@@ -1214,7 +1214,7 @@ test("an open finding cannot be erased by omitting it from a later approved revi
   assert.equal(gates.gates["review-complete"].status, "pending");
   assert.deepEqual(gates.gates["review-complete"].openFindings, ["f-1"]);
 });
-test("org-show reports persisted gate owner and keeps unknown usage/cost explicit", async (t) => {
+test("status reports persisted gate owner and keeps unknown usage/cost explicit", async (t) => {
   const dir = await repo(t),
     stateDir = path.join(dir, ".omt"),
     orgFile = path.join(stateDir, "organization.json");

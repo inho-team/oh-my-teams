@@ -1,6 +1,6 @@
 {
   "name": "oh-my-teams",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "description": "A PM/PL/Senior/Junior/Worker agent organization plugin for Claude Code and Codex, running on Orca.",
   "private": true,
   "license": "MIT",
@@ -20,6 +20,8 @@
     "test": "node --test tests/*.test.mjs",
     "lint": "npm run quality && npm run format:check",
     "quality": "node scripts/check-code-quality.mjs",
+    "sync": "node scripts/metadata.mjs --write",
+    "sync:check": "node scripts/metadata.mjs",
     "format": "prettier --write \"**/*.{mjs,json}\"",
     "format:check": "prettier --check \"**/*.{mjs,json}\"",
     "eval:organization": "node evals/organization/run.mjs",

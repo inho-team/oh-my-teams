@@ -275,8 +275,9 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   if (plan.clients.codex) await installCodex(plan, root, commandRunner);
   console.log(JSON.stringify(plan, null, 2));
   console.log(
-    "Installed oh my teams. Start a new conversation and invoke team-form, " +
-      "then use team-kickoff for a development goal. " +
+    "Installed oh my teams. Start a new conversation and invoke the form " +
+      "skill, then use the kickoff skill for a development goal. " +
+      "2.0.0 dropped the team- prefix and removed every compatibility alias. " +
       "Existing .omt organizations are reused. Legacy removal occurs only " +
       "with --remove-legacy after new-plugin verification.",
   );

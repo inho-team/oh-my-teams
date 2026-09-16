@@ -693,7 +693,7 @@ export function saveOrg(file, org, { update = false, expectedRevision } = {}) {
           "Organization changed; read it again before editing",
         );
       } else {
-        assert(!update, "No organization; run team-form first");
+        assert(!update, "No organization; run the form skill first");
       }
 
       const next = validateOrg({

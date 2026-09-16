@@ -6,17 +6,21 @@ Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / J
 
 | 스킬 | 동작 |
 |---|---|
-| `team-help` | 설치된 생애주기·역할·호환 스킬과 사용 시점을 표로 안내 |
-| `team-form` | 상설 조직의 이름·구조와 직급별 구독/계정·모델·인원·대체 순서를 한 번 선택 |
-| `team-kickoff` | 하나의 개발 Goal을 시작하거나 재개하고 완료 조건까지 지속 감독 |
-| `team-status` | 상설 조직과 현재 Goal·실행 팀·워크트리·검증 상태를 구분하여 표시 |
-| `team-adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존 |
-| `team-close` | 성공한 Goal의 PR/MR·병합·워크트리 정리와 완료 기록 처리 |
-| `team-disband` | 실패·취소된 실행 팀을 해체하고 복구 가능한 결과와 기록 보존 |
+| `help` | 설치된 생애주기·역할·지원 스킬과 사용 시점을 표로 안내 |
+| `form` | 상설 조직의 이름·구조와 직급별 구독/계정·모델·인원·대체 순서를 한 번 선택 |
+| `kickoff` | 하나의 개발 Goal을 시작하거나 재개하고 완료 조건까지 지속 감독 |
+| `status` | 상설 조직과 현재 Goal·실행 팀·워크트리·검증 상태를 구분하여 표시 |
+| `adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존 |
+| `close` | 성공한 Goal의 PR/MR·병합·워크트리 정리와 완료 기록 처리 |
+| `disband` | 실패·취소된 실행 팀을 해체하고 복구 가능한 결과와 기록 보존 |
 
-Claude에서는 `/oh-my-teams:team-form`, `/oh-my-teams:team-kickoff` 등으로 호출한다. Codex에서는 플러그인의 해당 스킬을 호출하거나 같은 뜻으로 요청한다. 기존 `team-setup`, `team-show`, `team-edit`, `org-setup`, `org-show`, `org-edit`은 호환 진입점으로 유지한다. `pm`은 kickoff 내부의 지휘 역할로 유지한다. 조직 구성 후 구독을 다시 묻지 않는다. 실행 중 작업은 시작 당시 조직 스냅샷을 유지한다.
+Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한다. Codex에서는 플러그인의 해당 스킬을 호출하거나 같은 뜻으로 요청한다. `pm`은 kickoff 내부의 지휘 역할로 유지한다. 조직 구성 후 구독을 다시 묻지 않는다. 실행 중 작업은 시작 당시 조직 스냅샷을 유지한다.
 
-`team-kickoff`는 호스트의 네이티브 Goal을 유일한 지속 실행 권한으로 사용한다. 같은 세션에서 Ralph, autopilot 또는 다른 Goal 루프를 함께 실행하지 않는다. 매 실행 주기에는 확인 가능한 진전을 남기며, 완료 조건과 최신 검증이 모두 충족된 뒤 `team-close`로 전달과 자원 정리를 마쳐야 Goal을 완료한다.
+구독·모델·승인처럼 사용자가 정해야 하는 항목은 [사용자 선택 질문 계약](plugins/oh-my-teams/references/user-choice.md)을 따른다. 호스트가 구조화된 선택 도구를 제공하면 그것으로 묻고(Claude Code에서는 `AskUserQuestion`), 제공하지 않으면 번호를 매긴 선택지를 한 번에 제시한다. Codex CLI 0.154.0에는 이 용도로 확인된 도구가 없으므로 후자를 쓴다.
+
+**2.0.0 비호환 변경:** 생애주기 스킬 이름에서 `team-` 접두어를 제거했다. `team-form`은 `form`, `team-kickoff`는 `kickoff`가 되었으며 `status`, `adjust`, `close`, `disband`, `help`도 같다. 이전 호환 별칭 `team-setup`, `team-show`, `team-edit`, `org-setup`, `org-show`, `org-edit`과 `director`는 모두 삭제했으므로 그 이름으로는 스킬을 찾을 수 없다. 조직 파일 형식과 런타임 명령은 바뀌지 않았으므로 기존 `.omt/` 설정은 그대로 쓴다.
+
+`kickoff`는 호스트의 네이티브 Goal을 유일한 지속 실행 권한으로 사용한다. 같은 세션에서 Ralph, autopilot 또는 다른 Goal 루프를 함께 실행하지 않는다. 매 실행 주기에는 확인 가능한 진전을 남기며, 완료 조건과 최신 검증이 모두 충족된 뒤 `close`로 전달과 자원 정리를 마쳐야 Goal을 완료한다.
 
 ```text
 PM       분석·중장기 계획·최종 결과
@@ -42,7 +46,7 @@ sh install.sh both   # claude | codex | both
 
 설치기는 현재 저장소를 호스트별 로컬 마켓으로 등록한다. 설치 후 **새 대화**에서 스킬을 사용한다. Claude 세션 전용 시험은 `claude --plugin-dir ./plugins/oh-my-teams`로 가능하다. 개발 변경 자체는 전역 설치나 사용자의 조직 설정을 자동 변경하지 않는다.
 
-새 설치 식별자는 `oh-my-teams@oh-my-teams`다. 기존 `/orca:director` 호출에 대응하는 `director` 스킬은 새 namespace에도 호환 별칭으로 설치되며 `pm`으로 연결된다. 조직 설정과 실행 기록은 `.omt/`에 저장한다. `~/.orca-skills` 고정 링크는 사용하지 않는다. 이전 구현·실측은 [legacy/0.6.1](legacy/0.6.1/README.md)에 보존했고 자동 스킬 발견에서 제외했다.
+새 설치 식별자는 `oh-my-teams@oh-my-teams`다. 기존 `/orca:director` 호출에 대응하던 `director` 별칭은 2.0.0에서 삭제했으므로 지휘 역할은 `pm`으로 직접 부른다. 조직 설정과 실행 기록은 `.omt/`에 저장한다. `~/.orca-skills` 고정 링크는 사용하지 않는다. 이전 구현·실측은 [legacy/0.6.1](legacy/0.6.1/README.md)에 보존했고 자동 스킬 발견에서 제외했다.
 
 ## 모델과 구독
 
@@ -109,8 +113,11 @@ node --test tests/runtime.test.mjs
 npm run eval:organization
 node experiments/run-routing.mjs --mode e1 --max-calls 18 --dry-run
 npm ci
+npm run sync
 npm run lint
 ```
+
+버전과 감사 수치처럼 여러 파일이 되풀이하는 값은 `scripts/metadata.mjs`가 정본에서 파생한다. 파일마다 직접 고치지 않고 정본만 바꾼 뒤 `npm run sync`를 실행하며, `npm run sync:check`는 고치지 않고 어긋난 곳만 보고한다. 정본과 따라가는 파일의 대응은 [AGENTS.md](AGENTS.md)에 표로 정리했다.
 
 제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 coordinator state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.
 

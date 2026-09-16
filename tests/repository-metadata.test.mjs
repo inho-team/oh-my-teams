@@ -2,9 +2,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { auditDirectory } from "../scripts/check-code-quality.mjs";
+import {
+  codexVersion,
+  declaredTestCount,
+  metadataMismatches,
+  metadataTargets,
+  repositoryFacts,
+  syncMetadata,
+} from "../scripts/metadata.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -16,36 +24,29 @@ function manifest(relative) {
   return JSON.parse(fs.readFileSync(path.join(root, relative), "utf8"));
 }
 
-/** Strip build metadata so distribution variants compare by base version.
- * @param {string} version declared semantic version
- * @returns {string} version without its build metadata suffix
- */
-function baseVersion(version) {
-  return version.split("+")[0];
-}
+test("every file that repeats a fact states the one its source produces", () => {
+  // Four manifests carry the version and three documents carry the audit
+  // counts. They used to be edited by hand, one release at a time, and the
+  // only thing that noticed a missed file was this test failing afterwards.
+  // `npm run sync` now rewrites them from the same definition this reads.
+  assert.deepEqual(metadataMismatches(root), []);
+});
 
-test("every manifest declares the same base version", () => {
+test("the version is a plain semantic version the other manifests can follow", () => {
   const declared = manifest("package.json").version;
   assert.match(declared, /^\d+\.\d+\.\d+$/);
+  assert.equal(repositoryFacts(root).version, declared);
 
-  const sources = {
-    ".claude-plugin/marketplace.json": manifest(
-      ".claude-plugin/marketplace.json",
-    ).metadata.version,
-    "plugins/oh-my-teams/.claude-plugin/plugin.json": manifest(
-      "plugins/oh-my-teams/.claude-plugin/plugin.json",
-    ).version,
-    "plugins/oh-my-teams/.codex-plugin/plugin.json": manifest(
-      "plugins/oh-my-teams/.codex-plugin/plugin.json",
-    ).version,
-  };
-
-  const mismatches = Object.entries(sources)
-    .filter(([, version]) => baseVersion(version) !== declared)
-    .map(
-      ([file, version]) => `${file} declares ${version}, expected ${declared}`,
-    );
-  assert.deepEqual(mismatches, []);
+  // Every manifest but package.json is a sync target, so the source itself
+  // must not be one: a version that could be rewritten from another file
+  // would leave no file holding the decision.
+  const targets = metadataTargets(repositoryFacts(root)).map((t) => t.file);
+  assert.ok(!targets.includes("package.json"));
+  assert.equal(
+    targets.filter((file) => file.endsWith(".json")).length,
+    3,
+    "the three following manifests must all be sync targets",
+  );
 });
 
 test("the codex manifest keeps its build metadata suffix", () => {
@@ -53,70 +54,113 @@ test("the codex manifest keeps its build metadata suffix", () => {
   assert.match(codex.version, /^\d+\.\d+\.\d+\+codex\.\d+$/);
 });
 
-test("documented audit numbers match what the audit actually reports", () => {
-  const audit = auditDirectory(root);
-  const totals = audit.totals;
-  const documents = {
-    "docs/PLAN_STATUS.md": fs.readFileSync(
-      path.join(root, "docs/PLAN_STATUS.md"),
-      "utf8",
-    ),
-    "docs/SAFETY_AUDIT.md": fs.readFileSync(
-      path.join(root, "docs/SAFETY_AUDIT.md"),
-      "utf8",
-    ),
-    "docs/CODE_QUALITY.md": fs.readFileSync(
-      path.join(root, "docs/CODE_QUALITY.md"),
-      "utf8",
-    ),
-  };
+test("a sync target can be found, and rewriting it moves only the number", () => {
+  const facts = repositoryFacts(root);
+  assert.equal(facts.findings, 0);
 
-  // These three documents each repeated the same counts, so all three aged
-  // together and none of them said so. Every number a document claims is
-  // checked against the audit that produced it.
-  const claims = [
-    ["docs/PLAN_STATUS.md", `활성 \`.mjs\` ${totals.files}개`],
-    ["docs/PLAN_STATUS.md", `공개 export ${totals.publicExports}개`],
-    ["docs/SAFETY_AUDIT.md", `${totals.files}개 활성 모듈`],
-    ["docs/SAFETY_AUDIT.md", `${totals.publicExports}개 공개 export`],
-    [
-      "docs/CODE_QUALITY.md",
-      `| 활성 \`.mjs\` 파일 | ${totals.files}/${totals.files} 모듈 문서화 |`,
-    ],
-    [
-      "docs/CODE_QUALITY.md",
-      `| 공개 export | ${totals.publicExports}/${totals.publicExports} JSDoc |`,
-    ],
-    ["docs/CODE_QUALITY.md", `${totals.parameterTags}개 (의미적 정확성`],
-    [
-      "docs/CODE_QUALITY.md",
-      `| 공개 함수 | ${totals.returnTags}/${totals.returnTags} \`@returns\` |`,
-    ],
-    ["docs/CODE_QUALITY.md", `${totals.throwsTags}개 \`@throws\` 명시`],
-  ];
-  for (const [file, claim] of claims) {
-    assert.ok(
-      documents[file].includes(claim),
-      `${file} must state the audited value: ${claim}`,
+  // Every pattern must match the text its replacement produces. A pattern
+  // that matched something wider would let the rewrite swallow the sentence
+  // around the number, and the check would still report the file as correct.
+  for (const target of metadataTargets(facts, "0.0.0+codex.1")) {
+    const source = fs.readFileSync(path.join(root, target.file), "utf8");
+    const match = source.match(target.pattern);
+    assert.ok(match, `${target.file} no longer states ${target.pattern}`);
+
+    const rewritten = source.replace(target.pattern, target.text);
+    const expected = match[0].replace(target.pattern, target.text);
+    assert.equal(
+      rewritten.length - source.length,
+      expected.length - match[0].length,
+      `${target.file} would change more than the value at ${target.pattern}`,
     );
   }
-  assert.equal(totals.findings, 0);
 });
 
-test("the eval manifest and the documents agree on how many scenarios exist", () => {
-  const manifestScenarios = JSON.parse(
-    fs.readFileSync(
-      path.join(root, "evals/organization/scenarios.json"),
-      "utf8",
-    ),
-  ).scenarios.length;
-  for (const relative of ["docs/PLAN_STATUS.md", "docs/SAFETY_AUDIT.md"]) {
-    const text = fs.readFileSync(path.join(root, relative), "utf8");
+test("a repeated fact that vanishes is reported, not silently accepted", () => {
+  // A document that stopped stating a number would otherwise pass by saying
+  // nothing, which is how a count goes missing without anyone noticing.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-metadata-"));
+  try {
+    for (const relative of [
+      "package.json",
+      "evals/organization/scenarios.json",
+      "docs/PLAN_STATUS.md",
+      "docs/SAFETY_AUDIT.md",
+      "docs/CODE_QUALITY.md",
+      "plugins/oh-my-teams/.claude-plugin/plugin.json",
+      "plugins/oh-my-teams/.codex-plugin/plugin.json",
+      ".claude-plugin/marketplace.json",
+    ]) {
+      const target = path.join(dir, relative);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(path.join(root, relative), target);
+    }
+    fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
+
+    const planStatus = path.join(dir, "docs/PLAN_STATUS.md");
+    const stripped = fs
+      .readFileSync(planStatus, "utf8")
+      .replace(/결정적 로컬 시나리오 \d+개/, "결정적 로컬 시나리오");
+    fs.writeFileSync(planStatus, stripped);
+
+    // The copy has no sources to audit, so its other counts differ too. Only
+    // the vanished sentence is under test here.
+    const vanished = /결정적 로컬 시나리오/;
+    const reported = metadataMismatches(dir).filter((line) =>
+      vanished.test(line),
+    );
+    assert.equal(
+      reported.length,
+      1,
+      `a vanished fact must be reported: ${JSON.stringify(reported)}`,
+    );
+    assert.match(reported[0], /no longer states/);
+
+    // A fact it cannot find is a fact it must not invent, so the rewrite
+    // reports it and leaves that file's sentence alone.
+    const missing = syncMetadata(dir).missing.filter((line) =>
+      vanished.test(line),
+    );
+    assert.equal(missing.length, 1);
+    const after = fs.readFileSync(planStatus, "utf8");
+    assert.ok(!/결정적 로컬 시나리오 \d+개/.test(after));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the test count is read from declarations, so it needs no test run", () => {
+  // The documents state how many tests pass, and running `node --test` to
+  // rewrite a document would cost minutes. Counting `test(` at column zero is
+  // only equal to the real total while no case is nested or indented.
+  assert.equal(declaredTestCount(root), repositoryFacts(root).tests);
+  for (const name of fs.readdirSync(path.join(root, "tests"))) {
+    if (!name.endsWith(".test.mjs")) continue;
+    const text = fs.readFileSync(path.join(root, "tests", name), "utf8");
     assert.ok(
-      text.includes(`${manifestScenarios}개`),
-      `${relative} must state ${manifestScenarios} scenarios`,
+      !/^[ \t]+test\(/m.test(text),
+      `${name} nests a test case, which the static count cannot see`,
     );
   }
+});
+
+test("the codex build suffix survives a no-op and is renewed on a bump", () => {
+  const clock = new Date("2026-09-16T10:00:00Z");
+  // Regenerating the suffix on every sync would make an unchanged repository
+  // report a change, so it only moves when the base version does.
+  assert.equal(
+    codexVersion("2.0.0", "2.0.0+codex.20260101000000", clock),
+    "2.0.0+codex.20260101000000",
+  );
+  assert.equal(
+    codexVersion("2.1.0", "2.0.0+codex.20260101000000", clock),
+    "2.1.0+codex.20260916100000",
+  );
+  assert.equal(
+    codexVersion("2.0.0", "2.0.0", clock),
+    "2.0.0+codex.20260916100000",
+  );
 });
 
 test("the legacy note points at paths that exist", () => {
