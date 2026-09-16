@@ -451,7 +451,14 @@ function npmGlobalEntry(name, env) {
   return null;
 }
 
-function resolveCommand(argv, env) {
+/**
+ * Resolves an argv so `spawn` can start it without a shell on every platform.
+ *
+ * @param {string[]} argv - Executable followed by literal arguments.
+ * @param {NodeJS.ProcessEnv} [env=process.env] - Environment used to find npm shims.
+ * @returns {string[]} The argv to spawn; on Windows an npm-installed CLI runs through Node.
+ */
+export function resolveCommand(argv, env = process.env) {
   const [name, ...rest] = argv;
   if (process.platform !== "win32") return argv;
   // An explicit path or extension is already something spawn can execute.
