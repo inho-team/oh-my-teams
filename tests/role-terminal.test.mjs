@@ -1,4 +1,4 @@
-/** Role terminals: bypass flags, unsubmitted commands, and role tab titles. */
+/** Role terminals: bypass flags, unsubmitted commands, trust reopening, and role tab titles. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -23,8 +23,11 @@ const example = () =>
 const PROMPT = "me@host project %";
 
 // Plays Orca's terminal verbs; the last screen repeats once the script ends.
-function fakeOrca(screens, terminals = []) {
+// Each create issues the next handle, `closeFails` makes close refuse, and
+// `terminals` is what list reports for the worktree.
+function fakeOrca(screens, { closeFails = false, terminals = [] } = {}) {
   const calls = [];
+  let created = 0;
   const execute = async (argv) => {
     const [, noun, verb] = argv;
     calls.push(argv.slice(1, -1));
@@ -33,8 +36,10 @@ function fakeOrca(screens, terminals = []) {
       code: 0,
       stdout: JSON.stringify({ ok: true, result }),
     });
-    if (verb === "create") return reply({ terminal: { handle: "term_1" } });
-    if (verb === "list") return reply({ terminals });
+    if (verb === "create") {
+      created += 1;
+      return reply({ terminal: { handle: `term_${created}` } });
+    }
     // An idle shell satisfies tui-idle too, so the wait decides nothing.
     if (verb === "wait") return reply({ wait: { satisfied: true } });
     if (verb === "read") {
@@ -42,12 +47,23 @@ function fakeOrca(screens, terminals = []) {
       return reply({ terminal: { tail } });
     }
     if (verb === "send") return reply({ send: { accepted: true } });
+    if (verb === "list") return reply({ terminals });
     if (verb === "rename") return reply({ rename: { title: argv.at(-2) } });
+    if (verb === "close") {
+      if (closeFails) return { code: 1, stderr: "terminal is busy" };
+      return reply({ close: { closed: true } });
+    }
     throw new Error(`unexpected verb ${verb}`);
   };
-  const sends = () => calls.filter((call) => call[1] === "send");
-  const renames = () => calls.filter((call) => call[1] === "rename");
-  return { calls, execute, sends, renames };
+  const of = (name) => () => calls.filter((call) => call[1] === name);
+  return {
+    calls,
+    execute,
+    sends: of("send"),
+    creates: of("create"),
+    closes: of("close"),
+    renames: of("rename"),
+  };
 }
 
 const fast = { settleMs: 5, readyMs: 20, pollMs: 1 };
@@ -125,6 +141,7 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
   });
   assert.equal(opened.submission, "orca");
   assert.equal(opened.trust, "not-asked");
+  assert.equal(opened.reopened, null);
   assert.equal(opened.ready, true);
   assert.equal(opened.status, undefined);
   assert.equal(opened.screenCheck, "required");
@@ -139,6 +156,7 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
     command.command,
   ]);
   assert.deepEqual(orca.sends(), []);
+  assert.deepEqual(orca.closes(), []);
   assert.equal(opened.title, "[Senior] wt");
   assert.equal(opened.titlePinned, true);
 });
@@ -222,13 +240,15 @@ test("the worktree's untitled plain shell is named, other tabs are not", async (
   const command = roleCommand(example(), "pm");
   const orca = fakeOrca(
     [[`${PROMPT} ${command.command}`, "Claude Code", "❯"]],
-    [
-      { handle: "term_1", title: "✳ Claude Code", agentIdentity: "claude" },
-      { handle: "term_shell", title: null },
-      { handle: "term_default", title: "Terminal 3" },
-      { handle: "term_named", title: "dev server" },
-      { handle: "term_agent", title: "Terminal 4", agentIdentity: "codex" },
-    ],
+    {
+      terminals: [
+        { handle: "term_1", title: "✳ Claude Code", agentIdentity: "claude" },
+        { handle: "term_shell", title: null },
+        { handle: "term_default", title: "Terminal 3" },
+        { handle: "term_named", title: "dev server" },
+        { handle: "term_agent", title: "Terminal 4", agentIdentity: "codex" },
+      ],
+    },
   );
   const opened = await openRoleTerminal({
     worktree: "id:repo::/work/literacy-site-research-2",
@@ -310,22 +330,40 @@ test("Agy's folder trust question is answered once, only when trust is selected"
     false,
   );
 
-  const trusted = fakeOrca([
-    asked,
-    asked,
-    [`${PROMPT} ${command.command}`, ">"],
-  ]);
+  const agent = [`${PROMPT} ${command.command}`, "Antigravity", ">"];
+  const trusted = fakeOrca([asked, asked, agent]);
   const opened = await openRoleTerminal({
     worktree: "active",
     command,
     execute: trusted.execute,
     ...fast,
   });
+  // The answered terminal keeps the question in its buffer, which Orca's
+  // startup check blocks on, so a clean terminal is returned instead.
   assert.equal(opened.trust, "accepted");
+  assert.equal(opened.terminal, "term_2");
+  assert.deepEqual(opened.reopened, {
+    closedTerminal: "term_1",
+    reason: "trust-question-in-buffer",
+  });
   assert.equal(opened.ready, true);
-  assert.equal(trusted.sends().length, 1);
+  assert.deepEqual(opened.screen, agent);
+  assert.deepEqual(
+    trusted.sends().map((call) => call[3]),
+    ["term_1"],
+  );
+  assert.deepEqual(trusted.closes(), [
+    ["terminal", "close", "--terminal", "term_1"],
+  ]);
+  assert.equal(trusted.creates().length, 2);
+  // The title goes to the terminal that is kept, not the one closed.
+  assert.deepEqual(
+    trusted.renames().map((call) => [call[3], call[5]]),
+    [["term_2", "[Senior]"]],
+  );
 
-  // A question that stays after one Enter blocks rather than repeating it.
+  // A question that stays after one Enter blocks rather than repeating it,
+  // and the terminal is kept as evidence.
   const repeated = fakeOrca([asked]);
   const blocked = await openRoleTerminal({
     worktree: "active",
@@ -335,7 +373,63 @@ test("Agy's folder trust question is answered once, only when trust is selected"
   });
   assert.equal(blocked.ready, false);
   assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.reopened, null);
   assert.equal(repeated.sends().length, 1);
+  assert.deepEqual(repeated.closes(), []);
+});
+
+test("a reopened terminal asking for trust again is blocked, not reopened", async () => {
+  const command = roleCommand(example(), "senior");
+  const asked = [
+    `${PROMPT} ${command.command}`,
+    "Do you trust the contents of this project?",
+    "> Yes, I trust this folder",
+  ];
+  const answered = [`${PROMPT} ${command.command}`, ">"];
+  // The question comes back in the second terminal: the trust was not kept.
+  const forgot = fakeOrca([asked, asked, answered, answered, asked]);
+  const opened = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute: forgot.execute,
+    ...fast,
+  });
+  assert.equal(opened.terminal, "term_2");
+  assert.equal(opened.trust, "accepted");
+  assert.equal(opened.reopened.closedTerminal, "term_1");
+  assert.equal(opened.ready, false);
+  assert.equal(opened.status, "blocked");
+  assert.equal(forgot.sends().length, 1);
+  assert.equal(forgot.closes().length, 1);
+  assert.equal(forgot.creates().length, 2);
+});
+
+test("a trusted terminal that will not close is reported, not doubled", async () => {
+  const command = roleCommand(example(), "senior");
+  const asked = [
+    `${PROMPT} ${command.command}`,
+    "Do you trust the contents of this project?",
+    "> Yes, I trust this folder",
+  ];
+  const stuck = fakeOrca(
+    [asked, asked, [`${PROMPT} ${command.command}`, ">"]],
+    {
+      closeFails: true,
+    },
+  );
+  const opened = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute: stuck.execute,
+    ...fast,
+  });
+  assert.equal(opened.terminal, "term_1");
+  assert.equal(opened.trust, "accepted");
+  assert.equal(opened.reopened, null);
+  assert.match(opened.closeError, /terminal is busy/);
+  assert.equal(opened.ready, false);
+  assert.equal(opened.status, "blocked");
+  assert.equal(stuck.creates().length, 1);
 });
 
 test("the launch documents open role terminals through role-terminal", () => {
@@ -351,6 +445,9 @@ test("the launch documents open role terminals through role-terminal", () => {
   assert.match(runtime, /node <runtime> role-terminal --org/);
   assert.match(runtime, /Enter를 한 번/);
   assert.match(runtime, /폴더 신뢰/);
+  // An answered trust question stayed in the buffer and blocked worker-start.
+  assert.match(runtime, /`reopened`/);
+  assert.match(runtime, /agent-trust-workspace/);
   assert.match(runtime, /--dangerously-skip-permissions/);
   // A title given only at creation was lost, so the documents keep the tag
   // and the rename after start together.
