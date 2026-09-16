@@ -26,7 +26,7 @@ agy --model claude-opus-4-6-thinking ...
 
 모델 ID는 실행 직전에 `agy models`에서 확인한다. `gpt-oss-120b-medium`처럼 모델 ID 자체에 추론 수준이 포함되거나 Agy가 별도 effort를 지원하지 않는 모델에는 `--effort`를 추가하지 않는다. 모델 선택 오류가 호출 전에 반환되면 사용량 0인 구성 오류로 기록하고, 기본 모델로 조용히 다시 실행하지 않는다.
 
-제한 편집 하네스는 `scripts/providers.mjs`가 프로필의 모델 ID를 인자 배열에 추가한다. 일반 감독 작업에서 Orca가 Agy를 아는 agent ID는 `agy`가 아니라 `antigravity`이며, `worker-start --model`은 Claude·Codex·Cursor에만 적용된다. 그래서 Agy 역할은 아래 「worker-start 래퍼」의 터미널 경로로 시작한다. 모델을 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. 화면의 모델이 요청과 다르거나 확인할 수 없으면 작업을 넘기지 않는다. 계정·모델을 다른 실행기로 임의 대체하지 않는다.
+제한 편집 하네스는 `scripts/providers.mjs`가 프로필의 모델 ID를 인자 배열에 추가한다. 일반 감독 작업에서 Orca가 Agy를 아는 agent ID는 `agy`가 아니라 `antigravity`이며, `worker-start --model`은 Claude·Codex·Cursor에만 적용된다. 그래서 Agy 역할은 아래 「worker-start 래퍼」의 터미널 경로로 시작한다. `role-terminal`로 모델을 명령줄에 담은 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. 화면의 모델이 요청과 다르거나 확인할 수 없으면 작업을 넘기지 않는다. 계정·모델을 다른 실행기로 임의 대체하지 않는다.
 
 제한 편집 하네스는 응답이 보고한 모델을 요청 모델과 대조하고, 불일치가 확인되면 결과를 채택하지 않는다(`scripts/providers.mjs`의 `modelBinding`). 보고서의 `modelProof`에는 `matched`, `mismatched`, `unproven`, `unrequested` 중 하나가 남는다. `unproven`은 실행기가 모델 메타데이터를 반환하지 않아 증명하지 못한 상태이며, 일치를 확인했다는 뜻이 아니다.
 
@@ -104,13 +104,23 @@ Agy 역할은 모델을 명령줄에 담아 터미널을 먼저 열고, 모델�
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-command --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state>
-<orca> terminal create --worktree id:<worktreeId> --command "<role-command의 command>" --json
-<orca> terminal read --terminal <handle> --screen --json
+node <runtime> role-terminal --org <organization.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <coordinator-state>
 node <runtime> worker-start --org <organization.json> --role <역할> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <handle> --worktree id:<worktreeId> --spec <작업>
 ```
 
-`role-command`와 `worker-start`에는 같은 `--workflow-id`와 `--state`를 넘긴다. 그래야 두 명령이 같은 조직 스냅샷과 이번 실행의 역할을 읽는다. 터미널은 한 역할의 프로필로 미리 만들어지므로, 두 명령 모두 요청한 역할이 이번 실행에 실제로 있을 때에만 받아들인다. 이번 실행에 없어 다른 역할로 접히는 역할을 요청하면 어느 역할로 접히는지 알리며 거부하고, 그때에는 접힌 역할의 터미널을 연다. `role-command`는 `agy --model <model>`을, 프로필에 강도가 있으면 `--effort <effort>`까지 만든다. 화면에 표시된 모델이 프로필의 모델과 같을 때에만 `worker-start --terminal`을 호출한다. Orca는 `agy` 실행 파일을 `antigravity` agent로 인식해 작업을 전달한다. 이 경로의 `modelProof`는 항상 `unproven`이므로 작업을 넘긴 뒤에도 보고서에 모델을 적을 때에는 화면에서 확인한 사실로 적는다. Orca가 터미널의 agent를 인식하지 못해 `inject_rejected`로 거부하면 같은 명령을 반복하지 않고 거부 원문과 함께 상위에 보고한다.
+`role-terminal`과 `worker-start`에는 같은 `--workflow-id`와 `--state`를 넘긴다. 그래야 두 명령이 같은 조직 스냅샷과 이번 실행의 역할을 읽는다. 터미널은 한 역할의 프로필로 미리 만들어지므로, 두 명령 모두 요청한 역할이 이번 실행에 실제로 있을 때에만 받아들인다. 이번 실행에 없어 다른 역할로 접히는 역할을 요청하면 어느 역할로 접히는지 알리며 거부하고, 그때에는 접힌 역할의 터미널을 연다. `role-terminal`이 여는 명령은 `role-command`와 같으며, 아래 「역할 터미널 열기」 절을 따른다. 결과의 `screen`에 표시된 모델이 프로필의 모델과 같을 때에만 결과의 `terminal`을 `worker-start --terminal`에 넘긴다. Orca는 `agy` 실행 파일을 `antigravity` agent로 인식해 작업을 전달한다. 이 경로의 `modelProof`는 항상 `unproven`이므로 작업을 넘긴 뒤에도 보고서에 모델을 적을 때에는 화면에서 확인한 사실로 적는다. Orca가 터미널의 agent를 인식하지 못해 `inject_rejected`로 거부하면 같은 명령을 반복하지 않고 거부 원문과 함께 상위에 보고한다.
+
+### 역할 터미널 열기
+
+`<orca> terminal create --command`를 직접 호출해 역할 터미널을 열지 않는다. Orca는 명령을 새 셸의 프롬프트에 입력만 하고 실행하지 않는 경우가 잦으며, 이 상태에서 보낸 브리프나 작업은 agent가 아니라 셸에 입력된다. `role-terminal`은 다음을 한 번에 수행한다.
+
+1. `role-command`와 같은 명령으로 터미널을 만든다.
+2. 짧게 `tui-idle`을 기다린 뒤 화면을 읽고, 마지막 줄에 명령이 프롬프트에 입력된 채 남아 있으면 Enter를 한 번 보낸다. 결과의 `submission`은 Orca가 스스로 실행했으면 `orca`, Enter를 보냈으면 `enter-sent`다. 시작된 agent에 입력이 들어가지 않도록 Enter는 두 번 보내지 않는다.
+3. agent가 명령 아래에 자기 화면을 그릴 때까지 화면을 다시 읽는다. Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족되므로 준비 여부를 판단하는 근거로 쓰지 않는다. 화면 너비 때문에 명령이 여러 줄로 나뉘어도 같은 명령으로 인식한다.
+4. Agy는 처음 여는 폴더마다 폴더 신뢰 질문("Do you trust the contents of this project?")을 띄우며, 권한 우회 플래그로도 건너뛰지 않는다. 역할의 워크트리는 사용자 저장소에서 이 실행을 위해 만든 것이고 역할은 이미 승인 없이 도구를 실행하므로, "Yes, I trust this folder"가 선택된 경우에만 Enter를 한 번 보내 신뢰한다. 결과의 `trust`는 질문이 없었으면 `not-asked`, 답했으면 `accepted`다. 신뢰한 폴더는 Agy 설정의 `trustedWorkspaces`에 남는다.
+5. 마지막 화면을 `screen`에 담는다. agent가 끝내 화면을 그리지 않았거나, 명령이 여전히 프롬프트에 남아 있거나, 신뢰 질문이 남아 있으면 `ready: false`, `status: "blocked"`로 종료 코드 1을 돌려준다. 이때는 브리프나 작업을 보내지 않고 화면을 증거로 붙여 보고한다.
+
+역할 명령에는 실행기별 권한 우회 플래그가 붙는다. Claude와 Agy에는 `--dangerously-skip-permissions`, Codex에는 `--dangerously-bypass-approvals-and-sandbox`다. 역할 터미널에는 도구 승인 창에 답할 사람이 없고 상위 역할이 대신 승인하는 절차도 없으므로, 플래그 없이 뜬 역할은 첫 도구 호출에서 멈춘다. Orca도 설정의 기본 인자로 같은 플래그를 붙이지만 명령이 agent 이름 하나뿐일 때만 붙이므로, `--model`이 붙은 명령이나 agent ID가 `antigravity`인 `agy`에는 붙지 않는다. 역할 프로필의 `command`는 실행 파일 이름 하나만 허용되므로 플래그가 두 번 붙지 않는다. Codex는 같은 플래그가 두 번 오면 실행을 거부한다.
 
 이 래퍼는 argv를 배열로 전달하고, receipt에서 Dispatch 신원을 확인한 뒤, 시작이 `ready`에 이르지 못하면 3값 liveness와 번역된 실패 신호가 담긴 receipt를 돌려준다. 거부되어 Dispatch가 만들어지지 않은 경우에만 오류를 던지며, 그 오류에도 신호와 원본 receipt가 함께 실린다.
 
@@ -122,17 +132,15 @@ Run을 바인딩한 뒤에는 `--spec`으로 Task와 첫 시도를 한 번에 �
 
 ## coordinator 실행
 
-PM coordinator는 감독 worker가 아니므로 `worker-start`로 띄우지 않는다. `orca worktree create --agent`에는 모델 옵션이 없어 PM 프로필의 모델을 전달할 수 없으므로, 워크트리를 agent 없이 만든 뒤 프로필에서 만든 명령으로 터미널을 연다.
+PM coordinator는 감독 worker가 아니므로 `worker-start`로 띄우지 않는다. `orca worktree create --agent`에는 모델 옵션이 없어 PM 프로필의 모델을 전달할 수 없으므로, 워크트리를 agent 없이 만든 뒤 `role-terminal`로 프로필의 명령을 실행한 터미널을 연다.
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-command --org <project>/.omt/organization.json --role pm
-<orca> terminal create --worktree id:<worktreeId> --command "<role-command의 command>" --json
-<orca> terminal read --terminal <handle> --screen --json
+node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --worktree id:<worktreeId>
 <orca> terminal send --terminal <handle> --text "<브리프 경로와 시작 지시>" --enter --json
 ```
 
-`role-command`는 Claude에는 `claude --model <model>`, Codex에는 `codex --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 화면에 표시된 모델이 `modelRequested`와 같은지 확인한다. `role-command`가 프로필을 거부하거나 화면의 모델이 다르면 브리프를 보내지 않고 사용자에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않는다.
+`role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model>`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 브리프를 보내지 않고 사용자에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 선언 세션이 coordinator를 대신 맡지도 않는다.
 
 ## 무응답 worker 감독
 

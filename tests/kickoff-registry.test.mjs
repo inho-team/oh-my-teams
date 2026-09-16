@@ -261,6 +261,37 @@ test("an entry named after its id by an earlier release stays closable", (t) => 
   assert.deepEqual(ids(fixture), []);
 });
 
+test("the declaring session is a coordinator only when it records why", (t) => {
+  const fixture = project(t);
+  // A session that failed to start the coordinator went on as PM itself. The
+  // registry refuses that unless the claim states why no handoff exists.
+  const own = claimFor(fixture, "wt-self");
+  own.coordinator = {
+    ...own.coordinator,
+    path: fixture.dir,
+    stateDir: path.join(fixture.dir, ".omt"),
+  };
+  assert.throws(
+    () => registerKickoff(fixture.org, own),
+    /declaring session cannot be the coordinator/,
+  );
+  assert.deepEqual(ids(fixture), []);
+
+  const reason =
+    "orca is not installed (command not found); the user approved supervising here";
+  const claimed = registerKickoff(fixture.org, {
+    ...own,
+    selfCoordinator: reason,
+  });
+  assert.equal(claimed.entry.selfCoordinator, reason);
+  // A child worktree needs no such statement.
+  assert.equal(
+    registerKickoff(fixture.org, claimFor(fixture, "wt-child")).entry
+      .selfCoordinator,
+    undefined,
+  );
+});
+
 test("ending a kickoff whose coordinator cannot be reached is a forced decision", (t) => {
   const fixture = project(t);
   registerKickoff(fixture.org, claimFor(fixture, "wt-a"));

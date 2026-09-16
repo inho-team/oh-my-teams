@@ -99,7 +99,7 @@ test("an Agy role starts in a terminal opened with its model, never by agent id"
   // no sanctioned launch at all.
   assert.throws(
     () => resolveRoleLaunch(example(), "senior"),
-    /agy.*role-command.*--terminal/s,
+    /agy.*role-terminal.*--terminal/s,
   );
   const launch = resolveRoleLaunch(example(), "senior", {}, { terminal: "t1" });
   assert.equal(launch.via, "terminal");
@@ -110,7 +110,12 @@ test("an Agy role starts in a terminal opened with its model, never by agent id"
   assert.equal(binding.screenCheck, "required");
 
   const command = roleCommand(example(), "senior");
-  assert.deepEqual(command.argv, ["agy", "--model", "gemini-3.8-flash-high"]);
+  assert.deepEqual(command.argv, [
+    "agy",
+    "--dangerously-skip-permissions",
+    "--model",
+    "gemini-3.8-flash-high",
+  ]);
 
   // Ollama has no interactive agent in Orca; its roles run through `work`.
   const org = example();
@@ -222,13 +227,22 @@ test("the coordinator command carries the model the PM profile pins", () => {
   const org = example();
   org.profiles["claude-current"].model = "opus[1m]";
   const pm = roleCommand(org, "pm");
-  assert.deepEqual(pm.argv, ["claude", "--model", "opus[1m]"]);
+  assert.deepEqual(pm.argv, [
+    "claude",
+    "--dangerously-skip-permissions",
+    "--model",
+    "opus[1m]",
+  ]);
   // Brackets are a glob in POSIX shells, so the command string quotes them.
-  assert.equal(pm.command, "claude --model 'opus[1m]'");
+  assert.equal(
+    pm.command,
+    "claude --dangerously-skip-permissions --model 'opus[1m]'",
+  );
 
   org.roles.pm.profile = "codex-terra";
   assert.deepEqual(roleCommand(org, "pm").argv, [
     "codex",
+    "--dangerously-bypass-approvals-and-sandbox",
     "--model",
     "gpt-5.6-terra",
     "--config",
@@ -238,12 +252,13 @@ test("the coordinator command carries the model the PM profile pins", () => {
   org.roles.pm.profile = "claude-current";
   org.profiles["claude-current"].model = null;
   const unpinned = roleCommand(org, "pm");
-  assert.deepEqual(unpinned.argv, ["claude"]);
+  assert.deepEqual(unpinned.argv, ["claude", "--dangerously-skip-permissions"]);
   assert.equal(unpinned.modelRequested, null);
 
   org.roles.pm.profile = "agy-opus";
   assert.deepEqual(roleCommand(org, "pm").argv, [
     "agy",
+    "--dangerously-skip-permissions",
     "--model",
     "claude-opus-4-6-thinking",
   ]);
@@ -332,7 +347,7 @@ test("worker-start requires the organization and role and refuses before Orca", 
         "--orca",
         path.join(dir, "missing-orca"),
       ]),
-    /role-command/,
+    /role-terminal/,
   );
 });
 
@@ -362,7 +377,7 @@ test("a terminal is opened and handed work only for a role the run holds", async
   // Folding still serves a fresh agent launch, where nothing was prebuilt.
   assert.equal(resolveRoleLaunch(org, "intern", {}, { roles }).role, "junior");
   // Asking for the role that does hold the work is fine, and PM is PM.
-  assert.equal(roleCommand(org, "junior", { roles }).argv[2], "gpt-5.5");
+  assert.equal(roleCommand(org, "junior", { roles }).argv[3], "gpt-5.5");
   assert.equal(roleCommand(org, "pm", { roles }).role, "pm");
   assert.throws(
     () => roleCommand(org, "pl", { roles }),
@@ -396,7 +411,12 @@ test("a terminal is opened and handed work only for a role the run holds", async
   const printed = await capture(() =>
     main(["role-command", "--role", "junior", ...common]),
   );
-  assert.deepEqual(JSON.parse(printed).argv, ["codex", "--model", "gpt-5.5"]);
+  assert.deepEqual(JSON.parse(printed).argv, [
+    "codex",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--model",
+    "gpt-5.5",
+  ]);
   await assert.rejects(
     () => main(["role-command", "--role", "intern", ...common]),
     /not in this run's roles/,

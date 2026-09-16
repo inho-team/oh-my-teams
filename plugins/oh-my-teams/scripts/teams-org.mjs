@@ -19,6 +19,7 @@ import {
   roleSpec,
 } from "./role-launch.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
+import { openRoleTerminal } from "./role-terminal.mjs";
 import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
@@ -89,6 +90,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                (with --workflow-id, the workflow's organization snapshot is used)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
   role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
+  role-terminal --org FILE --role ROLE --worktree SELECTOR [--title TEXT]
+                [--workflow-id ID --state DIR] [--orca EXECUTABLE]
   host-defaults [--project DIR] [--codex-home DIR]
   supervision-next --org FILE --observation FILE
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role intern]
@@ -153,6 +156,15 @@ export const ALLOWED_OPTIONS = {
   "runtime-discover": ["orca"],
   "role-spec": ["org", "role", "spec", "workflow-id", "state"],
   "role-command": ["org", "role", "workflow-id", "state"],
+  "role-terminal": [
+    "org",
+    "role",
+    "worktree",
+    "title",
+    "workflow-id",
+    "state",
+    "orca",
+  ],
   "host-defaults": ["project", "codex-home"],
   "supervision-next": ["org", "observation"],
   "worker-start": [
@@ -229,6 +241,7 @@ export const REQUIRED_OPTIONS = {
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
   "role-command": ["org", "role"],
+  "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
   "supervision-next": ["org", "observation"],
   work: ["org", "task", "repo", "state"],
@@ -576,6 +589,14 @@ async function executeCommand(args) {
       return (({ org, run }) => roleCommand(org, args.role, run))(
         launchContext(args),
       );
+    case "role-terminal":
+      return (({ org, run }) =>
+        openRoleTerminal({
+          worktree: args.worktree,
+          command: roleCommand(org, args.role, run),
+          title: args.title,
+          executable: args.orca,
+        }))(launchContext(args));
     case "host-defaults":
       return resolveHostDefaults({
         project: args.project && path.resolve(args.project),

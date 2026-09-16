@@ -35,6 +35,21 @@ export const ORCA_LAUNCH = Object.freeze({
 });
 
 /**
+ * Flag each provider's CLI takes to run tools without stopping for approval.
+ *
+ * A role terminal has nobody watching it: no supervisor can answer a tool
+ * approval prompt, so a role opened without this flag stops at its first
+ * command. Orca adds the same flags from its own agent defaults, but only to a
+ * command that is the bare agent name, so a command carrying `--model` (and
+ * every `agy` command, whose agent id is `antigravity`) arrives without them.
+ */
+export const PERMISSION_BYPASS = Object.freeze({
+  claude: "--dangerously-skip-permissions",
+  codex: "--dangerously-bypass-approvals-and-sandbox",
+  agy: "--dangerously-skip-permissions",
+});
+
+/**
  * Roles each role may start as supervised workers, before folding.
  *
  * Only PM and PL create Dispatches. Senior hands its implementation scope back
@@ -172,7 +187,7 @@ export function resolveRoleLaunch(
     assert(
       via === "agent",
       `Role ${role} uses agy (profile ${profileId}), which Orca cannot start with a model; ` +
-        "open it with role-command and orca terminal create, confirm the model on screen, then pass --terminal",
+        "open it with role-terminal, confirm the model on screen, then pass --terminal",
     );
     contradiction(role, "agent", explicit.agent, agent);
     contradiction(role, "model", explicit.model, profile.model);
@@ -245,8 +260,10 @@ function shellToken(token) {
  * Builds the interactive CLI command that opens a role with its saved model.
  *
  * `orca worktree create --agent` has no model option, so the PM coordinator is
- * opened with this command through `orca terminal create --command`. An Agy
- * role is opened the same way before `worker-start --terminal` hands it a task.
+ * opened with this command through `role-terminal`. An Agy role is opened the
+ * same way before `worker-start --terminal` hands it a task. The command runs
+ * tools without approval prompts, since no one can answer them in a role
+ * terminal.
  *
  * The role must be one the run holds. A terminal opened for a role the run
  * folds elsewhere would run that role's model while `worker-start` hands it
@@ -271,6 +288,10 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
     `Role ${role} profile ${profileId} must name a bare executable name on PATH, not ${profile.command[0]}`,
   );
   const argv = [...profile.command];
+  // Only a bare command reaches here, so the flag is never given twice, which
+  // Codex would refuse.
+  const bypass = PERMISSION_BYPASS[profile.provider];
+  if (bypass) argv.push(bypass);
   if (profile.model) argv.push("--model", profile.model);
   if (profile.effort) {
     // Codex takes effort only as a config override; Agy and Claude have a flag.
@@ -286,6 +307,7 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
     provider: profile.provider,
     argv,
     command: argv.map(shellToken).join(" "),
+    permissionBypass: bypass ?? null,
     modelRequested: profile.model,
     effortRequested: profile.effort ?? null,
   };

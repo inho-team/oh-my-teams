@@ -62,7 +62,7 @@ node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree
 1. `kickoff-show`로 등록된 kickoff를 확인한다. 같은 목표가 이미 진행 중이면 새로 시작하지 않고 기록된 coordinator에서 재개하도록 안내한다. 다른 목표라면 함께 진행해도 되며, 이때 병렬 kickoff의 비용을 알린다.
 2. 사용자에게 확인해야 하는 목표, 수용 기준, 비목표, 필수 검사와 전달 범위를 [`user-choice.md`](user-choice.md)의 방식으로 한 번에 확정한다.
 3. 확정한 내용을 브리프 파일로 쓴다. 부모 대화 전문을 넘기지 않고 작업 조건, 대상 파일, 근거 위치와 조직 파일 경로만 담는다.
-4. Orca 자식 워크트리를 만들고 coordinator 세션을 시작한 뒤 브리프 경로를 전달한다. 실제로 반환된 워크트리 ID를 그대로 보관한다. coordinator는 PM 프로필의 모델로 띄워야 하므로 `worktree create --agent`를 쓰지 않고 [`orca-runtime.md`](orca-runtime.md)의 `coordinator 실행` 절을 따른다. 그 절차가 모델을 전달하지 못하면 브리프를 보내지 않고 멈춘 뒤 보고한다.
+4. Orca 자식 워크트리를 만들고 coordinator 세션을 시작한 뒤 브리프 경로를 전달한다. 실제로 반환된 워크트리 ID를 그대로 보관한다. coordinator는 PM 프로필의 모델로 띄워야 하므로 `worktree create --agent`를 쓰지 않고 [`orca-runtime.md`](orca-runtime.md)의 `coordinator 실행` 절에 따라 `role-terminal`로 연다. 그 절차가 모델을 전달하지 못하거나 터미널이 준비되지 않으면 브리프를 보내지 않고 멈춘 뒤 보고한다. A가 PM을 대신 맡지 않는다.
 5. `kickoff-claim`으로 등록하고, 어느 워크트리가 무엇을 맡았는지 사용자에게 알린다. A는 여기서 감독을 시작하지 않는다.
 
 등록은 워크트리를 만든 뒤에 요청한다. 실제로 반환된 ID를 적어야 하므로 순서를 바꿀 수 없고, 등록이 거부되면 방금 만든 워크트리를 회수한 뒤 보고한다.
@@ -73,7 +73,11 @@ coordinator 세션(B)은 시작하자마자 다음을 수행한다.
 2. 같은 터미널에서 `orchestration run-create`로 Run을 만들어 바인딩한다.
 3. `kickoff-bind`로 등록부에 그 Run을 적는다. 이 호출이 거부되면 자기 워크트리 ID로 등록된 kickoff가 없다는 뜻이므로, Run을 그대로 두고 에스컬레이션한다.
 
-호스트가 자식 워크트리나 새 세션 생성을 지원하지 않으면 인계하지 않는다. 이때는 A가 그대로 coordinator가 되어 Goal과 Run을 소유하고, 등록 항목의 `coordinator`에 A를 적는다. 인계한 것처럼 보고하지 않으며, 이 경우 종료 절차에 회수할 자식 워크트리가 없다는 점을 함께 알린다. A는 Goal을 하나만 소유할 수 있으므로 이 환경에서는 한 세션이 kickoff를 하나씩만 감독한다.
+### 인계할 수 없는 호스트
+
+A가 coordinator를 겸하는 것은 호스트에 인계 수단 자체가 없을 때뿐이다. Orca 실행 파일이 없거나, 설치된 Orca가 `worktree create` 또는 `terminal create` 명령을 제공하지 않는 경우가 여기에 해당하며, 그 명령의 실제 오류를 증거로 남긴다. coordinator 터미널이 뜨지 않았거나, `role-terminal`이 `ready: false`를 돌려주었거나, 화면의 모델이 달랐던 것은 인계 수단이 없는 것이 아니라 인계에 실패한 것이다. 이때에는 A가 PM을 대신 맡지 않고 멈춘 뒤 보고한다.
+
+조건을 충족하더라도 사용자에게 A가 coordinator를 겸한다는 사실과 그 증거를 알리고 승인을 받는다. 승인을 받으면 A가 그대로 coordinator가 되어 Goal과 Run을 소유하고, 등록 항목의 `coordinator`에 A를 적는다. 런타임은 coordinator 경로가 원본 프로젝트와 같은 등록 요청을 `selfCoordinator`가 없으면 거부하므로, 요청 파일의 `selfCoordinator`에 인계할 수 없는 이유와 오류 증거, 사용자 승인을 한 문장으로 적는다. 인계한 것처럼 보고하지 않으며, 이 경우 종료 절차에 회수할 자식 워크트리가 없다는 점을 함께 알린다. A는 Goal을 하나만 소유할 수 있으므로 이 환경에서는 한 세션이 kickoff를 하나씩만 감독한다.
 
 ## 종료
 
