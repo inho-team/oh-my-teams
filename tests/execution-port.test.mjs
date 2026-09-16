@@ -14,6 +14,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import {
   startWorker as startLocalWorker,
+  translateLocalCode,
   translateLocalFailure,
 } from "../plugins/oh-my-teams/scripts/local-adapter.mjs";
 import { classifyFailure } from "../plugins/oh-my-teams/scripts/failures.mjs";
@@ -444,6 +445,39 @@ test("a record that names no runtime routes exactly as it did before", () => {
   };
   assert.equal(withRuntimeSignal(record), record);
   assert.equal(classifyFailure(record).category, "implementation-error");
+});
+
+test("every provider failure class is translated or deliberately left alone", () => {
+  // The provider registry does not export its failure classes, so the classes
+  // are read from the adapters that return them. A provider added later brings
+  // its own class with it, and this is what notices that the local translation
+  // table did not grow with it.
+  const directory = new URL(
+    "../plugins/oh-my-teams/scripts/providers/",
+    import.meta.url,
+  );
+  const classes = new Set();
+  for (const file of fs.readdirSync(directory)) {
+    const source = fs.readFileSync(new URL(file, directory), "utf8");
+    for (const [, value] of source.matchAll(/return "([a-z][a-z-]+)";/g)) {
+      classes.add(value);
+    }
+  }
+  assert.ok(classes.size >= 6, "no provider failure classes were found");
+
+  // A provider that rejected the request said why in its own words; only the
+  // recorded evidence can place that, so it stays unrouted on purpose.
+  const deliberatelyUnmapped = new Set(["model-error"]);
+  for (const failureClass of classes) {
+    const routed = classifyFailure(translateLocalCode(failureClass, "detail"));
+    const unmapped = routed.category === "unknown";
+    assert.equal(
+      unmapped,
+      deliberatelyUnmapped.has(failureClass),
+      `${failureClass} routes to ${routed.category}; add it to the local ` +
+        `translation table or to this test's deliberate exceptions`,
+    );
+  }
 });
 
 test("a local model mismatch routes to the profile owner, not the workspace", () => {

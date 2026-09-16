@@ -72,7 +72,16 @@ const LOCAL_FAILURE_HINTS = Object.freeze({
   "model-mismatch": { kind: "model-binding" },
   "pool-exhausted": { failureClass: "pool-exhausted" },
   "quota-unknown": { failureClass: "quota-unknown" },
-  "rate-limit": { failureClass: "rate-limit" },
+  // Failure routing reads only two capacity classes, and a rate limit is the
+  // ambiguous one: capacity is gone now, without proof the shared pool is what
+  // ran out. It routes as that while `code` keeps the provider's own word.
+  "rate-limit": { failureClass: "quota-unknown" },
+  // A truncated prompt means the model answered from part of the contract, so
+  // the work does not fit the window it was given. Splitting it is the repair,
+  // and that is the same route an oversized scope already takes.
+  "context-truncated": { kind: "scope" },
+  // Nothing was asked, because the provider could not be reached at all.
+  "provider-unavailable": { kind: "environment" },
 });
 
 /**

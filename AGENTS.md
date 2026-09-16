@@ -16,8 +16,21 @@
 
 활성 `.mjs` 파일에는 모듈 JSDoc을 작성하고, 공개 export에는 인접 JSDoc과 `@param`·`@returns`를 붙입니다. 실행문은 180자를 넘기지 않습니다. 포맷은 Prettier가 결정하므로 직접 맞추려고 하지 말고 `npm run format`을 실행합니다.
 
-작업을 마치면 `npm run lint`와 `npm test`를 실행해 통과를 확인한 뒤에 커밋합니다. 포맷 검사는 devDependency로 설치한 Prettier를 사용하므로, 새로 클론한 작업 트리에서는 `npm ci`를 먼저 실행합니다. 두 명령은 GitHub Actions의 `CI` 워크플로에서도 실행되기 때문에, 병합하기 전에 그 결과를 확인합니다.
+작업을 마치면 `npm run sync`로 공통 정보를 맞춘 뒤 `npm run lint`와 `npm test`를 실행해 통과를 확인하고 커밋합니다. 포맷 검사는 devDependency로 설치한 Prettier를 사용하므로, 새로 클론한 작업 트리에서는 `npm ci`를 먼저 실행합니다. 두 명령은 GitHub Actions의 `CI` 워크플로에서도 실행되기 때문에, 병합하기 전에 그 결과를 확인합니다.
 
 검사 기준의 상세한 내용은 [코드 품질·문서화 기준](docs/CODE_QUALITY.md)에 정리되어 있습니다.
 
-버전을 올릴 때에는 `package.json`, `.claude-plugin/marketplace.json`, Claude와 Codex의 `plugin.json`을 함께 갱신합니다. Codex manifest만 `+codex.<타임스탬프>` 형태의 빌드 메타데이터를 덧붙이며, 그 앞의 기본 버전은 나머지 세 곳과 일치해야 합니다. `tests/repository-metadata.test.mjs`가 이 일치를 검사합니다. 버전을 바꾼 뒤에는 `npm install`을 실행해서 `package-lock.json`에 기록된 버전까지 함께 동기화합니다.
+# 여러 파일이 되풀이하는 공통 정보
+
+버전과 감사 수치처럼 여러 파일이 같은 값을 적어야 하는 정보는 `scripts/metadata.mjs`가 한 곳에서 관리합니다. **이 값들을 파일마다 직접 고치지 말고 정본만 바꾼 뒤 `npm run sync`를 실행합니다.**
+
+| 정보 | 정본 | 따라가는 곳 |
+|---|---|---|
+| 버전 | `package.json`의 `version` | `.claude-plugin/marketplace.json`, Claude·Codex의 `plugin.json` |
+| 활성 모듈·공개 export·태그 수 | `npm run quality`의 감사 결과 | `docs/PLAN_STATUS.md`, `docs/SAFETY_AUDIT.md`, `docs/CODE_QUALITY.md` |
+| 테스트 개수 | `tests/*.test.mjs`의 최상위 `test(` 선언 | `docs/PLAN_STATUS.md`, `docs/SAFETY_AUDIT.md` |
+| eval 시나리오 수 | `evals/organization/scenarios.json` | `docs/PLAN_STATUS.md`, `docs/SAFETY_AUDIT.md` |
+
+`npm run sync:check`는 고치지 않고 어긋난 곳만 보고하며, `tests/repository-metadata.test.mjs`가 같은 검사를 실행하므로 동기화를 잊으면 테스트가 실패합니다. Codex manifest만 `+codex.<타임스탬프>` 형태의 빌드 메타데이터를 덧붙이는데, 기본 버전이 바뀔 때에만 타임스탬프를 새로 만듭니다. 버전을 바꾼 뒤에는 `npm install`을 실행해서 `package-lock.json`에 기록된 버전까지 함께 동기화합니다.
+
+값을 되풀이하는 문장을 새로 쓰거나 기존 문장의 표현을 바꿀 때에는 `metadataTargets`의 해당 정규식도 함께 고쳐야 합니다. 문장을 찾지 못하면 `sync`가 그 값을 지어내지 않고 `missing`으로 보고합니다.
