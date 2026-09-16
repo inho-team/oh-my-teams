@@ -12,12 +12,44 @@ import {
 
 /** Reasons a registered kickoff may be ended, in the order they end one. */
 export const RELEASE_REASONS = ["completed", "disbanded", "taken-over"];
+
+/**
+ * How a kickoff's result reaches the project that owns it.
+ *
+ * `local-merge` merges into a branch of the project's own checkout with
+ * `deliver`, `pull-request` delivers through a PR or MR against that branch,
+ * and `none` leaves the result in the kickoff's worktrees. The brief states the
+ * mode the user confirmed, and the claim records it as the authorization.
+ */
+export const DELIVERY_MODES = ["local-merge", "pull-request", "none"];
+
 // Entries written before ids were hashed are named after the id itself.
 const LEGACY_ENTRY_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const LEGACY_LEASE = "active-kickoff.json";
 
 function text(value) {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+/**
+ * Names the project checkout that owns an organization's kickoffs.
+ *
+ * @param {string} orgFile - Organization JSON path, `<project>/.omt/organization.json`.
+ * @returns {string} Absolute project directory.
+ */
+export function ownerProject(orgFile) {
+  return path.dirname(path.dirname(path.resolve(orgFile)));
+}
+
+function validateDelivery(delivery) {
+  assert(
+    delivery && DELIVERY_MODES.includes(delivery.mode),
+    `Kickoff delivery.mode must be one of: ${DELIVERY_MODES.join(", ")}`,
+  );
+  assert(
+    delivery.mode === "none" || text(delivery.branch),
+    `Kickoff delivery.branch required for ${delivery.mode}`,
+  );
 }
 
 /**
@@ -101,6 +133,13 @@ export function validateEntry(entry) {
   assert(
     entry.selfCoordinator === undefined || text(entry.selfCoordinator),
     "Kickoff selfCoordinator must state why no handoff was possible",
+  );
+  // Entries registered before delivery was recorded carry neither field.
+  if (entry.delivery !== undefined) validateDelivery(entry.delivery);
+  assert(
+    entry.delivered === undefined ||
+      (text(entry.delivered?.head) && text(entry.delivered?.mergeCommit)),
+    "Kickoff delivered must name the head and the merge commit",
   );
   return entry;
 }
@@ -193,13 +232,16 @@ export function registerKickoff(orgFile, claim) {
     // at the project itself is the declaring session supervising its own
     // kickoff, which is allowed only where no handoff exists and the user
     // agreed, so the claim has to say so.
-    const project = path.dirname(path.dirname(path.resolve(orgFile)));
+    const project = ownerProject(orgFile);
     const coordinatorPath = path.resolve(text(claim.coordinator.path) ?? "");
     assert(
       coordinatorPath !== project || text(claim.selfCoordinator),
       "The declaring session cannot be the coordinator; hand the kickoff to a child worktree, " +
         "or record selfCoordinator with why no handoff exists and the user's approval",
     );
+    // The mode the user confirmed in the brief is what authorizes delivering
+    // into the project later, so a claim without one is not registered.
+    validateDelivery(claim.delivery);
     assert(
       claim.organizationRevision === revision,
       `Organization is at revision ${revision}; read it again before registering`,
@@ -215,6 +257,12 @@ export function registerKickoff(orgFile, claim) {
       runId: claim.runId ?? null,
       organizationRevision: revision,
       brief,
+      delivery: {
+        mode: claim.delivery.mode,
+        ...(claim.delivery.mode === "none"
+          ? {}
+          : { branch: claim.delivery.branch }),
+      },
       ...(claim.selfCoordinator === undefined
         ? {}
         : { selfCoordinator: claim.selfCoordinator }),
@@ -252,6 +300,37 @@ export function bindKickoffRun(orgFile, { worktreeId, runId }) {
 }
 
 /**
+ * Records that a kickoff's result was merged into the owning project.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {{worktreeId: string, head: string, mergeCommit: string}} delivery -
+ *   Coordinator, the delivered head, and the merge commit on the owner branch.
+ * @returns {{recorded: boolean, entry: object}} Updated entry.
+ * @throws {Error} When the worktree holds no kickoff or another head was delivered.
+ */
+export function recordDelivery(orgFile, { worktreeId, head, mergeCommit }) {
+  return withRegistry(orgFile, () => {
+    const file = locateEntry(orgFile, worktreeId);
+    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
+    const entry = validateEntry(readJSON(file));
+    assert(
+      !entry.delivered || entry.delivered.head === head,
+      `Kickoff already delivered ${entry.delivered?.head}`,
+    );
+    const updated = validateEntry({
+      ...entry,
+      delivered: entry.delivered ?? {
+        head,
+        mergeCommit,
+        at: new Date().toISOString(),
+      },
+    });
+    writeJSON(file, updated);
+    return { recorded: true, entry: updated };
+  });
+}
+
+/**
  * Ends a registered kickoff and archives its entry.
  *
  * Other kickoffs are untouched. Ending one whose coordinator cannot be reached
@@ -279,6 +358,16 @@ export function releaseKickoff(orgFile, { worktreeId, reason, force = false }) {
     assert(
       reason !== "taken-over" || force,
       "A takeover needs explicit authorization; confirm it with the user first",
+    );
+    // A kickoff whose brief asked for a merge into the project is not complete
+    // until that merge is recorded, or `status` would show the goal delivered.
+    assert(
+      reason !== "completed" ||
+        entry.delivery?.mode !== "local-merge" ||
+        entry.delivered ||
+        force,
+      `Kickoff was to merge into ${entry.delivery?.branch}, which deliver has not recorded; ` +
+        "run deliver first, or pass --force with the user's decision",
     );
     const archived = path.join(
       path.dirname(registryDirectory(orgFile)),

@@ -63,9 +63,15 @@ export const DISPATCH_AUTHORITY = Object.freeze({
   intern: [],
 });
 
-// The worktree a selector names, as the path after `::` in an Orca worktree
-// ID, or null when the selector cannot be compared with a recorded ID.
-function selectedWorktreePath(selector, callerDir) {
+/**
+ * Resolves the directory an Orca worktree selector names.
+ *
+ * @param {string} [selector] - `current`, `active`, `id:<repo>::<path>` or `path:<dir>`.
+ * @param {string} callerDir - Directory `current` and `active` resolve to.
+ * @returns {string | null} Absolute directory, or null for `new-child`, `name:`
+ *   and other selectors that name no directory yet.
+ */
+export function selectedWorktreePath(selector, callerDir) {
   const value = String(selector ?? "current").trim();
   if (value === "current" || value === "active") return path.resolve(callerDir);
   if (value.startsWith("id:")) return worktreePath(value.slice(3));

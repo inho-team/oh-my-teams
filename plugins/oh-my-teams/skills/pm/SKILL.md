@@ -19,7 +19,7 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 - 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-terminal`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 터미널이 idle 신호를 보고하지 않아 `worker-start`가 호출 전에 거부하면 반복하거나 `dispatch --inject`로 우회하지 않고 멈춰 보고한다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
-- 커밋·PR·머지는 사용자가 허가한 범위에서만 PL 스킬의 머지 절차로 진행한다.
+- kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 선언 세션이 `close`에서 브리프의 전달 방식으로 수행한다.
 
 ### 책임
 
@@ -94,7 +94,7 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 
 실패는 `failure-classify` 결과의 next owner/action으로 보낸다. 분류는 report의 `modelProof`, `failureClass`, `grounding.grounded`, 종료 코드로 결정되므로 이 신호를 failure 파일에 그대로 옮긴다. 실행 기반이 시작을 거부한 경우에는 그 코드를 해석하지 말고 `runtime`과 `code`에 원문 그대로 적는다(`"runtime": "orca", "code": "agent_unconfigured"`). 번역은 `failure-classify`가 수행한다. 신호가 없으면 `unknown`으로 떨어져 재시도까지 막힌다. 재시도 가능한 실패도 `workflow-retry`에 해결 근거를 기록하고 기존 attempt·전체 예산을 유지한다. `resolvedBy`는 분류가 지정한 `nextOwner`와 같아야 하며, `process-unknown`은 실제 종료를 확인한 뒤 `processExitConfirmed`를 함께 넣어야 재시도할 수 있다. 반복 가능한 교훈은 `lesson-record` 후보로만 저장하며 검증 없이 역할 skill을 바꾸지 않는다. 외부 이슈·알림은 명시적으로 활성화된 incident config 안에서만 받고, 중복·제안 한도·관찰 기간·무진전 중단을 적용한다.
 
-사용자가 요청한 범위의 커밋·PR·머지를 처리하되 단순 개발 요청을 운영 배포나 외부 메시지 발송 허가로 확대하지 않는다. 머지할 때는 검증한 HEAD와 실제 PR HEAD, 최신 base를 대조하고 필수 검사를 통과시킨다. 승인 범위와 구체적인 머지 절차는 PL 스킬을 따른다.
+kickoff 안의 커밋과 워크트리 사이 병합은 PM이 처리하되 단순 개발 요청을 운영 배포나 외부 메시지 발송 허가로 확대하지 않는다. 완료 시점에는 주인 체크아웃에 직접 합치지 않고, 게이트를 통과한 통합 워크트리의 경로와 HEAD를 선언 세션에 넘긴다. 주인 브랜치와 충돌해 `deliver`가 되돌아오면 주인 브랜치를 통합 워크트리에 합쳐 해결하고 게이트부터 다시 통과시킨다. 구체적인 머지 절차는 PL 스킬을 따른다.
 
 감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 
