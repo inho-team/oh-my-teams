@@ -565,3 +565,163 @@ test("effort is set in adjust, which carries the ranges form no longer does", ()
   // than what the user chose and the user is told where to change it.
   assert.match(contract, /묻지 않고 정한다고 명시한/);
 });
+
+const readReference = (name) =>
+  fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references", name),
+    "utf8",
+  );
+
+test("roles are launched from their profile, never by hand-typed agent flags", () => {
+  // A PL bound to a Codex model ran on the account default because the
+  // coordinator typed `orca orchestration worker-start --agent codex` without
+  // --model, and the PM coordinator was opened by `worktree create --agent`,
+  // which has no model option at all.
+  const runtime = readReference("orca-runtime.md");
+  for (const text of [readSkill("pm"), readSkill("pl"), runtime]) {
+    assert.match(text, /worker-start --org <\S+ --role/);
+    // Every launch example names the workflow, so roles fold to the run's
+    // depth and the organization comes from the snapshot the workflow froze.
+    for (const [line] of text.matchAll(
+      /node <runtime> (?:worker-start|role-spec) [^\n`]*/g,
+    )) {
+      assert.match(line, /--workflow-id <\S+> --state <\S+>/, line);
+    }
+  }
+  for (const entry of fs.readdirSync(skills)) {
+    const file = path.join(skills, entry, "SKILL.md");
+    if (!fs.existsSync(file)) continue;
+    assert.doesNotMatch(
+      fs.readFileSync(file, "utf8"),
+      /orchestration worker-start --(task|spec)/,
+      `${entry} shows a raw worker-start launch`,
+    );
+  }
+  assert.doesNotMatch(
+    runtime,
+    /npm run org -- worker-start --repo <경로> --task <id> --agent/,
+  );
+  for (const verdict of ["matched", "mismatched", "unproven", "unrequested"]) {
+    assert.ok(runtime.includes(`\`${verdict}\``), `modelProof ${verdict}`);
+  }
+  assert.match(runtime, /## coordinator 실행/);
+  assert.match(runtime, /node <runtime> role-command --org/);
+  assert.match(runtime, /terminal read --terminal <handle> --screen/);
+  assert.match(runtime, /`antigravity`/);
+  // Agy roles had no sanctioned launch: the wrapper refused them and the
+  // charters forbade the raw command.
+  assert.match(runtime, /### Agy 역할 시작/);
+  assert.match(runtime, /--terminal <handle> --worktree id:<worktreeId>/);
+  // The terminal and the hand-over must read the same run, or an Agy terminal
+  // built for one role is accepted as the role the run folded it onto.
+  assert.match(
+    runtime,
+    /node <runtime> role-command --org <organization\.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state>/,
+  );
+  assert.doesNotMatch(readSkill("pl"), /custom argv/);
+  assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
+  assert.match(runtime, /대괄호/);
+  for (const role of ["pm", "pl"]) {
+    assert.match(readSkill(role), /Agy 역할은 `role-command`로 연 터미널/);
+  }
+  // Orca refuses nested workers by default, so PL cannot be the dispatcher.
+  assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
+  assert.match(readSkill("pl"), /기본값이 1/);
+  assert.match(readSkill("senior"), /- Junior가 이번 실행에 있으면 기능 구현/);
+  assert.match(readSkill("kickoff"), /coordinator 실행/);
+  assert.match(
+    readReference("kickoff-registry.md"),
+    /worktree create --agent`를 쓰지 않고/,
+  );
+});
+
+test("form says what a default model runs today and reads Codex models at ask time", () => {
+  const form = readSkill("form");
+  // "Codex 기본" was chosen as if it named one model, and the only Codex IDs
+  // form knew were a catalog that had already changed.
+  assert.match(form, /node <runtime> host-defaults/);
+  assert.match(form, /codex debug models/);
+  assert.match(form, /`codex:<id>`/);
+  assert.match(form, /지금은 gpt-6-astra가 실행됩니다/);
+  assert.match(form, /현재 해석값/);
+  for (const stale of ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"]) {
+    assert.ok(!form.includes(stale), `form hardcodes ${stale}`);
+  }
+  assert.match(form, /질문 수와 선택지 수는 늘지 않고/);
+  assert.match(form, /서열을 매기지 않는다/);
+});
+
+test("planning roles hand the deliverable down instead of writing it", () => {
+  const pm = readSkill("pm");
+  const pl = readSkill("pl");
+  const senior = readSkill("senior");
+  // PM told PL to "write research reports", and PL wrote them itself: the old
+  // wording let PL take exploration and implementation as its own work.
+  assert.doesNotMatch(
+    pm,
+    /상세 저장소 분석과 대안 조사는 PL에게 맡길 수 있지만/,
+  );
+  assert.doesNotMatch(pm, /PL의 감독 실행 경로를 쓴다/);
+  assert.match(pm, /PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고/);
+  assert.match(pm, /나눌 필요가 없는 일은 PL을 거치지 않고/);
+  assert.match(pl, /최종 산출물을 직접 작성하거나 커밋하지 않는다/);
+  assert.match(pl, /nested_worker_depth_exceeded/);
+  assert.match(pl, /작업을 스스로 수행하지 않는다/);
+  assert.match(pl, /<orca> orchestration run-create/);
+  assert.match(senior, /기능 구현이나 파일 편집을 직접 하지 않는다/);
+});
+
+test("every role charter names only commands that exist", () => {
+  const orcaVerbs = new Set([
+    "run-create",
+    "task-create",
+    "worker-list",
+    "worker-show",
+    "worker-read",
+    "worker-stop",
+    "worker-abandon",
+    "worker-release",
+  ]);
+  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+    const text = readSkill(role);
+    const charter = text.split("## 권한·책임·한계")[1]?.split(/\n## /)[0];
+    assert.ok(charter, `${role} lacks the charter section`);
+    for (const part of ["### 권한", "### 책임", "### 한계"]) {
+      assert.ok(charter.includes(part), `${role} charter lacks ${part}`);
+    }
+    // The fold rule is what lets a reduced team act without a missing role.
+    assert.match(charter, /resolveRole/, `${role} charter omits folding`);
+    const authority = charter.split("### 책임")[0];
+    for (const [, token] of authority.matchAll(/`([a-z]+(?:-[a-z]+)+)`/g)) {
+      assert.ok(
+        Object.hasOwn(REQUIRED_OPTIONS, token) || orcaVerbs.has(token),
+        `${role} charter names an unknown command: ${token}`,
+      );
+    }
+  }
+  for (const role of ["senior", "junior", "intern"]) {
+    assert.match(readSkill(role), /`worker-start`를 호출하지 않/);
+  }
+});
+
+test("a silent worker is asked, then escalated, and never shown as progressing", () => {
+  const runtime = readReference("orca-runtime.md");
+  assert.match(runtime, /## 무응답 worker 감독/);
+  assert.match(runtime, /node <runtime> supervision-next --org/);
+  assert.match(
+    runtime,
+    /orchestration send --to dispatch:<id> --type question/,
+  );
+  assert.match(runtime, /worker-read --dispatch <id> --source auto/);
+  assert.match(runtime, /`무응답 N분`/);
+  assert.match(runtime, /재시도나 종료를 결정하지 않는다/);
+  for (const role of ["pm", "pl"]) {
+    assert.match(readSkill(role), /무응답 worker 감독/);
+  }
+  for (const role of ["pl", "senior", "junior", "intern"]) {
+    assert.match(readSkill(role), /진행 요청에는/);
+    assert.match(readSkill(role), /heartbeat/);
+  }
+  assert.match(readSkill("form"), /progressCheckMs: 900000/);
+  assert.match(readSkill("adjust"), /policy\.supervision/);
+});

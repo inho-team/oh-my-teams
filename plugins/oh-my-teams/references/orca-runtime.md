@@ -26,7 +26,7 @@ agy --model claude-opus-4-6-thinking ...
 
 모델 ID는 실행 직전에 `agy models`에서 확인한다. `gpt-oss-120b-medium`처럼 모델 ID 자체에 추론 수준이 포함되거나 Agy가 별도 effort를 지원하지 않는 모델에는 `--effort`를 추가하지 않는다. 모델 선택 오류가 호출 전에 반환되면 사용량 0인 구성 오류로 기록하고, 기본 모델로 조용히 다시 실행하지 않는다.
 
-제한 편집 하네스는 `scripts/providers.mjs`가 프로필의 모델 ID를 인자 배열에 추가한다. 일반 감독 작업에서 Orca의 등록된 agent launcher가 Agy를 지원하면 requested/effective 모델을 대조한다. 지원하지 않으면 현재 orchestration 가이드의 custom argv 경로를 사용하되, 모델을 감지할 수 없거나 대화형 화면의 현재 모델이 요청과 다르면 Dispatch를 시작하지 않는다. 계정·모델을 다른 실행기로 임의 대체하지 않는다.
+제한 편집 하네스는 `scripts/providers.mjs`가 프로필의 모델 ID를 인자 배열에 추가한다. 일반 감독 작업에서 Orca가 Agy를 아는 agent ID는 `agy`가 아니라 `antigravity`이며, `worker-start --model`은 Claude·Codex·Cursor에만 적용된다. 그래서 Agy 역할은 아래 「worker-start 래퍼」의 터미널 경로로 시작한다. 모델을 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. 화면의 모델이 요청과 다르거나 확인할 수 없으면 작업을 넘기지 않는다. 계정·모델을 다른 실행기로 임의 대체하지 않는다.
 
 제한 편집 하네스는 응답이 보고한 모델을 요청 모델과 대조하고, 불일치가 확인되면 결과를 채택하지 않는다(`scripts/providers.mjs`의 `modelBinding`). 보고서의 `modelProof`에는 `matched`, `mismatched`, `unproven`, `unrequested` 중 하나가 남는다. `unproven`은 실행기가 모델 메타데이터를 반환하지 않아 증명하지 못한 상태이며, 일치를 확인했다는 뜻이 아니다.
 
@@ -63,15 +63,95 @@ agy --model claude-opus-4-6-thinking ...
 
 ## worker-start 래퍼
 
-감독 실행을 시작할 때에는 `npm run org -- worker-start --repo <경로> --task <id> --agent <agent>`를 사용한다. 이 래퍼는 argv를 배열로 전달하고, receipt에서 Dispatch 신원을 확인한 뒤, 시작이 `ready`에 이르지 못하면 3값 liveness와 번역된 실패 신호가 담긴 receipt를 돌려준다. 거부되어 Dispatch가 만들어지지 않은 경우에만 오류를 던지며, 그 오류에도 신호와 원본 receipt가 함께 실린다.
+감독 worker는 역할 이름과 조직 파일로만 시작한다. 원시 `orca orchestration worker-start`로 `--agent`와 `--model`을 손으로 적지 않는다. 손으로 적은 명령은 저장된 모델을 빠뜨려도 아무 오류 없이 계정 기본 모델로 실행되고, 보고서는 여전히 역할의 프로필을 적기 때문이다. kickoff 안에서는 항상 그 workflow를 함께 지정한다.
 
-`--model`은 `--effort`보다 먼저 있어야 하고, `--terminal`로 기존 터미널을 재사용할 때에는 `--model`과 `--effort`를 함께 쓸 수 없다. 래퍼가 호출 전에 이를 거부하므로 잘못된 조합이 실행 기반에 도달하지 않는다.
+```text
+node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|intern> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --spec <작업> [--worktree new-child] [--run <runId>]
+```
+
+`--workflow-id`와 `--state`를 주면 래퍼는 조직 파일 대신 그 workflow가 만들어질 때 고정한 조직 스냅샷을 읽고, workflow에 기록된 이번 실행의 역할 목록으로 역할을 접는다. 실행 도중 `adjust`로 바뀐 조직이나 삭제된 역할이 진행 중인 kickoff에 섞이지 않게 하기 위해서다. workflow를 주지 않으면 `--org`의 파일을 읽고 조직이 선언한 역할로 접는다.
+
+그다음 역할 프로필에서 시작 경로와 Orca agent, `--model`, `--effort`를 정한다.
+
+| 실행기 | 시작 경로 |
+|---|---|
+| Claude·Codex | 래퍼가 `--agent claude` 또는 `--agent codex`와 프로필의 `--model`·`--effort`로 새 터미널을 띄운다. |
+| Agy | Orca가 모델을 전달할 수 없으므로 아래 「Agy 역할 시작」의 터미널 경로를 따른다. `--terminal` 없이 호출하면 거부한다. |
+| Ollama | 대화형 Orca agent가 없으므로 감독 worker로 띄우지 않고 `work` 하네스로 실행한다. |
+
+`--agent`, `--model`, `--effort`를 함께 적으면 프로필과 같을 때에만 받아들이고, 다르면 Orca를 호출하기 전에 거부한다. `--terminal`과는 세 값 모두 함께 쓸 수 없다. Orca가 이 조합을 거부하고, 터미널은 처음 열 때의 모델을 유지하기 때문이다. 다음 경우에도 호출 전에 거부한다.
+
+- 역할이 PM이거나 PM으로 접힌다. 거부 문구는 조직에 선언되지 않은 역할(`is not declared`)과 이번 실행의 깊이에서 빠진 역할(`is not in this run's roles`)을 구분한다. PM은 coordinator이며 아래 「coordinator 실행」으로 띄운다.
+- 프로필이 현재 계정이 아니거나, `env` 또는 추가 인자로 계정을 고른다. Orca agent ID는 실행 파일만 가리키므로 계정을 표현하지 못한다. 이런 프로필은 `role-command`도 거부하므로 감독 worker로 띄울 수 없고, 프로필의 명령과 환경변수 참조를 그대로 쓰는 `work` 하네스로 Ollama와 같이 실행한다.
+- 프로필이 모델 없이 강도만 기록한다. Orca는 `--model` 없는 `--effort`를 거부한다.
+
+`--spec` 앞에는 받는 역할의 머리글이 붙는다. 머리글에는 역할, 보고 대상, 이번 실행에 없어 이어받는 역할, 직접 배정할 수 있는 역할, 조직 파일 경로, workflow ID와 coordinator state 경로, 그리고 역할 스킬의 `권한·책임·한계` 절 전문이 들어간다. 중첩 worker로 실행되는 PL은 이 경로로 자기 하위 역할을 시작한다. `task-create`로 만든 Task를 `--task`로 시작할 때에는 래퍼가 머리글을 붙일 수 없으므로, Task 설명을 `node <runtime> role-spec --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state> --spec <작업>`의 출력으로 만든다.
+
+시작 결과의 `binding`에는 `via`, `modelRequested`, `effortRequested`, `modelProof`, `screenCheck`가 남는다. `modelProof`는 다음 넷 중 하나다.
+
+| 값 | 뜻 | 다음 행동 |
+|---|---|---|
+| `matched` | receipt의 `launch.effective`에 기록된 모델과 강도가 요청과 같다. | 화면의 모델을 대조한 뒤 계속한다. |
+| `mismatched` | Orca가 다른 모델이나 강도로 띄웠다고 기록했다. 출력에 `status: "blocked"`가 붙고 종료 코드는 1이다. | 추가 지시를 보내지 않고 결과를 채택하지 않으며, 아래 실패 복구 절차와 함께 상위에 보고한다. |
+| `unproven` | receipt에 `launch.effective`가 없거나, 이미 열린 터미널에 작업을 넘겼다. | 화면에서 모델을 확인하기 전에는 요청 모델로 실행 중이라고 보고하지 않는다. |
+| `unrequested` | 프로필 모델이 `null`이라 모델을 요청하지 않았다. | 보고서에 특정 모델명을 쓰지 않고 계정 기본값이라고 적는다. 현재 해석값이 필요하면 `host-defaults` 결과를 `현재 해석값`으로 구분해 덧붙인다. |
+
+`launch.effective`는 Orca가 적용한 실행 인자의 기록이지 모델이 스스로 보고한 값이 아니다. 그러므로 `screenCheck`가 `required`이면 `matched`여도 시작 직후 `worker-read --dispatch <id> --source terminal`이나 `terminal read --screen`으로 대화형 화면에 표시된 현재 모델을 확인하고, `modelRequested`와 다르면 추가 지시를 보내지 않고 상위에 보고한다.
+
+### Agy 역할 시작
+
+Agy 역할은 모델을 명령줄에 담아 터미널을 먼저 열고, 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다.
+
+```text
+<orca> worktree create --name <name> --parent-worktree active --json
+node <runtime> role-command --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state>
+<orca> terminal create --worktree id:<worktreeId> --command "<role-command의 command>" --json
+<orca> terminal read --terminal <handle> --screen --json
+node <runtime> worker-start --org <organization.json> --role <역할> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <handle> --worktree id:<worktreeId> --spec <작업>
+```
+
+`role-command`와 `worker-start`에는 같은 `--workflow-id`와 `--state`를 넘긴다. 그래야 두 명령이 같은 조직 스냅샷과 이번 실행의 역할을 읽는다. 터미널은 한 역할의 프로필로 미리 만들어지므로, 두 명령 모두 요청한 역할이 이번 실행에 실제로 있을 때에만 받아들인다. 이번 실행에 없어 다른 역할로 접히는 역할을 요청하면 어느 역할로 접히는지 알리며 거부하고, 그때에는 접힌 역할의 터미널을 연다. `role-command`는 `agy --model <model>`을, 프로필에 강도가 있으면 `--effort <effort>`까지 만든다. 화면에 표시된 모델이 프로필의 모델과 같을 때에만 `worker-start --terminal`을 호출한다. Orca는 `agy` 실행 파일을 `antigravity` agent로 인식해 작업을 전달한다. 이 경로의 `modelProof`는 항상 `unproven`이므로 작업을 넘긴 뒤에도 보고서에 모델을 적을 때에는 화면에서 확인한 사실로 적는다. Orca가 터미널의 agent를 인식하지 못해 `inject_rejected`로 거부하면 같은 명령을 반복하지 않고 거부 원문과 함께 상위에 보고한다.
+
+이 래퍼는 argv를 배열로 전달하고, receipt에서 Dispatch 신원을 확인한 뒤, 시작이 `ready`에 이르지 못하면 3값 liveness와 번역된 실패 신호가 담긴 receipt를 돌려준다. 거부되어 Dispatch가 만들어지지 않은 경우에만 오류를 던지며, 그 오류에도 신호와 원본 receipt가 함께 실린다.
 
 **`worker-start`는 해당 Run에 바인딩된 coordinator 터미널에서만 호출할 수 있다.** 바인딩된 Run이 없는 상태에서 호출하면 Task의 존재 여부와 무관하게 `consumer_fenced`로 거부되므로, 먼저 같은 터미널에서 `orchestration run-create`로 Run을 만들어 바인딩한다. 이 코드는 호출한 자리가 잘못되었다는 뜻이므로 재시도로 해소되지 않으며, 번역표에 넣지 않고 증거와 함께 에스컬레이션한다.
 
 Run을 바인딩한 뒤에는 `--spec`으로 Task와 첫 시도를 한 번에 만들 수 있고, 성공한 시작은 `state: "ready"`와 함께 `runId`, `taskId`, `dispatchId`를 돌려준다. receipt의 `launch.requested`와 `launch.effective`에는 요청한 agent·모델·강도와 실제로 적용된 값이 나란히 들어 있다.
 
 `worker-start`는 `ready`에서만 0으로 종료하고, `failed`와 `outcome_unknown`에서는 1로 종료하면서도 `dispatchId`, `failedStage`, `residualResources`를 담은 receipt를 반환한다. 따라서 종료 코드만으로 실패를 단정하지 않고 receipt를 읽는다. receipt 자체가 오지 않은 경우에만 미관측으로 처리하며, 이때에도 같은 명령을 다시 실행하지 않는다.
+
+## coordinator 실행
+
+PM coordinator는 감독 worker가 아니므로 `worker-start`로 띄우지 않는다. `orca worktree create --agent`에는 모델 옵션이 없어 PM 프로필의 모델을 전달할 수 없으므로, 워크트리를 agent 없이 만든 뒤 프로필에서 만든 명령으로 터미널을 연다.
+
+```text
+<orca> worktree create --name <name> --parent-worktree active --json
+node <runtime> role-command --org <project>/.omt/organization.json --role pm
+<orca> terminal create --worktree id:<worktreeId> --command "<role-command의 command>" --json
+<orca> terminal read --terminal <handle> --screen --json
+<orca> terminal send --terminal <handle> --text "<브리프 경로와 시작 지시>" --enter --json
+```
+
+`role-command`는 Claude에는 `claude --model <model>`, Codex에는 `codex --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 화면에 표시된 모델이 `modelRequested`와 같은지 확인한다. `role-command`가 프로필을 거부하거나 화면의 모델이 다르면 브리프를 보내지 않고 사용자에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않는다.
+
+## 무응답 worker 감독
+
+`check --wait`의 제한 시간은 완료나 실패의 근거가 아니지만, 아무것도 하지 않고 다시 기다리는 근거도 아니다. 감독 역할(PM, PL)은 제한 시간을 조직의 `policy.supervision.progressCheckMs`로 두고, 제한 시간이 지날 때마다 `worker_done`을 보내지 않은 worker 각각에 대해 다음을 수행한다. 값이 없는 조직은 기본값 15분(`900000`)과 `unansweredLimit` 2를 쓴다.
+
+1. `worker-list`로 liveness를, `worker-show --dispatch <id>`로 `observation.agentWait`를 조회한다.
+2. 관측 파일에 다음을 적어 `node <runtime> supervision-next --org <organization.json> --observation <observation.json>`을 실행한다. 마지막 heartbeat, 메시지, 출력 변화 가운데 가장 최근 시각은 `lastActivityAt`, 그 뒤로 답을 받지 못한 진행 요청 수는 `unansweredRequests`, 그 뒤로 수행한 확인 횟수는 `inspections`, 이 정체를 이미 상위에 보고했으면 그 시각은 `escalatedAt`이다. 새 활동이 관측되면 세 값을 비운다. 진행 요청과 확인을 합한 횟수가 `unansweredLimit`에 이르면 보고로 넘어가므로, 상태를 확인할 수 없는 worker도 무한히 확인만 반복하지 않는다.
+3. 결과의 `action`대로 행동한다.
+
+| action | 행동 |
+|---|---|
+| `wait` | 다시 `check --wait`로 기다린다. `reason`이 `already-escalated`이면 같은 정체를 다시 보고하지 않고, 사용자 보고에는 `display`를 그대로 적는다. |
+| `ask-progress` | `<orca> orchestration send --to dispatch:<id> --type question --subject "진행 상황 요청" --body "현재 단계, 끝낸 항목과 남은 항목, 장애물을 알려 주세요." --json`으로 묻고, 요청 수를 하나 늘린다. |
+| `inspect` | `worker-show`와 `worker-read --dispatch <id> --source auto --limit <n>`으로 상태와 최근 출력을 확인하고 `inspections`를 하나 늘린다. 확인에서 새 활동을 찾았으면 관측값을 고쳐 다시 판정한다. |
+| `escalate` | `worker-read`의 제한된 출력, liveness, 무응답 시간과 보낸 요청을 증거로 붙여 상위에 보고한다. PL은 `orchestration send --type escalation`으로 PM에게, PM은 사용자에게 보고한다. `failureClassify`가 `true`이면 그 증거로 `failure-classify`를 실행한다. 보고한 시각을 `escalatedAt`으로 기록한다. |
+
+이 판정은 재시도나 종료를 결정하지 않는다. 종료와 재시도는 위 「worker-start 실패 복구」와 `failure-classify` 결과를 따른다. `unverifiable` worker는 살아 있다고 간주하지 않고 확인이나 보고로 보낸다. 사용자에게 상태를 알릴 때 무응답 worker는 `진행 중`이 아니라 결과의 `display`대로 `무응답 N분`으로 적는다.
+
+하위 worker는 진행 요청을 받으면 `orchestration reply --id <msg_id> --body <진행 상황>`으로 현재 단계, 끝낸 항목과 남은 항목, 장애물을 곧바로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다.
 
 ## worker-list와 liveness
 

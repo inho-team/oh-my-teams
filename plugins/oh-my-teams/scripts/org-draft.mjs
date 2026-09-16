@@ -1,12 +1,20 @@
 /** Drafts a first organization from a ladder size and one model per tier. */
-import { DEPTH_ROLES, FULL_DEPTH, assert, validateOrg } from "./core.mjs";
+import {
+  DEPTH_ROLES,
+  FULL_DEPTH,
+  SUPERVISION_DEFAULTS,
+  assert,
+  validateOrg,
+} from "./core.mjs";
 
 /**
  * Operating values a drafted organization starts with.
  *
  * None of them spends more than the models the user chose: one worker per role,
  * one attempt, no fallback onto another profile, a stop on exhaustion, and no
- * assistant calls. `adjust` raises any of them later.
+ * assistant calls. A silent worker is asked for progress and then escalated on
+ * the supervision defaults, which never retry or stop anything by themselves.
+ * `adjust` changes any of them later.
  */
 export const DRAFT_DEFAULTS = Object.freeze({
   concurrency: 1,
@@ -16,6 +24,7 @@ export const DRAFT_DEFAULTS = Object.freeze({
     maxCalls: 3,
     timeoutMs: 300000,
     repeatFailureLimit: 1,
+    supervision: SUPERVISION_DEFAULTS,
   }),
 });
 
@@ -115,6 +124,9 @@ export function draftOrganization({ name, tiers = FULL_DEPTH, models }) {
     pools,
     profiles,
     roles: bindings,
-    policy: { ...DRAFT_DEFAULTS.policy },
+    policy: {
+      ...DRAFT_DEFAULTS.policy,
+      supervision: { ...DRAFT_DEFAULTS.policy.supervision },
+    },
   });
 }
