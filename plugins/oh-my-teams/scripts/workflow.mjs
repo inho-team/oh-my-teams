@@ -2,7 +2,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { assert, hash, readJSON, validateOrg, writeJSON } from "./core.mjs";
+import {
+  ROLES,
+  assert,
+  definedRoles,
+  foldRole,
+  hash,
+  readJSON,
+  resolveRole,
+  validateOrg,
+  writeJSON,
+} from "./core.mjs";
 import { taskHash, validateTask } from "./contracts.mjs";
 import { git } from "./evidence.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
@@ -17,7 +27,6 @@ import {
   workflowStateFile,
 } from "./workflow-store.mjs";
 
-const ROLES = ["pm", "pl", "senior", "junior", "intern"];
 const TERMINAL_OBSERVATIONS = ["settled", "failed"];
 const occupiesSlot = (item) => ["reserved", "running"].includes(item.state);
 // A gate can only advance a task that has already reported an outcome.
@@ -133,11 +142,14 @@ async function freezeTasks(request, baseDir, repo) {
   return tasks;
 }
 
-function createTaskState(task, role) {
+function createTaskState(task, requestedRole, role) {
   return {
     revision: task.revision,
     taskHash: taskHash(task),
     role,
+    // Kept only when the organization does not declare the requested role, so a
+    // report can say which role the work was written for and which one ran it.
+    requestedRole: requestedRole === role ? undefined : requestedRole,
     state: "pending",
     attemptId: null,
     acceptedResult: null,
@@ -160,6 +172,9 @@ function createInitialState(request, org, tasks) {
     goal: request.goal,
     organizationRevision: org.revision,
     organizationHash: hash(org),
+    // Recorded so routing decisions made later fold onto a role this workflow
+    // was actually created with, even if the organization file changes.
+    roles: definedRoles(org),
     budget: {
       ...request.budget,
       attemptsUsed: 0,
@@ -169,7 +184,11 @@ function createInitialState(request, org, tasks) {
     tasks: Object.fromEntries(
       tasks.map((task) => [
         task.id,
-        createTaskState(task, roleByTask[task.id]),
+        createTaskState(
+          task,
+          roleByTask[task.id],
+          resolveRole(org, roleByTask[task.id]),
+        ),
       ]),
     ),
     eventIds: [],
@@ -291,11 +310,20 @@ function tasksConflict(left, right) {
   ].some((ownedPath) => leftOwnership.has(ownedPath));
 }
 
-function recordFailure(item, failureInput) {
+function recordFailure(state, item, failureInput) {
   const evidence = validateFailureEvidence(failureInput);
+  const route = classifyFailure(evidence);
+  // classifyFailure names the role that owns this failure in a full ladder. A
+  // reduced organization may not declare it, and an owner nobody holds would
+  // leave the failure unresolvable, so the decision is folded onto a declared
+  // role while the original name stays readable in the record.
+  const owner = foldRole(state.roles ?? ROLES, route.nextOwner);
   const failure = {
     ...evidence,
-    route: classifyFailure(evidence),
+    route:
+      owner === route.nextOwner
+        ? route
+        : { ...route, nextOwner: owner, routedOwner: route.nextOwner },
     attemptId: item.attemptId,
   };
   item.failure = failure;
@@ -365,7 +393,7 @@ function reconcileRunningTask(state, item, taskId, observed) {
   attempt.settledAt = new Date().toISOString();
   if (observed.status === "failed") {
     item.state = "failed";
-    attempt.failure = recordFailure(item, observed.failure);
+    attempt.failure = recordFailure(state, item, observed.failure);
   } else {
     item.state = "submitted";
   }
@@ -924,7 +952,7 @@ export function recordSettlement(stateDir, id, expectedRevision, input) {
 
     item.state = input.outcome === "failed" ? "failed" : "submitted";
     if (input.outcome === "failed") {
-      attempt.failure = recordFailure(item, input.failure);
+      attempt.failure = recordFailure(state, item, input.failure);
     }
     appendWorkflowEvent(dir, state, {
       ...input,

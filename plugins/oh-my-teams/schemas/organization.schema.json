@@ -18,7 +18,9 @@
       "type": "object",
       "required": ["preset", "revision"],
       "properties": {
-        "preset": { "enum": ["custom", "opus-first", "balanced"] },
+        "preset": {
+          "enum": ["custom", "opus-first", "balanced", "single-subscription"]
+        },
         "revision": { "type": "integer", "minimum": 1 }
       }
     },
@@ -44,7 +46,8 @@
     },
     "roles": {
       "type": "object",
-      "required": ["pm", "pl", "senior", "junior", "intern"],
+      "required": ["pm"],
+      "$comment": "A reduced organization declares only the roles it runs, so only PM is required. Work addressed to an omitted role folds onto the closest declared senior role; core.mjs resolveRole performs that fold and validateOrg rejects a parent the organization does not declare.",
       "additionalProperties": false,
       "properties": {
         "pm": { "$ref": "#/$defs/role" },

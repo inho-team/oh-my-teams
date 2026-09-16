@@ -16,8 +16,78 @@ import {
   transportFor,
 } from "./providers/index.mjs";
 
-/** Stable role identifiers used by schemas, organization graphs, and reports. */
+/**
+ * Stable role identifiers used by schemas, organization graphs, and reports.
+ *
+ * The order is a seniority ladder from most to least senior, and `resolveRole`
+ * reads it that way. An organization may omit every role except `pm`, so a
+ * responsibility addressed to an absent role folds upward along this array
+ * until it reaches a role the organization actually declares.
+ */
 export const ROLES = ["pm", "pl", "senior", "junior", "intern"];
+
+/** The one role every organization must declare, and the root of its graph. */
+export const ROOT_ROLE = "pm";
+
+/**
+ * Model-policy values an organization may record.
+ *
+ * `custom` means the roles were bound by hand. Every other value names a preset
+ * in `presets.mjs`, which owns what each one does.
+ */
+export const MODEL_POLICY_PRESETS = [
+  "custom",
+  "opus-first",
+  "balanced",
+  "single-subscription",
+];
+
+/**
+ * Lists the roles an organization declares, ordered from most to least senior.
+ *
+ * @param {object} org - Organization whose `roles` map is read.
+ * @returns {string[]} Declared role identifiers in `ROLES` order.
+ */
+export const definedRoles = (org) =>
+  ROLES.filter((role) => Object.hasOwn(org.roles ?? {}, role));
+
+/**
+ * Folds a responsibility addressed to one role onto the role that holds it.
+ *
+ * A reduced organization omits roles rather than renaming them, so failure
+ * routing, review requirements, and assistant drafting keep naming the role
+ * that owns the work in a full team. This resolves that name to the closest
+ * senior role actually declared, which terminates at `pm` because `validateOrg`
+ * requires it.
+ *
+ * Takes the declared names rather than the organization so a persisted workflow
+ * can fold a later routing decision from the role list it recorded at creation,
+ * without reopening an organization file that may have been revised since.
+ *
+ * @param {string[]} declared - Declared role identifiers.
+ * @param {string} role - Role the caller addressed, declared or not.
+ * @returns {string} Declared role that carries the responsibility.
+ * @throws {Error} When the name is not a known role or nothing declares it.
+ */
+export function foldRole(declared, role) {
+  const rank = ROLES.indexOf(role);
+  assert(rank >= 0, `Unknown role: ${role}`);
+  const present = new Set(declared ?? []);
+  for (let index = rank; index >= 0; index -= 1) {
+    if (present.has(ROLES[index])) return ROLES[index];
+  }
+  throw new Error(`No declared role can take over from ${role}`);
+}
+
+/**
+ * Folds a role onto the declared role of one organization.
+ *
+ * @param {object} org - Validated organization.
+ * @param {string} role - Role the caller addressed, declared or not.
+ * @returns {string} Declared role that carries the responsibility.
+ * @throws {Error} When the name is not a known role or nothing declares it.
+ */
+export const resolveRole = (org, role) => foldRole(definedRoles(org), role);
 
 /**
  * Reasoning-effort values each provider accepts, re-exported from the registry.
@@ -548,13 +618,17 @@ function validateRole(role, binding, org) {
       binding.attempts <= 5,
     `Invalid attempts: ${role}`,
   );
+  // A reduced organization may omit roles, so naming a role the organization
+  // never declared would leave this binding unreachable from PM instead of
+  // merely misplaced, and the cycle walk below would end at an absent parent
+  // without noticing the break.
   assert(
     binding.parent === null ||
-      (ROLES.includes(binding.parent) && binding.parent !== role),
+      (Object.hasOwn(org.roles, binding.parent) && binding.parent !== role),
     `Invalid parent: ${role}`,
   );
   assert(
-    role === "pm" ? binding.parent === null : binding.parent !== null,
+    role === ROOT_ROLE ? binding.parent === null : binding.parent !== null,
     "PM must be the only root",
   );
 
@@ -602,8 +676,8 @@ export function validateOrg(org) {
 
   if (org.modelPolicy) {
     assert(
-      ["custom", "opus-first", "balanced"].includes(org.modelPolicy.preset),
-      "Invalid model policy preset",
+      MODEL_POLICY_PRESETS.includes(org.modelPolicy.preset),
+      `Model policy preset must be one of ${MODEL_POLICY_PRESETS.join("/")}`,
     );
     assert(
       Number.isInteger(org.modelPolicy.revision) &&
@@ -618,16 +692,24 @@ export function validateOrg(org) {
     validateProfile(id, profile, pools);
   }
 
+  // An organization may run a reduced ladder, so only PM is mandatory. Role
+  // names stay fixed because routing, skills, and reports address them by name;
+  // a reduced team omits a role rather than inventing one.
   assert(
-    Object.keys(org.roles).length === ROLES.length &&
-      ROLES.every((role) => role in org.roles),
-    "Exactly PM/PL/Senior/Junior/Intern required",
+    Object.keys(org.roles).every((role) => ROLES.includes(role)),
+    `Roles must be named from ${ROLES.join("/")}`,
   );
-  for (const role of ROLES) validateRole(role, org.roles[role], org);
+  assert(
+    Object.hasOwn(org.roles, ROOT_ROLE),
+    `Role ${ROOT_ROLE.toUpperCase()} is required`,
+  );
+  for (const role of definedRoles(org)) {
+    validateRole(role, org.roles[role], org);
+  }
 
   if (org.assistants) {
     for (const [role, profiles] of Object.entries(org.assistants)) {
-      assert(ROLES.includes(role), `Unknown assistant role: ${role}`);
+      assert(Object.hasOwn(org.roles, role), `Unknown assistant role: ${role}`);
       assert(
         Array.isArray(profiles) &&
           profiles.length > 0 &&
@@ -738,12 +820,12 @@ export function chart(org) {
         ` | effort=${profile.effort ?? "provider-default"}` +
         ` | slots=${binding.concurrency}`,
     );
-    ROLES.filter((child) => org.roles[child].parent === role).forEach((child) =>
-      visit(child, depth + 1),
-    );
+    definedRoles(org)
+      .filter((child) => org.roles[child].parent === role)
+      .forEach((child) => visit(child, depth + 1));
   }
 
-  visit("pm", 0);
+  visit(ROOT_ROLE, 0);
   return lines.join("\n");
 }
 

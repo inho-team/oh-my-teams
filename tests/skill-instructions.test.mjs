@@ -5,7 +5,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readJSON, validateOrg } from "../plugins/oh-my-teams/scripts/core.mjs";
+import {
+  readJSON,
+  resolveRole,
+  validateOrg,
+} from "../plugins/oh-my-teams/scripts/core.mjs";
 import { assist } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { removedSkillNames } from "./removed-skills.mjs";
@@ -42,7 +46,8 @@ test("every example organization can run the assist the skills advertise", async
     // pm, pl, senior, junior and intern all tell the model it may call assist.
     // The preset examples carried no `assistants` block, so every one of those
     // roles failed with "Assistant profile not allowed" on an organization
-    // built from them.
+    // built from them. A reduced organization need not declare all five, and
+    // there the assist runs as the role that took the absent one's duties over.
     for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
       const report = await assist(dir, org, task, {
         role,
@@ -60,7 +65,11 @@ test("every example organization can run the assist the skills advertise", async
           }),
         }),
       });
-      assert.equal(report.callerRole, role, `${name} must allow ${role}`);
+      assert.equal(
+        report.callerRole,
+        resolveRole(org, role),
+        `${name} must allow ${role}`,
+      );
     }
   }
 });
@@ -302,11 +311,16 @@ test("form points at one structural example, not three overlapping ones", () => 
   const form = readSkill("form");
   // The preset files restate the model assignments the paragraph above already
   // gives in prose, and presets.mjs is the source of truth for them, so reading
-  // all three cost about 7KB to see one structure.
+  // all three cost about 7KB to see one structure. The single-subscription
+  // example is not one of those: it is the only example of a reduced role
+  // ladder, which no prose in form conveys as precisely as the file does.
   const linked = [
     ...form.matchAll(/examples\/(organization[.\w-]*\.json)/g),
   ].map((match) => match[1]);
-  assert.deepEqual([...new Set(linked)], ["organization.json"]);
+  assert.deepEqual([...new Set(linked)].sort(), [
+    "organization.json",
+    "organization.single-subscription.json",
+  ]);
 });
 
 test("init is described as the no-op it can be", () => {

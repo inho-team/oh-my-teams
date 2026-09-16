@@ -9,6 +9,7 @@ import {
   inside,
   ownerHasExited,
   profileEnv,
+  resolveRole,
   validateOrg,
   writeJSON,
 } from "./core.mjs";
@@ -314,7 +315,7 @@ export async function work(
   org,
   task,
   {
-    role = "intern",
+    role: requestedRole = "intern",
     stateDir,
     call = invoke,
     workflowId,
@@ -325,7 +326,10 @@ export async function work(
 ) {
   validateOrg(org);
   validateTask(task);
-  assert(org.roles[role], "Unknown role");
+  // A reduced organization need not declare the requested role, so the work
+  // folds onto the declared role that took its duties over instead of failing
+  // for naming a rung this ladder does not have.
+  const role = resolveRole(org, requestedRole);
   assert(stateDir, "Shared coordinator state directory required");
   assert(
     Boolean(workflowId) === Boolean(attemptId),
@@ -563,7 +567,7 @@ export async function draft(
     '"quote":"exact full source line","why":"observation"}]}. ' +
     `Do not edit or use tools. Provide at most 12 source citations for ${kind}. ` +
     `Make no pass/fail judgment.\n${context}`;
-  const profile = org.profiles[org.roles.intern.profile];
+  const profile = org.profiles[org.roles[resolveRole(org, "intern")].profile];
   const response = await call(profile, repo, prompt, org.policy.timeoutMs);
   assert(
     response.code === 0 && !response.providerError && !response.timedOut,
@@ -597,11 +601,11 @@ export async function assist(
   repo,
   org,
   task,
-  { role, kind, stateDir, profileId, call = invoke },
+  { role: callerRole, kind, stateDir, profileId, call = invoke },
 ) {
   validateOrg(org);
   validateTask(task);
-  assert(org.roles[role], "Unknown assistant caller role");
+  const role = resolveRole(org, callerRole);
   const allowed = org.assistants?.[role] ?? [];
   const selected = profileId ?? allowed[0];
   assert(
