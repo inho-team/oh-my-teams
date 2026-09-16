@@ -56,7 +56,12 @@ agy --model claude-opus-4-6-thinking ...
 실패 기록을 남길 때에는 실행 기반이 반환한 코드를 그대로 적고 어느 실행 기반인지 함께 밝힌다. `failure-classify`가 번역까지 수행하므로 중립 어휘로 바꾸어 적으려 하지 않는다.
 
 ```json
-{ "message": "관측한 내용", "evidence": "run_...", "runtime": "orca", "code": "agent_unconfigured" }
+{
+  "message": "관측한 내용",
+  "evidence": "run_...",
+  "runtime": "orca",
+  "code": "agent_unconfigured"
+}
 ```
 
 `runtime`은 `orca` 또는 `local`이며, `runtime`을 적었으면 `code`도 반드시 적는다. 둘 다 없는 기록은 이전과 똑같이 분류된다.
@@ -69,15 +74,17 @@ agy --model claude-opus-4-6-thinking ...
 node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|intern> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --spec <작업> [--worktree new-child] [--run <runId>]
 ```
 
+래퍼는 worker가 시작되면 receipt의 `effects`에 기록된 agent 터미널의 탭 제목을 역할 태그로 시작하게 바꾼다. 제목은 `[PL] <워크트리 이름>` 형식이며, `--title`을 주면 워크트리 이름 대신 그 문구가 태그 뒤에 온다. 같은 워크트리에서 같은 역할을 둘 이상 띄울 때에는 `--title`로 작업을 구분한다. 결과의 `title`과 `titlePinned`가 적용한 제목과 성공 여부를 나타내며, 제목 변경에 실패해도 이미 시작된 worker를 실패로 처리하지 않는다. 탭 제목을 붙이는 이유는 아래 「역할 탭 제목」 절에 있다.
+
 `--workflow-id`와 `--state`를 주면 래퍼는 조직 파일 대신 그 workflow가 만들어질 때 고정한 조직 스냅샷을 읽고, workflow에 기록된 이번 실행의 역할 목록으로 역할을 접는다. 실행 도중 `adjust`로 바뀐 조직이나 삭제된 역할이 진행 중인 kickoff에 섞이지 않게 하기 위해서다. workflow를 주지 않으면 `--org`의 파일을 읽고 조직이 선언한 역할로 접는다.
 
 그다음 역할 프로필에서 시작 경로와 Orca agent, `--model`, `--effort`를 정한다.
 
-| 실행기 | 시작 경로 |
-|---|---|
-| Claude·Codex | 래퍼가 `--agent claude` 또는 `--agent codex`와 프로필의 `--model`·`--effort`로 새 터미널을 띄운다. |
-| Agy | Orca가 모델을 전달할 수 없으므로 아래 「Agy 역할 시작」의 터미널 경로를 따른다. `--terminal` 없이 호출하면 거부한다. |
-| Ollama | 대화형 Orca agent가 없으므로 감독 worker로 띄우지 않고 `work` 하네스로 실행한다. |
+| 실행기       | 시작 경로                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Claude·Codex | 래퍼가 `--agent claude` 또는 `--agent codex`와 프로필의 `--model`·`--effort`로 새 터미널을 띄운다.                   |
+| Agy          | Orca가 모델을 전달할 수 없으므로 아래 「Agy 역할 시작」의 터미널 경로를 따른다. `--terminal` 없이 호출하면 거부한다. |
+| Ollama       | 대화형 Orca agent가 없으므로 감독 worker로 띄우지 않고 `work` 하네스로 실행한다.                                     |
 
 `--agent`, `--model`, `--effort`를 함께 적으면 프로필과 같을 때에만 받아들이고, 다르면 Orca를 호출하기 전에 거부한다. `--terminal`과는 세 값 모두 함께 쓸 수 없다. Orca가 이 조합을 거부하고, 터미널은 처음 열 때의 모델을 유지하기 때문이다. 다음 경우에도 호출 전에 거부한다.
 
@@ -89,12 +96,12 @@ node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|i
 
 시작 결과의 `binding`에는 `via`, `modelRequested`, `effortRequested`, `modelProof`, `screenCheck`가 남는다. `modelProof`는 다음 넷 중 하나다.
 
-| 값 | 뜻 | 다음 행동 |
-|---|---|---|
-| `matched` | receipt의 `launch.effective`에 기록된 모델과 강도가 요청과 같다. | 화면의 모델을 대조한 뒤 계속한다. |
-| `mismatched` | Orca가 다른 모델이나 강도로 띄웠다고 기록했다. 출력에 `status: "blocked"`가 붙고 종료 코드는 1이다. | 추가 지시를 보내지 않고 결과를 채택하지 않으며, 아래 실패 복구 절차와 함께 상위에 보고한다. |
-| `unproven` | receipt에 `launch.effective`가 없거나, 이미 열린 터미널에 작업을 넘겼다. | 화면에서 모델을 확인하기 전에는 요청 모델로 실행 중이라고 보고하지 않는다. |
-| `unrequested` | 프로필 모델이 `null`이라 모델을 요청하지 않았다. | 보고서에 특정 모델명을 쓰지 않고 계정 기본값이라고 적는다. 현재 해석값이 필요하면 `host-defaults` 결과를 `현재 해석값`으로 구분해 덧붙인다. |
+| 값            | 뜻                                                                                                  | 다음 행동                                                                                                                                   |
+| ------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `matched`     | receipt의 `launch.effective`에 기록된 모델과 강도가 요청과 같다.                                    | 화면의 모델을 대조한 뒤 계속한다.                                                                                                           |
+| `mismatched`  | Orca가 다른 모델이나 강도로 띄웠다고 기록했다. 출력에 `status: "blocked"`가 붙고 종료 코드는 1이다. | 추가 지시를 보내지 않고 결과를 채택하지 않으며, 아래 실패 복구 절차와 함께 상위에 보고한다.                                                 |
+| `unproven`    | receipt에 `launch.effective`가 없거나, 이미 열린 터미널에 작업을 넘겼다.                            | 화면에서 모델을 확인하기 전에는 요청 모델로 실행 중이라고 보고하지 않는다.                                                                  |
+| `unrequested` | 프로필 모델이 `null`이라 모델을 요청하지 않았다.                                                    | 보고서에 특정 모델명을 쓰지 않고 계정 기본값이라고 적는다. 현재 해석값이 필요하면 `host-defaults` 결과를 `현재 해석값`으로 구분해 덧붙인다. |
 
 `launch.effective`는 Orca가 적용한 실행 인자의 기록이지 모델이 스스로 보고한 값이 아니다. 그러므로 `screenCheck`가 `required`이면 `matched`여도 시작 직후 `worker-read --dispatch <id> --source terminal`이나 `terminal read --screen`으로 대화형 화면에 표시된 현재 모델을 확인하고, `modelRequested`와 다르면 추가 지시를 보내지 않고 상위에 보고한다.
 
@@ -123,7 +130,14 @@ Orca의 `worker-start`는 Dispatch를 먼저 만든 뒤, 넘겨받은 터미널�
 3. agent가 명령 아래에 자기 화면을 그릴 때까지 화면을 다시 읽는다. Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족되므로 준비 여부를 판단하는 근거로 쓰지 않는다. 화면 너비 때문에 명령이 여러 줄로 나뉘어도 같은 명령으로 인식한다.
 4. Agy는 처음 여는 폴더마다 폴더 신뢰 질문("Do you trust the contents of this project?")을 띄우며, 권한 우회 플래그로도 건너뛰지 않는다. 역할의 워크트리는 사용자 저장소에서 이 실행을 위해 만든 것이고 역할은 이미 승인 없이 도구를 실행하므로, "Yes, I trust this folder"가 선택된 경우에만 Enter를 한 번 보내 신뢰한다. 결과의 `trust`는 질문이 없었으면 `not-asked`, 답했으면 `accepted`다. 신뢰한 폴더는 Agy 설정의 `trustedWorkspaces`에 남는다.
 5. 신뢰 질문에 답한 터미널은 버퍼에 질문 문구가 남는다. Orca의 시작 판정기는 이 문구를 찾아 `worker-start --terminal`을 `agent-trust-workspace`로 차단하므로, 답한 뒤 질문이 화면에서 사라졌으면 그 터미널을 `terminal close`로 닫고 같은 워크트리에서 같은 명령으로 한 번만 다시 연다. 이때 신뢰는 이미 기록되어 있으므로 새 터미널에는 질문이 나오지 않는다. 결과의 `terminal`은 다시 연 터미널이고, `trust`는 `accepted`를 유지하며, `reopened`에 닫은 터미널(`closedTerminal`)과 이유가 남는다. 다시 열지 않았으면 `reopened`는 `null`이다. 다시 연 터미널에서도 질문이 나오면 신뢰가 기록되지 않은 것이므로 답하지도, 또 닫지도 않고 차단으로 돌려준다. 첫 터미널을 닫지 못했으면 새 터미널을 열지 않고 `closeError`에 오류 원문을 담아 차단으로 돌려준다.
-6. 마지막 화면을 `screen`에 담는다. agent가 끝내 화면을 그리지 않았거나, 명령이 여전히 프롬프트에 남아 있거나, 신뢰 질문이 남아 있거나, 신뢰에 답한 터미널을 닫지 못했으면 `ready: false`, `status: "blocked"`로 종료 코드 1을 돌려준다. 이때는 브리프나 작업을 보내지 않고 화면을 증거로 붙여 보고한다.
+6. 준비가 확인되면 탭 제목을 `terminal rename`으로 다시 지정하고, 같은 워크트리에서 agent가 없고 Orca 기본 이름(`Terminal <n>`)이거나 이름이 없는 셸 탭을 `[shell] <워크트리 이름>`으로 바꾼다. 사람이 이름을 붙인 탭과 다른 agent의 탭은 건드리지 않는다. 셸 탭의 새 이름은 `terminal list`에 바로 반영되지만, Orca 화면에 아직 한 번도 열리지 않은 탭은 저장된 탭 이름이 `Terminal <n>`으로 남을 수 있다. 결과의 `title`, `titlePinned`, `shellsLabeled`에 적용 내용이 담긴다. 이유는 아래 「역할 탭 제목」 절에 있다.
+7. 마지막 화면을 `screen`에 담는다. agent가 끝내 화면을 그리지 않았거나, 명령이 여전히 프롬프트에 남아 있거나, 신뢰 질문이 남아 있거나, 신뢰에 답한 터미널을 닫지 못했으면 `ready: false`, `status: "blocked"`로 종료 코드 1을 돌려준다. 이때는 브리프나 작업을 보내지 않고 화면을 증거로 붙여 보고한다.
+
+### 역할 탭 제목
+
+역할 터미널의 탭 제목은 `[PM]`, `[PL]`, `[Senior]`, `[Junior]`, `[Intern]` 태그로 시작한다. 태그가 없으면 Orca 탭에는 agent가 스스로 보내는 세션 요약 제목(예: `✳ Oh my teams kickoff coordinator`)만 보여서 어느 탭이 PM이고 어느 탭이 PL인지 구분할 수 없다. `role-terminal`의 `--title`은 태그를 대신하지 않고 태그 뒤에 붙으며, 생략하면 워크트리 이름이 붙는다.
+
+제목은 터미널을 만들 때 한 번 주는 것으로 끝내지 않고, agent가 뜬 뒤 `terminal rename`으로 다시 지정한다. literacy-test kickoff에서 `terminal create --title`로 연 PM 탭이 나중에 사용자 지정 제목을 잃고 agent의 세션 제목으로 표시되었다. Orca는 탭 기록이 없는 터미널을 넘겨받을 때 사용자 지정 제목 없이 탭을 다시 만들기 때문이다. Orca 탭은 사용자 지정 제목을 agent가 보내는 제목보다 먼저 표시하므로, 다시 지정한 제목은 agent가 작업하는 동안에도 유지된다. 반면 `terminal show`와 `terminal list`의 `title`은 agent가 보낸 실시간 제목이므로, 이 값이 태그로 시작하지 않는다고 해서 탭 제목이 사라진 것은 아니다. agent의 제목 기능 자체는 끄지 않는다. Orca가 그 제목으로 agent의 작업 상태를 판단하기 때문이다.
 
 역할 명령에는 실행기별 권한 우회 플래그가 붙는다. Claude와 Agy에는 `--dangerously-skip-permissions`, Codex에는 `--dangerously-bypass-approvals-and-sandbox`다. 역할 터미널에는 도구 승인 창에 답할 사람이 없고 상위 역할이 대신 승인하는 절차도 없으므로, 플래그 없이 뜬 역할은 첫 도구 호출에서 멈춘다. Orca도 설정의 기본 인자로 같은 플래그를 붙이지만 명령이 agent 이름 하나뿐일 때만 붙이므로, `--model`이 붙은 명령이나 agent ID가 `antigravity`인 `agy`에는 붙지 않는다. 역할 프로필의 `command`는 실행 파일 이름 하나만 허용되므로 플래그가 두 번 붙지 않는다. Codex는 같은 플래그가 두 번 오면 실행을 거부한다.
 
@@ -141,7 +155,7 @@ PM coordinator는 감독 worker가 아니므로 `worker-start`로 띄우지 않�
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --worktree id:<worktreeId>
+node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --worktree id:<worktreeId> [--title <kickoff 요약>]
 <orca> terminal send --terminal <handle> --text "<브리프 경로와 시작 지시>" --enter --json
 ```
 
@@ -155,12 +169,12 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --
 2. 관측 파일에 다음을 적어 `node <runtime> supervision-next --org <organization.json> --observation <observation.json>`을 실행한다. 마지막 heartbeat, 메시지, 출력 변화 가운데 가장 최근 시각은 `lastActivityAt`, 그 뒤로 답을 받지 못한 진행 요청 수는 `unansweredRequests`, 그 뒤로 수행한 확인 횟수는 `inspections`, 이 정체를 이미 상위에 보고했으면 그 시각은 `escalatedAt`, 그때 보고한 `reason`은 `escalatedReason`이다. 새 활동이 관측되면 세 값을 비운다. 진행 요청과 확인을 합한 횟수가 `unansweredLimit`에 이르면 보고로 넘어가므로, 상태를 확인할 수 없는 worker도 무한히 확인만 반복하지 않는다.
 3. 결과의 `action`대로 행동한다.
 
-| action | 행동 |
-|---|---|
-| `wait` | 다시 `check --wait`로 기다린다. `reason`이 `already-escalated`이면 같은 정체를 다시 보고하지 않고, 사용자 보고에는 `display`를 그대로 적는다. |
-| `ask-progress` | `<orca> orchestration send --to dispatch:<id> --type question --subject "진행 상황 요청" --body "현재 단계, 끝낸 항목과 남은 항목, 장애물을 알려 주세요." --json`으로 묻고, 요청 수를 하나 늘린다. |
-| `inspect` | `worker-show`와 `worker-read --dispatch <id> --source auto --limit <n>`으로 상태와 최근 출력을 확인하고 `inspections`를 하나 늘린다. 확인에서 새 활동을 찾았으면 관측값을 고쳐 다시 판정한다. |
-| `escalate` | `worker-read`의 제한된 출력, liveness, 무응답 시간과 보낸 요청을 증거로 붙여 상위에 보고한다. PL은 `orchestration send --type escalation`으로 PM에게, PM은 사용자에게 보고한다. `failureClassify`가 `true`이면 그 증거로 `failure-classify`를 실행한다. 보고한 시각을 `escalatedAt`으로, 판정의 `reason`을 `escalatedReason`으로 기록한다. 같은 종료나 같은 입력 대기는 다시 보고하지 않고, 보고한 뒤 사실이 바뀌었을 때만 다시 보고한다. |
+| action         | 행동                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wait`         | 다시 `check --wait`로 기다린다. `reason`이 `already-escalated`이면 같은 정체를 다시 보고하지 않고, 사용자 보고에는 `display`를 그대로 적는다.                                                                                                                                                                                                                                                                                             |
+| `ask-progress` | `<orca> orchestration send --to dispatch:<id> --type question --subject "진행 상황 요청" --body "현재 단계, 끝낸 항목과 남은 항목, 장애물을 알려 주세요." --json`으로 묻고, 요청 수를 하나 늘린다.                                                                                                                                                                                                                                        |
+| `inspect`      | `worker-show`와 `worker-read --dispatch <id> --source auto --limit <n>`으로 상태와 최근 출력을 확인하고 `inspections`를 하나 늘린다. 확인에서 새 활동을 찾았으면 관측값을 고쳐 다시 판정한다.                                                                                                                                                                                                                                             |
+| `escalate`     | `worker-read`의 제한된 출력, liveness, 무응답 시간과 보낸 요청을 증거로 붙여 상위에 보고한다. PL은 `orchestration send --type escalation`으로 PM에게, PM은 사용자에게 보고한다. `failureClassify`가 `true`이면 그 증거로 `failure-classify`를 실행한다. 보고한 시각을 `escalatedAt`으로, 판정의 `reason`을 `escalatedReason`으로 기록한다. 같은 종료나 같은 입력 대기는 다시 보고하지 않고, 보고한 뒤 사실이 바뀌었을 때만 다시 보고한다. |
 
 이 판정은 재시도나 종료를 결정하지 않는다. 종료와 재시도는 위 「worker-start 실패 복구」와 `failure-classify` 결과를 따른다. `unverifiable` worker는 살아 있다고 간주하지 않고 확인이나 보고로 보낸다. 사용자에게 상태를 알릴 때 무응답 worker는 `진행 중`이 아니라 결과의 `display`대로 `무응답 N분`으로 적는다.
 
