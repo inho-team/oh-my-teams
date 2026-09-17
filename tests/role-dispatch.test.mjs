@@ -18,6 +18,7 @@ import {
 import {
   assertWorktreeUnshared,
   launchBinding,
+  PERMISSION_BYPASS,
   readRoleCharter,
   resolveRoleLaunch,
   roleCommand,
@@ -44,10 +45,11 @@ function tempDir(t) {
 test("a role launches with the agent and model its profile pins", () => {
   // The incident: PL was bound to a Codex profile, yet the coordinator typed
   // `worker-start --agent codex` with no --model and PL ran on another model.
-  const launch = resolveRoleLaunch(example(), "pl");
+  const launch = resolveRoleLaunch(example(), "pl", {}, { terminal: "t1" });
   assert.equal(launch.role, "pl");
   assert.equal(launch.provider, "codex");
   assert.equal(launch.agent, "codex");
+  assert.equal(launch.via, "terminal");
   assert.equal(launch.model, "gpt-5.6-sol");
   assert.equal(launch.effort, null);
 });
@@ -58,44 +60,49 @@ test("a host-default profile launches without a model and says so", () => {
     tiers: 2,
     models: ["claude:default", "codex:default"],
   });
-  const launch = resolveRoleLaunch(org, "junior");
+  const launch = resolveRoleLaunch(org, "junior", {}, { terminal: "t1" });
   assert.equal(launch.agent, "codex");
   assert.equal(launch.model, null);
 
-  const binding = launchBinding(launch, { receipt: { result: {} } });
+  const binding = launchBinding(launch);
   assert.equal(binding.modelRequested, null);
   assert.equal(binding.modelProof, "unrequested");
 });
 
-test("an explicit agent, model or effort that contradicts the profile is refused", () => {
+test("no Claude or Codex role is started by agent id, which cannot carry the bypass flag", () => {
+  // A Codex PL started with `worker-start --agent codex --model` stopped at
+  // "Would you like to run the following command?": worker-start has no
+  // argument option, and Orca's per-agent default arguments are a user
+  // setting that was empty for claude and codex. Every role is opened with
+  // role-terminal, whose command carries the flag and the model, and handed
+  // its task with --terminal.
   const org = example();
-  assert.throws(
-    () => resolveRoleLaunch(org, "pl", { agent: "claude" }),
-    /agent claude contradicts .*codex/,
-  );
-  assert.throws(
-    () => resolveRoleLaunch(org, "pl", { model: "gpt-6-astra" }),
-    /model gpt-6-astra contradicts .*gpt-5\.6-sol/,
-  );
-  assert.throws(
-    () => resolveRoleLaunch(org, "pl", { effort: "high" }),
-    /effort high contradicts/,
-  );
-  // Naming a model for a host-default profile would claim a choice the user
-  // never saved.
-  org.roles.pl.profile = "claude-current";
-  assert.throws(
-    () => resolveRoleLaunch(org, "pl", { model: "opus" }),
-    /model opus contradicts .*host default/,
-  );
-  // Restating the saved values is not a contradiction.
-  org.roles.pl.profile = "codex-terra";
-  const launch = resolveRoleLaunch(org, "pl", {
-    agent: "codex",
-    model: "gpt-5.6-terra",
-    effort: "high",
-  });
-  assert.equal(launch.effort, "high");
+  org.roles.junior.profile = "claude-current";
+  org.profiles["claude-current"].model = "sonnet";
+  for (const [role, provider] of [
+    ["pl", "codex"],
+    ["junior", "claude"],
+    ["senior", "agy"],
+  ]) {
+    assert.throws(
+      () => resolveRoleLaunch(org, role),
+      new RegExp(`${provider}.*role-terminal.*--terminal`, "s"),
+    );
+    // Restating the profile does not reopen a launch by agent id either.
+    const { agent, model } = resolveRoleLaunch(
+      org,
+      role,
+      {},
+      { terminal: "t1" },
+    );
+    assert.throws(
+      () => resolveRoleLaunch(org, role, { agent, model }),
+      /role-terminal/,
+    );
+    const command = roleCommand(org, role);
+    assert.equal(command.argv[1], PERMISSION_BYPASS[provider]);
+    assert.equal(command.argv[command.argv.indexOf("--model") + 1], model);
+  }
 });
 
 test("an Agy role starts in a terminal opened with its model, never by agent id", () => {
@@ -110,7 +117,7 @@ test("an Agy role starts in a terminal opened with its model, never by agent id"
   assert.equal(launch.via, "terminal");
   assert.equal(launch.agent, "antigravity");
   assert.equal(launch.model, "gemini-3.8-flash-high");
-  const binding = launchBinding(launch, { receipt: { result: {} } });
+  const binding = launchBinding(launch);
   assert.equal(binding.modelProof, "unproven");
   assert.equal(binding.screenCheck, "required");
 
@@ -161,7 +168,10 @@ test("a named account or a path command cannot be launched as a plain name", () 
     account: "work",
     command: ["codex", "--profile", "work"],
   };
-  assert.throws(() => resolveRoleLaunch(org, "pl"), /current account/);
+  assert.throws(
+    () => resolveRoleLaunch(org, "pl", {}, { terminal: "t1" }),
+    /current account/,
+  );
   // PowerShell runs a quoted path as a string, not as a command.
   const pathOrg = example();
   pathOrg.profiles["claude-current"].command = ["C:\\Tools\\claude.cmd"];
@@ -184,46 +194,18 @@ test("PM is the coordinator and is never started as a worker", () => {
   );
 });
 
-test("the launch receipt proves the model only when Orca applied the request", () => {
-  const launch = resolveRoleLaunch(example(), "pl");
-  const receipt = (effective) => ({
-    receipt: { result: { launch: { requested: {}, effective } } },
-  });
-  assert.equal(
-    launchBinding(launch, receipt({ model: "gpt-5.6-sol" })).modelProof,
-    "matched",
-  );
-  assert.equal(
-    launchBinding(launch, receipt({ model: "gpt-6-astra" })).modelProof,
-    "mismatched",
-  );
-  assert.equal(launchBinding(launch, receipt(null)).modelProof, "unproven");
-  // A receipt that records no effort proves nothing about it.
-  const terraLaunch = (() => {
-    const org = example();
-    org.roles.pl.profile = "codex-terra";
-    return resolveRoleLaunch(org, "pl");
-  })();
-  assert.equal(
-    launchBinding(terraLaunch, receipt({ model: "gpt-5.6-terra" })).modelProof,
-    "unproven",
-  );
+test("a role handed its task in a terminal proves its model on the screen only", () => {
+  // Orca records no model for a --terminal start, and the terminal keeps the
+  // model its command was opened with, so only the screen can confirm it.
   const terra = example();
   terra.roles.pl.profile = "codex-terra";
-  assert.equal(
-    launchBinding(
-      resolveRoleLaunch(terra, "pl"),
-      receipt({ model: "gpt-5.6-terra", effort: "low" }),
-    ).modelProof,
-    "mismatched",
-  );
-  assert.equal(
-    launchBinding(
-      { ...launch, via: "terminal" },
-      receipt({ model: "gpt-5.6-sol" }),
-    ).modelProof,
-    "unproven",
-  );
+  const launch = resolveRoleLaunch(terra, "pl", {}, { terminal: "t1" });
+  const binding = launchBinding(launch);
+  assert.equal(binding.via, "terminal");
+  assert.equal(binding.modelRequested, "gpt-5.6-terra");
+  assert.equal(binding.effortRequested, "high");
+  assert.equal(binding.modelProof, "unproven");
+  assert.equal(binding.screenCheck, "required");
 });
 
 test("the coordinator command carries the model the PM profile pins", () => {
@@ -319,9 +301,15 @@ test("a spec handed to a subordinate opens with that role's charter", () => {
   });
   assert.match(located, /조직 파일: \/p\/\.omt\/organization\.json/);
   assert.match(located, /workflow: wf-1 \(state \/c\/\.omt\)/);
-  assert.equal(
-    resolveRoleLaunch(example(), "intern", {}, { roles: ["pm", "pl"] }).role,
-    "pl",
+  assert.throws(
+    () =>
+      resolveRoleLaunch(
+        example(),
+        "intern",
+        {},
+        { roles: ["pm", "pl"], terminal: "t1" },
+      ),
+    /intern is not in this run's roles; its work folds to pl/,
   );
 });
 
@@ -335,8 +323,29 @@ test("worker-start requires the organization and role and refuses before Orca", 
       main(["worker-start", "--repo", dir, "--spec", "x", "--agent", "codex"]),
     /--org required/,
   );
-  // The Agy refusal happens while reading the profile, so no Orca executable
-  // is ever resolved; a missing binary would otherwise mask it.
+  // The refusal happens while reading the profile, so no Orca executable is
+  // ever resolved; a missing binary would otherwise mask it.
+  for (const role of ["pl", "senior"]) {
+    await assert.rejects(
+      () =>
+        main([
+          "worker-start",
+          "--repo",
+          dir,
+          "--org",
+          orgFile,
+          "--role",
+          role,
+          "--spec",
+          "x",
+          "--orca",
+          path.join(dir, "missing-orca"),
+        ]),
+      /role-terminal/,
+    );
+  }
+  // The injection exception exists for Orca's Agy idle check; a Claude or
+  // Codex terminal that is not idle is busy or blocked, not unseen.
   await assert.rejects(
     () =>
       main([
@@ -346,13 +355,40 @@ test("worker-start requires the organization and role and refuses before Orca", 
         "--org",
         orgFile,
         "--role",
-        "senior",
+        "pl",
         "--spec",
         "x",
+        "--terminal",
+        "term_1",
+        "--inject-fallback",
+        "사용자가 주입을 승인했다",
         "--orca",
         path.join(dir, "missing-orca"),
       ]),
-    /role-terminal/,
+    /--inject-fallback applies only to agy/,
+  );
+  // Orca creates no worktree for a reused terminal, so the pair is refused
+  // before the idle probe spends its wait.
+  await assert.rejects(
+    () =>
+      main([
+        "worker-start",
+        "--repo",
+        dir,
+        "--org",
+        orgFile,
+        "--role",
+        "pl",
+        "--spec",
+        "x",
+        "--terminal",
+        "term_1",
+        "--worktree",
+        "new-child",
+        "--orca",
+        path.join(dir, "missing-orca"),
+      ]),
+    /--terminal cannot start in new-child/,
   );
 });
 
@@ -379,8 +415,10 @@ test("a terminal is opened and handed work only for a role the run holds", async
     () => resolveRoleLaunch(org, "intern", {}, { roles, terminal: "t1" }),
     /intern is not in this run's roles.*junior/s,
   );
-  // Folding still serves a fresh agent launch, where nothing was prebuilt.
-  assert.equal(resolveRoleLaunch(org, "intern", {}, { roles }).role, "junior");
+  assert.equal(
+    resolveRoleLaunch(org, "junior", {}, { roles, terminal: "t1" }).role,
+    "junior",
+  );
   // Asking for the role that does hold the work is fine, and PM is PM.
   assert.equal(roleCommand(org, "junior", { roles }).argv[3], "gpt-5.5");
   assert.equal(roleCommand(org, "pm", { roles }).role, "pm");
@@ -690,13 +728,11 @@ test("a workflow launch reads the organization snapshot the workflow froze", asy
         "wf-1",
         "--state",
         state,
-        "--model",
-        "gpt-5.6-sol",
         "--orca",
         path.join(repo, "missing-orca"),
       ]),
-    // The frozen snapshot pins terra, so sol contradicts it.
-    /gpt-5\.6-sol contradicts .*gpt-5\.6-terra/,
+    // The live file no longer declares PL; the frozen snapshot binds it to terra.
+    /Role pl uses codex \(profile codex-terra\)/,
   );
 });
 

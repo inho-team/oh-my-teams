@@ -37,6 +37,7 @@ import {
   pinTerminalTitle,
   roleTitle,
   workerTerminal,
+  worktreeLabel,
 } from "./role-terminal.mjs";
 import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
@@ -110,12 +111,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                    [--orca EXECUTABLE]
   runtime-discover [--orca EXECUTABLE]
   worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
-               [--worktree SELECTOR] [--terminal HANDLE] [--run ID]
+               --terminal HANDLE [--worktree SELECTOR] [--run ID]
                [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
                [--inject-fallback "USER APPROVAL"]
                [--orca EXECUTABLE]
                (with --workflow-id, the workflow's organization snapshot is used;
-               the worker's tab title starts with its role tag, e.g. [PL])
+               the terminal comes from role-terminal; the worker's tab title
+               starts with its role tag, e.g. [PL])
   headless-start --org FILE --role ROLE --cwd DIR --spec TEXT --state DIR
                  [--workflow-id ID] [--timeout-ms N] [--worker ID]
                  (runs the role as a non-interactive process, without Orca)
@@ -477,11 +479,12 @@ async function compatibilityPrepare(args) {
 // reclaim. A refusal that produced no Dispatch throws, and its neutral signal
 // travels with the error so the caller can route it rather than reread prose.
 //
-// The agent, model and effort come from the role's saved profile. Explicit
-// values are accepted only when they restate it, so a hand-typed launch can no
-// longer drop the model the user chose. A reused terminal keeps whatever model
-// it was started with, so it gets no model arguments and its proof stays
-// unproven.
+// Every role is handed its task in the terminal role-terminal opened with the
+// profile's model, effort and permission bypass flag. worker-start --agent
+// could pass the model but not the flag, so a start without --terminal, or
+// with a hand-typed agent, model or effort, is refused before Orca is called.
+// The terminal keeps the model it was opened with, so the proof stays
+// unproven until the screen is read.
 async function startSupervisedWorker(args) {
   const { org, run } = launchContext(args);
   const launch = resolveRoleLaunch(
@@ -490,8 +493,21 @@ async function startSupervisedWorker(args) {
     { agent: args.agent, model: args.model, effort: args.effort },
     { ...run, terminal: args.terminal },
   );
-  // `new-child` makes a worktree nobody works in yet, so only a named or
-  // current worktree can belong to another role's task or to the owner.
+  // The exception path exists because Orca never reports an Agy terminal
+  // idle. A Claude or Codex terminal that is not idle is busy or waiting on a
+  // prompt, and injecting a task there would bypass that state.
+  assert(
+    !args["inject-fallback"] || launch.provider === "agy",
+    `--inject-fallback applies only to agy roles; ${launch.role} uses ${launch.provider}`,
+  );
+  // Orca does not create a worktree around a terminal it is handed.
+  assert(
+    args.worktree !== "new-child",
+    "--terminal cannot start in new-child; create the worktree first, open the terminal there with role-terminal, " +
+      "and pass the same id: selector",
+  );
+  // Only a named or current worktree can belong to another role's task or to
+  // the owner.
   assertNotKickoffOwner(
     selectedWorktreePath(args.worktree ?? "current", args.repo) ?? args.repo,
     `starting ${launch.role}`,
@@ -502,27 +518,24 @@ async function startSupervisedWorker(args) {
     args.worktree ?? "current",
     args.repo,
   );
-  const viaTerminal = launch.via === "terminal";
   try {
     const started = await startWorker(path.resolve(args.repo), {
       task: args.task,
       spec: args.spec && roleSpec(org, launch.role, args.spec, run),
       worktree: args.worktree ?? "current",
-      agent: viaTerminal ? undefined : launch.agent,
       terminal: args.terminal,
-      model: viaTerminal ? undefined : (launch.model ?? undefined),
-      effort: viaTerminal ? undefined : (launch.effort ?? undefined),
       runId: args.run,
       retryOf: args["retry-of"],
       executable: args.orca,
     });
-    const binding = launchBinding(launch, started);
-    // Orca names a new worker's tab after the agent, which does not say which
-    // role it holds; the tab gets the role tag once the terminal exists.
+    const binding = launchBinding(launch);
+    // role-terminal already titled the tab. It is set again because Orca may
+    // rebuild the tab without it, but only when there is detail to set: a bare
+    // role tag would overwrite the title role-terminal was given.
     const worker = workerTerminal(started.receipt, args.terminal);
-    const title = worker.handle
-      ? roleTitle(launch.role, args.title ?? worker.place)
-      : null;
+    const detail = args.title ?? worker.place ?? worktreeLabel(args.worktree);
+    const title =
+      worker.handle && detail ? roleTitle(launch.role, detail) : null;
     const titlePinned = Boolean(
       title &&
       (await pinTerminalTitle({
@@ -536,14 +549,11 @@ async function startSupervisedWorker(args) {
       title,
       titlePinned,
       binding: { ...binding, roleHeader: Boolean(args.spec) },
-      // A launch Orca recorded with another model must not be handed work.
-      ...(binding.modelProof === "mismatched" ? { status: "blocked" } : {}),
     };
   } catch (error) {
     if (!error.signal) throw error;
     if (
       args["inject-fallback"] &&
-      viaTerminal &&
       error.signal.kind === "execution-unconfigured" &&
       error.signal.code === "timeout"
     ) {
@@ -630,7 +640,7 @@ async function injectFallback(args, org, run, launch, refusal) {
     workerId: injected.dispatchId,
     liveness: "unverifiable",
     binding: {
-      ...launchBinding(launch, {}),
+      ...launchBinding(launch),
       via: "dispatch-inject",
       modelProof: "unproven",
       roleHeader: Boolean(args.spec),
