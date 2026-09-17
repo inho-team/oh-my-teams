@@ -35,6 +35,7 @@ import {
 import {
   openRoleTerminal,
   pinTerminalTitle,
+  readLaunchEnvironment,
   roleTitle,
   workerTerminal,
   worktreeLabel,
@@ -971,52 +972,62 @@ async function executeCommand(args) {
       return (({ org, run }) => roleCommand(org, args.role, run))(
         launchContext(args),
       );
-    case "role-terminal":
-      return (({ org, run }) => {
-        const command = roleCommand(org, args.role, run);
-        const target = selectedWorktreePath(args.worktree, process.cwd());
-        if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
-        const launchedAt = new Date().toISOString();
-        assertWorktreeUnshared(
-          run.workflowState,
-          command.role,
-          args.worktree,
-          process.cwd(),
-        );
-        const allowUnverifiedApproval = args["allow-unverified"];
-        assert(
-          allowUnverifiedApproval === undefined ||
-            (typeof allowUnverifiedApproval === "string" &&
-              allowUnverifiedApproval.trim().length > 0),
-          "--allow-unverified requires a non-empty approval sentence",
-        );
-        return openRoleTerminal({
-          worktree: args.worktree,
-          command,
-          title: args.title,
-          executable: args.orca,
-          allowUnverified: allowUnverifiedApproval !== undefined,
-          allowUnverifiedApproval,
-        }).then((opened) => ({
-          ...opened,
-          ...(allowUnverifiedApproval
-            ? { allowUnverifiedApproval }
-            : {}),
-          ...recordLaunchSafely(args.org, launchedAt, {
-            via: "role-terminal",
-            role: command.role,
-            profile: command.profile,
-            provider: command.provider,
-            modelRequested: command.modelRequested,
-            effortRequested: command.effortRequested,
-            worktreePath: target,
-            worktreeSelector: args.worktree,
-            terminal: opened.terminal,
-            workflowId: args["workflow-id"] ?? null,
-            stateDir: args.state ?? null,
-          }),
-        }));
-      })(launchContext(args));
+    case "role-terminal": {
+      const { org, run: runCtx } = launchContext(args);
+      const command = roleCommand(org, args.role, runCtx);
+      const target = selectedWorktreePath(args.worktree, process.cwd());
+      if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
+      const launchedAt = new Date().toISOString();
+      assertWorktreeUnshared(
+        runCtx.workflowState,
+        command.role,
+        args.worktree,
+        process.cwd(),
+      );
+      const allowUnverifiedApproval = args["allow-unverified"];
+      assert(
+        allowUnverifiedApproval === undefined ||
+          (typeof allowUnverifiedApproval === "string" &&
+            allowUnverifiedApproval.trim().length > 0),
+        "--allow-unverified requires a non-empty approval sentence",
+      );
+      // 실제 환경에서 매트릭스 입력값을 읽습니다.
+      // 알 수 없는 값은 'unknown'으로 전달하여 표가 unverified로 처리합니다.
+      const env = await readLaunchEnvironment({
+        worktreePath: target ?? undefined,
+        orcaExecutable: args.orca,
+      });
+      const opened = await openRoleTerminal({
+        worktree: args.worktree,
+        command,
+        title: args.title,
+        executable: args.orca,
+        platform: env.platform,
+        shell: env.shell,
+        trustRecordExists: env.trustRecordExists,
+        orcaVersion: env.orcaVersion,
+        cliVersion: env.cliVersion,
+        allowUnverified: allowUnverifiedApproval !== undefined,
+        allowUnverifiedApproval,
+      });
+      return {
+        ...opened,
+        ...(allowUnverifiedApproval ? { allowUnverifiedApproval } : {}),
+        ...recordLaunchSafely(args.org, launchedAt, {
+          via: "role-terminal",
+          role: command.role,
+          profile: command.profile,
+          provider: command.provider,
+          modelRequested: command.modelRequested,
+          effortRequested: command.effortRequested,
+          worktreePath: target,
+          worktreeSelector: args.worktree,
+          terminal: opened.terminal,
+          workflowId: args["workflow-id"] ?? null,
+          stateDir: args.state ?? null,
+        }),
+      };
+    }
     case "host-defaults":
       return resolveHostDefaults({
         project: args.project && path.resolve(args.project),

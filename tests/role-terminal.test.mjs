@@ -751,3 +751,74 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
     "allow-unverified에 값이 없으면 parseArgs가 에러를 던져야 한다",
   );
 });
+
+test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
+  // finding: optimistic-matrix-defaults
+  // 환경 읽기 함수는 주입 가능한 실행기와 홈 디렉터리를 받아 결정적으로 동작해야 한다.
+  const { readLaunchEnvironment } = await import(
+    "../plugins/oh-my-teams/scripts/role-terminal.mjs"
+  );
+  const tmpDir = await import("node:os").then((m) => m.tmpdir());
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const tmpHome = path.join(tmpDir, "omt-test-env-" + Date.now());
+  fs.mkdirSync(path.join(tmpHome, ".gemini", "antigravity-cli"), { recursive: true });
+  fs.mkdirSync(path.join(tmpHome, ".claude"), { recursive: true });
+  const worktreePath = "C:/test/worktree";
+  // Agy 설정: worktreePath 신뢰 있음
+  fs.writeFileSync(
+    path.join(tmpHome, ".gemini", "antigravity-cli", "settings.json"),
+    JSON.stringify({ trustedWorkspaces: [worktreePath] }),
+  );
+  // Claude 설정: skipDangerousModePermissionPrompt=true
+  fs.writeFileSync(
+    path.join(tmpHome, ".claude", "settings.json"),
+    JSON.stringify({ skipDangerousModePermissionPrompt: true }),
+  );
+
+  const orcaCalls = [];
+  const fakeExecute = async (argv) => {
+    orcaCalls.push(argv);
+    const cmd = String(argv[0] ?? "");
+    if (cmd.includes("orca") && argv[1] === "--version") {
+      return { code: 0, stdout: "orca 1.4.204" };
+    }
+    if (cmd === "agy" && argv[1] === "--version") {
+      return { code: 0, stdout: "agy 1.2.5" };
+    }
+    return { code: 1, stdout: "", stderr: "unknown" };
+  };
+
+  const env = await readLaunchEnvironment({
+    worktreePath,
+    homedir: tmpHome,
+    execute: fakeExecute,
+  });
+
+  assert.equal(env.orcaVersion, "1.4.204", "orca 버전 읽기");
+  assert.equal(env.cliVersion, "1.2.5", "agy 버전 읽기");
+  assert.equal(env.trustRecordExists, true, "신뢰 기록 있음");
+  assert.equal(env.skipDangerousModePermissionPrompt, true, "skipPrompt 읽기");
+  assert.ok(["powershell", "posix"].includes(env.shell), "shell 값");
+
+  // 신뢰 없는 경우
+  fs.writeFileSync(
+    path.join(tmpHome, ".gemini", "antigravity-cli", "settings.json"),
+    JSON.stringify({ trustedWorkspaces: [] }),
+  );
+  const env2 = await readLaunchEnvironment({
+    worktreePath,
+    homedir: tmpHome,
+    execute: fakeExecute,
+  });
+  assert.equal(env2.trustRecordExists, false, "신뢰 기록 없음");
+
+  // 설정 파일 읽기 실패 시 unknown
+  const env3 = await readLaunchEnvironment({
+    worktreePath: "/nonexistent",
+    homedir: "/nonexistent-home",
+    execute: async () => { throw new Error("no orca"); },
+  });
+  assert.equal(env3.orcaVersion, "unknown", "버전 읽기 실패 시 unknown");
+  assert.equal(env3.trustRecordExists, "unknown", "설정 읽기 실패 시 unknown");
+});

@@ -17,6 +17,9 @@
  * title. `terminal rename` sets that custom title again, and Orca shows a
  * custom title ahead of any title the agent sends.
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { assert, run } from "./core.mjs";
 import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
 import {
@@ -25,6 +28,110 @@ import {
   SUPPORTED_ORCA_VERSION,
   SUPPORTED_CLI_VERSION,
 } from "./launch-matrix.mjs";
+
+/**
+ * 실제 환경에서 매트릭스 입력값을 읽습니다.
+ *
+ * 알 수 없는 값은 낙관적 기본값 대신 `unknown`으로 반환합니다.
+ * 사용자 설정 파일은 읽기만 하고 쓰지 않습니다.
+ *
+ * @param {object} options - 주입 가능한 의존성.
+ * @param {string} [options.worktreePath] - 신뢰 여부를 확인할 워크트리 경로.
+ * @param {string} [options.orcaExecutable] - Orca 실행 파일 경로.
+ * @param {string} [options.homedir=os.homedir()] - 홈 디렉터리 (테스트용 주입).
+ * @param {Function} [options.execute=run] - 명령 실행기 (테스트용 주입).
+ * @returns {Promise<object>} 환경 값 객체.
+ */
+export async function readLaunchEnvironment({
+  worktreePath,
+  orcaExecutable,
+  homedir = os.homedir(),
+  execute = run,
+} = {}) {
+  const platform = process.platform;
+  const shell = platform === "win32" ? "powershell" : "posix";
+
+  // Orca 버전 읽기
+  let orcaVersion = "unknown";
+  try {
+    const selected = selectOrcaExecutable(orcaExecutable);
+    const result = await execute([selected, "--version"], { timeoutMs: 10000 });
+    if (result.code === 0) {
+      const ver = String(result.stdout ?? "")
+        .trim()
+        .split(/\s+/)
+        .find((t) => /^\d+\.\d+\.\d+/.test(t));
+      if (ver) orcaVersion = ver;
+    }
+  } catch {
+    // unknown 유지
+  }
+
+  // Agy CLI 버전 읽기
+  let cliVersion = "unknown";
+  try {
+    const result = await execute(["agy", "--version"], { timeoutMs: 10000 });
+    if (result.code === 0) {
+      const ver = String(result.stdout ?? "")
+        .trim()
+        .split(/\s+/)
+        .find((t) => /^\d+\.\d+\.\d+/.test(t));
+      if (ver) cliVersion = ver;
+    }
+  } catch {
+    // unknown 유지
+  }
+
+  // Agy 신뢰 기록: ~/.gemini/antigravity-cli/settings.json의 trustedWorkspaces
+  let trustRecordExists = "unknown";
+  const agySettingsFile = path.join(
+    homedir,
+    ".gemini",
+    "antigravity-cli",
+    "settings.json",
+  );
+  try {
+    const text = fs.readFileSync(agySettingsFile, "utf8");
+    const settings = JSON.parse(text);
+    const trusted = settings.trustedWorkspaces;
+    if (
+      worktreePath &&
+      Array.isArray(trusted) &&
+      trusted.some((t) => String(t) === worktreePath)
+    ) {
+      trustRecordExists = true;
+    } else if (Array.isArray(trusted)) {
+      trustRecordExists = false;
+    }
+    // 읽었지만 배열이 아니면 unknown 유지
+  } catch {
+    // unknown 유지
+  }
+
+  // Claude skipDangerousModePermissionPrompt: ~/.claude/settings.json
+  let skipDangerousModePermissionPrompt = "unknown";
+  const claudeSettingsFile = path.join(homedir, ".claude", "settings.json");
+  try {
+    const text = fs.readFileSync(claudeSettingsFile, "utf8");
+    const settings = JSON.parse(text);
+    if (typeof settings.skipDangerousModePermissionPrompt === "boolean") {
+      skipDangerousModePermissionPrompt =
+        settings.skipDangerousModePermissionPrompt;
+    }
+  } catch {
+    // unknown 유지
+  }
+
+  return {
+    platform,
+    shell,
+    orcaVersion,
+    cliVersion,
+    trustRecordExists,
+    skipDangerousModePermissionPrompt,
+  };
+}
+
 
 const PROMPT_MARK = /[%$#>❯]\s*$/;
 
