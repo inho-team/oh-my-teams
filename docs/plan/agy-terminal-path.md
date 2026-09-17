@@ -219,10 +219,10 @@ headless 모드 실행 시 workflow에 연결하기 위한 receipt 형식입니�
   ```javascript
   e.lastIndexOf('antigravity cli') ... e.startsWith('gemini', o)
   ```
-- **수정 후:** 
+- **수정 후 제안:** 특정 모델명(`gemini`, `claude` 등) 하드코딩을 피하기 위해, 소문자로 변환된 버퍼(`e`)에서 배너 다음 줄의 구조적 특징(모델명 줄과 `>` 프롬프트 줄 간의 상대적 위치)을 판정 기준으로 삼거나, 판정할 모델 접두사를 설정 가능한 목록으로 추출합니다.
   ```javascript
-  // gemini 뿐만 아니라 claude, gpt-oss 등 다른 모델도 허용하도록 조건 완화
-  e.lastIndexOf('antigravity cli') ... (e.startsWith('gemini', o) || e.startsWith('claude', o) || e.startsWith('gpt-oss', o))
+  // 예시: 모델 줄이 빈 문자열이 아니고 다음 줄들에 프롬프트 '>'가 나오는지 확인하는 구조적 검사
+  e.lastIndexOf('antigravity cli') ... /* 배너 아래 줄 확인 */ && s-o===1 && e.charCodeAt(o)===62
   ```
 **위치:** `out/shared/shell-process-detection.js` (`isShellProcess`)
 - **수정안:** Windows PowerShell에서 복합 명령(`mode con: cols=44; agy...`) 사용 시 전경 프로세스가 여전히 `powershell.exe`로 남는 문제 해결을 위해, 터미널 내부 프로세스 트리에서 `agy.exe` 말단 프로세스 활성 상태를 직접 확인하는 로직 보강.
@@ -240,9 +240,9 @@ Hello Orca team,
 
 We have encountered a persistent issue on Windows where the agent detection logic incorrectly classifies Agy CLI terminals as bare shells when multiple statements are executed in PowerShell (e.g., `mode con: cols=44; agy ...`). Since the foreground process remains `powershell.exe` during execution, `isShellProcess` flags it as a shell, causing `agentIdentity` to be null.
 
-Additionally, the `tui-idle` check in `q0i(e)` strictly asserts `e.startsWith('gemini', o)` after the `Antigravity CLI` banner. This hardcoded rule prevents other valid Agy models (like `claude-sonnet-4-6` or `gpt-oss-120b-medium`) from ever being detected as idle, even if the UI renders correctly. 
+Additionally, the `tui-idle` check in `q0i(e)` strictly asserts `e.startsWith('gemini', o)` after the `antigravity cli` banner on the lowercase buffer. This hardcoded rule prevents other valid Agy models (like `claude-sonnet-4-6` or `gpt-oss-120b-medium`) from ever being detected as idle, even if the UI renders correctly. 
 
-We propose relaxing the model name check in `q0i(e)` to include other model families, and improving the Windows foreground process tree parsing to accurately identify `agy.exe` as the leaf active process even when wrapped in a PowerShell composite command.
+We propose modifying the `tui-idle` check in `q0i(e)` to avoid hardcoding model family names. Instead, the check could rely on the structural layout of the screen buffer (such as the presence of any non-empty model string followed by the `>` prompt line) or use a configurable list of supported model prefixes. We also propose improving the Windows foreground process tree parsing to accurately identify `agy.exe` as the leaf active process even when wrapped in a PowerShell composite command.
 
 Thanks!
 ```
