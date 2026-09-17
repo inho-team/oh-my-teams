@@ -590,5 +590,9 @@ test("agy turn.json carries --print-timeout from worker default and per-turn tim
     "55s",
     "worker timeoutMs=60000 → --print-timeout 55s",
   );
-  assert.equal(turnJson1.timeoutMs, 60000, "turn.json timeoutMs matches worker");
+  assert.equal(
+    turnJson1.timeoutMs,
+    60000,
+    "turn.json timeoutMs matches worker",
+  );
 });
