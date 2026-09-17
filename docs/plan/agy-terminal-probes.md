@@ -268,7 +268,7 @@ orca terminal create --worktree path:... --title "probe-1C"
 
 **`tui-idle` 결과:** `{ "satisfied": true, "status": "running" }`
 
-**판정:** `agentIdentity` 없음. 화면은 완전히 기동된 상태(프롬프트, 모델 줄 `Claude Sonnet 4.6 (Thinking)` 확인)임에도 Orca가 `antigravity`로 식별하지 않는다. `tui-idle`은 `satisfied: true`이며 이는 에이전트 식별이 아니라 일반 셸 idle 판정일 가능성이 있다.
+**판정:** `agentIdentity` 없음. 화면은 완전히 기동된 상태(프롬프트, 모델 줄 `Claude Sonnet 4.6 (Thinking)` 확인)임에도 Orca가 `antigravity`로 식별하지 않는다. `tui-idle`은 `satisfied: true`이며 이는 에이전트 식별이 아니라 일반 셸 idle 판정이다(아래 2-4절 핵심 발견 1 참조).
 
 **비고:** 이전 attempt의 관찰(claude-sonnet-4-6 `agentIdentity` 없음)과 일치한다. gemini와 gpt-oss는 순차 show에서 `agentIdentity: "antigravity"`가 확인됐으나, claude-sonnet-4-6은 동일한 방식에서도 설정되지 않는다. Orca 1.4.204에서 `antigravity` 식별 규칙이 모델 계열(모델 줄에 `gemini` 또는 `gpt-oss` 포함 여부)에 의존하는 것으로 추정된다(미확인, Orca 소스 확인 필요).
 
@@ -318,7 +318,7 @@ orca terminal create --worktree path:... --title "probe-1C"
 
 **핵심 발견:**
 
-1. `tui-idle`은 모든 모델에서 `satisfied: true`가 된다. 단, 이는 에이전트 식별이 아니라 화면 idle 상태 판정임을 시사한다.
+1. `tui-idle`은 모든 모델에서 `satisfied: true`가 된다. 이는 에이전트 화면 전용 판정이 아니라 일반 셸 idle 상태(입력 대기) 판정임이 확인됐다. 근거: (a) `orca-runtime.md` 「역할 터미널 열기」 절 3번째 규칙에 "Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족된다"고 명시되어 있다. (b) PM이 저장한 `probe-2-gpt-wait.json`(gpt-oss 터미널의 로그인 배너 단계, `Antigravity CLI` 배너·모델 줄이 아직 표시되기 전)에서도 `satisfied: true`가 반환됐으며, 이는 `antigravity` 대기 판정 함수 `q0i`(배너·`gemini` 줄·`>` 줄 필요)가 통과할 수 없는 화면 상태이므로 일반 셸 idle 판정 경로로 `true`가 반환된 것이다.
 2. `agentIdentity: "antigravity"`는 gemini 계열과 gpt-oss 계열에서는 설정되지만, claude-sonnet-4-6에서는 설정되지 않는다. Orca의 `antigravity` 식별 규칙이 모델 줄 또는 프로세스 패턴에서 `claude`를 `antigravity`와 다른 에이전트(`claude` 자체)로 처리할 가능성이 있다(미확인, Orca 소스 확인 필요).
 3. `agentIdentity` 설정 여부와 무관하게 `tui-idle satisfied: true`가 된다. 따라서 `tui-idle`만으로는 Orca가 터미널을 `antigravity`로 인식했는지 판별할 수 없다.
 
@@ -391,4 +391,4 @@ needs you to know which kind you have — the orchestration verbs cover all of t
 
 ---
 
-DONE: contradictory-title-conclusion 해소 — 2-5절 「--title→agentIdentity 설정」 일반화 철회, orca-rules c42d9de 6항 resolveCanonicalPaneAgentIdentity 우선순위 규칙으로 claude 미설정 원인(ambiguous 처리) 설명, 관측 사실·미확인 원인으로 분리 (ambiguous-idle-distinction은 다음 커밋)
+DONE: (1) contradictory-title-conclusion 해소 — 2-5절 「--title→agentIdentity 설정」 일반화 철회, orca-rules c42d9de 6항 resolveCanonicalPaneAgentIdentity 우선순위·ambiguous 규칙으로 claude 미설정 원인 설명, 관측 사실·미확인 원인 분리. (2) ambiguous-idle-distinction 해소 — 2-2절·2-4절 핵심발견 1을 orca-runtime.md 소스 근거(tui-idle은 명령을 붙든 셸에서도 충족)와 probe-2-gpt-wait.json 증거(로그인 배너 단계 satisfied: true)로 확인된 사실로 갱신.
