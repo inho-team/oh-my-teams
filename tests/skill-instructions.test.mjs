@@ -13,7 +13,8 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { assist } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { parseModelChoice } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { parseModelChoice, draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import { removedSkillNames } from "./removed-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -533,27 +534,128 @@ test("the depth is decided by the PM, reported, and changed through the runtime"
 });
 
 test("every model form offers is a choice org-draft accepts, Gemini included", () => {
+  // The table header changed from "| 역할 | 선택지 |" to "| 역할 | 선택지 (표시 이름 → 저장 값) |".
   const table = readSkill("form")
-    .split("| 역할 | 선택지 |")[1]
+    .split("| 역할 | 선택지 (표시 이름 → 저장 값) |")[1]
     ?.split("\n\n")[0];
-  assert.ok(table, "form must keep its model option table");
-  const offered = [...table.matchAll(/`([a-z]+:[a-z0-9.-]+)`/g)].map(
-    (match) => match[1],
-  );
-  // Gemini 3.1 Pro and 3.8 Flash were listed as confirmed choices yet never
-  // offered, because the only proposals were presets that assign Opus, Sonnet
-  // and GPT-OSS.
-  assert.ok(offered.includes("agy:gemini-3.1-pro-high"));
-  assert.ok(offered.includes("agy:gemini-3.8-flash-medium"));
-  // Agy has no level-free Gemini ID and refuses one without --effort, so a
-  // Gemini choice always fixes a depth the user did not pick. Flash has a
-  // middle level; Pro 3.1 offers only high and low.
-  assert.ok(!offered.includes("agy:gemini-3.8-flash-high"));
+  assert.ok(table, "form must keep its model option table with the new header");
+
+  // Expected stored values per role, matching the brief table exactly (order included).
+  const EXPECTED = {
+    pm: [
+      "claude:fable",
+      "claude:opus",
+      "codex:gpt-6-astra",
+      "agy:gemini-3.1-pro-high",
+    ],
+    pl: [
+      "claude:opus",
+      "codex:gpt-5.6-sol",
+      "agy:gemini-3.1-pro-high",
+      "claude:sonnet",
+      "codex:gpt-5.6-terra",
+    ],
+    senior: [
+      "claude:sonnet",
+      "codex:gpt-5.6-terra",
+      "agy:gemini-3.1-pro-high",
+      "agy:claude-opus-4-6-thinking",
+    ],
+    junior: [
+      "claude:haiku",
+      "codex:gpt-5.6-luna",
+      "agy:gemini-3.8-flash-medium",
+      "agy:claude-sonnet-4-6",
+    ],
+    intern: [
+      "claude:haiku",
+      "codex:gpt-5.6-luna",
+      "agy:gpt-oss-120b-medium",
+    ],
+  };
+
+  // Parse each role row from the table and compare against EXPECTED.
+  const ROLE_KO = {
+    PM: "pm",
+    PL: "pl",
+    Senior: "senior",
+    Junior: "junior",
+    Intern: "intern",
+  };
+  for (const [line] of table.matchAll(/^\| ([A-Za-z]+) \|([^|]+)\|$/gm)) {
+    const roleKo = line.match(/^\| ([A-Za-z]+) \|/)?.[1];
+    const role = ROLE_KO[roleKo];
+    if (!role) continue;
+    const rowValues = [
+      ...line.matchAll(/`([a-z]+:[a-z0-9._-]+)`/g),
+    ].map((m) => m[1]);
+    assert.deepEqual(
+      rowValues,
+      EXPECTED[role],
+      `form table row for ${role} does not match brief`,
+    );
+  }
+
+  // All offered values must be parseable by parseModelChoice.
+  const allOffered = Object.values(EXPECTED).flat();
+  for (const choice of allOffered) {
+    assert.doesNotThrow(() => parseModelChoice(choice), choice);
+  }
+
+  // Gemini checks: agy:gemini-3.1-pro-high and agy:gemini-3.8-flash-medium offered,
+  // but NOT agy:gemini-3.8-flash-high (wrong effort level in table).
+  assert.ok(allOffered.includes("agy:gemini-3.1-pro-high"));
+  assert.ok(allOffered.includes("agy:gemini-3.8-flash-medium"));
+  assert.ok(!allOffered.includes("agy:gemini-3.8-flash-high"));
+
+  // Gemini effort rules must remain documented.
   const form = readSkill("form");
   assert.match(form, /requires --effort/);
   assert.match(form, /결성 보고에 반드시 적고/);
-  for (const choice of offered) {
-    assert.doesNotThrow(() => parseModelChoice(choice), choice);
+
+  // Verify that org-draft accepts each value and role-command builds correct argv.
+  // Each choice drives: provider CLI + permission-bypass flag + --model <model>.
+  // For agy Gemini IDs the model string already encodes the effort suffix.
+  const BYPASS = {
+    claude: "--dangerously-skip-permissions",
+    codex: "--dangerously-bypass-approvals-and-sandbox",
+    agy: "--dangerously-skip-permissions",
+  };
+  for (const [role, choices] of Object.entries(EXPECTED)) {
+    for (const choice of choices) {
+      const { provider, model } = parseModelChoice(choice);
+      // Build a minimal 5-role org using this choice for the target role,
+      // filling the other four slots with a compatible placeholder.
+      const PLACEHOLDERS = {
+        pm: "claude:fable",
+        pl: "claude:opus",
+        senior: "claude:sonnet",
+        junior: "claude:haiku",
+        intern: "agy:gpt-oss-120b-medium",
+      };
+      const slots = ["pm", "pl", "senior", "junior", "intern"].map((r) =>
+        r === role ? choice : PLACEHOLDERS[r],
+      );
+      const org = draftOrganization({ name: "test", models: slots });
+      const cmd = roleCommand(org, role);
+      // argv[0] is the bare CLI name.
+      assert.equal(cmd.argv[0], provider, `${choice}: expected provider ${provider}`);
+      // argv[1] is always the permission bypass flag.
+      assert.equal(
+        cmd.argv[1],
+        BYPASS[provider],
+        `${choice}: expected bypass flag`,
+      );
+      if (model !== null) {
+        const modelIdx = cmd.argv.indexOf("--model");
+        assert.ok(modelIdx !== -1, `${choice}: --model flag missing`);
+        assert.equal(
+          cmd.argv[modelIdx + 1],
+          model,
+          `${choice}: expected --model ${model}`,
+        );
+      }
+    }
   }
 });
 

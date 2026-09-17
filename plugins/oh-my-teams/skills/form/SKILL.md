@@ -34,7 +34,7 @@ PL은 선택지가 다섯 개다. 구조화된 선택 도구(예: Claude Code `A
 묻기 전에 `claude`, `codex`, `agy`가 설치되어 있는지 확인하고, 확인되지 않은 선택지는 빼고 제시한다. 공급자별 확인 방법은 다음과 같다.
 
 - **Agy**: `agy models` 출력에 해당 ID가 있는지 확인한다. 이 배포에서 확인한 ID는 `gemini-3.1-pro-high`, `gemini-3.8-flash-medium`, `claude-opus-4-6-thinking`, `claude-sonnet-4-6`, `gpt-oss-120b-medium`이다.
-- **Codex**: `host-defaults` 출력의 `codex.listed`에 해당 ID가 있는지 확인한다. 이 배포에서 확인한 ID는 `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`이다.
+- **Codex**: `host-defaults` 출력의 `codex.listed`에 해당 ID가 있는지 확인한다. 카탈로그는 계정과 CLI 버전에 따라 달라지므로 ID 목록은 이 문서에 적어 두지 않는다.
 - **Claude 별칭**: 설치된 `claude --help`의 `--model` 설명에서 예시로 드는 별칭(예: `fable`, `opus`, `sonnet`)으로 확인한다. `haiku` 별칭은 `claude --help`의 `--model` 설명에서 예시로 언급되지 않으며, 이 환경에서는 공개된 확인 수단으로 확인하지 못했다. 확인되지 않은 별칭은 추측으로 제시하지 않는다. 단, 표에 포함된 선택지는 선언 세션이 별도로 확인하므로 그 결과를 따른다.
 
 ### 호스트 기본값과 자유 입력 안내
