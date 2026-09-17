@@ -840,9 +840,8 @@ test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
 test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", async () => {
   // finding: codex-trust-unknown — role-terminal.mjs가 Codex 신뢰 기록을 unknown으로 넘기던 버그 수정 검증.
   // 설정 내용을 주입해 true·false·unknown 세 경우를 결정적으로 확인한다.
-  const { readLaunchEnvironment: readEnv } = await import(
-    "../plugins/oh-my-teams/scripts/role-terminal.mjs"
-  );
+  const { readLaunchEnvironment: readEnv } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
   const tmpDir = await import("node:os").then((m) => m.tmpdir());
   const fsM = await import("node:fs");
   const pathM = await import("node:path");
@@ -858,14 +857,13 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
   const fakeGitCommonDir = fakeRepoRoot + "/.git";
 
   // fakeExecute: git rev-parse는 fakeGitCommonDir 반환, 나머지는 실패
-  const makeExecute = () =>
-    async (argv) => {
-      if (argv[0] === "git" && argv.includes("--git-common-dir")) {
-        return { code: 0, stdout: fakeGitCommonDir + "\n" };
-      }
-      // orca --version, agy --version → code:1 (unknown 유지)
-      return { code: 1, stdout: "", stderr: "skip" };
-    };
+  const makeExecute = () => async (argv) => {
+    if (argv[0] === "git" && argv.includes("--git-common-dir")) {
+      return { code: 0, stdout: fakeGitCommonDir + "\n" };
+    }
+    // orca --version, agy --version → code:1 (unknown 유지)
+    return { code: 1, stdout: "", stderr: "skip" };
+  };
 
   // 케이스 1: trust_level = "trusted" → codexTrustRecordExists = true
   fsM.writeFileSync(
@@ -895,11 +893,7 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
     codexHome: codexDir,
     execute: makeExecute(),
   });
-  assert.equal(
-    envFalse.codexTrustRecordExists,
-    false,
-    "경로 불일치 → false",
-  );
+  assert.equal(envFalse.codexTrustRecordExists, false, "경로 불일치 → false");
 
   // 케이스 3: 설정 파일 없음 → unknown
   fsM.unlinkSync(codexConfig);
@@ -915,24 +909,54 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
     "설정 파일 없음 → unknown",
   );
 
-  // 케이스 추가: trust_level = "trusted" + 경로 대소문자/구분자 정규화
+  // 케이스 추가: 큰따옴표 키에 TOML 이스케이프(\\ → \) — 실제 config.toml 형식
   fsM.mkdirSync(codexDir, { recursive: true });
-  // Windows 경로를 백슬래시로 저장해도 정규화 후 일치
-  const backslashPath = fakeRepoRoot.replace(/\//g, "\\");
+  // 실제 config.toml: [projects."C:\Users\me\repo"] — \\ 두 글자가 실제 백슬래시 하나
+  const escapedKey = "C:\\\\Users\\\\me\\\\repo"; // JS 문자열로 \\ 두 글자씩
+  const repoRootForEscape = "C:/Users/me/repo";
+  // git rev-parse 응답도 이 루트에 맞춰 재정의
+  const makeExecuteForRepo = (root) => async (argv) => {
+    if (argv[0] === "git" && argv.includes("--git-common-dir")) {
+      return { code: 0, stdout: root + "/.git\n" };
+    }
+    return { code: 1, stdout: "", stderr: "skip" };
+  };
   fsM.writeFileSync(
     codexConfig,
-    `[projects."${backslashPath}"]\ntrust_level = "trusted"\n`,
+    // 파일 내용: [projects."C:\\Users\\me\\repo"]\ntrust_level = "trusted"\n
+    // TOML 기본 문자열에서 \\ 두 글자 = 백슬래시 하나
+    `[projects."${escapedKey}"]\ntrust_level = "trusted"\n`,
   );
-  const envNorm = await readEnv({
-    worktreePath: fakeRepoRoot + "/some-worktree",
+  const envDoubleQuoteEscape = await readEnv({
+    worktreePath: repoRootForEscape + "/wt",
     homedir: tmpBase,
     codexHome: codexDir,
-    execute: makeExecute(),
+    execute: makeExecuteForRepo(repoRootForEscape),
   });
   assert.equal(
-    envNorm.codexTrustRecordExists,
+    envDoubleQuoteEscape.codexTrustRecordExists,
     true,
-    "백슬래시 경로 정규화 후 true",
+    `큰따옴표 TOML 이스케이프(\\\\ → \\) 해제 후 true`,
+  );
+
+  // 케이스 추가: 작은따옴표(리터럴) 키 — 이스케이프 없음
+  // [projects.'c:\users\me\repo'] — 백슬래시 그대로
+  const singleQuoteRepoRoot = "c:/users/me/repo2";
+  const singleQuoteLiteralKey = "c:\\users\\me\\repo2"; // \ 한 글자
+  fsM.writeFileSync(
+    codexConfig,
+    `[projects.'${singleQuoteLiteralKey}']\ntrust_level = "trusted"\n`,
+  );
+  const envSingleQuote = await readEnv({
+    worktreePath: singleQuoteRepoRoot + "/wt",
+    homedir: tmpBase,
+    codexHome: codexDir,
+    execute: makeExecuteForRepo(singleQuoteRepoRoot),
+  });
+  assert.equal(
+    envSingleQuote.codexTrustRecordExists,
+    true,
+    "작은따옴표 리터럴 키(이스케이프 없음) → true",
   );
 
   // 정리

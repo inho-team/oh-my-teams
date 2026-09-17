@@ -157,28 +157,41 @@ export async function readLaunchEnvironment({
 
         try {
           const tomlText = fs.readFileSync(codexConfigFile, "utf8");
-          // [projects."<경로>"] 섹션에서 trust_level = "trusted" 검출
-          // TOML 섹션 헤더 패턴: [projects."경로"] 또는 [projects.'경로']
-          const sectionRe =
-            /^\s*\[projects\.['"](.*?)['"]\]\s*$/gim;
-          let match;
+          // [projects."<경로>"] 또는 [projects.'<경로>'] 섹션에서 trust_level 검출.
+          // 큰따옴표 키: TOML 기본 문자열 → \\ → \, \" → " 풀기.
+          // 작은따옴표 키: TOML 리터럴 문자열 → 이스케이프 없이 그대로 사용.
+          const sectionReDouble =
+            /^\s*\[projects\."((?:[^"\\]|\\.)*)"\]\s*$/gim;
+          const sectionReSingle = /^\s*\[projects\.'([^']*)'\]\s*$/gim;
+
+          /** TOML 기본 문자열(큰따옴표) 이스케이프 해제 */
+          const unescapeTomlBasic = (s) => s.replace(/\\(["\\])/g, "$1");
+
           let found = false;
-          while ((match = sectionRe.exec(tomlText)) !== null) {
-            const sectionPath = normPath(match[1]);
-            if (sectionPath !== normalizedRoot) continue;
-            // 이 섹션부터 다음 섹션([...]) 또는 파일 끝까지 검색
-            const afterSection = tomlText.slice(
-              match.index + match[0].length,
-            );
-            const nextSection = afterSection.search(/^\s*\[/m);
-            const body =
-              nextSection === -1
-                ? afterSection
-                : afterSection.slice(0, nextSection);
-            if (/^\s*trust_level\s*=\s*["']trusted["']\s*$/im.test(body)) {
-              found = true;
+          for (const [re, unescape] of [
+            [sectionReDouble, unescapeTomlBasic],
+            [sectionReSingle, (s) => s],
+          ]) {
+            let match;
+            re.lastIndex = 0;
+            while ((match = re.exec(tomlText)) !== null) {
+              const sectionPath = normPath(unescape(match[1]));
+              if (sectionPath !== normalizedRoot) continue;
+              // 이 섹션부터 다음 섹션([...]) 또는 파일 끝까지 검색
+              const afterSection = tomlText.slice(
+                match.index + match[0].length,
+              );
+              const nextSection = afterSection.search(/^\s*\[/m);
+              const body =
+                nextSection === -1
+                  ? afterSection
+                  : afterSection.slice(0, nextSection);
+              if (/^\s*trust_level\s*=\s*["']trusted["']\s*$/im.test(body)) {
+                found = true;
+              }
+              break;
             }
-            break;
+            if (found) break;
           }
           codexTrustRecordExists = found;
         } catch {
