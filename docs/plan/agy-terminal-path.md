@@ -150,7 +150,7 @@ export function predictLaunchPath(params) {
 
 ### 7. 기존 조건을 대체할 호출 지점 목록
 기존의 하드코딩된 조건들을 표(matrix)를 읽는 로직으로 대체합니다.
-- `plugins/oh-my-teams/scripts/role-terminal.mjs:56`: 폭 조정(narrow) 로직 `isWidthAdjustmentNeeded` 등에서 표의 요구 사항을 읽어 결정.
+- `plugins/oh-my-teams/scripts/role-terminal.mjs:56`: 폭 조정(narrow) 로직에서 Windows의 경우 폭 조정을 **생략**하도록 변경합니다. 이유: `mode con: cols=44`를 `agy` 실행과 함께 묶거나 분리하여 전송하더라도, 전경 프로세스가 `powershell.exe`로 남아 Orca가 에이전트를 식별하지 못하기 때문입니다(`docs/plan/agy-terminal-probes.md` 1절 조합 A, B 참조). 반면 POSIX에서는 터미널 에이전트 식별이 정상 동작하므로 기존처럼 `stty cols 44`를 함께 적용합니다.
 - `plugins/oh-my-teams/scripts/role-terminal.mjs:497-502`: `platform === "win32" && /^gemini/...` 검사 대신 `predictLaunchPath` 결과가 `blocked`인지 확인.
 - `plugins/oh-my-teams/scripts/role-terminal.mjs:315, 420, 521, 543`: `trustQuestion` 로직이 `agent-trust-workspace` 등 매트릭스의 reason 코드와 연계.
 - `plugins/oh-my-teams/scripts/orca-adapter.mjs:484`: `blockedReason`이 매트릭스 예측과 다를 경우 `matrix-mismatch`로 분류.
