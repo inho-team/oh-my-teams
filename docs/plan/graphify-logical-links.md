@@ -16,7 +16,7 @@ graphify는 `.mjs` 파일의 `calls`/`imports` 관계를 모델 없이 AST로 �
 1. A 지점(PL 작업 분할): `affected`로 영향 범위를 측정하면 task `files` 목록과 의존성 DAG를 객관적 근거로 정할 수 있다. 실측에서 `draftOrganization`에 대해 깊이 2에서 15개 노드를 추출했으며, 직접 import 파일은 grep 결과와 일치하고 affected가 2단계 간접 의존자를 추가로 포함했다. 단, 그래프를 커밋 단위로 갱신하는 운영 절차가 먼저 정립되어야 한다. → **보류**
 2. B 지점(Senior 검토·불필요한 변경 규율): `affected`로 변경 함수의 호출자를 확인하고 `explain`으로 기존 helper를 찾을 수 있다. A 지점의 운영 절차가 해결되면 즉시 적용 가능하다. → **보류**
 3. C 지점(병렬 킥오프·PR 충돌): `prs --conflicts`는 `gh` CLI 인증이 필요하다. 대체 검증(최근 PR 변경 파일과 커뮤니티 대응)에서 PR #51(ollama)의 변경 파일이 커뮤니티 5로 집중되고 PR #54의 변경 파일이 커뮤니티 18과 겹치지 않음을 확인했다. 그래프 커뮤니티 기반 분석은 작동하나, GitHub API 없이는 자동화하기 어렵다. → **보류**
-4. D 지점(OMT 문서 논리 연결): `.md` 파일의 마크다운 링크 관계 추출은 모델(LLM API)을 요구한다. `--code-only`로 우회하면 `.md` 파일 자체가 제외된다. 브리프의 금지 사항(문서 LLM 의미 분석 Pass 3 실행 금지)과 충돌하므로 현 조건에서 실행할 수 없다. → **기각**
+4. D 지점(OMT 문서 논리 연결): `extract_markdown` 함수는 정규식 기반이며 모델 없이 references 엣지를 추출하지만, CLI의 `graphify extract`는 문서 파일에 API 키를 요구하고 `--code-only`는 `.md`를 건너뛴다. CLI만으로는 마크다운 관계를 `graph.json`에 넣을 수 없어 현재 조건에서 운용하기 어렵다. → **기각**
 
 ## 2. 실측 결과 요약
 
@@ -132,15 +132,38 @@ Depth: 2
 
 grep 대조(`grep -rn "import.*work.*from.*worker"`): `work`를 직접 import하는 파일은 `harness-smoke.mjs`, `lock-recovery-and-release.test.mjs`, `provider-adapters.test.mjs`, `run-depth.test.mjs`, `runtime.test.mjs`, `silent-wrong-results.test.mjs`, `workflow-safety.test.mjs`, `teams-org.mjs` 8개다. graphify affected에는 여기에 더해 `skill-instructions.test.mjs`, `orca-org.mjs`, 그리고 `imports_from` 경유 7개 테스트가 추가로 포함된다. 직접 import 파일은 일치하며, `imports_from` 경유 노드는 2단계 역의존자다.
 
-### 2.5 마크다운 링크 관계 추출 시도
+### 2.5 마크다운 링크 관계 추출
 
+**CLI 경로 (실패):**
 ```
 명령: graphify extract plugins/oh-my-teams --no-viz --out <tmpdir>
 결과: error: no LLM API key found
       (20 doc/paper/image file(s) need semantic extraction)
 ```
 
-`.md` 파일의 마크다운 링크(`[text](./other.md)`) 관계는 graphify의 문서 처리 단계(Pass 3)를 통해 `references` 엣지로 추출된다. 그러나 이 단계는 LLM API 키가 없으면 실행되지 않는다. `--code-only`로 우회하면 `.md` 파일 자체가 코드 추출 대상에서 제외된다. → **모델 필요**
+CLI의 `graphify extract`는 문서 파일(`.md`)에 LLM API 키를 요구한다. `--code-only`를 사용하면 `.md` 파일 자체가 건너뛰어진다(실측: 48개 문서 파일 스킵). CLI만으로는 마크다운 `references` 관계를 `graph.json`에 넣을 수 없다.
+
+**직접 API 호출 실측:**
+
+`graphify/extractors/markdown.py`의 `extract_markdown(path: Path) -> dict`는 정규식 기반이며 LLM을 호출하지 않는다(`No tree-sitter dependency — pure line-by-line parsing.` L340). 이를 직접 호출해 검증했다.
+
+```python
+# md_test.py — sys.path에 소스 사본(커밋 26b02b5) 경로를 삽입해 import
+# (설치된 graphifyy 0.9.63이 아니라 소스 사본의 결과)
+sys.path.insert(0, '<graphify 소스 사본 경로>')
+from graphify.extractors.markdown import extract_markdown
+
+# plugins/oh-my-teams/skills/**/SKILL.md + references/*.md 20개 파일 처리
+FILES_SCANNED: 20
+TOTAL_REF_EDGES: 43
+  skills/adjust/SKILL.md: 2 refs
+  skills/close/SKILL.md: 4 refs
+  skills/kickoff/SKILL.md: 5 refs
+  skills/pm/SKILL.md: 5 refs
+  ... (12개 SKILL.md에서 총 참조 엣지 추출)
+```
+
+모델 없이 20개 파일에서 43개 `references` 엣지가 추출되었다. 단, 노드 ID가 절대 경로 기반(`c_users_kjsun_orca_workspaces_...`)으로 생성되어, 이 ID는 CLI가 생성하는 `graph.json`의 노드 ID와 병합하려면 추가 정규화 작업이 필요하다. 또한 소스 사본(26b02b5)과 설치본(0.9.63)의 동일 여부는 미확인이다.
 
 ### 2.6 `prs --conflicts` 실행 결과
 
@@ -216,19 +239,15 @@ PR #51의 `providers/ollama.mjs`가 커뮤니티 5에 속하고 주요 런타임
 
 ### D. OMT 문서 논리 연결: **기각**
 
-**판정 근거:** `plugins/oh-my-teams/skills/**/SKILL.md`와 `references/*.md` 사이 마크다운 링크 관계 추출을 시도했다.
+**판정 근거:** `plugins/oh-my-teams/skills/**/SKILL.md`와 `references/*.md` 사이 마크다운 링크 관계 추출을 CLI와 직접 API 호출 두 방법으로 시도했다.
 
-```
-명령: graphify extract plugins/oh-my-teams --out <tmpdir>
-결과: error: no LLM API key found
-      (20 doc/paper/image file(s) need semantic extraction)
-```
+graphify 소스(`extractors/markdown.py`)의 `extract_markdown(path: Path) -> dict`는 정규식 기반이며 LLM을 호출하지 않는다. 직접 호출 실측에서 20개 파일로부터 43개 `references` 엣지를 모델 없이 추출했다(2.5절 참조). 즉 **마크다운 링크 추출 자체에 모델이 필요한 것은 아니다**.
 
-README는 마크다운 `[text](./other.md)` 링크가 `references` 엣지가 된다고 설명하지만(`detect.py` `DOC_EXTENSIONS` L45), 이 처리는 문서 의미 분석 단계(Pass 3)로 LLM API 키 없이는 실행되지 않는다. `--code-only`로 우회하면 `.md` 파일 자체가 제외된다(실측: 48개 문서 파일 스킵).
+CLI 경로의 제약: `graphify extract`는 문서 파일을 Pass 3(LLM 의미 분석)으로 처리하며 API 키 없이는 실행되지 않는다. `--code-only`로 우회하면 `.md` 파일이 건너뛰어진다. CLI만으로는 마크다운 `references` 관계를 `graph.json`에 넣을 수 없다.
 
-그래프 없이 grep으로 마크다운 링크를 분석한 결과, 스킬 파일들은 `../../references/orca-runtime.md`, `../../references/assist.md` 등을 반복적으로 참조하고 있어 참조 구조 자체는 파악 가능하지만, graphify를 통한 자동화에는 모델이 필요하다.
+직접 API 호출의 한계: 생성된 노드 ID가 절대 경로 기반이라 CLI가 만든 코드 그래프의 노드 ID와 병합하려면 별도 정규화 작업이 필요하다. 또한 측정에 사용한 `extract_markdown`은 설치된 graphifyy 0.9.63이 아니라 소스 사본(커밋 26b02b5)에서 직접 import한 것이므로, 설치본과 동일한지 확인되지 않았다.
 
-**기각 이유:** 브리프의 금지 사항(문서 LLM 의미 분석 Pass 3 실행 금지, API 키가 필요한 기능 금지)과 충돌한다.
+**기각 이유:** CLI 경로가 막혀 있어 `graph.json`에 마크다운 관계를 통합하는 표준 경로가 없다. 직접 API 호출 경로는 노드 ID 정규화 문제를 해결해야 하고, 코드 그래프와 통합하는 별도 스크립트 작성이 필요하다. 이 추가 작업의 범위가 현 브리프 범위를 벗어난다.
 
 ## 4. 운영 위험
 
@@ -281,9 +300,9 @@ graphify 미설치 환경 대체 동작: 각 브랜치의 변경 예정 파일�
 
 ## 6. 미확인 항목
 
-- 설치된 graphifyy 0.9.63과 소스 사본(커밋 26b02b5)의 PyPI 버전이 같은지 직접 대조하지 않았다.
+- 설치된 graphifyy 0.9.63과 소스 사본(커밋 26b02b5)의 PyPI 버전이 같은지 직접 대조하지 않았다(`extract_markdown` 실측은 소스 사본 기준).
 - `.graphify_analysis.json`에 그래프를 생성한 커밋 SHA가 포함되는지 확인하지 않았다.
-- `prs --conflicts`: `gh` CLI 인증 필요로 실행하지 못했다.
-- D 지점 마크다운 링크 관계 추출: 모델 필요로 실행하지 못했다.
+- `prs --conflicts`: graphify 실행 시 gh 인증 오류 발생, 실행하지 못했다(원인 미확인).
+- D 지점 마크다운 링크 추출: `extract_markdown` 직접 호출로 43개 엣지 추출 성공(모델 불필요). 단 노드 ID 정규화와 코드 그래프 통합 방법은 미확인.
 - graphify strict 모드가 OMT worker와 실제로 충돌하는지 실험하지 않았다(금지 사항).
 - worktree별 `graphify-out` 경로 규칙의 실제 운영 절차는 정립되지 않았다.
