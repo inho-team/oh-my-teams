@@ -7,9 +7,9 @@ description: 성공한 oh my teams kickoff를 검증하고 허가된 PR/MR 생�
 
 성공한 kickoff의 전달과 정리를 담당한다. 활성 kickoff가 없으면 삭제나 병합을 추측해서 수행하지 않는다.
 
-병합은 두 종류로 나뉜다. kickoff의 워크트리끼리 합치는 병합(worker 브랜치를 통합 워크트리나 coordinator에 합치는 일)은 팀 내부 작업이므로 PM·PL이 게이트를 통과시킨 뒤 별도 허가 없이 수행한다. 반면 **주인 체크아웃**, 즉 kickoff를 선언한 원본 프로젝트의 브랜치로 결과를 넣는 병합은 이 절차에서 선언 세션만 수행한다. 사용자가 브리프에서 확정한 전달 방식이 그 허가이며, 등록 항목의 `delivery`에 기록되어 있다. 런타임은 kickoff가 진행 중인 주인 체크아웃에서 `merge-check`를 실행하거나 역할을 띄우는 요청을 거부하므로, 워커의 커밋이 주인 브랜치로 바로 들어가지 않는다.
+병합은 두 종류로 나뉜다. kickoff의 워크트리끼리 합치는 병합(worker 브랜치를 통합 워크트리나 PM 워크트리에 합치는 일)은 팀 내부 작업이므로 PM·PL이 게이트를 통과시킨 뒤 별도 허가 없이 수행한다. 반면 **주인 체크아웃**, 즉 kickoff를 선언한 원본 프로젝트의 브랜치로 결과를 넣는 병합은 이 절차에서 선언 세션만 수행한다. 사용자가 브리프에서 확정한 전달 방식이 그 허가이며, 등록 항목의 `delivery`에 기록되어 있다. 런타임은 kickoff가 진행 중인 주인 체크아웃에서 `merge-check`를 실행하거나 역할을 띄우는 요청을 거부하므로, 워커의 커밋이 주인 브랜치로 바로 들어가지 않는다.
 
-종료할 kickoff의 coordinator 워크트리 ID로 `kickoff-show --worktree <coordinator-id>`를 먼저 조회한다. kickoff가 여럿이면 사용자가 지목한 것만 종료한다. 기록된 `coordinator.stateDir`이 아래 명령의 `<shared-state>`이고, 회수 대상은 기록된 coordinator 워크트리와 그 아래의 자식 워크트리다. 이 절차는 coordinator 세션이 아니라 kickoff를 선언한 세션에서 수행한다. 자기가 서 있는 워크트리는 스스로 제거할 수 없기 때문이다. 등록 항목의 형식은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
+종료할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회한다. kickoff가 여럿이면 사용자가 지목한 것만 종료한다. 기록된 `pm.stateDir`이 아래 명령의 `<shared-state>`이고, 회수 대상은 기록된 PM 워크트리와 그 아래의 자식 워크트리다. 이 절차는 PM 세션이 아니라 kickoff를 선언한 세션에서 수행한다. 자기가 서 있는 워크트리는 스스로 제거할 수 없기 때문이다. 등록 항목의 형식은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
 1. 원래 Goal의 모든 수용 기준, 필수 검토, 최신 HEAD의 검사와 미해결 사항을 확인한다.
 2. 눈으로 확인하지 말고 게이트를 실행한다. `merge-check`는 필수 검토와 PM 수용이 source·task hash에 연결되기 전에는 병합을 거부하며, 비정상 종료는 병합 중단 조건이다.
@@ -28,7 +28,7 @@ node <runtime> workflow-status --id <workflow> --state <shared-state>
    - `delivery`가 없는 항목은 이 기록을 도입하기 전에 등록된 kickoff다. 전달 방식을 추측하지 않고 사용자에게 확인한다.
 
 ```text
-node <runtime> deliver --org <project>/.omt/organization.json --worktree <coordinator-id> --source <integration-worktree> --head <verified-head> --evidence <evidence.json> --task <integration-task.json> --report <report.json> --state <shared-state>
+node <runtime> deliver --org <project>/.omt/organization.json --worktree <pm-worktree-id> --source <integration-worktree> --head <verified-head> --evidence <evidence.json> --task <integration-task.json> --report <report.json> --state <shared-state>
 ```
 
 4. PR/MR 생성, 병합 또는 push를 할 수 없는 환경이면 수행한 것으로 표현하지 않고 정확한 제약과 필요한 후속 작업을 알린다.
@@ -39,7 +39,7 @@ node <runtime> deliver --org <project>/.omt/organization.json --worktree <coordi
 9. 마지막으로 이 kickoff의 등록 항목을 해제한다. `delivery.mode`가 `local-merge`인데 `deliver`가 병합을 기록하지 않았으면 `--reason completed`는 거부된다. 브리프가 요구한 전달 없이 완료로 닫으려면 사용자의 결정을 받은 뒤에만 `--force`를 붙이고, 전달하지 않은 사실을 보고에 적는다. 이 단계를 건너뛰면 `status`가 끝난 kickoff를 계속 진행 중으로 보여 주고, 그 워크트리에서 새 kickoff를 등록할 수 없다. 사용자에게 넘긴 정리 항목이 남아 있어도 Goal을 완료 처리했으면 항목은 해제하고, 남은 항목을 보고에 함께 적는다.
 
 ```text
-node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <coordinator-id> --reason completed
+node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <pm-worktree-id> --reason completed
 ```
 
 최종 기록에는 Goal 결과, 전달 방식, PR/MR 주소 또는 식별자, 주인 브랜치의 병합 커밋, 검사 근거, 회수·삭제한 워크트리와 보존한 후속 항목을 포함한다. 사용자에게 전달하는 문장은 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)의 기준을 따른다.

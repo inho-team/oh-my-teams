@@ -327,7 +327,7 @@ export async function work(
 ) {
   validateOrg(org);
   validateTask(task);
-  assert(stateDir, "Shared coordinator state directory required");
+  assert(stateDir, "Shared PM state directory required");
   assert(
     Boolean(workflowId) === Boolean(attemptId),
     "workflowId and attemptId must be supplied together",
@@ -630,7 +630,7 @@ export async function assist(
     ["research", "checklist", "edit"].includes(kind),
     "Assist kind must be research, checklist, or edit",
   );
-  assert(stateDir, "Shared coordinator state directory required");
+  assert(stateDir, "Shared PM state directory required");
 
   if (kind === "edit") {
     return work(repo, org, task, {

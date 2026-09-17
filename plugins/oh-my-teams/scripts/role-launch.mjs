@@ -232,8 +232,8 @@ export function resolveRoleLaunch(
   assert(
     role !== ROOT_ROLE,
     requestedRole === ROOT_ROLE
-      ? "PM is the coordinator; launch it with role-command, not worker-start"
-      : `${foldReason(org, roles, requestedRole)} and its work folds to pm, the coordinator, which does it itself`,
+      ? "PM runs in its own terminal opened with role-command, not worker-start"
+      : `${foldReason(org, roles, requestedRole)} and its work folds to pm, which does it itself`,
   );
   const profileId = org.roles[role].profile;
   const profile = org.profiles[profileId];
@@ -325,7 +325,7 @@ function shellToken(token) {
 /**
  * Builds the interactive CLI command that opens a role with its saved model.
  *
- * `orca worktree create --agent` has no model option, so the PM coordinator is
+ * `orca worktree create --agent` has no model option, so the PM is
  * opened with this command through `role-terminal`. An Agy role is opened the
  * same way before `worker-start --terminal` hands it a task. The command runs
  * tools without approval prompts, since no one can answer them in a role
@@ -418,7 +418,7 @@ const names = (list) =>
  * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
  * @param {string} [run.orgFile] - Organization file the launch read.
  * @param {string} [run.workflowId] - Workflow the task belongs to.
- * @param {string} [run.stateDir] - Coordinator state directory of that workflow.
+ * @param {string} [run.stateDir] - PM worktree state directory of that workflow.
  * @returns {string} Header, charter and task, in that order.
  * @throws {Error} When the role is unknown or the task is empty.
  */

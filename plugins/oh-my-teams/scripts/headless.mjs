@@ -317,7 +317,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
  * Starts a headless worker and its first turn.
  *
  * @param {object} options - Worker definition.
- * @param {string} options.stateDir - Coordinator state directory.
+ * @param {string} options.stateDir - PM worktree state directory.
  * @param {string} options.workerId - Caller-owned id (lowercase, digits, hyphens).
  * @param {string} options.role - Role the worker holds.
  * @param {string} options.profile - Profile id the role resolved to.
@@ -369,7 +369,7 @@ export function startHeadlessWorker({
 /**
  * Reports a headless worker's state from its files.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker to read.
  * @param {object} [options] - `codexHome` for Codex model lookup.
  * @returns {object} Liveness, outcome, marker, session, model verdict, and paths.
@@ -441,7 +441,7 @@ export function headlessStatus(stateDir, workerId, options = {}) {
 /**
  * Waits until a worker's current turn is no longer live, or the wait ends.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker to wait for.
  * @param {number} waitMs - Longest time to wait.
  * @param {object} [options] - `pollMs` and `codexHome`.
@@ -461,7 +461,7 @@ export async function waitHeadless(stateDir, workerId, waitMs, options = {}) {
 /**
  * Answers a worker's question by resuming its session as the next turn.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker whose turn ended.
  * @param {string} text - Answer or follow-up instruction.
  * @param {object} [options] - `timeoutMs` and `codexHome`.
@@ -488,7 +488,7 @@ export function answerHeadless(stateDir, workerId, text, options = {}) {
 /**
  * Requests that a worker's running turn stop.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker to stop.
  * @returns {{requested: boolean, turn: number}} Whether a request was written.
  */
@@ -509,7 +509,7 @@ export function stopHeadless(stateDir, workerId) {
 /**
  * Lists the headless workers recorded in a state directory.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {object} [options] - `codexHome` for Codex model lookup.
  * @returns {object[]} Status of every worker.
  */

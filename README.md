@@ -74,7 +74,7 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 
 ### 여러 kickoff 동시 진행
 
-한 프로젝트에서 kickoff를 몇 개든 동시에 진행할 수 있다. kickoff마다 선언 세션이 coordinator 워크트리를 따로 만들어 넘기고, 그 워크트리 ID로 `.omt/kickoffs/`에 등록한다. `status`는 등록된 kickoff를 모두 보여 주고, `close`와 `disband`는 지목한 kickoff만 종료한다. 한 워크트리에는 kickoff를 하나만 등록할 수 있다. coordinator 세션 하나가 Goal 하나를 소유하고 Run 하나를 바인딩하기 때문이다.
+한 프로젝트에서 kickoff를 몇 개든 동시에 진행할 수 있다. kickoff마다 선언 세션이 PM 워크트리를 따로 만들어 넘기고, 그 워크트리 ID로 `.omt/kickoffs/`에 등록한다. `status`는 등록된 kickoff를 모두 보여 주고, `close`와 `disband`는 지목한 kickoff만 종료한다. 한 워크트리에는 kickoff를 하나만 등록할 수 있다. PM 세션 하나가 Goal 하나를 소유하고 Run 하나를 바인딩하기 때문이다.
 
 워크트리가 나뉘어 파일 충돌은 없지만 구독 할당량은 나뉘지 않는다. 역할별 동시 인원과 호출 예산은 kickoff마다 따로 계산되므로, 같은 구독을 쓰는 kickoff가 둘이면 조직 파일에 적은 동시 인원의 두 배까지 워커가 함께 돌 수 있다. 필요하면 각 kickoff의 실행 깊이를 낮추거나 `adjust`로 동시 인원을 줄인다.
 
@@ -132,9 +132,9 @@ node plugins/oh-my-teams/scripts/teams-org.mjs validate --org plugins/oh-my-team
 node plugins/oh-my-teams/scripts/teams-org.mjs show --org plugins/oh-my-teams/examples/organization.json
 node plugins/oh-my-teams/scripts/teams-org.mjs assist --org .omt/organization.json --task <task.json> --repo <worktree> --state .omt --role junior --kind research
 node plugins/oh-my-teams/scripts/teams-org.mjs preset --org <project>/.omt/organization.json --name balanced --revision <revision>
-node plugins/oh-my-teams/scripts/teams-org.mjs gate-check --task <task-v2.json> --report <report.json> --repo <worktree> --state <coordinator>/.omt
-node plugins/oh-my-teams/scripts/teams-org.mjs workflow-status --id <workflow-id> --state <coordinator>/.omt
-node plugins/oh-my-teams/scripts/teams-org.mjs incident-status --state <coordinator>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs gate-check --task <task-v2.json> --report <report.json> --repo <worktree> --state <pm-worktree>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs workflow-status --id <workflow-id> --state <pm-worktree>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs incident-status --state <pm-worktree>/.omt
 node --test tests/runtime.test.mjs
 npm run eval:organization
 node experiments/run-routing.mjs --mode e1 --max-calls 18 --dry-run
@@ -145,9 +145,9 @@ npm run lint
 
 버전과 감사 수치처럼 여러 파일이 되풀이하는 값은 `scripts/metadata.mjs`가 정본에서 파생한다. 파일마다 직접 고치지 않고 정본만 바꾼 뒤 `npm run sync`를 실행하며, `npm run sync:check`는 고치지 않고 어긋난 곳만 보고한다. 정본과 따라가는 파일의 대응은 [AGENTS.md](AGENTS.md)에 표로 정리했다.
 
-제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 coordinator state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.
+제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 PM state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.
 
-감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. 래퍼가 역할 프로필에서 Orca agent와 모델·강도를 정하고, 프로필과 다른 `--agent`·`--model`·`--effort`는 거부하며, 결과의 `binding.modelProof`에 요청한 모델이 적용됐는지 남긴다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Orca가 모델을 전달하지 못하는 Agy 역할은 `role-command`로 모델을 담아 연 터미널을 `--terminal`로 넘기고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM coordinator는 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
+감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. 래퍼가 역할 프로필에서 Orca agent와 모델·강도를 정하고, 프로필과 다른 `--agent`·`--model`·`--effort`는 거부하며, 결과의 `binding.modelProof`에 요청한 모델이 적용됐는지 남긴다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Orca가 모델을 전달하지 못하는 Agy 역할은 `role-command`로 모델을 담아 연 터미널을 `--terminal`로 넘기고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
 
 `assist`는 조직의 `assistants.<role>` 허용 목록에서 GPT-OSS-120B 프로필을 선택한다. `research`와 `checklist`는 파일을 수정하지 않고 검증된 인용과 감사 기록을 남긴다. `edit`는 호출자의 기본 모델을 바꾸지 않은 채 GPT-OSS를 한 번 호출하고, 기존 `work`와 동일한 파일 해시·허용 범위·검사·보고 관문을 적용한다. 비서 결과의 판단과 통합 책임은 호출한 역할에 남는다.
 

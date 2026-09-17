@@ -212,7 +212,7 @@ test("a missing environment reference fails as configuration, not as budget", as
 test("one uncontainable tracked entry does not abort evidence collection", async (t) => {
   const dir = await repo(t);
 
-  // Coordinator state spelled with different case is the reachable form of this
+  // PM state spelled with different case is the reachable form of this
   // hazard: the exclusion filter matched only ".omt/", so ".OMT/state.json" was
   // handed to inside(), rejected as a forbidden segment, and took verify,
   // gateCheck and validateEvidence down with it.
@@ -246,7 +246,7 @@ test("one uncontainable tracked entry does not abort evidence collection", async
   assert.equal(evidence.status, "passed");
   assert.ok(evidence.fingerprint.tree);
 
-  // Coordinator state is never part of the source fingerprint, so rewriting it
+  // PM state is never part of the source fingerprint, so rewriting it
   // must not invalidate evidence that is otherwise unchanged.
   fs.writeFileSync(path.join(dir, ".OMT", "state.json"), '{"changed":true}\n');
   assert.equal((await verify(dir, options)).cached, true);

@@ -217,7 +217,7 @@ function createInitialState(request, org, tasks) {
 /**
  * Creates an immutable workflow snapshot and append-only creation event.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {object} request - Valid workflow request.
  * @param {object} org - Organization snapshot.
  * @param {string} [baseDir=process.cwd()] - Base for repo/task relative paths.
@@ -296,7 +296,7 @@ export async function createWorkflow(
 /**
  * Reads workflow state, frozen tasks, and organization without mutation.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @returns {object} Complete durable workflow snapshot.
  * @throws {Error} When the workflow or a referenced revision is unavailable.
@@ -591,7 +591,7 @@ function acceptWithoutIntegration(stateDir, id, expectedRevision) {
  * A workflow whose integration is not required closes once every task is
  * accepted, and needs no checkout or integration report.
  *
- * @param {string} stateDir - Coordinator store.
+ * @param {string} stateDir - PM worktree store.
  * @param {string} id - Workflow identifier.
  * @param {number} expectedRevision - Revision observed before verification.
  * @param {string} [repo] - Final integration checkout, when integration is required.
@@ -678,11 +678,11 @@ export async function acceptWorkflowIntegration(
  * A running attempt without an authoritative observation yields
  * `reconcile-required`; it is never silently restarted.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} [observations={}] - External states keyed by attempt ID.
- * @returns {{state: object, actions: object[]}} New state and coordinator actions.
+ * @returns {{state: object, actions: object[]}} New state and PM actions.
  * @throws {Error} For stale revisions, mismatched receipts, or exceeded budgets.
  */
 export function resumeWorkflow(
@@ -757,7 +757,7 @@ function validateExecutionInput(input, reserveOnly = false) {
 /**
  * Attaches an actual Orca execution receipt to one ready workflow task.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} input - Event, attempt, task, and Orca receipt.
@@ -770,7 +770,7 @@ export function attachExecution(stateDir, id, expectedRevision, input) {
 
 /**
  * Reserves capacity and calls before launching an external worker.
- * @param {string} stateDir - Shared coordinator store.
+ * @param {string} stateDir - Shared PM worktree store.
  * @param {string} id - Workflow identifier.
  * @param {number} expectedRevision - Expected state revision.
  * @param {object} input - Stable event/attempt/task identity and callAllowance.
@@ -983,7 +983,7 @@ function validateSettlementInput(input) {
 /**
  * Records an idempotent settlement without equating it to product acceptance.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} input - Attempt outcome, usage, identity, and failure evidence.
@@ -1067,7 +1067,7 @@ function validateRetryInput(input) {
  * retry does, and returns the reserved calls but never the spent attempt, so a
  * launch loop cannot become free.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow identifier.
  * @param {number} expectedRevision - Revision the caller last read.
  * @param {object} input - Event id, task, attempt, resolution, and evidence.
@@ -1152,7 +1152,7 @@ function validateReworkInput(input) {
  * the work back. The corrected execution then settles, is reviewed and accepted
  * like the first, and its gate advances the task.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} input - Event, task, current attempt, review ID, and the
@@ -1273,7 +1273,7 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
 /**
  * Requeues a routed, resolved failure without erasing attempt or budget history.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {number} expectedRevision - Optimistic state revision.
  * @param {object} input - Resolution owner, evidence, and retry event.
@@ -1378,7 +1378,7 @@ function validateDepthInput(input) {
  * Pending tasks fold again from the role they were written for; tasks that
  * already ran keep the role that ran them.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow identifier.
  * @param {number} expectedRevision - Revision the caller last read.
  * @param {object} input - Event id, target depth, reason and evidence.

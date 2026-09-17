@@ -27,7 +27,7 @@ function recoverTransaction(directory) {
 /**
  * Resolves a workflow's durable state directory.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Valid workflow ID.
  * @returns {string} Workflow directory path.
  */
@@ -42,7 +42,7 @@ export function workflowDirectory(stateDir, id) {
 /**
  * Resolves a workflow's materialized state file.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Valid workflow ID.
  * @returns {string} Workflow state JSON path.
  */
@@ -54,11 +54,11 @@ export function workflowStateFile(stateDir, id) {
  * Executes a synchronous workflow update under its exclusive lock.
  *
  * @template T
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {() => T} callback - Critical state transition.
  * @returns {T} Callback result.
- * @throws {Error} When another coordinator owns the lock or callback fails.
+ * @throws {Error} When another writer (PM or PL) holds the lock or callback fails.
  */
 export function withWorkflowUpdate(stateDir, id, callback) {
   const directory = workflowDirectory(stateDir, id);
@@ -105,7 +105,7 @@ export function appendWorkflowEvent(directory, state, event) {
 /**
  * Atomically persists the materialized state with a fresh update timestamp.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @param {object} state - Mutable workflow state.
  * @returns {void}
@@ -126,7 +126,7 @@ export function saveWorkflowState(stateDir, id, state) {
 /**
  * Reads materialized workflow state, frozen task revisions, and organization.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow ID.
  * @returns {{dir: string, state: object, tasks: object, organization: object}}
  * Complete workflow snapshot.

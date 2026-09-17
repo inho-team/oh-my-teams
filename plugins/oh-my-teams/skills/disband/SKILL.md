@@ -7,7 +7,7 @@ description: 실패·취소·중단된 oh my teams kickoff의 실행 팀을 안�
 
 성공으로 종료할 수 없는 kickoff를 정리한다. 해체는 성공 완료가 아니며 실패를 숨기거나 Goal을 `complete`로 바꾸지 않는다.
 
-해체할 kickoff의 coordinator 워크트리 ID로 `kickoff-show --worktree <coordinator-id>`를 먼저 조회해 `<shared-state>` 경로를 확인한다. kickoff가 여럿이면 사용자가 지목한 것만 해체한다. coordinator 워크트리를 회수하므로 이 절차도 kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
+해체할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회해 `<shared-state>` 경로를 확인한다. kickoff가 여럿이면 사용자가 지목한 것만 해체한다. PM 워크트리를 회수하므로 이 절차도 kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
 1. 해체 사유를 `failed`, `cancelled`, `abandoned` 가운데 하나로 기록하고, 충족한 기준과 미완료 기준을 분리한다.
 2. 새 작업 배정을 중단하고 살아 있는 worker와 프로세스에 취소를 전달한다. 종료가 확인되지 않은 프로세스를 사라진 것으로 간주하지 않는다.
@@ -23,7 +23,7 @@ node <runtime> workflow-release --id <workflow> --state <shared-state> --revisio
 6. 해체 사유와 보존 위치를 기록한 뒤 이 kickoff의 등록 항목을 해제한다. 실패로 끝났더라도 해제해야 `status`가 끝난 kickoff를 진행 중으로 보여 주지 않는다. 다만 종료를 확인하지 못해 봉인만 해 둔 worker가 남아 있으면, 항목을 해제하면서 그 자원의 식별자와 상태를 해체 기록과 사용자 보고에 함께 남긴다.
 
 ```text
-node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <coordinator-id> --reason disbanded
+node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <pm-worktree-id> --reason disbanded
 ```
 
 7. 상설 조직 설정과 과거 실행 기록은 삭제하지 않는다. 사용자가 조직 자체의 폐기를 명시적으로 요청한 경우에도 먼저 보관 위치와 삭제 범위를 제시하고 별도 승인을 받는다.

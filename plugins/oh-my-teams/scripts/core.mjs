@@ -369,7 +369,7 @@ function segment(part) {
  *
  * Both lexical traversal and symlink traversal through the nearest existing
  * ancestor are rejected. `.git`, `.orca`, and `.omt` are always outside edit
- * scope because they contain repository or coordinator-owned state, and the
+ * scope because they contain repository or PM-owned state, and the
  * comparison is made on a normalized segment so that a case-insensitive or
  * trailing-dot spelling cannot reach the same directory.
  *

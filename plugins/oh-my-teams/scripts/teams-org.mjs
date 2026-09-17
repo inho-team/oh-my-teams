@@ -564,12 +564,12 @@ function startHeadlessRole(args) {
     args["workflow-id"] ? args : { ...args, state: undefined },
   );
   const command = roleCommand(org, args.role, run);
-  // roleCommand also serves the PM coordinator's terminal; a worker is never PM.
+  // roleCommand also serves the PM's terminal; a worker is never PM.
   assert(
     command.role !== "pm",
     args.role === "pm"
-      ? "PM is the coordinator; it is not started as a headless worker"
-      : `${args.role} folds to pm, the coordinator, which does its work itself`,
+      ? "PM runs in its own terminal opened with role-command; it is not started as a headless worker"
+      : `${args.role} folds to pm, which does its work itself`,
   );
   assert(
     HEADLESS_PROVIDERS.includes(command.provider),
@@ -1042,7 +1042,7 @@ const BLOCKING_STATUSES = ["failed", "blocked"];
 // Commands do not share one envelope: a worker report carries `status`, the
 // workflow mutations wrap the new state in `{state, ...}`, and the review and
 // acceptance commands report `gateStatus`. Reading only the top-level `status`
-// left a settled failure and a revoked approval exiting 0, so a coordinator
+// left a settled failure and a revoked approval exiting 0, so a calling
 // script saw success. Each known shape is checked explicitly.
 function blockingOutcome(output) {
   if (!output || typeof output !== "object") return false;

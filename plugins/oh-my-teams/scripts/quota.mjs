@@ -17,7 +17,7 @@ export function validateQuotaSnapshot(snapshot) {
   );
   // recordQuotaSnapshot builds a state path from this value, so it must carry
   // the same pool identity the organization declares. A free-form string here
-  // would let "../.." place a snapshot outside the coordinator state.
+  // would let "../.." place a snapshot outside the PM state.
   assert(
     /^[a-z0-9][a-z0-9-]*$/.test(snapshot.poolId),
     `Invalid pool id: ${snapshot.poolId}`,
@@ -152,7 +152,7 @@ export function compareQuotaSnapshots(before, after) {
 /**
  * Writes an immutable quota snapshot under its pool and observation time.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {object} snapshot - Valid quota snapshot.
  * @returns {{file: string, snapshot: object}} Persisted location and value.
  * @throws {Error} When validation fails or the timestamp already exists.
@@ -174,7 +174,7 @@ export function recordQuotaSnapshot(stateDir, snapshot) {
 /**
  * Loads the lexically latest snapshot for every recorded quota pool.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @returns {Record<string, object>} Latest snapshot keyed by pool ID.
  */
 export function latestQuotaSnapshots(stateDir) {

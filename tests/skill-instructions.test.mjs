@@ -293,7 +293,7 @@ test("one rule lives in one place", () => {
   const restatements = [
     [/`live` worker가 0명이면.*표현하지 않는다/, "the liveness verdict"],
     [/--role \w+ --kind research/, "the assist invocation"],
-    [/"coordinator": \{/, "the kickoff registry entry"],
+    [/"pm": \{/, "the kickoff registry entry"],
   ];
   for (const entry of fs.readdirSync(skills)) {
     const file = path.join(skills, entry, "SKILL.md");
@@ -437,15 +437,15 @@ test("the Goal belongs to the session that can bind the Run", () => {
   // worker-start is fenced to the terminal that created the Run, so a session
   // that hands the work to a child worktree and keeps the Goal would own a
   // Goal it can never dispatch for. The declaring session hands over a brief;
-  // the coordinator creates the Goal and binds the Run in the same terminal.
-  assert.match(kickoff, /coordinator 세션이 브리프를 읽고 하나 만들며/);
+  // the PM creates the Goal and binds the Run in the same terminal.
+  assert.match(kickoff, /PM 세션이 브리프를 읽고 하나 만들며/);
   assert.match(kickoff, /worker-start`가 Run에 바인딩된 coordinator 터미널/);
   assert.match(registry, /Goal의 유일한 소유자는 B다/);
 });
 
-test("closing runs where the coordinator worktree can actually be reclaimed", () => {
+test("closing runs where the PM worktree can actually be reclaimed", () => {
   // A worktree cannot remove itself, so close and disband belong to the
-  // declaring session rather than the coordinator that did the work.
+  // declaring session rather than the PM that did the work.
   for (const skill of ["close", "disband"]) {
     assert.match(
       readSkill(skill),
@@ -460,13 +460,13 @@ test("a kickoff is released by its ending, never by a reading", () => {
   const disband = readSkill("disband");
   const status = readSkill("status");
   // An entry left behind shows a finished kickoff as running and blocks its
-  // worktree, and an entry cleared on an unverifiable coordinator would abandon
+  // worktree, and an entry cleared on an unverifiable PM would abandon
   // a run that may still be alive. Both endings release the one kickoff they
   // end; the read-only skill never touches an entry.
   assert.match(close, /kickoff-release .*--reason completed/);
   assert.match(disband, /kickoff-release .*--reason disbanded/);
   for (const skill of [close, disband]) {
-    assert.match(skill, /kickoff-show --worktree <coordinator-id>/);
+    assert.match(skill, /kickoff-show --worktree <pm-worktree-id>/);
     assert.match(skill, /사용자가 지목한 것만/);
   }
   assert.match(status, /등록 항목을 지우거나 고쳐 쓰지 않는다/);
@@ -574,8 +574,8 @@ const readReference = (name) =>
 
 test("roles are launched from their profile, never by hand-typed agent flags", () => {
   // A PL bound to a Codex model ran on the account default because the
-  // coordinator typed `orca orchestration worker-start --agent codex` without
-  // --model, and the PM coordinator was opened by `worktree create --agent`,
+  // PM typed `orca orchestration worker-start --agent codex` without
+  // --model, and the PM was opened by `worktree create --agent`,
   // which has no model option at all.
   const runtime = readReference("orca-runtime.md");
   for (const text of [readSkill("pm"), readSkill("pl"), runtime]) {
@@ -604,7 +604,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   for (const verdict of ["matched", "mismatched", "unproven", "unrequested"]) {
     assert.ok(runtime.includes(`\`${verdict}\``), `modelProof ${verdict}`);
   }
-  assert.match(runtime, /## coordinator 실행/);
+  assert.match(runtime, /## PM 실행/);
   // A hand-typed `terminal create --command` left the command unsubmitted at
   // the prompt, so role terminals open through role-terminal, which reads the
   // screen and submits the command once.
@@ -619,7 +619,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // built for one role is accepted as the role the run folded it onto.
   assert.match(
     runtime,
-    /node <runtime> role-terminal --org <organization\.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <coordinator-state>/,
+    /node <runtime> role-terminal --org <organization\.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>/,
   );
   assert.doesNotMatch(readSkill("pl"), /custom argv/);
   assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
@@ -642,8 +642,8 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
   assert.match(readSkill("pl"), /기본값이 1/);
   assert.match(readSkill("senior"), /- Junior가 이번 실행에 있으면 기능 구현/);
-  assert.match(readSkill("kickoff"), /coordinator 실행/);
-  // A session that could not start the coordinator went on as PM itself.
+  assert.match(readSkill("kickoff"), /`PM 실행` 절/);
+  // A session that could not start the PM went on as PM itself.
   assert.match(readSkill("kickoff"), /선언 세션은 PM을 대신 맡지 않는다/);
   assert.match(readReference("kickoff-registry.md"), /인계에 실패한 것이다/);
   assert.match(

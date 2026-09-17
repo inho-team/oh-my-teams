@@ -62,7 +62,7 @@ async function kickoffProject(
   const worktreeId = `repo::${worktree}`;
   registerKickoff(org, {
     goal: "write the report",
-    coordinator: {
+    pm: {
       worktreeId,
       path: worktree,
       stateDir: path.join(worktree, ".omt"),
@@ -80,7 +80,7 @@ test("a claim records how the brief delivers, and a branch where one is merged",
   assert.deepEqual(entry.delivery, { mode: "local-merge", branch: "main" });
   const claim = (delivery) => ({
     goal: "another goal",
-    coordinator: {
+    pm: {
       worktreeId: "wt-2",
       path: path.join(fixture.project, "..", "wt-2"),
       stateDir: "/tmp/wt-2/.omt",

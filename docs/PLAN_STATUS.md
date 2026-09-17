@@ -18,8 +18,8 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npm test` | 299개 테스트가 모두 통과했다. |
-| `npm run quality` | 활성 `.mjs` 80개와 공개 export 232개를 검사했으며 지적 사항이 없었다. |
+| `npm test` | 302개 테스트가 모두 통과했다. |
+| `npm run quality` | 활성 `.mjs` 80개와 공개 export 233개를 검사했으며 지적 사항이 없었다. |
 | `npm run eval:organization` | 결정적 로컬 시나리오 7개가 모두 통과했다. |
 | `npm run format:check` | Prettier 기준으로 모든 대상 파일이 통과했다. |
 | README의 `validate`·`show` 예제 | 현재 예제 조직으로 정상 실행됐다. |

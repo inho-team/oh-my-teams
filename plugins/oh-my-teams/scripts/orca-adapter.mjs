@@ -487,7 +487,7 @@ export async function checkTerminalIdle(
  * terminal but owns no worker: `worker-list` does not report its liveness,
  * `worker-release` does not reclaim it, and nothing proves the model.
  *
- * @param {string} repo - Coordinator worktree the commands run from.
+ * @param {string} repo - Worktree of the Run-bound coordinator terminal the commands run from.
  * @param {object} options - Task or spec, terminal, run, and runner.
  * @param {string} [options.task] - Existing Orca task to dispatch.
  * @param {string} [options.spec] - Task description when no task is given.

@@ -267,11 +267,11 @@ test("a ready role tab is renamed with its role tag after the agent starts", asy
   const opened = await openRoleTerminal({
     worktree: "id:repo::/work/literacy-site-research-2",
     command,
-    title: "PM coordinator: 문해력 사이트 조사",
+    title: "PM: 문해력 사이트 조사",
     execute: orca.execute,
     ...fast,
   });
-  const title = "[PM] PM coordinator: 문해력 사이트 조사";
+  const title = "[PM] PM: 문해력 사이트 조사";
   assert.equal(orca.calls[0][5], title);
   assert.deepEqual(orca.renames(), [
     ["terminal", "rename", "--terminal", "term_1", "--title", title],
@@ -299,7 +299,7 @@ test("a ready role tab is renamed with its role tag after the agent starts", asy
 });
 
 test("the worktree's unused plain shell is closed, other tabs are not", async () => {
-  // The literacy-test coordinator worktree held the PM tab and an untitled
+  // The literacy-test PM worktree held the PM tab and an untitled
   // shell that `worktree create` opened. Renaming that shell did not last:
   // Orca kept `Terminal 1` for a tab it had not shown.
   const command = roleCommand(example(), "pm");
