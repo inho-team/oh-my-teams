@@ -52,4 +52,24 @@
 | 171행: 신뢰 질문 답변 뒤 버퍼 문구 잔존 문제 | 화면 파싱 시 `lastIndexOf`로 전체 확인하므로, 버퍼 내 남아있으면 차단 | 일치 | `out/main/index.js` 문자열 포함(`workspace`, `folder` 등) 확인부 |
 | 181행: 명령줄에 `--dangerously-skip-permissions` 등 우회 플래그 적용 시 도구 승인 건너뜀 | 소스 상에서 전달된 명령어 기반으로 에이전트가 실행됨 (Orca 단에서 차단하지 않음) | 일치 | (해당 부분은 터미널 래퍼와 Orca 명령 전달 방식에 해당됨) |
 
+### 6. `agentIdentity` 결정 규칙과 `isTerminalRunningAgent`의 차이
+
+번들 코드(`out/shared/pane-agent-identity-adapter.js` 및 `out/main/index.js`) 확인 결과, 두 판정은 서로 다른 목적과 로직을 가집니다.
+
+1. **`agentIdentity` 결정 방식**:
+   - `terminal show` 등에서 표시되는 `agentIdentity`는 여러 출처의 증거(evidence)에 우선순위를 두어 결정됩니다.
+   - **우선순위 (PANE_AGENT_EVIDENCE_SOURCES)**: `live-hook` > `process` (전경 프로세스) > `launch` (Orca 실행 기록) > `completed-hook` > `sleeping-session` > `sibling` > `title` (터미널 제목).
+   - 동순위 증거에서 서로 다른 에이전트를 가리키면 충돌(ambiguous)로 처리되어 `null`이 반환됩니다. 언제든 상위 증거가 변경되면 갱신됩니다.
+2. **`isTerminalRunningAgent`와의 차이**:
+   - `isTerminalRunningAgent`는 에이전트 실행 여부(boolean)를 가리는 liveness 체크로, `isPtyRunning`을 통해 제목, 화면 버퍼, 셸의 전경 자식 프로세스 이름 등을 복합적으로 확인하며, `agentIdentity`와는 완전히 별개의 판정입니다.
+3. **Windows 전경 프로세스 확인 방법**:
+   - `cqe()` 함수에서 `windows-process-tree.node`의 네이티브 모듈(`t.Mi` 및 `t.Ri` 등)을 활용하여 셸(`n.pid`)의 자식 프로세스 트리를 탐색해 말단(활성) 프로세스 이름(예: `agy.exe`)을 알아냅니다. 따라서 셸 아래의 자식 프로세스를 정확히 감지합니다.
+4. **실측 결과 설명 표**:
+
+| 조건 (실측 사례) | `agentIdentity` | 소스 기반 설명 (규칙 적용) |
+|---|---|---|
+| gemini/gpt-oss 모델 (제목 지정) | `antigravity` | 전경 프로세스(`agy.exe` -> `antigravity`) 증거가 우세하여 `antigravity`로 판정됨. |
+| claude-sonnet-4-6 (제목 미지정) | `null` (없음) | 프로세스는 `agy.exe`이나, 화면/명령어에서 `claude` 키워드가 감지(또는 훅 발생)되어 증거 충돌(ambiguous)로 `null`이 되었을 수 있음 (미확인: 실제 어느 증거끼리 충돌했는지 로깅 필요). |
+| `--title` 미지정 시 (gemini) | `null` (없음) | 자동 부여된 `Terminal 1` 등의 제목을 fallback으로 파싱하는 과정에서 기각(rejectTitleFallback)되거나 프로세스 증거가 무효화되었을 수 있음 (미확인: fallback 기각 조건과 프로세스 증거 무효화 조건의 실제 값 확인 필요). |
+
 > **올바른 규칙 수정 필요 사항 (orca-runtime.md 불일치 시)**: 현재 `orca-runtime.md`의 서술은 설치된 소스의 실제 판정 기준(화면 파싱 문자열 기반 대기 및 차단 판독, 셸 프로세스 필터링)과 대체로 일치합니다. 단, Agy 대기 판정이 `gemini`로 시작하는 문자열에 강하게 의존(`startsWith('gemini', o)`)한다는 점이 확인되었으므로, 다른 모델(예: `claude`, `gpt-oss`) 사용 시 폭을 아무리 조정해도 해당 줄이 `gemini`로 시작하지 않기 때문에 무조건 실패할 수밖에 없음이 소스로 증명되었습니다.
