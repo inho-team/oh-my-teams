@@ -556,6 +556,10 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
  * @param {string} options.prompt - Full instruction, protocol included.
  * @param {number} [options.timeoutMs=1800000] - Per-turn time limit.
  * @returns {object} The worker record, the turn it started, and a headless receipt draft.
+ *   The draft's `runId` and `worktreeId` are `null`; the caller must fill them with the
+ *   actual Orca Run ID and the Orca worktree ID (`<repo-id>::<path>`) before passing the
+ *   receipt to `workflow-attach`. Leaving either field null causes `workflow-attach` to
+ *   reject the receipt as incomplete.
  * @throws {Error} When the id is taken or the provider cannot run headless.
  */
 export function startHeadlessWorker({
@@ -594,10 +598,10 @@ export function startHeadlessWorker({
   const receipt = {
     via: "headless-start",
     executionId: workerId,
-    runId: `run_${workerId}`,
+    runId: null,
     taskId: `headless:${workerId}`,
     dispatchId: `headless:${workerId}`,
-    worktreeId: path.resolve(cwd),
+    worktreeId: null,
     runnerPid: launched.runnerPid ?? null,
     modelRequested: model ?? null,
   };

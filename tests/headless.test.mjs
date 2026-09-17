@@ -561,7 +561,7 @@ test("an Agy server error is reported in its own words, and a capacity 503 as a 
   assert.equal(read.rateLimited, true);
   assert.equal(read.usage.inputTokens, 11708);
 });
-test("agy turn.json carries --print-timeout from worker default and per-turn timeoutMs", (t) => {
+test("agy turn.json carries --print-timeout from worker default and per-turn timeoutMs", async (t) => {
   const box = sandbox(t);
   // Worker 기본값: timeoutMs=60000이면 turn.json argv에 --print-timeout 55s가 들어간다.
   startHeadlessWorker({
@@ -594,5 +594,40 @@ test("agy turn.json carries --print-timeout from worker default and per-turn tim
     turnJson1.timeoutMs,
     60000,
     "turn.json timeoutMs matches worker",
+  );
+
+  // 턴별 timeoutMs: headless-answer에 timeoutMs를 넘기면 그 값이 turn.json argv에 반영된다.
+  await waitHeadless(box.state, "pt-default", 15000, { pollMs: 100 });
+  const answered = answerHeadless(box.state, "pt-default", "go ahead", {
+    timeoutMs: 90000,
+  });
+  assert.equal(answered.turn, 2, "answer starts a second turn");
+  const turnJson2 = JSON.parse(
+    fs.readFileSync(
+      path.join(
+        box.state,
+        "headless",
+        "pt-default",
+        "turns",
+        "2",
+        "turn.json",
+      ),
+      "utf8",
+    ),
+  );
+  const ptIdx2 = turnJson2.argv.indexOf("--print-timeout");
+  assert.ok(
+    ptIdx2 !== -1,
+    "per-turn turn.json must contain --print-timeout",
+  );
+  assert.equal(
+    turnJson2.argv[ptIdx2 + 1],
+    "85s",
+    "per-turn timeoutMs=90000 → --print-timeout 85s",
+  );
+  assert.equal(
+    turnJson2.timeoutMs,
+    90000,
+    "turn.json timeoutMs matches per-turn value",
   );
 });
