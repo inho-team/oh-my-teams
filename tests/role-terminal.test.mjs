@@ -663,3 +663,51 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
     "trust refusal must not call orca terminal create",
   );
 });
+test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", async () => {
+  // finding: missing-headless-refusal-test
+  // Agy + win32 + posix shell + 신뢰 있음 + gpt-oss 모델 → 표 규칙 9 headless
+  // headless는 터미널 경로가 아니므로, 터미널 생성 전에 거부해야 한다.
+  const headlessCommand = {
+    role: "senior",
+    profile: "agy-gpt-oss",
+    provider: "agy",
+    argv: ["agy", "--dangerously-skip-permissions", "--model", "gpt-oss-120b"],
+    command: "agy --dangerously-skip-permissions --model gpt-oss-120b",
+    permissionBypass: "--dangerously-skip-permissions",
+    modelRequested: "gpt-oss-120b",
+    effortRequested: null,
+  };
+  const orcaCalls = [];
+  const execute = async (argv) => {
+    orcaCalls.push(argv);
+    return { code: 0, stdout: "{}" };
+  };
+
+  // win32 + posix shell + 신뢰 있음 → rule 2 건너뜀(powershell 아님), rule 9 headless
+  await assert.rejects(
+    openRoleTerminal({
+      worktree: "id:repo::C:/wt",
+      command: headlessCommand,
+      executable: "orca",
+      execute,
+      platform: "win32",
+      shell: "posix",
+      trustRecordExists: true,
+      orcaVersion: "1.4.204",
+      cliVersion: "1.2.5",
+      allowUnverified: false,
+      settleMs: 5,
+      readyMs: 20,
+      pollMs: 1,
+    }),
+    (err) => {
+      assert.match(err.message, /headless/, "headless 거부 메시지 포함");
+      return true;
+    },
+  );
+  assert.equal(
+    orcaCalls.length,
+    0,
+    "headless 예측 거부는 Orca terminal create를 호출하지 않는다",
+  );
+});
