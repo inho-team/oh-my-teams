@@ -420,6 +420,27 @@ function alive(pid) {
   }
 }
 
+/**
+ * Decides a turn's liveness from its runner process and its exit record.
+ *
+ * The runner writes exit.json and only then ends, so the process is observed
+ * before exit.json is read. Read the other way round, a turn that recorded
+ * its exit and ended between the two reads showed neither a record nor a
+ * process, and a cleanly finished worker was reported unverifiable.
+ *
+ * @param {object} reads - How to observe the turn.
+ * @param {() => boolean} reads.runnerAlive - Whether the runner process exists now.
+ * @param {() => object | null} reads.readExit - The exit record, or null.
+ * @returns {{liveness: string, exit: object | null}} `exited`, `live` or
+ *   `unverifiable`, with the exit record when there is one.
+ */
+export function turnLiveness({ runnerAlive, readExit }) {
+  const running = runnerAlive();
+  const exit = readExit();
+  if (exit) return { liveness: "exited", exit };
+  return { liveness: running ? "live" : "unverifiable", exit: null };
+}
+
 function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
   const number = turnDirs(dir).length + 1;
   const turnDir = path.join(dir, "turns", String(number));
@@ -523,7 +544,6 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   const turns = turnDirs(dir);
   const turnDir = turns.at(-1);
   const exitFile = path.join(turnDir, "exit.json");
-  const exit = fs.existsSync(exitFile) ? readJSON(exitFile) : null;
   const runner = fs.existsSync(path.join(turnDir, "runner.json"))
     ? readJSON(path.join(turnDir, "runner.json")).pid
     : null;
@@ -546,10 +566,10 @@ export function headlessStatus(stateDir, workerId, options = {}) {
       ).session;
     }
   }
-  let liveness;
-  if (exit) liveness = "exited";
-  else if (alive(runner)) liveness = "live";
-  else liveness = "unverifiable";
+  const { liveness, exit } = turnLiveness({
+    runnerAlive: () => alive(runner),
+    readExit: () => (fs.existsSync(exitFile) ? readJSON(exitFile) : null),
+  });
 
   let outcome = null;
   if (exit) {

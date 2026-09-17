@@ -15,6 +15,7 @@ import {
   readHeadlessStream,
   startHeadlessWorker,
   stopHeadless,
+  turnLiveness,
   waitHeadless,
 } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import { main, parseArgs } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
@@ -337,6 +338,45 @@ test("a runner that died without recording an exit is unverifiable, not ended", 
   assert.throws(
     () => start(box, "claude", "Bad Id", "x"),
     /Invalid headless worker id/,
+  );
+});
+
+test("a turn that records its exit and ends between two reads is exited, not unverifiable", () => {
+  // Under the full test run an Agy turn was reported unverifiable: the status
+  // looked for exit.json, the runner then wrote it and ended, and the process
+  // check that followed found no runner. The runner writes exit.json before
+  // it ends, so the process is observed first and exit.json read after it.
+  const world = { exitWritten: false, runnerAlive: true };
+  const finishTurn = () => {
+    world.exitWritten = true;
+    world.runnerAlive = false;
+  };
+  const exitRecord = { code: 0 };
+  // The turn ends right after whichever read comes first.
+  const racing = (read) => () => {
+    const value = read();
+    finishTurn();
+    return value;
+  };
+  const verdict = turnLiveness({
+    runnerAlive: racing(() => world.runnerAlive),
+    readExit: racing(() => (world.exitWritten ? exitRecord : null)),
+  });
+  assert.deepEqual(verdict, { liveness: "exited", exit: exitRecord });
+
+  // Before and after the turn the answer does not depend on the order.
+  assert.deepEqual(
+    turnLiveness({ runnerAlive: () => true, readExit: () => null }),
+    { liveness: "live", exit: null },
+  );
+  assert.deepEqual(
+    turnLiveness({ runnerAlive: () => false, readExit: () => exitRecord }),
+    { liveness: "exited", exit: exitRecord },
+  );
+  // A runner that is gone with no exit record stays unverifiable.
+  assert.deepEqual(
+    turnLiveness({ runnerAlive: () => false, readExit: () => null }),
+    { liveness: "unverifiable", exit: null },
   );
 });
 
