@@ -13,7 +13,7 @@ graphify를 격리된 Python venv로 이 저장소에 실제로 실행하고, PM
 
 graphify는 `.mjs` 파일의 `calls`/`imports` 관계를 모델 없이 AST로 추출하며, 실측에서 46초 만에 129개 코드 파일로부터 1,366 노드·3,718 엣지의 그래프를 생성했다. `graphify affected`는 grep 대조에서 호출자 목록이 일치했다. 그러나 마크다운 링크 관계(D 지점)는 LLM API 키 없이 추출할 수 없었고, `graphify prs --conflicts`는 `gh` CLI 인증을 요구했다. OMT가 Node.js 전용 환경이라는 점과 Python 의존성 추가 비용을 고려하면 현 시점에서 필수 의존성으로 채택하기에는 운영 위험이 더 큰 검증이 필요하다.
 
-1. A 지점(PL 작업 분할): `affected`로 영향 범위를 측정하면 task `files` 목록과 의존성 DAG를 객관적 근거로 정할 수 있다. 실측에서 `draftOrganization`에 대해 깊이 2에서 15개 노드를 추출했으며 grep 대조와 완전히 일치했다. 단, 그래프를 커밋 단위로 갱신하는 운영 절차가 먼저 정립되어야 한다. → **보류**
+1. A 지점(PL 작업 분할): `affected`로 영향 범위를 측정하면 task `files` 목록과 의존성 DAG를 객관적 근거로 정할 수 있다. 실측에서 `draftOrganization`에 대해 깊이 2에서 15개 노드를 추출했으며, 직접 import 파일은 grep 결과와 일치하고 affected가 2단계 간접 의존자를 추가로 포함했다. 단, 그래프를 커밋 단위로 갱신하는 운영 절차가 먼저 정립되어야 한다. → **보류**
 2. B 지점(Senior 검토·불필요한 변경 규율): `affected`로 변경 함수의 호출자를 확인하고 `explain`으로 기존 helper를 찾을 수 있다. A 지점의 운영 절차가 해결되면 즉시 적용 가능하다. → **보류**
 3. C 지점(병렬 킥오프·PR 충돌): `prs --conflicts`는 `gh` CLI 인증이 필요하다. 대체 검증(최근 PR 변경 파일과 커뮤니티 대응)에서 PR #51(ollama)의 변경 파일이 커뮤니티 5로 집중되고 PR #54의 변경 파일이 커뮤니티 18과 겹치지 않음을 확인했다. 그래프 커뮤니티 기반 분석은 작동하나, GitHub API 없이는 자동화하기 어렵다. → **보류**
 4. D 지점(OMT 문서 논리 연결): `.md` 파일의 마크다운 링크 관계 추출은 모델(LLM API)을 요구한다. `--code-only`로 우회하면 `.md` 파일 자체가 제외된다. 브리프의 금지 사항(문서 LLM 의미 분석 Pass 3 실행 금지)과 충돌하므로 현 조건에서 실행할 수 없다. → **기각**
@@ -58,12 +58,24 @@ Depth: 2
 - writeDraft() [calls] plugins/oh-my-teams/scripts/teams-org.mjs:L845
 - teams-org.mjs [imports] plugins/oh-my-teams/scripts/teams-org.mjs:L81
 - org-draft.test.mjs [imports] tests/org-draft.test.mjs:L13
+- role-dispatch.test.mjs [imports] tests/role-dispatch.test.mjs:L28
+- supervision.test.mjs [imports] tests/supervision.test.mjs:L10
 - executeCommand() [calls] plugins/oh-my-teams/scripts/teams-org.mjs:L857
 - orca-org.mjs [imports_from] plugins/orca/scripts/orca-org.mjs:L7
-...
+- agy-start.test.mjs [imports_from] tests/agy-start.test.mjs:L12
+- cleanup-and-portability.test.mjs [imports_from] tests/cleanup-and-portability.test.mjs:L13
+- delivery.test.mjs [imports_from] tests/delivery.test.mjs:L17
+- headless.test.mjs [imports_from] tests/headless.test.mjs:L21
+- runtime.test.mjs [imports_from] tests/runtime.test.mjs:L86
+- safety-net.test.mjs [imports_from] tests/safety-net.test.mjs:L29
+- skill-instructions.test.mjs [imports_from] tests/skill-instructions.test.mjs:L15
+- usage-report.test.mjs [imports_from] tests/usage-report.test.mjs:L25
+(총 15개 노드)
 ```
 
-`teams-org.mjs` → `org-draft.mjs` 관계는 `[imports_from] EXTRACTED`로 추출되었다. grep으로 확인: `teams-org.mjs:L81: import { draftOrganization } from "./org-draft.mjs";` — 일치.
+`teams-org.mjs` → `org-draft.mjs` 관계는 `[imports_from] EXTRACTED`로 추출되었다. grep으로 확인: `teams-org.mjs:L81: import { draftOrganization } from "./org-draft.mjs";`
+
+grep 대조(`grep -rn draftOrganization`): `draftOrganization`을 직접 import하는 파일은 `org-draft.test.mjs`, `role-dispatch.test.mjs`, `supervision.test.mjs`, `teams-org.mjs` 4개다. graphify affected에는 여기에 더해 `orca-org.mjs`와 8개의 `imports_from` 경유 테스트 파일(간접 의존자)이 추가로 포함된다. 직접 import 파일은 일치하며, `imports_from` 경유 노드는 grep으로는 보이지 않는 2단계 역의존자다.
 
 ```
 명령: graphify explain "org-draft.mjs" --graph graph.json
@@ -78,22 +90,47 @@ Connections (16):
   --> draftOrganization() [contains] [EXTRACTED] L82
   <-- org-draft.test.mjs [imports_from] [EXTRACTED]
   <-- supervision.test.mjs [imports_from] [EXTRACTED]
+  --> core.mjs [imports_from] [EXTRACTED] plugins/oh-my-teams/scripts/org-draft.mjs:L2
+  --> validateOrg() [imports] [EXTRACTED] plugins/oh-my-teams/scripts/org-draft.mjs:L2
+  --> DEPTH_ROLES [imports] [EXTRACTED] plugins/oh-my-teams/scripts/org-draft.mjs:L2
+  --> FULL_DEPTH [imports] [EXTRACTED] plugins/oh-my-teams/scripts/org-draft.mjs:L2
   ...
 ```
+
+`org-draft.mjs`가 `core.mjs`에서 `validateOrg()`를 import한다(`[imports] EXTRACTED L2`). `draftOrganization()`이 `validateOrg()`를 통해 검증을 공유한다는 사실은 이 엣지로 확인된다.
 
 ### 2.4 `affected`를 `work()` export에 실행하고 grep 호출자와 대조
 
 ```
 명령: graphify affected "work" --graph graph.json
 출력:
-- executeCommand() [calls] teams-org.mjs:L1019
-- assist() [calls] worker.mjs:L637
-- teams-org.mjs [imports] teams-org.mjs:L42
-- runtime.test.mjs [imports] L18
-- 8개 추가 테스트 파일 [imports/_from]
+Affected nodes for work()
+Relations: calls, indirect_call, references, imports, imports_from, ...
+Depth: 2
+- executeCommand() [calls] plugins/oh-my-teams/scripts/teams-org.mjs:L1019
+- assist() [calls] plugins/oh-my-teams/scripts/worker.mjs:L637
+- harness-smoke.mjs [imports] experiments/harness-smoke.mjs:L11
+- teams-org.mjs [imports] plugins/oh-my-teams/scripts/teams-org.mjs:L42
+- lock-recovery-and-release.test.mjs [imports] tests/lock-recovery-and-release.test.mjs:L15
+- provider-adapters.test.mjs [imports] tests/provider-adapters.test.mjs:L28
+- run-depth.test.mjs [imports] tests/run-depth.test.mjs:L20
+- runtime.test.mjs [imports] tests/runtime.test.mjs:L18
+- silent-wrong-results.test.mjs [imports] tests/silent-wrong-results.test.mjs:L14
+- workflow-safety.test.mjs [imports] tests/workflow-safety.test.mjs:L23
+- main() [calls] plugins/oh-my-teams/scripts/teams-org.mjs:L1227
+- skill-instructions.test.mjs [imports] tests/skill-instructions.test.mjs:L14
+- orca-org.mjs [imports_from] plugins/orca/scripts/orca-org.mjs:L7
+- agy-start.test.mjs [imports_from] tests/agy-start.test.mjs:L12
+- cleanup-and-portability.test.mjs [imports_from] tests/cleanup-and-portability.test.mjs:L13
+- delivery.test.mjs [imports_from] tests/delivery.test.mjs:L17
+- headless.test.mjs [imports_from] tests/headless.test.mjs:L21
+- role-dispatch.test.mjs [imports_from] tests/role-dispatch.test.mjs:L29
+- safety-net.test.mjs [imports_from] tests/safety-net.test.mjs:L29
+- usage-report.test.mjs [imports_from] tests/usage-report.test.mjs:L25
+(총 20개 노드)
 ```
 
-grep 대조: `teams-org.mjs:L42: import { assist, draft, validateTask, work } from "./worker.mjs";` — 일치. graphify가 추출한 호출자 목록과 grep 결과가 완전히 일치했다.
+grep 대조(`grep -rn "import.*work.*from.*worker"`): `work`를 직접 import하는 파일은 `harness-smoke.mjs`, `lock-recovery-and-release.test.mjs`, `provider-adapters.test.mjs`, `run-depth.test.mjs`, `runtime.test.mjs`, `silent-wrong-results.test.mjs`, `workflow-safety.test.mjs`, `teams-org.mjs` 8개다. graphify affected에는 여기에 더해 `skill-instructions.test.mjs`, `orca-org.mjs`, 그리고 `imports_from` 경유 7개 테스트가 추가로 포함된다. 직접 import 파일은 일치하며, `imports_from` 경유 노드는 2단계 역의존자다.
 
 ### 2.5 마크다운 링크 관계 추출 시도
 
@@ -112,7 +149,7 @@ grep 대조: `teams-org.mjs:L42: import { assist, draft, validateTask, work } fr
 오류: Error: gh CLI not found or not authenticated. Run: gh auth login
 ```
 
-`prs` 명령은 GitHub API(`gh` CLI 인증 또는 `GITHUB_TOKEN`)를 요구한다. 이번 실측에서는 실행할 수 없었다.
+실측 환경에서 gh 2.97.0이 설치되어 있고(`C:/Program Files/GitHub CLI`) `dev-inho` 계정으로 인증되어 있었다(`gh auth status: Logged in to github.com`). 그럼에도 graphify가 위 오류를 발생시킨 것은, graphify의 `prs` 구현이 PATH에서 gh를 찾지 못했거나 내부적으로 `gh auth token`을 별도로 확인하는 과정에서 실패한 것으로 추정된다. 실제 원인은 소스 사본(`prs.py`)을 더 분석해야 하며 이번 실측에서는 미확인으로 남긴다. `prs --conflicts`는 이번 실측에서 실행하지 못했다.
 
 ### 2.7 쿼리 로그 기본값 (소스 확인)
 
@@ -137,11 +174,11 @@ def _log_path() -> Path | None:
 
 ### A. PL 작업 분할: **보류**
 
-**판정 근거:** `graphify affected <노드>` 명령은 깊이 2 BFS로 지정한 export의 역방향 의존자를 추출하며, 결과가 grep 호출자 목록과 완전히 일치했다. PL이 task의 `files` 목록을 정할 때 이 출력을 그대로 근거로 쓸 수 있다.
+**판정 근거:** `graphify affected <노드>` 명령은 깊이 2 BFS로 지정한 export의 역방향 의존자를 추출한다. 직접 import 파일은 grep 결과와 일치하며, affected가 2단계 간접 의존자(`imports_from` 경유 노드)를 추가로 포함한다. PL이 task의 `files` 목록을 정할 때 직접 의존 파일의 기준으로 이 출력을 근거로 쓸 수 있다.
 
 실측 예:
-- `draftOrganization` affected: 15개 노드 추출, `teams-org.mjs:L81`·`teams-org.mjs:L845`·8개 테스트 파일 포함
-- `work()` affected: 18개 노드 추출, `teams-org.mjs:L42`·`L1019`·10개 파일 포함
+- `draftOrganization` affected: 15개 노드 추출. 직접 import 파일 3개(테스트)와 `teams-org.mjs`, 함수 노드 2개, 그리고 `imports_from` 경유 간접 의존자 9개(`orca-org.mjs` 포함)가 포함된다.
+- `work()` affected: 20개 노드 추출. 직접 import 파일 8개(`harness-smoke.mjs` 포함)와 함수 노드 2개, 그리고 `imports_from` 경유 간접 의존자 10개가 포함된다.
 
 기본 깊이는 2이며(`affected.py` L194), `--depth` 플래그로 조정할 수 있다. `DEFAULT_AFFECTED_RELATIONS`에는 `calls`, `imports`, `imports_from`, `dynamic_import`, `inherits`, `uses` 등 12개 관계가 포함된다(`affected.py` L12–32).
 
