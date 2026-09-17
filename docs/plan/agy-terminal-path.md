@@ -91,12 +91,16 @@
  * @param {boolean} params.skipDangerousModePermissionPrompt - 첫 실행 확인 질문 설정 우회 여부
  * @param {string} params.orcaVersion - Orca 버전
  * @param {string} params.cliVersion - Antigravity CLI 버전
+ * @param {boolean} [params.allowUnverified=false] - 검증 모드. true일 때만 unverified인 supervised-terminal 후보 칸이 터미널 생성을 허용
  * @returns {MatrixResult}
  */
 export function predictLaunchPath(params) {
   // ...
 }
 ```
+
+**검증 모드(`allowUnverified`) 전달 방식:**
+이 값은 터미널 생성 주체가 명령행 옵션으로 제공합니다. 예를 들어, `role-terminal --allow-unverified "<누가 무엇을 승인했는지>"` 옵션을 통해 전달하며, 결과에 승인 문장을 남겨 책임 소재를 추적합니다. 기본 실행(검증 모드 해제) 시에는 매트릭스에서 `unverified`인 `supervised-terminal` 경로에 도달하면 터미널 생성 전에 알리고 멈춥니다.
 
 ### 2. 칸의 값 (MatrixResult 스키마)
 - `path`: `supervised-terminal` | `supervised-screen-path` | `headless` | `blocked`
