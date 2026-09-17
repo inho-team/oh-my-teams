@@ -779,8 +779,11 @@ function validateExecutionInput(input, reserveOnly = false, stateDir = null) {
       // worktreeId の形式は <repo-id>::<path>。「::」以降がworkerのcwdと一致する必要がある。
       const sep = input.receipt.worktreeId.indexOf("::");
       const worktreePath =
-        sep === -1 ? input.receipt.worktreeId : input.receipt.worktreeId.slice(sep + 2);
-      const normalize = (p) => path.resolve(p).toLowerCase().replace(/\\/g, "/");
+        sep === -1
+          ? input.receipt.worktreeId
+          : input.receipt.worktreeId.slice(sep + 2);
+      const normalize = (p) =>
+        path.resolve(p).toLowerCase().replace(/\\/g, "/");
       assert(
         normalize(workerRecord.cwd) === normalize(worktreePath),
         `Headless receipt worktreeId path does not match worker.json cwd for "${executionId}"`,

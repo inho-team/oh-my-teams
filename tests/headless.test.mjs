@@ -604,22 +604,12 @@ test("agy turn.json carries --print-timeout from worker default and per-turn tim
   assert.equal(answered.turn, 2, "answer starts a second turn");
   const turnJson2 = JSON.parse(
     fs.readFileSync(
-      path.join(
-        box.state,
-        "headless",
-        "pt-default",
-        "turns",
-        "2",
-        "turn.json",
-      ),
+      path.join(box.state, "headless", "pt-default", "turns", "2", "turn.json"),
       "utf8",
     ),
   );
   const ptIdx2 = turnJson2.argv.indexOf("--print-timeout");
-  assert.ok(
-    ptIdx2 !== -1,
-    "per-turn turn.json must contain --print-timeout",
-  );
+  assert.ok(ptIdx2 !== -1, "per-turn turn.json must contain --print-timeout");
   assert.equal(
     turnJson2.argv[ptIdx2 + 1],
     "85s",
