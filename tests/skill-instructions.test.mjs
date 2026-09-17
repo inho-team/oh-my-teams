@@ -582,6 +582,7 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
     Junior: "junior",
     Intern: "intern",
   };
+  const found = {};
   for (const [line] of table.matchAll(/^\| ([A-Za-z]+) \|([^|]+)\|$/gm)) {
     const roleKo = line.match(/^\| ([A-Za-z]+) \|/)?.[1];
     const role = ROLE_KO[roleKo];
@@ -594,7 +595,14 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
       EXPECTED[role],
       `form table row for ${role} does not match brief`,
     );
+    found[role] = true;
   }
+  // Every role must appear exactly once: a missing row must fail the test.
+  assert.deepEqual(
+    Object.keys(found),
+    Object.keys(EXPECTED),
+    "form table is missing one or more role rows",
+  );
 
   // All offered values must be parseable by parseModelChoice.
   const allOffered = Object.values(EXPECTED).flat();
