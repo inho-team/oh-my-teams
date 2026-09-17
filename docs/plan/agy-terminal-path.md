@@ -123,7 +123,7 @@ export function predictLaunchPath(params) {
 | Claude / - / - / - / - / skipPrompt=false | blocked | claude-permission-prompt | user / 권한 승인 | unverified |
 | Claude / - / win32 / - / - / skipPrompt=true | supervised-terminal | - | - / - | verified (26-09-17, Claude Code 2.1.274, Haiku 4.5; `plugins/oh-my-teams/references/orca-runtime.md` Claude 역할 검증, worker_done 확인) |
 | Agy / claude / - / - / 신뢰 있음 / - | blocked | claude-unsupported-by-orca | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 2-2절) |
-| Agy / gemini / win32 / powershell / 신뢰 있음 / - | supervised-terminal | - | pm / 브리프 기준 9 실측 (검증 모드에서만 터미널 생성 허용) | verified (26-09-17, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 2-1절·2-5절 식별 및 tui-idle 실측. worker_done 미확인) |
+| Agy / gemini / win32 / powershell / 신뢰 있음 / - | supervised-terminal | - | pm / 브리프 기준 9 실측 (검증 모드에서만 터미널 생성 허용) | unverified (식별·tui-idle은 agy-terminal-probes.md 2-1·2-5절에서 확인, worker_done 미확인) |
 | Agy / - / win32 / powershell / 신뢰 있음 / - | headless | - | - / Agy 역할 대체 경로 | verified (26-09-17, CLI 1.2.4; `docs/plan/headless-runtime.md` Windows 검증) |
 | Agy / gemini,gpt-oss / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
 | Claude / - / posix / - / - / skipPrompt=true | supervised-terminal | - | - / - | unverified |
