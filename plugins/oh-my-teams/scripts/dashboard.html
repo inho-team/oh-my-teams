@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="data:,">
+<title>oh my teams 작업 현황</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #eef1f5; --text: #1b1f24; --muted: #5d6673;
+    --line: #dde2e8; --accent: #2f6fde; --accent-text: #ffffff;
+    --live: #1f8a4c; --question: #b7791f; --done: #2f6fde; --bad: #c2362f; --unknown: #7a5ea8;
+    --code: #f0f2f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101317; --surface: #171b21; --surface-2: #1f252d; --text: #e6e9ee; --muted: #9aa4b1;
+      --line: #2b323c; --accent: #6b9cf0; --accent-text: #0d1117;
+      --live: #4cc38a; --question: #e0a84a; --done: #6b9cf0; --bad: #f07470; --unknown: #b39ddb;
+      --code: #0d1014;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101317; --surface: #171b21; --surface-2: #1f252d; --text: #e6e9ee; --muted: #9aa4b1;
+    --line: #2b323c; --accent: #6b9cf0; --accent-text: #0d1117;
+    --live: #4cc38a; --question: #e0a84a; --done: #6b9cf0; --bad: #f07470; --unknown: #b39ddb;
+    --code: #0d1014;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line);
+    padding: calc(10px + env(safe-area-inset-top)) 16px 10px; display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  button { font: inherit; border-radius: 10px; border: 1px solid var(--line); background: var(--surface);
+    color: var(--text); padding: 8px 12px; min-height: 40px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.danger { color: var(--bad); border-color: var(--bad); }
+  button.danger.armed { background: var(--bad); color: var(--surface); }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); }
+  .empty { color: var(--muted); text-align: center; padding: 48px 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; }
+  .worker { display: block; width: 100%; text-align: left; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .title { font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .badge { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 9px; border: 1px solid currentColor; white-space: nowrap; }
+  .s-live { color: var(--live); } .s-question { color: var(--question); } .s-done { color: var(--done); }
+  .s-bad { color: var(--bad); } .s-unknown { color: var(--unknown); } .s-muted { color: var(--muted); }
+  .question { border-color: var(--question); }
+  .card h3 { margin: 0 0 6px; font-size: 14px; }
+  .question h3 { color: var(--question); }
+  .detail-q { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 10px; }
+  textarea { width: 100%; min-height: 90px; font: inherit; color: var(--text); background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px; resize: vertical; }
+  .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; }
+  .facts dt { color: var(--muted); } .facts dd { margin: 0; overflow-wrap: anywhere; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .turn h2 { font-size: 15px; margin: 0 0 6px; }
+  .entry { margin: 8px 0; }
+  .entry .kind { font-size: 11px; font-weight: 700; letter-spacing: .02em; color: var(--muted); }
+  .entry pre, .prompt { margin: 2px 0 0; padding: 8px 10px; background: var(--code); border-radius: 8px;
+    white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    max-height: 320px; overflow: auto; }
+  .entry.text pre { font-family: inherit; font-size: 14px; background: transparent; padding: 0; max-height: none; }
+  .entry.error .kind { color: var(--bad); }
+  .error-box { color: var(--bad); font-size: 13px; margin-top: 6px; }
+  .back { min-width: 40px; }
+</style>
+</head>
+<body>
+<header>
+  <button class="back" id="back" hidden aria-label="목록으로">←</button>
+  <h1 id="heading">작업 현황</h1>
+  <span class="meta" id="updated"></span>
+</header>
+<main id="app"><p class="empty">불러오는 중…</p></main>
+<script>
+(() => {
+  const token = new URLSearchParams(location.search).get("token") || "";
+  const app = document.getElementById("app");
+  const heading = document.getElementById("heading");
+  const updated = document.getElementById("updated");
+  const back = document.getElementById("back");
+  let current = null;
+  let timer = null;
+  let drafting = false;
+
+  const LIVENESS = { live: "실행 중", exited: "종료", unverifiable: "확인 불가" };
+  const OUTCOME = {
+    done: ["완료", "s-done"], question: ["질문 대기", "s-question"], failed: ["실패", "s-bad"],
+    "no-marker": ["표식 없음", "s-bad"], "exit-error": ["비정상 종료", "s-bad"],
+    "timed-out": ["시간 초과", "s-bad"], stopped: ["중단됨", "s-muted"],
+  };
+  const PROOF = { matched: "일치", alias: "별칭 확인", mismatched: "불일치", unproven: "미증명", unrequested: "기본 모델" };
+  const KIND = { text: "응답", tool: "도구", output: "출력", error: "오류" };
+
+  const el = (tag, attrs = {}, ...children) => {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (key === "class") node.className = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+      else if (value !== undefined && value !== null) node.setAttribute(key, value);
+    }
+    for (const child of children.flat()) {
+      if (child === null || child === undefined || child === false) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  };
+
+  // replaceChildren turns an array into text; nested lists and empty parts
+  // are flattened and dropped first.
+  const render = (...nodes) =>
+    app.replaceChildren(...nodes.flat(Infinity).filter((node) => node !== null && node !== undefined && node !== false));
+
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      ...options,
+      headers: { "x-omt-token": token, "content-type": "application/json", ...(options.headers || {}) },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `요청 실패 (${response.status})`);
+    return body;
+  }
+
+  function badge(worker) {
+    if (worker.liveness !== "exited") {
+      const cls = worker.liveness === "live" ? "s-live" : "s-unknown";
+      return el("span", { class: `badge ${cls}` }, LIVENESS[worker.liveness] || worker.liveness);
+    }
+    const [label, cls] = OUTCOME[worker.outcome] || [worker.outcome || "종료", "s-muted"];
+    return el("span", { class: `badge ${cls}` }, label);
+  }
+
+  function modelLine(worker) {
+    const reported = worker.modelReported || "보고 없음";
+    return `${worker.provider} · ${reported} (${PROOF[worker.modelProof] || worker.modelProof})`;
+  }
+
+  function stamp() {
+    updated.textContent = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function schedule(fn, ms) {
+    clearTimeout(timer);
+    timer = setTimeout(fn, ms);
+  }
+
+  async function showList() {
+    current = null;
+    back.hidden = true;
+    heading.textContent = "작업 현황";
+    try {
+      const data = await api("/api/workers");
+      stamp();
+      const workers = [...data.workers].sort((a, b) => {
+        const rank = (w) => (w.outcome === "question" ? 0 : w.liveness === "live" ? 1 : w.liveness === "unverifiable" ? 2 : 3);
+        return rank(a) - rank(b) || a.worker.localeCompare(b.worker);
+      });
+      render(
+        workers.length === 0
+          ? el("p", { class: "empty" }, "아직 실행한 worker가 없습니다.")
+          : workers.map((worker) =>
+              el("button", { class: `card worker${worker.outcome === "question" ? " question" : ""}`, onclick: () => showWorker(worker.worker) },
+                el("div", { class: "row" }, el("span", { class: "title" }, `${worker.role} · ${worker.worker}`), badge(worker)),
+                el("div", { class: "sub" }, modelLine(worker)),
+                worker.marker && worker.marker.detail
+                  ? el("div", { class: "sub" }, `${worker.marker.kind === "question" ? "질문" : "요약"}: ${worker.marker.detail}`)
+                  : null,
+                el("div", { class: "sub" }, `턴 ${worker.turn} · ${worker.cwd.split(/[\\/]/).filter(Boolean).at(-1) || worker.cwd}`),
+              ),
+            ),
+      );
+    } catch (error) {
+      render(el("p", { class: "empty" }, `불러오지 못했습니다: ${error.message}`));
+    }
+    schedule(showList, 4000);
+  }
+
+  function entryView(entry) {
+    return el("div", { class: `entry ${entry.kind}` },
+      el("div", { class: "kind" }, entry.name ? `${KIND[entry.kind] || entry.kind} · ${entry.name}` : KIND[entry.kind] || entry.kind),
+      el("pre", {}, entry.text || ""),
+    );
+  }
+
+  function turnView(turn, isLast) {
+    const exit = turn.exit;
+    const status = exit
+      ? `종료 코드 ${exit.code ?? "-"}${exit.timedOut ? " · 시간 초과" : ""}${exit.stopped ? " · 중단" : ""} · ${Math.round((exit.durationMs || 0) / 1000)}초`
+      : "실행 중";
+    const box = el("section", { class: "card turn" },
+      el("h2", {}, `턴 ${turn.number}${turn.resumed ? " (재개)" : ""}`),
+      el("div", { class: "sub" }, status),
+      el("details", {}, el("summary", {}, "지시문"), el("pre", { class: "prompt" }, turn.prompt)),
+      turn.transcript.length === 0 ? el("p", { class: "sub" }, "아직 기록이 없습니다.") : turn.transcript.map(entryView),
+      turn.stderrTail ? el("details", {}, el("summary", {}, "표준 오류"), el("pre", { class: "prompt" }, turn.stderrTail)) : null,
+    );
+    return box;
+  }
+
+  function answerCard(worker) {
+    const area = el("textarea", { placeholder: "답변이나 추가 지시를 입력하세요", "aria-label": "답변" });
+    const error = el("div", { class: "error-box" });
+    area.addEventListener("focus", () => { drafting = true; });
+    area.addEventListener("blur", () => { drafting = area.value.trim().length > 0; });
+    const sendButton = el("button", { class: "primary", onclick: async () => {
+      if (!area.value.trim()) return;
+      sendButton.disabled = true;
+      try {
+        await api(`/api/workers/${worker.worker}/answer`, { method: "POST", body: JSON.stringify({ text: area.value }) });
+        drafting = false;
+        showWorker(worker.worker);
+      } catch (e) {
+        error.textContent = e.message;
+        sendButton.disabled = false;
+      }
+    } }, worker.outcome === "question" ? "답변 보내기" : "이어서 지시하기");
+    return el("section", { class: `card${worker.outcome === "question" ? " question" : ""}` },
+      worker.outcome === "question"
+        ? [el("h3", {}, "질문"), el("p", { class: "detail-q" }, worker.marker.detail)]
+        : el("h3", {}, "같은 세션으로 이어서 지시"),
+      area, el("div", { class: "actions" }, sendButton), error,
+    );
+  }
+
+  function stopCard(worker) {
+    const error = el("div", { class: "error-box" });
+    let armed = false;
+    const button = el("button", { class: "danger", onclick: async () => {
+      if (!armed) {
+        armed = true;
+        button.classList.add("armed");
+        button.textContent = "한 번 더 누르면 중단합니다";
+        setTimeout(() => { armed = false; button.classList.remove("armed"); button.textContent = "이 턴 중단"; }, 4000);
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(`/api/workers/${worker.worker}/stop`, { method: "POST" });
+        showWorker(worker.worker);
+      } catch (e) {
+        error.textContent = e.message;
+      }
+    } }, "이 턴 중단");
+    return el("section", { class: "card" }, el("div", { class: "actions" }, button), error);
+  }
+
+  async function showWorker(id) {
+    current = id;
+    back.hidden = false;
+    heading.textContent = id;
+    try {
+      const worker = await api(`/api/workers/${id}`);
+      if (current !== id) return;
+      stamp();
+      if (!drafting) {
+        const turns = worker.turns.map((turn, index) => turnView(turn, index === worker.turns.length - 1)).reverse();
+        render(
+          el("section", { class: "card" },
+            el("div", { class: "row" }, el("span", { class: "title" }, `${worker.role} · ${worker.profile}`), badge(worker)),
+            el("dl", { class: "facts" },
+              el("dt", {}, "모델"), el("dd", {}, modelLine(worker)),
+              el("dt", {}, "작업 경로"), el("dd", {}, worker.cwd),
+              el("dt", {}, "세션"), el("dd", {}, worker.session || "아직 없음"),
+              el("dt", {}, "턴"), el("dd", {}, String(worker.turn)),
+              worker.providerError ? [el("dt", {}, "제공자 오류"), el("dd", {}, worker.providerError)] : null,
+              worker.rateLimited ? [el("dt", {}, "속도 제한"), el("dd", {}, "감지됨")] : null,
+            ),
+          ),
+          worker.liveness === "exited" && worker.session ? answerCard(worker) : null,
+          worker.liveness === "live" ? stopCard(worker) : null,
+          turns,
+        );
+      }
+      schedule(() => showWorker(id), worker.liveness === "live" ? 2500 : 6000);
+    } catch (error) {
+      render(el("p", { class: "empty" }, `불러오지 못했습니다: ${error.message}`));
+      schedule(() => showWorker(id), 6000);
+    }
+  }
+
+  back.addEventListener("click", () => { drafting = false; history.pushState(null, "", `?token=${encodeURIComponent(token)}`); showList(); });
+  window.addEventListener("popstate", () => { drafting = false; showList(); });
+  showList();
+})();
+</script>
+</body>
+</html>
