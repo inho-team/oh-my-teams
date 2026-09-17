@@ -15,7 +15,7 @@ graphify는 `.mjs` 파일의 `calls`/`imports` 관계를 모델 없이 AST로 �
 
 1. A 지점(PL 작업 분할): `affected`로 영향 범위를 측정하면 task `files` 목록과 의존성 DAG를 객관적 근거로 정할 수 있다. 실측에서 `draftOrganization`에 대해 깊이 2에서 15개 노드를 추출했으며, 직접 import 파일은 grep 결과와 일치하고 affected가 2단계 간접 의존자를 추가로 포함했다. 단, 그래프를 커밋 단위로 갱신하는 운영 절차가 먼저 정립되어야 한다. → **보류**
 2. B 지점(Senior 검토·불필요한 변경 규율): `affected`로 변경 함수의 호출자를 확인하고 `explain`으로 기존 helper를 찾을 수 있다. A 지점의 운영 절차가 해결되면 즉시 적용 가능하다. → **보류**
-3. C 지점(병렬 킥오프·PR 충돌): `prs --conflicts`는 `gh` CLI 인증이 필요하다. 대체 검증(최근 PR 변경 파일과 커뮤니티 대응)에서 PR #51(ollama)의 변경 파일이 커뮤니티 5로 집중되고 PR #54의 변경 파일이 커뮤니티 18과 겹치지 않음을 확인했다. 그래프 커뮤니티 기반 분석은 작동하나, GitHub API 없이는 자동화하기 어렵다. → **보류**
+3. C 지점(병렬 kickoff·PR 충돌): `prs --conflicts`는 `gh` CLI 인증이 필요하다. 대체 검증(최근 PR 변경 파일과 커뮤니티 대응)에서 PR #51(ollama)의 변경 파일이 커뮤니티 5로 집중되고 PR #54의 변경 파일이 커뮤니티 18과 겹치지 않음을 확인했다. 그래프 커뮤니티 기반 분석은 작동하나, GitHub API 없이는 자동화하기 어렵다. → **보류**
 4. D 지점(OMT 문서 논리 연결): `extract_markdown` 함수는 정규식 기반이며 모델 없이 references 엣지를 추출하지만, CLI의 `graphify extract`는 문서 파일에 API 키를 요구하고 `--code-only`는 `.md`를 건너뛴다. CLI만으로는 마크다운 관계를 `graph.json`에 넣을 수 없어 현재 조건에서 운용하기 어렵다. → **기각**
 
 ## 2. 실측 결과 요약
@@ -145,10 +145,10 @@ CLI의 `graphify extract`는 문서 파일(`.md`)에 LLM API 키를 요구한다
 
 **직접 API 호출 실측:**
 
-`graphify/extractors/markdown.py`의 `extract_markdown(path: Path) -> dict`는 정규식 기반이며 LLM을 호출하지 않는다(`No tree-sitter dependency — pure line-by-line parsing.` L340). 이를 직접 호출해 검증했다.
+`graphify/extractors/markdown.py`의 `extract_markdown(path: Path) -> dict`는 정규식 기반이며 LLM을 호출하지 않는다(L340의 docstring은 tree-sitter 없이 줄 단위로 파싱한다고 적는다). 이를 직접 호출해 검증했다.
 
 ```python
-# md_test.py — sys.path에 소스 사본(커밋 26b02b5) 경로를 삽입해 import
+# md_test.py: sys.path에 소스 사본(커밋 26b02b5) 경로를 삽입해 import
 # (설치된 graphifyy 0.9.63이 아니라 소스 사본의 결과)
 sys.path.insert(0, '<graphify 소스 사본 경로>')
 from graphify.extractors.markdown import extract_markdown
@@ -291,7 +291,7 @@ graphify 미설치 환경 대체 동작: `grep -rn "<export명>" plugins/ tests/
 
 graphify 미설치 환경 대체 동작: `grep -rn "<함수명>" plugins/ tests/`로 호출자를 확인하고, 코드 내 `import` 구문으로 같은 파일에서 제공하는 helper를 수동 탐색한다.
 
-### C 지점(보류): 병렬 킥오프·PR 충돌
+### C 지점(보류): 병렬 kickoff·PR 충돌
 
 후속 구현 시 바꿀 파일:
 - `plugins/oh-my-teams/skills/pl/SKILL.md`: 병렬 kickoff 시작 시 `graphify prs --conflicts`를 실행해 커뮤니티 충돌 위험을 확인한다는 절차를 추가한다.
