@@ -520,10 +520,17 @@ export async function openRoleTerminal({
     allowUnverified,
     allowUnverifiedApproval,
   });
-  assert(
-    matrixResult.path !== "blocked",
-    `Role ${command.role} launch blocked by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,
-  );
+  if (matrixResult.path === "blocked" || matrixResult.path === "headless") {
+    const err = new Error(
+      `Role ${command.role} launch refused by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,
+    );
+    err.matrixRefusal = {
+      path: matrixResult.path,
+      reason: matrixResult.reason,
+      nextAction: matrixResult.nextAction,
+    };
+    throw err;
+  }
   const orca = selectOrcaExecutable(executable);
   const tabTitle = roleTitle(command.role, title ?? worktreeLabel(worktree));
   const { typed, columns } = launchLine(command, platform);
