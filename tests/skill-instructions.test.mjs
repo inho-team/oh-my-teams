@@ -792,3 +792,29 @@ test("a silent worker is asked, then escalated, and never shown as progressing",
   assert.match(readSkill("form"), /progressCheckMs: 900000/);
   assert.match(readSkill("adjust"), /policy\.supervision/);
 });
+
+test("reports lead with a verdict and instructions lead with the goal", () => {
+  const bluf = readReference("bluf.md");
+  for (const verdict of ["완료", "부분 완료", "실패", "차단"]) {
+    assert.ok(bluf.includes(`| \`${verdict}\` |`), `bluf.md lacks ${verdict}`);
+  }
+  // The first line must not become a success claim ahead of evidence.
+  assert.match(bluf, /검증 전에 성공을 선언하는 문장이 되어서는 안 된다/);
+  assert.match(bluf, /결론을 마지막에 다시 요약하지 않는다/);
+  // Structured outputs and the headless last-line marker keep their format.
+  assert.match(bluf, /`DONE:`, `QUESTION:`, `FAILED:`/);
+  assert.match(bluf, /## 아래로 내리는 지시/);
+
+  assert.match(
+    readSkill("pm"),
+    /\]\(\.\.\/\.\.\/references\/bluf\.md\)의 「아래로 내리는 지시」/,
+  );
+  assert.match(
+    readSkill("kickoff"),
+    /브리프는 \[두괄식\]\(\.\.\/\.\.\/references\/bluf\.md\)/,
+  );
+  assert.match(
+    readReference("korean-result-reporting.md"),
+    /\[`bluf\.md`\]\(bluf\.md\)/,
+  );
+});

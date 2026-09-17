@@ -278,6 +278,14 @@ test("a spec handed to a subordinate opens with that role's charter", () => {
   assert.match(header, /직접 배정할 수 있는 역할: 없음/);
   assert.ok(header.includes(readRoleCharter("junior")));
   assert.equal(task.trim(), "value.txt의 오타를 고친다.");
+  // Every worker reads only its spec, so the BLUF rule rides in the header
+  // and points at a reference that exists wherever the worker runs.
+  assert.match(
+    header,
+    /보고는 두괄식으로 쓴다\. 첫 줄은 `완료`·`부분 완료`·`실패`·`차단`/,
+  );
+  const bluf = header.match(/^두괄식 기준 전문: (.+)$/m)?.[1];
+  assert.ok(bluf && path.isAbsolute(bluf) && fs.existsSync(bluf), bluf);
 
   const pl = roleSpec(example(), "pl", "분할한다.");
   assert.match(pl, /직접 배정할 수 있는 역할: Senior, Junior, Intern/);
