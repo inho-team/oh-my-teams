@@ -215,7 +215,7 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 12. Codex 신뢰 있음 → supervised-terminal (unverified, 실측 대기)
+    // 12. Codex 신뢰 있음 → supervised-terminal (verified, 실측 완료 2026-09-18)
     {
       label: "codex_trusted",
       params: {
@@ -226,8 +226,6 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         trustRecordExists: false,
         codexTrustRecordExists: true,
         skipDangerousModePermissionPrompt: true,
-        allowUnverified: true,
-        allowUnverifiedApproval: "승인: 검증 모드",
         ...V,
       },
     },
@@ -548,4 +546,74 @@ test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () =
     notTrustedUnknown.reason.includes("codex-trust-workspace"),
     "codexTrustRecordExists=unknown → blocked(codex-trust-workspace)",
   );
+});
+
+test("Codex 신뢰 있음은 verified supervised-terminal을 돌려주고 검증 게이트 없이 통과한다", () => {
+  // codexTrustRecordExists: true → 12행 → supervised-terminal, evidence=verified
+  // allowUnverified 없이도 막히지 않아야 함
+  const trusted = predictLaunchPath({
+    runner: "codex",
+    model: undefined,
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: false,
+    codexTrustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    allowUnverified: false,
+    ...V,
+  });
+  assert.equal(
+    trusted.path,
+    "supervised-terminal",
+    "codex 신뢰 있음 → supervised-terminal",
+  );
+  assert.equal(trusted.evidence, "verified", "evidence=verified");
+  assert.deepEqual(trusted.reason, [], "reason 빈 배열");
+  assert.equal(trusted.nextOwner, "-", "nextOwner='-'");
+  assert.equal(trusted.nextAction, "", "nextAction=''");
+
+  // 플랫폼·셸이 달라도 동일하게 적용됨
+  const trustedWin = predictLaunchPath({
+    runner: "codex",
+    model: undefined,
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: false,
+    codexTrustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    allowUnverified: false,
+    ...V,
+  });
+  assert.equal(
+    trustedWin.path,
+    "supervised-terminal",
+    "codex win32 신뢰 있음 → supervised-terminal",
+  );
+  assert.equal(trustedWin.evidence, "verified");
+});
+
+test("Codex 신뢰 없음/unknown은 4행 codex-trust-workspace로 차단된다", () => {
+  for (const codexTrustRecordExists of [false, "unknown", undefined, null]) {
+    const result = predictLaunchPath({
+      runner: "codex",
+      model: undefined,
+      platform: "linux",
+      shell: "posix",
+      trustRecordExists: true,
+      codexTrustRecordExists,
+      skipDangerousModePermissionPrompt: true,
+      allowUnverified: true,
+      allowUnverifiedApproval: "승인",
+      ...V,
+    });
+    assert.equal(
+      result.path,
+      "blocked",
+      `codexTrustRecordExists=${JSON.stringify(codexTrustRecordExists)} → blocked`,
+    );
+    assert.ok(
+      result.reason.includes("codex-trust-workspace"),
+      `codexTrustRecordExists=${JSON.stringify(codexTrustRecordExists)} → codex-trust-workspace`,
+    );
+  }
 });

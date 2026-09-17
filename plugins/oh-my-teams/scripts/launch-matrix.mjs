@@ -270,17 +270,19 @@ const MATRIX_RULES = [
       evidence: "unverified",
     },
   },
-  // 12. Codex / 신뢰 있음 → supervised-terminal (unverified, 실측 대기)
+  // 12. Codex / 신뢰 있음 → supervised-terminal (verified)
+  // 2026-09-18 Orca 1.4.204 실측: role-terminal ready → terminal-idle-check idle →
+  // worker-start(task_e16a4a21060e, ctx_1a6f307bf0c3) → worker_done outcome:succeeded(b5e1cc3) →
+  // ack → worker-release → 터미널·워크트리 회수 완료. binding.modelProof는 unproven이었음.
   {
     match: ({ runner, codexTrustRecordExists }) =>
       runner === "codex" && codexTrustRecordExists === true,
     result: {
       path: "supervised-terminal",
-      reason: ["codex-worker-done-unverified"],
-      nextOwner: "pm",
-      nextAction:
-        "브리프 기준 9 실측이 필요합니다(검증 모드에서만 터미널 생성 허용).",
-      evidence: "unverified",
+      reason: [],
+      nextOwner: "-",
+      nextAction: "",
+      evidence: "verified",
     },
   },
   // 13. 그 외 모든 미확인 조합
