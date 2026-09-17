@@ -73,3 +73,127 @@
 | `--title` 미지정 시 (gemini) | `null` (없음) | 프로세스 증거(`isForegroundProcessProofFresh`의 수명 초과 등)가 누락된 상황에서, 터미널 제목(`Terminal 1`)만으로는 에이전트를 식별할 수 없어 `null`이 반환되었을 수 있음 (미확인: 프로세스 증거 무효화 여부 등 실제 값 확인 필요). |
 
 > **올바른 규칙 수정 필요 사항 (orca-runtime.md 불일치 시)**: 현재 `orca-runtime.md`의 서술은 설치된 소스의 실제 판정 기준(화면 파싱 문자열 기반 대기 및 차단 판독, 셸 프로세스 필터링)과 대체로 일치합니다. 단, Agy 대기 판정이 `gemini`로 시작하는 문자열에 강하게 의존(`startsWith('gemini', o)`)한다는 점이 확인되었으므로, 다른 모델(예: `claude`, `gpt-oss`) 사용 시 폭을 아무리 조정해도 해당 줄이 `gemini`로 시작하지 않기 때문에 무조건 실패할 수밖에 없음이 소스로 증명되었습니다.
+
+## 설계
+
+### 1. `scripts/launch-matrix.mjs` 공개 함수 시그니처
+```javascript
+/**
+ * 주어진 환경 조합에서 터미널 실행 경로와 예측 결과를 반환합니다.
+ * Agy 모델은 내부에서 계열('gemini', 'claude', 'gpt-oss')로 정규화됩니다.
+ * 
+ * @param {object} params
+ * @param {'claude'|'codex'|'agy'} params.runner - 실행기
+ * @param {string} [params.model] - 모델 이름 (예: 'gemini-3.1-pro-high')
+ * @param {'win32'|'darwin'|'linux'} params.platform - 플랫폼
+ * @param {'powershell'|'posix'} params.shell - 셸 종류
+ * @param {boolean} params.trustRecordExists - 워크트리 신뢰 기록 유무
+ * @param {boolean} params.skipDangerousModePermissionPrompt - 첫 실행 확인 질문 설정 우회 여부
+ * @param {string} params.orcaVersion - Orca 버전
+ * @param {string} params.cliVersion - Antigravity CLI 버전
+ * @returns {MatrixResult}
+ */
+export function predictLaunchPath(params) {
+  // ...
+}
+```
+
+### 2. 칸의 값 (MatrixResult 스키마)
+- `path`: `supervised-terminal` | `supervised-screen-path` | `headless` | `blocked`
+- `reason`: 차단 또는 예외 경로인 경우 이유 코드 목록 (예: `agent-trust-workspace`, `claude-permission-prompt`, `unsupported_version`, `no_agent_detected`, `agent-trust-workspace-buffer`, `codex-trust-workspace`).
+- `nextOwner` / `nextAction`: 거부 시 담당자와 다음 행동 가이드.
+- `evidence`: `verified`(날짜·버전·재현 기록) | `source-derived`(번들 위치) | `unverified`. Orca나 CLI 버전이 표가 다루는 범위를 벗어나면 결과가 `unverified`로 떨어지는 규칙을 둡니다.
+
+### 3. 표 전체 초안
+차원 조합에 따른 예측 결과입니다 (일부 우선순위 규칙 적용). 실측과 소스로 뒷받침되지 않는 칸(예: macOS, Linux 등)은 `unverified`로 둡니다.
+
+| 조건(runner/model/platform/shell/trust/skipPrompt) | 예상 path | reason | nextOwner / nextAction | evidence |
+|---|---|---|---|---|
+| 버전 범위 밖 | unverified | unsupported_version | pm / 버전 지원 확인 | unverified |
+| Agy / - / - / - / 신뢰 없음 / - | blocked | agent-trust-workspace | user / 폴더 신뢰 | verified |
+| Agy / - / win32 / - / 신뢰 있음 / - | blocked | agent-trust-workspace-buffer | pm / headless 권장 | verified |
+| Agy / claude / - / - / 신뢰 있음 / - | blocked | claude-unsupported-by-orca | pm / headless 권장 | verified |
+| Codex / - / - / - / 신뢰 없음 / - | blocked | codex-trust-workspace | user / 폴더 신뢰 | unverified |
+| Claude / - / - / - / - / skipPrompt=false | blocked | claude-permission-prompt | user / 권한 승인 | unverified |
+| Agy / gemini,gpt-oss / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
+| Claude / - / posix / - / - / skipPrompt=true | supervised-terminal | - | - / - | unverified |
+| Codex / - / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
+| Agy / gemini / win32 / powershell / 신뢰 있음 / - | blocked | no_agent_detected | pm / headless 권장 | verified |
+| 그 외 모든 미확인 조합 | unverified | untested_combination | pm / 검증 필요 | unverified |
+
+### 4. 인접 실패 칸과 사전 점검
+브리프 기준 7의 인접 실패 6가지를 다음 이유 코드로 사전 거부합니다 (자동 응답 없음):
+1. **Codex 폴더 신뢰 질문**: 신뢰 없음 시 `codex-trust-workspace`
+2. **Claude 권한 우회 첫 실행 확인**: `skipPrompt` 설정 안 된 경우 `claude-permission-prompt`
+3. **Agy 신뢰 문구의 버퍼 잔존**: Agy 첫 실행 후 버퍼에 문구가 남아 차단되는 상황 예측 (`agent-trust-workspace-buffer`)
+4. **Codex 역할 worker_done 미검증**: `unverified`
+5. **터미널 제목이 셸 경로로 남는 경우**: PowerShell에서 복수 명령 실행 시 발생. `no_agent_detected`
+6. **버전 범위 밖**: Orca/CLI 버전이 지원 범위 밖이면 `unsupported_version`
+
+### 5. 거부 흐름과 표 불일치 신호
+- **실행 전 거부**: `plugins/oh-my-teams/scripts/role-terminal.mjs`에서 터미널을 열기 전(`workflow-reserve` 이전)에 표를 조회합니다. 표가 `blocked`를 반환하면 터미널 생성과 attempt 예약을 중단하고, 이유 코드와 `nextAction`을 반환합니다.
+- **사후 거부 분류**: 표가 성공(`supervised-terminal`)을 예측했으나 `terminal-idle-check`나 `worker-start`에서 실패하는 경우, 이를 "표 불일치" 신호로 분류합니다. `plugins/oh-my-teams/scripts/failures.mjs` 내 `failure-classify`가 받을 신호 이름은 `matrix-mismatch`이며, 분류 경로는 `matrix-mismatch -> review`로 지정합니다.
+
+### 6. 새 터미널 경로 가능 여부
+- **결론**: Orca `tui-idle`에 기대지 않는 감독 터미널 경로(`supervised-screen-path`)는 현재 Orca CLI 제약상 불가능합니다.
+- **근거**: `orca orchestration dispatch --inject`를 사용하면 Task/Dispatch 컨텍스트는 생성되지만, 터미널이 `unsupervised` 상태로 남습니다. `worker-list`는 이를 `unsupervised`로 보고하고, `worker-stop` 등 lifecycle 제어 명령이 듣지 않습니다. 기존 에이전트 터미널의 lifecycle을 획득하는 `worker-start --terminal <handle>` 명령은 작업 계약 금지 조항에 의해 사용할 수 없습니다.
+
+### 7. 기존 조건을 대체할 호출 지점 목록
+기존의 하드코딩된 조건들을 표(matrix)를 읽는 로직으로 대체합니다.
+- `plugins/oh-my-teams/scripts/role-terminal.mjs:56`: 폭 조정(narrow) 로직 `isWidthAdjustmentNeeded` 등에서 표의 요구 사항을 읽어 결정.
+- `plugins/oh-my-teams/scripts/role-terminal.mjs:497-502`: `platform === "win32" && /^gemini/...` 검사 대신 `predictLaunchPath` 결과가 `blocked`인지 확인.
+- `plugins/oh-my-teams/scripts/role-terminal.mjs:315, 420, 521, 543`: `trustQuestion` 로직이 `agent-trust-workspace` 등 매트릭스의 reason 코드와 연계.
+- `plugins/oh-my-teams/scripts/orca-adapter.mjs:484`: `blockedReason`이 매트릭스 예측과 다를 경우 `matrix-mismatch`로 분류.
+- `plugins/oh-my-teams/scripts/workflow.mjs:740`: `validateExecutionInput`에서 headless receipt 처리 등 추가.
+
+### 8. Headless receipt 형식과 검증 규칙
+headless 모드 실행 시 workflow에 연결하기 위한 receipt 형식입니다.
+```json
+{
+  "via": "headless-start",
+  "executionId": "junior-launch-probes-rework-1",
+  "runId": "run_26fc7d5e1e5b",
+  "taskId": "headless:junior-launch-probes-rework-1",
+  "dispatchId": "headless:junior-launch-probes-rework-1",
+  "worktreeId": "b17417a2-dbbc-4c0f-8605-dc79dfb58523::C:/Users/kjsun/orca/workspaces/oh-my-teams/agy-launch-probes",
+  "runnerPid": 2112,
+  "modelRequested": "claude-sonnet-4-6"
+}
+```
+- `plugins/oh-my-teams/scripts/workflow.mjs`의 `workflow-attach` 단계에서 `receipt.via === "headless-start"`인지 검사하고, `headless Worker ID`가 `taskId` 및 `dispatchId`와 일대일로 대응하는지 검증합니다. 통과하지 않으면 거부합니다.
+
+## Orca 수정안
+
+### 1. 판정 코드 최소 수정안
+**위치:** `out/main/index.js` (`q0i` 함수 내 Agy 에이전트 식별 로직)
+- **수정 전:** 
+  ```javascript
+  e.lastIndexOf('antigravity cli') ... e.startsWith('gemini', o)
+  ```
+- **수정 후:** 
+  ```javascript
+  // gemini 뿐만 아니라 claude, gpt-oss 등 다른 모델도 허용하도록 조건 완화
+  e.lastIndexOf('antigravity cli') ... (e.startsWith('gemini', o) || e.startsWith('claude', o) || e.startsWith('gpt-oss', o))
+  ```
+**위치:** `out/shared/shell-process-detection.js` (`isShellProcess`)
+- **수정안:** Windows PowerShell에서 복합 명령(`mode con: cols=44; agy...`) 사용 시 전경 프로세스가 여전히 `powershell.exe`로 남는 문제 해결을 위해, 터미널 내부 프로세스 트리에서 `agy.exe` 말단 프로세스 활성 상태를 직접 확인하는 로직 보강.
+
+### 2. 재현 절차 (Windows 11)
+1. PowerShell 기반의 새 워크트리를 생성합니다.
+2. `orca terminal create --command "mode con: cols=44; agy --dangerously-skip-permissions --model gemini-3.1-pro-high"` 명령을 실행합니다.
+3. **기대 결과:** Orca가 해당 터미널을 `antigravity` 에이전트로 식별(`agentIdentity`)하고, `tui-idle`이 만족되어 작업을 주입할 수 있어야 합니다.
+4. **실제 결과:** 터미널 창의 프로세스가 `powershell.exe`로 남아 있어 `no_agent_detected` 또는 식별 불가(null)로 처리되고 작업 주입에 실패합니다.
+
+### 3. stablyai/orca#21110 댓글 초안
+(※ 참고: 이 댓글은 게시하지 않습니다.)
+```markdown
+Hello Orca team,
+
+We have encountered a persistent issue on Windows where the agent detection logic incorrectly classifies Agy CLI terminals as bare shells when multiple statements are executed in PowerShell (e.g., `mode con: cols=44; agy ...`). Since the foreground process remains `powershell.exe` during execution, `isShellProcess` flags it as a shell, causing `agentIdentity` to be null.
+
+Additionally, the `tui-idle` check in `q0i(e)` strictly asserts `e.startsWith('gemini', o)` after the `Antigravity CLI` banner. This hardcoded rule prevents other valid Agy models (like `claude-sonnet-4-6` or `gpt-oss-120b-medium`) from ever being detected as idle, even if the UI renders correctly. 
+
+We propose relaxing the model name check in `q0i(e)` to include other model families, and improving the Windows foreground process tree parsing to accurately identify `agy.exe` as the leaf active process even when wrapped in a PowerShell composite command.
+
+Thanks!
+```
