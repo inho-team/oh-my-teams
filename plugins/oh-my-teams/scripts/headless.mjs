@@ -1,7 +1,7 @@
 /**
  * Headless supervisor: roles as non-interactive provider processes, no Orca.
  *
- * Each worker is a directory under `<state>/headless/<id>` holding one
+ * Each worker is a directory under `<pm-state>/headless/<id>` holding one
  * directory per turn. A turn is run by a detached runner that owns the
  * provider process and records its exit, so liveness, completion, the model
  * and the session to resume are all read from files rather than inferred from
@@ -468,6 +468,29 @@ function alive(pid) {
   }
 }
 
+/**
+ * Decides a turn's liveness from its runner process and its exit record.
+ *
+ * The runner writes exit.json and only then ends, so the process is observed
+ * before exit.json is read. Read the other way round, a turn that recorded
+ * its exit and ended between the two reads showed neither a record nor a
+ * process, and a cleanly finished worker was reported unverifiable. Callers
+ * read the turn's output only after this, so an exit record never pairs with
+ * output from before the turn ended.
+ *
+ * @param {object} reads - How to observe the turn.
+ * @param {() => boolean} reads.runnerAlive - Whether the runner process exists now.
+ * @param {() => object | null} reads.readExit - The exit record, or null.
+ * @returns {{liveness: string, exit: object | null}} `exited`, `live` or
+ *   `unverifiable`, with the exit record when there is one.
+ */
+export function turnLiveness({ runnerAlive, readExit }) {
+  const running = runnerAlive();
+  const exit = readExit();
+  if (exit) return { liveness: "exited", exit };
+  return { liveness: running ? "live" : "unverifiable", exit: null };
+}
+
 function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
   const number = turnDirs(dir).length + 1;
   const turnDir = path.join(dir, "turns", String(number));
@@ -619,22 +642,18 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   const turns = turnDirs(dir);
   const turnDir = turns.at(-1);
   const exitFile = path.join(turnDir, "exit.json");
-  const readExit = () => (fs.existsSync(exitFile) ? readJSON(exitFile) : null);
-  let exit = readExit();
   const runner = fs.existsSync(path.join(turnDir, "runner.json"))
     ? readJSON(path.join(turnDir, "runner.json")).pid
     : null;
-  // A runner that wrote its exit and ended just after the first look is not
-  // unverifiable, so the exit is looked for once more before saying so. The
-  // stream is read after this, and a runner closes it before writing the exit,
-  // so an exited turn's stream is always read complete.
-  let liveness;
-  if (exit) liveness = "exited";
-  else if (alive(runner)) liveness = "live";
-  else {
-    exit = readExit();
-    liveness = exit ? "exited" : "unverifiable";
-  }
+  // Liveness is sampled before the stream is read. The runner writes
+  // exit.json only after the provider's output is complete, so an exit record
+  // seen here always pairs with a whole stream; read the other way round, a
+  // turn that ended between the two reads was exited with the output from
+  // before its marker.
+  const { liveness, exit } = turnLiveness({
+    runnerAlive: () => alive(runner),
+    readExit: () => (fs.existsSync(exitFile) ? readJSON(exitFile) : null),
+  });
   const streamFile = path.join(turnDir, "stream.jsonl");
   const stream = readHeadlessStream(
     worker.provider,
@@ -721,13 +740,15 @@ export function headlessDetail(stateDir, workerId, options = {}) {
       ? readJSON(path.join(turnDir, "turn.json"))
       : {};
     const exitFile = path.join(turnDir, "exit.json");
+    // As in headlessStatus, the exit record is read before the output it ends.
+    const exit = fs.existsSync(exitFile) ? readJSON(exitFile) : null;
     const stderr = read(path.join(turnDir, "stderr.txt"));
     return {
       number: turn.number,
       startedAt: turn.startedAt ?? null,
       resumed: Boolean(turn.session),
       prompt: clip(read(path.join(turnDir, "prompt.txt")), 6000),
-      exit: fs.existsSync(exitFile) ? readJSON(exitFile) : null,
+      exit,
       transcript: headlessTranscript(
         status.provider,
         read(path.join(turnDir, "stream.jsonl")),

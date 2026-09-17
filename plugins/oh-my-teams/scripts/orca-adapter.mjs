@@ -475,6 +475,25 @@ async function assertTerminalIdle(orca, terminal, { cwd, execute }) {
     );
     throw orcaError(JSON.stringify(envelope), failed, envelope);
   }
+  const wait = envelope?.result?.wait;
+  if (!waited.timedOut && wait?.satisfied === false) {
+    // Orca stops waiting at once when the screen holds a trust, update or
+    // approval prompt, and says so only inside an `ok` envelope. The prompt
+    // needs someone at the terminal, so the signal is built without the hint
+    // table: a reason that matched a hinted code would gain a route.
+    const reason = wait.blockedReason ?? "not_idle";
+    const state = wait.blockedReason
+      ? `is held at a prompt (${reason})`
+      : "was reported not idle without a reason";
+    const refused = assertFailureSignal({
+      code: reason,
+      message:
+        `Terminal ${terminal} ${state} instead of reporting tui-idle, ` +
+        "so Orca worker-start could not hand it a task; no Dispatch was created. " +
+        "Read the terminal screen and report it rather than repeating the start",
+    });
+    throw orcaError(refused.message, refused, envelope);
+  }
   if (waited.code !== 0 || waited.timedOut || !envelope) {
     const detail =
       waited.stderr || waited.stdout || "Orca terminal wait failed";

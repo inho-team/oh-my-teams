@@ -16,21 +16,21 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 - 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 사용자 결정을 요청한다.
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
 - `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
-- 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-terminal`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. 사용자가 승인하면 래퍼의 `--inject-fallback`만 쓴다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
+- 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. Agy 터미널이고 사용자가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), Windows에서 모델이 `gemini`로 시작하는 Agy 역할은 Orca 터미널로 시작하지 않고 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 선언 세션이 `close`에서 브리프의 전달 방식으로 수행한다.
 
 ### 책임
 
-PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최종 판단을 책임진다. 변경 내용, 검사 근거, 남은 사항, 확인된 모델 사용량과 무응답·실패 상태를 kickoff를 선언한 사용자에게 보고한다.
+PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최종 판단을 책임진다. 변경 내용, 검사 근거, 남은 사항, 확인된 모델 사용량과 무응답·실패 상태를 kickoff를 선언한 사용자에게 보고한다. 진행 보고와 최종 보고는 첫 줄에 판정과 근거를 두는 [두괄식](../../references/bluf.md)으로 쓴다.
 
 ### 한계
 
 - 이번 실행에 하위 역할이 하나라도 있으면 PM은 최종 산출물(코드, 문서, 조사 보고서)을 직접 작성하지 않는다. 산출물은 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할에게 배정한다.
 - PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고, 산출물 자체를 만들라는 지시를 보내지 않는다. 나눌 필요가 없는 일은 PL을 거치지 않고 Junior나 Intern에게, 설계와 의미 검토는 Senior에게 직접 배정한다.
 - Orca는 기본적으로 중첩 worker를 한 단계만 허용한다(`NESTED_WORKER_MAX_DEPTH` 기본값 1). 이 설정에서 PM이 띄운 PL은 하위 worker를 시작할 수 없으므로, 사용자가 Orca 설정의 Nested worker depth를 올렸다고 확인하지 않은 한 PL에게는 분할 계획과 통합 검증만 받고 계획의 작업은 PM이 자기 Run에서 평평하게 배정한다.
-- 원시 `orca orchestration worker-start`나 `orca worktree create --agent`로 역할을 띄우지 않는다. 저장된 모델이 빠지기 때문이다.
+- 원시 `orca orchestration worker-start`나 `orca worktree create --agent`로 역할을 띄우지 않는다. 저장된 모델과 권한 우회 플래그가 빠지기 때문이다.
 - 모델·계정·구독을 바꾸거나 사용자에게 없는 모델로 전환하지 않는다. 바꿔야 하면 `adjust`를 사용자에게 제안한다.
 - 검토를 배정할 때 finding이나 criterion의 필드 이름을 지시문에서 새로 정하지 않고 `examples/review.json` 형식을 그대로 요구한다. 검토자가 형식을 틀리게 써도 PM이 옮겨 적지 않고 검토자에게 되돌린다.
 - 자신이 작성하거나 계획한 결과를 스스로 검토해 승인하지 않는다. 단순 개발 요청을 배포·외부 발송 허가로 확대하지 않는다.
@@ -48,13 +48,17 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다.
 - PM은 자료 정리와 반론 수집을 보조 도구에 맡길 수 있으나 목표·우선순위·수용 결정은 위임하지 않는다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
 
-제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 감독 worker로 배정한다. 여러 작업으로 나누고 통합해야 하면 PL에게 분할 계획과 통합을 맡기고, 나눌 필요가 없으면 수행할 역할에게 직접 배정한다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 준다.
+제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 감독 worker로 배정한다. 여러 작업으로 나누고 통합해야 하면 PL에게 분할 계획과 통합을 맡기고, 나눌 필요가 없으면 수행할 역할에게 직접 배정한다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 주고, [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 완료 조건부터 쓴다.
 
-감독 worker는 다음처럼 역할, 조직 파일과 이번 kickoff의 workflow로 시작한다. 래퍼가 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 agent·모델·강도를 정하고, `--spec` 앞에 받는 역할의 권한·책임·한계와 조직 파일·workflow·PM state 경로를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로 이 경로들이 머리글에 필요하다.
+감독 worker는 다음처럼 역할, 조직 파일과 이번 kickoff의 workflow로 터미널을 연 뒤 그 터미널에 작업을 넘긴다. `role-terminal`과 `worker-start`가 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 agent·모델·강도를 정하고, `worker-start` 래퍼가 `--spec` 앞에 받는 역할의 권한·책임·한계와 조직 파일·workflow·PM state 경로를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로 이 경로들이 머리글에 필요하다.
 
 ```text
-node <runtime> worker-start --org <project>/.omt/organization.json --role junior --repo <pm-worktree> --workflow-id <workflowId> --state <pm-worktree>/.omt --spec "<구체적인 작업>" --worktree new-child
-node <runtime> role-spec --org <project>/.omt/organization.json --role senior --workflow-id <workflowId> --state <pm-worktree>/.omt --spec "<구체적인 작업>"
+<orca> worktree create --name <name> --parent-worktree active --json
+node <runtime> role-terminal --org <project>/.omt/organization.json --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
+node <runtime> terminal-idle-check --terminal <handle>
+node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
+node <runtime> worker-start --org <project>/.omt/organization.json --role junior --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <handle> --worktree id:<worktreeId> --spec "<구체적인 작업>"
+node <runtime> role-spec --org <project>/.omt/organization.json --role senior --workflow-id <workflowId> --state <pm-state> --spec "<구체적인 작업>"
 ```
 
 `role-spec`은 `task-create`로 먼저 만든 Task를 `--task`로 시작할 때 쓴다. 이 경우 래퍼가 머리글을 붙일 수 없으므로 Task 설명을 `role-spec --text`의 출력으로 만든다. `--text` 없이 실행하면 JSON이 출력되고, 그대로 `task-create --spec`에 넣으면 이스케이프된 JSON이 지시문이 된다. 시작 결과의 `binding.modelProof` 확인, 화면의 모델 대조, 거부 사유는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다.
@@ -76,7 +80,7 @@ node <runtime> role-spec --org <project>/.omt/organization.json --role senior --
 실행 중 판단이 바뀌면 `workflow-depth`로 깊이를 바꾼다. 변경 파일에는 `schemaVersion: 1`, 새 `eventId`, 목표 `depth`, `reason`, `evidence`를 적는다.
 
 ```text
-node <runtime> workflow-depth --id <workflow> --state <shared-state> --revision <read-revision> --change <depth-change.json>
+node <runtime> workflow-depth --id <workflow> --state <pm-state> --revision <read-revision> --change <depth-change.json>
 ```
 
 - 올리기는 언제든 가능하다. 대기 중인 작업은 원래 요청된 역할로 다시 배정된다.
@@ -101,7 +105,7 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 4. `accept` 뒤 `workflow-resume`을 실행하면 수정 실행의 gate가 task를 `accepted`로 올린다.
 
 ```text
-node <runtime> workflow-rework --id <workflowId> --state <pm-worktree>/.omt --revision <n> --rework <rework.json>
+node <runtime> workflow-rework --id <workflowId> --state <pm-state> --revision <n> --rework <rework.json>
 ```
 
 workflow 밖에서 수정을 진행하고 로그 파일에만 경위를 남기지 않는다. 그렇게 하면 gate가 수용되어도 task는 `submitted`에 머문다.

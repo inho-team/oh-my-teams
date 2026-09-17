@@ -11,7 +11,7 @@ description: oh my teams 상설 조직과 현재 kickoff Goal, 실행 팀, 워�
 
 ```text
 node <runtime> kickoff-show --org <project>/.omt/organization.json
-node <runtime> show --org <project>/.omt/organization.json --state <pm-worktree>/.omt
+node <runtime> show --org <project>/.omt/organization.json --state <pm-state>
 ```
 
 `kickoff-show`가 돌려준 각 항목의 `pm.stateDir`이 두 번째 명령의 `--state` 인자다. `active: false`이면 진행 중인 kickoff가 없다고 알리고 다른 워크트리를 뒤져 실행 상태를 추측하지 않는다. 같은 구독을 쓰는 kickoff가 둘 이상이면 함께 할당량을 소모하고 있다는 점도 표시한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.

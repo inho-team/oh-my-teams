@@ -9,15 +9,15 @@ description: 성공한 oh my teams kickoff를 검증하고 허가된 PR/MR 생�
 
 병합은 두 종류로 나뉜다. kickoff의 워크트리끼리 합치는 병합(worker 브랜치를 통합 워크트리나 PM 워크트리에 합치는 일)은 팀 내부 작업이므로 PM·PL이 게이트를 통과시킨 뒤 별도 허가 없이 수행한다. 반면 **주인 체크아웃**, 즉 kickoff를 선언한 원본 프로젝트의 브랜치로 결과를 넣는 병합은 이 절차에서 선언 세션만 수행한다. 사용자가 브리프에서 확정한 전달 방식이 그 허가이며, 등록 항목의 `delivery`에 기록되어 있다. 런타임은 kickoff가 진행 중인 주인 체크아웃에서 `merge-check`를 실행하거나 역할을 띄우는 요청을 거부하므로, 워커의 커밋이 주인 브랜치로 바로 들어가지 않는다.
 
-종료할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회한다. kickoff가 여럿이면 사용자가 지목한 것만 종료한다. 기록된 `pm.stateDir`이 아래 명령의 `<shared-state>`이고, 회수 대상은 기록된 PM 워크트리와 그 아래의 자식 워크트리다. 이 절차는 PM 세션이 아니라 kickoff를 선언한 세션에서 수행한다. 자기가 서 있는 워크트리는 스스로 제거할 수 없기 때문이다. 등록 항목의 형식은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
+종료할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회한다. kickoff가 여럿이면 사용자가 지목한 것만 종료한다. 기록된 `pm.stateDir`이 아래 명령의 `<pm-state>`이고, 회수 대상은 기록된 PM 워크트리와 그 아래의 자식 워크트리다. 이 절차는 PM 세션이 아니라 kickoff를 선언한 세션에서 수행한다. 자기가 서 있는 워크트리는 스스로 제거할 수 없기 때문이다. 등록 항목의 형식은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
 1. 원래 Goal의 모든 수용 기준, 필수 검토, 최신 HEAD의 검사와 미해결 사항을 확인한다.
 2. 눈으로 확인하지 말고 게이트를 실행한다. `merge-check`는 필수 검토와 PM 수용이 source·task hash에 연결되기 전에는 병합을 거부하며, 비정상 종료는 병합 중단 조건이다.
 
 ```text
-node <runtime> verify --task <integration-task.json> --repo <integration-worktree> --state <shared-state>
-node <runtime> merge-check --evidence <evidence.json> --task <integration-task.json> --repo <integration-worktree> --base <origin/main> --report <report.json> --state <shared-state>
-node <runtime> workflow-status --id <workflow> --state <shared-state>
+node <runtime> verify --task <integration-task.json> --repo <integration-worktree> --state <pm-state>
+node <runtime> merge-check --evidence <evidence.json> --task <integration-task.json> --repo <integration-worktree> --base <origin/main> --report <report.json> --state <pm-state>
+node <runtime> workflow-status --id <workflow> --state <pm-state>
 ```
 
    게이트는 kickoff의 통합 워크트리에서 실행한다. 주인 체크아웃을 `--repo`로 주면 `merge-check`가 거부한다.
@@ -28,7 +28,7 @@ node <runtime> workflow-status --id <workflow> --state <shared-state>
    - `delivery`가 없는 항목은 이 기록을 도입하기 전에 등록된 kickoff다. 전달 방식을 추측하지 않고 사용자에게 확인한다.
 
 ```text
-node <runtime> deliver --org <project>/.omt/organization.json --worktree <pm-worktree-id> --source <integration-worktree> --head <verified-head> --evidence <evidence.json> --task <integration-task.json> --report <report.json> --state <shared-state>
+node <runtime> deliver --org <project>/.omt/organization.json --worktree <pm-worktree-id> --source <integration-worktree> --head <verified-head> --evidence <evidence.json> --task <integration-task.json> --report <report.json> --state <pm-state>
 ```
 
 4. PR/MR 생성, 병합 또는 push를 할 수 없는 환경이면 수행한 것으로 표현하지 않고 정확한 제약과 필요한 후속 작업을 알린다.
