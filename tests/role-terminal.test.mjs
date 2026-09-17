@@ -630,7 +630,11 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
     /no_agent_detected/,
   );
   // matrix 거부는 orca 호출 전에 일어남
-  assert.equal(calls.length, 0, "matrix refusal must not call orca terminal create");
+  assert.equal(
+    calls.length,
+    0,
+    "matrix refusal must not call orca terminal create",
+  );
 
   // 신뢰 기록 없는 경우도 마찬가지
   const callsTrust = [];
@@ -653,6 +657,9 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
     }),
     /agent-trust-workspace/,
   );
-  assert.equal(callsTrust.length, 0, "trust refusal must not call orca terminal create");
+  assert.equal(
+    callsTrust.length,
+    0,
+    "trust refusal must not call orca terminal create",
+  );
 });
-

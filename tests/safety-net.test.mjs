@@ -505,16 +505,12 @@ test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 
   // 브리프 기준 6: predictLaunchPath가 blocked를 반환하면 터미널이 열리지 않으며
   // Orca 호출 없이 오류를 던진다. Attempt 예약은 터미널이 열린 뒤에 일어나므로
   // Orca 호출이 0건임을 확인하면 attempt 소비가 없음을 증명한다.
-  const { openRoleTerminal } = await import(
-    "../plugins/oh-my-teams/scripts/role-terminal.mjs"
-  );
-  const {
-    SUPPORTED_ORCA_VERSION,
-    SUPPORTED_CLI_VERSION,
-  } = await import("../plugins/oh-my-teams/scripts/launch-matrix.mjs");
-  const { roleCommand } = await import(
-    "../plugins/oh-my-teams/scripts/role-launch.mjs"
-  );
+  const { openRoleTerminal } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+  const { SUPPORTED_ORCA_VERSION, SUPPORTED_CLI_VERSION } =
+    await import("../plugins/oh-my-teams/scripts/launch-matrix.mjs");
+  const { roleCommand } =
+    await import("../plugins/oh-my-teams/scripts/role-launch.mjs");
 
   const orcaCalls = [];
   const execute = async (argv) => {
@@ -523,7 +519,10 @@ test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 
   };
 
   const org = readJSON(
-    new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
+    new URL(
+      "../plugins/oh-my-teams/examples/organization.json",
+      import.meta.url,
+    ),
   );
   const gemini = roleCommand(org, "senior");
 
@@ -556,5 +555,3 @@ test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 
     "matrix refusal must not invoke orca (no attempt consumed)",
   );
 });
-
-

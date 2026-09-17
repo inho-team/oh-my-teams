@@ -22,10 +22,7 @@ function assertValidResult(result, label) {
     paths.includes(result.path),
     `${label}: path must be one of ${paths.join("|")}, got "${result.path}"`,
   );
-  assert.ok(
-    Array.isArray(result.reason),
-    `${label}: reason must be an array`,
-  );
+  assert.ok(Array.isArray(result.reason), `${label}: reason must be an array`);
   assert.ok(
     typeof result.nextOwner === "string",
     `${label}: nextOwner must be a string`,
@@ -409,7 +406,9 @@ test("unverified supervised-terminal은 검증 모드 없이 blocked된다", () 
     ...V,
   });
   assert.equal(withoutApprovalText.path, "blocked");
-  assert.deepEqual(withoutApprovalText.reason, ["unverified-terminal-creation"]);
+  assert.deepEqual(withoutApprovalText.reason, [
+    "unverified-terminal-creation",
+  ]);
 
   // allowUnverified=true 승인 문장 있음 → supervised-terminal
   const withApproval = predictLaunchPath({

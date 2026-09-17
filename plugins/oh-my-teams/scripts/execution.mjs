@@ -40,7 +40,6 @@ export const NEUTRAL_FAILURE_KINDS = Object.freeze([
   "implementation",
 ]);
 
-
 /**
  * Validates the workspace receipt an execution adapter returns.
  *

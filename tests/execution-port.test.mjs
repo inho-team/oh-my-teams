@@ -708,7 +708,8 @@ test("matrix-mismatch 신호는 포트 계약의 유효한 kind이다", () => {
   const signal = assertFailureSignal({
     kind: "matrix-mismatch",
     code: "approval_required",
-    message: "Terminal held at approval prompt despite supervised-terminal prediction",
+    message:
+      "Terminal held at approval prompt despite supervised-terminal prediction",
   });
   assert.equal(signal.kind, "matrix-mismatch");
 });
@@ -721,14 +722,18 @@ test("사후 거부와 표 불일치: matrixPrediction supervised-terminal → m
     timedOut: false,
     stdout: JSON.stringify({
       ok: true,
-      result: { wait: { satisfied: false, blockedReason: "approval_required" } },
+      result: {
+        wait: { satisfied: false, blockedReason: "approval_required" },
+      },
     }),
     stderr: "",
   });
-  const { checkTerminalIdle } = await import(
-    "../plugins/oh-my-teams/scripts/orca-adapter.mjs"
-  );
-  const matrixPrediction = { path: "supervised-terminal", evidence: "unverified" };
+  const { checkTerminalIdle } =
+    await import("../plugins/oh-my-teams/scripts/orca-adapter.mjs");
+  const matrixPrediction = {
+    path: "supervised-terminal",
+    evidence: "unverified",
+  };
   const err = await checkTerminalIdle("term_x", {
     matrixPrediction,
     execute: fakeWait,
@@ -751,13 +756,14 @@ test("matrixPrediction이 없으면 blocked prompt는 matrix-mismatch가 붙지 
     timedOut: false,
     stdout: JSON.stringify({
       ok: true,
-      result: { wait: { satisfied: false, blockedReason: "approval_required" } },
+      result: {
+        wait: { satisfied: false, blockedReason: "approval_required" },
+      },
     }),
     stderr: "",
   });
-  const { checkTerminalIdle } = await import(
-    "../plugins/oh-my-teams/scripts/orca-adapter.mjs"
-  );
+  const { checkTerminalIdle } =
+    await import("../plugins/oh-my-teams/scripts/orca-adapter.mjs");
   const err = await checkTerminalIdle("term_y", {
     execute: fakeWait,
   }).then(
@@ -772,4 +778,3 @@ test("matrixPrediction이 없으면 blocked prompt는 matrix-mismatch가 붙지 
   );
   assert.doesNotMatch(err.message, /matrix-prediction-failure/);
 });
-

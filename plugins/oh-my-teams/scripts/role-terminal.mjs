@@ -19,7 +19,12 @@
  */
 import { assert, run } from "./core.mjs";
 import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
-import { predictLaunchPath, normalizeModelFamily, SUPPORTED_ORCA_VERSION, SUPPORTED_CLI_VERSION } from "./launch-matrix.mjs";
+import {
+  predictLaunchPath,
+  normalizeModelFamily,
+  SUPPORTED_ORCA_VERSION,
+  SUPPORTED_CLI_VERSION,
+} from "./launch-matrix.mjs";
 
 const PROMPT_MARK = /[%$#>❯]\s*$/;
 
@@ -66,7 +71,6 @@ export function launchLine(command, platform = process.platform) {
     columns: AGY_BANNER_COLUMNS,
   };
 }
-
 
 /** Tag each role's tab title starts with, so PM and PL tabs are told apart. */
 export const ROLE_TITLE_TAGS = Object.freeze({

@@ -43,7 +43,9 @@ export const SUPPORTED_CLI_VERSION = "1.2.5";
  * @returns {'gemini'|'claude'|'gpt-oss'|'unknown'} 정규화된 모델 계열.
  */
 export function normalizeModelFamily(model) {
-  const lower = String(model ?? "").toLowerCase().trim();
+  const lower = String(model ?? "")
+    .toLowerCase()
+    .trim();
   if (!lower) return "unknown";
   if (/^gemini/.test(lower)) return "gemini";
   if (/^claude/.test(lower)) return "claude";
@@ -73,7 +75,11 @@ function isVersionSupported(version, supported) {
  * @param {string|undefined} allowUnverifiedApproval - 검증 모드 승인 문장.
  * @returns {MatrixResult} 최종 결과.
  */
-function applyVerificationGate(candidate, allowUnverified, allowUnverifiedApproval) {
+function applyVerificationGate(
+  candidate,
+  allowUnverified,
+  allowUnverifiedApproval,
+) {
   if (candidate.path !== "supervised-terminal") return candidate;
   if (candidate.evidence !== "unverified") return candidate;
   if (allowUnverified && allowUnverifiedApproval) return candidate;
@@ -82,7 +88,7 @@ function applyVerificationGate(candidate, allowUnverified, allowUnverifiedApprov
     reason: ["unverified-terminal-creation"],
     nextOwner: "pm",
     nextAction:
-      "검증되지 않은 조합입니다. --allow-unverified \"<승인 문장>\" 옵션으로 명시적 승인 후 재시도하세요.",
+      '검증되지 않은 조합입니다. --allow-unverified "<승인 문장>" 옵션으로 명시적 승인 후 재시도하세요.',
     evidence: "unverified",
   };
 }
@@ -126,7 +132,8 @@ const MATRIX_RULES = [
       path: "blocked",
       reason: ["no_agent_detected"],
       nextOwner: "pm",
-      nextAction: "Windows PowerShell에서 Agy는 복합 명령 실행 시 에이전트 식별에 실패합니다. 단일 명령으로 분리하거나 headless를 사용하세요.",
+      nextAction:
+        "Windows PowerShell에서 Agy는 복합 명령 실행 시 에이전트 식별에 실패합니다. 단일 명령으로 분리하거나 headless를 사용하세요.",
       evidence: "source-derived",
     },
   },
@@ -162,14 +169,17 @@ const MATRIX_RULES = [
       path: "blocked",
       reason: ["claude-permission-prompt"],
       nextOwner: "user",
-      nextAction: "권한 승인 질문에 답하거나 --dangerously-skip-permissions 플래그를 사용하세요.",
+      nextAction:
+        "권한 승인 질문에 답하거나 --dangerously-skip-permissions 플래그를 사용하세요.",
       evidence: "unverified",
     },
   },
   // 6. Claude / win32 / skipPrompt=true → supervised-terminal (verified)
   {
     match: ({ runner, platform, skipDangerousModePermissionPrompt }) =>
-      runner === "claude" && platform === "win32" && skipDangerousModePermissionPrompt,
+      runner === "claude" &&
+      platform === "win32" &&
+      skipDangerousModePermissionPrompt,
     result: {
       path: "supervised-terminal",
       reason: [],
@@ -181,12 +191,15 @@ const MATRIX_RULES = [
   // 7. Agy / claude 계열 / 신뢰 있음 → blocked (Orca가 claude 모델을 antigravity로 인식 불가)
   {
     match: ({ runner, trustRecordExists, model }) =>
-      runner === "agy" && trustRecordExists && normalizeModelFamily(model) === "claude",
+      runner === "agy" &&
+      trustRecordExists &&
+      normalizeModelFamily(model) === "claude",
     result: {
       path: "blocked",
       reason: ["claude-unsupported-by-orca"],
       nextOwner: "pm",
-      nextAction: "Agy claude 모델은 Orca tui-idle 판정을 통과할 수 없습니다. headless를 권장합니다.",
+      nextAction:
+        "Agy claude 모델은 Orca tui-idle 판정을 통과할 수 없습니다. headless를 권장합니다.",
       evidence: "verified",
     },
   },
@@ -242,7 +255,9 @@ const MATRIX_RULES = [
   // 11. Claude / posix / skipPrompt=true → supervised-terminal (unverified)
   {
     match: ({ runner, platform, skipDangerousModePermissionPrompt }) =>
-      runner === "claude" && platform !== "win32" && skipDangerousModePermissionPrompt,
+      runner === "claude" &&
+      platform !== "win32" &&
+      skipDangerousModePermissionPrompt,
     result: {
       path: "supervised-terminal",
       reason: [],
@@ -295,13 +310,14 @@ const MATRIX_RULES = [
  * @returns {MatrixResult} 실행 경로 예측 결과.
  */
 export function predictLaunchPath(params) {
-  const {
-    allowUnverified = false,
-    allowUnverifiedApproval,
-  } = params;
+  const { allowUnverified = false, allowUnverifiedApproval } = params;
   for (const rule of MATRIX_RULES) {
     if (rule.match(params)) {
-      return applyVerificationGate(rule.result, allowUnverified, allowUnverifiedApproval);
+      return applyVerificationGate(
+        rule.result,
+        allowUnverified,
+        allowUnverifiedApproval,
+      );
     }
   }
   // 이 줄에 도달하면 프로그래밍 오류입니다 (마지막 규칙이 모든 조합을 덮습니다).

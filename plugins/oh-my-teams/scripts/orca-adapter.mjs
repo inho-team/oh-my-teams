@@ -430,7 +430,11 @@ const IDLE_PROBE_MS = 20000;
 // terminals. The same wait is run first, and a terminal that times out is
 // refused before any Dispatch exists. The probe names no agent, so a runtime
 // that starts reporting idle reopens the path without a code change.
-async function assertTerminalIdle(orca, terminal, { cwd, execute, matrixPrediction }) {
+async function assertTerminalIdle(
+  orca,
+  terminal,
+  { cwd, execute, matrixPrediction },
+) {
   const waited = await execute(
     [
       orca,
@@ -489,7 +493,9 @@ async function assertTerminalIdle(orca, terminal, { cwd, execute, matrixPredicti
     // but Orca refused it here, the prediction itself is wrong: signal that
     // so the table can be revised rather than the same start repeated.
     const mismatch =
-      matrixPrediction?.path === "supervised-terminal" ? "matrix-mismatch" : undefined;
+      matrixPrediction?.path === "supervised-terminal"
+        ? "matrix-mismatch"
+        : undefined;
     const refused = assertFailureSignal({
       ...(mismatch ? { kind: mismatch } : {}),
       code: reason,
@@ -497,7 +503,9 @@ async function assertTerminalIdle(orca, terminal, { cwd, execute, matrixPredicti
         `Terminal ${terminal} ${state} instead of reporting tui-idle, ` +
         "so Orca worker-start could not hand it a task; no Dispatch was created. " +
         "Read the terminal screen and report it rather than repeating the start" +
-        (mismatch ? ` (matrix-prediction-failure: predicted supervised-terminal for ${reason})` : ""),
+        (mismatch
+          ? ` (matrix-prediction-failure: predicted supervised-terminal for ${reason})`
+          : ""),
     });
     throw orcaError(refused.message, refused, envelope);
   }
@@ -513,7 +521,6 @@ async function assertTerminalIdle(orca, terminal, { cwd, execute, matrixPredicti
     );
   }
 }
-
 
 /**
  * Checks, without creating anything, that a terminal reports `tui-idle`.
@@ -537,10 +544,13 @@ export async function checkTerminalIdle(
 ) {
   assert(terminal, "A terminal handle is required");
   const selected = selectOrcaExecutable(executable);
-  await assertTerminalIdle(selected, terminal, { cwd, execute, matrixPrediction });
+  await assertTerminalIdle(selected, terminal, {
+    cwd,
+    execute,
+    matrixPrediction,
+  });
   return { terminal, idle: true };
 }
-
 
 /**
  * Hands a task to a terminal with `dispatch --inject`, outside supervision.
@@ -720,9 +730,12 @@ export async function startWorker(
     execute,
   );
   if (terminal) {
-    await assertTerminalIdle(selected, terminal, { cwd: repo, execute, matrixPrediction });
+    await assertTerminalIdle(selected, terminal, {
+      cwd: repo,
+      execute,
+      matrixPrediction,
+    });
   }
-
 
   const argv = [selected, "orchestration", "worker-start"];
   if (task) argv.push("--task", task);
