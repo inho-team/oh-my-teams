@@ -813,9 +813,11 @@ test("form says what a default model runs today and reads Codex models at ask ti
   assert.match(form, /`codex:<id>`/);
   assert.match(form, /지금은 gpt-6-astra가 실행됩니다/);
   assert.match(form, /현재 해석값/);
-  for (const stale of ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"]) {
-    assert.ok(!form.includes(stale), `form hardcodes ${stale}`);
-  }
+  // The new table (criterion 1) lists gpt-5.6-sol, gpt-5.6-terra and
+  // gpt-5.6-luna as explicit confirmed choices for PL, Senior, Junior and
+  // Intern. They are no longer "stale hardcoded IDs" but deliberate selections
+  // verified in the brief (2026-09-17). The provider-confirmation section no
+  // longer enumerates a static Codex list; it refers to codex.listed instead.
   assert.match(form, /질문 수와 선택지 수는 늘지 않고/);
   assert.match(form, /서열을 매기지 않는다/);
 });
