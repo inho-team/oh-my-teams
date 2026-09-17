@@ -3,7 +3,7 @@
 - 작성일: 2026-09-17
 - 상태: 실측 완료. 채택/보류/기각 판정 포함. 후속 구현 전 Senior 검토 대기.
 - 대상: graphify(https://github.com/Graphify-Labs/graphify, Apache-2.0), OMT 역할 스킬, Orca 런타임
-- 관련 문서: [최소 변경 규율 브리프](../../.omt/briefs/minimal-change-discipline.md), [공유 할당량 모델 라우팅](shared-quota-model-routing.md), [AI 네이티브 에이전트 조직](ai-native-agent-organization.md)
+- 관련 문서: [최소 변경 규율](../../plugins/oh-my-teams/references/minimal-change.md), [공유 할당량 모델 라우팅](shared-quota-model-routing.md), [AI 네이티브 에이전트 조직](ai-native-agent-organization.md)
 
 graphify를 격리된 Python venv로 이 저장소에 실제로 실행하고, PM·PL·Senior의 판단을 그래프 근거에 연결하는 방안의 실측 결과를 정리한다.
 
@@ -135,7 +135,7 @@ def _log_path() -> Path | None:
 
 ## 3. 연결 지점 A~D 판정
 
-### A. PL 작업 분할 — **보류**
+### A. PL 작업 분할: **보류**
 
 **판정 근거:** `graphify affected <노드>` 명령은 깊이 2 BFS로 지정한 export의 역방향 의존자를 추출하며, 결과가 grep 호출자 목록과 완전히 일치했다. PL이 task의 `files` 목록을 정할 때 이 출력을 그대로 근거로 쓸 수 있다.
 
@@ -149,17 +149,17 @@ def _log_path() -> Path | None:
 
 **채택 시 바꿀 파일:** PL 스킬(`plugins/oh-my-teams/skills/pl/SKILL.md`)에 "task `files` 초안에 `graphify affected` 결과를 첨부한다" 규칙을 추가한다. graphify가 설치되지 않은 환경에서는 grep으로 대체하고, PL 스킬에 "graphify 미설치 시 `grep -rn <export명>`으로 호출자를 수동 확인한다"고 명시한다.
 
-### B. Senior 검토와 불필요한 변경 규율 — **보류**
+### B. Senior 검토와 불필요한 변경 규율: **보류**
 
 **판정 근거:** 변경한 함수의 호출자를 `graphify affected`로 확인하고, `graphify explain`으로 동일 커뮤니티 내 기존 helper를 찾는 흐름이 실측에서 작동했다. `org-draft.mjs`의 `explain` 결과에서 같은 커뮤니티(18)의 연결 노드를 확인해 `draftOrganization()`이 `core.mjs`의 `validateOrg()`를 통해 검증을 공유하고 있음을 파악할 수 있었다.
 
-이 검토 흐름은 minimal-change-discipline 브리프(C:/Users/kjsun/orca/oh-my-teams/.omt/briefs/minimal-change-discipline.md)가 요구하는 "변경 줄 밖의 기존 helper 재사용 확인"과 직접 연결된다.
+이 검토 흐름은 [최소 변경 규율](../../plugins/oh-my-teams/references/minimal-change.md)이 요구하는 "변경 줄 밖의 기존 helper 재사용 확인"과 직접 연결된다.
 
 **보류 이유:** A 지점의 그래프 갱신 절차가 해결되어야 하고, Senior 스킬에 검토 기준을 추가하는 작업(`minimal-change-discipline` kickoff)이 진행 중이다. 두 작업이 완료된 뒤 연동하는 것이 적절하다.
 
 **채택 시 바꿀 파일:** Senior 스킬(`plugins/oh-my-teams/skills/senior/SKILL.md`)에 "검토 시 `graphify affected <변경 export>`와 `graphify explain <변경 파일>`을 실행해 호출자와 helper를 확인한다" 항목을 추가한다. graphify 미설치 환경에서는 `grep -rn <export명>`으로 대체한다.
 
-### C. 병렬 킥오프·PR 충돌 — **보류**
+### C. 병렬 kickoff·PR 충돌: **보류**
 
 **판정 근거:** `graphify prs --conflicts`는 `gh` CLI 인증(`gh auth login`)이 필요해 이번 실측에서 실행하지 못했다. 대체 검증으로 최근 병합 PR 두 개의 변경 파일을 커뮤니티에 대응했다.
 
@@ -171,13 +171,13 @@ def _log_path() -> Path | None:
 
 PR #51의 `providers/ollama.mjs`가 커뮤니티 5에 속하고 주요 런타임 스크립트들이 다른 커뮤니티(0, 3)에 속한다. 두 PR 사이에 같은 커뮤니티에서 겹치는 파일이 있으면 충돌 위험이 높다고 판단할 수 있다. 이 분석 방법 자체는 작동하나, `prs --conflicts` 없이는 미병합 PR에 자동 적용하기 어렵다.
 
-현재 진행 중인 킥오프 브랜치(`dev-inho/form-model-choices`, `dev-inho/minimal-change-discipline-2`) 두 개 모두 `git diff --name-only main...branch` 결과가 비어 있어 변경 파일을 확인할 수 없었다.
+현재 진행 중인 kickoff 브랜치(`dev-inho/form-model-choices`, `dev-inho/minimal-change-discipline-2`) 두 개 모두 `git diff --name-only main...branch` 결과가 비어 있어 변경 파일을 확인할 수 없었다.
 
 **보류 이유:** `gh` CLI 인증 또는 GitHub API 연동이 해결되어야 `prs --conflicts`를 활용할 수 있다. 커뮤니티 기반 수동 분석은 작동하지만, 실용적인 자동화 수준에 이르지 못한다.
 
 **채택 시 바꿀 파일:** PL 스킬에 "병렬 kickoff 시작 전 `graphify prs --conflicts`로 커뮤니티 충돌을 확인한다. `gh` CLI 미인증 환경에서는 각 브랜치의 변경 파일을 `graphify explain`으로 커뮤니티에 대응해 수동 확인한다"고 추가한다.
 
-### D. OMT 문서 논리 연결 — **기각**
+### D. OMT 문서 논리 연결: **기각**
 
 **판정 근거:** `plugins/oh-my-teams/skills/**/SKILL.md`와 `references/*.md` 사이 마크다운 링크 관계 추출을 시도했다.
 
