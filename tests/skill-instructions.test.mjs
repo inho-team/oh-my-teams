@@ -818,3 +818,77 @@ test("reports lead with a verdict and instructions lead with the goal", () => {
     /\[`bluf\.md`\]\(bluf\.md\)/,
   );
 });
+test("minimal-change discipline lives in one place and each role links it", () => {
+  const references = path.join(root, "plugins/oh-my-teams/references");
+  const canonicalPath = path.join(references, "minimal-change.md");
+
+  // 수용 기준 1: 정본 파일이 존재한다
+  assert.ok(
+    fs.existsSync(canonicalPath),
+    "references/minimal-change.md must exist",
+  );
+
+  const canonical = fs.readFileSync(canonicalPath, "utf8");
+
+  // 수용 기준 6: 두 예외의 핵심 문구가 정본에 있다
+  // 안전 예외
+  assert.match(
+    canonical,
+    /신뢰 경계의 입력 검증/,
+    "canonical must state the safety exception",
+  );
+  assert.match(
+    canonical,
+    /데이터 손실을 막는 오류 처리/,
+    "canonical must state data-loss clause of safety exception",
+  );
+  // 가독성 예외
+  assert.match(
+    canonical,
+    /줄 수를 줄이려고 읽기 어려운 코드를 만들지 않는다/,
+    "canonical must state the readability exception",
+  );
+  assert.match(
+    canonical,
+    /지루한 코드가 영리한 코드보다 낫다/,
+    "canonical must state the boring-over-clever principle",
+  );
+
+  // 수용 기준 4: Senior가 다섯 판정 대상을 명시한다
+  const seniorText = readSkill("senior");
+  const fiveTargets = [
+    /요청하지 않은 리팩터링/,
+    /변경 줄 밖의 정리/,
+    /추측성 확장/,
+    /이미 있는 helper의 재구현/,
+    /요청하지 않은 주석/,
+  ];
+  for (const pattern of fiveTargets) {
+    assert.match(
+      seniorText,
+      pattern,
+      `senior must list all five finding targets (missing: ${pattern})`,
+    );
+  }
+
+  // 수용 기준 1: 다섯 역할 스킬이 정본을 링크한다
+  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+    assert.match(
+      readSkill(role),
+      /references\/minimal-change\.md/,
+      `${role} must link to references/minimal-change.md`,
+    );
+  }
+
+  // 수용 기준 5: Junior·Intern의 링크가 ### 한계 절 안에 있다
+  for (const role of ["junior", "intern"]) {
+    const text = readSkill(role);
+    const limitsSection = text.split("### 한계")[1]?.split(/\n## /)[0];
+    assert.ok(limitsSection, `${role} must have a ### 한계 section`);
+    assert.match(
+      limitsSection,
+      /references\/minimal-change\.md/,
+      `${role} must link to minimal-change.md inside ### 한계`,
+    );
+  }
+});
