@@ -142,7 +142,10 @@ export function predictLaunchPath(params) {
 
 ### 5. 거부 흐름과 표 불일치 신호
 - **실행 전 거부**: `plugins/oh-my-teams/scripts/role-terminal.mjs`에서 터미널을 열기 전(`workflow-reserve` 이전)에 표를 조회합니다. 표가 `blocked`를 반환하면 터미널 생성과 attempt 예약을 중단하고, 이유 코드와 `nextAction`을 반환합니다.
-- **사후 거부 분류**: 표가 성공(`supervised-terminal`)을 예측했으나 `terminal-idle-check`나 `worker-start`에서 실패하는 경우, 이를 "표 불일치" 신호로 분류합니다. `plugins/oh-my-teams/scripts/failures.mjs` 내 `failure-classify`가 받을 신호 이름은 `matrix-mismatch`이며, 분류 경로는 `matrix-mismatch -> review`로 지정합니다.
+- **사후 거부 분류**: 표가 성공(`supervised-terminal` 또는 `headless`)을 예측했으나 `terminal-idle-check`나 `worker-start` 단계에서 실패하는 경우, 이를 "표 불일치" 신호로 분류합니다. `plugins/oh-my-teams/scripts/failures.mjs`의 `classifyFailure` 함수가 처리할 신호는 다음과 같이 정의합니다:
+  - **입력 필드(Signal)**: `kind: "matrix-mismatch"`, `predictedPath: "<예측된 path>"`, `actualReason: "<Orca가 반환한 실제 거부/실패 코드>"`
+  - **분류 결과(Route)**: `category: "matrix-prediction-failure"`, `nextOwner: "pm"`, `action: "revise-matrix"`, `retryable: false`
+  (기존 `failures.mjs`의 `not-started`, `workspace-context` 등 기존 경로와 겹치지 않는 새로운 분류 결과를 반환하게 합니다.)
 
 ### 6. 새 터미널 경로 가능 여부
 - **결론**: Orca `tui-idle`에 기대지 않는 감독 터미널 경로(`supervised-screen-path`)는 현재 Orca CLI 제약상 불가능합니다.
