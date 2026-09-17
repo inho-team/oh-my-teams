@@ -191,7 +191,7 @@ headless 모드 실행 시 workflow에 연결하기 위한 receipt 형식입니�
 |---|---|---|
 | `via` | 필수 | `"headless-start"` 고정 값 |
 | `executionId` | 필수 | 예약된 attempt의 `executionId` (worker ID와 동일해야 함) |
-| `runId` | 선택 | 런타임이 부여한 ID (기존 Orca 영수증과 달리 headless에서는 선택) |
+| `runId` | 필수 | 런타임이 부여한 ID |
 | `taskId` | 필수 | `headless:<executionId>` 형식이어야 함 |
 | `dispatchId` | 필수 | `headless:<executionId>` 형식이어야 함 |
 | `worktreeId` | 필수 | 대상 워크트리 ID |
@@ -202,9 +202,8 @@ headless 모드 실행 시 workflow에 연결하기 위한 receipt 형식입니�
 
 **추가할 검사 로직 (`workflow-attach` 단계 등):**
 `receipt.via === "headless-start"`인 경우를 조건부로 처리하여 다음을 추가합니다.
-1. `runId` 필수 검사 제외 (선택 필드로 완화).
-2. `taskId`와 `dispatchId`가 `headless:<executionId>` 형식으로 접두사 규칙을 따르는지 검사.
-3. `executionId`가 예약된 worker ID와 정확히 대응하는지 검사.
+1. `taskId`와 `dispatchId`가 `headless:<executionId>` 형식으로 접두사 규칙을 따르는지 검사.
+2. `executionId`가 예약된 worker ID와 정확히 대응하는지 검사.
 
 **거부할 receipt 예시:**
 - **접두사 불일치**: `taskId`가 `headless:junior-launch-probes`가 아니라 `task_123` 등 일반 형식을 띰.
