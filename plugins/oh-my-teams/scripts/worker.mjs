@@ -237,6 +237,7 @@ function recordProviderCall(
     requestedModel: profile.model,
     requestedEffort: profile.effort ?? null,
     effectiveModel: response.effectiveModel ?? null,
+    sessionId: response.sessionId ?? null,
     modelProof: binding.status,
     selectionReason:
       callNumber === 1
@@ -685,6 +686,7 @@ export async function assist(
     requestedModel: profile.model,
     requestedEffort: profile.effort ?? null,
     effectiveModel: response.effectiveModel ?? null,
+    sessionId: response.sessionId ?? null,
     modelProof: binding.status,
     workspace: await workspaceBinding(repo),
     summary: payload.summary,

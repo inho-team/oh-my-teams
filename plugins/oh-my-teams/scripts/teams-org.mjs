@@ -83,6 +83,8 @@ import {
   registerKickoff,
   releaseKickoff,
 } from "./kickoff-registry.mjs";
+import { recordLaunch } from "./usage-ledger.mjs";
+import { formatUsageTable, usageReport } from "./usage-report.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
@@ -131,6 +133,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                 [--workflow-id ID --state DIR] [--orca EXECUTABLE]
                 (the tab title is the role tag, e.g. [PM], then TEXT or the worktree)
   host-defaults [--project DIR] [--codex-home DIR]
+  usage-report --org FILE [--worktree ID | --all] [--state DIR]
+               [--place ROLE=DIR ...] [--claude-home DIR] [--codex-home DIR]
+               [--agy-home DIR] [--write] [--json]
+               (per-role turns and tokens from provider session records, read-only;
+               --write stores the report in <project>/.omt/history)
   supervision-next --org FILE --observation FILE
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role intern]
        [--workflow-id ID --attempt-id ID]
@@ -232,6 +239,18 @@ export const ALLOWED_OPTIONS = {
     "orca",
   ],
   "host-defaults": ["project", "codex-home"],
+  "usage-report": [
+    "org",
+    "worktree",
+    "all",
+    "state",
+    "place",
+    "claude-home",
+    "codex-home",
+    "agy-home",
+    "write",
+    "json",
+  ],
   "supervision-next": ["org", "observation"],
   "worker-start": [
     "org",
@@ -319,6 +338,7 @@ export const REQUIRED_OPTIONS = {
   "role-command": ["org", "role"],
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
+  "usage-report": ["org"],
   "supervision-next": ["org", "observation"],
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
@@ -350,7 +370,8 @@ export const REQUIRED_OPTIONS = {
 };
 
 /**
- * Parses strict `--key value` CLI input and repeatable `--report` values.
+ * Parses strict `--key value` CLI input and the repeatable `--report` and
+ * `--place` values.
  *
  * @param {string[]} argv - Arguments excluding executable and script path.
  * @returns {object} Command plus parsed option values.
@@ -365,7 +386,7 @@ export function parseArgs(argv) {
     const option = key.slice(2);
     // `--text` is a flag only for role-spec; headless-answer takes a value.
     if (
-      ["json", "apply", "force"].includes(option) ||
+      ["json", "apply", "force", "all", "write"].includes(option) ||
       (option === "text" && command === "role-spec")
     ) {
       args[option] = true;
@@ -377,9 +398,12 @@ export function parseArgs(argv) {
       `Missing value: ${key}`,
     );
     index += 1;
-    if (option === "report" && command === "aggregate") {
-      args.report ??= [];
-      args.report.push(optionValue);
+    if (
+      (option === "report" && command === "aggregate") ||
+      (option === "place" && command === "usage-report")
+    ) {
+      args[option] ??= [];
+      args[option].push(optionValue);
     } else {
       assert(!(option in args), `Duplicate option: ${key}`);
       args[option] = optionValue;
@@ -498,6 +522,7 @@ async function startSupervisedWorker(args) {
     args.repo,
   );
   const viaTerminal = launch.via === "terminal";
+  const launchedAt = new Date().toISOString();
   try {
     const started = await startWorker(path.resolve(args.repo), {
       task: args.task,
@@ -526,8 +551,25 @@ async function startSupervisedWorker(args) {
         title,
       })),
     );
+    const ledger = recordLaunchSafely(args.org, launchedAt, {
+      via: "worker-start",
+      role: launch.role,
+      profile: launch.profile,
+      provider: launch.provider,
+      modelRequested: launch.model,
+      effortRequested: launch.effort,
+      worktreePath:
+        selectedWorktreePath(args.worktree ?? "current", args.repo) ??
+        receiptWorktreePath(started.receipt),
+      worktreeSelector: args.worktree ?? "current",
+      terminal: worker.handle,
+      workerId: started.workerId ?? null,
+      workflowId: args["workflow-id"] ?? null,
+      stateDir: args.state ?? null,
+    });
     return {
       ...started,
+      ...ledger,
       title,
       titlePinned,
       binding: { ...binding, roleHeader: Boolean(args.spec) },
@@ -580,7 +622,8 @@ function startHeadlessRole(args) {
   assertNotKickoffOwner(cwd, `starting ${command.role}`);
   assertWorktreeUnshared(run.workflowState, command.role, `path:${cwd}`, cwd);
   const workerId = args.worker ?? `${command.role}-${Date.now().toString(36)}`;
-  return startHeadlessWorker({
+  const launchedAt = new Date().toISOString();
+  const started = startHeadlessWorker({
     stateDir: args.state,
     workerId,
     role: command.role,
@@ -597,6 +640,50 @@ ${HEADLESS_PROTOCOL}
       ? {}
       : { timeoutMs: Number(args["timeout-ms"]) }),
   });
+  return {
+    ...started,
+    ...recordLaunchSafely(args.org, launchedAt, {
+      via: "headless-start",
+      role: command.role,
+      profile: command.profile,
+      provider: command.provider,
+      modelRequested: command.modelRequested,
+      effortRequested: command.effortRequested,
+      worktreePath: cwd,
+      worktreeSelector: `path:${cwd}`,
+      workerId,
+      workflowId: args["workflow-id"] ?? null,
+      stateDir: args.state,
+    }),
+  };
+}
+
+// A usage report can attribute a session to a role only through this line,
+// but a launch that already started must not fail because the ledger could
+// not be written, so the failure travels in the result instead. The line is
+// stamped with when the launch began: opening a terminal waits for the agent
+// to be ready, and its session is created well before that wait ends.
+function recordLaunchSafely(orgFile, launchedAt, launch) {
+  try {
+    const { file } = recordLaunch(
+      orgFile,
+      { ...launch, callerCwd: process.cwd() },
+      launchedAt,
+    );
+    return { ledger: file };
+  } catch (error) {
+    return { ledgerError: error.message };
+  }
+}
+
+// Orca names a worktree it created as `<repoId>::<path>`.
+function receiptWorktreePath(receipt) {
+  const effect = (receipt?.result?.effects ?? []).find(
+    (item) => item?.kind === "worktree",
+  );
+  const id = typeof effect?.id === "string" ? effect.id : "";
+  const at = id.lastIndexOf("::");
+  return at === -1 ? null : path.resolve(id.slice(at + 2));
 }
 
 // The exception path #41 asked for. An Agy terminal Orca cannot see idle is
@@ -709,6 +796,27 @@ async function mergeCheck(args) {
       "Evidence and required gates match this checkout. " +
       "Apply merge authorization and mandatory CI separately.",
   };
+}
+
+// The table is for a person reading the terminal; --json and --write keep the
+// full records, which carry paths and session ids but no message text.
+async function reportUsage(args) {
+  const report = await usageReport({
+    orgFile: args.org,
+    worktreeId: args.worktree,
+    all: Boolean(args.all),
+    stateDir: args.state,
+    places: args.place,
+    homes: {
+      claudeHome: args["claude-home"],
+      codexHome: args["codex-home"],
+      agyHome: args["agy-home"],
+    },
+    write: Boolean(args.write),
+  });
+  if (args.json) return report;
+  console.log(formatUsageTable(report));
+  return undefined;
 }
 
 function writeDraft(args) {
@@ -833,6 +941,7 @@ async function executeCommand(args) {
         const command = roleCommand(org, args.role, run);
         const target = selectedWorktreePath(args.worktree, process.cwd());
         if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
+        const launchedAt = new Date().toISOString();
         assertWorktreeUnshared(
           run.workflowState,
           command.role,
@@ -844,13 +953,30 @@ async function executeCommand(args) {
           command,
           title: args.title,
           executable: args.orca,
-        });
+        }).then((opened) => ({
+          ...opened,
+          ...recordLaunchSafely(args.org, launchedAt, {
+            via: "role-terminal",
+            role: command.role,
+            profile: command.profile,
+            provider: command.provider,
+            modelRequested: command.modelRequested,
+            effortRequested: command.effortRequested,
+            worktreePath: target,
+            worktreeSelector: args.worktree,
+            terminal: opened.terminal,
+            workflowId: args["workflow-id"] ?? null,
+            stateDir: args.state ?? null,
+          }),
+        }));
       })(launchContext(args));
     case "host-defaults":
       return resolveHostDefaults({
         project: args.project && path.resolve(args.project),
         codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
       });
+    case "usage-report":
+      return reportUsage(args);
     case "supervision-next":
       return nextSupervisionAction({
         ...readJSON(args.observation),

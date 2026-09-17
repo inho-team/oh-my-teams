@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, readJSON, writeJSON } from "./core.mjs";
+import { addTokenUsage, normalizeTokenUsage } from "./usage.mjs";
 
 const RUNNER = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -66,6 +67,21 @@ const PROVIDERS = {
             event.rate_limit_info?.status &&
             event.rate_limit_info.status !== "allowed",
         ),
+        ...PROVIDERS.claude.usage(events),
+      };
+    },
+    // The result event totals the whole `-p` invocation. Its cost is the
+    // API-equivalent estimate Claude prints, not what a subscription is billed.
+    usage(events) {
+      const result = events.findLast((event) => event.type === "result");
+      return {
+        usage: normalizeTokenUsage("claude", result?.usage),
+        costUsd:
+          typeof result?.total_cost_usd === "number"
+            ? result.total_cost_usd
+            : null,
+        numTurns:
+          typeof result?.num_turns === "number" ? result.num_turns : null,
       };
     },
   },
@@ -79,7 +95,7 @@ const PROVIDERS = {
       argv.push(prompt);
       return { argv, stdin: null };
     },
-    read(events, { codexHome } = {}) {
+    read(events, { codexHome, lookupModel = true } = {}) {
       const thread = events.find((event) => event.type === "thread.started");
       const messages = events.filter(
         (event) =>
@@ -92,7 +108,8 @@ const PROVIDERS = {
       const session = thread?.thread_id ?? null;
       return {
         session,
-        model: session ? codexRolloutModel(session, codexHome) : null,
+        model:
+          session && lookupModel ? codexRolloutModel(session, codexHome) : null,
         text: messages.at(-1)?.item?.text ?? null,
         providerError: failure
           ? String(failure.message ?? failure.error?.message ?? failure.type)
@@ -100,6 +117,22 @@ const PROVIDERS = {
         rateLimited: /rate.?limit|usage limit|quota/i.test(
           JSON.stringify(failure ?? ""),
         ),
+        ...PROVIDERS.codex.usage(events),
+      };
+    },
+    // `codex exec --json` reports usage per model turn, so the turns are summed.
+    usage(events) {
+      const completed = events.filter(
+        (event) => event.type === "turn.completed",
+      );
+      return {
+        usage: completed.reduce(
+          (total, event) =>
+            addTokenUsage(total, normalizeTokenUsage("codex", event.usage)),
+          null,
+        ),
+        costUsd: null,
+        numTurns: completed.length || null,
       };
     },
   },
@@ -132,6 +165,21 @@ const PROVIDERS = {
         rateLimited: /RESOURCE_EXHAUSTED|rate.?limit|quota/i.test(
           JSON.stringify(result ?? ""),
         ),
+        ...PROVIDERS.agy.usage(events),
+      };
+    },
+    // Agy's `--output-format json` puts usage and num_turns at the top level.
+    // Where the stream-json result event carries them has not been observed, so
+    // both the nested result and the event itself are read.
+    usage(events) {
+      const result = events.findLast((event) => event.event === "result");
+      const body = result?.result;
+      const raw = body?.usage ?? result?.usage ?? null;
+      const turns = body?.num_turns ?? result?.num_turns;
+      return {
+        usage: normalizeTokenUsage("agy", raw),
+        costUsd: null,
+        numTurns: typeof turns === "number" ? turns : null,
       };
     },
   },
@@ -366,6 +414,54 @@ export function startHeadlessWorker({
   return { worker, ...launchTurn(dir, worker, { prompt }) };
 }
 
+function readTurn(worker, turnDir, options) {
+  const file = (name) => path.join(turnDir, name);
+  const stream = readHeadlessStream(
+    worker.provider,
+    fs.existsSync(file("stream.jsonl"))
+      ? fs.readFileSync(file("stream.jsonl"), "utf8")
+      : "",
+    options,
+  );
+  const turn = fs.existsSync(file("turn.json"))
+    ? readJSON(file("turn.json"))
+    : {};
+  const exit = fs.existsSync(file("exit.json"))
+    ? readJSON(file("exit.json"))
+    : null;
+  return {
+    number: Number(path.basename(turnDir)),
+    startedAt: turn.startedAt ?? null,
+    endedAt: exit?.endedAt ?? null,
+    exited: Boolean(exit),
+    session: stream.session,
+    model: stream.model,
+    usage: stream.usage,
+    costUsd: stream.costUsd,
+    numTurns: stream.numTurns,
+  };
+}
+
+/**
+ * Reads what each turn of a headless worker reported, without its text.
+ *
+ * @param {string} stateDir - PM worktree state directory.
+ * @param {string} workerId - Worker to read.
+ * @param {object} [options] - `codexHome` for Codex model lookup.
+ * @returns {{worker: object, turns: object[]}} The worker record and, per turn,
+ *   its times, session, reported model, normalized usage, cost and model turns.
+ * @throws {Error} When the worker does not exist.
+ */
+export function headlessTurns(stateDir, workerId, options = {}) {
+  const dir = workerDir(stateDir, workerId);
+  assert(fs.existsSync(dir), `No headless worker ${workerId}`);
+  const worker = readJSON(path.join(dir, "worker.json"));
+  return {
+    worker,
+    turns: turnDirs(dir).map((turnDir) => readTurn(worker, turnDir, options)),
+  };
+}
+
 /**
  * Reports a headless worker's state from its files.
  *
@@ -382,10 +478,22 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   const turns = turnDirs(dir);
   const turnDir = turns.at(-1);
   const exitFile = path.join(turnDir, "exit.json");
-  const exit = fs.existsSync(exitFile) ? readJSON(exitFile) : null;
+  const readExit = () => (fs.existsSync(exitFile) ? readJSON(exitFile) : null);
+  let exit = readExit();
   const runner = fs.existsSync(path.join(turnDir, "runner.json"))
     ? readJSON(path.join(turnDir, "runner.json")).pid
     : null;
+  // A runner that wrote its exit and ended just after the first look is not
+  // unverifiable, so the exit is looked for once more before saying so. The
+  // stream is read after this, and a runner closes it before writing the exit,
+  // so an exited turn's stream is always read complete.
+  let liveness;
+  if (exit) liveness = "exited";
+  else if (alive(runner)) liveness = "live";
+  else {
+    exit = readExit();
+    liveness = exit ? "exited" : "unverifiable";
+  }
   const streamFile = path.join(turnDir, "stream.jsonl");
   const stream = readHeadlessStream(
     worker.provider,
@@ -405,11 +513,6 @@ export function headlessStatus(stateDir, workerId, options = {}) {
       ).session;
     }
   }
-  let liveness;
-  if (exit) liveness = "exited";
-  else if (alive(runner)) liveness = "live";
-  else liveness = "unverifiable";
-
   let outcome = null;
   if (exit) {
     if (exit.stopped) outcome = "stopped";
@@ -434,7 +537,27 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     modelProof: modelVerdict(worker.modelRequested, stream.model),
     providerError: stream.providerError,
     rateLimited: stream.rateLimited,
+    ...headlessUsageSummary(worker, turns, options),
     stream: streamFile,
+  };
+}
+
+// Earlier turns are read only for their usage and session, so the Codex model
+// lookup, which walks the rollout directory, is not repeated for each of them.
+function headlessUsageSummary(worker, turns, options) {
+  const read = turns.map((turnDir) =>
+    readTurn(worker, turnDir, { ...options, lookupModel: false }),
+  );
+  const sessions = [];
+  for (const turn of read) {
+    if (turn.session && !sessions.includes(turn.session))
+      sessions.push(turn.session);
+  }
+  const measured = read.filter((turn) => turn.usage);
+  return {
+    sessions,
+    usage: read.reduce((total, turn) => addTokenUsage(total, turn.usage), null),
+    usageTurns: { measured: measured.length, total: read.length },
   };
 }
 

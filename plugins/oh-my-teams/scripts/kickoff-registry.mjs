@@ -89,6 +89,17 @@ function entryName(worktreeId) {
   return crypto.createHash("sha256").update(worktreeId).digest("hex");
 }
 
+/**
+ * Names the files a kickoff's registry entry and archives are stored under.
+ *
+ * @param {string} worktreeId - PM worktree id of the kickoff.
+ * @returns {string} Hex digest used in the entry and history file names.
+ * @throws {Error} When the id is empty or holds control characters.
+ */
+export function kickoffEntryName(worktreeId) {
+  return entryName(worktreeId);
+}
+
 function entryFile(orgFile, worktreeId) {
   return path.join(registryDirectory(orgFile), `${entryName(worktreeId)}.json`);
 }

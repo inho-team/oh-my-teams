@@ -32,7 +32,13 @@ node <runtime> deliver --org <project>/.omt/organization.json --worktree <pm-wor
 ```
 
 4. PR/MR 생성, 병합 또는 push를 할 수 없는 환경이면 수행한 것으로 표현하지 않고 정확한 제약과 필요한 후속 작업을 알린다.
-5. 코드, 검사 증거, 검토 결과와 병합 식별자를 영속적인 위치에 보존한다. 실행 중인 프로세스가 없는지 확인한다. "정산"은 세 대상을 가리키므로 각각 따로 확인한다. Orca Dispatch의 accepted settlement, `workflow-status`가 보고하는 모든 attempt의 종결 상태, 그리고 하네스 보고서가 없을 때 붙는 `unsettled` 표시는 저장 위치와 확인 명령이 서로 다르다.
+5. 코드, 검사 증거, 검토 결과와 병합 식별자를 영속적인 위치에 보존한다. 워크트리를 회수하면 PM state의 headless 기록도 사라지므로, 회수 전에 역할별 사용량 스냅샷을 `<project>/.omt/history`에 남긴다. 스냅샷에 실패하면 그 사실을 최종 기록에 적고 종료 절차는 계속한다.
+
+```text
+node <runtime> usage-report --org <project>/.omt/organization.json --worktree <pm-worktree-id> --write
+```
+
+   실행 중인 프로세스가 없는지 확인한다. "정산"은 세 대상을 가리키므로 각각 따로 확인한다. Orca Dispatch의 accepted settlement, `workflow-status`가 보고하는 모든 attempt의 종결 상태, 그리고 하네스 보고서가 없을 때 붙는 `unsettled` 표시는 저장 위치와 확인 명령이 서로 다르다.
 6. Orca의 현재 가이드에 따라 정산이 끝난 worker를 release하고 child worktree를 회수한다. 보존되지 않은 변경, 살아 있는 프로세스, 상태 불명 worker가 있으면 삭제하지 않으며, 종료를 확인하지 못한 worker는 `worker-abandon`으로 봉인한다.
 7. 환경이 워크트리 삭제를 지원하지만 별도 최종 승인이 필요한 경우에는 정확한 대상을 제시하고 승인을 받은 뒤 삭제한다. 승인은 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 받으며, 삭제 대상과 되돌릴 수 없다는 사실을 선택지에 함께 적는다. 환경이 삭제 자체를 지원하지 않으면 불가능한 승인을 요구하지 않고 사용자가 실행할 정리 절차를 제공한다.
 8. 요청된 전달과 정리가 모두 끝난 뒤에만 kickoff Goal을 완료 처리한다. 환경 제약으로 정리를 사용자에게 넘긴 경우에는 남은 정리 항목을 명시해 보고한 뒤 완료 처리한다.
@@ -42,4 +48,4 @@ node <runtime> deliver --org <project>/.omt/organization.json --worktree <pm-wor
 node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <pm-worktree-id> --reason completed
 ```
 
-최종 기록에는 Goal 결과, 전달 방식, PR/MR 주소 또는 식별자, 주인 브랜치의 병합 커밋, 검사 근거, 회수·삭제한 워크트리와 보존한 후속 항목을 포함한다. 사용자에게 전달하는 문장은 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)의 기준을 따른다.
+최종 기록에는 Goal 결과, 전달 방식, 사용량 스냅샷 경로, PR/MR 주소 또는 식별자, 주인 브랜치의 병합 커밋, 검사 근거, 회수·삭제한 워크트리와 보존한 후속 항목을 포함한다. 사용자에게 전달하는 문장은 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)의 기준을 따른다.

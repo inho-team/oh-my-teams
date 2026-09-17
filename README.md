@@ -62,7 +62,7 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 
 `form`은 다섯 역할(PM·PL·Senior·Junior·Intern)이 각각 어떤 모델을 쓸지만 묻고, 질문은 두 번으로 끝난다. 첫 번째에 PM·PL·Senior·Junior의 모델을, 두 번째에 Intern의 모델을 묻는다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 다섯 역할을 두고, 몇 개를 쓸지는 kickoff마다 PM이 실행 깊이로 정한다. 모델 선택지에는 Claude Code·Codex 기본 모델과 Agy의 Opus 4.6, Sonnet 4.6, Gemini 3.1 Pro, Gemini 3.8 Flash, GPT-OSS 120B가 역할 성격에 맞게 들어 있으며, 그 밖의 모델은 자유 입력으로 받는다. `기본` 선택지는 모델을 `null`로 저장하므로, `form`은 묻기 전에 `host-defaults`로 지금 실행될 모델을 확인해 선택지 설명과 결성 보고에 적는다. Codex의 개별 모델 ID는 설치된 CLI의 `codex debug models`에서 읽어 질문 본문에 안내하며, 자유 입력 `codex:<id>`로 고른다.
 
-묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 전체 호출 한도는 3이다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓰고, 보조 도구 호출은 허용하지 않는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
+묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번이 쓰는 provider 호출 수와 workflow attempt 하나에 배정되는 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓰고, 보조 도구 호출은 허용하지 않는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
 
 ### 실행 깊이
 
@@ -126,6 +126,8 @@ Ollama는 저장소 파일을 직접 열지 못한다. 작업 계약의 `context
 
 ## 실행과 검증
 
+역할별 사용량은 `usage-report`가 각 CLI가 이미 남긴 세션 기록에서 읽는다. 역할을 띄우는 `role-terminal`, `worker-start`, `headless-start`가 `<project>/.omt/usage/launches.jsonl`에 어느 역할을 어디서 띄웠는지 적고, 보고서는 그 기록으로 세션을 역할에 연결한다. 메시지 본문은 읽지 않는다. Agy 대화형 세션은 토큰 사용량이 기록되지 않아 `unmeasured`로 표시되므로, 사용량이 중요한 kickoff에서는 Agy 역할을 `headless-start`로 실행한다. 자세한 기준은 [`orca-runtime.md`](plugins/oh-my-teams/references/orca-runtime.md)의 「사용량 측정」 절에 있다.
+
 ```text
 node plugins/oh-my-teams/scripts/teams-org.mjs --help
 node plugins/oh-my-teams/scripts/teams-org.mjs validate --org plugins/oh-my-teams/examples/organization.json
@@ -135,6 +137,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs preset --org <project>/.omt/organ
 node plugins/oh-my-teams/scripts/teams-org.mjs gate-check --task <task-v2.json> --report <report.json> --repo <worktree> --state <pm-worktree>/.omt
 node plugins/oh-my-teams/scripts/teams-org.mjs workflow-status --id <workflow-id> --state <pm-worktree>/.omt
 node plugins/oh-my-teams/scripts/teams-org.mjs incident-status --state <pm-worktree>/.omt
+node plugins/oh-my-teams/scripts/teams-org.mjs usage-report --org <project>/.omt/organization.json --worktree <pm-worktree-id>
 node --test tests/runtime.test.mjs
 npm run eval:organization
 node experiments/run-routing.mjs --mode e1 --max-calls 18 --dry-run

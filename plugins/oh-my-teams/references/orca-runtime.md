@@ -222,3 +222,18 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --
 Goal이 `blocked`이면 표현을 완화하지 않고 그대로 전달한다. 다만 `workflow-status`의 `blocked`는 실패한 task가 하나 있다는 뜻이며 `workflow-retry`로 되돌릴 수 있는 일시 상태이므로, Goal의 `blocked`와 서로 옮겨 적지 않는다.
 
 사용자에게 보고할 때에는 Goal 상태, `live` worker 수, 확인된 최근 코드 변경을 **서로 구분된 항목**으로 제시한다. 계획의 존재, 대기 중인 다음 단계, 완료된 변경, 현재 실행 중인 구현은 각각 다른 사실이다.
+
+## 사용량 측정
+
+`usage-report`는 kickoff의 역할별 턴·호출·토큰과 모델을 각 CLI가 이미 남긴 기록에서 읽는다. 읽기만 하며, `--write`를 줄 때만 `<project>/.omt/history/usage-<entry>-<createdAt>.json`에 스냅샷을 쓴다.
+
+```text
+node <runtime> usage-report --org <project>/.omt/organization.json --worktree <pm-worktree-id> [--place <role>=<dir>]... [--json]
+node <runtime> usage-report --org <project>/.omt/organization.json --all
+```
+
+- **역할 연결**: `role-terminal`, `worker-start`, `headless-start`는 실행할 때마다 `<project>/.omt/usage/launches.jsonl`에 역할, 프로필, 요청 모델, 워크트리, 터미널, 시작 시각을 한 줄씩 남긴다. 이 줄은 `--state`가 가리키는 PM state, PM 워크트리 안에서의 실행, 또는 앞서 기록된 역할 워크트리 안에서의 실행으로 kickoff에 묶인다. 기록에 실패해도 실행은 계속되고 결과에 `ledgerError`가 붙는다. 보고서는 PM 워크트리(등록 항목)와 이 기록의 워크트리에서 만든 세션을 실행기·경로·시각으로 역할에 연결한다. 같은 워크트리에서 같은 실행기의 두 역할을 1분 안에 띄웠으면 어느 쪽인지 가릴 수 없어 `ambiguous`로, 어느 기록으로도 설명되지 않는 세션은 `unattributed`로 표시하고 추측하지 않는다. 이 기록이 생기기 전의 kickoff는 `--place <role>=<dir>`로 역할이 쓴 워크트리를 직접 알려 준다.
+- **읽는 기록**: Claude는 `~/.claude/projects`의 transcript(같은 응답이 여러 줄로 반복되므로 응답 id로 한 번만 센다), Codex는 `~/.codex/sessions`와 `archived_sessions`의 rollout(누적 합계이므로 kickoff 기간의 마지막 값에서 기간 전 마지막 값을 뺀다), Agy는 `~/.gemini/antigravity-cli/conversation_summaries.db`의 대화 id·작업 경로·단계 수·시각 열만 읽는다. headless worker는 PM state의 stream을, 로컬 하네스는 `runs`와 `assists` 보고서의 호출 기록을 읽고, 같은 세션이 CLI 기록에도 있으면 두 번 세지 않는다. 메시지 본문, 제목, 미리보기는 읽지 않는다. 위치는 `--claude-home`, `--codex-home`, `--agy-home` 또는 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OMT_AGY_HOME`으로 바꾼다.
+- **측정되지 않는 것**: Agy 대화형 세션은 토큰 사용량이 어디에도 기록되지 않는다. 이런 세션은 `measured: false`, `reason: "agy-interactive-usage-not-recorded"`로 표시하고 토큰은 `null`로 둔다. 단계 수(`steps`)만 보조 지표로 보여 준다. 사용량 비교가 중요한 kickoff에서는 Agy 역할을 `role-terminal` 대신 `headless-start`로 실행한다. headless 결과에는 사용량이 담긴다. 다만 Agy의 stream-json에서 사용량이 담기는 위치는 아직 실제 출력으로 확인하지 않았으므로, 결과 이벤트의 중첩 위치와 최상위를 모두 읽는다.
+- **해석**: 역할별 점유율(`share`)은 측정된 세션의 prompt와 output 토큰만으로 계산한다. 측정된 세션이 없는 역할은 0%가 아니라 `unmeasured`이며, `coverage`가 몇 개 세션 위에서 계산했는지 알린다. prompt 토큰은 Claude에서 캐시 읽기·생성을 포함한 합, Codex에서 캐시를 포함해 보고된 입력, Agy에서 보고된 `input_tokens`다. Agy의 `input_tokens`가 캐시 읽기를 포함하는지는 확인되지 않았다. Claude headless의 `costUsd`는 CLI가 계산한 API 환산 추정치이며 구독 요금이 아니다. 요청 모델과 보고 모델이 다르면 `mismatches`에 적는다.
+- **호출 한도와의 관계**: 조직의 `policy.maxCalls`는 `work` 한 번과 workflow attempt 하나가 쓰는 provider 호출 수를 제한하고, workflow의 `budget.maxCalls`는 그 workflow 전체의 호출 예산이다. 둘 다 대화형 역할 터미널의 턴을 세지 않으므로, 대화형 역할이 쓴 양은 이 보고서로만 확인한다.

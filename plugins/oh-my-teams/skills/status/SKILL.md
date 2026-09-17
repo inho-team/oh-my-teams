@@ -22,6 +22,12 @@ workflow가 있으면 `workflow-status`가 돌려주는 현재 `depth`와 이번
 
 상태를 사용자에게 표시하기 직전에 해당 Goal과 `worker-list`를 다시 조회한다. `live` worker 수를 함께 표시한다. 무엇을 `in-progress`·`stopped`·`unverifiable`·`blocked`로 표시할지, 그리고 workflow의 `blocked`를 Goal의 `blocked`와 구분하는 규칙은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 
+역할별 사용량을 물으면 아래 명령으로 조회해 역할별 턴·토큰·모델과 측정 범위(coverage)를 함께 보여 준다. 측정되지 않은 역할은 0이 아니라 `unmeasured`로 전하고, 해석 기준은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「사용량 측정」 절을 따른다. 이 조회도 읽기만 하므로 `--write`를 붙이지 않는다.
+
+```text
+node <runtime> usage-report --org <project>/.omt/organization.json --worktree <pm-worktree-id>
+```
+
 status는 조회만 하므로 등록 항목을 지우거나 고쳐 쓰지 않는다. PM이 응답하지 않아 liveness가 `unverifiable`로 남아도 마찬가지이며, 해제는 `close`와 `disband`만 수행한다.
 
 조직이 없으면 아직 구성되지 않았다고 알린다. 조직도를 보기만 하는 요청에서 구성이나 구독 질문을 시작하지 않는다. 모델 호출로 조직도를 다시 그리지 않는다.

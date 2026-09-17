@@ -67,7 +67,8 @@ export function parseJsonLines(stdout) {
  * Normalizes JSON-envelope and JSONL agent-CLI output into one result shape.
  *
  * @param {string} stdout - Raw provider standard output.
- * @returns {object} Text, usage, effective model, cost, and provider-error flag.
+ * @returns {object} Text, usage, effective model, cost, provider-error flag, and
+ *   the provider session id when the output names one.
  */
 export function decodeAgentCli(stdout) {
   const envelope = tryParseJson(stdout);
@@ -81,6 +82,9 @@ export function decodeAgentCli(stdout) {
   let usage = envelope?.usage ?? null;
   let effectiveModel =
     typeof envelope?.model === "string" ? envelope.model : null;
+  // The session id lets a usage report skip the transcript the same call left
+  // in the provider's own session store, so the call is not counted twice.
+  let sessionId = sessionOf(envelope);
 
   for (const event of events) {
     if (
@@ -95,6 +99,7 @@ export function decodeAgentCli(stdout) {
     if (event.usage) usage = event.usage;
     if (typeof event.model === "string") effectiveModel = event.model;
     if (typeof event.model_id === "string") effectiveModel = event.model_id;
+    sessionId ??= sessionOf(event);
   }
 
   if (
@@ -118,7 +123,14 @@ export function decodeAgentCli(stdout) {
         ? envelope.total_cost_usd
         : null,
     providerError,
+    sessionId,
   };
+}
+
+function sessionOf(record) {
+  if (!record || typeof record !== "object") return null;
+  const id = record.session_id ?? record.thread_id ?? record.conversation_id;
+  return typeof id === "string" && id ? id : null;
 }
 
 /**
