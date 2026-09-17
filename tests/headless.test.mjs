@@ -510,3 +510,35 @@ test("headless-answer takes its text as a value, while role-spec --text is a fla
   );
   assert.equal(parseArgs(["role-spec", "--text", "--role", "pl"]).text, true);
 });
+
+test("an Agy server error is reported in its own words, and a capacity 503 as a limit", () => {
+  // The result carried the server's explanation in `error`, but the reader kept
+  // only the status word ERROR, and a missing-capacity 503 that asks for a
+  // retry later was reported as not rate limited.
+  const stream = [
+    {
+      event: "init",
+      conversation_id: "c1",
+      init: { model: "gpt-oss-120b-medium" },
+    },
+    {
+      event: "result",
+      result: {
+        conversation_id: "c1",
+        status: "ERROR",
+        response: "",
+        error:
+          "Our servers are experiencing high traffic right now, please try again in a minute. " +
+          "(UNAVAILABLE (code 503): No capacity available for model gpt-oss-120b-medium on the server)",
+        num_turns: 1,
+        usage: { input_tokens: 11708, output_tokens: 139, total_tokens: 11847 },
+      },
+    },
+  ]
+    .map((event) => JSON.stringify(event))
+    .join("\n");
+  const read = readHeadlessStream("agy", stream);
+  assert.match(read.providerError, /No capacity available for model/);
+  assert.equal(read.rateLimited, true);
+  assert.equal(read.usage.inputTokens, 11708);
+});
