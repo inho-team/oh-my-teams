@@ -49,6 +49,9 @@ export const AGY_BANNER_COLUMNS = 44;
  *   width it sets or null.
  */
 export function launchLine(command, platform = process.platform) {
+  // Kept pure for every platform so the typed line stays testable; the refusal
+  // for a Windows Agy Gemini role happens in openRoleTerminal before any
+  // terminal is created.
   const narrow =
     command.provider === "agy" && /^gemini/i.test(command.modelRequested ?? "");
   if (!narrow) return { typed: command.command, columns: null };
@@ -463,8 +466,15 @@ async function launchOnce({
  * @param {string} [options.platform=process.platform] - Host platform, which
  *   decides whether an Agy Gemini role is launched narrow.
  * @param {Function} [options.execute=run] - Injectable command runner.
+ * On Windows an Agy Gemini role is refused before any terminal is created.
+ * The narrowed console did not make Orca report the terminal idle, and Orca did
+ * not recognize it as agy, so both the supervised start and the injection
+ * fallback failed there only after a terminal had been opened and approved
+ * (#46). The same role runs headless on Windows.
+ *
  * @returns {Promise<object>} Handle, submission, readiness and final screen.
- * @throws {Error} When the terminal cannot be created or read.
+ * @throws {Error} When the terminal cannot be created or read, or the role is
+ *   an Agy Gemini role on Windows.
  */
 export async function openRoleTerminal({
   worktree,
@@ -481,6 +491,15 @@ export async function openRoleTerminal({
   assert(
     Array.isArray(command?.argv) && command.argv.length > 0,
     "role-terminal needs a role command",
+  );
+  assert(
+    !(
+      platform === "win32" &&
+      command.provider === "agy" &&
+      /^gemini/i.test(command.modelRequested ?? "")
+    ),
+    `Role ${command.role} runs Agy ${command.modelRequested}, which Orca cannot supervise from a Windows terminal (#46); ` +
+      `start it with headless-start --org <organization.json> --role ${command.role} --cwd <worktree> --spec <brief> --state <pm-state> instead`,
   );
   const orca = selectOrcaExecutable(executable);
   const tabTitle = roleTitle(command.role, title ?? worktreeLabel(worktree));

@@ -75,10 +75,11 @@ function fakeOrca(
   };
 }
 
-const fast = { settleMs: 5, readyMs: 20, pollMs: 1 };
-// Screens in the tests below show the typed command, which for the example's
-// Gemini Senior carries the width prefix of the host the test runs on.
-const typedFor = (command) => launchLine(command).typed;
+// The screens below are a POSIX host's. On Windows the example's Gemini Senior
+// is refused before a terminal opens, so these tests name their platform
+// rather than inheriting the host's.
+const fast = { settleMs: 5, readyMs: 20, pollMs: 1, platform: "darwin" };
+const typedFor = (command) => launchLine(command, "darwin").typed;
 
 test("every role command runs tools without an approval prompt", () => {
   // Nobody answers an approval prompt in a role terminal, and Orca adds its
@@ -234,6 +235,7 @@ test("a typed but unsubmitted command is sent Enter exactly once", async () => {
     settleMs: 0,
     readyMs: 50,
     pollMs: 1,
+    platform: "darwin",
   });
   assert.equal(opened.submission, "enter-sent");
   assert.equal(opened.ready, true);
@@ -528,4 +530,33 @@ test("the launch documents open role terminals through role-terminal", () => {
   assert.match(runtime, /### 역할 탭 제목/);
   assert.match(runtime, /`\[PM\]`, `\[PL\]`/);
   assert.match(runtime, /agent가 뜬 뒤 `terminal rename`으로 다시 지정한다/);
+});
+
+test("on Windows an Agy Gemini role is refused before any terminal opens", async () => {
+  // #46: on Windows the narrowed console never made Orca report the terminal
+  // idle and Orca did not recognize it as agy, so both the supervised start and
+  // the approved injection failed, but only after the terminal was opened.
+  const org = example();
+  const gemini = roleCommand(org, "senior");
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    return { code: 0, stdout: "{}" };
+  };
+  await assert.rejects(
+    openRoleTerminal({
+      worktree: "id:repo::C:/wt",
+      command: gemini,
+      executable: "orca",
+      execute,
+      ...fast,
+      platform: "win32",
+    }),
+    /headless-start --org <organization.json> --role senior/,
+  );
+  assert.equal(calls.length, 0);
+
+  // A Claude role on Windows is not affected.
+  const claude = roleCommand(org, "pm");
+  assert.doesNotThrow(() => launchLine(claude, "win32"));
 });

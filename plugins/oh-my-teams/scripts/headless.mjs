@@ -161,16 +161,25 @@ const PROVIDERS = {
           typeof result?.result?.response === "string"
             ? result.result.response
             : null,
-        providerError: status && status !== "SUCCESS" ? status : null,
-        rateLimited: /RESOURCE_EXHAUSTED|rate.?limit|quota/i.test(
-          JSON.stringify(result ?? ""),
-        ),
+        // The result's `error` is the server's own explanation; the status is
+        // only the word ERROR, which told the reader nothing about the cause.
+        providerError:
+          status && status !== "SUCCESS"
+            ? String(result?.result?.error || status)
+            : null,
+        // A 503 for missing model capacity asks for a retry later, the same
+        // remedy as a rate limit, so it is reported as one.
+        rateLimited:
+          /RESOURCE_EXHAUSTED|rate.?limit|quota|UNAVAILABLE \(code 503\)|No capacity available/i.test(
+            JSON.stringify(result ?? ""),
+          ),
         ...PROVIDERS.agy.usage(events),
       };
     },
     // Agy's `--output-format json` puts usage and num_turns at the top level.
-    // Where the stream-json result event carries them has not been observed, so
-    // both the nested result and the event itself are read.
+    // In stream-json they sit inside the result event's `result`, observed with
+    // agy 1.2.4 on Windows, including a run that ended in a 503 after spending
+    // input tokens. The event itself is still read for the top-level shape.
     usage(events) {
       const result = events.findLast((event) => event.event === "result");
       const body = result?.result;
