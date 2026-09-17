@@ -74,6 +74,8 @@ agy --model claude-opus-4-6-thinking ...
 
 `runtime`은 `orca` 또는 `local`이며, `runtime`을 적었으면 `code`도 반드시 적는다. 둘 다 없는 기록은 이전과 똑같이 분류된다.
 
+표가 `supervised-terminal`로 예측한 조합에서 `terminal-idle-check`나 `worker-start`가 거부하면, `scripts/failures.mjs`의 `classifyFailure`는 `kind: "matrix-mismatch"` 신호를 `category: "matrix-prediction-failure"`, `nextOwner: "pm"`, `action: "revise-matrix"` 경로로 보낸다. 이 경로로 분류된 실패는 재시도해도 같은 결과가 재현되므로 `retryable: false`이며, 표 자체를 고쳐야 해결된다.
+
 ## worker-start 래퍼
 
 감독 worker는 역할 이름과 조직 파일로만 시작한다. 원시 `orca orchestration worker-start`로 `--agent`와 `--model`을 손으로 적지 않는다. 손으로 적은 명령은 저장된 모델을 빠뜨려도 아무 오류 없이 계정 기본 모델로 실행되고, 보고서는 여전히 역할의 프로필을 적기 때문이다. kickoff 안에서는 항상 그 workflow를 함께 지정한다.
@@ -160,11 +162,13 @@ Orca는 `antigravity` 터미널의 대기 상태를 화면으로 판정한다(`d
 
 workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 `via`와 화면에서 확인한 모델을 함께 적는다. 진행은 `check --wait`와 터미널 화면으로 따라가고, 작업이 끝나면 터미널을 직접 닫는다. `injected`가 `false`이면 결과에 `status: "blocked"`가 붙으므로 작업이 넘어간 것으로 보고하지 않는다. Orca가 `inject_rejected`나 `no_agent_detected`로 주입을 거부하면 래퍼는 예외를 던지지 않고 이 결과를 돌려준다. 결과에는 거부 원문(`orcaResponse`), 중립 신호 `injectRefusal`(`kind: "not-started"`), 그 신호의 분류 `route`(`start-refused` → PM의 `change-launch-path`), 이번 호출이 만든 Task를 `failed`로 닫았는지 알리는 `taskClosed`가 담긴다. `taskClosed`가 `false`이고 `taskCreated`가 `true`이면 그 Task를 `orchestration task-update --status failed`로 직접 닫는다. 이 거부는 작업을 하나도 넘기지 않았다는 확정된 사실이므로, 같은 코드를 `failure-classify`에 `runtime`·`code`로 넣지 말고 결과의 `injectRefusal`을 그대로 쓴다. `worker-start` 경로의 같은 코드는 이미 띄운 에이전트가 남아 있을 수 있어 여전히 프로세스 상태 미상으로 분류되기 때문이다. 미리 예약한 시도는 `workflow-release`의 해제 파일에 `refusal`로 `injectRefusal`을 함께 넣으면 돌려받는다. 다른 해제는 지금처럼 시도를 소진한 채로 둔다. 다음 kickoff부터는 Gemini 모델 프로필이나 Claude·Codex 프로필로 바꾸도록 안내한다.
 
+**headless-start receipt 형식.** `headless-start`로 실행한 Agy 역할을 workflow에 연결할 때 제출하는 receipt 형식이다. `via: "headless-start"`가 고정값이고, `executionId`는 headless worker ID이며, `taskId`와 `dispatchId`는 모두 `headless:<executionId>` 형식이어야 한다. `runId`는 실제 Orca Run ID로 필수이고, `worktreeId`는 Orca 워크트리 ID로 필수이다. `workflow-attach`와 `workflow-rework`는 PM state의 `headless/<executionId>/worker.json`과 이 receipt의 작업 경로를 대조해 연결을 검증한다. `headless-start` 결과의 receipt 초안은 `runId`와 `worktreeId`가 비어 있어 호출자가 실제 값으로 채운 뒤 제출해야 한다.
+
 ### 역할 터미널 열기
 
 `<orca> terminal create --command`를 직접 호출해 역할 터미널을 열지 않는다. Orca는 명령을 새 셸의 프롬프트에 입력만 하고 실행하지 않는 경우가 잦으며, 이 상태에서 보낸 브리프나 작업은 agent가 아니라 셸에 입력된다. `role-terminal`은 다음을 한 번에 수행한다.
 
-1. `role-command`와 같은 명령으로 터미널을 만든다. 모델이 `gemini`로 시작하는 Agy 역할은 POSIX 셸에서 `stty cols 44;`, PowerShell에서 `mode con: cols=44;`를 앞에 붙인다(위 「역할 터미널에서 시작」 절의 Agy 대기 판정 문단).
+1. `role-command`와 같은 명령으로 터미널을 만든다. `scripts/launch-matrix.mjs`의 호환성 표가 `supervised-terminal`을 돌려주는 Agy 역할 중 POSIX 셸에서는 `stty cols 44`를 앞에 붙인다. Windows에서는 폭 조정을 생략한다(`role-terminal.mjs`의 폭 조정 조건; `docs/plan/agy-terminal-path.md`의 「설계」 7절).
 2. 짧게 `tui-idle`을 기다린 뒤 화면을 읽고, 마지막 줄에 명령이 프롬프트에 입력된 채 남아 있으면 Enter를 한 번 보낸다. 결과의 `submission`은 Orca가 스스로 실행했으면 `orca`, Enter를 보냈으면 `enter-sent`다. 시작된 agent에 입력이 들어가지 않도록 Enter는 두 번 보내지 않는다.
 3. agent가 명령 아래에 자기 화면을 그릴 때까지 화면을 다시 읽는다. Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족되므로 준비 여부를 판단하는 근거로 쓰지 않는다. 화면 너비 때문에 명령이 여러 줄로 나뉘어도 같은 명령으로 인식한다.
 4. Agy는 처음 여는 폴더마다 폴더 신뢰 질문("Do you trust the contents of this project?")을 띄우며, 권한 우회 플래그로도 건너뛰지 않는다. 역할의 워크트리는 사용자 저장소에서 이 실행을 위해 만든 것이고 역할은 이미 승인 없이 도구를 실행하므로, "Yes, I trust this folder"가 선택된 경우에만 Enter를 한 번 보내 신뢰한다. 결과의 `trust`는 질문이 없었으면 `not-asked`, 답했으면 `accepted`다. 신뢰한 폴더는 Agy 설정의 `trustedWorkspaces`에 남는다.
