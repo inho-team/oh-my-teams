@@ -324,6 +324,23 @@ orca terminal create --worktree path:... --title "probe-1C"
 
 ---
 
+### 2-5. `--title` 유무에 따른 `agentIdentity` 차이
+
+같은 `--command "agy --dangerously-skip-permissions --model gemini-3.8-flash-medium"`으로 `--title` 지정 여부만 달리한 두 실험을 비교했다.
+
+| 조건 | 핸들 | `title` (show) | `agentIdentity` | 화면 모델 줄 |
+|---|---|---|---|---|
+| `--title "probe-2-gemini-r2"` 지정 | `term_ce65706d` | `probe-2-gemini-r2` | **`antigravity`** | `Gemini 3.8 Flash (Medium)` |
+| `--title` 없음 | `term_a834517e` | `Terminal 1` (Orca 자동 생성) | 없음 | `Gemini 3.8 Flash (Medium)` |
+
+두 실험 모두 `tui-idle satisfied: true`, 화면은 완전히 기동된 상태였다. `--title` 없는 경우 show를 두 번 별도로 호출해 캐시가 아닌 최신 상태를 재확인했으나 `agentIdentity`는 여전히 설정되지 않았다.
+
+**판정:** `--title`을 지정하면 `agentIdentity: "antigravity"`가 설정되고, 지정하지 않으면 설정되지 않는다. `title`이 `"Terminal 1"`(Orca 자동 생성값)일 때는 Orca가 `agy` 프로세스를 `antigravity`로 식별하지 않는다. 이 차이가 `--title` 값 자체에 기인하는지, 아니면 `--title` 지정 여부가 Orca의 내부 agent 감지 경로를 바꾸는지는 미확인(Orca 소스 확인 필요).
+
+**실용적 함의:** OMT의 `role-terminal`이 `--title`을 지정해 터미널을 생성하는 것이 `agentIdentity` 설정에 필수적이다.
+
+---
+
 ## 3. `tui-idle` 비의존 감독 터미널 경로 가능 여부
 
 ### 참조 문서 근거
@@ -372,4 +389,4 @@ needs you to know which kind you have — the orchestration verbs cover all of t
 
 ---
 
-DONE: 조합 1A·1B·1C 폭 조정 방식 비교, 조합 2 모델 3종(gemini·claude·gpt-oss) tui-idle 및 agentIdentity 비교, 조합 3 감독 터미널 경로 도움말·참조 문서 판정 완료
+DONE: 조합 1A·1B·1C 폭 조정 방식 비교, 조합 2 모델 3종(gemini·claude·gpt-oss) tui-idle 및 agentIdentity 비교, 조합 2-5 --title 유무에 따른 agentIdentity 차이 확인, 조합 3 감독 터미널 경로 도움말·참조 문서 판정 완료
