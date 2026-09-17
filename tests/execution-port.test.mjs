@@ -688,3 +688,88 @@ test("local quota classes keep the route failure handling already owns", () => {
     retryable: true,
   });
 });
+
+test("matrix-mismatch는 matrix-prediction-failure로 분류된다", () => {
+  const result = classifyFailure({ kind: "matrix-mismatch" });
+  assert.deepEqual(result, {
+    category: "matrix-prediction-failure",
+    nextOwner: "pm",
+    action: "revise-matrix",
+    retryable: false,
+  });
+});
+
+test("matrix-mismatch 신호는 포트 계약의 유효한 kind이다", () => {
+  assert.ok(
+    NEUTRAL_FAILURE_KINDS.includes("matrix-mismatch"),
+    "matrix-mismatch must be in NEUTRAL_FAILURE_KINDS",
+  );
+  // assertFailureSignal은 알려진 kind만 통과시킨다
+  const signal = assertFailureSignal({
+    kind: "matrix-mismatch",
+    code: "approval_required",
+    message: "Terminal held at approval prompt despite supervised-terminal prediction",
+  });
+  assert.equal(signal.kind, "matrix-mismatch");
+});
+
+test("사후 거부와 표 불일치: matrixPrediction supervised-terminal → matrix-mismatch kind 반환", async () => {
+  // checkTerminalIdle이 satisfied===false를 받고 matrixPrediction이 supervised-terminal이면
+  // 던지는 오류에 signal.kind === 'matrix-mismatch'가 붙어야 한다
+  const fakeWait = async () => ({
+    code: 0,
+    timedOut: false,
+    stdout: JSON.stringify({
+      ok: true,
+      result: { wait: { satisfied: false, blockedReason: "approval_required" } },
+    }),
+    stderr: "",
+  });
+  const { checkTerminalIdle } = await import(
+    "../plugins/oh-my-teams/scripts/orca-adapter.mjs"
+  );
+  const matrixPrediction = { path: "supervised-terminal", evidence: "unverified" };
+  const err = await checkTerminalIdle("term_x", {
+    matrixPrediction,
+    execute: fakeWait,
+  }).then(
+    () => null,
+    (e) => e,
+  );
+  assert.ok(err, "checkTerminalIdle should throw");
+  assert.equal(
+    err.signal?.kind,
+    "matrix-mismatch",
+    `Expected matrix-mismatch, got ${err.signal?.kind}`,
+  );
+  assert.match(err.message, /matrix-prediction-failure/);
+});
+
+test("matrixPrediction이 없으면 blocked prompt는 matrix-mismatch가 붙지 않는다", async () => {
+  const fakeWait = async () => ({
+    code: 0,
+    timedOut: false,
+    stdout: JSON.stringify({
+      ok: true,
+      result: { wait: { satisfied: false, blockedReason: "approval_required" } },
+    }),
+    stderr: "",
+  });
+  const { checkTerminalIdle } = await import(
+    "../plugins/oh-my-teams/scripts/orca-adapter.mjs"
+  );
+  const err = await checkTerminalIdle("term_y", {
+    execute: fakeWait,
+  }).then(
+    () => null,
+    (e) => e,
+  );
+  assert.ok(err, "checkTerminalIdle should throw");
+  assert.equal(
+    err.signal?.kind,
+    undefined,
+    `Expected no kind, got ${err.signal?.kind}`,
+  );
+  assert.doesNotMatch(err.message, /matrix-prediction-failure/);
+});
+
