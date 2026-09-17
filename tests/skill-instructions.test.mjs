@@ -830,6 +830,25 @@ test("form says what a default model runs today and reads Codex models at ask ti
   assert.match(form, /서열을 매기지 않는다/);
 });
 
+test("form does not hardcode catalog Codex IDs outside the choice table", () => {
+  const form = readSkill("form");
+  // The table is the only sanctioned place for confirmed Codex IDs.
+  // Outside the table, enumerating catalog IDs would duplicate a fact that
+  // belongs to codex.listed and would go stale when the catalog changes.
+  // gpt-6-astra is exempted: it appears in the host-defaults example sentence
+  // that the existing test ("form says what a default model runs today") requires.
+  const tableSection = form
+    .split("| 역할 | 선택지 (표시 이름 → 저장 값) |")[1]
+    ?.split("\n\n")[0];
+  const bodyOutsideTable = form.replace(tableSection ?? "", "");
+  for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+    assert.ok(
+      !bodyOutsideTable.includes(id),
+      `form hardcodes ${id} outside the choice table`,
+    );
+  }
+});
+
 test("planning roles hand the deliverable down instead of writing it", () => {
   const pm = readSkill("pm");
   const pl = readSkill("pl");
