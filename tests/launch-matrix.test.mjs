@@ -159,9 +159,9 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 8. Agy gemini win32(non-powershell) 신뢰 있음 → supervised-terminal unverified
+    // 8. Agy gemini win32 신뢰 있음 → headless (orca-idle-requires-narrow-screen)
     {
-      label: "agy_gemini_win32_non_powershell",
+      label: "agy_gemini_win32_headless",
       params: {
         runner: "agy",
         model: "gemini-3.1-pro-high",
@@ -169,8 +169,6 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         shell: "posix",
         trustRecordExists: true,
         skipDangerousModePermissionPrompt: true,
-        allowUnverified: true,
-        allowUnverifiedApproval: "승인: 검증 모드",
         ...V,
       },
     },
@@ -217,7 +215,7 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 12. Codex 신뢰 있음 → blocked (worker_done 미검증)
+    // 12. Codex 신뢰 있음 → supervised-terminal (unverified, 실측 대기)
     {
       label: "codex_trusted",
       params: {
@@ -225,8 +223,11 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         model: undefined,
         platform: "darwin",
         shell: "posix",
-        trustRecordExists: true,
+        trustRecordExists: false,
+        codexTrustRecordExists: true,
         skipDangerousModePermissionPrompt: true,
+        allowUnverified: true,
+        allowUnverifiedApproval: "승인: 검증 모드",
         ...V,
       },
     },
@@ -265,34 +266,23 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
   assert.equal(claudeWin.path, "supervised-terminal");
   assert.equal(claudeWin.evidence, "verified");
 
-  // 예시 2: Windows gemini Agy 검증 모드 → supervised-terminal
-  const geminiWin32Verified = predictLaunchPath({
+  // 예시 2: Windows gemini Agy → headless (orca-idle-requires-narrow-screen)
+  // 실측: tui-idle 120초 미도달, 폭 조정은 에이전트 식별 깨뜨림
+  const geminiWin32 = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
     platform: "win32",
     shell: "posix",
     trustRecordExists: true,
     skipDangerousModePermissionPrompt: true,
-    allowUnverified: true,
-    allowUnverifiedApproval: "승인: 검증 모드",
     ...V,
   });
-  assert.equal(geminiWin32Verified.path, "supervised-terminal");
-  assert.equal(geminiWin32Verified.evidence, "unverified");
-
-  // 예시 2: Windows gemini Agy 검증 모드 해제 → blocked (unverified-terminal-creation)
-  const geminiWin32Blocked = predictLaunchPath({
-    runner: "agy",
-    model: "gemini-3.1-pro-high",
-    platform: "win32",
-    shell: "posix",
-    trustRecordExists: true,
-    skipDangerousModePermissionPrompt: true,
-    allowUnverified: false,
-    ...V,
-  });
-  assert.equal(geminiWin32Blocked.path, "blocked");
-  assert.deepEqual(geminiWin32Blocked.reason, ["unverified-terminal-creation"]);
+  assert.equal(geminiWin32.path, "headless");
+  assert.ok(
+    geminiWin32.reason.includes("orca-idle-requires-narrow-screen"),
+    "8행 reason 코드",
+  );
+  assert.equal(geminiWin32.evidence, "verified");
 
   // 예시 3: Codex 신뢰 없음 → blocked (codex-trust-workspace)
   const codexNoTrust = predictLaunchPath({
@@ -300,7 +290,8 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
     model: undefined,
     platform: "darwin",
     shell: "posix",
-    trustRecordExists: false,
+    trustRecordExists: true,
+    codexTrustRecordExists: false,
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
@@ -481,13 +472,15 @@ test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한
     allowUnverified: false,
     ...V,
   });
-  assert.equal(geminiWithTrust.path, "blocked");
+  // gemini+win32+신뢰 있음 → 8행 headless (orca-idle-requires-narrow-screen)
+  // evidence=verified → applyVerificationGate 미적용 → headless 그대로 반환
+  assert.equal(geminiWithTrust.path, "headless");
   assert.ok(
-    geminiWithTrust.reason.includes("unverified-terminal-creation"),
-    "allowUnverified=false → unverified-terminal-creation",
+    geminiWithTrust.reason.includes("orca-idle-requires-narrow-screen"),
+    "8행 reason 코드",
   );
 
-  // allowUnverified=true+승인 → supervised-terminal
+  // allowUnverified=true+승인 → 8행 headless (verified, gate 불필요)
   const geminiAllowed = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
@@ -500,8 +493,8 @@ test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한
     allowUnverifiedApproval: "PM 승인",
     ...V,
   });
-  assert.equal(geminiAllowed.path, "supervised-terminal");
-  assert.equal(geminiAllowed.evidence, "unverified");
+  assert.equal(geminiAllowed.path, "headless");
+  assert.equal(geminiAllowed.evidence, "verified");
 });
 
 test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () => {

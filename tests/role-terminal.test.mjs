@@ -549,9 +549,9 @@ test("the launch documents open role terminals through role-terminal", () => {
 });
 
 test("on Windows an Agy Gemini role without approval is refused before any terminal opens", async () => {
-  // #46 수정: Windows에서 구현은 폭 조정을 생략하고 단일 명령만 입력하므로
-  // isCompoundCommand=false → 2행(no_agent_detected) 건너뜀 → 8행(unverified supervised-terminal).
-  // allowUnverified 없이는 unverified-terminal-creation으로 차단됨.
+  // 실측(Orca 1.4.204): Windows gemini+powershell → 8행(headless/verified).
+  // headless 경로는 openRoleTerminal에서 blocked와 동일하게 throw되며
+  // 이유 코드는 orca-idle-requires-narrow-screen.
   const org = example();
   const gemini = roleCommand(org, "senior");
   const calls = [];
@@ -559,7 +559,7 @@ test("on Windows an Agy Gemini role without approval is refused before any termi
     calls.push(argv);
     return { code: 0, stdout: "{}" };
   };
-  // Windows powershell + allowUnverified=false → unverified-terminal-creation (matrix rule 8 → gate)
+  // Windows powershell + gemini → 8행 headless → orca-idle-requires-narrow-screen
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -574,7 +574,7 @@ test("on Windows an Agy Gemini role without approval is refused before any termi
       trustRecordExists: true,
       allowUnverified: false,
     }),
-    /unverified-terminal-creation/,
+    /orca-idle-requires-narrow-screen/,
   );
   assert.equal(calls.length, 0);
 
@@ -620,8 +620,8 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
     return { code: 0, stdout: "{}" };
   };
 
-  // Agy gemini win32 powershell + allowUnverified=false → unverified-terminal-creation → 터미널 생성 없음
-  // (단일 명령이므로 isCompoundCommand=false → 2행 건너뜀 → 8행 unverified gate)
+  // Agy gemini win32 powershell → 8행 headless → orca-idle-requires-narrow-screen → 터미널 생성 없음
+  // (단일 명령 → isCompoundCommand=false → 2행 건너뜀 → 8행 headless/verified)
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -634,7 +634,7 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
       allowUnverified: false,
       ...{ settleMs: 5, readyMs: 20, pollMs: 1 },
     }),
-    /unverified-terminal-creation/,
+    /orca-idle-requires-narrow-screen/,
   );
   // matrix 거부는 orca 호출 전에 일어남
   assert.equal(

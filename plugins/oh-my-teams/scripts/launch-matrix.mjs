@@ -207,10 +207,9 @@ const MATRIX_RULES = [
       evidence: "verified",
     },
   },
-  // 8. Agy / gemini / win32 / powershell / 신뢰 있음
-  // (위의 규칙 2에서 win32+powershell은 이미 blocked이므로 이 규칙은 실제로
-  //  win32이지만 shell이 powershell이 아닌 경우만 도달합니다)
-  // 설계에 따라: allowUnverified 검증 게이트 적용 (unverified)
+  // 8. Agy / gemini / win32 / 신뢰 있음 → headless
+  // 실측(Orca 1.4.204): tui-idle이 120초까지 오지 않아 worker-start 불가.
+  // 폭 조정(Windows에서는 mode con: cols)은 powershell 전경 문제로 에이전트 식별을 깨뜨려 두 조건을 동시에 만족할 방법이 없음.
   {
     match: ({ runner, model, platform, trustRecordExists }) =>
       runner === "agy" &&
@@ -218,11 +217,12 @@ const MATRIX_RULES = [
       platform === "win32" &&
       trustRecordExists,
     result: {
-      path: "supervised-terminal",
-      reason: [],
-      nextOwner: "pm",
-      nextAction: "브리프 기준 9 실측(검증 모드에서만 터미널 생성 허용).",
-      evidence: "unverified",
+      path: "headless",
+      reason: ["orca-idle-requires-narrow-screen"],
+      nextOwner: "-",
+      nextAction:
+        "Orca tui-idle이 좁은 화면을 요구하고 폭 조정은 에이전트 식별을 깨뜨립니다. headless 경로를 사용합니다.",
+      evidence: "verified",
     },
   },
   // 9. Agy / - / win32 / 신뢰 있음 (gemini 외 다른 계열 포함) → headless
@@ -231,7 +231,7 @@ const MATRIX_RULES = [
       runner === "agy" && platform === "win32" && trustRecordExists,
     result: {
       path: "headless",
-      reason: [],
+      reason: ["agy-headless-fallback"],
       nextOwner: "-",
       nextAction: "Agy 역할 대체 경로(headless)를 사용합니다.",
       evidence: "verified",
@@ -270,15 +270,16 @@ const MATRIX_RULES = [
       evidence: "unverified",
     },
   },
-  // 12. Codex / 신뢰 있음 → blocked (worker_done 미검증)
+  // 12. Codex / 신뢰 있음 → supervised-terminal (unverified, 실측 대기)
   {
-    match: ({ runner, trustRecordExists }) =>
-      runner === "codex" && trustRecordExists,
+    match: ({ runner, codexTrustRecordExists }) =>
+      runner === "codex" && codexTrustRecordExists === true,
     result: {
-      path: "blocked",
+      path: "supervised-terminal",
       reason: ["codex-worker-done-unverified"],
       nextOwner: "pm",
-      nextAction: "브리프 기준 9 실측이 필요합니다.",
+      nextAction:
+        "브리프 기준 9 실측이 필요합니다(검증 모드에서만 터미널 생성 허용).",
       evidence: "unverified",
     },
   },
