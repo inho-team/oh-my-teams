@@ -52,6 +52,13 @@
       "evidenceTests": [
         "terminal dispatches cannot be reported as active goal progress"
       ]
+    },
+    {
+      "id": "minimal-change-discipline",
+      "description": "The minimal-change rule lives in one canonical place and each role skill links it; removing the rule or either exception causes a test failure.",
+      "evidenceTests": [
+        "minimal-change discipline lives in one place and each role links it"
+      ]
     }
   ]
 }
