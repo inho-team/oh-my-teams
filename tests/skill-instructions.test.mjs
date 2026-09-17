@@ -594,6 +594,14 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     )) {
       assert.match(line, /--workflow-id <\S+> --state <\S+>/, line);
     }
+    // A worker started by agent id got no permission bypass flag, so every
+    // launch example hands over a terminal role-terminal opened.
+    for (const [line] of text.matchAll(
+      /node <runtime> worker-start [^\n`]*/g,
+    )) {
+      assert.match(line, /--terminal <\S+>/, line);
+      assert.doesNotMatch(line, /new-child/, line);
+    }
   }
   for (const entry of fs.readdirSync(skills)) {
     const file = path.join(skills, entry, "SKILL.md");
@@ -618,9 +626,18 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(runtime, /node <runtime> role-terminal --org/);
   assert.match(runtime, /결과의 `screen`/);
   assert.match(runtime, /`antigravity`/);
-  // Agy roles had no sanctioned launch: the wrapper refused them and the
-  // charters forbade the raw command.
-  assert.match(runtime, /### Agy 역할 시작/);
+  // Agy roles had no sanctioned launch, and Claude and Codex roles started by
+  // agent id stopped at their first approval prompt; every role now starts
+  // from a terminal opened with its model and bypass flag.
+  assert.match(runtime, /### 역할 터미널에서 시작/);
+  assert.match(runtime, /\| Claude·Codex·Agy \|/);
+  assert.match(runtime, /`agentDefaultArgs`/);
+  assert.doesNotMatch(runtime, /명령이 agent 이름 하나뿐일 때만 붙이므로/);
+  assert.match(runtime, /`satisfied: false`와 `blockedReason`/);
+  assert.match(
+    runtime,
+    /Claude·Codex 역할에 이 옵션을 붙이면 Orca를 호출하기 전에 거부한다/,
+  );
   assert.match(runtime, /--terminal <handle> --worktree id:<worktreeId>/);
   // The terminal and the hand-over must read the same run, or an Agy terminal
   // built for one role is accepted as the role the run folded it onto.
@@ -632,7 +649,16 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
   assert.match(runtime, /대괄호/);
   for (const role of ["pm", "pl"]) {
-    assert.match(readSkill(role), /Agy 역할은 `role-terminal`로 연 터미널/);
+    assert.match(
+      readSkill(role),
+      /Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널/,
+    );
+    assert.doesNotMatch(readSkill(role), /래퍼가 새 터미널을 띄우/);
+    // The example checks the terminal, then reserves, then hands it over.
+    assert.match(
+      readSkill(role),
+      /terminal-idle-check --terminal <\S+>\nnode <runtime> workflow-reserve [^\n]*\nnode <runtime> worker-start /,
+    );
     // An Agy terminal never reports tui-idle, and the inject workaround
     // escapes worker-stop and model checks.
     assert.match(readSkill(role), /원시 `dispatch --inject`로 우회하지 않고/);

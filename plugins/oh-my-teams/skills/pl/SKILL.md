@@ -16,7 +16,7 @@ PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분�
 ### 권한
 
 - 맡은 목표를 작업 단위로 나누고, 의존성·작업 파동·파일 소유권과 각 작업의 검사를 정한다.
-- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex 역할은 래퍼가 새 터미널을 띄우고, Agy 역할은 `role-terminal`로 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 PM에게 보고한다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
+- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 PM에게 보고한다), Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
 - Orca의 `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`와 `supervision-next`로 하위 worker를 감독하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `prepare`, `prepare-input`, `attach-workspace`, `work`로 Intern 하네스를 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
 - 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. kickoff 워크트리 사이의 병합은 게이트를 통과시킨 뒤 별도 허가 없이 진행하고, 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않는다.
@@ -43,8 +43,15 @@ PL은 PM이 띄운 감독 worker로 실행된다. Orca의 중첩 worker 깊이�
 
 ```text
 <orca> orchestration run-create --objective "<PM이 맡긴 분할 목표>" --json
-node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --workflow-id <workflowId> --state <coordinator-state> --spec "<구체적인 구현 작업>" --worktree new-child
-node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --workflow-id <workflowId> --state <coordinator-state> --spec "<설계 또는 검토 작업>" --worktree current
+<orca> worktree create --name <name> --parent-worktree active --json
+node <runtime> role-terminal --org <organization.json> --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <coordinator-state>
+node <runtime> terminal-idle-check --terminal <junior-handle>
+node <runtime> workflow-reserve --id <workflowId> --state <coordinator-state> --revision <n> --execution <reserve.json>
+node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <junior-handle> --worktree id:<worktreeId> --spec "<구체적인 구현 작업>"
+node <runtime> role-terminal --org <organization.json> --role senior --worktree current --workflow-id <workflowId> --state <coordinator-state>
+node <runtime> terminal-idle-check --terminal <senior-handle>
+node <runtime> workflow-reserve --id <workflowId> --state <coordinator-state> --revision <n> --execution <reserve.json>
+node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <senior-handle> --worktree current --spec "<설계 또는 검토 작업>"
 <orca> orchestration check --wait --types "worker_done,escalation,question" --timeout-ms <progressCheckMs> --json
 ```
 
@@ -63,7 +70,7 @@ node <runtime> work --org <returned-org> --task <returned-task> --repo <returned
 
 `prepare`는 이전 호출용 호환 진입점이다. 새 연동은 `prepare-input`으로 계약과 base를 먼저 고정하고, 공통 discovery에서 확인한 Orca 기능으로 worktree를 만든 뒤 실제 receipt를 `attach-workspace`에 전달한다. `attach-workspace`는 `--receipt`와 함께 `--runtime`을 요구하며, 그 파일은 `runtime-discover`의 출력을 저장해 만든다. 연결 단계는 receipt 경로·Git root·HEAD·parent의 base를 대조한다. `work`는 Agy/Claude/Codex/Ollama의 제한된 응답을 받아 명시된 파일에만 적용하고, 선택한 검사와 호출 한도를 관리한다. 보고서는 공유 state의 runs 아래에 남는다. 실행 실패 시 편집 내용을 보존한다. 이 하네스는 비대화 명령이며 자체적으로 감독 Dispatch나 `worker_done`을 만들지 않는다. 감독된 Junior가 실행했다면 하네스 결과를 확인한 뒤 자신의 실제 Dispatch에 보고한다.
 
-**일반 감독 작업:** 위 「하위 역할 배정」의 `worker-start --org --role` 래퍼로만 배정한다. 래퍼가 역할 프로필의 agent·모델·강도를 전달하고 이와 다른 명시값을 거부하므로, 원시 `orca orchestration worker-start`로 `--agent`나 `--model`을 직접 적지 않는다. 시작 결과의 `binding.modelProof`와 대화형 화면의 현재 모델 대조, Agy 역할의 터미널 경로, 별도 계정·Ollama 프로필을 `work` 하네스로 실행하는 규칙은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다. 요청 모델이 적용됐다는 증거가 없거나 화면의 모델이 다르면 추가 지시를 보내지 않고 PM에게 보고한다. 계정 이름만 브리프에 적어 계정이 바뀌었다고 판단하지 않는다.
+**일반 감독 작업:** 위 「하위 역할 배정」의 `worker-start --org --role` 래퍼로만 배정한다. `role-terminal`이 역할 프로필의 모델·강도·권한 우회 플래그로 터미널을 열고 래퍼가 `--terminal` 없는 시작과 명시한 `--agent`·`--model`·`--effort`를 거부하므로, 원시 `orca orchestration worker-start`로 `--agent`나 `--model`을 직접 적지 않는다. 시작 결과의 `binding.modelProof`와 대화형 화면의 현재 모델 대조, 역할 터미널에서 시작하는 절차, 별도 계정·Ollama 프로필을 `work` 하네스로 실행하는 규칙은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다. 요청 모델이 적용됐다는 증거가 없거나 화면의 모델이 다르면 추가 지시를 보내지 않고 PM에게 보고한다. 계정 이름만 브리프에 적어 계정이 바뀌었다고 판단하지 않는다.
 
 감독 메시지는 현재 injected preamble의 Task/Dispatch 권한을 사용한다. 대기에는 `check --wait`를 쓰며 터미널 화면을 주기적으로 전체 읽어 모델을 깨우지 않는다. timeout은 완료나 재시도 근거가 아니지만, 그 시점마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절에 따라 활동을 다시 조회하고 진행 요청과 상향 보고를 결정한다. 메시지를 처리하고 accepted settlement의 다음 소유권을 정한 뒤 acknowledge한다.
 

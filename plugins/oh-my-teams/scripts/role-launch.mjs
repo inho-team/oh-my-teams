@@ -4,8 +4,8 @@
  * A coordinator that types `--agent` and `--model` by hand can drop the model
  * the user saved, and nothing downstream notices: Orca launches the agent's
  * account default and the report still names the role's profile. Reading the
- * agent, model and effort from the organization, and refusing any explicit
- * value that disagrees, removes that hand-built step.
+ * agent, model and effort from the organization, and refusing explicit values
+ * on the command line, removes that hand-built step.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -22,15 +22,18 @@ import {
 /**
  * How each provider's role reaches an Orca terminal, and under which agent id.
  *
- * `orchestration worker-start --model` pins a model for Claude, Codex and
- * Cursor only, so those start with `agent`. Orca knows Agy as `antigravity`
- * but cannot pass it a model, so an Agy role is opened in a terminal with its
- * model on the command line first and then handed its task with `--terminal`.
- * Ollama has no interactive agent in Orca and runs through the `work` harness.
+ * Every role is opened with `role-terminal`, whose command carries the
+ * model, the effort and the permission bypass flag, and is then handed its
+ * task with `worker-start --terminal`. `worker-start --agent` has no option
+ * for extra arguments: the command Orca builds takes them from the user's
+ * per-agent default arguments, which may be empty, so a Codex PL started that
+ * way stopped at its first command approval. Orca cannot pass Agy
+ * (`antigravity`) a model at all. Ollama has no interactive agent in Orca and
+ * runs through the `work` harness.
  */
 export const ORCA_LAUNCH = Object.freeze({
-  claude: Object.freeze({ agent: "claude", via: "agent" }),
-  codex: Object.freeze({ agent: "codex", via: "agent" }),
+  claude: Object.freeze({ agent: "claude", via: "terminal" }),
+  codex: Object.freeze({ agent: "codex", via: "terminal" }),
   agy: Object.freeze({ agent: "antigravity", via: "terminal" }),
 });
 
@@ -39,9 +42,10 @@ export const ORCA_LAUNCH = Object.freeze({
  *
  * A role terminal has nobody watching it: no supervisor can answer a tool
  * approval prompt, so a role opened without this flag stops at its first
- * command. Orca adds the same flags from its own agent defaults, but only to a
- * command that is the bare agent name, so a command carrying `--model` (and
- * every `agy` command, whose agent id is `antigravity`) arrives without them.
+ * command. Orca's per-agent default arguments can supply the same flags, but
+ * only to an agent Orca launches itself and only when the user's setting holds
+ * them; a command typed into a terminal gets none, so the flag is part of the
+ * role command.
  */
 export const PERMISSION_BYPASS = Object.freeze({
   claude: "--dangerously-skip-permissions",
@@ -199,13 +203,6 @@ function assertHeldRole(org, roles, requestedRole, role) {
   );
 }
 
-function contradiction(role, what, explicit, saved) {
-  assert(
-    explicit === undefined || explicit === saved,
-    `Role ${role}: ${what} ${explicit} contradicts the saved profile (${saved ?? "host default"})`,
-  );
-}
-
 /**
  * Resolves how a dispatched role must launch, and with which model and effort.
  *
@@ -219,7 +216,8 @@ function contradiction(role, what, explicit, saved) {
  * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
  * @param {string} [run.terminal] - Terminal handle the role was opened in.
  * @returns {object} Role, profile, provider, agent, launch path, model, effort.
- * @throws {Error} For PM, an unlaunchable profile, or a contradicting value.
+ * @throws {Error} For PM, an unlaunchable profile, a missing terminal, or any
+ *   explicit agent, model or effort.
  */
 export function resolveRoleLaunch(
   requestedOrg,
@@ -239,64 +237,46 @@ export function resolveRoleLaunch(
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
   const { agent, via } = ORCA_LAUNCH[profile.provider];
-  if (terminal) {
-    assertHeldRole(org, roles, requestedRole, role);
-    // Orca refuses a model, effort or agent beside --terminal, so none is
-    // accepted here either, even one that restates the profile.
-    assert(
-      [explicit.agent, explicit.model, explicit.effort].every(
-        (value) => value === undefined,
-      ),
-      `Role ${role}: --agent, --model and --effort cannot combine with --terminal; the terminal keeps the model it was opened with`,
-    );
-  } else {
-    assert(
-      via === "agent",
-      `Role ${role} uses agy (profile ${profileId}), which Orca cannot start with a model; ` +
-        "open it with role-terminal, confirm the model on screen, then pass --terminal",
-    );
-    contradiction(role, "agent", explicit.agent, agent);
-    contradiction(role, "model", explicit.model, profile.model);
-    contradiction(role, "effort", explicit.effort, profile.effort);
-  }
+  assert(
+    terminal,
+    `Role ${role} uses ${profile.provider} (profile ${profileId}); worker-start --agent cannot give it the ` +
+      "permission bypass flag and pinned model, so open it with role-terminal, confirm the model on screen, then pass --terminal",
+  );
+  assertHeldRole(org, roles, requestedRole, role);
+  // Orca refuses a model, effort or agent beside --terminal, so none is
+  // accepted here either, even one that restates the profile.
+  assert(
+    [explicit.agent, explicit.model, explicit.effort].every(
+      (value) => value === undefined,
+    ),
+    `Role ${role}: --agent, --model and --effort cannot combine with --terminal; the terminal keeps the model it was opened with`,
+  );
   return {
     requestedRole,
     role,
     profile: profileId,
     provider: profile.provider,
     agent,
-    via: terminal ? "terminal" : via,
+    via,
     model: profile.model,
     effort: profile.effort ?? null,
   };
 }
 
 /**
- * Records what a launch requested and whether Orca's receipt proves it.
+ * Records what a launch requested and what is left to prove it.
  *
- * `launch.effective` is Orca's record of the launch arguments it applied, not
- * the model's own report, so `matched` still leaves the interactive screen to
- * confirm. A null requested model is `unrequested`: the agent runs its account
- * default, and no report may name a specific model from this receipt. A role
- * handed its task in an existing terminal is `unproven` until the screen shows
- * the model.
+ * A role is handed its task in the terminal `role-terminal` opened, and Orca
+ * records no model for a `--terminal` start, so the model stays `unproven`
+ * until the interactive screen shows it. A null requested model is
+ * `unrequested`: the agent runs its account default, and no report may name a
+ * specific model from this launch.
  *
  * @param {object} launch - Result of {@link resolveRoleLaunch}.
- * @param {object} started - Worker receipt from the Orca adapter.
  * @returns {object} Requested values, a `modelProof` verdict and `screenCheck`.
  */
-export function launchBinding(launch, started) {
-  const effective = started?.receipt?.result?.launch?.effective;
-  let modelProof;
-  if (launch.model === null) modelProof = "unrequested";
-  else if (launch.via === "terminal" || !effective) modelProof = "unproven";
-  else if (effective.model !== launch.model) modelProof = "mismatched";
-  else if (launch.effort === null || effective.effort === launch.effort) {
-    modelProof = "matched";
-  } else if (effective.effort === undefined || effective.effort === null) {
-    // A receipt that records no effort neither confirms nor contradicts it.
-    modelProof = "unproven";
-  } else modelProof = "mismatched";
+export function launchBinding(launch) {
+  const modelProof = launch.model === null ? "unrequested" : "unproven";
   return {
     requestedRole: launch.requestedRole,
     role: launch.role,
@@ -326,9 +306,9 @@ function shellToken(token) {
  * Builds the interactive CLI command that opens a role with its saved model.
  *
  * `orca worktree create --agent` has no model option, so the PM coordinator is
- * opened with this command through `role-terminal`. An Agy role is opened the
- * same way before `worker-start --terminal` hands it a task. The command runs
- * tools without approval prompts, since no one can answer them in a role
+ * opened with this command through `role-terminal`. Every other role is opened
+ * the same way before `worker-start --terminal` hands it a task. The command
+ * runs tools without approval prompts, since no one can answer them in a role
  * terminal.
  *
  * The role must be one the run holds. A terminal opened for a role the run

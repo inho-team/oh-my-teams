@@ -414,6 +414,80 @@ test("a terminal that never reports idle is refused before any Dispatch", async 
   assert.equal(missing.calls.length, 1);
 });
 
+test("a terminal held at a prompt is refused before any Dispatch", async () => {
+  // Orca answers tui-idle at once with satisfied: false and a blockedReason
+  // when the screen shows a trust, update or approval prompt. The envelope is
+  // still ok, so reading only `ok` handed a Claude or Codex terminal stuck at
+  // a folder trust question to worker-start, which then failed its Dispatch.
+  const blocked = orcaVerbs({
+    wait: {
+      stdout: JSON.stringify({
+        ok: true,
+        result: {
+          wait: {
+            handle: "term_1",
+            condition: "tui-idle",
+            satisfied: false,
+            status: "running",
+            blockedReason: "agent-trust-workspace",
+          },
+        },
+      }),
+    },
+  });
+  await assert.rejects(
+    () =>
+      startOrcaWorker("/repo", {
+        task: "task_1",
+        terminal: "term_1",
+        discovery,
+        execute: blocked.execute,
+      }),
+    (error) => {
+      assert.equal(error.signal.code, "agent-trust-workspace");
+      // Only someone at the terminal can answer the prompt, so no route is
+      // invented for it.
+      assert.equal(error.signal.kind, undefined);
+      assert.match(error.message, /agent-trust-workspace/);
+      assert.match(error.message, /no Dispatch was created/);
+      return true;
+    },
+  );
+  assert.equal(blocked.calls.length, 1, "worker-start is never called");
+
+  // A reason that happens to match a hinted code gains no route, and a wait
+  // that names no reason is not described as a prompt.
+  for (const [blockedReason, code, prompt] of [
+    ["failed", "failed", true],
+    [undefined, "not_idle", false],
+  ]) {
+    const { execute } = orcaVerbs({
+      wait: {
+        stdout: JSON.stringify({
+          ok: true,
+          result: { wait: { satisfied: false, blockedReason } },
+        }),
+      },
+    });
+    await assert.rejects(
+      () =>
+        startOrcaWorker("/repo", {
+          task: "task_1",
+          terminal: "term_1",
+          discovery,
+          execute,
+        }),
+      (error) => {
+        assert.equal(error.signal.code, code);
+        assert.equal(error.signal.kind, undefined);
+        assert.equal(error.signal.processState, undefined);
+        assert.equal(/held at a prompt/.test(error.message), prompt);
+        return true;
+      },
+    );
+  }
+});
+
 test("the local adapter reports an exited worker and never claims liveness", async () => {
   const stdout = JSON.stringify({
     result: "done",
