@@ -131,12 +131,12 @@ export function predictLaunchPath(params) {
 | 그 외 모든 미확인 조합 | blocked | untested_combination | pm / 검증 필요 | unverified |
 
 **규칙 적용 예시:**
-- **Windows Claude**: `Claude / - / win32 / - / - / skipPrompt=true` -> 5번째 행에 걸려 `supervised-terminal`
+- **Windows Claude**: `Claude / - / win32 / - / - / skipPrompt=true` -> 6번째 행(Claude / - / win32 / - / - / skipPrompt=true)에 걸려 `supervised-terminal`
 - **Windows gemini Agy (검증 모드 유무)**:
-  - 검증 모드(`allowUnverified=true`): `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true / allowUnverified=true` -> 7번째 행에 걸려 `supervised-terminal`
-  - 검증 모드 해제(`allowUnverified=false`): `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true / allowUnverified=false` -> 7번째 행에 도달하나 검증 모드가 아니므로 `blocked (unverified-terminal-creation)`
-- **Codex**: `Codex / - / - / - / 신뢰 없음 / -` -> 3번째 행에 걸려 `blocked (codex-trust-workspace)`
-- **버전 범위 밖**: 지원 버전 범위 밖일 경우 -> 1번째 행에 걸려 `blocked (unsupported_version)`
+  - 검증 모드(`allowUnverified=true`): `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true / allowUnverified=true` -> 8번째 행(Agy / gemini / win32 / powershell / 신뢰 있음 / -)에 걸려 `supervised-terminal`
+  - 검증 모드 해제(`allowUnverified=false`): `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true / allowUnverified=false` -> 8번째 행(Agy / gemini / win32 / powershell / 신뢰 있음 / -)에 도달하나 검증 모드가 아니므로 `blocked (unverified-terminal-creation)`
+- **Codex**: `Codex / - / - / - / 신뢰 없음 / -` -> 4번째 행(Codex / - / - / - / 신뢰 없음 / -)에 걸려 `blocked (codex-trust-workspace)`
+- **버전 범위 밖**: 지원 버전 범위 밖일 경우 -> 1번째 행(지원 버전 범위 밖)에 걸려 `blocked (unsupported_version)`
 
 
 ### 4. 인접 실패 칸과 사전 점검
