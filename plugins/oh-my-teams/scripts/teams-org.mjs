@@ -15,6 +15,7 @@ import {
 import {
   assertWorktreeUnshared,
   launchBinding,
+  PERMISSION_BYPASS,
   selectedWorktreePath,
   resolveRoleLaunch,
   roleCommand,
@@ -40,6 +41,7 @@ import {
   workerTerminal,
   worktreeLabel,
 } from "./role-terminal.mjs";
+import { predictLaunchPath } from "./launch-matrix.mjs";
 import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
@@ -220,7 +222,7 @@ export const ALLOWED_OPTIONS = {
   ],
   "runtime-discover": ["orca"],
   "role-spec": ["org", "role", "spec", "workflow-id", "state", "text"],
-  "terminal-idle-check": ["terminal", "orca"],
+  "terminal-idle-check": ["terminal", "orca", "org", "role"],
   "headless-start": [
     "org",
     "role",
@@ -546,6 +548,28 @@ async function startSupervisedWorker(args) {
     args.repo,
   );
   const launchedAt = new Date().toISOString();
+  // terminal이 있을 때만 matrixPrediction을 계산합니다.
+  // startWorker → assertTerminalIdle 에서 사후 거부가 matrix-mismatch로 분류됩니다.
+  let matrixPrediction;
+  if (args.terminal) {
+    try {
+      const env = await readLaunchEnvironment({ orcaExecutable: args.orca });
+      matrixPrediction = predictLaunchPath({
+        runner: launch.provider,
+        model: launch.model,
+        platform: env.platform,
+        shell: env.shell,
+        trustRecordExists: env.trustRecordExists,
+        skipDangerousModePermissionPrompt: Boolean(
+            PERMISSION_BYPASS[launch.provider],
+          ),
+        orcaVersion: env.orcaVersion,
+        cliVersion: env.cliVersion,
+      });
+    } catch {
+      // 예측 실패 시 matrixPrediction undefined (기존 동작 유지)
+    }
+  }
   try {
     const started = await startWorker(path.resolve(args.repo), {
       task: args.task,
@@ -555,6 +579,7 @@ async function startSupervisedWorker(args) {
       runId: args.run,
       retryOf: args["retry-of"],
       executable: args.orca,
+      matrixPrediction,
     });
     const binding = launchBinding(launch);
     // role-terminal already titled the tab. It is set again because Orca may
@@ -958,11 +983,37 @@ async function executeCommand(args) {
         token: started.token,
       };
     }
-    case "terminal-idle-check":
+    case "terminal-idle-check": {
+      // --org와 --role이 주어질 때만 matrixPrediction을 계산합니다.
+      // 예측이 없으면 기존 동작을 유지합니다(matrixPrediction 전달 안 함).
+      let matrixPrediction;
+      if (args.org && args.role) {
+        try {
+          const org = validateOrg(readJSON(args.org));
+          const command = roleCommand(org, args.role);
+          const env = await readLaunchEnvironment({ orcaExecutable: args.orca });
+          matrixPrediction = predictLaunchPath({
+            runner: command.provider,
+            model: command.modelRequested,
+            platform: env.platform,
+            shell: env.shell,
+            trustRecordExists: env.trustRecordExists,
+            skipDangerousModePermissionPrompt: Boolean(
+              command.permissionBypass,
+            ),
+            orcaVersion: env.orcaVersion,
+            cliVersion: env.cliVersion,
+          });
+        } catch {
+          // 예측 실패 시 기존 동작 유지 (matrixPrediction undefined)
+        }
+      }
       return checkTerminalIdle(args.terminal, {
         executable: args.orca,
         cwd: process.cwd(),
+        matrixPrediction,
       });
+    }
     case "role-spec":
       return (({ org, run }) => ({
         role: args.role,
