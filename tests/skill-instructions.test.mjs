@@ -890,5 +890,27 @@ test("minimal-change discipline lives in one place and each role links it", () =
       /references\/minimal-change\.md/,
       `${role} must link to minimal-change.md inside ### 한계`,
     );
+    assert.match(
+      limitsSection,
+      /신뢰 경계의 입력 검증/,
+      `${role} 한계 section must mention 신뢰 경계의 입력 검증`,
+    );
+    assert.match(
+      limitsSection,
+      /읽기 어려운 코드/,
+      `${role} 한계 section must mention 읽기 어려운 코드`,
+    );
   }
+
+  // 수용 기준: 정본과 PM 스킬에 이스케이프된 따옴표(\")가 없다
+  assert.doesNotMatch(
+    canonical,
+    /\\"/,
+    "references/minimal-change.md must not contain escaped quotes",
+  );
+  assert.doesNotMatch(
+    readSkill("pm"),
+    /\\"/,
+    "pm SKILL.md must not contain escaped quotes",
+  );
 });
