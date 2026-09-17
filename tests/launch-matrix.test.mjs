@@ -89,6 +89,7 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         shell: "powershell",
         trustRecordExists: true,
         skipDangerousModePermissionPrompt: true,
+        isCompoundCommand: true,
         ...V,
       },
     },
@@ -441,8 +442,8 @@ test("Agy claude 모델은 신뢰 기록 있어도 blocked된다", () => {
   assert.equal(result.evidence, "verified");
 });
 
-test("Windows Agy powershell은 신뢰 있어도 no_agent_detected로 차단된다", () => {
-  // 복합 명령 방식이 문제이므로 gemini/gpt-oss 모두 차단
+test("Windows Agy powershell 복합 명령은 no_agent_detected로 차단된다", () => {
+  // isCompoundCommand=true(복합 명령)일 때만 no_agent_detected → 2행 적용
   for (const model of ["gemini-3.1-pro-high", "gpt-oss-120b-medium"]) {
     const result = predictLaunchPath({
       runner: "agy",
@@ -451,6 +452,7 @@ test("Windows Agy powershell은 신뢰 있어도 no_agent_detected로 차단된�
       shell: "powershell",
       trustRecordExists: true,
       skipDangerousModePermissionPrompt: true,
+      isCompoundCommand: true,
       allowUnverified: true,
       allowUnverifiedApproval: "승인",
       ...V,
@@ -461,4 +463,42 @@ test("Windows Agy powershell은 신뢰 있어도 no_agent_detected로 차단된�
       `model=${model} should have no_agent_detected`,
     );
   }
+});
+
+test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한다", () => {
+  // 실측 수정: 구현은 Windows에서 폭 조정을 생략해 단일 명령만 입력(isCompoundCommand=false).
+  // gemini → 표 3행(신뢰 없음) 또는 표 8행(gemini win32 신뢰 있음) 도달.
+  // gemini + 신뢰 있음 → 8행 supervised-terminal/unverified → allowUnverified 없으면 blocked(unverified-terminal-creation)
+  const geminiWithTrust = predictLaunchPath({
+    runner: "agy",
+    model: "gemini-3.1-pro-high",
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    isCompoundCommand: false,
+    allowUnverified: false,
+    ...V,
+  });
+  assert.equal(geminiWithTrust.path, "blocked");
+  assert.ok(
+    geminiWithTrust.reason.includes("unverified-terminal-creation"),
+    "allowUnverified=false → unverified-terminal-creation",
+  );
+
+  // allowUnverified=true+승인 → supervised-terminal
+  const geminiAllowed = predictLaunchPath({
+    runner: "agy",
+    model: "gemini-3.1-pro-high",
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    isCompoundCommand: false,
+    allowUnverified: true,
+    allowUnverifiedApproval: "PM 승인",
+    ...V,
+  });
+  assert.equal(geminiAllowed.path, "supervised-terminal");
+  assert.equal(geminiAllowed.evidence, "unverified");
 });

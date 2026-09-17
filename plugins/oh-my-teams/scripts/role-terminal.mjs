@@ -614,6 +614,8 @@ export async function openRoleTerminal({
     Array.isArray(command?.argv) && command.argv.length > 0,
     "role-terminal needs a role command",
   );
+  const { typed, columns } = launchLine(command, platform);
+  const isCompoundCommand = columns !== null;
   const matrixResult = predictLaunchPath({
     runner: command.provider,
     model: command.modelRequested,
@@ -623,6 +625,7 @@ export async function openRoleTerminal({
     skipDangerousModePermissionPrompt: Boolean(command.permissionBypass),
     orcaVersion,
     cliVersion,
+    isCompoundCommand,
     allowUnverified,
     allowUnverifiedApproval,
   });
@@ -639,7 +642,6 @@ export async function openRoleTerminal({
   }
   const orca = selectOrcaExecutable(executable);
   const tabTitle = roleTitle(command.role, title ?? worktreeLabel(worktree));
-  const { typed, columns } = launchLine(command, platform);
   const launch = {
     orca,
     worktree,

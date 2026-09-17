@@ -548,11 +548,10 @@ test("the launch documents open role terminals through role-terminal", () => {
   assert.match(runtime, /agent가 뜬 뒤 `terminal rename`으로 다시 지정한다/);
 });
 
-test("on Windows an Agy Gemini role is refused before any terminal opens", async () => {
-  // #46: on Windows the narrowed console never made Orca report the terminal
-  // idle and Orca did not recognize it as agy, so both the supervised start and
-  // the approved injection failed, but only after the terminal was opened.
-  // Now the matrix blocks the launch before any terminal is created.
+test("on Windows an Agy Gemini role without approval is refused before any terminal opens", async () => {
+  // #46 수정: Windows에서 구현은 폭 조정을 생략하고 단일 명령만 입력하므로
+  // isCompoundCommand=false → 2행(no_agent_detected) 건너뜀 → 8행(unverified supervised-terminal).
+  // allowUnverified 없이는 unverified-terminal-creation으로 차단됨.
   const org = example();
   const gemini = roleCommand(org, "senior");
   const calls = [];
@@ -560,18 +559,22 @@ test("on Windows an Agy Gemini role is refused before any terminal opens", async
     calls.push(argv);
     return { code: 0, stdout: "{}" };
   };
-  // Windows powershell → no_agent_detected (matrix rule 2)
+  // Windows powershell + allowUnverified=false → unverified-terminal-creation (matrix rule 8 → gate)
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
       command: gemini,
       executable: "orca",
       execute,
-      ...fast,
+      settleMs: 5,
+      readyMs: 20,
+      pollMs: 1,
       platform: "win32",
       shell: "powershell",
+      trustRecordExists: true,
+      allowUnverified: false,
     }),
-    /no_agent_detected/,
+    /unverified-terminal-creation/,
   );
   assert.equal(calls.length, 0);
 
@@ -617,7 +620,8 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
     return { code: 0, stdout: "{}" };
   };
 
-  // Agy gemini win32 powershell → matrix blocked → 터미널 생성 없음
+  // Agy gemini win32 powershell + allowUnverified=false → unverified-terminal-creation → 터미널 생성 없음
+  // (단일 명령이므로 isCompoundCommand=false → 2행 건너뜀 → 8행 unverified gate)
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -627,11 +631,10 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
       platform: "win32",
       shell: "powershell",
       trustRecordExists: true,
-      allowUnverified: true,
-      allowUnverifiedApproval: "test",
+      allowUnverified: false,
       ...{ settleMs: 5, readyMs: 20, pollMs: 1 },
     }),
-    /no_agent_detected/,
+    /unverified-terminal-creation/,
   );
   // matrix 거부는 orca 호출 전에 일어남
   assert.equal(

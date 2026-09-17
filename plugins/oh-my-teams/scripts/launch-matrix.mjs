@@ -122,12 +122,16 @@ const MATRIX_RULES = [
     },
   },
   // 2. Agy / win32 / powershell — 복합 명령 실행(폭 조정과 agy를 한 줄에)
-  // 이 패턴은 기존 코드의 `mode con: cols=44; agy ...` 방식으로,
+  // isCompoundCommand=true인 경우에만 적용됩니다. Windows에서 구현은 폭 조정을
+  // 생략하므로 단일 명령만 입력하여 이 행에 걸리지 않습니다.
   // powershell.exe가 전경 프로세스로 남아 no_agent_detected 발생
-  // (설계 7절: role-terminal.mjs:56 폭 조정 조건 대체)
+  // (설계 7절: role-terminal.mjs 폭 조정 조건 대체)
   {
-    match: ({ runner, platform, shell }) =>
-      runner === "agy" && platform === "win32" && shell === "powershell",
+    match: ({ runner, platform, shell, isCompoundCommand }) =>
+      runner === "agy" &&
+      platform === "win32" &&
+      shell === "powershell" &&
+      isCompoundCommand === true,
     result: {
       path: "blocked",
       reason: ["no_agent_detected"],
@@ -304,6 +308,8 @@ const MATRIX_RULES = [
  * @param {boolean} params.skipDangerousModePermissionPrompt - 첫 실행 확인 질문 설정 우회 여부.
  * @param {string} params.orcaVersion - Orca 버전.
  * @param {string} params.cliVersion - Antigravity CLI 버전.
+ * @param {boolean} [params.isCompoundCommand=false] - 실제로 입력하는 명령이 복합 명령(;로 연결)인지 여부.
+ *   true일 때만 2행(no_agent_detected) 규칙이 적용됩니다.
  * @param {boolean} [params.allowUnverified=false] - 검증 모드. true일 때만 unverified인
  *   supervised-terminal 후보 칸이 터미널 생성을 허용합니다.
  * @param {string} [params.allowUnverifiedApproval] - 검증 모드 승인 문장. 책임 소재 추적용.
