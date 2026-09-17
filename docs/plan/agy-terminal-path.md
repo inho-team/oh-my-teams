@@ -117,7 +117,8 @@ export function predictLaunchPath(params) {
 | Codex / - / - / - / 신뢰 없음 / - | blocked | codex-trust-workspace | user / 폴더 신뢰 | source-derived (out/main/index.js) |
 | Claude / - / - / - / - / skipPrompt=false | blocked | claude-permission-prompt | user / 권한 승인 | unverified |
 | Agy / claude / - / - / 신뢰 있음 / - | blocked | claude-unsupported-by-orca | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 2-2절) |
-| Agy / gemini / win32 / powershell / 신뢰 있음 / - | headless | - | - / - | verified (26-09-17, CLI 1.2.4; `docs/plan/headless-runtime.md` Windows 검증) |
+| Agy / gemini / win32 / powershell / 신뢰 있음 / - | supervised-terminal | - | pm / 브리프 기준 9 실측 (검증 모드에서만 터미널 생성 허용) | verified (26-09-17, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 2-1절·2-5절 식별 및 tui-idle 실측. worker_done 미확인) |
+| Agy / - / win32 / powershell / 신뢰 있음 / - | headless | - | - / Agy 역할 대체 경로 | verified (26-09-17, CLI 1.2.4; `docs/plan/headless-runtime.md` Windows 검증) |
 | Agy / - / win32 / - / 신뢰 있음 / - | blocked | agent-trust-workspace-buffer | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 1-1절 버퍼 잔존 문제) |
 | Agy / gemini,gpt-oss / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
 | Claude / - / posix / - / - / skipPrompt=true | supervised-terminal | - | - / - | unverified |
@@ -127,8 +128,8 @@ export function predictLaunchPath(params) {
 **규칙 적용 예시:**
 - `Agy / gemini / win32 / powershell / 신뢰 없음 / skipPrompt=true`: 2번째 행에 걸려 `blocked (agent-trust-workspace)`
 - `Agy / claude / win32 / powershell / 신뢰 있음 / skipPrompt=true`: 5번째 행에 걸려 `blocked (claude-unsupported-by-orca)`
-- `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true`: 6번째 행에 걸려 `headless`
-- `Agy / gpt-oss / win32 / cmd / 신뢰 있음 / skipPrompt=true`: 7번째 행에 걸려 `blocked (agent-trust-workspace-buffer)`
+- `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true`: 6번째 행에 걸려 `supervised-terminal`
+- `Agy / gpt-oss / win32 / cmd / 신뢰 있음 / skipPrompt=true`: 8번째 행에 걸려 `blocked (agent-trust-workspace-buffer)`
 
 
 ### 4. 인접 실패 칸과 사전 점검
