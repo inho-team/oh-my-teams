@@ -500,3 +500,61 @@ test("every CLI subcommand enforces its declared required options", async () => 
     /Unknown option: --nope/,
   );
 });
+
+test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 않는다", async () => {
+  // 브리프 기준 6: predictLaunchPath가 blocked를 반환하면 터미널이 열리지 않으며
+  // Orca 호출 없이 오류를 던진다. Attempt 예약은 터미널이 열린 뒤에 일어나므로
+  // Orca 호출이 0건임을 확인하면 attempt 소비가 없음을 증명한다.
+  const { openRoleTerminal } = await import(
+    "../plugins/oh-my-teams/scripts/role-terminal.mjs"
+  );
+  const {
+    SUPPORTED_ORCA_VERSION,
+    SUPPORTED_CLI_VERSION,
+  } = await import("../plugins/oh-my-teams/scripts/launch-matrix.mjs");
+  const { roleCommand } = await import(
+    "../plugins/oh-my-teams/scripts/role-launch.mjs"
+  );
+
+  const orcaCalls = [];
+  const execute = async (argv) => {
+    orcaCalls.push(argv);
+    return { code: 0, stdout: "{}" };
+  };
+
+  const org = readJSON(
+    new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
+  );
+  const gemini = roleCommand(org, "senior");
+
+  // Agy gemini win32/powershell → no_agent_detected (matrix blocked)
+  let thrown = null;
+  try {
+    await openRoleTerminal({
+      worktree: "id:repo::/tmp/wt",
+      command: gemini,
+      execute,
+      platform: "win32",
+      shell: "powershell",
+      trustRecordExists: true,
+      orcaVersion: SUPPORTED_ORCA_VERSION,
+      cliVersion: SUPPORTED_CLI_VERSION,
+      settleMs: 5,
+      readyMs: 20,
+      pollMs: 1,
+    });
+  } catch (err) {
+    thrown = err;
+  }
+  assert.ok(thrown, "openRoleTerminal must throw for blocked matrix path");
+  assert.match(thrown.message, /no_agent_detected/);
+
+  // Orca 호출이 전혀 없어야 함 → attempt 예약 시도 없음
+  assert.equal(
+    orcaCalls.length,
+    0,
+    "matrix refusal must not invoke orca (no attempt consumed)",
+  );
+});
+
+
