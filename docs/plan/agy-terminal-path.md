@@ -149,7 +149,18 @@ export function predictLaunchPath(params) {
 
 ### 6. 새 터미널 경로 가능 여부
 - **결론**: Orca `tui-idle`에 기대지 않는 감독 터미널 경로(`supervised-screen-path`)는 현재 Orca CLI 제약상 불가능합니다.
-- **근거**: `orca orchestration dispatch --inject`를 사용하면 Task/Dispatch 컨텍스트는 생성되지만, 터미널이 `unsupervised` 상태로 남습니다. `worker-list`는 이를 `unsupervised`로 보고하고, `worker-stop` 등 lifecycle 제어 명령이 듣지 않습니다. 기존 에이전트 터미널의 lifecycle을 획득하는 `worker-start --terminal <handle>` 명령은 작업 계약 금지 조항에 의해 사용할 수 없습니다.
+- **근거**: 
+  - `orca orchestration dispatch --inject`를 사용하면 Task/Dispatch 컨텍스트는 생성되지만, 터미널이 `unsupervised` 상태로 남습니다.
+    > **명령:** `orca skills get orchestration --reference references/low-level-topology.md`
+    > **원문:** "`dispatch --inject` creates authoritative Task/Dispatch context but deliberately keeps an operator-created process unsupervised: it creates no supervised worker resource row. `worker-show`, `worker-read`, and `worker-list` report the lane as `unsupervised`; `worker-stop` and `worker-abandon` do not close that process, and settled retain/release take no process action."
+  - 기존 에이전트 터미널의 lifecycle을 획득하는 `worker-start --terminal <handle>` 명령은 저수준 문서에서 권장하나, 이번 작업 계약 금지 조항에 의해 사용할 수 없습니다.
+    > **명령:** `orca skills get orchestration --reference references/low-level-topology.md`
+    > **원문:** "Use `worker-start --terminal <handle>` when lifecycle ownership of an existing agent terminal is required. Never imply that low-level dispatch retroactively owns a process, never use it to route around the nested-depth limit, and never use it for an ownership handoff."
+  - 관련 도움말 원문:
+    > **명령:** `orca orchestration worker-start --help`
+    > **원문:** "Not every worker has a terminal. Read output with worker-read --source auto or --source transcript, which always work; --source terminal is refused when there is none, and orca terminal verbs do not accept every worker handle. Nothing above needs you to know which kind you have — the orchestration verbs cover all of them."
+    > **명령:** `orca orchestration dispatch --help`
+    > **원문:** "--inject    (플래그, 설명 없음)"
 
 ### 7. 기존 조건을 대체할 호출 지점 목록
 기존의 하드코딩된 조건들을 표(matrix)를 읽는 로직으로 대체합니다.
