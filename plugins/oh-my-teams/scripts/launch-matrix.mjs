@@ -153,10 +153,10 @@ const MATRIX_RULES = [
       evidence: "verified",
     },
   },
-  // 4. Codex / - / 신뢰 기록 없음
+  // 4. Codex / - / 신뢰 기록 없음 (codexTrustRecordExists가 true가 아닌 경우)
   {
-    match: ({ runner, trustRecordExists }) =>
-      runner === "codex" && !trustRecordExists,
+    match: ({ runner, codexTrustRecordExists }) =>
+      runner === "codex" && codexTrustRecordExists !== true,
     result: {
       path: "blocked",
       reason: ["codex-trust-workspace"],
@@ -304,7 +304,9 @@ const MATRIX_RULES = [
  * @param {string} [params.model] - 모델 이름 (예: 'gemini-3.1-pro-high').
  * @param {'win32'|'darwin'|'linux'} params.platform - 플랫폼.
  * @param {'powershell'|'posix'} params.shell - 셸 종류.
- * @param {boolean} params.trustRecordExists - 워크트리 신뢰 기록 유무.
+ * @param {boolean} params.trustRecordExists - 워크트리 신뢰 기록 유무 (Agy용).
+ * @param {boolean|string} [params.codexTrustRecordExists="unknown"] - Codex 신뢰 기록 유무.
+ *   true일 때만 4행(codex-trust-workspace) 차단을 건너뜁니다.
  * @param {boolean} params.skipDangerousModePermissionPrompt - 첫 실행 확인 질문 설정 우회 여부.
  * @param {string} params.orcaVersion - Orca 버전.
  * @param {string} params.cliVersion - Antigravity CLI 버전.

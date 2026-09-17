@@ -660,7 +660,8 @@ async function launchOnce({
  * @param {number} [options.pollMs=1500] - Interval between screen reads.
  * @param {string} [options.platform=process.platform] - Host platform.
  * @param {'powershell'|'posix'} [options.shell='posix'] - Shell kind on the platform.
- * @param {boolean} [options.trustRecordExists=true] - Whether the worktree has a trust record.
+ * @param {boolean} [options.trustRecordExists=true] - Whether the worktree has a trust record (Agy).
+ * @param {boolean|string} [options.codexTrustRecordExists="unknown"] - Whether the worktree has a Codex trust record.
  * @param {string} [options.orcaVersion] - Orca version for matrix lookup.
  * @param {string} [options.cliVersion] - Antigravity CLI version for matrix lookup.
  * @param {boolean} [options.allowUnverified=false] - Permit unverified supervised-terminal paths.
@@ -685,6 +686,7 @@ export async function openRoleTerminal({
   platform = process.platform,
   shell = platform === "win32" ? "powershell" : "posix",
   trustRecordExists = true,
+  codexTrustRecordExists = "unknown",
   orcaVersion = SUPPORTED_ORCA_VERSION,
   cliVersion = SUPPORTED_CLI_VERSION,
   allowUnverified = false,
@@ -704,6 +706,7 @@ export async function openRoleTerminal({
     platform,
     shell,
     trustRecordExists,
+    codexTrustRecordExists,
     skipDangerousModePermissionPrompt: Boolean(command.permissionBypass),
     orcaVersion,
     cliVersion,

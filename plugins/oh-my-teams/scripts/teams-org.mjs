@@ -560,6 +560,7 @@ async function startSupervisedWorker(args) {
         platform: env.platform,
         shell: env.shell,
         trustRecordExists: env.trustRecordExists,
+        codexTrustRecordExists: env.codexTrustRecordExists,
         skipDangerousModePermissionPrompt: Boolean(
           PERMISSION_BYPASS[launch.provider],
         ),
@@ -1000,6 +1001,7 @@ async function executeCommand(args) {
             platform: env.platform,
             shell: env.shell,
             trustRecordExists: env.trustRecordExists,
+            codexTrustRecordExists: env.codexTrustRecordExists,
             skipDangerousModePermissionPrompt: Boolean(
               command.permissionBypass,
             ),
@@ -1058,6 +1060,7 @@ async function executeCommand(args) {
         platform: env.platform,
         shell: env.shell,
         trustRecordExists: env.trustRecordExists,
+        codexTrustRecordExists: env.codexTrustRecordExists,
         orcaVersion: env.orcaVersion,
         cliVersion: env.cliVersion,
         allowUnverified: allowUnverifiedApproval !== undefined,

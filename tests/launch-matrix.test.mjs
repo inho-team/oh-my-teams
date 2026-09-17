@@ -106,7 +106,7 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 4. Codex 신뢰 없음
+    // 4. Codex 신뢰 없음 (codexTrustRecordExists !== true)
     {
       label: "codex_no_trust",
       params: {
@@ -114,7 +114,8 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         model: undefined,
         platform: "darwin",
         shell: "posix",
-        trustRecordExists: false,
+        trustRecordExists: true,
+        codexTrustRecordExists: false,
         skipDangerousModePermissionPrompt: true,
         ...V,
       },
@@ -501,4 +502,57 @@ test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한
   });
   assert.equal(geminiAllowed.path, "supervised-terminal");
   assert.equal(geminiAllowed.evidence, "unverified");
+});
+
+test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () => {
+  // codexTrustRecordExists: true → 4행 건너뜀 → Codex 신뢰 있음 경로(13행)
+  const trusted = predictLaunchPath({
+    runner: "codex",
+    model: undefined,
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: false, // Agy 신뢰 기록(무관)
+    codexTrustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    ...V,
+  });
+  assert.notEqual(
+    trusted.reason?.[0],
+    "codex-trust-workspace",
+    "codexTrustRecordExists=true → 4행 건너뜀",
+  );
+
+  // codexTrustRecordExists: false → 4행 적용
+  const notTrustedFalse = predictLaunchPath({
+    runner: "codex",
+    model: undefined,
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: true,
+    codexTrustRecordExists: false,
+    skipDangerousModePermissionPrompt: true,
+    ...V,
+  });
+  assert.equal(notTrustedFalse.path, "blocked");
+  assert.ok(
+    notTrustedFalse.reason.includes("codex-trust-workspace"),
+    "codexTrustRecordExists=false → blocked(codex-trust-workspace)",
+  );
+
+  // codexTrustRecordExists: "unknown" → 4행 적용 (신뢰 미확인도 차단)
+  const notTrustedUnknown = predictLaunchPath({
+    runner: "codex",
+    model: undefined,
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: true,
+    codexTrustRecordExists: "unknown",
+    skipDangerousModePermissionPrompt: true,
+    ...V,
+  });
+  assert.equal(notTrustedUnknown.path, "blocked");
+  assert.ok(
+    notTrustedUnknown.reason.includes("codex-trust-workspace"),
+    "codexTrustRecordExists=unknown → blocked(codex-trust-workspace)",
+  );
 });
