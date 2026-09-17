@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, readJSON, writeJSON } from "./core.mjs";
+import { printTimeout } from "./providers/shared.mjs";
 import { addTokenUsage, normalizeTokenUsage } from "./usage.mjs";
 
 const RUNNER = path.join(
@@ -137,13 +138,15 @@ const PROVIDERS = {
     },
   },
   agy: {
-    command({ binary, model, prompt, session }) {
+    command({ binary, model, prompt, session, timeoutMs }) {
       const argv = [
         ...binary,
         "--output-format",
         "stream-json",
         "--dangerously-skip-permissions",
       ];
+      if (timeoutMs != null)
+        argv.push("--print-timeout", printTimeout(timeoutMs));
       if (session) argv.push("--conversation", session);
       if (model) argv.push("--model", model);
       argv.push("-p", prompt);
@@ -238,13 +241,14 @@ export function codexRolloutModel(threadId, codexHome) {
 /**
  * Builds the argv and stdin of one headless turn for a provider.
  *
- * @param {object} options - Provider, executable argv, model, effort, prompt, session.
+ * @param {object} options - Provider, executable argv, model, effort, prompt, session, and timeoutMs.
  * @param {string} options.provider - `claude`, `codex` or `agy`.
  * @param {string[]} options.binary - Executable argv, e.g. `["claude"]`.
  * @param {string | null} [options.model] - Model to request.
  * @param {string | null} [options.effort] - Reasoning effort to request.
  * @param {string} options.prompt - Instruction for this turn.
  * @param {string | null} [options.session] - Session to resume.
+ * @param {number | null} [options.timeoutMs] - Per-turn time limit passed as --print-timeout (agy only).
  * @returns {{argv: string[], stdin: string | null}} Command and stdin payload.
  * @throws {Error} When the provider cannot run headless.
  */
@@ -504,6 +508,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
   const number = turnDirs(dir).length + 1;
   const turnDir = path.join(dir, "turns", String(number));
   fs.mkdirSync(turnDir, { recursive: true });
+  const resolvedTimeoutMs = timeoutMs ?? worker.timeoutMs;
   const { argv, stdin } = headlessCommand({
     provider: worker.provider,
     binary: worker.binary,
@@ -511,6 +516,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
     effort: worker.effortRequested,
     prompt,
     session,
+    timeoutMs: resolvedTimeoutMs,
   });
   fs.writeFileSync(path.join(turnDir, "prompt.txt"), prompt);
   if (stdin !== null) fs.writeFileSync(path.join(turnDir, "stdin.txt"), stdin);
@@ -520,7 +526,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
     stdinFile: stdin === null ? null : "stdin.txt",
     cwd: worker.cwd,
     session: session ?? null,
-    timeoutMs: timeoutMs ?? worker.timeoutMs,
+    timeoutMs: resolvedTimeoutMs,
     startedAt: new Date().toISOString(),
   });
   const runner = spawn(process.execPath, [RUNNER, turnDir], {

@@ -146,6 +146,25 @@ test("each provider's headless command, first turn and resumed", () => {
       stdin: null,
     },
   );
+  // timeoutMs가 없으면 --print-timeout을 삽입하지 않는다.
+  assert.ok(
+    !headlessCommand({
+      provider: "agy",
+      binary: ["agy"],
+      prompt,
+    }).argv.includes("--print-timeout"),
+    "agy without timeoutMs must not include --print-timeout",
+  );
+  // timeoutMs를 주면 printTimeout(timeoutMs) 값이 argv에 들어간다.
+  const ptArgv = headlessCommand({
+    provider: "agy",
+    binary: ["agy"],
+    prompt,
+    timeoutMs: 60000,
+  }).argv;
+  const ptIdx = ptArgv.indexOf("--print-timeout");
+  assert.ok(ptIdx !== -1, "agy with timeoutMs must include --print-timeout");
+  assert.equal(ptArgv[ptIdx + 1], "55s"); // 60000 - 5000 = 55000ms = 55s
   assert.throws(
     () => headlessCommand({ provider: "ollama", binary: ["ollama"], prompt }),
     /no headless runtime/,
@@ -541,4 +560,35 @@ test("an Agy server error is reported in its own words, and a capacity 503 as a 
   assert.match(read.providerError, /No capacity available for model/);
   assert.equal(read.rateLimited, true);
   assert.equal(read.usage.inputTokens, 11708);
+});
+test("agy turn.json carries --print-timeout from worker default and per-turn timeoutMs", (t) => {
+  const box = sandbox(t);
+  // Worker 기본값: timeoutMs=60000이면 turn.json argv에 --print-timeout 55s가 들어간다.
+  startHeadlessWorker({
+    stateDir: box.state,
+    workerId: "pt-default",
+    role: "junior",
+    profile: "agy-profile",
+    provider: "agy",
+    binary: [process.execPath, FAKE, "agy"],
+    model: "gemini-fake",
+    effort: null,
+    cwd: box.cwd,
+    prompt: "ASK before writing",
+    timeoutMs: 60000,
+  });
+  const turnJson1 = JSON.parse(
+    fs.readFileSync(
+      path.join(box.state, "headless", "pt-default", "turns", "1", "turn.json"),
+      "utf8",
+    ),
+  );
+  const ptIdx1 = turnJson1.argv.indexOf("--print-timeout");
+  assert.ok(ptIdx1 !== -1, "agy turn.json must contain --print-timeout");
+  assert.equal(
+    turnJson1.argv[ptIdx1 + 1],
+    "55s",
+    "worker timeoutMs=60000 → --print-timeout 55s",
+  );
+  assert.equal(turnJson1.timeoutMs, 60000, "turn.json timeoutMs matches worker");
 });

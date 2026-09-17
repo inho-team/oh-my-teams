@@ -75,7 +75,7 @@ turns/<n>/stop.request  중단 요청 (있으면 러너가 종료 처리)
 |---|---|---|---|---|---|
 | Claude | `claude -p --output-format stream-json --verbose --dangerously-skip-permissions [--model] [--effort]` (지시 stdin) | `--resume <id>` 추가 | `system/init.session_id` | `system/init.model` | `result.result` |
 | Codex | `codex exec --json --dangerously-bypass-approvals-and-sandbox [-m] [-c model_reasoning_effort=] <지시>` | `codex exec resume <id> …` | `thread.started.thread_id` | `$CODEX_HOME/sessions/**/rollout-*-<id>.jsonl`의 `turn_context.model` | 마지막 `agent_message.text` |
-| Agy | `agy --output-format stream-json --dangerously-skip-permissions [--model] -p <지시>` | `--conversation <id>` 추가 | `init.conversation_id` | `init.model` | `result.response` |
+| Agy | `agy --output-format stream-json --dangerously-skip-permissions [--print-timeout <dur>] [--model] -p <지시>` | `--conversation <id>` 추가 | `init.conversation_id` | `init.model` | `result.response` |
 
 모델 판정은 요청과 보고가 같으면 `matched`, 다르면 `mismatched`, 요청이 없으면 `unrequested`, 보고를 찾지 못하면 `unproven`이다. Claude의 `sonnet` 같은 별칭은 보고 모델(`claude-sonnet-5`)과 문자열이 다르므로, 요청이 별칭이면 `alias`로 구분해 보고 모델을 함께 적는다.
 
