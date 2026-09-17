@@ -136,6 +136,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
   role-terminal --org FILE --role ROLE --worktree SELECTOR [--title TEXT]
                 [--workflow-id ID --state DIR] [--orca EXECUTABLE]
+                [--allow-unverified "APPROVAL SENTENCE"]
                 (the tab title is the role tag, e.g. [PM], then TEXT or the worktree)
   host-defaults [--project DIR] [--codex-home DIR]
   usage-report --org FILE [--worktree ID | --all] [--state DIR]
@@ -243,6 +244,7 @@ export const ALLOWED_OPTIONS = {
     "workflow-id",
     "state",
     "orca",
+    "allow-unverified",
   ],
   "host-defaults": ["project", "codex-home"],
   "usage-report": [
@@ -981,13 +983,25 @@ async function executeCommand(args) {
           args.worktree,
           process.cwd(),
         );
+        const allowUnverifiedApproval = args["allow-unverified"];
+        assert(
+          allowUnverifiedApproval === undefined ||
+            (typeof allowUnverifiedApproval === "string" &&
+              allowUnverifiedApproval.trim().length > 0),
+          "--allow-unverified requires a non-empty approval sentence",
+        );
         return openRoleTerminal({
           worktree: args.worktree,
           command,
           title: args.title,
           executable: args.orca,
+          allowUnverified: allowUnverifiedApproval !== undefined,
+          allowUnverifiedApproval,
         }).then((opened) => ({
           ...opened,
+          ...(allowUnverifiedApproval
+            ? { allowUnverifiedApproval }
+            : {}),
           ...recordLaunchSafely(args.org, launchedAt, {
             via: "role-terminal",
             role: command.role,

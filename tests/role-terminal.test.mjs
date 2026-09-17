@@ -20,6 +20,10 @@ import {
   workerTerminal,
   worktreeLabel,
 } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
+import {
+  ALLOWED_OPTIONS,
+  parseArgs,
+} from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
@@ -709,5 +713,41 @@ test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", as
     orcaCalls.length,
     0,
     "headless 예측 거부는 Orca terminal create를 호출하지 않는다",
+  );
+});
+
+test("role-terminal CLI allow-unverified 옵션 처리", () => {
+  // finding: missing-cli-verification-option
+  // ALLOWED_OPTIONS에 allow-unverified가 등록되어 있어야 한다
+  assert.ok(
+    ALLOWED_OPTIONS["role-terminal"].includes("allow-unverified"),
+    "role-terminal ALLOWED_OPTIONS에 allow-unverified가 있어야 한다",
+  );
+
+  // parseArgs: allow-unverified 는 값 옵션 (flag 아님)
+  const parsed = parseArgs([
+    "role-terminal",
+    "--org", "org.json",
+    "--role", "senior",
+    "--worktree", "active",
+    "--allow-unverified", "PM이 2026-09-17 승인",
+  ]);
+  assert.equal(
+    parsed["allow-unverified"],
+    "PM이 2026-09-17 승인",
+    "allow-unverified 값이 파싱되어야 한다",
+  );
+
+  // 값 없이 사용하면 parseArgs가 에러를 던진다
+  assert.throws(
+    () => parseArgs([
+      "role-terminal",
+      "--org", "org.json",
+      "--role", "senior",
+      "--worktree", "active",
+      "--allow-unverified",
+    ]),
+    /Missing value/,
+    "allow-unverified에 값이 없으면 parseArgs가 에러를 던져야 한다",
   );
 });
