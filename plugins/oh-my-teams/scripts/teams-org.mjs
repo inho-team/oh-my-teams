@@ -641,6 +641,9 @@ async function injectFallback(args, org, run, launch, refusal) {
       "the model is not proven; report the model shown on the terminal screen",
     ],
     ...(injected.injected ? {} : { status: "blocked" }),
+    ...(injected.injectRefusal
+      ? { route: classifyFailure(injected.injectRefusal) }
+      : {}),
   };
 }
 
