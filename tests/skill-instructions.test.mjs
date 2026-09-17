@@ -13,7 +13,10 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { assist } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { parseModelChoice, draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import {
+  parseModelChoice,
+  draftOrganization,
+} from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import { removedSkillNames } from "./removed-skills.mjs";
 
@@ -567,11 +570,7 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
       "agy:gemini-3.8-flash-medium",
       "agy:claude-sonnet-4-6",
     ],
-    intern: [
-      "claude:haiku",
-      "codex:gpt-5.6-luna",
-      "agy:gpt-oss-120b-medium",
-    ],
+    intern: ["claude:haiku", "codex:gpt-5.6-luna", "agy:gpt-oss-120b-medium"],
   };
 
   // Parse each role row from the table and compare against EXPECTED.
@@ -587,9 +586,9 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
     const roleKo = line.match(/^\| ([A-Za-z]+) \|/)?.[1];
     const role = ROLE_KO[roleKo];
     if (!role) continue;
-    const rowValues = [
-      ...line.matchAll(/`([a-z]+:[a-z0-9._-]+)`/g),
-    ].map((m) => m[1]);
+    const rowValues = [...line.matchAll(/`([a-z]+:[a-z0-9._-]+)`/g)].map(
+      (m) => m[1],
+    );
     assert.deepEqual(
       rowValues,
       EXPECTED[role],
@@ -647,7 +646,11 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
       const org = draftOrganization({ name: "test", models: slots });
       const cmd = roleCommand(org, role);
       // argv[0] is the bare CLI name.
-      assert.equal(cmd.argv[0], provider, `${choice}: expected provider ${provider}`);
+      assert.equal(
+        cmd.argv[0],
+        provider,
+        `${choice}: expected provider ${provider}`,
+      );
       // argv[1] is always the permission bypass flag.
       assert.equal(
         cmd.argv[1],
