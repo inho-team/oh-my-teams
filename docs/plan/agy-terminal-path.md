@@ -69,7 +69,7 @@
 | 조건 (실측 사례) | `agentIdentity` | 소스 기반 설명 (규칙 적용) |
 |---|---|---|
 | gemini/gpt-oss 모델 (제목 지정) | `antigravity` | 전경 프로세스(`agy.exe` -> `antigravity`) 증거가 확보되었고, 제목(`probe...`) 증거와 충돌하지 않아 우선순위에 따라 `antigravity`로 판정됨. |
-| claude-sonnet-4-6 (제목 미지정) | `null` (없음) | 프로세스는 `agy.exe`이나 화면 파싱, `claude` 상태 훅(`live-hook`) 등으로 인해 `claude` 증거와 `antigravity` 증거가 경합하여 충돌(ambiguous)로 처리되었을 가능성 높음 (미확인: 실제 충돌 증거 조합 로깅 필요). |
+| claude-sonnet-4-6 (제목 지정: probe-2-claude, probe-2-claude-r2) | `null` (없음) | 프로세스는 `agy.exe`이나 화면 파싱, `claude` 상태 훅(`live-hook`) 등으로 인해 `claude` 증거와 `antigravity` 증거가 경합하여 충돌(ambiguous)로 처리되었을 가능성 높음 (미확인: 실제 충돌 증거 조합 로깅 필요). |
 | `--title` 미지정 시 (gemini) | `null` (없음) | 프로세스 증거(`isForegroundProcessProofFresh`의 수명 초과 등)가 누락된 상황에서, 터미널 제목(`Terminal 1`)만으로는 에이전트를 식별할 수 없어 `null`이 반환되었을 수 있음 (미확인: 프로세스 증거 무효화 여부 등 실제 값 확인 필요). |
 
 > **올바른 규칙 수정 필요 사항 (orca-runtime.md 불일치 시)**: 현재 `orca-runtime.md`의 서술은 설치된 소스의 실제 판정 기준(화면 파싱 문자열 기반 대기 및 차단 판독, 셸 프로세스 필터링)과 대체로 일치합니다. 단, Agy 대기 판정이 `gemini`로 시작하는 문자열에 강하게 의존(`startsWith('gemini', o)`)한다는 점이 확인되었으므로, 다른 모델(예: `claude`, `gpt-oss`) 사용 시 폭을 아무리 조정해도 해당 줄이 `gemini`로 시작하지 않기 때문에 무조건 실패할 수밖에 없음이 소스로 증명되었습니다.
