@@ -120,7 +120,6 @@ export function predictLaunchPath(params) {
 | Agy / claude / - / - / 신뢰 있음 / - | blocked | claude-unsupported-by-orca | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 2-2절) |
 | Agy / gemini / win32 / powershell / 신뢰 있음 / - | supervised-terminal | - | pm / 브리프 기준 9 실측 (검증 모드에서만 터미널 생성 허용) | verified (26-09-17, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 2-1절·2-5절 식별 및 tui-idle 실측. worker_done 미확인) |
 | Agy / - / win32 / powershell / 신뢰 있음 / - | headless | - | - / Agy 역할 대체 경로 | verified (26-09-17, CLI 1.2.4; `docs/plan/headless-runtime.md` Windows 검증) |
-| Agy / - / win32 / - / 신뢰 있음 / - | blocked | agent-trust-workspace-buffer | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 1-1절 버퍼 잔존 문제) |
 | Agy / gemini,gpt-oss / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
 | Claude / - / posix / - / - / skipPrompt=true | supervised-terminal | - | - / - | unverified |
 | Codex / - / - / - / 신뢰 있음 / - | blocked | codex-worker-done-unverified | pm / 브리프 기준 9 실측 | unverified |
@@ -134,10 +133,10 @@ export function predictLaunchPath(params) {
 
 
 ### 4. 인접 실패 칸과 사전 점검
-브리프 기준 7의 인접 실패 6가지를 다음 이유 코드로 사전 거부합니다 (자동 응답 없음):
+브리프 기준 7의 인접 실패 6가지 중 5가지는 다음 이유 코드로 사전 거부하고, 버퍼 잔존은 사후 거부로 처리합니다:
 1. **Codex 폴더 신뢰 질문**: 신뢰 없음 시 `codex-trust-workspace`
 2. **Claude 권한 우회 첫 실행 확인**: `skipPrompt` 설정 안 된 경우 `claude-permission-prompt`
-3. **Agy 신뢰 문구의 버퍼 잔존**: Agy 첫 실행 후 버퍼에 문구가 남아 차단되는 상황 예측 (`agent-trust-workspace-buffer`)
+3. **Agy 신뢰 문구의 버퍼 잔존 (사후 거부)**: 터미널을 다시 연 뒤에도 버퍼에 문구가 남아 차단되는 경우 `agent-trust-workspace-buffer` 반환
 4. **Codex 역할 worker_done 미검증**: `codex-worker-done-unverified`
 5. **터미널 제목이 셸 경로로 남는 경우**: PowerShell에서 복수 명령 실행 시 발생. `no_agent_detected`
 6. **버전 범위 밖**: Orca/CLI 버전이 지원 범위 밖이면 `unsupported_version`
