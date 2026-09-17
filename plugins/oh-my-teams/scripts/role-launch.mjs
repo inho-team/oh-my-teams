@@ -145,6 +145,7 @@ const skillsDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../skills",
 );
+const referencesDir = path.resolve(skillsDir, "../references");
 const BARE_COMMAND = /^[A-Za-z0-9._-]+$/;
 
 function launchableProfile(role, profileId, profile) {
@@ -438,6 +439,10 @@ export function roleSpec(
     // Untracked files count toward verify's fingerprint, and the literacy-test
     // workers left node_modules and scratch scripts beside their report.
     "조사용 임시 스크립트, 의존성 설치, 내려받은 파일은 작업 워크트리가 아니라 워크트리 밖의 임시 디렉터리에서 만든다. 추적되지 않은 파일도 검증 증거의 지문에 들어가므로, 워크트리에 남기면 검증과 검토를 다시 해야 한다.",
+    // A parent reads many reports, so the verdict comes first; tying it to a
+    // fixed set of values keeps the first line from claiming unverified success.
+    "보고는 두괄식으로 쓴다. 첫 줄은 `완료`·`부분 완료`·`실패`·`차단` 가운데 확인한 증거가 받쳐 주는 판정과 그 근거 하나로 시작하고, 보고 대상이 내릴 결정이 있으면 둘째 줄에 적은 뒤 상세를 쓴다. 하위 역할에게 보내는 지시는 목표와 완료 조건을 먼저 쓴다.",
+    `두괄식 기준 전문: ${path.join(referencesDir, "bluf.md")}`,
     "",
     readRoleCharter(role),
     "",

@@ -107,7 +107,7 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 - 프로필이 모델 없이 강도만 기록한다. Orca는 `--model` 없는 `--effort`를 거부한다.
 - 받은 워크트리가 이번 workflow에서 다른 역할의 task가 작업하는 워크트리다. 아래 「역할과 워크트리」 절을 따른다.
 
-`--spec` 앞에는 받는 역할의 머리글이 붙는다. 머리글에는 역할, 보고 대상, 이번 실행에 없어 이어받는 역할, 직접 배정할 수 있는 역할, 조직 파일 경로, workflow ID와 coordinator state 경로, 그리고 역할 스킬의 `권한·책임·한계` 절 전문이 들어간다. 중첩 worker로 실행되는 PL은 이 경로로 자기 하위 역할을 시작한다. `task-create`로 만든 Task를 `--task`로 시작할 때에는 래퍼가 머리글을 붙일 수 없으므로, Task 설명을 `node <runtime> role-spec --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state> --spec <작업>`의 출력으로 만든다.
+`--spec` 앞에는 받는 역할의 머리글이 붙는다. 머리글에는 역할, 보고 대상, 이번 실행에 없어 이어받는 역할, 직접 배정할 수 있는 역할, 조직 파일 경로, workflow ID와 coordinator state 경로, [두괄식](bluf.md) 보고·지시 규칙, 그리고 역할 스킬의 `권한·책임·한계` 절 전문이 들어간다. 중첩 worker로 실행되는 PL은 이 경로로 자기 하위 역할을 시작한다. `task-create`로 만든 Task를 `--task`로 시작할 때에는 래퍼가 머리글을 붙일 수 없으므로, Task 설명을 `node <runtime> role-spec --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state> --spec <작업>`의 출력으로 만든다.
 
 시작 결과의 `binding`에는 `via`, `modelRequested`, `effortRequested`, `modelProof`, `screenCheck`가 남는다. `via`는 항상 `terminal`이며, `modelProof`는 다음 둘 중 하나다.
 
