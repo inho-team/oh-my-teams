@@ -59,7 +59,3 @@ worktree 조회 결과와 ID·경로·instance를 대조한다. 실제 외부 Di
 Claude·Codex marketplace를 새 경로에 연결하고 1.4.0을 설치했다.
 현재 문서의 과거 전체 완료 표시는 이러한
 추가 검증의 완료 증거로 사용할 수 없다.
-
-## agy-terminal-path docs-align (2026-09-18)
-
-`orca-runtime.md`와 PM·PL 스킬이 조합별 조건 대신 `scripts/launch-matrix.mjs` 호환성 표를 링크하도록 수정했다. headless-start receipt 형식을 문서화하고, Agy 대기 판정 문단을 소스 대조표와 일치하도록 고쳤다. `matrix-mismatch` 신호의 경로(`matrix-prediction-failure`, `pm`, `revise-matrix`)를 「실패 어휘 번역」 절에 추가했다. `tests/skill-instructions.test.mjs`의 관련 정규식을 갱신하고 `launch-matrix.mjs` 링크 확인 검사를 추가했다. 모든 변경은 계약 `files` 목록 안에 있다.
