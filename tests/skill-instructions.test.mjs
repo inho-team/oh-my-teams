@@ -836,14 +836,24 @@ test("form says what a default model runs today and reads Codex models at ask ti
 test("form does not hardcode catalog Codex IDs outside the choice table", () => {
   const form = readSkill("form");
   // The table is the only sanctioned place for confirmed Codex IDs.
-  // Outside the table, enumerating catalog IDs would duplicate a fact that
-  // belongs to codex.listed and would go stale when the catalog changes.
+  // Exception: the PL guidance sentence is required by brief criterion 2 —
+  // it tells structured-tool hosts to hint Codex Terra as a free-input value.
   // gpt-6-astra is exempted: it appears in the host-defaults example sentence
   // that the existing test ("form says what a default model runs today") requires.
+  const PL_GUIDANCE_KO = "자유 입력으로 `codex:gpt-5.6-terra`";
+  // Confirm the PL guidance is present in the document.
+  assert.ok(
+    form.includes(PL_GUIDANCE_KO),
+    "form must keep the PL Codex Terra free-input guidance (brief criterion 2)",
+  );
   const tableSection = form
     .split("| 역할 | 선택지 (표시 이름 → 저장 값) |")[1]
     ?.split("\n\n")[0];
-  const bodyOutsideTable = form.replace(tableSection ?? "", "");
+  // Remove the table and the one allowed PL guidance occurrence, then check
+  // that no other catalog IDs are hardcoded outside the table.
+  const bodyOutsideTable = form
+    .replace(tableSection ?? "", "")
+    .replace(PL_GUIDANCE_KO, "");
   for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
     assert.ok(
       !bodyOutsideTable.includes(id),
