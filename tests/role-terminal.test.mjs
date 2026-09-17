@@ -78,7 +78,14 @@ function fakeOrca(
 // The screens below are a POSIX host's. On Windows the example's Gemini Senior
 // is refused before a terminal opens, so these tests name their platform
 // rather than inheriting the host's.
-const fast = { settleMs: 5, readyMs: 20, pollMs: 1, platform: "darwin" };
+const fast = {
+  settleMs: 5,
+  readyMs: 20,
+  pollMs: 1,
+  platform: "darwin",
+  allowUnverified: true,
+  allowUnverifiedApproval: "test-approved",
+};
 const typedFor = (command) => launchLine(command, "darwin").typed;
 
 test("every role command runs tools without an approval prompt", () => {
@@ -120,10 +127,13 @@ test("an Agy Gemini role is launched narrow enough for Orca to see it idle", asy
     typed: `stty cols ${AGY_BANNER_COLUMNS}; ${gemini.command}`,
     columns: AGY_BANNER_COLUMNS,
   });
-  // Windows has no stty; PowerShell narrows the console with mode con:.
+  // Windows skips the width adjustment: combining mode con: with agy in one
+  // line keeps powershell.exe as the foreground process and Orca cannot detect
+  // the agent. The matrix blocks that path; on Windows Agy Gemini either runs
+  // through allowUnverified or headless.
   assert.deepEqual(launchLine(gemini, "win32"), {
-    typed: `mode con: cols=${AGY_BANNER_COLUMNS}; ${gemini.command}`,
-    columns: AGY_BANNER_COLUMNS,
+    typed: gemini.command,
+    columns: null,
   });
   assert.equal(
     launchLine(gemini, "linux").typed,
@@ -236,6 +246,8 @@ test("a typed but unsubmitted command is sent Enter exactly once", async () => {
     readyMs: 50,
     pollMs: 1,
     platform: "darwin",
+    allowUnverified: true,
+    allowUnverifiedApproval: "test-approved",
   });
   assert.equal(opened.submission, "enter-sent");
   assert.equal(opened.ready, true);
@@ -536,6 +548,7 @@ test("on Windows an Agy Gemini role is refused before any terminal opens", async
   // #46: on Windows the narrowed console never made Orca report the terminal
   // idle and Orca did not recognize it as agy, so both the supervised start and
   // the approved injection failed, but only after the terminal was opened.
+  // Now the matrix blocks the launch before any terminal is created.
   const org = example();
   const gemini = roleCommand(org, "senior");
   const calls = [];
@@ -543,6 +556,7 @@ test("on Windows an Agy Gemini role is refused before any terminal opens", async
     calls.push(argv);
     return { code: 0, stdout: "{}" };
   };
+  // Windows powershell → no_agent_detected (matrix rule 2)
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -551,12 +565,94 @@ test("on Windows an Agy Gemini role is refused before any terminal opens", async
       execute,
       ...fast,
       platform: "win32",
+      shell: "powershell",
     }),
-    /headless-start --org <organization.json> --role senior/,
+    /no_agent_detected/,
   );
   assert.equal(calls.length, 0);
 
-  // A Claude role on Windows is not affected.
+  // A Claude role on Windows with skipPrompt is allowed (verified).
   const claude = roleCommand(org, "pm");
   assert.doesNotThrow(() => launchLine(claude, "win32"));
 });
+
+test("win32/POSIX별 실행 명령: POSIX에서만 폭 조정 명령이 붙는다", () => {
+  const org = example();
+  const gemini = roleCommand(org, "senior");
+  assert.equal(gemini.provider, "agy");
+  assert.match(gemini.modelRequested, /^gemini/i);
+
+  // POSIX: stty cols 44 붙음
+  const posix = launchLine(gemini, "darwin");
+  assert.match(posix.typed, /stty cols 44/);
+  assert.equal(posix.columns, AGY_BANNER_COLUMNS);
+
+  // Linux도 POSIX
+  const linux = launchLine(gemini, "linux");
+  assert.match(linux.typed, /stty cols 44/);
+
+  // Windows: 폭 조정 없음 (단일 명령만)
+  const win = launchLine(gemini, "win32");
+  assert.doesNotMatch(win.typed, /mode con/);
+  assert.doesNotMatch(win.typed, /stty/);
+  assert.equal(win.columns, null);
+  assert.equal(win.typed, gemini.command);
+
+  // Claude는 플랫폼 무관하게 폭 조정 없음
+  const claude = roleCommand(org, "pm");
+  assert.equal(launchLine(claude, "win32").columns, null);
+  assert.equal(launchLine(claude, "darwin").columns, null);
+});
+
+test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", async () => {
+  const org = example();
+  const gemini = roleCommand(org, "senior");
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    return { code: 0, stdout: "{}" };
+  };
+
+  // Agy gemini win32 powershell → matrix blocked → 터미널 생성 없음
+  await assert.rejects(
+    openRoleTerminal({
+      worktree: "id:repo::C:/wt",
+      command: gemini,
+      executable: "orca",
+      execute,
+      platform: "win32",
+      shell: "powershell",
+      trustRecordExists: true,
+      allowUnverified: true,
+      allowUnverifiedApproval: "test",
+      ...{ settleMs: 5, readyMs: 20, pollMs: 1 },
+    }),
+    /no_agent_detected/,
+  );
+  // matrix 거부는 orca 호출 전에 일어남
+  assert.equal(calls.length, 0, "matrix refusal must not call orca terminal create");
+
+  // 신뢰 기록 없는 경우도 마찬가지
+  const callsTrust = [];
+  const executeTrust = async (argv) => {
+    callsTrust.push(argv);
+    return { code: 0, stdout: "{}" };
+  };
+  await assert.rejects(
+    openRoleTerminal({
+      worktree: "active",
+      command: gemini,
+      executable: "orca",
+      execute: executeTrust,
+      platform: "darwin",
+      shell: "posix",
+      trustRecordExists: false,
+      allowUnverified: true,
+      allowUnverifiedApproval: "test",
+      ...{ settleMs: 5, readyMs: 20, pollMs: 1 },
+    }),
+    /agent-trust-workspace/,
+  );
+  assert.equal(callsTrust.length, 0, "trust refusal must not call orca terminal create");
+});
+

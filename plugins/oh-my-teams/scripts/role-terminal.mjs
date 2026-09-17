@@ -19,6 +19,7 @@
  */
 import { assert, run } from "./core.mjs";
 import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+import { predictLaunchPath, normalizeModelFamily, SUPPORTED_ORCA_VERSION, SUPPORTED_CLI_VERSION } from "./launch-matrix.mjs";
 
 const PROMPT_MARK = /[%$#>❯]\s*$/;
 
@@ -37,11 +38,14 @@ const PROMPT_MARK = /[%$#>❯]\s*$/;
 export const AGY_BANNER_COLUMNS = 44;
 
 /**
- * Returns the shell command a role terminal types, narrowed for Agy Gemini.
+ * Returns the shell command a role terminal types, narrowed for Agy Gemini on POSIX.
  *
- * Role commands run in a POSIX shell or in PowerShell, and both separate two
- * commands with `;`. A POSIX shell narrows the terminal with `stty`; Windows
- * has no `stty`, so PowerShell narrows the console with `mode con:`.
+ * Role commands run in a POSIX shell or in PowerShell. A POSIX shell narrows
+ * the terminal with `stty` so Orca's tui-idle check sees the model line without
+ * logo glyphs. On Windows, narrowing with `mode con:` in the same line as `agy`
+ * keeps `powershell.exe` as the foreground process and Orca cannot detect the
+ * agent, so the width adjustment is skipped there entirely; the matrix routes
+ * Windows Agy Gemini through a separate path (see `predictLaunchPath`).
  *
  * @param {object} command - Result of `roleCommand`.
  * @param {string} [platform=process.platform] - Host platform.
@@ -50,20 +54,19 @@ export const AGY_BANNER_COLUMNS = 44;
  */
 export function launchLine(command, platform = process.platform) {
   // Kept pure for every platform so the typed line stays testable; the refusal
-  // for a Windows Agy Gemini role happens in openRoleTerminal before any
-  // terminal is created.
+  // for a Windows Agy role happens in openRoleTerminal before any terminal is
+  // created.
   const narrow =
-    command.provider === "agy" && /^gemini/i.test(command.modelRequested ?? "");
+    command.provider === "agy" &&
+    normalizeModelFamily(command.modelRequested) === "gemini" &&
+    platform !== "win32";
   if (!narrow) return { typed: command.command, columns: null };
-  const width =
-    platform === "win32"
-      ? `mode con: cols=${AGY_BANNER_COLUMNS}`
-      : `stty cols ${AGY_BANNER_COLUMNS}`;
   return {
-    typed: `${width}; ${command.command}`,
+    typed: `stty cols ${AGY_BANNER_COLUMNS}; ${command.command}`,
     columns: AGY_BANNER_COLUMNS,
   };
 }
+
 
 /** Tag each role's tab title starts with, so PM and PL tabs are told apart. */
 export const ROLE_TITLE_TAGS = Object.freeze({
@@ -463,18 +466,21 @@ async function launchOnce({
  * @param {number} [options.settleMs=8000] - Wait before sending Enter.
  * @param {number} [options.readyMs=90000] - Wait for the agent's interface.
  * @param {number} [options.pollMs=1500] - Interval between screen reads.
- * @param {string} [options.platform=process.platform] - Host platform, which
- *   decides whether an Agy Gemini role is launched narrow.
+ * @param {string} [options.platform=process.platform] - Host platform.
+ * @param {'powershell'|'posix'} [options.shell='posix'] - Shell kind on the platform.
+ * @param {boolean} [options.trustRecordExists=true] - Whether the worktree has a trust record.
+ * @param {string} [options.orcaVersion] - Orca version for matrix lookup.
+ * @param {string} [options.cliVersion] - Antigravity CLI version for matrix lookup.
+ * @param {boolean} [options.allowUnverified=false] - Permit unverified supervised-terminal paths.
+ * @param {string} [options.allowUnverifiedApproval] - Approval sentence recorded for accountability.
  * @param {Function} [options.execute=run] - Injectable command runner.
- * On Windows an Agy Gemini role is refused before any terminal is created.
- * The narrowed console did not make Orca report the terminal idle, and Orca did
- * not recognize it as agy, so both the supervised start and the injection
- * fallback failed there only after a terminal had been opened and approved
- * (#46). The same role runs headless on Windows.
+ * The matrix table is consulted before any terminal is created. A `blocked` or
+ * unverified-without-approval result throws with the reason codes and next
+ * action, without spending a workflow attempt.
  *
  * @returns {Promise<object>} Handle, submission, readiness and final screen.
- * @throws {Error} When the terminal cannot be created or read, or the role is
- *   an Agy Gemini role on Windows.
+ * @throws {Error} When the terminal cannot be created or read, or the matrix
+ *   predicts a blocked launch path.
  */
 export async function openRoleTerminal({
   worktree,
@@ -485,6 +491,12 @@ export async function openRoleTerminal({
   readyMs = 90000,
   pollMs = 1500,
   platform = process.platform,
+  shell = platform === "win32" ? "powershell" : "posix",
+  trustRecordExists = true,
+  orcaVersion = SUPPORTED_ORCA_VERSION,
+  cliVersion = SUPPORTED_CLI_VERSION,
+  allowUnverified = false,
+  allowUnverifiedApproval,
   execute = run,
 }) {
   assert(worktree, "role-terminal needs a worktree selector");
@@ -492,14 +504,21 @@ export async function openRoleTerminal({
     Array.isArray(command?.argv) && command.argv.length > 0,
     "role-terminal needs a role command",
   );
+  const matrixResult = predictLaunchPath({
+    runner: command.provider,
+    model: command.modelRequested,
+    platform,
+    shell,
+    trustRecordExists,
+    skipDangerousModePermissionPrompt: Boolean(command.permissionBypass),
+    orcaVersion,
+    cliVersion,
+    allowUnverified,
+    allowUnverifiedApproval,
+  });
   assert(
-    !(
-      platform === "win32" &&
-      command.provider === "agy" &&
-      /^gemini/i.test(command.modelRequested ?? "")
-    ),
-    `Role ${command.role} runs Agy ${command.modelRequested}, which Orca cannot supervise from a Windows terminal (#46); ` +
-      `start it with headless-start --org <organization.json> --role ${command.role} --cwd <worktree> --spec <brief> --state <pm-state> instead`,
+    matrixResult.path !== "blocked",
+    `Role ${command.role} launch blocked by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,
   );
   const orca = selectOrcaExecutable(executable);
   const tabTitle = roleTitle(command.role, title ?? worktreeLabel(worktree));
