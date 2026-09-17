@@ -13,7 +13,11 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { assist } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { parseModelChoice } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import {
+  parseModelChoice,
+  draftOrganization,
+} from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import { removedSkillNames } from "./removed-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -533,27 +537,136 @@ test("the depth is decided by the PM, reported, and changed through the runtime"
 });
 
 test("every model form offers is a choice org-draft accepts, Gemini included", () => {
+  // The table header changed from "| 역할 | 선택지 |" to "| 역할 | 선택지 (표시 이름 → 저장 값) |".
   const table = readSkill("form")
-    .split("| 역할 | 선택지 |")[1]
+    .split("| 역할 | 선택지 (표시 이름 → 저장 값) |")[1]
     ?.split("\n\n")[0];
-  assert.ok(table, "form must keep its model option table");
-  const offered = [...table.matchAll(/`([a-z]+:[a-z0-9.-]+)`/g)].map(
-    (match) => match[1],
+  assert.ok(table, "form must keep its model option table with the new header");
+
+  // Expected stored values per role, matching the brief table exactly (order included).
+  const EXPECTED = {
+    pm: [
+      "claude:fable",
+      "claude:opus",
+      "codex:gpt-6-astra",
+      "agy:gemini-3.1-pro-high",
+    ],
+    pl: [
+      "claude:opus",
+      "codex:gpt-5.6-sol",
+      "agy:gemini-3.1-pro-high",
+      "claude:sonnet",
+      "codex:gpt-5.6-terra",
+    ],
+    senior: [
+      "claude:sonnet",
+      "codex:gpt-5.6-terra",
+      "agy:gemini-3.1-pro-high",
+      "agy:claude-opus-4-6-thinking",
+    ],
+    junior: [
+      "claude:haiku",
+      "codex:gpt-5.6-luna",
+      "agy:gemini-3.8-flash-medium",
+      "agy:claude-sonnet-4-6",
+    ],
+    intern: ["claude:haiku", "codex:gpt-5.6-luna", "agy:gpt-oss-120b-medium"],
+  };
+
+  // Parse each role row from the table and compare against EXPECTED.
+  const ROLE_KO = {
+    PM: "pm",
+    PL: "pl",
+    Senior: "senior",
+    Junior: "junior",
+    Intern: "intern",
+  };
+  const found = {};
+  for (const [line] of table.matchAll(/^\| ([A-Za-z]+) \|([^|]+)\|$/gm)) {
+    const roleKo = line.match(/^\| ([A-Za-z]+) \|/)?.[1];
+    const role = ROLE_KO[roleKo];
+    if (!role) continue;
+    const rowValues = [...line.matchAll(/`([a-z]+:[a-z0-9._-]+)`/g)].map(
+      (m) => m[1],
+    );
+    assert.deepEqual(
+      rowValues,
+      EXPECTED[role],
+      `form table row for ${role} does not match brief`,
+    );
+    found[role] = true;
+  }
+  // Every role must appear exactly once: a missing row must fail the test.
+  assert.deepEqual(
+    Object.keys(found),
+    Object.keys(EXPECTED),
+    "form table is missing one or more role rows",
   );
-  // Gemini 3.1 Pro and 3.8 Flash were listed as confirmed choices yet never
-  // offered, because the only proposals were presets that assign Opus, Sonnet
-  // and GPT-OSS.
-  assert.ok(offered.includes("agy:gemini-3.1-pro-high"));
-  assert.ok(offered.includes("agy:gemini-3.8-flash-medium"));
-  // Agy has no level-free Gemini ID and refuses one without --effort, so a
-  // Gemini choice always fixes a depth the user did not pick. Flash has a
-  // middle level; Pro 3.1 offers only high and low.
-  assert.ok(!offered.includes("agy:gemini-3.8-flash-high"));
+
+  // All offered values must be parseable by parseModelChoice.
+  const allOffered = Object.values(EXPECTED).flat();
+  for (const choice of allOffered) {
+    assert.doesNotThrow(() => parseModelChoice(choice), choice);
+  }
+
+  // Gemini checks: agy:gemini-3.1-pro-high and agy:gemini-3.8-flash-medium offered,
+  // but NOT agy:gemini-3.8-flash-high (wrong effort level in table).
+  assert.ok(allOffered.includes("agy:gemini-3.1-pro-high"));
+  assert.ok(allOffered.includes("agy:gemini-3.8-flash-medium"));
+  assert.ok(!allOffered.includes("agy:gemini-3.8-flash-high"));
+
+  // Gemini effort rules must remain documented.
   const form = readSkill("form");
   assert.match(form, /requires --effort/);
   assert.match(form, /결성 보고에 반드시 적고/);
-  for (const choice of offered) {
-    assert.doesNotThrow(() => parseModelChoice(choice), choice);
+
+  // Verify that org-draft accepts each value and role-command builds correct argv.
+  // Each choice drives: provider CLI + permission-bypass flag + --model <model>.
+  // For agy Gemini IDs the model string already encodes the effort suffix.
+  const BYPASS = {
+    claude: "--dangerously-skip-permissions",
+    codex: "--dangerously-bypass-approvals-and-sandbox",
+    agy: "--dangerously-skip-permissions",
+  };
+  for (const [role, choices] of Object.entries(EXPECTED)) {
+    for (const choice of choices) {
+      const { provider, model } = parseModelChoice(choice);
+      // Build a minimal 5-role org using this choice for the target role,
+      // filling the other four slots with a compatible placeholder.
+      const PLACEHOLDERS = {
+        pm: "claude:fable",
+        pl: "claude:opus",
+        senior: "claude:sonnet",
+        junior: "claude:haiku",
+        intern: "agy:gpt-oss-120b-medium",
+      };
+      const slots = ["pm", "pl", "senior", "junior", "intern"].map((r) =>
+        r === role ? choice : PLACEHOLDERS[r],
+      );
+      const org = draftOrganization({ name: "test", models: slots });
+      const cmd = roleCommand(org, role);
+      // argv[0] is the bare CLI name.
+      assert.equal(
+        cmd.argv[0],
+        provider,
+        `${choice}: expected provider ${provider}`,
+      );
+      // argv[1] is always the permission bypass flag.
+      assert.equal(
+        cmd.argv[1],
+        BYPASS[provider],
+        `${choice}: expected bypass flag`,
+      );
+      if (model !== null) {
+        const modelIdx = cmd.argv.indexOf("--model");
+        assert.ok(modelIdx !== -1, `${choice}: --model flag missing`);
+        assert.equal(
+          cmd.argv[modelIdx + 1],
+          model,
+          `${choice}: expected --model ${model}`,
+        );
+      }
+    }
   }
 });
 
@@ -716,11 +829,42 @@ test("form says what a default model runs today and reads Codex models at ask ti
   assert.match(form, /`codex:<id>`/);
   assert.match(form, /지금은 gpt-6-astra가 실행됩니다/);
   assert.match(form, /현재 해석값/);
-  for (const stale of ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"]) {
-    assert.ok(!form.includes(stale), `form hardcodes ${stale}`);
-  }
+  // The new table (criterion 1) lists gpt-5.6-sol, gpt-5.6-terra and
+  // gpt-5.6-luna as explicit confirmed choices for PL, Senior, Junior and
+  // Intern. They are no longer "stale hardcoded IDs" but deliberate selections
+  // verified in the brief (2026-09-17). The provider-confirmation section no
+  // longer enumerates a static Codex list; it refers to codex.listed instead.
   assert.match(form, /질문 수와 선택지 수는 늘지 않고/);
   assert.match(form, /서열을 매기지 않는다/);
+});
+
+test("form does not hardcode catalog Codex IDs outside the choice table", () => {
+  const form = readSkill("form");
+  // The table is the only sanctioned place for confirmed Codex IDs.
+  // Exception: the PL guidance sentence is required by brief criterion 2 —
+  // it tells structured-tool hosts to hint Codex Terra as a free-input value.
+  // gpt-6-astra is exempted: it appears in the host-defaults example sentence
+  // that the existing test ("form says what a default model runs today") requires.
+  const PL_GUIDANCE_KO = "자유 입력으로 `codex:gpt-5.6-terra`";
+  // Confirm the PL guidance is present in the document.
+  assert.ok(
+    form.includes(PL_GUIDANCE_KO),
+    "form must keep the PL Codex Terra free-input guidance (brief criterion 2)",
+  );
+  const tableSection = form
+    .split("| 역할 | 선택지 (표시 이름 → 저장 값) |")[1]
+    ?.split("\n\n")[0];
+  // Remove the table and the one allowed PL guidance occurrence, then check
+  // that no other catalog IDs are hardcoded outside the table.
+  const bodyOutsideTable = form
+    .replace(tableSection ?? "", "")
+    .replace(PL_GUIDANCE_KO, "");
+  for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+    assert.ok(
+      !bodyOutsideTable.includes(id),
+      `form hardcodes ${id} outside the choice table`,
+    );
+  }
 });
 
 test("planning roles hand the deliverable down instead of writing it", () => {
@@ -821,5 +965,101 @@ test("reports lead with a verdict and instructions lead with the goal", () => {
   assert.match(
     readReference("korean-result-reporting.md"),
     /\[`bluf\.md`\]\(bluf\.md\)/,
+  );
+});
+test("minimal-change discipline lives in one place and each role links it", () => {
+  const references = path.join(root, "plugins/oh-my-teams/references");
+  const canonicalPath = path.join(references, "minimal-change.md");
+
+  // 수용 기준 1: 정본 파일이 존재한다
+  assert.ok(
+    fs.existsSync(canonicalPath),
+    "references/minimal-change.md must exist",
+  );
+
+  const canonical = fs.readFileSync(canonicalPath, "utf8");
+
+  // 수용 기준 6: 두 예외의 핵심 문구가 정본에 있다
+  // 안전 예외
+  assert.match(
+    canonical,
+    /신뢰 경계의 입력 검증/,
+    "canonical must state the safety exception",
+  );
+  assert.match(
+    canonical,
+    /데이터 손실을 막는 오류 처리/,
+    "canonical must state data-loss clause of safety exception",
+  );
+  // 가독성 예외
+  assert.match(
+    canonical,
+    /줄 수를 줄이려고 읽기 어려운 코드를 만들지 않는다/,
+    "canonical must state the readability exception",
+  );
+  assert.match(
+    canonical,
+    /지루한 코드가 영리한 코드보다 낫다/,
+    "canonical must state the boring-over-clever principle",
+  );
+
+  // 수용 기준 4: Senior가 다섯 판정 대상을 명시한다
+  const seniorText = readSkill("senior");
+  const fiveTargets = [
+    /요청하지 않은 리팩터링/,
+    /변경 줄 밖의 정리/,
+    /추측성 확장/,
+    /이미 있는 helper의 재구현/,
+    /요청하지 않은 주석/,
+  ];
+  for (const pattern of fiveTargets) {
+    assert.match(
+      seniorText,
+      pattern,
+      `senior must list all five finding targets (missing: ${pattern})`,
+    );
+  }
+
+  // 수용 기준 1: 다섯 역할 스킬이 정본을 링크한다
+  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+    assert.match(
+      readSkill(role),
+      /references\/minimal-change\.md/,
+      `${role} must link to references/minimal-change.md`,
+    );
+  }
+
+  // 수용 기준 5: Junior·Intern의 링크가 ### 한계 절 안에 있다
+  for (const role of ["junior", "intern"]) {
+    const text = readSkill(role);
+    const limitsSection = text.split("### 한계")[1]?.split(/\n## /)[0];
+    assert.ok(limitsSection, `${role} must have a ### 한계 section`);
+    assert.match(
+      limitsSection,
+      /references\/minimal-change\.md/,
+      `${role} must link to minimal-change.md inside ### 한계`,
+    );
+    assert.match(
+      limitsSection,
+      /신뢰 경계의 입력 검증/,
+      `${role} 한계 section must mention 신뢰 경계의 입력 검증`,
+    );
+    assert.match(
+      limitsSection,
+      /읽기 어려운 코드/,
+      `${role} 한계 section must mention 읽기 어려운 코드`,
+    );
+  }
+
+  // 수용 기준: 정본과 PM 스킬에 이스케이프된 따옴표(\")가 없다
+  assert.doesNotMatch(
+    canonical,
+    /\\"/,
+    "references/minimal-change.md must not contain escaped quotes",
+  );
+  assert.doesNotMatch(
+    readSkill("pm"),
+    /\\"/,
+    "pm SKILL.md must not contain escaped quotes",
   );
 });
