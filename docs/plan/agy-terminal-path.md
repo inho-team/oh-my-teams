@@ -172,6 +172,7 @@ export function predictLaunchPath(params) {
 
 ### 8. Headless receipt 형식과 검증 규칙
 headless 모드 실행 시 workflow에 연결하기 위한 receipt 형식입니다.
+
 ```json
 {
   "via": "headless-start",
@@ -184,7 +185,31 @@ headless 모드 실행 시 workflow에 연결하기 위한 receipt 형식입니�
   "modelRequested": "claude-sonnet-4-6"
 }
 ```
-- `plugins/oh-my-teams/scripts/workflow.mjs`의 `workflow-attach` 단계에서 `receipt.via === "headless-start"`인지 검사하고, `headless Worker ID`가 `taskId` 및 `dispatchId`와 일대일로 대응하는지 검증합니다. 통과하지 않으면 거부합니다.
+
+| 필드 | 필수 여부 | 설명 |
+|---|---|---|
+| `via` | 필수 | `"headless-start"` 고정 값 |
+| `executionId` | 필수 | 예약된 attempt의 `executionId` (worker ID와 동일해야 함) |
+| `runId` | 선택 | 런타임이 부여한 ID (기존 Orca 영수증과 달리 headless에서는 선택) |
+| `taskId` | 필수 | `headless:<executionId>` 형식이어야 함 |
+| `dispatchId` | 필수 | `headless:<executionId>` 형식이어야 함 |
+| `worktreeId` | 필수 | 대상 워크트리 ID |
+| `runnerPid` | 선택 | 헤드리스 러너 프로세스의 PID |
+| `modelRequested` | 선택 | 실행 시 요청한 모델 이름 |
+
+현재 `plugins/oh-my-teams/scripts/workflow.mjs`의 `validateExecutionInput`은 `schemaVersion`, `eventId`, `attemptId`와 `receipt` 내부의 5가지 ID(`executionId`, `runId`, `taskId`, `dispatchId`, `worktreeId`)가 모두 존재하는지(진실성(truthy))만 검사합니다.
+
+**추가할 검사 로직 (`workflow-attach` 단계 등):**
+`receipt.via === "headless-start"`인 경우를 조건부로 처리하여 다음을 추가합니다.
+1. `runId` 필수 검사 제외 (선택 필드로 완화).
+2. `taskId`와 `dispatchId`가 `headless:<executionId>` 형식으로 접두사 규칙을 따르는지 검사.
+3. `executionId`가 예약된 worker ID와 정확히 대응하는지 검사.
+
+**거부할 receipt 예시:**
+- **접두사 불일치**: `taskId`가 `headless:junior-launch-probes`가 아니라 `task_123` 등 일반 형식을 띰.
+- **`via` 누락**: `"via": "headless-start"` 필드가 없어 기본 Orca 영수증으로 간주되고, 형식 검증에서 실패함.
+- **다른 worker ID**: 영수증의 `executionId`가 이 attempt를 위해 예약된 worker ID와 일치하지 않음.
+- **필수 필드 누락**: `worktreeId` 등이 빠져 있음.
 
 ## Orca 수정안
 
