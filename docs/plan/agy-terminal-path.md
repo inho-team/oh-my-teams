@@ -105,21 +105,31 @@ export function predictLaunchPath(params) {
 - `evidence`: `verified`(날짜·버전·재현 기록) | `source-derived`(번들 위치) | `unverified`. Orca나 CLI 버전이 표가 다루는 범위를 벗어나면 결과가 `unverified`로 떨어지는 규칙을 둡니다.
 
 ### 3. 표 전체 초안
-차원 조합에 따른 예측 결과입니다 (일부 우선순위 규칙 적용). 실측과 소스로 뒷받침되지 않는 칸(예: macOS, Linux 등)은 `unverified`로 둡니다.
+
+차원 조합에 따른 예측 결과입니다. 규칙은 위에서부터 순차적으로 평가되며 처음 조건이 맞는 행이 적용됩니다 (마지막 행이 나머지 모든 조합을 덮습니다).
+조건 평가 순서는 다음과 같습니다: 버전 범위(지원 여부) -> 신뢰 기록(trust) -> 첫 실행 확인 질문(skipPrompt) -> 실행기(runner) -> 모델 계열(model) -> 플랫폼(platform) -> 셸(shell).
+실측과 소스로 뒷받침되지 않는 칸은 `evidence`를 `unverified`로 표기하고 터미널 생성을 사전 차단(`path: blocked`)합니다.
 
 | 조건(runner/model/platform/shell/trust/skipPrompt) | 예상 path | reason | nextOwner / nextAction | evidence |
 |---|---|---|---|---|
-| 버전 범위 밖 | unverified | unsupported_version | pm / 버전 지원 확인 | unverified |
-| Agy / - / - / - / 신뢰 없음 / - | blocked | agent-trust-workspace | user / 폴더 신뢰 | verified |
-| Agy / - / win32 / - / 신뢰 있음 / - | blocked | agent-trust-workspace-buffer | pm / headless 권장 | verified |
-| Agy / claude / - / - / 신뢰 있음 / - | blocked | claude-unsupported-by-orca | pm / headless 권장 | verified |
-| Codex / - / - / - / 신뢰 없음 / - | blocked | codex-trust-workspace | user / 폴더 신뢰 | unverified |
+| 지원 버전 범위 밖 | blocked | unsupported_version | pm / 버전 지원 확인 | unverified |
+| Agy / - / - / - / 신뢰 없음 / - | blocked | agent-trust-workspace | user / 폴더 신뢰 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 1-1절) |
+| Codex / - / - / - / 신뢰 없음 / - | blocked | codex-trust-workspace | user / 폴더 신뢰 | source-derived (out/main/index.js) |
 | Claude / - / - / - / - / skipPrompt=false | blocked | claude-permission-prompt | user / 권한 승인 | unverified |
+| Agy / claude / - / - / 신뢰 있음 / - | blocked | claude-unsupported-by-orca | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 2-2절) |
+| Agy / gemini / win32 / powershell / 신뢰 있음 / - | headless | - | - / - | verified (26-09-17, CLI 1.2.4; `docs/plan/headless-runtime.md` Windows 검증) |
+| Agy / - / win32 / - / 신뢰 있음 / - | blocked | agent-trust-workspace-buffer | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 1-1절 버퍼 잔존 문제) |
 | Agy / gemini,gpt-oss / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
 | Claude / - / posix / - / - / skipPrompt=true | supervised-terminal | - | - / - | unverified |
 | Codex / - / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
-| Agy / gemini / win32 / powershell / 신뢰 있음 / - | blocked | no_agent_detected | pm / headless 권장 | verified |
-| 그 외 모든 미확인 조합 | unverified | untested_combination | pm / 검증 필요 | unverified |
+| 그 외 모든 미확인 조합 | blocked | untested_combination | pm / 검증 필요 | unverified |
+
+**규칙 적용 예시:**
+- `Agy / gemini / win32 / powershell / 신뢰 없음 / skipPrompt=true`: 2번째 행에 걸려 `blocked (agent-trust-workspace)`
+- `Agy / claude / win32 / powershell / 신뢰 있음 / skipPrompt=true`: 5번째 행에 걸려 `blocked (claude-unsupported-by-orca)`
+- `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true`: 6번째 행에 걸려 `headless`
+- `Agy / gpt-oss / win32 / cmd / 신뢰 있음 / skipPrompt=true`: 7번째 행에 걸려 `blocked (agent-trust-workspace-buffer)`
+
 
 ### 4. 인접 실패 칸과 사전 점검
 브리프 기준 7의 인접 실패 6가지를 다음 이유 코드로 사전 거부합니다 (자동 응답 없음):
