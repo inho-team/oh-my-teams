@@ -632,6 +632,13 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(runtime, /### 역할 터미널에서 시작/);
   assert.match(runtime, /\| Claude·Codex·Agy \|/);
   assert.match(runtime, /`agentDefaultArgs`/);
+  // Orca pre-trusts a Codex folder only when it launches Codex itself, so the
+  // terminal path can stop at Codex's trust screen until a person answers.
+  assert.match(runtime, /Orca가 Codex 작업 폴더를 미리 신뢰해 두지 않는다/);
+  assert.match(
+    runtime,
+    /`agent-trust-workspace`로 거부하므로 kickoff는 사람이 답할 때까지 멈춘다/,
+  );
   assert.doesNotMatch(runtime, /명령이 agent 이름 하나뿐일 때만 붙이므로/);
   assert.match(runtime, /`satisfied: false`와 `blockedReason`/);
   assert.match(

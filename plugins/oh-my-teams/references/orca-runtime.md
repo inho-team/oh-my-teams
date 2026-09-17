@@ -97,6 +97,8 @@ node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|i
 
 Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권한 우회 플래그를 보장할 수 없기 때문이다. 자세한 근거는 아래 「역할 탭 제목」 절의 권한 우회 플래그 문단에 있다.
 
+이 경로에서는 Orca가 Codex 작업 폴더를 미리 신뢰해 두지 않는다. Orca 1.4.203은 Codex를 직접 띄울 때(`worker-start --agent codex`, `worktree create --agent codex`) 시작 전에 그 워크트리를 `~/.codex/config.toml`에 신뢰한 프로젝트로 기록한다. `terminal create --command`는 명령이 agent 이름 하나뿐일 때에만 이 기록을 남기므로, `role-terminal`이 입력하는 `codex --dangerously-bypass-approvals-and-sandbox --model <model>`에는 적용되지 않는다. 그래서 한 번도 신뢰한 적 없는 저장소의 워크트리에서 Codex 역할을 열면 Codex의 폴더 신뢰 화면이 나올 수 있다. 권한 우회 플래그가 이 화면을 건너뛰는지는 확인하지 않았다. 화면이 나오면 `role-terminal`은 답하지 않고, `terminal-idle-check`와 `worker-start`가 `agent-trust-workspace`로 거부하므로 kickoff는 사람이 답할 때까지 멈춘다. 이때에는 사용자가 그 터미널에서 신뢰를 한 번 선택하거나, 해당 저장소에서 `codex`를 한 번 직접 실행해 신뢰해 둔 뒤 `terminal-idle-check`부터 다시 진행한다. OMT는 사용자의 Codex 설정 파일에 신뢰 항목을 직접 쓰지 않는다.
+
 `--agent`, `--model`, `--effort`는 프로필과 같은 값이어도 받지 않고 Orca를 호출하기 전에 거부한다. 모든 역할은 `--terminal`로 시작하며, Orca는 `--terminal`과 이 옵션들을 함께 받지 않고 터미널은 처음 열 때의 모델을 유지하기 때문이다. `--terminal`과 `--worktree new-child`를 함께 주면 Orca가 넘겨받은 터미널에 워크트리를 만들지 않으므로 역시 호출 전에 거부한다. 다음 경우에도 호출 전에 거부한다.
 
 - 역할이 PM이거나 PM으로 접힌다. 거부 문구는 조직에 선언되지 않은 역할(`is not declared`)과 이번 실행의 깊이에서 빠진 역할(`is not in this run's roles`)을 구분한다. PM은 coordinator이며 아래 「coordinator 실행」으로 띄운다.
