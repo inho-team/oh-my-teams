@@ -341,6 +341,70 @@ test("a runner that died without recording an exit is unverifiable, not ended", 
   );
 });
 
+test("a turn that ends right after its stream was read is not reported with that stale stream", (t) => {
+  // Reading the exit record after the stream paired a finished turn with the
+  // output from before its DONE line, and the status said exited, no-marker.
+  const box = sandbox(t);
+  const dir = path.join(box.state, "headless", "racing");
+  const turn = path.join(dir, "turns", "1");
+  fs.mkdirSync(turn, { recursive: true });
+  writeJSON(path.join(dir, "worker.json"), {
+    schemaVersion: 1,
+    id: "racing",
+    role: "junior",
+    profile: "p",
+    provider: "claude",
+    binary: ["claude"],
+    modelRequested: null,
+    effortRequested: null,
+    cwd: box.cwd,
+    timeoutMs: 1000,
+  });
+  // This process stands in for a runner that is still running.
+  writeJSON(path.join(turn, "runner.json"), { pid: process.pid });
+  const stream = path.join(turn, "stream.jsonl");
+  const event = (value) => `${JSON.stringify(value)}\n`;
+  fs.writeFileSync(
+    stream,
+    event({ type: "system", subtype: "init", session_id: "s1", model: "m" }),
+  );
+  const finish = () => {
+    fs.appendFileSync(
+      stream,
+      event({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "work complete\nDONE: wrote the file",
+        session_id: "s1",
+      }),
+    );
+    writeJSON(path.join(turn, "exit.json"), { code: 0 });
+  };
+  const readFileSync = fs.readFileSync;
+  let finished = false;
+  fs.readFileSync = function (file, ...rest) {
+    const content = readFileSync.call(fs, file, ...rest);
+    if (!finished && path.resolve(String(file)) === path.resolve(stream)) {
+      finished = true;
+      finish();
+    }
+    return content;
+  };
+  let first;
+  try {
+    first = headlessStatus(box.state, "racing");
+  } finally {
+    fs.readFileSync = readFileSync;
+  }
+  assert.ok(finished, "the turn finished during the status read");
+  // Either the turn is still live, or its exit is paired with the full stream.
+  assert.notEqual(first.outcome, "no-marker");
+  if (first.liveness === "exited") assert.equal(first.outcome, "done");
+  else assert.equal(first.liveness, "live");
+  assert.equal(headlessStatus(box.state, "racing").outcome, "done");
+});
+
 test("a turn that records its exit and ends between two reads is exited, not unverifiable", () => {
   // Under the full test run an Agy turn was reported unverifiable: the status
   // looked for exit.json, the runner then wrote it and ended, and the process
