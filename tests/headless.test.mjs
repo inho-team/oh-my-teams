@@ -475,7 +475,7 @@ test("headless-start keeps the role checks of a terminal launch", async (t) => {
     ]);
   await assert.rejects(
     run("pm", box.cwd),
-    /PM is the coordinator; it is not started as a headless worker/,
+    /PM runs in its own terminal opened with role-command; it is not started as a headless worker/,
   );
   await assert.rejects(
     run("junior", path.join(box.cwd, "missing")),

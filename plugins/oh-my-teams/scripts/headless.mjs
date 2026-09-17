@@ -1,7 +1,7 @@
 /**
  * Headless supervisor: roles as non-interactive provider processes, no Orca.
  *
- * Each worker is a directory under `<state>/headless/<id>` holding one
+ * Each worker is a directory under `<pm-state>/headless/<id>` holding one
  * directory per turn. A turn is run by a detached runner that owns the
  * provider process and records its exit, so liveness, completion, the model
  * and the session to resume are all read from files rather than inferred from
@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, readJSON, writeJSON } from "./core.mjs";
+import { addTokenUsage, normalizeTokenUsage } from "./usage.mjs";
 
 const RUNNER = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -66,6 +67,21 @@ const PROVIDERS = {
             event.rate_limit_info?.status &&
             event.rate_limit_info.status !== "allowed",
         ),
+        ...PROVIDERS.claude.usage(events),
+      };
+    },
+    // The result event totals the whole `-p` invocation. Its cost is the
+    // API-equivalent estimate Claude prints, not what a subscription is billed.
+    usage(events) {
+      const result = events.findLast((event) => event.type === "result");
+      return {
+        usage: normalizeTokenUsage("claude", result?.usage),
+        costUsd:
+          typeof result?.total_cost_usd === "number"
+            ? result.total_cost_usd
+            : null,
+        numTurns:
+          typeof result?.num_turns === "number" ? result.num_turns : null,
       };
     },
   },
@@ -79,7 +95,7 @@ const PROVIDERS = {
       argv.push(prompt);
       return { argv, stdin: null };
     },
-    read(events, { codexHome } = {}) {
+    read(events, { codexHome, lookupModel = true } = {}) {
       const thread = events.find((event) => event.type === "thread.started");
       const messages = events.filter(
         (event) =>
@@ -92,7 +108,8 @@ const PROVIDERS = {
       const session = thread?.thread_id ?? null;
       return {
         session,
-        model: session ? codexRolloutModel(session, codexHome) : null,
+        model:
+          session && lookupModel ? codexRolloutModel(session, codexHome) : null,
         text: messages.at(-1)?.item?.text ?? null,
         providerError: failure
           ? String(failure.message ?? failure.error?.message ?? failure.type)
@@ -100,6 +117,22 @@ const PROVIDERS = {
         rateLimited: /rate.?limit|usage limit|quota/i.test(
           JSON.stringify(failure ?? ""),
         ),
+        ...PROVIDERS.codex.usage(events),
+      };
+    },
+    // `codex exec --json` reports usage per model turn, so the turns are summed.
+    usage(events) {
+      const completed = events.filter(
+        (event) => event.type === "turn.completed",
+      );
+      return {
+        usage: completed.reduce(
+          (total, event) =>
+            addTokenUsage(total, normalizeTokenUsage("codex", event.usage)),
+          null,
+        ),
+        costUsd: null,
+        numTurns: completed.length || null,
       };
     },
   },
@@ -132,6 +165,21 @@ const PROVIDERS = {
         rateLimited: /RESOURCE_EXHAUSTED|rate.?limit|quota/i.test(
           JSON.stringify(result ?? ""),
         ),
+        ...PROVIDERS.agy.usage(events),
+      };
+    },
+    // Agy's `--output-format json` puts usage and num_turns at the top level.
+    // Where the stream-json result event carries them has not been observed, so
+    // both the nested result and the event itself are read.
+    usage(events) {
+      const result = events.findLast((event) => event.event === "result");
+      const body = result?.result;
+      const raw = body?.usage ?? result?.usage ?? null;
+      const turns = body?.num_turns ?? result?.num_turns;
+      return {
+        usage: normalizeTokenUsage("agy", raw),
+        costUsd: null,
+        numTurns: typeof turns === "number" ? turns : null,
       };
     },
   },
@@ -481,7 +529,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
  * Starts a headless worker and its first turn.
  *
  * @param {object} options - Worker definition.
- * @param {string} options.stateDir - Coordinator state directory.
+ * @param {string} options.stateDir - PM worktree state directory.
  * @param {string} options.workerId - Caller-owned id (lowercase, digits, hyphens).
  * @param {string} options.role - Role the worker holds.
  * @param {string} options.profile - Profile id the role resolved to.
@@ -530,10 +578,58 @@ export function startHeadlessWorker({
   return { worker, ...launchTurn(dir, worker, { prompt }) };
 }
 
+function readTurn(worker, turnDir, options) {
+  const file = (name) => path.join(turnDir, name);
+  const stream = readHeadlessStream(
+    worker.provider,
+    fs.existsSync(file("stream.jsonl"))
+      ? fs.readFileSync(file("stream.jsonl"), "utf8")
+      : "",
+    options,
+  );
+  const turn = fs.existsSync(file("turn.json"))
+    ? readJSON(file("turn.json"))
+    : {};
+  const exit = fs.existsSync(file("exit.json"))
+    ? readJSON(file("exit.json"))
+    : null;
+  return {
+    number: Number(path.basename(turnDir)),
+    startedAt: turn.startedAt ?? null,
+    endedAt: exit?.endedAt ?? null,
+    exited: Boolean(exit),
+    session: stream.session,
+    model: stream.model,
+    usage: stream.usage,
+    costUsd: stream.costUsd,
+    numTurns: stream.numTurns,
+  };
+}
+
+/**
+ * Reads what each turn of a headless worker reported, without its text.
+ *
+ * @param {string} stateDir - PM worktree state directory.
+ * @param {string} workerId - Worker to read.
+ * @param {object} [options] - `codexHome` for Codex model lookup.
+ * @returns {{worker: object, turns: object[]}} The worker record and, per turn,
+ *   its times, session, reported model, normalized usage, cost and model turns.
+ * @throws {Error} When the worker does not exist.
+ */
+export function headlessTurns(stateDir, workerId, options = {}) {
+  const dir = workerDir(stateDir, workerId);
+  assert(fs.existsSync(dir), `No headless worker ${workerId}`);
+  const worker = readJSON(path.join(dir, "worker.json"));
+  return {
+    worker,
+    turns: turnDirs(dir).map((turnDir) => readTurn(worker, turnDir, options)),
+  };
+}
+
 /**
  * Reports a headless worker's state from its files.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker to read.
  * @param {object} [options] - `codexHome` for Codex model lookup.
  * @returns {object} Liveness, outcome, marker, session, model verdict, and paths.
@@ -601,14 +697,34 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     modelProof: modelVerdict(worker.modelRequested, stream.model),
     providerError: stream.providerError,
     rateLimited: stream.rateLimited,
+    ...headlessUsageSummary(worker, turns, options),
     stream: streamFile,
+  };
+}
+
+// Earlier turns are read only for their usage and session, so the Codex model
+// lookup, which walks the rollout directory, is not repeated for each of them.
+function headlessUsageSummary(worker, turns, options) {
+  const read = turns.map((turnDir) =>
+    readTurn(worker, turnDir, { ...options, lookupModel: false }),
+  );
+  const sessions = [];
+  for (const turn of read) {
+    if (turn.session && !sessions.includes(turn.session))
+      sessions.push(turn.session);
+  }
+  const measured = read.filter((turn) => turn.usage);
+  return {
+    sessions,
+    usage: read.reduce((total, turn) => addTokenUsage(total, turn.usage), null),
+    usageTurns: { measured: measured.length, total: read.length },
   };
 }
 
 /**
  * Reports a worker with every turn's prompt, exit and readable transcript.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker to read.
  * @param {object} [options] - `codexHome` for Codex model lookup.
  * @returns {object} The worker's status plus its turns, oldest first.
@@ -646,7 +762,7 @@ export function headlessDetail(stateDir, workerId, options = {}) {
 /**
  * Waits until a worker's current turn is no longer live, or the wait ends.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker to wait for.
  * @param {number} waitMs - Longest time to wait.
  * @param {object} [options] - `pollMs` and `codexHome`.
@@ -666,7 +782,7 @@ export async function waitHeadless(stateDir, workerId, waitMs, options = {}) {
 /**
  * Answers a worker's question by resuming its session as the next turn.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker whose turn ended.
  * @param {string} text - Answer or follow-up instruction.
  * @param {object} [options] - `timeoutMs` and `codexHome`.
@@ -693,7 +809,7 @@ export function answerHeadless(stateDir, workerId, text, options = {}) {
 /**
  * Requests that a worker's running turn stop.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker to stop.
  * @returns {{requested: boolean, turn: number}} Whether a request was written.
  */
@@ -714,7 +830,7 @@ export function stopHeadless(stateDir, workerId) {
 /**
  * Lists the headless workers recorded in a state directory.
  *
- * @param {string} stateDir - Coordinator state directory.
+ * @param {string} stateDir - PM worktree state directory.
  * @param {object} [options] - `codexHome` for Codex model lookup.
  * @returns {object[]} Status of every worker.
  */

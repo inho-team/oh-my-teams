@@ -65,8 +65,8 @@ export function classifyFailure(input = {}) {
   }
   // A launch refused before any work was handed over started nothing, so
   // reconciling a process would inspect one that never existed. The same
-  // terminal refuses again, and choosing another launch path is the
-  // coordinator's decision, which PM holds at every run depth.
+  // terminal refuses again, and choosing another launch path is PM's
+  // decision at every run depth.
   if (input.kind === "not-started") {
     return route("start-refused", "pm", "change-launch-path", false);
   }

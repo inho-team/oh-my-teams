@@ -80,10 +80,10 @@ function readBody(request) {
 }
 
 /**
- * Creates the dashboard HTTP server for one coordinator state directory.
+ * Creates the dashboard HTTP server for one PM state directory.
  *
  * @param {object} options - Server options.
- * @param {string} options.stateDir - Coordinator state holding `headless/`.
+ * @param {string} options.stateDir - PM worktree state holding `headless/`.
  * @param {string} options.token - Token every request must carry.
  * @param {object} [options.headless] - `codexHome` and `timeoutMs` passed on.
  * @returns {http.Server} A server that is not yet listening.
@@ -153,7 +153,7 @@ export function createDashboardServer({ stateDir, token, headless = {} }) {
  * Starts the dashboard and reports where to open it.
  *
  * @param {object} options - Listen options.
- * @param {string} options.stateDir - Coordinator state holding `headless/`.
+ * @param {string} options.stateDir - PM worktree state holding `headless/`.
  * @param {number} [options.port=4812] - Port to listen on; 0 picks a free one.
  * @param {string} [options.host="0.0.0.0"] - Interface; all by default for a tailnet phone.
  * @param {string} [options.token] - Token to require; generated when omitted.

@@ -79,7 +79,7 @@ export function assertNotKickoffOwner(directory, use) {
  *
  * @param {object} options - Delivery options.
  * @param {string} options.orgFile - Organization JSON in the owning project.
- * @param {string} options.worktreeId - Coordinator worktree of the kickoff.
+ * @param {string} options.worktreeId - PM worktree of the kickoff.
  * @param {string} options.source - Worktree holding the verified result.
  * @param {string} options.head - Verified commit to deliver.
  * @param {Function} [options.gate] - Runs the merge gates against the source.

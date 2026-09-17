@@ -39,19 +39,19 @@ PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌
 
 ## 하위 역할 배정
 
-PL은 PM이 띄운 감독 worker로 실행된다. Orca의 중첩 worker 깊이는 기본값이 1이라 PM의 worker인 PL은 기본 설정에서 하위 worker를 시작할 수 없고, 새 Run을 만들어도 깊이는 초기화되지 않는다. 그러므로 기본 설정에서는 분할 계획을 PM에게 돌려보내고, 사용자가 Orca 설정의 Nested worker depth를 2 이상으로 올린 경우에만 자기 터미널에서 Run을 따로 만들어 바인딩한 뒤 하위 worker를 시작한다. 조직 파일, workflow ID와 coordinator state 경로는 받은 지시문 머리글에 적힌 값을 그대로 사용한다.
+PL은 PM이 띄운 감독 worker로 실행된다. Orca의 중첩 worker 깊이는 기본값이 1이라 PM의 worker인 PL은 기본 설정에서 하위 worker를 시작할 수 없고, 새 Run을 만들어도 깊이는 초기화되지 않는다. 그러므로 기본 설정에서는 분할 계획을 PM에게 돌려보내고, 사용자가 Orca 설정의 Nested worker depth를 2 이상으로 올린 경우에만 자기 터미널에서 Run을 따로 만들어 바인딩한 뒤 하위 worker를 시작한다. 조직 파일, workflow ID와 PM state 경로는 받은 지시문 머리글에 적힌 값을 그대로 사용한다.
 
 ```text
 <orca> orchestration run-create --objective "<PM이 맡긴 분할 목표>" --json
 <orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <organization.json> --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <coordinator-state>
+node <runtime> role-terminal --org <organization.json> --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
 node <runtime> terminal-idle-check --terminal <junior-handle>
-node <runtime> workflow-reserve --id <workflowId> --state <coordinator-state> --revision <n> --execution <reserve.json>
-node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <junior-handle> --worktree id:<worktreeId> --spec "<구체적인 구현 작업>"
-node <runtime> role-terminal --org <organization.json> --role senior --worktree current --workflow-id <workflowId> --state <coordinator-state>
+node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
+node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <junior-handle> --worktree id:<worktreeId> --spec "<구체적인 구현 작업>"
+node <runtime> role-terminal --org <organization.json> --role senior --worktree current --workflow-id <workflowId> --state <pm-state>
 node <runtime> terminal-idle-check --terminal <senior-handle>
-node <runtime> workflow-reserve --id <workflowId> --state <coordinator-state> --revision <n> --execution <reserve.json>
-node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <senior-handle> --worktree current --spec "<설계 또는 검토 작업>"
+node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
+node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <senior-handle> --worktree current --spec "<설계 또는 검토 작업>"
 <orca> orchestration check --wait --types "worker_done,escalation,question" --timeout-ms <progressCheckMs> --json
 ```
 
@@ -78,8 +78,8 @@ node <runtime> work --org <returned-org> --task <returned-task> --repo <returned
 
 ```text
 node <runtime> aggregate --expected task-a,task-b --report <a/report.json> --report <b/report.json>
-node <runtime> verify --task <integration-task.json> --repo <integration-worktree> --state <shared-state>
-node <runtime> merge-check --evidence <evidence.json> --task <coordinator-integration-task.json> --repo <integration-worktree> --base origin/main --report <report.json> --state <shared-state>
+node <runtime> verify --task <integration-task.json> --repo <integration-worktree> --state <pm-state>
+node <runtime> merge-check --evidence <evidence.json> --task <pm-integration-task.json> --repo <integration-worktree> --base origin/main --report <report.json> --state <pm-state>
 ```
 
 task v1의 `merge-check`는 review gate를 조회하지 않고 통과시키므로, v1 경로에서는 report의 `issues`를 직접 확인한다. task v2는 구현 report가 `submitted`인 뒤 `review-record`와 `gate-check`를 거친다. 검토가 반려되면 PM 스킬의 「완료 판단」에 적힌 검토 반려 루프(`workflow-rework`)로 수정 실행을 같은 attempt에 연결한다. 모든 필수 review와 PM acceptance가 source/task hash에 연결되기 전에는 `merge-check`가 거부된다. v1의 문자열 `issues`는 호환 입력이며 구조화된 review 완료로 자동 승격하지 않는다.

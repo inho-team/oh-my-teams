@@ -17,7 +17,7 @@ const LESSON_TARGETS = [
  * Repeated observations return the existing candidate. Creation never modifies
  * a role skill or promotes the record to reviewed knowledge.
  *
- * @param {string} stateDir - Coordinator `.omt` state directory.
+ * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {object} input - Failure, resolution, reproduction, target, and owner.
  * @returns {object} Creation status, fingerprint, path, and optional new record.
  * @throws {Error} When required evidence or routing metadata is invalid.

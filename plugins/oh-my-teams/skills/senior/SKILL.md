@@ -44,7 +44,7 @@ task v2 검토는 [`../../examples/review.json`](../../examples/review.json)(승
 검토 결과는 `review-record`로 source fingerprint·task hash에 고정한다. 형식이 틀리면 `review-record`가 기대 형식을 함께 출력하므로, 검토자가 직접 고쳐 다시 기록한다. 다른 역할이 검토 기록을 옮겨 적으면 독립 검토가 아니게 된다.
 
 ```text
-node <runtime> review-record --task <task.json> --report <report.json> --review <review.json> --repo <검토한 워크트리> --state <shared-state>
+node <runtime> review-record --task <task.json> --report <report.json> --review <review.json> --repo <검토한 워크트리> --state <pm-state>
 ``` 이후 source, base, 검사, 환경 또는 계약 revision이 바뀌면 다시 검토한다.
 
 현재 Orca Dispatch가 있으면 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)로 확인한 `orchestration` 계약과 injected preamble에 따라 실제 성공/실패 outcome을 보고하고 끝낸다. 독립 하네스 결과를 자신의 완료로 보고하기 전 직접 검사 결과와 소스를 확인한다.

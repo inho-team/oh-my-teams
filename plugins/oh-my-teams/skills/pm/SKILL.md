@@ -50,15 +50,15 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 
 제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 감독 worker로 배정한다. 여러 작업으로 나누고 통합해야 하면 PL에게 분할 계획과 통합을 맡기고, 나눌 필요가 없으면 수행할 역할에게 직접 배정한다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 주고, [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 완료 조건부터 쓴다.
 
-감독 worker는 다음처럼 역할, 조직 파일과 이번 kickoff의 workflow로 터미널을 연 뒤 그 터미널에 작업을 넘긴다. `role-terminal`과 `worker-start`가 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 agent·모델·강도를 정하고, `worker-start` 래퍼가 `--spec` 앞에 받는 역할의 권한·책임·한계와 조직 파일·workflow·coordinator state 경로를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로 이 경로들이 머리글에 필요하다.
+감독 worker는 다음처럼 역할, 조직 파일과 이번 kickoff의 workflow로 터미널을 연 뒤 그 터미널에 작업을 넘긴다. `role-terminal`과 `worker-start`가 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 agent·모델·강도를 정하고, `worker-start` 래퍼가 `--spec` 앞에 받는 역할의 권한·책임·한계와 조직 파일·workflow·PM state 경로를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로 이 경로들이 머리글에 필요하다.
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <project>/.omt/organization.json --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <coordinator>/.omt
+node <runtime> role-terminal --org <project>/.omt/organization.json --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
 node <runtime> terminal-idle-check --terminal <handle>
-node <runtime> workflow-reserve --id <workflowId> --state <coordinator>/.omt --revision <n> --execution <reserve.json>
-node <runtime> worker-start --org <project>/.omt/organization.json --role junior --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator>/.omt --terminal <handle> --worktree id:<worktreeId> --spec "<구체적인 작업>"
-node <runtime> role-spec --org <project>/.omt/organization.json --role senior --workflow-id <workflowId> --state <coordinator>/.omt --spec "<구체적인 작업>"
+node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
+node <runtime> worker-start --org <project>/.omt/organization.json --role junior --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <handle> --worktree id:<worktreeId> --spec "<구체적인 작업>"
+node <runtime> role-spec --org <project>/.omt/organization.json --role senior --workflow-id <workflowId> --state <pm-state> --spec "<구체적인 작업>"
 ```
 
 `role-spec`은 `task-create`로 먼저 만든 Task를 `--task`로 시작할 때 쓴다. 이 경우 래퍼가 머리글을 붙일 수 없으므로 Task 설명을 `role-spec --text`의 출력으로 만든다. `--text` 없이 실행하면 JSON이 출력되고, 그대로 `task-create --spec`에 넣으면 이스케이프된 JSON이 지시문이 된다. 시작 결과의 `binding.modelProof` 확인, 화면의 모델 대조, 거부 사유는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다.
@@ -80,7 +80,7 @@ node <runtime> role-spec --org <project>/.omt/organization.json --role senior --
 실행 중 판단이 바뀌면 `workflow-depth`로 깊이를 바꾼다. 변경 파일에는 `schemaVersion: 1`, 새 `eventId`, 목표 `depth`, `reason`, `evidence`를 적는다.
 
 ```text
-node <runtime> workflow-depth --id <workflow> --state <shared-state> --revision <read-revision> --change <depth-change.json>
+node <runtime> workflow-depth --id <workflow> --state <pm-state> --revision <read-revision> --change <depth-change.json>
 ```
 
 - 올리기는 언제든 가능하다. 대기 중인 작업은 원래 요청된 역할로 다시 배정된다.
@@ -105,7 +105,7 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 4. `accept` 뒤 `workflow-resume`을 실행하면 수정 실행의 gate가 task를 `accepted`로 올린다.
 
 ```text
-node <runtime> workflow-rework --id <workflowId> --state <coordinator>/.omt --revision <n> --rework <rework.json>
+node <runtime> workflow-rework --id <workflowId> --state <pm-state> --revision <n> --rework <rework.json>
 ```
 
 workflow 밖에서 수정을 진행하고 로그 파일에만 경위를 남기지 않는다. 그렇게 하면 gate가 수용되어도 task는 `submitted`에 머문다.

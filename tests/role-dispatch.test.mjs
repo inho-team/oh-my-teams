@@ -43,7 +43,7 @@ function tempDir(t) {
 }
 
 test("a role launches with the agent and model its profile pins", () => {
-  // The incident: PL was bound to a Codex profile, yet the coordinator typed
+  // The incident: PL was bound to a Codex profile, yet the PM typed
   // `worker-start --agent codex` with no --model and PL ran on another model.
   const launch = resolveRoleLaunch(example(), "pl", {}, { terminal: "t1" });
   assert.equal(launch.role, "pl");
@@ -178,8 +178,11 @@ test("a named account or a path command cannot be launched as a plain name", () 
   assert.throws(() => roleCommand(pathOrg, "pm"), /bare executable name/);
 });
 
-test("PM is the coordinator and is never started as a worker", () => {
-  assert.throws(() => resolveRoleLaunch(example(), "pm"), /coordinator/);
+test("PM is never started as a worker", () => {
+  assert.throws(
+    () => resolveRoleLaunch(example(), "pm"),
+    /PM runs in its own terminal/,
+  );
   // A reduced team folds PL's work onto PM, which then does it itself.
   const org = draftOrganization({
     name: "team",
@@ -208,9 +211,9 @@ test("a role handed its task in a terminal proves its model on the screen only",
   assert.equal(binding.screenCheck, "required");
 });
 
-test("the coordinator command carries the model the PM profile pins", () => {
+test("the PM command carries the model the PM profile pins", () => {
   // `orca worktree create --agent` has no --model, so a pinned PM model was
-  // silently dropped. The coordinator is launched from this argv instead.
+  // silently dropped. The PM is launched from this argv instead.
   const org = example();
   org.profiles["claude-current"].model = "opus[1m]";
   const pm = roleCommand(org, "pm");
@@ -491,10 +494,9 @@ test("a role does not start in the worktree another role's task works in", async
       waiting: { role: "intern", attempts: [{ id: "reserved" }] },
     },
   };
-  const coordinator = "/w/literacy-test/literacy-site-research-2";
+  const pmWorktree = "/w/literacy-test/literacy-site-research-2";
   assert.throws(
-    () =>
-      assertWorktreeUnshared(state, "senior", `id:${juniorId}`, coordinator),
+    () => assertWorktreeUnshared(state, "senior", `id:${juniorId}`, pmWorktree),
     /literacy-report-junior is where junior works on task report; senior does not start there/,
   );
   assert.throws(
@@ -513,13 +515,13 @@ test("a role does not start in the worktree another role's task works in", async
         state,
         "pl",
         `path:/w/literacy-test/literacy-report-junior`,
-        coordinator,
+        pmWorktree,
       ),
     /where junior works/,
   );
   // The owner itself, a role the owner supervises, a new child worktree, the
-  // coordinator's own worktree, and a launch outside any workflow all pass.
-  assertWorktreeUnshared(state, "junior", `id:${juniorId}`, coordinator);
+  // PM's own worktree, and a launch outside any workflow all pass.
+  assertWorktreeUnshared(state, "junior", `id:${juniorId}`, pmWorktree);
   assertWorktreeUnshared(
     state,
     "senior",
@@ -532,8 +534,8 @@ test("a role does not start in the worktree another role's task works in", async
     "new-child",
     "/w/literacy-test/literacy-report-junior",
   );
-  assertWorktreeUnshared(state, "senior", "current", coordinator);
-  assertWorktreeUnshared(undefined, "senior", `id:${juniorId}`, coordinator);
+  assertWorktreeUnshared(state, "senior", "current", pmWorktree);
+  assertWorktreeUnshared(undefined, "senior", `id:${juniorId}`, pmWorktree);
 
   // Through the CLI, role-terminal reads the workflow's record and refuses
   // before any terminal is created.

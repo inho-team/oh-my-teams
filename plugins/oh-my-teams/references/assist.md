@@ -13,7 +13,7 @@
 5. 공유 조정자 상태 디렉터리가 있어야 한다.
 
 ```text
-node <runtime> assist --org <organization.json> --task <task.json> --repo <worktree> --state <shared-state> --role <role> --kind <kind> [--profile <profile>]
+node <runtime> assist --org <organization.json> --task <task.json> --repo <worktree> --state <pm-state> --role <role> --kind <kind> [--profile <profile>]
 ```
 
 여섯 인수가 모두 필수이고 `--profile`만 선택이다. `--profile`을 생략하면 허용 목록의 첫 항목을 쓴다.

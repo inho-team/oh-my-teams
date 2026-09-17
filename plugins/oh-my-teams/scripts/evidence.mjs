@@ -46,7 +46,7 @@ async function workspaceContents(repo) {
     .split("\0")
     .filter(Boolean);
   const files = [...new Set([...tracked, ...untracked])]
-    // Coordinator state is excluded whatever its spelling: on a
+    // PM state is excluded whatever its spelling: on a
     // case-insensitive filesystem ".OMT/" is the same directory, and it would
     // otherwise reach inside() and be rejected as a forbidden segment.
     .filter((file) => !/^\.(omt|orca)\//i.test(file))

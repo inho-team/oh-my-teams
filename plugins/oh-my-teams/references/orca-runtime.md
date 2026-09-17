@@ -79,10 +79,10 @@ agy --model claude-opus-4-6-thinking ...
 감독 worker는 역할 이름과 조직 파일로만 시작한다. 원시 `orca orchestration worker-start`로 `--agent`와 `--model`을 손으로 적지 않는다. 손으로 적은 명령은 저장된 모델을 빠뜨려도 아무 오류 없이 계정 기본 모델로 실행되고, 보고서는 여전히 역할의 프로필을 적기 때문이다. kickoff 안에서는 항상 그 workflow를 함께 지정한다.
 
 ```text
-node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|intern> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <handle> --worktree <selector> --spec <작업> [--run <runId>]
+node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|intern> --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <handle> --worktree <selector> --spec <작업> [--run <runId>]
 ```
 
-`--terminal`에는 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 연 터미널을 넘긴다. 래퍼는 새 agent 터미널을 띄우지 않는다.
+`<run-bound-worktree>`는 Run에 바인딩된 터미널이 서 있는 워크트리다. PM이 시작하면 PM 워크트리이고, 자기 Run을 바인딩한 PL이 시작하면 PL 워크트리다. `<pm-state>`는 PM 워크트리의 `.omt` 디렉터리로, 등록 항목의 `pm.stateDir`와 같으며 PL과 worker도 이 경로를 함께 쓴다. `--terminal`에는 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 연 터미널을 넘긴다. 래퍼는 새 agent 터미널을 띄우지 않는다.
 
 래퍼는 worker가 시작되면 receipt의 `effects`에 기록된 agent 터미널의 탭 제목을 역할 태그로 시작하게 바꾼다. 제목은 `[PL] <워크트리 이름>` 형식이며, `--title`을 주면 워크트리 이름 대신 그 문구가 태그 뒤에 온다. `--worktree current`처럼 워크트리 이름을 알 수 없고 `--title`도 없으면 제목을 바꾸지 않고 `role-terminal`이 붙인 제목을 유지한다. 같은 워크트리에서 같은 역할을 둘 이상 띄울 때에는 `--title`로 작업을 구분한다. 결과의 `title`과 `titlePinned`가 적용한 제목과 성공 여부를 나타내며, 제목 변경에 실패해도 이미 시작된 worker를 실패로 처리하지 않는다. 탭 제목을 붙이는 이유는 아래 「역할 탭 제목」 절에 있다.
 
@@ -102,12 +102,12 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 `--agent`, `--model`, `--effort`는 프로필과 같은 값이어도 받지 않고 Orca를 호출하기 전에 거부한다. 모든 역할은 `--terminal`로 시작하며, Orca는 `--terminal`과 이 옵션들을 함께 받지 않고 터미널은 처음 열 때의 모델을 유지하기 때문이다. `--terminal`과 `--worktree new-child`를 함께 주면 Orca가 넘겨받은 터미널에 워크트리를 만들지 않으므로 역시 호출 전에 거부한다. 다음 경우에도 호출 전에 거부한다.
 
-- 역할이 PM이거나 PM으로 접힌다. 거부 문구는 조직에 선언되지 않은 역할(`is not declared`)과 이번 실행의 깊이에서 빠진 역할(`is not in this run's roles`)을 구분한다. PM은 coordinator이며 아래 「coordinator 실행」으로 띄운다.
+- 역할이 PM이거나 PM으로 접힌다. 거부 문구는 조직에 선언되지 않은 역할(`is not declared`)과 이번 실행의 깊이에서 빠진 역할(`is not in this run's roles`)을 구분한다. PM은 감독 worker가 아니며 아래 「PM 실행」으로 띄운다.
 - 프로필이 현재 계정이 아니거나, `env` 또는 추가 인자로 계정을 고른다. Orca agent ID는 실행 파일만 가리키므로 계정을 표현하지 못한다. 이런 프로필은 `role-command`도 거부하므로 감독 worker로 띄울 수 없고, 프로필의 명령과 환경변수 참조를 그대로 쓰는 `work` 하네스로 Ollama와 같이 실행한다.
 - 프로필이 모델 없이 강도만 기록한다. Orca는 `--model` 없는 `--effort`를 거부한다.
 - 받은 워크트리가 이번 workflow에서 다른 역할의 task가 작업하는 워크트리다. 아래 「역할과 워크트리」 절을 따른다.
 
-`--spec` 앞에는 받는 역할의 머리글이 붙는다. 머리글에는 역할, 보고 대상, 이번 실행에 없어 이어받는 역할, 직접 배정할 수 있는 역할, 조직 파일 경로, workflow ID와 coordinator state 경로, [두괄식](bluf.md) 보고·지시 규칙, 그리고 역할 스킬의 `권한·책임·한계` 절 전문이 들어간다. 중첩 worker로 실행되는 PL은 이 경로로 자기 하위 역할을 시작한다. `task-create`로 만든 Task를 `--task`로 시작할 때에는 래퍼가 머리글을 붙일 수 없으므로, Task 설명을 `node <runtime> role-spec --org <organization.json> --role <역할> --workflow-id <workflowId> --state <coordinator-state> --spec <작업>`의 출력으로 만든다.
+`--spec` 앞에는 받는 역할의 머리글이 붙는다. 머리글에는 역할, 보고 대상, 이번 실행에 없어 이어받는 역할, 직접 배정할 수 있는 역할, 조직 파일 경로, workflow ID와 PM state 경로, [두괄식](bluf.md) 보고·지시 규칙, 그리고 역할 스킬의 `권한·책임·한계` 절 전문이 들어간다. 중첩 worker로 실행되는 PL은 이 경로로 자기 하위 역할을 시작한다. `task-create`로 만든 Task를 `--task`로 시작할 때에는 래퍼가 머리글을 붙일 수 없으므로, Task 설명을 `node <runtime> role-spec --org <organization.json> --role <역할> --workflow-id <workflowId> --state <pm-state> --spec <작업>`의 출력으로 만든다.
 
 시작 결과의 `binding`에는 `via`, `modelRequested`, `effortRequested`, `modelProof`, `screenCheck`가 남는다. `via`는 항상 `terminal`이며, `modelProof`는 다음 둘 중 하나다.
 
@@ -132,10 +132,10 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <organization.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <coordinator-state>
+node <runtime> role-terminal --org <organization.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
 node <runtime> terminal-idle-check --terminal <handle>
-node <runtime> workflow-reserve --id <workflowId> --state <coordinator-state> --revision <n> --execution <reserve.json>
-node <runtime> worker-start --org <organization.json> --role <역할> --repo <coordinator-worktree> --workflow-id <workflowId> --state <coordinator-state> --terminal <handle> --worktree id:<worktreeId> --spec <작업>
+node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
+node <runtime> worker-start --org <organization.json> --role <역할> --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <handle> --worktree id:<worktreeId> --spec <작업>
 ```
 
 `role-terminal`과 `worker-start`에는 같은 `--workflow-id`와 `--state`를 넘긴다. 그래야 두 명령이 같은 조직 스냅샷과 이번 실행의 역할을 읽는다. 터미널은 한 역할의 프로필로 미리 만들어지므로, 두 명령 모두 요청한 역할이 이번 실행에 실제로 있을 때에만 받아들인다. 이번 실행에 없어 다른 역할로 접히는 역할을 요청하면 어느 역할로 접히는지 알리며 거부하고, 그때에는 접힌 역할의 터미널을 연다. `role-terminal`이 여는 명령은 `role-command`와 같으며, 아래 「역할 터미널 열기」 절을 따른다. 결과의 `ready`가 `true`이고 `screen`에 표시된 모델이 프로필의 모델과 같을 때에만 결과의 `terminal`을 `worker-start --terminal`에 넘긴다. 신뢰 질문 때문에 터미널을 다시 열었다면 넘기는 값은 `reopened.closedTerminal`이 아니라 결과의 `terminal`이다. 이 경로의 `modelProof`는 항상 `unproven`이므로 작업을 넘긴 뒤에도 보고서에 모델을 적을 때에는 화면에서 확인한 사실로 적는다.
@@ -182,15 +182,15 @@ workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 
 
 이 래퍼는 argv를 배열로 전달하고, receipt에서 Dispatch 신원을 확인한 뒤, 시작이 `ready`에 이르지 못하면 3값 liveness와 번역된 실패 신호가 담긴 receipt를 돌려준다. 거부되어 Dispatch가 만들어지지 않은 경우에만 오류를 던지며, 그 오류에도 신호와 원본 receipt가 함께 실린다.
 
-**`worker-start`는 해당 Run에 바인딩된 coordinator 터미널에서만 호출할 수 있다.** 바인딩된 Run이 없는 상태에서 호출하면 Task의 존재 여부와 무관하게 `consumer_fenced`로 거부되므로, 먼저 같은 터미널에서 `orchestration run-create`로 Run을 만들어 바인딩한다. 이 코드는 호출한 자리가 잘못되었다는 뜻이므로 재시도로 해소되지 않으며, 번역표에 넣지 않고 증거와 함께 에스컬레이션한다.
+**`worker-start`는 해당 Run에 바인딩된 coordinator 터미널에서만 호출할 수 있다.** Orca는 Run에 바인딩된 터미널을 coordinator 터미널이라고 부르며, 기본적으로 PM 터미널이 여기에 해당하고 Nested worker depth를 2 이상으로 올려 자기 Run을 바인딩한 PL 터미널도 해당한다. 바인딩된 Run이 없는 상태에서 호출하면 Task의 존재 여부와 무관하게 `consumer_fenced`로 거부되므로, 먼저 같은 터미널에서 `orchestration run-create`로 Run을 만들어 바인딩한다. 이 코드는 호출한 자리가 잘못되었다는 뜻이므로 재시도로 해소되지 않으며, 번역표에 넣지 않고 증거와 함께 에스컬레이션한다.
 
 Run을 바인딩한 뒤에는 `--spec`으로 Task와 첫 시도를 한 번에 만들 수 있고, 성공한 시작은 `state: "ready"`와 함께 `runId`, `taskId`, `dispatchId`를 돌려준다. `--agent`로 시작한 receipt의 `launch.requested`와 `launch.effective`에는 요청한 agent·모델·강도와 적용된 값이 나란히 들어 있지만, 래퍼가 쓰는 `--terminal` 시작에서는 두 값 모두 모델을 담지 않는다.
 
 `worker-start`는 `ready`에서만 0으로 종료하고, `failed`와 `outcome_unknown`에서는 1로 종료하면서도 `dispatchId`, `failedStage`, `residualResources`를 담은 receipt를 반환한다. 따라서 종료 코드만으로 실패를 단정하지 않고 receipt를 읽는다. receipt 자체가 오지 않은 경우에만 미관측으로 처리하며, 이때에도 같은 명령을 다시 실행하지 않는다.
 
-## coordinator 실행
+## PM 실행
 
-PM coordinator는 감독 worker가 아니므로 `worker-start`로 띄우지 않는다. `orca worktree create --agent`에는 모델 옵션이 없어 PM 프로필의 모델을 전달할 수 없으므로, 워크트리를 agent 없이 만든 뒤 `role-terminal`로 프로필의 명령을 실행한 터미널을 연다.
+PM은 감독 worker가 아니므로 `worker-start`로 띄우지 않는다. `orca worktree create --agent`에는 모델 옵션이 없어 PM 프로필의 모델을 전달할 수 없으므로, 워크트리를 agent 없이 만든 뒤 `role-terminal`로 프로필의 명령을 실행한 터미널을 연다.
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
@@ -198,7 +198,7 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --
 <orca> terminal send --terminal <handle> --text "<브리프 경로와 시작 지시>" --enter --json
 ```
 
-`role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model>`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 브리프를 보내지 않고 사용자에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 선언 세션이 coordinator를 대신 맡지도 않는다.
+`role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model>`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 브리프를 보내지 않고 사용자에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 선언 세션이 PM을 대신 맡지도 않는다.
 
 ## 무응답 worker 감독
 
@@ -230,3 +230,18 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --
 Goal이 `blocked`이면 표현을 완화하지 않고 그대로 전달한다. 다만 `workflow-status`의 `blocked`는 실패한 task가 하나 있다는 뜻이며 `workflow-retry`로 되돌릴 수 있는 일시 상태이므로, Goal의 `blocked`와 서로 옮겨 적지 않는다.
 
 사용자에게 보고할 때에는 Goal 상태, `live` worker 수, 확인된 최근 코드 변경을 **서로 구분된 항목**으로 제시한다. 계획의 존재, 대기 중인 다음 단계, 완료된 변경, 현재 실행 중인 구현은 각각 다른 사실이다.
+
+## 사용량 측정
+
+`usage-report`는 kickoff의 역할별 턴·호출·토큰과 모델을 각 CLI가 이미 남긴 기록에서 읽는다. 읽기만 하며, `--write`를 줄 때만 `<project>/.omt/history/usage-<entry>-<createdAt>.json`에 스냅샷을 쓴다.
+
+```text
+node <runtime> usage-report --org <project>/.omt/organization.json --worktree <pm-worktree-id> [--place <role>=<dir>]... [--json]
+node <runtime> usage-report --org <project>/.omt/organization.json --all
+```
+
+- **역할 연결**: `role-terminal`, `worker-start`, `headless-start`는 실행할 때마다 `<project>/.omt/usage/launches.jsonl`에 역할, 프로필, 요청 모델, 워크트리, 터미널, 시작 시각을 한 줄씩 남긴다. 이 줄은 `--state`가 가리키는 PM state, PM 워크트리 안에서의 실행, 또는 앞서 기록된 역할 워크트리 안에서의 실행으로 kickoff에 묶인다. 기록에 실패해도 실행은 계속되고 결과에 `ledgerError`가 붙는다. 보고서는 PM 워크트리(등록 항목)와 이 기록의 워크트리에서 만든 세션을 실행기·경로·시각으로 역할에 연결한다. 같은 워크트리에서 같은 실행기의 두 역할을 1분 안에 띄웠으면 어느 쪽인지 가릴 수 없어 `ambiguous`로, 어느 기록으로도 설명되지 않는 세션은 `unattributed`로 표시하고 추측하지 않는다. 이 기록이 생기기 전의 kickoff는 `--place <role>=<dir>`로 역할이 쓴 워크트리를 직접 알려 준다.
+- **읽는 기록**: Claude는 `~/.claude/projects`의 transcript(같은 응답이 여러 줄로 반복되므로 응답 id로 한 번만 센다), Codex는 `~/.codex/sessions`와 `archived_sessions`의 rollout(누적 합계이므로 kickoff 기간의 마지막 값에서 기간 전 마지막 값을 뺀다), Agy는 `~/.gemini/antigravity-cli/conversation_summaries.db`의 대화 id·작업 경로·단계 수·시각 열만 읽는다. headless worker는 PM state의 stream을, 로컬 하네스는 `runs`와 `assists` 보고서의 호출 기록을 읽고, 같은 세션이 CLI 기록에도 있으면 두 번 세지 않는다. 메시지 본문, 제목, 미리보기는 읽지 않는다. 위치는 `--claude-home`, `--codex-home`, `--agy-home` 또는 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OMT_AGY_HOME`으로 바꾼다.
+- **측정되지 않는 것**: Agy 대화형 세션은 토큰 사용량이 어디에도 기록되지 않는다. 이런 세션은 `measured: false`, `reason: "agy-interactive-usage-not-recorded"`로 표시하고 토큰은 `null`로 둔다. 단계 수(`steps`)만 보조 지표로 보여 준다. 사용량 비교가 중요한 kickoff에서는 Agy 역할을 `role-terminal` 대신 `headless-start`로 실행한다. headless 결과에는 사용량이 담긴다. 다만 Agy의 stream-json에서 사용량이 담기는 위치는 아직 실제 출력으로 확인하지 않았으므로, 결과 이벤트의 중첩 위치와 최상위를 모두 읽는다.
+- **해석**: 역할별 점유율(`share`)은 측정된 세션의 prompt와 output 토큰만으로 계산한다. 측정된 세션이 없는 역할은 0%가 아니라 `unmeasured`이며, `coverage`가 몇 개 세션 위에서 계산했는지 알린다. prompt 토큰은 Claude에서 캐시 읽기·생성을 포함한 합, Codex에서 캐시를 포함해 보고된 입력, Agy에서 보고된 `input_tokens`다. Agy의 `input_tokens`가 캐시 읽기를 포함하는지는 확인되지 않았다. Claude headless의 `costUsd`는 CLI가 계산한 API 환산 추정치이며 구독 요금이 아니다. 요청 모델과 보고 모델이 다르면 `mismatches`에 적는다.
+- **호출 한도와의 관계**: 조직의 `policy.maxCalls`는 `work` 한 번과 workflow attempt 하나가 쓰는 provider 호출 수를 제한하고, workflow의 `budget.maxCalls`는 그 workflow 전체의 호출 예산이다. 둘 다 대화형 역할 터미널의 턴을 세지 않으므로, 대화형 역할이 쓴 양은 이 보고서로만 확인한다.

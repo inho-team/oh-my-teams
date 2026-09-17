@@ -61,7 +61,7 @@ export function translateLocalFailure(response) {
 /**
  * Neutral routing hints for the codes this adapter's own receipts carry.
  *
- * A coordinator writing a failure record after the fact holds the code, not
+ * A PM or PL writing a failure record after the fact holds the code, not
  * the response object {@link translateLocalFailure} reads, so the same
  * vocabulary has to be translatable from the code alone. `model-error` is
  * absent on purpose: the provider rejected the request for a reason only the

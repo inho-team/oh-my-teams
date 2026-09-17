@@ -31,7 +31,7 @@ PM (teams-org.mjs headless-start)
 
 ## 3. 기록 형식
 
-`<state>/headless/<workerId>/` 아래에 둔다.
+`<pm-state>/headless/<workerId>/` 아래에 둔다.
 
 ```text
 worker.json          역할, 프로필, 제공자, 요청 모델·강도, 작업 경로, 시간 제한, 생성 시각
