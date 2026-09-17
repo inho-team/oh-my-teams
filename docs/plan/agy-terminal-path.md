@@ -1,7 +1,7 @@
 # Agy 터미널 경로 개선 계획 (Orca 판정 규칙)
 
 - 작성일: 2026-09-17
-- 상태: 초안 (Draft)
+- 상태: 실측과 Senior 검토 완료. 호환성 표는 `plugins/oh-my-teams/scripts/launch-matrix.mjs`가 정본이며, Codex 신뢰 기록이 없는 조합은 사용자 설정을 바꾸지 않고는 재현할 수 없어 근거 등급이 `source-derived`로 남아 있다. #55는 닫히고 #46은 Orca의 `tui-idle` 판정 규칙 때문에 열려 있다.
 - 대상 버전: Orca 1.4.204, Antigravity CLI 1.2.5
 
 ## Orca 판정 규칙
