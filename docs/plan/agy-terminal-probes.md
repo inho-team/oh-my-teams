@@ -335,9 +335,11 @@ orca terminal create --worktree path:... --title "probe-1C"
 
 두 실험 모두 `tui-idle satisfied: true`, 화면은 완전히 기동된 상태였다. `--title` 없는 경우 show를 두 번 별도로 호출해 캐시가 아닌 최신 상태를 재확인했으나 `agentIdentity`는 여전히 설정되지 않았다.
 
-**판정:** `--title`을 지정하면 `agentIdentity: "antigravity"`가 설정되고, 지정하지 않으면 설정되지 않는다. `title`이 `"Terminal 1"`(Orca 자동 생성값)일 때는 Orca가 `agy` 프로세스를 `antigravity`로 식별하지 않는다. 이 차이가 `--title` 값 자체에 기인하는지, 아니면 `--title` 지정 여부가 Orca의 내부 agent 감지 경로를 바꾸는지는 미확인(Orca 소스 확인 필요).
+**관측 사실:** `--title`을 지정한 경우 gemini 계열(`probe-2-gemini-r2`)과 gpt-oss 계열(`probe-2-gpt2`)에서는 `agentIdentity: "antigravity"`가 설정되었다. `--title`을 지정하지 않은 gemini 터미널(`title: "Terminal 1"`)에서는 `agentIdentity`가 없었다. 그러나 `--title`을 지정한 2-2절의 claude-sonnet-4-6(`probe-2-claude-r2`)에서도 `agentIdentity`가 없었다. 따라서 "`--title` 지정 → `agentIdentity` 설정"은 모든 모델 계열에 적용되는 일반 규칙이 아니다.
 
-**실용적 함의:** OMT의 `role-terminal`이 `--title`을 지정해 터미널을 생성하는 것이 `agentIdentity` 설정에 필수적이다.
+**미확인 원인:** `orca-rules`(`c42d9de`)의 「Orca 판정 규칙」 6항에 따르면, `agentIdentity`는 `resolveCanonicalPaneAgentIdentity`에서 `live-hook` > `process` > `launch` > `title` 우선순위로 결정되며, 동순위 증거가 서로 다른 에이전트를 가리키면 충돌(ambiguous)로 처리되어 `null`이 반환된다. claude-sonnet-4-6의 경우 `live-hook`(`claude` 상태 훅) 증거와 전경 프로세스(`agy.exe` → `antigravity`) 증거가 경합하여 ambiguous로 처리되었을 가능성이 높다(미확인: 실제 충돌 증거 조합 로깅 필요). `--title` 미지정 gemini는 프로세스 증거(`isForegroundProcessProofFresh`)의 수명 초과 등으로 `null`이 반환되었을 수 있다(미확인).
+
+**실용적 함의:** OMT의 `role-terminal`이 `--title`을 지정해 터미널을 생성하는 것은 gemini·gpt-oss 계열에서 `agentIdentity` 설정에 필요하나, claude 계열에서는 이것만으로 충분하지 않을 수 있다.
 
 ---
 
@@ -389,4 +391,4 @@ needs you to know which kind you have — the orchestration verbs cover all of t
 
 ---
 
-DONE: 조합 1A·1B·1C 폭 조정 방식 비교, 조합 2 모델 3종(gemini·claude·gpt-oss) tui-idle 및 agentIdentity 비교, 조합 2-5 --title 유무에 따른 agentIdentity 차이 확인, 조합 3 감독 터미널 경로 도움말·참조 문서 판정 완료
+DONE: contradictory-title-conclusion 해소 — 2-5절 「--title→agentIdentity 설정」 일반화 철회, orca-rules c42d9de 6항 resolveCanonicalPaneAgentIdentity 우선순위 규칙으로 claude 미설정 원인(ambiguous 처리) 설명, 관측 사실·미확인 원인으로 분리 (ambiguous-idle-distinction은 다음 커밋)
