@@ -255,3 +255,20 @@ We propose modifying the `tui-idle` check in `q0i(e)` to avoid hardcoding model 
 
 Thanks!
 ```
+
+---
+
+## 기준 9 실측 결과
+
+### 3차 실측 (2026-09-18, 수정 커밋 fe368a1·d7c7ab2·5fe61a1)
+
+런타임: `agy-live-verification` @ `fe368a1`. 환경: Windows 11 Pro 10.0.26200, Orca 1.4.204, Antigravity CLI 1.2.5, PowerShell.
+
+| 조합 | 워크트리(신뢰 기록) | 결과 | 표와의 대조 |
+|---|---|---|---|
+| r3-c6 Codex `gpt-5.6-luna` | 새 워크트리 `verify-r3-c6-codex-luna-new`(회수함) | `role-terminal`이 터미널 생성 전 거부: `[codex-trust-workspace]` | **표 입력 배선 결함.** `readLaunchEnvironment`는 `codexTrustRecordExists: true`를 돌려주지만, 표 4행은 Agy 신뢰 기록인 `trustRecordExists`를 보고, `predictLaunchPath` 호출에 codex 값이 전달되지 않는다. |
+| r3-c2 Agy `gemini-3.8-flash-medium` (`--allow-unverified`) | `agy-probe-sandbox`(Agy 신뢰 있음) | `role-terminal` ready=true(`agentIdentity=antigravity`). `terminal-idle-check`가 `tui-idle` 미보고로 거부. `orca terminal wait --for tui-idle --timeout-ms 120000`도 timeout. | **표 불일치(사후 거부).** 표 8행은 `supervised-terminal`을 예측했으나 `tui-idle`에 도달하지 못한다. |
+| r3-c1 Agy `gemini-3.1-pro-high` | 새 워크트리 `verify-r3-c1-agy-gemini-pro-new`(회수함, Agy 신뢰 없음) | `role-terminal`이 터미널 생성 전 거부: `[agent-trust-workspace]` | **표 3행과 일치.** |
+| r3-c3 Agy `claude-sonnet-4-6` | `agy-probe-sandbox` | `role-terminal`이 터미널 생성 전 거부: `[claude-unsupported-by-orca]` | **표 7행과 일치.** |
+| r3-c4 Agy `gpt-oss-120b-medium` (`--allow-unverified`) | `agy-probe-sandbox` | `headless` 경로로 거부. 이유 코드가 빈 배열이어서 메시지가 `"refused by matrix []"`로 나온다. | **경미한 결함.** 표 9행의 `reason`이 비어 있다. |
+| r5-c6 Codex `gpt-5.6-luna` | 새 워크트리 `verify-r5-c6-codex-luna-new`(기준 `fef87c6`, 회수함) | `role-terminal --allow-unverified` → ready=true → `terminal-idle-check` idle=true → `worker-start` (task `task_e16a4a21060e`, dispatch `ctx_1a6f307bf0c3`, `binding.modelProof=unproven`) → `orchestration check --wait` → `worker_done`, outcome succeeded, 커밋 `b5e1cc3` → `worker-release` → 터미널 닫기 → 워크트리 회수 | **Codex 감독 터미널 경로가 `worker_done`까지 처음으로 검증되었다.** 표 12행의 근거 등급을 `unverified`에서 `verified`로 올릴 수 있다. |
