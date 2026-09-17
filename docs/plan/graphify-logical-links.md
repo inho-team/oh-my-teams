@@ -1,7 +1,7 @@
 # graphify로 OMT의 판단을 코드·문서 구조에 논리적으로 연결하는 방안 검토
 
 - 작성일: 2026-09-17
-- 상태: 실측 완료. 채택/보류/기각 판정 포함. 후속 구현 전 Senior 검토 대기.
+- 상태: 실측과 Senior 검토 완료. A·B·C 보류, D 기각. 스킬·런타임 변경은 후속 결정 대상.
 - 대상: graphify(https://github.com/Graphify-Labs/graphify, Apache-2.0), OMT 역할 스킬, Orca 런타임
 - 관련 문서: [최소 변경 규율](../../plugins/oh-my-teams/references/minimal-change.md), [공유 할당량 모델 라우팅](shared-quota-model-routing.md), [AI 네이티브 에이전트 조직](ai-native-agent-organization.md)
 
