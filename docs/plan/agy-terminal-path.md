@@ -10,19 +10,20 @@
 
 ### 1. 에이전트 식별 (Agent Detection)
 - **위치**: `out/shared/shell-process-detection.js` (`isShellProcess`), `out/main/index.js` (`isterminalrunningagent`)
-- **규칙**: 터미널의 전경 프로세스(foreground process) 이름이 셸(`bash`, `zsh`, `cmd.exe`, `powershell.exe` 등)로 식별되면, 에이전트가 실행 중이 아닌 'bare shell' 상태로 간주하여 `isterminalrunningagent`가 `false`를 반환합니다.
-- **PowerShell에서 여러 명령 실행 시 실패 원인 (#46 B)**: PowerShell에서 `mode con: cols=44; agy ...` 처럼 한 줄에 여러 명령(statement)을 적어 실행하면, 프로세스(exec)가 대체되지 않거나 복수 명령 실행 기간 동안 전경 프로세스가 계속 `powershell.exe`로 유지됩니다. 따라서 `isShellProcess('powershell.exe')`에 의해 셸로 간주되어, 에이전트로 식별되지 않고 실패하게 됩니다. 제목 기반 식별 또한 셸 이름으로 남아 있으면 실패 요인이 됩니다.
+- **규칙**: 터미널의 전경 프로세스(foreground process) 이름이 셸(`bash`, `zsh`, `cmd.exe`, `powershell.exe` 등)로 식별되면, 에이전트가 실행 중이 아닌 'bare shell' 상태로 간주하여 `isterminalrunningagent`가 `false`를 반환합니다. `out/main/index.js` 내 `isterminalrunningagent`에서 `ptycontroller.getforegroundprocess`를 호출하여 얻은 프로세스 객체를 기반으로 에이전트를 매핑하며, `isShellProcess`가 `true`면 거부됩니다.
+- **PowerShell에서 여러 명령 실행 시 실패 원인 (#46 B)**: PowerShell에서 `mode con: cols=44; agy ...` 처럼 한 줄에 여러 명령(statement)을 적어 실행하면, 프로세스(exec)가 대체되지 않거나 복수 명령 실행 기간 동안 전경 프로세스가 계속 `powershell.exe`로 유지됩니다. 따라서 `isShellProcess('powershell.exe')`에 의해 셸로 간주되어, 에이전트로 식별되지 않고 실패하게 됩니다. 제목 기반 식별 또한 셸 이름(`powershell.exe`)으로 남아 있으면 실패 요인이 됩니다.
 
 ### 2. `terminal wait --for tui-idle` 판정
 - **위치**: `out/main/index.js` 내 `q0i(e)` 함수 등 (화면 문자열 분석)
 - **규칙**:
-  - `antigravity`: `e.lastIndexOf('antigravity cli')`로 배너 확인 후, 이어진 줄에서 온전히 `gemini`로 시작하는 줄(`e.startsWith('gemini', o)`)과 길이가 1이고 `>`인 줄(`s-o===1 && e.charCodeAt(o)===62`)이 모두 존재해야 대기로 판정합니다. 화면 폭(44) 조정 시 로고가 배너 위로 밀려나 모델 줄 맨 앞에 로고 문자가 붙지 않으므로 `gemini`로 시작할 수 있게 됩니다.
-  - **상태 훅 및 제목**: `antigravity` 터미널은 화면 내 문자열(`Antigravity CLI`, `gemini`, `>`)만으로 대기를 판정하며, `Stop` 훅이나 터미널 제목(`✳`)은 판정 근거로 쓰이지 않습니다.
+  - `antigravity`: 입력 `e`는 화면 버퍼 문자열을 소문자로 변환한 값(`e.toLowerCase()`)입니다. `e.lastIndexOf('antigravity cli')`로 배너를 찾고, 이어진 줄에서 온전히 `gemini`로 시작하는 줄(`e.startsWith('gemini', o)`)과 길이가 1이고 `>`인 줄(`s-o===1 && e.charCodeAt(o)===62`)이 모두 존재해야 대기로 판정합니다. 화면 폭(44) 조정 시 로고가 배너 위로 밀려나 모델 줄 맨 앞에 로고 문자가 붙지 않으므로 `gemini`로 시작할 수 있게 됩니다.
+  - **Claude 판정**: `W0i(e)` 등에서 `V0i = '✳'` 상수를 사용해 `e.startsWith('✳')`로 제목을 검사하거나, `/hook/claude`로 들어오는 상태 훅 메시지로 판정합니다.
+  - **상태 훅 및 제목**: `antigravity` 터미널은 화면 내 문자열(`antigravity cli`, `gemini`, `>`)만으로 대기를 판정하는 `q0i(e)` 함수에 완전히 의존하며, `Stop` 훅이나 터미널 제목(`✳`)은 판정 근거로 쓰이지 않습니다.
 
 ### 3. `blockedReason` 판정 (신뢰 질문 등)
 - **위치**: `out/main/index.js` 화면 파싱 로직
-- **규칙**: 화면 문자열에서 `do you trust`, `trust this`, `trusted workspace`의 마지막 위치를 찾고, 그 이후 문자열에 `workspace`, `folder`, `directory`, `repo` 중 하나가 포함되어 있으면 `agent-trust-workspace`로 차단합니다.
-- **버퍼 내 문구 잔존 문제**: 화면 전체(또는 버퍼)를 대상으로 `lastIndexOf`를 수행하므로, 질문에 답한 뒤에도 터미널 버퍼에 해당 문구가 남아 있으면 지워질 때까지 차단을 일으킵니다.
+- **규칙**: 화면 문자열에서 `do you trust`, `trust this`, `trusted workspace`의 마지막 위치(`lastIndexOf`)를 찾고, 그 이후 문자열에 `workspace`, `folder`, `directory`, `repo` 중 하나가 포함되어 있으면 `reason: 'agent-trust-workspace'`로 차단합니다.
+- **버퍼 내 문구 잔존 문제**: 화면 전체(또는 버퍼)를 대상으로 `lastIndexOf`를 수행하므로, 질문에 답한 뒤에도 터미널 버퍼에 해당 문구가 남아 있으면(스크롤로 사라지지 않으면) 지워질 때까지 차단을 일으킵니다.
 
 ### 4. `orchestration dispatch --inject`의 `no_agent_detected` 조건
 - **위치**: `out/main/index.js`
