@@ -117,6 +117,7 @@ export function predictLaunchPath(params) {
 | 조건(runner/model/platform/shell/trust/skipPrompt) | 예상 path | reason | nextOwner / nextAction | evidence |
 |---|---|---|---|---|
 | 지원 버전 범위 밖 | blocked | unsupported_version | pm / 버전 지원 확인 | unverified |
+| Agy / - / win32 / powershell / - / - (복합 명령 실행 시) | blocked | no_agent_detected | pm / 단일 명령으로 분리 | source-derived (out/shared/shell-process-detection.js) |
 | Agy / - / - / - / 신뢰 없음 / - | blocked | agent-trust-workspace | user / 폴더 신뢰 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 1-1절) |
 | Codex / - / - / - / 신뢰 없음 / - | blocked | codex-trust-workspace | user / 폴더 신뢰 | source-derived (out/main/index.js) |
 | Claude / - / - / - / - / skipPrompt=false | blocked | claude-permission-prompt | user / 권한 승인 | unverified |
@@ -139,13 +140,15 @@ export function predictLaunchPath(params) {
 
 
 ### 4. 인접 실패 칸과 사전 점검
-브리프 기준 7의 인접 실패 6가지 중 5가지는 다음 이유 코드로 사전 거부하고, 버퍼 잔존은 사후 거부로 처리합니다:
-1. **Codex 폴더 신뢰 질문**: 신뢰 없음 시 `codex-trust-workspace`
-2. **Claude 권한 우회 첫 실행 확인**: `skipPrompt` 설정 안 된 경우 `claude-permission-prompt`
+브리프 기준 7의 인접 실패 6가지 중 4가지는 다음 이유 코드로 사전 거부하고, 버퍼 잔존과 실행 후 식별 불가 문제는 사후 거부로 처리합니다:
+1. **Codex 폴더 신뢰 질문**: 신뢰 없음 시 `codex-trust-workspace` (사전 거부)
+2. **Claude 권한 우회 첫 실행 확인**: `skipPrompt` 설정 안 된 경우 `claude-permission-prompt` (사전 거부)
 3. **Agy 신뢰 문구의 버퍼 잔존 (사후 거부)**: 터미널을 다시 연 뒤에도 버퍼에 문구가 남아 차단되는 경우 `agent-trust-workspace-buffer` 반환
-4. **Codex 역할 worker_done 미검증**: `codex-worker-done-unverified`
-5. **터미널 제목이 셸 경로로 남는 경우**: PowerShell에서 복수 명령 실행 시 발생. `no_agent_detected`
-6. **버전 범위 밖**: Orca/CLI 버전이 지원 범위 밖이면 `unsupported_version`
+4. **Codex 역할 worker_done 미검증**: `codex-worker-done-unverified` (사전 거부)
+5. **터미널 제목이 셸 경로로 남는 경우 (no_agent_detected)**:
+   - **사전 거부**: 폭 조정(`mode con: cols=44`) 등 앞선 명령을 `agy`와 같은 줄에 붙이는 복합 명령 방식인 경우, 실행 전에 알 수 있으므로 매트릭스에서 미리 `no_agent_detected`로 차단(`blocked`)합니다.
+   - **사후 거부**: 단일 명령으로 실행했음에도 실행 뒤 프로세스 이름이 셸로 남아 식별되지 않는 경우는 사후 거부 코드 `no_agent_detected`를 반환하며, 표 불일치 분류 규칙(`matrix-prediction-failure`)으로 연결합니다.
+6. **버전 범위 밖**: Orca/CLI 버전이 지원 범위 밖이면 `unsupported_version` (사전 거부)
 
 ### 5. 거부 흐름과 표 불일치 신호
 - **실행 전 거부**: `plugins/oh-my-teams/scripts/role-terminal.mjs`에서 터미널을 열기 전(`workflow-reserve` 이전)에 표를 조회합니다. 표가 `blocked`를 반환하면 터미널 생성과 attempt 예약을 중단하고, 이유 코드와 `nextAction`을 반환합니다.
