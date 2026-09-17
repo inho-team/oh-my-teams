@@ -277,6 +277,147 @@ export function readHeadlessStream(provider, stream, options = {}) {
   };
 }
 
+const clip = (text, limit) => {
+  const value = String(text ?? "");
+  return value.length > limit ? `${value.slice(0, limit)}…` : value;
+};
+
+function toolSummary(input) {
+  if (!input || typeof input !== "object") return "";
+  const preferred =
+    input.command ??
+    input.CommandLine ??
+    input.file_path ??
+    input.TargetFile ??
+    input.AbsolutePath ??
+    input.path ??
+    input.description;
+  return clip(preferred ?? JSON.stringify(input), 400);
+}
+
+const TRANSCRIBE = {
+  claude(events) {
+    const entries = [];
+    for (const event of events) {
+      const content = event.message?.content;
+      if (event.type === "assistant" && Array.isArray(content)) {
+        for (const part of content) {
+          if (part.type === "text" && part.text?.trim()) {
+            entries.push({ kind: "text", text: part.text });
+          } else if (part.type === "tool_use") {
+            entries.push({
+              kind: "tool",
+              name: part.name,
+              text: toolSummary(part.input),
+            });
+          }
+        }
+      } else if (event.type === "user" && Array.isArray(content)) {
+        for (const part of content) {
+          if (part.type !== "tool_result") continue;
+          const text = Array.isArray(part.content)
+            ? part.content.map((item) => item.text ?? "").join("\n")
+            : part.content;
+          entries.push({
+            kind: part.is_error ? "error" : "output",
+            text: clip(text, 2000),
+          });
+        }
+      } else if (event.type === "result" && event.is_error) {
+        entries.push({
+          kind: "error",
+          text: String(event.result ?? event.subtype),
+        });
+      }
+    }
+    return entries;
+  },
+  codex(events) {
+    const entries = [];
+    for (const event of events) {
+      const item = event.item;
+      if (event.type === "item.completed" && item?.type === "agent_message") {
+        entries.push({ kind: "text", text: item.text ?? "" });
+      } else if (
+        event.type === "item.completed" &&
+        item?.type === "command_execution"
+      ) {
+        entries.push({
+          kind: "tool",
+          name: "shell",
+          text: clip(item.command, 400),
+        });
+        entries.push({
+          kind: item.exit_code === 0 ? "output" : "error",
+          text: clip(item.aggregated_output, 2000),
+        });
+      } else if (["error", "turn.failed"].includes(event.type)) {
+        entries.push({
+          kind: "error",
+          text: String(event.message ?? event.error?.message ?? event.type),
+        });
+      }
+    }
+    return entries;
+  },
+  agy(events) {
+    const entries = [];
+    const texts = new Map();
+    for (const event of events) {
+      const step = event.step_update;
+      if (step?.step_type === "agent_response" && step.text_delta) {
+        texts.set(
+          step.step_index,
+          (texts.get(step.step_index) ?? "") + step.text_delta,
+        );
+      }
+      if (step?.step_type === "agent_response" && step.state === "DONE") {
+        const text = texts.get(step.step_index);
+        if (text?.trim()) entries.push({ kind: "text", text });
+        texts.delete(step.step_index);
+      } else if (step?.step_type === "tool" && step.state === "DONE") {
+        entries.push({
+          kind: "tool",
+          name: step.tool_name,
+          text: toolSummary(step.tool_info?.parameters),
+        });
+      } else if (
+        event.event === "result" &&
+        event.result?.status !== "SUCCESS"
+      ) {
+        entries.push({ kind: "error", text: String(event.result?.status) });
+      }
+    }
+    // A turn still running has text that no DONE step closed yet.
+    for (const text of texts.values()) {
+      if (text.trim()) entries.push({ kind: "text", text, partial: true });
+    }
+    return entries;
+  },
+};
+
+/**
+ * Turns a provider stream into a readable transcript for people.
+ *
+ * @param {string} provider - Provider that wrote the stream.
+ * @param {string} stream - Raw JSONL output.
+ * @param {number} [limit=300] - Most recent entries to keep.
+ * @returns {{kind: string, text: string, name?: string}[]} Text, tool, output
+ *   and error entries in order.
+ */
+export function headlessTranscript(provider, stream, limit = 300) {
+  const events = [];
+  for (const line of String(stream).split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line));
+    } catch {
+      // Not an event.
+    }
+  }
+  return (TRANSCRIBE[provider]?.(events) ?? []).slice(-limit);
+}
+
 /**
  * Compares the model a turn requested with the one its provider reported.
  *
@@ -559,6 +700,42 @@ function headlessUsageSummary(worker, turns, options) {
     usage: read.reduce((total, turn) => addTokenUsage(total, turn.usage), null),
     usageTurns: { measured: measured.length, total: read.length },
   };
+}
+
+/**
+ * Reports a worker with every turn's prompt, exit and readable transcript.
+ *
+ * @param {string} stateDir - PM worktree state directory.
+ * @param {string} workerId - Worker to read.
+ * @param {object} [options] - `codexHome` for Codex model lookup.
+ * @returns {object} The worker's status plus its turns, oldest first.
+ * @throws {Error} When the worker does not exist.
+ */
+export function headlessDetail(stateDir, workerId, options = {}) {
+  const status = headlessStatus(stateDir, workerId, options);
+  const dir = workerDir(stateDir, workerId);
+  const read = (file) =>
+    fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  const turns = turnDirs(dir).map((turnDir) => {
+    const turn = fs.existsSync(path.join(turnDir, "turn.json"))
+      ? readJSON(path.join(turnDir, "turn.json"))
+      : {};
+    const exitFile = path.join(turnDir, "exit.json");
+    const stderr = read(path.join(turnDir, "stderr.txt"));
+    return {
+      number: turn.number,
+      startedAt: turn.startedAt ?? null,
+      resumed: Boolean(turn.session),
+      prompt: clip(read(path.join(turnDir, "prompt.txt")), 6000),
+      exit: fs.existsSync(exitFile) ? readJSON(exitFile) : null,
+      transcript: headlessTranscript(
+        status.provider,
+        read(path.join(turnDir, "stream.jsonl")),
+      ),
+      stderrTail: stderr.length > 2000 ? stderr.slice(-2000) : stderr,
+    };
+  });
+  return { ...status, turns };
 }
 
 /**

@@ -17,6 +17,7 @@ import {
 import { taskHash, validateTask } from "./contracts.mjs";
 import { git } from "./evidence.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
+import { assertFailureSignal } from "./execution.mjs";
 import { gateCheck } from "./gates.mjs";
 import {
   WORKFLOW_ID_PATTERN,
@@ -1064,16 +1065,23 @@ function validateRetryInput(input) {
  * back: the task stayed `reserved`, every resume returned the same
  * `launch-reconcile-required` action, and one failed launch cost a slot and an
  * attempt for the life of the workflow. Releasing requires the same evidence a
- * retry does, and returns the reserved calls but never the spent attempt, so a
+ * retry does, and returns the reserved calls but not the spent attempt, so a
  * launch loop cannot become free.
+ *
+ * The one exception is a launch the runtime refused before handing any work
+ * over. Nothing started, so there was no work to pay for, and with a small
+ * attempt budget keeping it spent forced the workflow to be recreated. The
+ * attempt is returned only when the release carries that `not-started` signal.
  *
  * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow identifier.
  * @param {number} expectedRevision - Revision the caller last read.
- * @param {object} input - Event id, task, attempt, resolution, and evidence.
+ * @param {object} input - Event id, task, attempt, resolution, and evidence,
+ *   plus an optional `refusal` signal for a launch refused before it started.
  * @returns {object} Updated workflow state, or the unchanged state on replay.
  * @throws {Error} When the revision is stale, the task is not reserved, the
- * attempt does not match, or the resolution evidence is missing.
+ * attempt does not match, the resolution evidence is missing, or a refusal is
+ * not a `not-started` signal.
  */
 export function releaseReservation(stateDir, id, expectedRevision, input) {
   return withWorkflowUpdate(stateDir, id, () => {
@@ -1108,8 +1116,18 @@ export function releaseReservation(stateDir, id, expectedRevision, input) {
 
     const attempt = item.attempts.find((entry) => entry.id === input.attemptId);
     assert(attempt, "Reserved attempt is not recorded");
-    // The attempt itself stays spent: an unobserved launch is not free work.
-    attempt.status = "released";
+    const refused = input.refusal !== undefined;
+    if (refused) {
+      assertFailureSignal(input.refusal);
+      assert(
+        input.refusal.kind === "not-started",
+        "Only a launch refused before any work started returns its attempt",
+      );
+      state.budget.attemptsUsed -= 1;
+      attempt.refusal = input.refusal;
+    }
+    // Otherwise the attempt stays spent: an unobserved launch is not free work.
+    attempt.status = refused ? "refused" : "released";
     attempt.releasedAt = new Date().toISOString();
     attempt.resolution = input.resolution;
     attempt.evidence = input.evidence;
@@ -1124,6 +1142,7 @@ export function releaseReservation(stateDir, id, expectedRevision, input) {
       attemptId: input.attemptId,
       resolution: input.resolution,
       evidence: input.evidence,
+      ...(refused ? { refusal: input.refusal, attemptReturned: true } : {}),
     });
     state.revision += 1;
     state.status = deriveWorkflowStatus(state);

@@ -27,6 +27,9 @@ export const NEUTRAL_FAILURE_KINDS = Object.freeze([
   "scope",
   "model-binding",
   "execution-unconfigured",
+  // The runtime refused a launch before handing any work over, so nothing
+  // started and there is no process to reconcile.
+  "not-started",
   "workspace-context",
   "environment",
   "contract",

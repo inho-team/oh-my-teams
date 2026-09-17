@@ -63,6 +63,13 @@ export function classifyFailure(input = {}) {
   if (input.kind === "execution-unconfigured") {
     return route("execution-unconfigured", "pm", "rebind-profile-agent", false);
   }
+  // A launch refused before any work was handed over started nothing, so
+  // reconciling a process would inspect one that never existed. The same
+  // terminal refuses again, and choosing another launch path is PM's
+  // decision at every run depth.
+  if (input.kind === "not-started") {
+    return route("start-refused", "pm", "change-launch-path", false);
+  }
   if (
     input.kind === "workspace-context" ||
     input.grounded === false ||

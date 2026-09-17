@@ -22,6 +22,7 @@ import {
 } from "./role-launch.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
 import { assertNotKickoffOwner, deliverKickoff } from "./delivery.mjs";
+import { startDashboard } from "./dashboard.mjs";
 import {
   answerHeadless,
   HEADLESS_PROTOCOL,
@@ -124,6 +125,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   headless-answer --state DIR --worker ID --text TEXT [--timeout-ms N]
   headless-stop --state DIR --worker ID
   headless-list --state DIR
+  dashboard --state DIR [--port N] [--host ADDRESS] [--token TEXT]
+            (serves the headless workers to a browser; every request needs the token)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
@@ -228,6 +231,7 @@ export const ALLOWED_OPTIONS = {
   "headless-answer": ["state", "worker", "text", "timeout-ms"],
   "headless-stop": ["state", "worker"],
   "headless-list": ["state"],
+  dashboard: ["state", "port", "host", "token"],
   "role-command": ["org", "role", "workflow-id", "state"],
   "role-terminal": [
     "org",
@@ -335,6 +339,7 @@ export const REQUIRED_OPTIONS = {
   "headless-answer": ["state", "worker", "text"],
   "headless-stop": ["state", "worker"],
   "headless-list": ["state"],
+  dashboard: ["state"],
   "role-command": ["org", "role"],
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
@@ -723,6 +728,9 @@ async function injectFallback(args, org, run, launch, refusal) {
       "the model is not proven; report the model shown on the terminal screen",
     ],
     ...(injected.injected ? {} : { status: "blocked" }),
+    ...(injected.injectRefusal
+      ? { route: classifyFailure(injected.injectRefusal) }
+      : {}),
   };
 }
 
@@ -922,6 +930,21 @@ async function executeCommand(args) {
       return stopHeadless(args.state, args.worker);
     case "headless-list":
       return listHeadless(args.state);
+    case "dashboard": {
+      // The server keeps the process running; only where to open it is printed.
+      const started = await startDashboard({
+        stateDir: path.resolve(args.state),
+        port: args.port === undefined ? 4812 : Number(args.port),
+        host: args.host ?? "0.0.0.0",
+        token: args.token,
+      });
+      return {
+        listening: `${started.host}:${started.port}`,
+        local: `http://127.0.0.1:${started.port}${started.path}`,
+        path: started.path,
+        token: started.token,
+      };
+    }
     case "terminal-idle-check":
       return checkTerminalIdle(args.terminal, {
         executable: args.orca,

@@ -40,6 +40,38 @@ const ORCA_FAILURE_HINTS = Object.freeze({
 });
 
 /**
+ * Codes `dispatch --inject` returns when it refuses before typing anything.
+ *
+ * On that path they prove no work reached the terminal. The same codes met
+ * during `worker-start` may follow an agent the launch already started, which
+ * is why the general table leaves them unsettled.
+ */
+const INJECT_REFUSALS = new Set(["inject_rejected", "no_agent_detected"]);
+
+/**
+ * Translates a refusal of `dispatch --inject` into a neutral signal.
+ *
+ * @param {string} code - Orca `error.code` from the dispatch call.
+ * @param {string} [message] - Orca's own explanation, when it supplied one.
+ * @returns {object} `not-started` for an injection refusal, otherwise the
+ *   general translation.
+ * @throws {Error} When the resulting signal violates the port contract.
+ */
+export function translateInjectRefusal(code, message) {
+  const normalized = String(code ?? "").trim();
+  if (!INJECT_REFUSALS.has(normalized)) {
+    return translateOrcaFailure(code, message);
+  }
+  return assertFailureSignal({
+    kind: "not-started",
+    code: normalized,
+    message:
+      String(message ?? "").trim() ||
+      `Orca refused the injection: ${normalized}`,
+  });
+}
+
+/**
  * Translates one Orca code into the neutral signal failure routing consumes.
  *
  * @param {string} code - Orca `error.code`, receipt state, or observed state.
@@ -495,8 +527,14 @@ export async function checkTerminalIdle(
  * @param {string} [options.runId] - Run the task belongs to.
  * @param {string} [options.executable] - Orca executable to use.
  * @param {Function} [options.execute=run] - Injectable command runner.
+ * A refused injection is returned rather than thrown. It started nothing, so
+ * the result carries `injected: false`, the neutral `injectRefusal`, and the
+ * task this call created, closed as failed so it does not wait as `ready` in
+ * the Run with no Dispatch to carry it.
+ *
  * @returns {Promise<object>} Task, Dispatch and whether Orca injected it.
- * @throws {Error} When Orca refuses the task or the dispatch.
+ * @throws {Error} When Orca refuses the task, or fails the dispatch for any
+ *   reason other than a refusal to inject.
  */
 export async function injectTask(
   repo,
@@ -510,6 +548,7 @@ export async function injectTask(
   const selected = selectOrcaExecutable(executable);
   const runArgs = runId ? ["--run", runId] : [];
   let taskId = task;
+  let taskCreated = false;
   if (!taskId) {
     const created = await runOrcaJson(
       selected,
@@ -518,21 +557,66 @@ export async function injectTask(
     );
     taskId = created.result?.task?.id;
     assert(taskId, "Orca task-create returned no task id");
+    taskCreated = true;
   }
-  const dispatched = await runOrcaJson(
-    selected,
-    [
-      "orchestration",
-      "dispatch",
-      "--task",
+  let dispatched;
+  try {
+    dispatched = await runOrcaJson(
+      selected,
+      [
+        "orchestration",
+        "dispatch",
+        "--task",
+        taskId,
+        "--to",
+        terminal,
+        "--inject",
+        ...runArgs,
+      ],
+      { cwd: repo, execute },
+    );
+  } catch (error) {
+    if (!INJECT_REFUSALS.has(error.signal?.code)) throw error;
+    const injectRefusal = translateInjectRefusal(
+      error.signal.code,
+      error.signal.message,
+    );
+    let taskClosed = false;
+    if (taskCreated) {
+      try {
+        await runOrcaJson(
+          selected,
+          [
+            "orchestration",
+            "task-update",
+            "--id",
+            taskId,
+            "--status",
+            "failed",
+            "--result",
+            JSON.stringify({ refused: injectRefusal.code }),
+            ...runArgs,
+          ],
+          { cwd: repo, execute },
+        );
+        taskClosed = true;
+      } catch {
+        // The refusal is the fact to report; a task left open is named by
+        // taskClosed so the coordinator closes it rather than guessing.
+      }
+    }
+    return {
       taskId,
-      "--to",
+      taskCreated,
+      taskClosed,
+      dispatchId: null,
+      runId: runId ?? null,
       terminal,
-      "--inject",
-      ...runArgs,
-    ],
-    { cwd: repo, execute },
-  );
+      injected: false,
+      injectRefusal,
+      orcaResponse: error.message,
+    };
+  }
   const dispatch = dispatched.result?.dispatch;
   assert(dispatch?.id, "Orca dispatch returned no dispatch id");
   return {

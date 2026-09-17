@@ -323,3 +323,83 @@ test("an unlaunched reservation returns its slot and calls but not its attempt",
     /holds no reservation to release/,
   );
 });
+
+test("a launch refused before it started returns its attempt with the reservation", async (t) => {
+  const dir = await repo(t);
+  const stateDir = path.join(dir, ".omt");
+  writeJSON(path.join(dir, "lease.json"), task);
+  const request = {
+    schemaVersion: 1,
+    id: "refused-launch",
+    goal: "Return the attempt of a refused launch",
+    repo: ".",
+    tasks: [{ file: "lease.json", role: "intern" }],
+    policy: { maxRunning: 1, maxReviewPending: 1 },
+    budget: { maxAttempts: 1, maxCalls: 3 },
+  };
+  await createWorkflow(stateDir, request, structuredClone(organization), dir);
+  const revision = () => readWorkflow(stateDir, request.id).state.revision;
+  const reserve = (suffix) =>
+    reserveExecution(stateDir, request.id, revision(), {
+      schemaVersion: 1,
+      eventId: `reserve-${suffix}`,
+      attemptId: `attempt-${suffix}`,
+      taskId: "lease",
+      callAllowance: 2,
+      reserveOnly: true,
+    });
+  const release = (suffix, patch = {}) => ({
+    schemaVersion: 1,
+    eventId: `release-${suffix}`,
+    taskId: "lease",
+    attemptId: `attempt-${suffix}`,
+    resolution: "Orca refused the injection before typing anything",
+    evidence: "failure-junior-inject.json",
+    ...patch,
+  });
+  const notStarted = {
+    kind: "not-started",
+    code: "inject_rejected",
+    message: "no recognized agent detected",
+  };
+
+  reserve("one");
+  // Only a signal proving nothing started returns the attempt.
+  assert.throws(
+    () =>
+      releaseReservation(
+        stateDir,
+        request.id,
+        revision(),
+        release("one", {
+          refusal: { processState: "unknown", code: "failed", message: "x" },
+        }),
+      ),
+    /Only a launch refused before any work started/,
+  );
+
+  // #46: with maxAttempts 1 a refused injection used to exhaust the workflow,
+  // which then had to be recreated although no work had been attempted.
+  const released = releaseReservation(
+    stateDir,
+    request.id,
+    revision(),
+    release("one", { refusal: notStarted }),
+  ).state;
+  assert.equal(released.budget.attemptsUsed, 0);
+  assert.equal(released.tasks.lease.attempts[0].status, "refused");
+  assert.equal(
+    released.tasks.lease.attempts[0].refusal.code,
+    "inject_rejected",
+  );
+
+  // The returned attempt is usable, and an ordinary release still spends it.
+  reserve("two");
+  const spent = releaseReservation(
+    stateDir,
+    request.id,
+    revision(),
+    release("two"),
+  ).state;
+  assert.equal(spent.budget.attemptsUsed, 1);
+});

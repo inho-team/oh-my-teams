@@ -544,7 +544,14 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
   // offered, because the only proposals were presets that assign Opus, Sonnet
   // and GPT-OSS.
   assert.ok(offered.includes("agy:gemini-3.1-pro-high"));
-  assert.ok(offered.includes("agy:gemini-3.8-flash-high"));
+  assert.ok(offered.includes("agy:gemini-3.8-flash-medium"));
+  // Agy has no level-free Gemini ID and refuses one without --effort, so a
+  // Gemini choice always fixes a depth the user did not pick. Flash has a
+  // middle level; Pro 3.1 offers only high and low.
+  assert.ok(!offered.includes("agy:gemini-3.8-flash-high"));
+  const form = readSkill("form");
+  assert.match(form, /requires --effort/);
+  assert.match(form, /결성 보고에 반드시 적고/);
   for (const choice of offered) {
     assert.doesNotThrow(() => parseModelChoice(choice), choice);
   }
