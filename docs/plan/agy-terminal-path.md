@@ -123,7 +123,7 @@ export function predictLaunchPath(params) {
 | Agy / - / win32 / - / 신뢰 있음 / - | blocked | agent-trust-workspace-buffer | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 1-1절 버퍼 잔존 문제) |
 | Agy / gemini,gpt-oss / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
 | Claude / - / posix / - / - / skipPrompt=true | supervised-terminal | - | - / - | unverified |
-| Codex / - / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
+| Codex / - / - / - / 신뢰 있음 / - | blocked | codex-worker-done-unverified | pm / 브리프 기준 9 실측 | unverified |
 | 그 외 모든 미확인 조합 | blocked | untested_combination | pm / 검증 필요 | unverified |
 
 **규칙 적용 예시:**
@@ -138,7 +138,7 @@ export function predictLaunchPath(params) {
 1. **Codex 폴더 신뢰 질문**: 신뢰 없음 시 `codex-trust-workspace`
 2. **Claude 권한 우회 첫 실행 확인**: `skipPrompt` 설정 안 된 경우 `claude-permission-prompt`
 3. **Agy 신뢰 문구의 버퍼 잔존**: Agy 첫 실행 후 버퍼에 문구가 남아 차단되는 상황 예측 (`agent-trust-workspace-buffer`)
-4. **Codex 역할 worker_done 미검증**: `unverified`
+4. **Codex 역할 worker_done 미검증**: `codex-worker-done-unverified`
 5. **터미널 제목이 셸 경로로 남는 경우**: PowerShell에서 복수 명령 실행 시 발생. `no_agent_detected`
 6. **버전 범위 밖**: Orca/CLI 버전이 지원 범위 밖이면 `unsupported_version`
 
