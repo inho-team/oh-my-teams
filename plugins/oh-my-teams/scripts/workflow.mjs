@@ -753,6 +753,17 @@ function validateExecutionInput(input, reserveOnly = false) {
       input.receipt?.worktreeId,
     "Actual run/task/dispatch/execution/worktree receipt ids required",
   );
+  if (input.receipt.via === "headless-start") {
+    const expected = `headless:${input.receipt.executionId}`;
+    assert(
+      input.receipt.taskId === expected,
+      `Headless receipt taskId must be "${expected}", got "${input.receipt.taskId}"`,
+    );
+    assert(
+      input.receipt.dispatchId === expected,
+      `Headless receipt dispatchId must be "${expected}", got "${input.receipt.dispatchId}"`,
+    );
+  }
 }
 
 /**

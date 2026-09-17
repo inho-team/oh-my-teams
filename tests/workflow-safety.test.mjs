@@ -854,3 +854,154 @@ test("resumeWorkflow rejects pending and stale-execution gates", async (t) => {
   assert.equal(revoked.state.tasks.gated.state, "review-pending");
   assert.equal(revoked.state.tasks.gated.acceptedResult, null);
 });
+
+test("headless receipt: valid receipt passes, invalid receipts are rejected", async (t) => {
+  const dir = await repo(t),
+    stateDir = path.join(dir, ".omt");
+  writeJSON(path.join(dir, "a.json"), task("a"));
+  const request = {
+    schemaVersion: 1,
+    id: "headless-receipt-test",
+    goal: "Test headless receipt validation",
+    repo: ".",
+    tasks: [{ file: "a.json", role: "intern" }],
+    policy: { maxRunning: 1, maxReviewPending: 1 },
+    budget: { maxAttempts: 3, maxCalls: 3 },
+  };
+  await createWorkflow(stateDir, request, structuredClone(organization), dir);
+
+  // 올바른 headless receipt는 통과한다.
+  const goodReceipt = {
+    via: "headless-start",
+    executionId: "worker-abc123",
+    runId: "run_worker-abc123",
+    taskId: "headless:worker-abc123",
+    dispatchId: "headless:worker-abc123",
+    worktreeId: "uuid::C:/some/worktree",
+    runnerPid: 1234,
+    modelRequested: "gemini-3.1-pro-high",
+  };
+  const attached = attachExecution(stateDir, request.id, 1, {
+    schemaVersion: 1,
+    eventId: "attach-headless-good",
+    attemptId: "attempt-headless-good",
+    taskId: "a",
+    callAllowance: 1,
+    receipt: goodReceipt,
+  });
+  assert.equal(attached.tasks.a.state, "running");
+  assert.equal(attached.tasks.a.execution.via, "headless-start");
+
+  // 접두사 불일치: taskId가 headless:<executionId> 형식이 아님
+  await createWorkflow(
+    stateDir,
+    { ...request, id: "headless-receipt-reject-1" },
+    structuredClone(organization),
+    dir,
+  );
+  assert.throws(
+    () =>
+      attachExecution(stateDir, "headless-receipt-reject-1", 1, {
+        schemaVersion: 1,
+        eventId: "attach-bad-prefix",
+        attemptId: "attempt-bad-prefix",
+        taskId: "a",
+        callAllowance: 1,
+        receipt: {
+          via: "headless-start",
+          executionId: "worker-xyz",
+          runId: "run_xyz",
+          taskId: "task_123", // 접두사 불일치
+          dispatchId: "headless:worker-xyz",
+          worktreeId: "uuid::C:/some/worktree",
+        },
+      }),
+    /taskId must be/,
+    "접두사 불일치 taskId는 거부해야 한다",
+  );
+
+  // 다른 worker ID: dispatchId가 headless:<executionId>와 불일치
+  await createWorkflow(
+    stateDir,
+    { ...request, id: "headless-receipt-reject-2" },
+    structuredClone(organization),
+    dir,
+  );
+  assert.throws(
+    () =>
+      attachExecution(stateDir, "headless-receipt-reject-2", 1, {
+        schemaVersion: 1,
+        eventId: "attach-bad-dispatch",
+        attemptId: "attempt-bad-dispatch",
+        taskId: "a",
+        callAllowance: 1,
+        receipt: {
+          via: "headless-start",
+          executionId: "worker-abc",
+          runId: "run_abc",
+          taskId: "headless:worker-abc",
+          dispatchId: "headless:other-worker", // 다른 worker ID
+          worktreeId: "uuid::C:/some/worktree",
+        },
+      }),
+    /dispatchId must be/,
+    "다른 worker ID의 dispatchId는 거부해야 한다",
+  );
+
+  // via 누락: 기존 Orca receipt로 간주되어 기존 검사만 적용 (headless 접두사 검사 없음)
+  await createWorkflow(
+    stateDir,
+    { ...request, id: "headless-receipt-no-via" },
+    structuredClone(organization),
+    dir,
+  );
+  // via 없이 일반 Orca receipt 형식이면 통과한다.
+  const noViaAttached = attachExecution(
+    stateDir,
+    "headless-receipt-no-via",
+    1,
+    {
+      schemaVersion: 1,
+      eventId: "attach-no-via",
+      attemptId: "attempt-no-via",
+      taskId: "a",
+      callAllowance: 1,
+      receipt: {
+        executionId: "exec-no-via",
+        runId: "run-no-via",
+        taskId: "orca-task",
+        dispatchId: "dispatch-no-via",
+        worktreeId: "wt-no-via",
+      },
+    },
+  );
+  assert.equal(noViaAttached.tasks.a.state, "running");
+
+  // 필수 필드 누락: worktreeId 없음
+  await createWorkflow(
+    stateDir,
+    { ...request, id: "headless-receipt-missing-field" },
+    structuredClone(organization),
+    dir,
+  );
+  assert.throws(
+    () =>
+      attachExecution(stateDir, "headless-receipt-missing-field", 1, {
+        schemaVersion: 1,
+        eventId: "attach-missing-field",
+        attemptId: "attempt-missing-field",
+        taskId: "a",
+        callAllowance: 1,
+        receipt: {
+          via: "headless-start",
+          executionId: "worker-def",
+          runId: "run_def",
+          taskId: "headless:worker-def",
+          dispatchId: "headless:worker-def",
+          // worktreeId 누락
+        },
+      }),
+    /receipt ids required/,
+    "필수 필드 누락은 거부해야 한다",
+  );
+});

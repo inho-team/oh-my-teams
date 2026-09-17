@@ -555,7 +555,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
  * @param {string} options.cwd - Worktree the worker runs in.
  * @param {string} options.prompt - Full instruction, protocol included.
  * @param {number} [options.timeoutMs=1800000] - Per-turn time limit.
- * @returns {object} The worker record and the turn it started.
+ * @returns {object} The worker record, the turn it started, and a headless receipt draft.
  * @throws {Error} When the id is taken or the provider cannot run headless.
  */
 export function startHeadlessWorker({
@@ -590,7 +590,18 @@ export function startHeadlessWorker({
     createdAt: new Date().toISOString(),
   };
   writeJSON(path.join(dir, "worker.json"), worker);
-  return { worker, ...launchTurn(dir, worker, { prompt }) };
+  const launched = launchTurn(dir, worker, { prompt });
+  const receipt = {
+    via: "headless-start",
+    executionId: workerId,
+    runId: `run_${workerId}`,
+    taskId: `headless:${workerId}`,
+    dispatchId: `headless:${workerId}`,
+    worktreeId: path.resolve(cwd),
+    runnerPid: launched.runnerPid ?? null,
+    modelRequested: model ?? null,
+  };
+  return { worker, ...launched, receipt };
 }
 
 function readTurn(worker, turnDir, options) {
