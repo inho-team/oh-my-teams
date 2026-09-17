@@ -209,3 +209,89 @@ test("the runtime reference explains the narrow launch and the exception path", 
     /`role-spec --text`의 출력/,
   );
 });
+
+const refuse = (code, message) => ({
+  code: 0,
+  stdout: JSON.stringify({ ok: false, error: { code, message } }),
+});
+
+test("a refused injection is returned, and the task it created is closed", async () => {
+  // #46: on Windows Orca did not recognize the Agy terminal, refused the
+  // injection with inject_rejected, and the wrapper threw Orca's raw error. The
+  // documented blocked result never appeared, and a task it had created was
+  // left ready in the Run with no Dispatch to carry it.
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv.slice(1, -1));
+    if (argv[2] === "task-create") return reply({ task: { id: "task_7" } });
+    if (argv[2] === "dispatch")
+      return refuse(
+        "inject_rejected",
+        "Cannot dispatch --inject to terminal term_1: no recognized agent detected.",
+      );
+    return reply({ task: { id: "task_7", status: "failed" } });
+  };
+  const injected = await injectTask("/repo", {
+    spec: "work",
+    terminal: "term_1",
+    runId: "run_1",
+    executable: "orca",
+    execute,
+  });
+  assert.equal(injected.injected, false);
+  assert.equal(injected.dispatchId, null);
+  assert.equal(injected.taskId, "task_7");
+  assert.equal(injected.taskClosed, true);
+  assert.equal(injected.injectRefusal.kind, "not-started");
+  assert.equal(injected.injectRefusal.code, "inject_rejected");
+  assert.deepEqual(calls[2].slice(0, 6), [
+    "orchestration",
+    "task-update",
+    "--id",
+    "task_7",
+    "--status",
+    "failed",
+  ]);
+
+  // A task the caller brought is the caller's to settle.
+  calls.length = 0;
+  const existing = await injectTask("/repo", {
+    task: "task_5",
+    terminal: "term_1",
+    executable: "orca",
+    execute: async (argv) =>
+      argv[2] === "dispatch"
+        ? refuse("no_agent_detected", "no agent")
+        : reply({}),
+  });
+  assert.equal(existing.taskCreated, false);
+  assert.equal(existing.taskClosed, false);
+
+  // Any other dispatch failure still throws: it does not prove nothing started.
+  await assert.rejects(
+    injectTask("/repo", {
+      task: "task_5",
+      terminal: "term_1",
+      executable: "orca",
+      execute: async () => refuse("runtime_error", "broke mid-dispatch"),
+    }),
+    /runtime_error/,
+  );
+});
+
+test("a refusal that started nothing routes to PM, not to process reconciliation", () => {
+  // Translated through the general table, inject_rejected read as an unsettled
+  // process and went to PL to reconcile, although no Dispatch or process
+  // existed and a depth-3 run holds no PL.
+  const route = classifyFailure({
+    kind: "not-started",
+    code: "inject_rejected",
+    message: "no recognized agent detected",
+  });
+  assert.deepEqual(route, {
+    category: "start-refused",
+    nextOwner: "pm",
+    action: "change-launch-path",
+    retryable: false,
+  });
+});

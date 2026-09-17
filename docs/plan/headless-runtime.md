@@ -108,6 +108,23 @@ node <runtime> headless-list   --state DIR
 
 검증 중에 `headless-answer --text`의 답변 문장이 별도 인자로 거부되는 문제를 찾았다. `role-spec --text` 플래그가 모든 명령에 적용된 탓이며, `role-spec`에만 적용하도록 고쳤다.
 
+### Windows 검증 (2026-09-17)
+
+[#46](https://github.com/inho-team/oh-my-teams/issues/46)에서 Windows의 Orca 터미널 경로로는 Gemini Agy 역할을 시작할 수 없다는 것이 확인되어, 같은 역할을 헤드리스로 실행했다.
+
+- 환경: Windows 11 Pro 10.0.26200, Antigravity CLI 1.2.4, oh-my-teams 2.2.3(`main`의 `7d24fed` 이후).
+- 조직: `org-draft`로 Junior만 Agy `gemini-3.8-flash-medium`으로 둔 임시 조직. 임시 Git 저장소에서 `headless-start --role junior`로 "`hello.txt`에 `ok`를 쓰고 끝내라"는 과제를 주었다.
+
+| 항목 | 결과 |
+|---|---|
+| 판정 | `liveness: exited`, `outcome: done`, `DONE` 표시에 커밋 SHA 포함 |
+| 모델 | 요청·보고 모두 `gemini-3.8-flash-medium`, `modelProof: matched` |
+| 결과물 | `hello.txt`에 `ok`, 커밋 `Create hello.txt containing ok` |
+| 종료 | `exit.code: 0`, `timedOut: false`. 마지막 스트림 이벤트 1.7초 뒤 프로세스가 스스로 종료 |
+| 소요 | 240.0초. 역할 지시에 따라 작업 디렉터리·Git 상태 확인, 파일 작성, 커밋, SHA 확인까지 도구 호출 약 30단계 |
+
+이 검증에는 `--timeout-ms 240000`을 주었고 실행이 그 직전에 끝났다. 기본 제한 시간은 30분이므로 평소 실행에는 여유가 있지만, 제한 시간을 줄여 쓸 때에는 Windows의 Agy 역할이 이 정도 시간을 쓸 수 있다는 점을 고려한다. 질문과 답변으로 이어지는 두 번째 턴과 시간 초과 경로는 Windows에서 아직 확인하지 않았다.
+
 ## 9. 대시보드 (3단계)
 
 Orca 탭이 보여 주던 것을 oh my teams가 직접 보여 준다. 의존성 없는 Node HTTP 서버가 worker 기록 파일을 읽어 폰 화면용 페이지로 제공한다.
