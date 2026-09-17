@@ -93,6 +93,7 @@ node <runtime> worker-start --org <organization.json> --role <pl|senior|junior|i
 | 실행기           | 시작 경로                                                                                                                                                                  |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude·Codex·Agy | 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 모델·강도·권한 우회 플래그를 담은 명령의 터미널을 열고, 그 터미널을 `--terminal`로 넘긴다. `--terminal` 없이 호출하면 거부한다. |
+| Agy(Windows, `gemini` 모델) | Windows의 Orca는 이 터미널의 대기를 보고하지 않으므로 감독 worker로 띄우지 않고 `headless-start`로 실행한다(아래 Agy 대기 판정 문단). |
 | Ollama           | 대화형 Orca agent가 없으므로 감독 worker로 띄우지 않고 `work` 하네스로 실행한다.                                                                                           |
 
 Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권한 우회 플래그를 보장할 수 없기 때문이다. 자세한 근거는 아래 「역할 탭 제목」 절의 권한 우회 플래그 문단에 있다.
@@ -127,7 +128,7 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 ### 역할 터미널에서 시작
 
-모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
+모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따르며, 예외는 Windows에서 모델이 `gemini`로 시작하는 Agy 역할뿐이다. 이 역할은 아래 Agy 대기 판정 문단에 따라 `headless-start`로 실행한다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json

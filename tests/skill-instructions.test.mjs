@@ -631,6 +631,10 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // from a terminal opened with its model and bypass flag.
   assert.match(runtime, /### 역할 터미널에서 시작/);
   assert.match(runtime, /\| Claude·Codex·Agy \|/);
+  assert.match(
+    runtime,
+    /\| Agy\(Windows, `gemini` 모델\) \|[^\n]*`headless-start`로 실행한다/,
+  );
   assert.match(runtime, /`agentDefaultArgs`/);
   // Orca pre-trusts a Codex folder only when it launches Codex itself, so the
   // terminal path can stop at Codex's trust screen until a person answers.
@@ -661,6 +665,12 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
       /Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널/,
     );
     assert.doesNotMatch(readSkill(role), /래퍼가 새 터미널을 띄우/);
+    // #46: on Windows Orca never reports a Gemini Agy terminal idle, so that
+    // one role runs headless instead of through the terminal path.
+    assert.match(
+      readSkill(role),
+      /Windows에서 모델이 `gemini`로 시작하는 Agy 역할은 Orca 터미널로 시작하지 않고 `headless-start`로 실행/,
+    );
     // The example checks the terminal, then reserves, then hands it over.
     assert.match(
       readSkill(role),
