@@ -272,3 +272,62 @@ Thanks!
 | r3-c3 Agy `claude-sonnet-4-6` | `agy-probe-sandbox` | `role-terminal`이 터미널 생성 전 거부: `[claude-unsupported-by-orca]` | **표 7행과 일치.** |
 | r3-c4 Agy `gpt-oss-120b-medium` (`--allow-unverified`) | `agy-probe-sandbox` | `headless` 경로로 거부. 이유 코드가 빈 배열이어서 메시지가 `"refused by matrix []"`로 나온다. | **경미한 결함.** 표 9행의 `reason`이 비어 있다. |
 | r5-c6 Codex `gpt-5.6-luna` | 새 워크트리 `verify-r5-c6-codex-luna-new`(기준 `fef87c6`, 회수함) | `role-terminal --allow-unverified` → ready=true → `terminal-idle-check` idle=true → `worker-start` (task `task_e16a4a21060e`, dispatch `ctx_1a6f307bf0c3`, `binding.modelProof=unproven`) → `orchestration check --wait` → `worker_done`, outcome succeeded, 커밋 `b5e1cc3` → `worker-release` → 터미널 닫기 → 워크트리 회수 | **Codex 감독 터미널 경로가 `worker_done`까지 처음으로 검증되었다.** 표 12행의 근거 등급을 `unverified`에서 `verified`로 올릴 수 있다. |
+
+---
+
+## #46·#55 판정 (2026-09-18)
+
+환경: Windows 11 Pro 10.0.26200, Orca 1.4.204, Antigravity CLI 1.2.5, PowerShell.
+
+### #46 A — Windows에서 `mode con:` 뒤에도 `tui-idle`이 충족되지 않음
+
+**판정: 재현 확인, Orca 쪽 원인으로 미해결.**
+
+이번 실측에서 `agy-probe-sandbox`(Agy 신뢰 있음) 워크트리에 `gemini-3.8-flash-medium`을 단일 명령(`agy …`)으로 띄웠을 때 `agentIdentity: antigravity`로 식별은 되었으나, `orca terminal wait --for tui-idle --timeout-ms 120000`이 만료까지 만족되지 않았다. `mode con: cols=44`를 먼저 보낸 뒤 `agy`를 따로 보내면 `tui-idle: satisfied: true`가 되지만 아래 B의 이유로 에이전트 식별이 깨진다. 두 조건을 동시에 만족시키는 방법이 Orca 1.4.204에서 존재하지 않는다. 근본 원인은 「Orca 수정안」 절 1에서 분석한 `q0i(e)` 함수의 `gemini`-하드코딩 판정과 Windows 화면 폭 조건이다.
+
+### #46 B — `mode con: …; agy …`로 띄운 터미널을 Orca가 agy로 인식하지 못함
+
+**판정: 재현 확인, Orca 쪽 원인으로 미해결.**
+
+빈 PowerShell 터미널에 `mode con: cols=44`를 먼저 보내고 `agy`를 따로 보내면 `tui-idle: satisfied: true`가 되지만, `agentIdentity`가 비고 터미널 제목이 `powershell.exe`로 남는다. 이는 「Orca 판정 규칙 1」 절에서 분석한 대로, PowerShell에서 복합 명령 혹은 순차 명령 실행 시 전경 프로세스가 `powershell.exe`로 유지되어 `isShellProcess` 판정을 통과하지 못하는 현상이다. OMT가 고칠 수 있는 원인이 아니며, 「Orca 수정안 1」의 `isShellProcess` 보강(Windows 전경 프로세스 트리에서 `agy.exe` 말단 프로세스 확인)이 적용되어야 해결된다.
+
+### #46 C — `--inject-fallback`이 `inject_rejected`를 결과로 돌려주지 않음
+
+**판정: PR에서 수정 완료(이슈 #46 코멘트 확인).**
+
+C는 `--inject-fallback`이 `inject_rejected`·`no_agent_detected` 거부를 던지지 않고 `status: "blocked"` 결과로 돌려주도록 수정되었으며, 거부 원문·`injectRefusal`·`taskId`·`taskClosed`가 함께 기록된다. 이번 실측 범위 밖에서 이미 반영되었다.
+
+### #46 D — 주입 거부 시 Task가 남고 예약 시도가 소진됨
+
+**판정: PR에서 수정 완료(이슈 #46 코멘트 확인).**
+
+D는 주입 경로의 `inject_rejected`·`no_agent_detected`가 `not-started` 신호로 번역되어 `workflow-release`에서 예약한 시도를 돌려받도록 수정되었다. 이번 실측 범위 밖에서 이미 반영되었다.
+
+---
+
+### #55 A — Windows의 비 Gemini Agy 역할이 실행 전에 거부되지 않음
+
+**판정: 수정 완료.**
+
+이번 실측에서 `agy-probe-sandbox`에서 `claude-sonnet-4-6` Agy 역할을 실행했을 때 `role-terminal`이 터미널 생성 전 `[claude-unsupported-by-orca]`로 거부했다. 표 7행과 일치한다. `gpt-oss-120b-medium` Agy 역할은 `headless` 경로로 거부되었다(표 9행). 두 경우 모두 터미널을 열기 전에 실행 경로가 결정되어 제안 1이 반영된 상태다.
+
+### #55 B — 비 Gemini Agy 역할 대체 경로(headless)의 검증
+
+**판정: 수정 완료, `orca-runtime.md` 및 표에 반영됨.**
+
+`headless-start`가 provider `agy`에서 모델 무관하게 동작한다는 것이 이미 문서에 기록되어 있고, 표 8·9행이 `headless` 경로를 명시한다. 이번 실측에서도 해당 분기가 런타임에서 정상적으로 적용됨을 확인했다.
+
+### #55 C — headless 실행을 workflow 시도에 연결하는 receipt 형식이 없음
+
+**판정: 수정 완료, 「headless receipt 형식」 절에 반영됨.**
+
+「headless receipt 형식」 절이 `via: "headless-start"`와 worker ID 대응 형식을 정의하고, `validateExecutionInput`에서 검증하는 로직을 명시한다. 런타임 코드(`workflow.mjs`)와 표가 이 형식을 반영한다.
+
+---
+
+### 결론
+
+**#46은 열어 둔다.** A와 B의 근본 원인은 Orca의 `q0i(e)` 판정 하드코딩과 Windows 전경 프로세스 트리 파싱이며, OMT 범위에서 해결할 수 없다. Orca 수정(`q0i` 판정 완화 및 `isShellProcess` 보강)이 적용되기 전까지 Windows에서 Agy Gemini 역할의 감독 터미널 경로는 사용할 수 없다.
+
+**#55는 닫을 수 있다.** 비 Gemini Agy 역할의 실행 전 거부(A), headless 경로 검증(B), headless receipt 형식(C)이 모두 표와 런타임에 반영되었다. 이번 실측(`r3-c3`, `r3-c4`)에서도 런타임 동작이 표와 일치함을 확인했다.
+
