@@ -836,3 +836,105 @@ test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
   assert.equal(env3.orcaVersion, "unknown", "버전 읽기 실패 시 unknown");
   assert.equal(env3.trustRecordExists, "unknown", "설정 읽기 실패 시 unknown");
 });
+
+test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", async () => {
+  // finding: codex-trust-unknown — role-terminal.mjs가 Codex 신뢰 기록을 unknown으로 넘기던 버그 수정 검증.
+  // 설정 내용을 주입해 true·false·unknown 세 경우를 결정적으로 확인한다.
+  const { readLaunchEnvironment: readEnv } = await import(
+    "../plugins/oh-my-teams/scripts/role-terminal.mjs"
+  );
+  const tmpDir = await import("node:os").then((m) => m.tmpdir());
+  const fsM = await import("node:fs");
+  const pathM = await import("node:path");
+
+  const tmpBase = pathM.join(tmpDir, "omt-codex-trust-" + Date.now());
+  // 임시 Codex 설정 디렉터리
+  const codexDir = pathM.join(tmpBase, "codex-home");
+  fsM.mkdirSync(codexDir, { recursive: true });
+  const codexConfig = pathM.join(codexDir, "config.toml");
+
+  // 주 저장소 루트 경로: git rev-parse 시뮬레이션을 위해 주입
+  const fakeRepoRoot = "C:/Users/kjsun/orca/oh-my-teams";
+  const fakeGitCommonDir = fakeRepoRoot + "/.git";
+
+  // fakeExecute: git rev-parse는 fakeGitCommonDir 반환, 나머지는 실패
+  const makeExecute = () =>
+    async (argv) => {
+      if (argv[0] === "git" && argv.includes("--git-common-dir")) {
+        return { code: 0, stdout: fakeGitCommonDir + "\n" };
+      }
+      // orca --version, agy --version → code:1 (unknown 유지)
+      return { code: 1, stdout: "", stderr: "skip" };
+    };
+
+  // 케이스 1: trust_level = "trusted" → codexTrustRecordExists = true
+  fsM.writeFileSync(
+    codexConfig,
+    `[projects."${fakeRepoRoot}"]\ntrust_level = "trusted"\n`,
+  );
+  const envTrue = await readEnv({
+    worktreePath: fakeRepoRoot + "/some-worktree",
+    homedir: tmpBase,
+    codexHome: codexDir,
+    execute: makeExecute(),
+  });
+  assert.equal(
+    envTrue.codexTrustRecordExists,
+    true,
+    "trust_level=trusted → true",
+  );
+
+  // 케이스 2: 다른 경로 or trust_level 없음 → false
+  fsM.writeFileSync(
+    codexConfig,
+    `[projects."C:/other/repo"]\ntrust_level = "trusted"\n`,
+  );
+  const envFalse = await readEnv({
+    worktreePath: fakeRepoRoot + "/some-worktree",
+    homedir: tmpBase,
+    codexHome: codexDir,
+    execute: makeExecute(),
+  });
+  assert.equal(
+    envFalse.codexTrustRecordExists,
+    false,
+    "경로 불일치 → false",
+  );
+
+  // 케이스 3: 설정 파일 없음 → unknown
+  fsM.unlinkSync(codexConfig);
+  const envUnknown = await readEnv({
+    worktreePath: fakeRepoRoot + "/some-worktree",
+    homedir: tmpBase,
+    codexHome: codexDir,
+    execute: makeExecute(),
+  });
+  assert.equal(
+    envUnknown.codexTrustRecordExists,
+    "unknown",
+    "설정 파일 없음 → unknown",
+  );
+
+  // 케이스 추가: trust_level = "trusted" + 경로 대소문자/구분자 정규화
+  fsM.mkdirSync(codexDir, { recursive: true });
+  // Windows 경로를 백슬래시로 저장해도 정규화 후 일치
+  const backslashPath = fakeRepoRoot.replace(/\//g, "\\");
+  fsM.writeFileSync(
+    codexConfig,
+    `[projects."${backslashPath}"]\ntrust_level = "trusted"\n`,
+  );
+  const envNorm = await readEnv({
+    worktreePath: fakeRepoRoot + "/some-worktree",
+    homedir: tmpBase,
+    codexHome: codexDir,
+    execute: makeExecute(),
+  });
+  assert.equal(
+    envNorm.codexTrustRecordExists,
+    true,
+    "백슬래시 경로 정규화 후 true",
+  );
+
+  // 정리
+  fsM.rmSync(tmpBase, { recursive: true, force: true });
+});

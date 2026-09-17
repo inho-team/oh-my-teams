@@ -39,6 +39,7 @@ import {
  * @param {string} [options.worktreePath] - 신뢰 여부를 확인할 워크트리 경로.
  * @param {string} [options.orcaExecutable] - Orca 실행 파일 경로.
  * @param {string} [options.homedir=os.homedir()] - 홈 디렉터리 (테스트용 주입).
+ * @param {string} [options.codexHome] - Codex 설정 디렉터리 (테스트용 주입, 미지정 시 CODEX_HOME 환경변수 또는 ~/.codex 사용).
  * @param {Function} [options.execute=run] - 명령 실행기 (테스트용 주입).
  * @returns {Promise<object>} 환경 값 객체.
  */
@@ -46,6 +47,7 @@ export async function readLaunchEnvironment({
   worktreePath,
   orcaExecutable,
   homedir = os.homedir(),
+  codexHome,
   execute = run,
 } = {}) {
   const platform = process.platform;
@@ -122,12 +124,79 @@ export async function readLaunchEnvironment({
     // unknown 유지
   }
 
+  // Codex 신뢰 기록: CODEX_HOME/config.toml 또는 ~/.codex/config.toml
+  // [projects."<주 저장소 루트>"] 아래 trust_level = "trusted"인지 읽기만 한다.
+  // 주 저장소 루트: worktreePath에서 git rev-parse --path-format=absolute --git-common-dir 결과의 부모.
+  let codexTrustRecordExists = "unknown";
+  if (worktreePath) {
+    try {
+      const gitCommonDir = await execute(
+        [
+          "git",
+          "-C",
+          worktreePath,
+          "rev-parse",
+          "--path-format=absolute",
+          "--git-common-dir",
+        ],
+        { timeoutMs: 10000 },
+      );
+      if (gitCommonDir.code === 0) {
+        const gitCommonDirPath = String(gitCommonDir.stdout ?? "").trim();
+        // --git-common-dir 결과의 부모가 주 저장소 루트
+        const repoRoot = path.dirname(gitCommonDirPath);
+        // 경로 정규화: 대소문자 통일(Windows), 구분자 통일
+        const normPath = (p) =>
+          p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+        const normalizedRoot = normPath(repoRoot);
+
+        const resolvedCodexHome = codexHome ?? process.env.CODEX_HOME;
+        const codexConfigFile = resolvedCodexHome
+          ? path.join(resolvedCodexHome, "config.toml")
+          : path.join(homedir, ".codex", "config.toml");
+
+        try {
+          const tomlText = fs.readFileSync(codexConfigFile, "utf8");
+          // [projects."<경로>"] 섹션에서 trust_level = "trusted" 검출
+          // TOML 섹션 헤더 패턴: [projects."경로"] 또는 [projects.'경로']
+          const sectionRe =
+            /^\s*\[projects\.['"](.*?)['"]\]\s*$/gim;
+          let match;
+          let found = false;
+          while ((match = sectionRe.exec(tomlText)) !== null) {
+            const sectionPath = normPath(match[1]);
+            if (sectionPath !== normalizedRoot) continue;
+            // 이 섹션부터 다음 섹션([...]) 또는 파일 끝까지 검색
+            const afterSection = tomlText.slice(
+              match.index + match[0].length,
+            );
+            const nextSection = afterSection.search(/^\s*\[/m);
+            const body =
+              nextSection === -1
+                ? afterSection
+                : afterSection.slice(0, nextSection);
+            if (/^\s*trust_level\s*=\s*["']trusted["']\s*$/im.test(body)) {
+              found = true;
+            }
+            break;
+          }
+          codexTrustRecordExists = found;
+        } catch {
+          // 읽기 실패: unknown 유지
+        }
+      }
+    } catch {
+      // git 실행 실패: unknown 유지
+    }
+  }
+
   return {
     platform,
     shell,
     orcaVersion,
     cliVersion,
     trustRecordExists,
+    codexTrustRecordExists,
     skipDangerousModePermissionPrompt,
   };
 }
