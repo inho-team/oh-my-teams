@@ -22,8 +22,8 @@ description: 최초 oh my teams 상설 조직을 다섯 역할의 모델만 물�
 | 역할 | 선택지 |
 |---|---|
 | PM·PL·Senior | Claude Code 기본(`claude:default`), Opus 4.6·Agy(`agy:claude-opus-4-6-thinking`), Gemini 3.1 Pro·Agy(`agy:gemini-3.1-pro-high`), Codex 기본(`codex:default`) |
-| Junior | Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-high`), Opus 4.6·Agy(`agy:claude-opus-4-6-thinking`), Codex 기본(`codex:default`) |
-| Intern | GPT-OSS 120B·Agy(`agy:gpt-oss-120b-medium`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-high`), Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Codex 기본(`codex:default`) |
+| Junior | Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-medium`), Opus 4.6·Agy(`agy:claude-opus-4-6-thinking`), Codex 기본(`codex:default`) |
+| Intern | GPT-OSS 120B·Agy(`agy:gpt-oss-120b-medium`), Gemini 3.8 Flash·Agy(`agy:gemini-3.8-flash-medium`), Sonnet 4.6·Agy(`agy:claude-sonnet-4-6`), Codex 기본(`codex:default`) |
 
 이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 묻기 전에 `claude`, `codex`, `agy`가 설치되어 있는지와 `agy models`에 해당 ID가 있는지 확인하고, 확인되지 않은 선택지는 빼고 제시한다. 이 배포에서 확인한 Agy 선택지는 Gemini Flash 3.8·3.7·3.6(각 high/medium/low), Gemini Pro 3.1(high/low), Claude Sonnet 4.6, Claude Opus 4.6, GPT-OSS-120B다. Codex의 개별 모델은 능력 서열을 가정하지 않기 위해 선택지에 넣지 않고 자유 입력으로 받는다.
 
@@ -42,7 +42,7 @@ node <runtime> host-defaults --project <project>
 
 Codex 모델 목록은 카탈로그가 계정과 CLI 버전에 따라 달라지므로 이 문서에 적어 두지 않는다. 질문 본문에 `codex.listed`의 ID를 나열하고, 그 가운데 하나를 쓰려면 자유 입력으로 `codex:<id>`를 적으면 된다고 안내한다. 이 안내는 질문 본문에 넣으므로 질문 수와 선택지 수는 늘지 않고, 목록은 카탈로그 순서 그대로 적어 서열을 매기지 않는다.
 
-Gemini 모델 ID는 추론 강도를 이름에 담고 있어서 강도를 비워 둘 수 없다. 결성 단계에서는 Pro 3.1과 Flash 3.8이 공통으로 제공하는 `-high`를 사용하고, 다른 강도는 `adjust`에서 바꾼다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 역할만 다시 묻는다.
+Gemini는 다른 모델과 달리 강도를 비워 둘 수 없다. Agy에는 강도 없는 Gemini ID가 없고, 강도를 빼고 `--model gemini-3.8-flash`로 부르면 1.2.4가 "requires --effort (available: low, medium, high)"라며 호출 전에 거부하므로, 따로 조정하지 않았을 때 쓰일 기본 강도가 없다. 그래서 결성 단계에서는 Flash 3.8을 `medium`으로, `medium`이 없는 Pro 3.1을 `high`로 정한다. 사용자가 고르지 않은 강도이므로 결성 보고에 반드시 적고, 다른 강도는 `adjust`에서 바꾼다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 역할만 다시 묻는다.
 
 ## 묻지 않고 정하는 것
 
@@ -69,6 +69,6 @@ node <runtime> show --org <project>/.omt/organization.json
 
 `init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 질문을 처음부터 다시 시작하지 않는다.
 
-결성을 보고할 때에는 역할별로 배정된 모델과 함께, 모델이 `null`인 `기본` 프로필마다 `host-defaults`를 다시 실행해 얻은 현재 해석값을 적는다. 예를 들어 "PL: Codex 기본(지금은 gpt-6-astra, 계정 기본값을 따름)"처럼 저장값과 현재 해석값을 구분하고, Claude의 해석값이 `null`이면 확인하지 못했다고 적는다. 이어서 위 목록에서 묻지 않고 정한 값을 짧게 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 저장된 파일의 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서 확인할 수 있다.
+결성을 보고할 때에는 역할별로 배정된 모델과 함께, 모델이 `null`인 `기본` 프로필마다 `host-defaults`를 다시 실행해 얻은 현재 해석값을 적는다. 예를 들어 "PL: Codex 기본(지금은 gpt-6-astra, 계정 기본값을 따름)"처럼 저장값과 현재 해석값을 구분하고, Claude의 해석값이 `null`이면 확인하지 못했다고 적는다. Gemini를 고른 역할이 있으면 "Junior: Gemini 3.8 Flash, 강도 medium(Gemini는 강도가 필수라 결성 때 정함)"처럼 정한 강도를 함께 적는다. 이어서 위 목록에서 묻지 않고 정한 값을 짧게 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 저장된 파일의 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서 확인할 수 있다.
 
 `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다. 조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 kickoff 등록부가 놓이는 자리가 된다. 한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있으며, form 자체는 kickoff를 등록하지 않는다. 자세한 계약은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)에 있다.
