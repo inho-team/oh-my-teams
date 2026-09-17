@@ -526,7 +526,7 @@ test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 
   );
   const gemini = roleCommand(org, "senior");
 
-  // Agy gemini win32/powershell → no_agent_detected (matrix blocked)
+  // Agy gemini win32/powershell → orca-idle-requires-narrow-screen (matrix blocked)
   let thrown = null;
   try {
     await openRoleTerminal({
@@ -546,7 +546,7 @@ test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 
     thrown = err;
   }
   assert.ok(thrown, "openRoleTerminal must throw for blocked matrix path");
-  assert.match(thrown.message, /no_agent_detected/);
+  assert.match(thrown.message, /orca-idle-requires-narrow-screen/);
 
   // Orca 호출이 전혀 없어야 함 → attempt 예약 시도 없음
   assert.equal(
