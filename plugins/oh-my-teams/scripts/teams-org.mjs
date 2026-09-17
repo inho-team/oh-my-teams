@@ -561,8 +561,8 @@ async function startSupervisedWorker(args) {
         shell: env.shell,
         trustRecordExists: env.trustRecordExists,
         skipDangerousModePermissionPrompt: Boolean(
-            PERMISSION_BYPASS[launch.provider],
-          ),
+          PERMISSION_BYPASS[launch.provider],
+        ),
         orcaVersion: env.orcaVersion,
         cliVersion: env.cliVersion,
       });
@@ -991,7 +991,9 @@ async function executeCommand(args) {
         try {
           const org = validateOrg(readJSON(args.org));
           const command = roleCommand(org, args.role);
-          const env = await readLaunchEnvironment({ orcaExecutable: args.orca });
+          const env = await readLaunchEnvironment({
+            orcaExecutable: args.orca,
+          });
           matrixPrediction = predictLaunchPath({
             runner: command.provider,
             model: command.modelRequested,

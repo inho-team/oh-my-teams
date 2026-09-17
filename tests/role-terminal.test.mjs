@@ -727,10 +727,14 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
   // parseArgs: allow-unverified 는 값 옵션 (flag 아님)
   const parsed = parseArgs([
     "role-terminal",
-    "--org", "org.json",
-    "--role", "senior",
-    "--worktree", "active",
-    "--allow-unverified", "PM이 2026-09-17 승인",
+    "--org",
+    "org.json",
+    "--role",
+    "senior",
+    "--worktree",
+    "active",
+    "--allow-unverified",
+    "PM이 2026-09-17 승인",
   ]);
   assert.equal(
     parsed["allow-unverified"],
@@ -740,13 +744,17 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
 
   // 값 없이 사용하면 parseArgs가 에러를 던진다
   assert.throws(
-    () => parseArgs([
-      "role-terminal",
-      "--org", "org.json",
-      "--role", "senior",
-      "--worktree", "active",
-      "--allow-unverified",
-    ]),
+    () =>
+      parseArgs([
+        "role-terminal",
+        "--org",
+        "org.json",
+        "--role",
+        "senior",
+        "--worktree",
+        "active",
+        "--allow-unverified",
+      ]),
     /Missing value/,
     "allow-unverified에 값이 없으면 parseArgs가 에러를 던져야 한다",
   );
@@ -755,14 +763,15 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
 test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
   // finding: optimistic-matrix-defaults
   // 환경 읽기 함수는 주입 가능한 실행기와 홈 디렉터리를 받아 결정적으로 동작해야 한다.
-  const { readLaunchEnvironment } = await import(
-    "../plugins/oh-my-teams/scripts/role-terminal.mjs"
-  );
+  const { readLaunchEnvironment } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
   const tmpDir = await import("node:os").then((m) => m.tmpdir());
   const fs = await import("node:fs");
   const path = await import("node:path");
   const tmpHome = path.join(tmpDir, "omt-test-env-" + Date.now());
-  fs.mkdirSync(path.join(tmpHome, ".gemini", "antigravity-cli"), { recursive: true });
+  fs.mkdirSync(path.join(tmpHome, ".gemini", "antigravity-cli"), {
+    recursive: true,
+  });
   fs.mkdirSync(path.join(tmpHome, ".claude"), { recursive: true });
   const worktreePath = "C:/test/worktree";
   // Agy 설정: worktreePath 신뢰 있음
@@ -817,7 +826,9 @@ test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
   const env3 = await readLaunchEnvironment({
     worktreePath: "/nonexistent",
     homedir: "/nonexistent-home",
-    execute: async () => { throw new Error("no orca"); },
+    execute: async () => {
+      throw new Error("no orca");
+    },
   });
   assert.equal(env3.orcaVersion, "unknown", "버전 읽기 실패 시 unknown");
   assert.equal(env3.trustRecordExists, "unknown", "설정 읽기 실패 시 unknown");
