@@ -9,15 +9,15 @@
 
 ## 결론
 
-**메모리 high 3건·medium 3건, 아키텍처 medium 1건·low 2건, checks medium 5건·low 10건으로 발견 항목 합계 24건이며, 다음 kickoff에서 F-01·F-02·F-03·F-05·STATE-02 순서로 수정을 시작할 것을 권고한다.**
+**메모리 high 3건·medium 3건·low 1건, 아키텍처 medium 1건·low 3건, checks medium 1건·low 14건으로 발견 항목 합계 25건이며, 다음 kickoff에서 F-01·F-02·F-03·F-05·STATE-02 순서로 수정을 시작할 것을 권고한다.**
 
 가장 중요한 발견 다섯 가지는 다음과 같다.
 
 1. **F-01·F-02** (memory/high): `headless.mjs`가 폴링마다 Codex sessions 트리를 전체 재귀 탐색하고(F-01), stream.jsonl 전체를 반복 읽는다(F-02). 대시보드 2.5초 폴링 기준 RSS가 지속적으로 압박을 받는다.
 2. **F-03** (memory/high): `usage-sources.mjs`의 `eachJsonLine`이 파일 전체를 메모리에 올린다. 모듈 주석과 구현이 불일치하며, 50MB 입력에서 RSS 84MB 증가를 측정했다.
 3. **STATE-02** (memory/medium): `core.mjs`의 `run()` 함수에서 overflow 발생 시 timeout 경로와 달리 fallback 타이머가 없어, Windows에서 자식 프로세스 트리가 `close`를 보내지 않으면 `timeoutMs`(기본 300초)까지 대기할 수 있다.
-4. **DOCS-02** (checks/medium): R13~R15·R17 규칙(Orca 재구현 금지, 어댑터 경유, 스킬 중복, 임시 산출물)이 `AGENTS.md`·`CODE_QUALITY.md` 정본 문서에 없다.
-5. **TESTS4-08** (checks/medium): `incidents.mjs`와 `usage-ledger.mjs`의 핵심 상태 관리 경로를 직접 검증하는 단위 테스트가 없다.
+4. **CLOSE-01** (architecture/medium): `close` 절차가 kickoff 브랜치(원격·로컬·하위 워크트리 브랜치)를 삭제하지 않아 kickoff마다 브랜치가 누적된다. `close/SKILL.md`의 회수·정리 절(6단계)에 브랜치 삭제 단계가 없다.
+5. **DOCS-02** (checks/low): R13~R15·R17 규칙(Orca 재구현 금지, 어댑터 경유, 스킬 중복, 임시 산출물)이 `AGENTS.md`·`CODE_QUALITY.md` 정본 문서에 없다.
 
 다음 kickoff에서 위 5개 항목을 우선 수정하고, checks/high 부재와 F-05(Windows 프로세스 트리) 실측을 병행할 것을 권고한다.
 
@@ -178,7 +178,7 @@
 | F-04 | memory | medium | `usage-ledger.mjs:138-169` | recordLaunch: ledger 전체 재읽기(상한 없음) |
 | F-05 | memory | medium | `headless-runner.mjs:53-58`, `headless.mjs:532-538` | headless-runner: Windows 손자 프로세스 정리 미보장 |
 | F-06 | checks | low | `usage-sources.mjs:183-185` | eachJsonLine 주석과 구현 불일치 |
-| F-07 | architecture | medium | `headless.mjs:532-538`, `headless-runner.mjs` 전체 | headless 프로세스 직접 관리와 원칙 8의 충돌 여부 |
+| F-07 | architecture | low | `headless.mjs:532-538`, `headless-runner.mjs` 전체 | headless 프로세스 직접 관리와 원칙 8의 충돌 여부 |
 | STATE-01 | memory | medium | `workflow-store.mjs:89, 101, 118` | eventIds: includes O(n) 탐색 + state 전체 직렬화(상한 없음) |
 | STATE-02 | memory | medium | `core.mjs:537-557` | run() overflow 후 fallback 타이머 없음 |
 | STATE-03 | checks | low | `gates.mjs:181, 255` | reviews/decisions 디렉터리 전체 스캔(측정 미완) |
@@ -186,18 +186,19 @@
 | STATE-05 | checks | low | `workflow.mjs:44` | validateWorkflowRequest 외부 미사용 export |
 | LAUNCH-01 | memory | low | `role-terminal.mjs:588-595, 539-545` | pollMs 간격 orca terminal read 외부 프로세스 반복(최대 70회/launch) |
 | LAUNCH-02 | architecture | low | `role-terminal.mjs:24` | runOrcaJson 직접 import — 어댑터 경유 규칙 근거 미확인 |
-| DOCS-01 | checks | medium | `AGENTS.md:13` | 버전 정책 `1.x.x` — 현재 2.4.1과 불일치 |
-| DOCS-02 | checks | medium | `ai-native-agent-organization.md:53` vs `AGENTS.md`, `CODE_QUALITY.md` | R13~R15·R17 규칙이 정본 문서에 없음 |
-| DOCS-03 | checks | medium | `ai-native-agent-organization.md:53` vs `headless-runtime.md:7-16` | 원칙 8과 headless 설계 목표 충돌: 예외 조항 미선언 |
+| CLOSE-01 | architecture | medium | `plugins/oh-my-teams/skills/close/SKILL.md:42-44` | close 절차에 kickoff 브랜치(원격·로컬·하위 워크트리) 삭제 단계 없음 |
+| DOCS-01 | checks | low | `AGENTS.md:13` | 버전 정책 `1.x.x` — 현재 2.4.1과 불일치 |
+| DOCS-02 | checks | low | `ai-native-agent-organization.md:53` vs `AGENTS.md`, `CODE_QUALITY.md` | R13~R15·R17 규칙이 정본 문서에 없음 |
+| DOCS-03 | checks | low | `ai-native-agent-organization.md:53` vs `headless-runtime.md:7-16` | 원칙 8과 headless 설계 목표 충돌: 예외 조항 미선언 |
 | DOCS-04 | checks | low | `scripts/check-code-quality.mjs:8-16` | 비공개 함수 문서화 사각지대(evals/run.mjs) |
 | DOCS-05 | checks | low | `scripts/metadata.mjs:37-45` | declaredTestCount: 테스트 파일 전체 읽기(현재 규모 허용 범위) |
 | DOCS-06 | architecture | low | `plugins/orca/scripts/orca-org.mjs:1-12` | pre-1.1 호환 파일, 제거 여부 미확인 |
 | DOCS-07 | checks | low | `references/assist.md:11` | 보조 도구 허용 모델 ID 런타임 로직 중복 선언 |
 | DOCS-09 | checks | low | `skills/form/SKILL.md:24-28` | 모델 선택지 자동 동기화 없음 |
 | TESTS4-07 | checks | low | `tests/` 전반 | 타임아웃 중단 시 t.after 클린업 미보장 |
-| TESTS4-08 | checks | medium | `tests/` — `incidents.mjs`, `usage-ledger.mjs` 직접 단위 테스트 없음 | 핵심 상태 관리 경로 단위 테스트 부재 |
+| TESTS4-08 | checks | low | `tests/` — `incidents.mjs`, `usage-ledger.mjs` 직접 단위 테스트 없음 | 핵심 상태 관리 경로 단위 테스트 부재 |
 
-**합계**: memory high 3건, memory medium 3건, memory low 1건 / architecture medium 1건, architecture low 2건 / checks medium 5건, checks low 10건. 총 24건.
+**합계**: memory high 3건, memory medium 3건, memory low 1건 / architecture medium 1건(CLOSE-01), architecture low 3건 / checks medium 0건, checks low 14건. 총 25건.
 
 ### 상세 항목
 
@@ -408,7 +409,7 @@
 
 - **id**: F-07
 - **분류**: architecture
-- **심각도**: medium (초안 가안 medium 유지 — 근거가 확인됐으나 설계 판단이 필요해 Senior/PM 결정 대기)
+- **심각도**: low (senior 검토 반영 — 아키텍처 원칙 문서 충돌로 기능 결함이 없는 경우에 해당하여 low로 조정)
 - **파일:줄**: `plugins/oh-my-teams/scripts/headless.mjs:532-538`, `plugins/oh-my-teams/scripts/headless-runner.mjs` 전체
 - **증상**: headless 경로가 프로세스 소유·중단·회수를 직접 수행한다. `docs/plan/ai-native-agent-organization.md:53` 원칙 8("Orca의 감독 기능을 재구현하지 않는다. 프로세스·회수는 Orca를 사용한다")과 구조적으로 충돌하는 후보다.
 - **근거**: `ai-native-agent-organization.md:53`: "Orca의 감독 기능을 재구현하지 않는다. 스킬 패키지는 업무 계약과 gate를 담당하고, 실행 소유권·프로세스·회수는 Orca를 사용한다."
@@ -637,7 +638,7 @@
 
 - **id**: DOCS-01
 - **분류**: checks
-- **심각도**: medium (초안 가안 medium 유지 — 정본 문서와 현실의 불일치가 명확히 확인됨)
+- **심각도**: low (senior 검토 반영 — 진단/문서화의 명확성 문제로 기능 결함이 없는 경우에 해당하여 low로 조정)
 - **파일:줄**: `AGENTS.md:13`
 - **증상**: 버전 정책이 `` `1.x.x` 범위에서 버전을 올립니다``라고 적혀 있으나 현재 버전은 2.4.1이다. 주 버전 2로의 전환이 이미 이루어진 상태에서 문서는 여전히 `1.x.x`를 기술하고 있어, 정본과 현실이 어긋난다.
 - **근거**: 코드 인용 — `AGENTS.md:13`:
@@ -655,7 +656,7 @@
 
 - **id**: DOCS-02
 - **분류**: checks
-- **심각도**: medium (초안 가안 medium 유지 — 규칙이 정본 문서에 없음을 직접 확인함)
+- **심각도**: low (senior 검토 반영 — 진단/문서화의 명확성 문제로 기능 결함이 없는 경우에 해당하여 low로 조정)
 - **파일:줄**: `docs/plan/ai-native-agent-organization.md:53` vs `AGENTS.md`, `docs/CODE_QUALITY.md`
 - **증상**: 규칙 R13("Orca의 감독 기능을 재구현하지 않는다"), R14("어댑터를 거치지 않는 직접 호출 금지"), R15("스킬 문서에 런타임 로직 중복 금지"), R17("임시 산출물을 워크트리에 남기지 않는다")은 설계 문서·소스 주석에만 존재하며 `AGENTS.md`·`CODE_QUALITY.md` 등 정본 문서에 없다.
 - **근거**:
@@ -674,7 +675,7 @@
 
 - **id**: DOCS-03
 - **분류**: checks
-- **심각도**: medium (초안 가안 medium 유지 — 두 문서 간 충돌이 코드에서 확인됨)
+- **심각도**: low (senior 검토 반영 — 진단/문서화의 명확성 문제로 기능 결함이 없는 경우에 해당하여 low로 조정)
 - **파일:줄**: `docs/plan/ai-native-agent-organization.md:53` vs `docs/plan/headless-runtime.md:7-16`
 - **증상**: `ai-native-agent-organization.md:53`의 원칙 8은 "실행 소유권·프로세스·회수는 Orca를 사용한다"고 선언하나, `headless-runtime.md:7-16`은 headless 경로가 "Orca를 대체하는 감독 런타임"임을 명시적 설계 목표로 선언한다. 두 문서가 충돌하는지, `headless-runtime.md`가 공식 예외인지가 불명확하다. B7 조사에서 `ai-native-agent-organization.md`에 headless 예외 조항이 없음을 직접 확인했다.
 - **근거**:
@@ -821,7 +822,7 @@
 
 - **id**: TESTS4-08
 - **분류**: checks
-- **심각도**: medium (초안 가안 medium 유지 — 핵심 상태 관리 경로의 직접 단위 테스트 부재)
+- **심각도**: low (senior 검토 반영 — 진단/문서화의 명확성 문제로 기능 결함이 없는 경우에 해당하여 low로 조정)
 - **파일:줄**: `tests/` — `incidents.mjs`, `usage-ledger.mjs` 직접 테스트 없음
 - **증상**: `incidents.mjs`(265줄, B2)는 `boundary-and-gate.test.mjs:17`과 `runtime.test.mjs:69`에서 임포트되어 간접적으로 검사되나, `incidents.mjs`를 직접 대상으로 하는 전용 테스트 파일이 없다. 마찬가지로 `usage-ledger.mjs`(170줄, B5)는 `usage-report.test.mjs:16`에서만 임포트되며, `recordLaunch`·`readLaunches` 등의 핵심 함수를 직접 단위 테스트하는 파일이 없다. 두 모듈 모두 상태를 파일 시스템에 저장하고 읽는 중요 함수들을 갖고 있으며, 발견 후보 F-04(usage-ledger)와 incidents 상태 크기 의심이 이들과 관련이 있다.
 - **근거**:
@@ -832,6 +833,25 @@
 - **제안 수정**: `tests/usage-ledger.test.mjs`를 추가하여 `recordLaunch`·`readLaunches` 왕복, `resolveLaunchKickoff` 동작을 단위 테스트한다. `tests/incidents.test.mjs`를 추가하여 `classifyIncident`·`incidentStatus` 상태 변이를 단위 테스트한다.
 - **예상 작업 크기**: S (단위 테스트 2~3개 추가 × 2 파일)
 - **회귀 방지 검사**: 신규 `usage-ledger.test.mjs`·`incidents.test.mjs`.
+
+---
+
+#### CLOSE-01
+
+- **id**: CLOSE-01
+- **분류**: architecture
+- **심각도**: medium (자원 누적 — kickoff 횟수에 비례하여 원격·로컬·하위 워크트리 브랜치가 무한 누적되므로 자원 증가가 지속됨. 기능 결함은 없으나 브랜치 관리 비용 증가)
+- **파일:줄**: `plugins/oh-my-teams/skills/close/SKILL.md:42-44`
+- **증상**: `close` 절차의 회수·정리 단계(6단계)가 worker를 release하고 child worktree를 회수하도록 지시하지만, kickoff 시 생성된 원격 브랜치·로컬 브랜치·하위 워크트리 브랜치를 삭제하는 단계가 없다. kickoff를 반복할수록 브랜치가 누적된다. 반면 `disband`는 복구를 위한 브랜치 보존이 요구될 수 있으므로 구분이 필요하다.
+- **근거**: `plugins/oh-my-teams/skills/close/SKILL.md:42-44`:
+  ```text
+  6. Orca의 현재 가이드에 따라 정산이 끝난 worker를 release하고 child worktree를 회수한다. 보존되지 않은 변경, 살아 있는 프로세스, 상태 불명 worker가 있으면 삭제하지 않으며, 종료를 확인하지 못한 worker는 `worker-abandon`으로 봉인한다.
+  ```
+  이 단계에서 worktree를 회수한다고 기술하지만, kickoff 브랜치(원격 브랜치: `git push origin --delete <branch>`, 로컬 브랜치: `git branch -d <branch>`) 삭제 지시가 없다. kickoff마다 브랜치가 생성되지만 제거되지 않으므로 장기 운영 시 브랜치가 누적된다.
+  측정: 해당 없음(코드·문서 구조 분석).
+- **제안 수정**: `close` 절차의 6단계(또는 별도 정리 단계)에 다음을 추가한다. (a) 전달(병합)이 확인된 뒤 kickoff의 원격 브랜치와 로컬 브랜치를 삭제한다. (b) 하위 워크트리가 삭제되면 해당 워크트리 전용 브랜치도 삭제한다. (c) `disband`는 복구 가능성을 위해 브랜치를 보존하는 정책을 유지한다. `close/SKILL.md` 6단계와 7단계 사이에 브랜치 정리 절차를 명시하거나, 8단계 최종 정리 목록에 브랜치 삭제를 포함한다.
+- **예상 작업 크기**: XS (문서 절차 추가)
+- **회귀 방지 검사**: `tests/skill-instructions.test.mjs`에 close 절차에 브랜치 삭제 언급이 있는지 확인하는 검사 추가 권고.
 
 ---
 
@@ -932,11 +952,12 @@
 | 3 | `fix/core-overflow-fallback` | STATE-02 | S | medium/memory, overflow 후 close 미착신 Windows 위험 제거 |
 | 4 | `fix/headless-runner-kill-tree` | F-05 | M | medium/memory, Windows 손자 프로세스 정리(실환경 검증 병행) |
 | 5 | `fix/state-eventids-set` | STATE-01 | S | medium/memory, O(n) 탐색 제거 |
-| 6 | `docs/fix-rules-and-version` | DOCS-01, DOCS-02, DOCS-03, LAUNCH-02 | S | medium/checks, 정본 문서 규칙 추가·버전 정책 수정·문서 충돌 해소 |
-| 7 | `test/add-unit-tests` | TESTS4-08, P-09, P-10 | S | medium/checks, usage-ledger·incidents 단위 테스트 추가 |
-| 8 | `fix/minor-checks` | STATE-04, STATE-05, DOCS-04, DOCS-07, DOCS-09 | XS-S | low/checks, 예외 무음·미사용 export·문서 정합성 정리 |
-| 9 | `refactor/ledger-read` | F-04 | S | medium/memory, ledger 역방향 읽기(극단적 시나리오 대응) |
-| 10 | `fix/legacy-compat` | DOCS-06 | XS | low/architecture, pre-1.1 호환 파일 사용 여부 확인 후 제거 |
+| 6 | `docs/fix-close-branch-cleanup` | CLOSE-01 | XS | medium/architecture, close 절차에 브랜치 정리 단계 추가 |
+| 7 | `refactor/ledger-read` | F-04 | S | medium/memory, ledger 역방향 읽기(극단적 시나리오 대응) |
+| 8 | `docs/fix-rules-and-version` | DOCS-01, DOCS-02, DOCS-03, LAUNCH-02 | S | low/checks, 정본 문서 규칙 추가·버전 정책 수정·문서 충돌 해소 |
+| 9 | `test/add-unit-tests` | TESTS4-08, P-09, P-10 | S | low/checks, usage-ledger·incidents 단위 테스트 추가 |
+| 10 | `fix/minor-checks` | STATE-04, STATE-05, DOCS-04, DOCS-07, DOCS-09 | XS-S | low/checks, 예외 무음·미사용 export·문서 정합성 정리 |
+| 11 | `fix/legacy-compat` | DOCS-06 | XS | low/architecture, pre-1.1 호환 파일 사용 여부 확인 후 제거 |
 
 ### 특이 사항
 
