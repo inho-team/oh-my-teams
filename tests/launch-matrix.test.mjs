@@ -4,14 +4,15 @@ import assert from "node:assert/strict";
 import {
   normalizeModelFamily,
   predictLaunchPath,
-  SUPPORTED_CLI_VERSION,
-  SUPPORTED_ORCA_VERSION,
+  classifyVersion,
+  VERIFIED_CLI_VERSION,
+  VERIFIED_ORCA_VERSION,
 } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
 
 // 기본 지원 버전
 const V = {
-  orcaVersion: SUPPORTED_ORCA_VERSION,
-  cliVersion: SUPPORTED_CLI_VERSION,
+  orcaVersion: VERIFIED_ORCA_VERSION,
+  cliVersion: VERIFIED_CLI_VERSION,
 };
 
 // 모든 결과에 필수 필드가 있는지 확인하는 헬퍼
@@ -62,7 +63,7 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         trustRecordExists: true,
         skipDangerousModePermissionPrompt: true,
         orcaVersion: "1.3.0",
-        cliVersion: SUPPORTED_CLI_VERSION,
+        cliVersion: VERIFIED_CLI_VERSION,
       },
     },
     // 1. 버전 범위 밖 - CLI 버전 다름
@@ -75,7 +76,7 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         shell: "posix",
         trustRecordExists: true,
         skipDangerousModePermissionPrompt: true,
-        orcaVersion: SUPPORTED_ORCA_VERSION,
+        orcaVersion: VERIFIED_ORCA_VERSION,
         cliVersion: "1.2.4",
       },
     },
@@ -296,8 +297,8 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
   assert.equal(codexNoTrust.path, "blocked");
   assert.ok(codexNoTrust.reason.includes("codex-trust-workspace"));
 
-  // 예시 4: 버전 범위 밖 → blocked (unsupported_version)
-  const badVersion = predictLaunchPath({
+  // 예시 4: 검증에 쓰지 않은 버전 → 경로는 유지하고 근거 등급만 낮춘다
+  const otherVersion = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
     platform: "darwin",
@@ -305,10 +306,13 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
     trustRecordExists: true,
     skipDangerousModePermissionPrompt: true,
     orcaVersion: "2.0.0",
-    cliVersion: SUPPORTED_CLI_VERSION,
+    cliVersion: VERIFIED_CLI_VERSION,
   });
-  assert.equal(badVersion.path, "blocked");
-  assert.ok(badVersion.reason.includes("unsupported_version"));
+  // 이 칸은 원래 근거 등급이 unverified인 supervised-terminal이라 검증 게이트가 막는다.
+  // 버전 때문이 아니라 칸 자체가 미검증이라는 점을 이유 코드로 구분할 수 있다.
+  assert.equal(otherVersion.path, "blocked");
+  assert.ok(otherVersion.reason.includes("unverified-terminal-creation"));
+  assert.ok(otherVersion.reason.includes("untested_version"));
 });
 
 test("마지막 행(untested_combination)이 나머지 모든 조합을 덮는다", () => {
@@ -339,34 +343,116 @@ test("마지막 행(untested_combination)이 나머지 모든 조합을 덮는�
   assert.ok(unknownModel.reason.includes("untested_combination"));
 });
 
-test("버전 범위 밖은 unsupported_version으로 차단된다", () => {
-  const cases = [
-    { orcaVersion: "0.9.0", cliVersion: SUPPORTED_CLI_VERSION },
-    { orcaVersion: SUPPORTED_ORCA_VERSION, cliVersion: "1.0.0" },
-    { orcaVersion: "2.0.0", cliVersion: "2.0.0" },
-    { orcaVersion: "", cliVersion: SUPPORTED_CLI_VERSION },
-    { orcaVersion: SUPPORTED_ORCA_VERSION, cliVersion: "" },
-  ];
-  for (const versionParams of cases) {
+test("Orca 패치 갱신은 검증된 경로를 막지 않는다 (#61)", () => {
+  // Orca가 자동 갱신되어 패치 버전만 달라진 경우. 이전에는 모든 역할이
+  // unsupported_version으로 막혀 kickoff가 워커를 하나도 시작하지 못했다.
+  const claudePatch = predictLaunchPath({
+    runner: "claude",
+    model: "sonnet",
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    orcaVersion: "1.4.205",
+    cliVersion: "unknown",
+  });
+  assert.equal(claudePatch.path, "supervised-terminal");
+  assert.equal(claudePatch.evidence, "verified");
+  assert.ok(claudePatch.reason.includes("untested_patch_version"));
+
+  const agyPatch = predictLaunchPath({
+    runner: "agy",
+    model: "gemini-3.8-flash-high",
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    orcaVersion: "1.4.205",
+    cliVersion: VERIFIED_CLI_VERSION,
+  });
+  assert.equal(agyPatch.path, "headless");
+  assert.equal(agyPatch.evidence, "verified");
+});
+
+test("Orca 버전을 확인하지 못해도 검증된 경로는 한 단계만 낮아진다", () => {
+  for (const orcaVersion of ["1.5.0", "unknown", ""]) {
     const result = predictLaunchPath({
       runner: "claude",
-      model: undefined,
+      model: "sonnet",
       platform: "win32",
       shell: "powershell",
       trustRecordExists: true,
       skipDangerousModePermissionPrompt: true,
-      ...versionParams,
+      orcaVersion,
+      cliVersion: "unknown",
     });
     assert.equal(
       result.path,
-      "blocked",
-      `Expected blocked for ${JSON.stringify(versionParams)}`,
+      "supervised-terminal",
+      `Expected supervised-terminal for orcaVersion=${orcaVersion}`,
     );
-    assert.ok(
-      result.reason.includes("unsupported_version"),
-      `Expected unsupported_version for ${JSON.stringify(versionParams)}`,
-    );
+    assert.equal(result.evidence, "source-derived");
+    assert.ok(result.reason.includes("untested_version"));
   }
+});
+
+test("Antigravity CLI 버전은 Agy 역할에만 적용된다", () => {
+  const claudeWithOldCli = predictLaunchPath({
+    runner: "claude",
+    model: "sonnet",
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    orcaVersion: VERIFIED_ORCA_VERSION,
+    cliVersion: "0.1.0",
+  });
+  assert.equal(claudeWithOldCli.path, "supervised-terminal");
+  assert.equal(claudeWithOldCli.evidence, "verified");
+  assert.deepEqual(claudeWithOldCli.reason, []);
+
+  const agyWithOldCli = predictLaunchPath({
+    runner: "agy",
+    model: "gemini-3.8-flash-high",
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    orcaVersion: VERIFIED_ORCA_VERSION,
+    cliVersion: "0.1.0",
+    allowUnverified: true,
+    allowUnverifiedApproval: "이사 승인",
+  });
+  assert.equal(agyWithOldCli.path, "supervised-terminal");
+  assert.ok(agyWithOldCli.reason.includes("untested_version"));
+});
+
+test("headless 경로는 Orca 버전 차이의 영향을 받지 않는다", () => {
+  const headless = predictLaunchPath({
+    runner: "agy",
+    model: "gemini-3.8-flash-high",
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    orcaVersion: "9.9.9",
+    cliVersion: VERIFIED_CLI_VERSION,
+  });
+  assert.equal(headless.path, "headless");
+  assert.equal(headless.evidence, "verified");
+  assert.ok(!headless.reason.includes("untested_version"));
+});
+
+test("classifyVersion은 같은 버전·패치 차이·그 밖을 구분한다", () => {
+  assert.equal(classifyVersion("1.4.204", "1.4.204"), "match");
+  assert.equal(classifyVersion(" 1.4.204 ", "1.4.204"), "match");
+  assert.equal(classifyVersion("1.4.205", "1.4.204"), "patch-diff");
+  assert.equal(classifyVersion("1.4.0", "1.4.204"), "patch-diff");
+  assert.equal(classifyVersion("1.5.0", "1.4.204"), "unknown");
+  assert.equal(classifyVersion("2.0.0", "1.4.204"), "unknown");
+  assert.equal(classifyVersion("", "1.4.204"), "unknown");
+  assert.equal(classifyVersion(undefined, "1.4.204"), "unknown");
+  assert.equal(classifyVersion("unknown", "1.4.204"), "unknown");
 });
 
 test("unverified supervised-terminal은 검증 모드 없이 blocked된다", () => {

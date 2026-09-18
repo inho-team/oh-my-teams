@@ -507,7 +507,7 @@ test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 
   // Orca 호출이 0건임을 확인하면 attempt 소비가 없음을 증명한다.
   const { openRoleTerminal } =
     await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
-  const { SUPPORTED_ORCA_VERSION, SUPPORTED_CLI_VERSION } =
+  const { VERIFIED_ORCA_VERSION, VERIFIED_CLI_VERSION } =
     await import("../plugins/oh-my-teams/scripts/launch-matrix.mjs");
   const { roleCommand } =
     await import("../plugins/oh-my-teams/scripts/role-launch.mjs");
@@ -536,8 +536,8 @@ test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 
       platform: "win32",
       shell: "powershell",
       trustRecordExists: true,
-      orcaVersion: SUPPORTED_ORCA_VERSION,
-      cliVersion: SUPPORTED_CLI_VERSION,
+      orcaVersion: VERIFIED_ORCA_VERSION,
+      cliVersion: VERIFIED_CLI_VERSION,
       settleMs: 5,
       readyMs: 20,
       pollMs: 1,
