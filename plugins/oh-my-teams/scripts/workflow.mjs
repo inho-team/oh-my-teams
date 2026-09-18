@@ -737,7 +737,7 @@ export function resumeWorkflow(
   });
 }
 
-function validateExecutionInput(input, reserveOnly = false) {
+function validateExecutionInput(input, reserveOnly = false, stateDir = null) {
   assert(
     input?.schemaVersion === 1 &&
       WORKFLOW_ID_PATTERN.test(input.eventId) &&
@@ -753,6 +753,43 @@ function validateExecutionInput(input, reserveOnly = false) {
       input.receipt?.worktreeId,
     "Actual run/task/dispatch/execution/worktree receipt ids required",
   );
+  if (input.receipt.via === "headless-start") {
+    const expected = `headless:${input.receipt.executionId}`;
+    assert(
+      input.receipt.taskId === expected,
+      `Headless receipt taskId must be "${expected}", got "${input.receipt.taskId}"`,
+    );
+    assert(
+      input.receipt.dispatchId === expected,
+      `Headless receipt dispatchId must be "${expected}", got "${input.receipt.dispatchId}"`,
+    );
+    if (stateDir) {
+      const executionId = input.receipt.executionId;
+      const workerFile = path.join(
+        path.resolve(stateDir),
+        "headless",
+        executionId,
+        "worker.json",
+      );
+      assert(
+        fs.existsSync(workerFile),
+        `Headless worker record not found for executionId "${executionId}"`,
+      );
+      const workerRecord = readJSON(workerFile);
+      // worktreeId の形式は <repo-id>::<path>。「::」以降がworkerのcwdと一致する必要がある。
+      const sep = input.receipt.worktreeId.indexOf("::");
+      const worktreePath =
+        sep === -1
+          ? input.receipt.worktreeId
+          : input.receipt.worktreeId.slice(sep + 2);
+      const normalize = (p) =>
+        path.resolve(p).toLowerCase().replace(/\\/g, "/");
+      assert(
+        normalize(workerRecord.cwd) === normalize(worktreePath),
+        `Headless receipt worktreeId path does not match worker.json cwd for "${executionId}"`,
+      );
+    }
+  }
 }
 
 /**
@@ -785,7 +822,7 @@ export function reserveExecution(stateDir, id, expectedRevision, input) {
 function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
   return withWorkflowUpdate(stateDir, id, () => {
     const { state, tasks, organization, dir } = readWorkflow(stateDir, id);
-    validateExecutionInput(input, reserveOnly);
+    validateExecutionInput(input, reserveOnly, reserveOnly ? null : stateDir);
     if (state.eventIds.includes(input.eventId))
       return { state, duplicate: true };
     assert(
@@ -1151,8 +1188,8 @@ export function releaseReservation(stateDir, id, expectedRevision, input) {
   });
 }
 
-function validateReworkInput(input) {
-  validateExecutionInput(input);
+function validateReworkInput(input, stateDir = null) {
+  validateExecutionInput(input, false, stateDir);
   assert(
     typeof input.reviewId === "string" && input.reviewId.trim(),
     "Rework needs the review that asked for changes",
@@ -1183,7 +1220,7 @@ function validateReworkInput(input) {
 export function reworkTask(stateDir, id, expectedRevision, input) {
   return withWorkflowUpdate(stateDir, id, () => {
     const { state, organization, dir } = readWorkflow(stateDir, id);
-    validateReworkInput(input);
+    validateReworkInput(input, stateDir);
     if (state.eventIds.includes(input.eventId))
       return { state, duplicate: true };
     assert(

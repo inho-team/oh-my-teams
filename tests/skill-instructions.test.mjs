@@ -746,7 +746,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(runtime, /\| Claude·Codex·Agy \|/);
   assert.match(
     runtime,
-    /\| Agy\(Windows, `gemini` 모델\) \|[^\n]*`headless-start`로 실행한다/,
+    /\| Agy\(모델·플랫폼 조합에 따라\) \|[^\n]*`scripts\/launch-matrix\.mjs`/,
   );
   assert.match(runtime, /`agentDefaultArgs`/);
   // Orca pre-trusts a Codex folder only when it launches Codex itself, so the
@@ -778,12 +778,14 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
       /Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널/,
     );
     assert.doesNotMatch(readSkill(role), /래퍼가 새 터미널을 띄우/);
-    // #46: on Windows Orca never reports a Gemini Agy terminal idle, so that
-    // one role runs headless instead of through the terminal path.
+    // #46: on Windows Orca never reports a Gemini Agy terminal idle, so the
+    // matrix decides the launch path and skills link the matrix table.
     assert.match(
       readSkill(role),
-      /Windows에서 모델이 `gemini`로 시작하는 Agy 역할은 Orca 터미널로 시작하지 않고 `headless-start`로 실행/,
+      /호환성 표\(`scripts\/launch-matrix\.mjs`\)가 `headless`로 정한 역할은 `headless-start`로 실행/,
     );
+    // Skills and orca-runtime.md must link launch-matrix.mjs.
+    assert.match(readSkill(role), /launch-matrix\.mjs/);
     // The example checks the terminal, then reserves, then hands it over.
     assert.match(
       readSkill(role),
@@ -801,6 +803,9 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     /호출하기 전에 같은 터미널에 `terminal wait --for tui-idle`/,
   );
   assert.match(runtime, /멈춘 뒤 거부 원문과 함께 사용자에게 보고한다/);
+  // orca-runtime.md must link the compatibility matrix.
+  assert.match(runtime, /launch-matrix\.mjs/);
+
   // Orca refuses nested workers by default, so PL cannot be the dispatcher.
   assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
   assert.match(readSkill("pl"), /기본값이 1/);

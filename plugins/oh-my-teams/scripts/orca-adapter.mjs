@@ -430,7 +430,11 @@ const IDLE_PROBE_MS = 20000;
 // terminals. The same wait is run first, and a terminal that times out is
 // refused before any Dispatch exists. The probe names no agent, so a runtime
 // that starts reporting idle reopens the path without a code change.
-async function assertTerminalIdle(orca, terminal, { cwd, execute }) {
+async function assertTerminalIdle(
+  orca,
+  terminal,
+  { cwd, execute, matrixPrediction },
+) {
   const waited = await execute(
     [
       orca,
@@ -485,12 +489,23 @@ async function assertTerminalIdle(orca, terminal, { cwd, execute }) {
     const state = wait.blockedReason
       ? `is held at a prompt (${reason})`
       : "was reported not idle without a reason";
+    // When the matrix predicted the terminal would reach supervised-terminal
+    // but Orca refused it here, the prediction itself is wrong: signal that
+    // so the table can be revised rather than the same start repeated.
+    const mismatch =
+      matrixPrediction?.path === "supervised-terminal"
+        ? "matrix-mismatch"
+        : undefined;
     const refused = assertFailureSignal({
+      ...(mismatch ? { kind: mismatch } : {}),
       code: reason,
       message:
         `Terminal ${terminal} ${state} instead of reporting tui-idle, ` +
         "so Orca worker-start could not hand it a task; no Dispatch was created. " +
-        "Read the terminal screen and report it rather than repeating the start",
+        "Read the terminal screen and report it rather than repeating the start" +
+        (mismatch
+          ? ` (matrix-prediction-failure: predicted supervised-terminal for ${reason})`
+          : ""),
     });
     throw orcaError(refused.message, refused, envelope);
   }
@@ -516,17 +531,24 @@ async function assertTerminalIdle(orca, terminal, { cwd, execute }) {
  * attempt is reserved.
  *
  * @param {string} terminal - Terminal handle to check.
- * @param {object} [options={}] - Executable, cwd, and injectable runner.
+ * @param {object} [options={}] - Executable, cwd, matrixPrediction, and injectable runner.
+ * @param {object} [options.matrixPrediction] - Result of `predictLaunchPath` for this terminal,
+ *   used to attach a `matrix-mismatch` signal when the post-launch refusal contradicts the
+ *   predicted `supervised-terminal` path.
  * @returns {Promise<{terminal: string, idle: true}>} The idle terminal.
  * @throws {Error} Carrying the translated signal when the terminal is not idle.
  */
 export async function checkTerminalIdle(
   terminal,
-  { executable, cwd, execute = run } = {},
+  { executable, cwd, matrixPrediction, execute = run } = {},
 ) {
   assert(terminal, "A terminal handle is required");
   const selected = selectOrcaExecutable(executable);
-  await assertTerminalIdle(selected, terminal, { cwd, execute });
+  await assertTerminalIdle(selected, terminal, {
+    cwd,
+    execute,
+    matrixPrediction,
+  });
   return { terminal, idle: true };
 }
 
@@ -662,6 +684,9 @@ export async function injectTask(
  *
  * @param {string} repo - Worktree the coordinator issues the command from.
  * @param {object} options - Task selection, placement, and launch options.
+ * @param {object} [options.matrixPrediction] - Result of `predictLaunchPath` for the reused
+ *   terminal, used to attach a `matrix-mismatch` signal when the post-launch refusal contradicts
+ *   the predicted `supervised-terminal` path.
  * @returns {Promise<object>} Worker receipt satisfying the execution port.
  * @throws {Error} When the arguments are invalid, a reused terminal is not
  * idle, or no receipt came back. The thrown error carries a translated
@@ -682,6 +707,7 @@ export async function startWorker(
     timeoutMs = 300000,
     discovery: suppliedDiscovery,
     executable,
+    matrixPrediction,
     execute = run,
   },
 ) {
@@ -704,7 +730,11 @@ export async function startWorker(
     execute,
   );
   if (terminal) {
-    await assertTerminalIdle(selected, terminal, { cwd: repo, execute });
+    await assertTerminalIdle(selected, terminal, {
+      cwd: repo,
+      execute,
+      matrixPrediction,
+    });
   }
 
   const argv = [selected, "orchestration", "worker-start"];

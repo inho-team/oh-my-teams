@@ -17,8 +17,202 @@
  * title. `terminal rename` sets that custom title again, and Orca shows a
  * custom title ahead of any title the agent sends.
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { assert, run } from "./core.mjs";
 import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+import {
+  predictLaunchPath,
+  normalizeModelFamily,
+  SUPPORTED_ORCA_VERSION,
+  SUPPORTED_CLI_VERSION,
+} from "./launch-matrix.mjs";
+
+/**
+ * 실제 환경에서 매트릭스 입력값을 읽습니다.
+ *
+ * 알 수 없는 값은 낙관적 기본값 대신 `unknown`으로 반환합니다.
+ * 사용자 설정 파일은 읽기만 하고 쓰지 않습니다.
+ *
+ * @param {object} options - 주입 가능한 의존성.
+ * @param {string} [options.worktreePath] - 신뢰 여부를 확인할 워크트리 경로.
+ * @param {string} [options.orcaExecutable] - Orca 실행 파일 경로.
+ * @param {string} [options.homedir=os.homedir()] - 홈 디렉터리 (테스트용 주입).
+ * @param {string} [options.codexHome] - Codex 설정 디렉터리 (테스트용 주입, 미지정 시 CODEX_HOME 환경변수 또는 ~/.codex 사용).
+ * @param {Function} [options.execute=run] - 명령 실행기 (테스트용 주입).
+ * @returns {Promise<object>} 환경 값 객체.
+ */
+export async function readLaunchEnvironment({
+  worktreePath,
+  orcaExecutable,
+  homedir = os.homedir(),
+  codexHome,
+  execute = run,
+} = {}) {
+  const platform = process.platform;
+  const shell = platform === "win32" ? "powershell" : "posix";
+
+  // Orca 버전 읽기
+  let orcaVersion = "unknown";
+  try {
+    const selected = selectOrcaExecutable(orcaExecutable);
+    const result = await execute([selected, "--version"], { timeoutMs: 10000 });
+    if (result.code === 0) {
+      const ver = String(result.stdout ?? "")
+        .trim()
+        .split(/\s+/)
+        .find((t) => /^\d+\.\d+\.\d+/.test(t));
+      if (ver) orcaVersion = ver;
+    }
+  } catch {
+    // unknown 유지
+  }
+
+  // Agy CLI 버전 읽기
+  let cliVersion = "unknown";
+  try {
+    const result = await execute(["agy", "--version"], { timeoutMs: 10000 });
+    if (result.code === 0) {
+      const ver = String(result.stdout ?? "")
+        .trim()
+        .split(/\s+/)
+        .find((t) => /^\d+\.\d+\.\d+/.test(t));
+      if (ver) cliVersion = ver;
+    }
+  } catch {
+    // unknown 유지
+  }
+
+  // Agy 신뢰 기록: ~/.gemini/antigravity-cli/settings.json의 trustedWorkspaces
+  let trustRecordExists = "unknown";
+  const agySettingsFile = path.join(
+    homedir,
+    ".gemini",
+    "antigravity-cli",
+    "settings.json",
+  );
+  try {
+    const text = fs.readFileSync(agySettingsFile, "utf8");
+    const settings = JSON.parse(text);
+    const trusted = settings.trustedWorkspaces;
+    if (
+      worktreePath &&
+      Array.isArray(trusted) &&
+      trusted.some((t) => String(t) === worktreePath)
+    ) {
+      trustRecordExists = true;
+    } else if (Array.isArray(trusted)) {
+      trustRecordExists = false;
+    }
+    // 읽었지만 배열이 아니면 unknown 유지
+  } catch {
+    // unknown 유지
+  }
+
+  // Claude skipDangerousModePermissionPrompt: ~/.claude/settings.json
+  let skipDangerousModePermissionPrompt = "unknown";
+  const claudeSettingsFile = path.join(homedir, ".claude", "settings.json");
+  try {
+    const text = fs.readFileSync(claudeSettingsFile, "utf8");
+    const settings = JSON.parse(text);
+    if (typeof settings.skipDangerousModePermissionPrompt === "boolean") {
+      skipDangerousModePermissionPrompt =
+        settings.skipDangerousModePermissionPrompt;
+    }
+  } catch {
+    // unknown 유지
+  }
+
+  // Codex 신뢰 기록: CODEX_HOME/config.toml 또는 ~/.codex/config.toml
+  // [projects."<주 저장소 루트>"] 아래 trust_level = "trusted"인지 읽기만 한다.
+  // 주 저장소 루트: worktreePath에서 git rev-parse --path-format=absolute --git-common-dir 결과의 부모.
+  let codexTrustRecordExists = "unknown";
+  if (worktreePath) {
+    try {
+      const gitCommonDir = await execute(
+        [
+          "git",
+          "-C",
+          worktreePath,
+          "rev-parse",
+          "--path-format=absolute",
+          "--git-common-dir",
+        ],
+        { timeoutMs: 10000 },
+      );
+      if (gitCommonDir.code === 0) {
+        const gitCommonDirPath = String(gitCommonDir.stdout ?? "").trim();
+        // --git-common-dir 결과의 부모가 주 저장소 루트
+        const repoRoot = path.dirname(gitCommonDirPath);
+        // 경로 정규화: 대소문자 통일(Windows), 구분자 통일
+        const normPath = (p) =>
+          p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+        const normalizedRoot = normPath(repoRoot);
+
+        const resolvedCodexHome = codexHome ?? process.env.CODEX_HOME;
+        const codexConfigFile = resolvedCodexHome
+          ? path.join(resolvedCodexHome, "config.toml")
+          : path.join(homedir, ".codex", "config.toml");
+
+        try {
+          const tomlText = fs.readFileSync(codexConfigFile, "utf8");
+          // [projects."<경로>"] 또는 [projects.'<경로>'] 섹션에서 trust_level 검출.
+          // 큰따옴표 키: TOML 기본 문자열 → \\ → \, \" → " 풀기.
+          // 작은따옴표 키: TOML 리터럴 문자열 → 이스케이프 없이 그대로 사용.
+          const sectionReDouble =
+            /^\s*\[projects\."((?:[^"\\]|\\.)*)"\]\s*$/gim;
+          const sectionReSingle = /^\s*\[projects\.'([^']*)'\]\s*$/gim;
+
+          /** TOML 기본 문자열(큰따옴표) 이스케이프 해제 */
+          const unescapeTomlBasic = (s) => s.replace(/\\(["\\])/g, "$1");
+
+          let found = false;
+          for (const [re, unescape] of [
+            [sectionReDouble, unescapeTomlBasic],
+            [sectionReSingle, (s) => s],
+          ]) {
+            let match;
+            re.lastIndex = 0;
+            while ((match = re.exec(tomlText)) !== null) {
+              const sectionPath = normPath(unescape(match[1]));
+              if (sectionPath !== normalizedRoot) continue;
+              // 이 섹션부터 다음 섹션([...]) 또는 파일 끝까지 검색
+              const afterSection = tomlText.slice(
+                match.index + match[0].length,
+              );
+              const nextSection = afterSection.search(/^\s*\[/m);
+              const body =
+                nextSection === -1
+                  ? afterSection
+                  : afterSection.slice(0, nextSection);
+              if (/^\s*trust_level\s*=\s*["']trusted["']\s*$/im.test(body)) {
+                found = true;
+              }
+              break;
+            }
+            if (found) break;
+          }
+          codexTrustRecordExists = found;
+        } catch {
+          // 읽기 실패: unknown 유지
+        }
+      }
+    } catch {
+      // git 실행 실패: unknown 유지
+    }
+  }
+
+  return {
+    platform,
+    shell,
+    orcaVersion,
+    cliVersion,
+    trustRecordExists,
+    codexTrustRecordExists,
+    skipDangerousModePermissionPrompt,
+  };
+}
 
 const PROMPT_MARK = /[%$#>❯]\s*$/;
 
@@ -37,11 +231,14 @@ const PROMPT_MARK = /[%$#>❯]\s*$/;
 export const AGY_BANNER_COLUMNS = 44;
 
 /**
- * Returns the shell command a role terminal types, narrowed for Agy Gemini.
+ * Returns the shell command a role terminal types, narrowed for Agy Gemini on POSIX.
  *
- * Role commands run in a POSIX shell or in PowerShell, and both separate two
- * commands with `;`. A POSIX shell narrows the terminal with `stty`; Windows
- * has no `stty`, so PowerShell narrows the console with `mode con:`.
+ * Role commands run in a POSIX shell or in PowerShell. A POSIX shell narrows
+ * the terminal with `stty` so Orca's tui-idle check sees the model line without
+ * logo glyphs. On Windows, narrowing with `mode con:` in the same line as `agy`
+ * keeps `powershell.exe` as the foreground process and Orca cannot detect the
+ * agent, so the width adjustment is skipped there entirely; the matrix routes
+ * Windows Agy Gemini through a separate path (see `predictLaunchPath`).
  *
  * @param {object} command - Result of `roleCommand`.
  * @param {string} [platform=process.platform] - Host platform.
@@ -50,17 +247,15 @@ export const AGY_BANNER_COLUMNS = 44;
  */
 export function launchLine(command, platform = process.platform) {
   // Kept pure for every platform so the typed line stays testable; the refusal
-  // for a Windows Agy Gemini role happens in openRoleTerminal before any
-  // terminal is created.
+  // for a Windows Agy role happens in openRoleTerminal before any terminal is
+  // created.
   const narrow =
-    command.provider === "agy" && /^gemini/i.test(command.modelRequested ?? "");
+    command.provider === "agy" &&
+    normalizeModelFamily(command.modelRequested) === "gemini" &&
+    platform !== "win32";
   if (!narrow) return { typed: command.command, columns: null };
-  const width =
-    platform === "win32"
-      ? `mode con: cols=${AGY_BANNER_COLUMNS}`
-      : `stty cols ${AGY_BANNER_COLUMNS}`;
   return {
-    typed: `${width}; ${command.command}`,
+    typed: `stty cols ${AGY_BANNER_COLUMNS}; ${command.command}`,
     columns: AGY_BANNER_COLUMNS,
   };
 }
@@ -463,18 +658,22 @@ async function launchOnce({
  * @param {number} [options.settleMs=8000] - Wait before sending Enter.
  * @param {number} [options.readyMs=90000] - Wait for the agent's interface.
  * @param {number} [options.pollMs=1500] - Interval between screen reads.
- * @param {string} [options.platform=process.platform] - Host platform, which
- *   decides whether an Agy Gemini role is launched narrow.
+ * @param {string} [options.platform=process.platform] - Host platform.
+ * @param {'powershell'|'posix'} [options.shell='posix'] - Shell kind on the platform.
+ * @param {boolean} [options.trustRecordExists=true] - Whether the worktree has a trust record (Agy).
+ * @param {boolean|string} [options.codexTrustRecordExists="unknown"] - Whether the worktree has a Codex trust record.
+ * @param {string} [options.orcaVersion] - Orca version for matrix lookup.
+ * @param {string} [options.cliVersion] - Antigravity CLI version for matrix lookup.
+ * @param {boolean} [options.allowUnverified=false] - Permit unverified supervised-terminal paths.
+ * @param {string} [options.allowUnverifiedApproval] - Approval sentence recorded for accountability.
  * @param {Function} [options.execute=run] - Injectable command runner.
- * On Windows an Agy Gemini role is refused before any terminal is created.
- * The narrowed console did not make Orca report the terminal idle, and Orca did
- * not recognize it as agy, so both the supervised start and the injection
- * fallback failed there only after a terminal had been opened and approved
- * (#46). The same role runs headless on Windows.
+ * The matrix table is consulted before any terminal is created. A `blocked` or
+ * unverified-without-approval result throws with the reason codes and next
+ * action, without spending a workflow attempt.
  *
  * @returns {Promise<object>} Handle, submission, readiness and final screen.
- * @throws {Error} When the terminal cannot be created or read, or the role is
- *   an Agy Gemini role on Windows.
+ * @throws {Error} When the terminal cannot be created or read, or the matrix
+ *   predicts a blocked launch path.
  */
 export async function openRoleTerminal({
   worktree,
@@ -485,6 +684,13 @@ export async function openRoleTerminal({
   readyMs = 90000,
   pollMs = 1500,
   platform = process.platform,
+  shell = platform === "win32" ? "powershell" : "posix",
+  trustRecordExists = true,
+  codexTrustRecordExists = "unknown",
+  orcaVersion = SUPPORTED_ORCA_VERSION,
+  cliVersion = SUPPORTED_CLI_VERSION,
+  allowUnverified = false,
+  allowUnverifiedApproval,
   execute = run,
 }) {
   assert(worktree, "role-terminal needs a worktree selector");
@@ -492,18 +698,35 @@ export async function openRoleTerminal({
     Array.isArray(command?.argv) && command.argv.length > 0,
     "role-terminal needs a role command",
   );
-  assert(
-    !(
-      platform === "win32" &&
-      command.provider === "agy" &&
-      /^gemini/i.test(command.modelRequested ?? "")
-    ),
-    `Role ${command.role} runs Agy ${command.modelRequested}, which Orca cannot supervise from a Windows terminal (#46); ` +
-      `start it with headless-start --org <organization.json> --role ${command.role} --cwd <worktree> --spec <brief> --state <pm-state> instead`,
-  );
+  const { typed, columns } = launchLine(command, platform);
+  const isCompoundCommand = columns !== null;
+  const matrixResult = predictLaunchPath({
+    runner: command.provider,
+    model: command.modelRequested,
+    platform,
+    shell,
+    trustRecordExists,
+    codexTrustRecordExists,
+    skipDangerousModePermissionPrompt: Boolean(command.permissionBypass),
+    orcaVersion,
+    cliVersion,
+    isCompoundCommand,
+    allowUnverified,
+    allowUnverifiedApproval,
+  });
+  if (matrixResult.path === "blocked" || matrixResult.path === "headless") {
+    const err = new Error(
+      `Role ${command.role} launch refused by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,
+    );
+    err.matrixRefusal = {
+      path: matrixResult.path,
+      reason: matrixResult.reason,
+      nextAction: matrixResult.nextAction,
+    };
+    throw err;
+  }
   const orca = selectOrcaExecutable(executable);
   const tabTitle = roleTitle(command.role, title ?? worktreeLabel(worktree));
-  const { typed, columns } = launchLine(command, platform);
   const launch = {
     orca,
     worktree,

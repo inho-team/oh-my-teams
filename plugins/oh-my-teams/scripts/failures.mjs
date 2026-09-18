@@ -70,6 +70,12 @@ export function classifyFailure(input = {}) {
   if (input.kind === "not-started") {
     return route("start-refused", "pm", "change-launch-path", false);
   }
+  // A post-launch refusal that the compatibility matrix predicted would succeed
+  // means the table itself is wrong: retrying the same combination reproduces
+  // the failure, and only revising the matrix changes the outcome.
+  if (input.kind === "matrix-mismatch") {
+    return route("matrix-prediction-failure", "pm", "revise-matrix", false);
+  }
   if (
     input.kind === "workspace-context" ||
     input.grounded === false ||

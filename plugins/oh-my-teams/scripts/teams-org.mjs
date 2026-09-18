@@ -15,6 +15,7 @@ import {
 import {
   assertWorktreeUnshared,
   launchBinding,
+  PERMISSION_BYPASS,
   selectedWorktreePath,
   resolveRoleLaunch,
   roleCommand,
@@ -35,10 +36,12 @@ import {
 import {
   openRoleTerminal,
   pinTerminalTitle,
+  readLaunchEnvironment,
   roleTitle,
   workerTerminal,
   worktreeLabel,
 } from "./role-terminal.mjs";
+import { predictLaunchPath } from "./launch-matrix.mjs";
 import { assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
@@ -136,6 +139,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
   role-terminal --org FILE --role ROLE --worktree SELECTOR [--title TEXT]
                 [--workflow-id ID --state DIR] [--orca EXECUTABLE]
+                [--allow-unverified "APPROVAL SENTENCE"]
                 (the tab title is the role tag, e.g. [PM], then TEXT or the worktree)
   host-defaults [--project DIR] [--codex-home DIR]
   usage-report --org FILE [--worktree ID | --all] [--state DIR]
@@ -218,7 +222,7 @@ export const ALLOWED_OPTIONS = {
   ],
   "runtime-discover": ["orca"],
   "role-spec": ["org", "role", "spec", "workflow-id", "state", "text"],
-  "terminal-idle-check": ["terminal", "orca"],
+  "terminal-idle-check": ["terminal", "orca", "org", "role"],
   "headless-start": [
     "org",
     "role",
@@ -243,6 +247,7 @@ export const ALLOWED_OPTIONS = {
     "workflow-id",
     "state",
     "orca",
+    "allow-unverified",
   ],
   "host-defaults": ["project", "codex-home"],
   "usage-report": [
@@ -543,6 +548,29 @@ async function startSupervisedWorker(args) {
     args.repo,
   );
   const launchedAt = new Date().toISOString();
+  // terminal이 있을 때만 matrixPrediction을 계산합니다.
+  // startWorker → assertTerminalIdle 에서 사후 거부가 matrix-mismatch로 분류됩니다.
+  let matrixPrediction;
+  if (args.terminal) {
+    try {
+      const env = await readLaunchEnvironment({ orcaExecutable: args.orca });
+      matrixPrediction = predictLaunchPath({
+        runner: launch.provider,
+        model: launch.model,
+        platform: env.platform,
+        shell: env.shell,
+        trustRecordExists: env.trustRecordExists,
+        codexTrustRecordExists: env.codexTrustRecordExists,
+        skipDangerousModePermissionPrompt: Boolean(
+          PERMISSION_BYPASS[launch.provider],
+        ),
+        orcaVersion: env.orcaVersion,
+        cliVersion: env.cliVersion,
+      });
+    } catch {
+      // 예측 실패 시 matrixPrediction undefined (기존 동작 유지)
+    }
+  }
   try {
     const started = await startWorker(path.resolve(args.repo), {
       task: args.task,
@@ -552,6 +580,7 @@ async function startSupervisedWorker(args) {
       runId: args.run,
       retryOf: args["retry-of"],
       executable: args.orca,
+      matrixPrediction,
     });
     const binding = launchBinding(launch);
     // role-terminal already titled the tab. It is set again because Orca may
@@ -955,11 +984,40 @@ async function executeCommand(args) {
         token: started.token,
       };
     }
-    case "terminal-idle-check":
+    case "terminal-idle-check": {
+      // --org와 --role이 주어질 때만 matrixPrediction을 계산합니다.
+      // 예측이 없으면 기존 동작을 유지합니다(matrixPrediction 전달 안 함).
+      let matrixPrediction;
+      if (args.org && args.role) {
+        try {
+          const org = validateOrg(readJSON(args.org));
+          const command = roleCommand(org, args.role);
+          const env = await readLaunchEnvironment({
+            orcaExecutable: args.orca,
+          });
+          matrixPrediction = predictLaunchPath({
+            runner: command.provider,
+            model: command.modelRequested,
+            platform: env.platform,
+            shell: env.shell,
+            trustRecordExists: env.trustRecordExists,
+            codexTrustRecordExists: env.codexTrustRecordExists,
+            skipDangerousModePermissionPrompt: Boolean(
+              command.permissionBypass,
+            ),
+            orcaVersion: env.orcaVersion,
+            cliVersion: env.cliVersion,
+          });
+        } catch {
+          // 예측 실패 시 기존 동작 유지 (matrixPrediction undefined)
+        }
+      }
       return checkTerminalIdle(args.terminal, {
         executable: args.orca,
         cwd: process.cwd(),
+        matrixPrediction,
       });
+    }
     case "role-spec":
       return (({ org, run }) => ({
         role: args.role,
@@ -969,40 +1027,63 @@ async function executeCommand(args) {
       return (({ org, run }) => roleCommand(org, args.role, run))(
         launchContext(args),
       );
-    case "role-terminal":
-      return (({ org, run }) => {
-        const command = roleCommand(org, args.role, run);
-        const target = selectedWorktreePath(args.worktree, process.cwd());
-        if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
-        const launchedAt = new Date().toISOString();
-        assertWorktreeUnshared(
-          run.workflowState,
-          command.role,
-          args.worktree,
-          process.cwd(),
-        );
-        return openRoleTerminal({
-          worktree: args.worktree,
-          command,
-          title: args.title,
-          executable: args.orca,
-        }).then((opened) => ({
-          ...opened,
-          ...recordLaunchSafely(args.org, launchedAt, {
-            via: "role-terminal",
-            role: command.role,
-            profile: command.profile,
-            provider: command.provider,
-            modelRequested: command.modelRequested,
-            effortRequested: command.effortRequested,
-            worktreePath: target,
-            worktreeSelector: args.worktree,
-            terminal: opened.terminal,
-            workflowId: args["workflow-id"] ?? null,
-            stateDir: args.state ?? null,
-          }),
-        }));
-      })(launchContext(args));
+    case "role-terminal": {
+      const { org, run: runCtx } = launchContext(args);
+      const command = roleCommand(org, args.role, runCtx);
+      const target = selectedWorktreePath(args.worktree, process.cwd());
+      if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
+      const launchedAt = new Date().toISOString();
+      assertWorktreeUnshared(
+        runCtx.workflowState,
+        command.role,
+        args.worktree,
+        process.cwd(),
+      );
+      const allowUnverifiedApproval = args["allow-unverified"];
+      assert(
+        allowUnverifiedApproval === undefined ||
+          (typeof allowUnverifiedApproval === "string" &&
+            allowUnverifiedApproval.trim().length > 0),
+        "--allow-unverified requires a non-empty approval sentence",
+      );
+      // 실제 환경에서 매트릭스 입력값을 읽습니다.
+      // 알 수 없는 값은 'unknown'으로 전달하여 표가 unverified로 처리합니다.
+      const env = await readLaunchEnvironment({
+        worktreePath: target ?? undefined,
+        orcaExecutable: args.orca,
+      });
+      const opened = await openRoleTerminal({
+        worktree: args.worktree,
+        command,
+        title: args.title,
+        executable: args.orca,
+        platform: env.platform,
+        shell: env.shell,
+        trustRecordExists: env.trustRecordExists,
+        codexTrustRecordExists: env.codexTrustRecordExists,
+        orcaVersion: env.orcaVersion,
+        cliVersion: env.cliVersion,
+        allowUnverified: allowUnverifiedApproval !== undefined,
+        allowUnverifiedApproval,
+      });
+      return {
+        ...opened,
+        ...(allowUnverifiedApproval ? { allowUnverifiedApproval } : {}),
+        ...recordLaunchSafely(args.org, launchedAt, {
+          via: "role-terminal",
+          role: command.role,
+          profile: command.profile,
+          provider: command.provider,
+          modelRequested: command.modelRequested,
+          effortRequested: command.effortRequested,
+          worktreePath: target,
+          worktreeSelector: args.worktree,
+          terminal: opened.terminal,
+          workflowId: args["workflow-id"] ?? null,
+          stateDir: args.state ?? null,
+        }),
+      };
+    }
     case "host-defaults":
       return resolveHostDefaults({
         project: args.project && path.resolve(args.project),

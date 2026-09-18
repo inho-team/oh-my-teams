@@ -30,6 +30,9 @@ export const NEUTRAL_FAILURE_KINDS = Object.freeze([
   // The runtime refused a launch before handing any work over, so nothing
   // started and there is no process to reconcile.
   "not-started",
+  // A post-launch refusal that disagrees with the compatibility table's
+  // prediction: the table itself must be revised before a retry helps.
+  "matrix-mismatch",
   "workspace-context",
   "environment",
   "contract",

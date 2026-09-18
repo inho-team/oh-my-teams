@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, readJSON, writeJSON } from "./core.mjs";
+import { printTimeout } from "./providers/shared.mjs";
 import { addTokenUsage, normalizeTokenUsage } from "./usage.mjs";
 
 const RUNNER = path.join(
@@ -137,13 +138,15 @@ const PROVIDERS = {
     },
   },
   agy: {
-    command({ binary, model, prompt, session }) {
+    command({ binary, model, prompt, session, timeoutMs }) {
       const argv = [
         ...binary,
         "--output-format",
         "stream-json",
         "--dangerously-skip-permissions",
       ];
+      if (timeoutMs != null)
+        argv.push("--print-timeout", printTimeout(timeoutMs));
       if (session) argv.push("--conversation", session);
       if (model) argv.push("--model", model);
       argv.push("-p", prompt);
@@ -238,13 +241,14 @@ export function codexRolloutModel(threadId, codexHome) {
 /**
  * Builds the argv and stdin of one headless turn for a provider.
  *
- * @param {object} options - Provider, executable argv, model, effort, prompt, session.
+ * @param {object} options - Provider, executable argv, model, effort, prompt, session, and timeoutMs.
  * @param {string} options.provider - `claude`, `codex` or `agy`.
  * @param {string[]} options.binary - Executable argv, e.g. `["claude"]`.
  * @param {string | null} [options.model] - Model to request.
  * @param {string | null} [options.effort] - Reasoning effort to request.
  * @param {string} options.prompt - Instruction for this turn.
  * @param {string | null} [options.session] - Session to resume.
+ * @param {number | null} [options.timeoutMs] - Per-turn time limit passed as --print-timeout (agy only).
  * @returns {{argv: string[], stdin: string | null}} Command and stdin payload.
  * @throws {Error} When the provider cannot run headless.
  */
@@ -504,6 +508,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
   const number = turnDirs(dir).length + 1;
   const turnDir = path.join(dir, "turns", String(number));
   fs.mkdirSync(turnDir, { recursive: true });
+  const resolvedTimeoutMs = timeoutMs ?? worker.timeoutMs;
   const { argv, stdin } = headlessCommand({
     provider: worker.provider,
     binary: worker.binary,
@@ -511,6 +516,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
     effort: worker.effortRequested,
     prompt,
     session,
+    timeoutMs: resolvedTimeoutMs,
   });
   fs.writeFileSync(path.join(turnDir, "prompt.txt"), prompt);
   if (stdin !== null) fs.writeFileSync(path.join(turnDir, "stdin.txt"), stdin);
@@ -520,7 +526,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
     stdinFile: stdin === null ? null : "stdin.txt",
     cwd: worker.cwd,
     session: session ?? null,
-    timeoutMs: timeoutMs ?? worker.timeoutMs,
+    timeoutMs: resolvedTimeoutMs,
     startedAt: new Date().toISOString(),
   });
   const runner = spawn(process.execPath, [RUNNER, turnDir], {
@@ -549,7 +555,11 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
  * @param {string} options.cwd - Worktree the worker runs in.
  * @param {string} options.prompt - Full instruction, protocol included.
  * @param {number} [options.timeoutMs=1800000] - Per-turn time limit.
- * @returns {object} The worker record and the turn it started.
+ * @returns {object} The worker record, the turn it started, and a headless receipt draft.
+ *   The draft's `runId` and `worktreeId` are `null`; the caller must fill them with the
+ *   actual Orca Run ID and the Orca worktree ID (`<repo-id>::<path>`) before passing the
+ *   receipt to `workflow-attach`. Leaving either field null causes `workflow-attach` to
+ *   reject the receipt as incomplete.
  * @throws {Error} When the id is taken or the provider cannot run headless.
  */
 export function startHeadlessWorker({
@@ -584,7 +594,18 @@ export function startHeadlessWorker({
     createdAt: new Date().toISOString(),
   };
   writeJSON(path.join(dir, "worker.json"), worker);
-  return { worker, ...launchTurn(dir, worker, { prompt }) };
+  const launched = launchTurn(dir, worker, { prompt });
+  const receipt = {
+    via: "headless-start",
+    executionId: workerId,
+    runId: null,
+    taskId: `headless:${workerId}`,
+    dispatchId: `headless:${workerId}`,
+    worktreeId: null,
+    runnerPid: launched.runnerPid ?? null,
+    modelRequested: model ?? null,
+  };
+  return { worker, ...launched, receipt };
 }
 
 function readTurn(worker, turnDir, options) {
