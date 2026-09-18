@@ -287,3 +287,215 @@ high 3개, medium 3개, low 1개. 합계 7개.
 - **C-M2 추가 경로**: `headlessDetail`이 모든 턴의 stream을 읽는 경로(768-788)는 대시보드 상세 요청마다 발생한다. 턴이 많은 장기 worker에서 총 읽기량이 회차별로 누적되는지 확인 필요(미측정).
 - **F-05 Windows 실측**: `child.kill()` 이후 손자 프로세스 생존 여부는 실제 Windows 환경에서 `tasklist`로 확인해야 한다(임시 디렉터리 방식으로 측정 불가).
 - **usage-sources.mjs 대용량 파일 상한**: 100MB 이상 Claude 대화 기록(매우 긴 세션)에서 eachJsonLine의 메모리 상한이 Node.js 기본 힙(`--max-old-space-size`)과 충돌할 가능성(미측정, 50MB 제한으로 측정).
+
+---
+
+### audit-state
+
+> 조사 대상: B2(workflow.mjs, workflow-store.mjs, gates.mjs, evidence.mjs, failures.mjs, lessons.mjs, incidents.mjs) + B4a(teams-org.mjs, core.mjs)
+> 조사 기준 커밋: 4d1d7d6
+
+#### 1. 파일별 조사 상태
+
+| 파일 | 묶음 | 줄 수 | 조사 상태 |
+|---|---|---:|---|
+| plugins/oh-my-teams/scripts/workflow.mjs | B2 | 1,504 | 조사함 |
+| plugins/oh-my-teams/scripts/workflow-store.mjs | B2 | 163 | 조사함 |
+| plugins/oh-my-teams/scripts/gates.mjs | B2 | 453 | 조사함 |
+| plugins/oh-my-teams/scripts/evidence.mjs | B2 | 440 | 조사함 |
+| plugins/oh-my-teams/scripts/failures.mjs | B2 | 133 | 조사함 |
+| plugins/oh-my-teams/scripts/lessons.mjs | B2 | 71 | 조사함 |
+| plugins/oh-my-teams/scripts/incidents.mjs | B2 | 266 | 조사함 |
+| plugins/oh-my-teams/scripts/teams-org.mjs | B4a | 1,329 | 조사함 |
+| plugins/oh-my-teams/scripts/core.mjs | B4a | 945 | 조사함 |
+
+---
+
+#### 2. 발견 후보
+
+---
+
+##### STATE-01
+
+- **id**: STATE-01
+- **분류**: memory
+- **심각도 가안**: medium
+- **파일:줄**: `workflow-store.mjs:89`, `workflow-store.mjs:101`, `workflow-store.mjs:118`
+- **증상**: `appendWorkflowEvent`가 중복 여부를 `state.eventIds.includes(event.id)`로 확인한다. `Array.includes`는 O(n) 선형 탐색이며, 이벤트마다 `state.eventIds.push(event.id)`로 상한 없이 늘어난다. `saveWorkflowState`는 저장할 때마다 `eventIds`를 포함한 state 전체를 JSON 직렬화하여 쓰므로 이벤트가 쌓일수록 비용이 선형 증가한다.
+- **근거**: 코드 인용 — `workflow-store.mjs:89-101`:
+  ```js
+  if (state.eventIds.includes(event.id)) return false;
+  // ...
+  state.eventIds.push(event.id);
+  ```
+  `workflow-store.mjs:118-121`:
+  ```js
+  writeJSON(path.join(directory, "transaction.json"), {
+    state,
+    events: pendingEvents.get(state) ?? [],
+  });
+  ```
+  測定結果 (eventIds 크기별 includes 1회 + JSON.stringify 1회, 임시 스크립트 %TEMP%\omt-audit-measure-state):
+
+  | eventIds 수 | includes(ms) | 직렬화(ms) | 합계(ms) | payload(KB) | RSS 증가(MB) |
+  |---|---|---|---|---|---|
+  | 1,000 | 0 | 1 | 1 | 24 | 0 |
+  | 10,000 | 0 | 3 | 3 | 235 | 1 |
+  | 100,000 | 1 | 34 | 35 | 2,344 | 5 |
+
+  스크립트 요지: 길이 n의 eventIds 배열을 생성하고 미존재 키에 대한 includes 1회 + JSON.stringify 1회 측정. 100k 이벤트에서 35ms, payload 2.3MB. 단일 workflow에서 100k 이벤트는 극단적 시나리오(예: 1만 태스크 × 10이벤트/태스크)이며, 10k 이하에서는 3ms 미만으로 허용 범위.
+- **제안 수정**: `eventIds`를 `Set<string>`으로 교체하여 includes를 O(1)로 줄인다. JSON 직렬화 시 `Array.from(eventIds)`로 변환하거나, state 저장 직전에 배열로 바꾼다. 기존 `state.json`의 배열 형식을 로드할 때 Set으로 변환하는 마이그레이션 처리 필요.
+- **예상 작업 크기**: S (Set 교체 + 직렬화 호환성 확인)
+- **회귀 방지 검사**: `workflow.test.mjs`의 이벤트 중복 방지 테스트; 기존 배열 state.json을 로드·저장하는 왕복 테스트 추가 필요
+
+---
+
+##### STATE-02
+
+- **id**: STATE-02
+- **분류**: memory
+- **심각도 가안**: medium
+- **파일:줄**: `core.mjs:537-557`
+- **증상**: `run()` 함수에서 overflow 발생 시 `child.kill()`을 호출하지만(`core.mjs:557`) fallback 타이머를 걸지 않는다. timeout 경로는 `fallbackTimer = setTimeout(() => finish(-1), 1000)`(`core.mjs:541`)으로 1초 후 강제 종료하지만, overflow 경로는 `child.kill()` 후 `close` 이벤트가 오길 기다린다. Windows에서 `child.kill()`이 자식 트리를 끝내지 않으면 `close`가 오지 않아 promise가 `timeoutMs`(기본 300초)까지 남는다. 또한 매 data chunk마다 `Buffer.byteLength(stdout) + Buffer.byteLength(stderr)` 재계산이 발생한다.
+- **근거**: 코드 인용 — `core.mjs:537-557`:
+  ```js
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+    // Some process trees never deliver `close`; return an uncertain result.
+    fallbackTimer = setTimeout(() => finish(-1), 1000);  // timeout에만
+  }, timeoutMs);
+
+  stream.on("data", (data) => {
+    stdout += data;
+    if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > maxBytes) {
+      overflow = true;
+      stdout = stdout.slice(0, maxBytes / 2);
+      stderr = stderr.slice(0, maxBytes / 2);
+      child.kill();  // fallback 타이머 없음
+    }
+  });
+  ```
+  주석 `core.mjs:540`: \"Some process trees never deliver \`close\`\" — timeout 경로에는 fallback이 있으나 overflow 경로에는 없다.
+
+  측정 결과 (Buffer.byteLength 재계산 비용, 8MB 출력 시뮬레이션, 임시 스크립트):
+
+  | chunk 크기 | 목표 | 재계산 횟수 | 경과(ms) | RSS 증가(MB) |
+  |---|---|---|---|---|
+  | 64KB | 8MB | 128 | 786 | 64 |
+  | 16KB | 8MB | 512 | 2,753 | 68 |
+  | 4KB | 8MB | 2,048 | 10,347 | 56 |
+
+  overflow 후 close 미착신 시 대기: 미측정(Windows 실환경 필요).
+- **제안 수정**: overflow 시에도 `fallbackTimer = setTimeout(() => finish(-1), 1000)`을 추가하여 timeout과 대칭적으로 처리. `Buffer.byteLength` 재계산은 현재 길이를 별도 `totalBytes` 변수로 추적하면 O(1)로 줄일 수 있다.
+- **예상 작업 크기**: S (fallback 타이머 추가 + byteLength 카운터 변수 추가)
+- **회귀 방지 검사**: `core.mjs` 관련 `run` 테스트; overflow 후 close 미착신 시나리오(Windows 프로세스 트리) 추가 필요
+
+---
+
+##### STATE-03
+
+- **id**: STATE-03
+- **분류**: checks
+- **심각도 가안**: low
+- **파일:줄**: `gates.mjs:181`, `gates.mjs:255`
+- **증상**: `loadReviews`는 `reviews/` 디렉터리 전체를 읽어 `taskId`로 필터링하고(`gates.mjs:181-183`), `matchingDecision`은 `decisions/` 디렉터리 전체를 읽어 탐색한다(`gates.mjs:255-263`). 두 함수는 `gateCheck`, `recordReviewLocked`, `acceptOutcomeLocked`에서 각각 호출되며, 리뷰·결정 파일이 쌓일수록 전체 읽기 비용이 선형 증가한다.
+- **근거**: 코드 인용 — `gates.mjs:180-183`:
+  ```js
+  export function loadReviews(stateDir, task) {
+    return readJsonDirectory(path.join(stateDir, "reviews")).filter(
+      (review) => review.taskId === task.id,
+    );
+  }
+  ```
+  `gates.mjs:253-263`:
+  ```js
+  function matchingDecision(stateDir, task, report, reviewIds) {
+    return readJsonDirectory(path.join(stateDir, "decisions")).find(
+      (decision) => decision.taskId === task.id && ...
+    );
+  }
+  ```
+  `readJsonDirectory`는 `readdirSync + sort + map(readJSON)`으로 디렉터리 전체 읽기(`core.mjs:169-176`).
+  측정: 미측정(리뷰·결정 파일 수는 workflow 규모에 의존하며, 수십~수백 개가 상한일 가능성이 높아 실제 영향은 낮을 것으로 추정).
+- **제안 수정**: `reviews/<taskId>/` 하위 구조로 분리하거나, task-keyed 인덱스 파일을 두어 전체 스캔을 줄이는 방안 검토. 현재 규모에서 문제가 없다면 허용 가능.
+- **예상 작업 크기**: S-M (디렉터리 구조 변경 시 마이그레이션 포함)
+- **회귀 방지 검사**: `gates.test.mjs`의 리뷰 로드 테스트; 리뷰 파일 수 증가 시 로드 시간 측정 추가 필요
+
+---
+
+##### STATE-04
+
+- **id**: STATE-04
+- **분류**: checks
+- **심각도 가안**: low
+- **파일:줄**: `teams-org.mjs:570-572`, `teams-org.mjs:1011-1013`
+- **증상**: `predictLaunchPath` 호출 실패를 빈 `catch` 블록으로 무시한다. 예외를 로깅하지 않아 예측 실패 원인(launch-matrix 로직 오류, 환경 정보 누락 등)이 숨겨진다. `matrixPrediction`이 `undefined`로 남아도 후속 함수는 이를 허용하므로 기능상 문제는 없으나 진단성이 낮다.
+- **근거**: 코드 인용 — `teams-org.mjs:570-572`:
+  ```js
+  } catch {
+    // 예측 실패 시 matrixPrediction undefined (기존 동작 유지)
+  }
+  ```
+  `teams-org.mjs:1011-1013`:
+  ```js
+  } catch {
+    // 예측 실패 시 기존 동작 유지 (matrixPrediction undefined)
+  }
+  ```
+  측정: 해당 없음(진단성 문제).
+- **제안 수정**: `catch (error)` 로 받아 `process.stderr.write` 또는 구조화된 경고 출력 추가. 또는 결과 객체에 `matrixPredictionError: error.message`를 포함하여 호출자가 판단할 수 있게 한다.
+- **예상 작업 크기**: XS (catch 블록에 경고 출력 1줄 추가 × 2개소)
+- **회귀 방지 검사**: `predictLaunchPath` 실패 시 stderr 출력 확인 테스트
+
+---
+
+##### STATE-05
+
+- **id**: STATE-05
+- **분류**: checks
+- **심각도 가안**: low
+- **파일:줄**: `workflow.mjs:44`
+- **증상**: `validateWorkflowRequest`가 `export`로 공개되어 있으나, 모듈 내부 `createWorkflow`(`workflow.mjs:234`)에서만 호출되고 외부 파일에서 import하지 않는다. 의도하지 않은 공개 API가 유지보수 범위를 모호하게 만들 수 있다.
+- **근거**: `grep "validateWorkflowRequest" scripts/*.mjs` 결과:
+  ```
+  workflow.mjs:44: export function validateWorkflowRequest(...)
+  workflow.mjs:234: validateWorkflowRequest(request);
+  ```
+  `teams-org.mjs` import 목록(62-74줄)에 없음. 다른 스크립트 파일에도 없음.
+  측정: 해당 없음.
+- **제안 수정**: 외부 사용이 없다면 `export` 제거 검토. 테스트 또는 미래 API용으로 남겨둔 경우 JSDoc에 `@internal` 태그를 추가하여 의도 명시.
+- **예상 작업 크기**: XS
+- **회귀 방지 검사**: `workflow.test.mjs`에서 `validateWorkflowRequest` 직접 호출 여부 확인 후 제거 가능
+
+---
+
+#### 3. 사전 후보 확인·반박·보완
+
+| 사전 후보 | 판정 | 근거 |
+|---|---|---|
+| **C-M5** | **확인(일부)** | `core.mjs:537-557`에서 overflow 후 fallback 타이머 없음 확인. 매 chunk마다 `Buffer.byteLength` 재계산 측정: 64KB chunk × 128회 = 786ms, 4KB chunk × 2,048회 = 10,347ms. overflow 후 close 미착신 시간: 미측정(Windows 실환경 필요). → STATE-02로 등록 |
+| **C-M7** | **확인(낮은 우선순위)** | `workflow-store.mjs:89, 101`에서 `eventIds.includes` O(n) + state 전체 직렬화 확인. 측정: 100k 이벤트 35ms, payload 2.3MB. 10k 이하 3ms 미만(허용 범위). `pendingEvents`는 WeakMap(누수 없음, 사전 후보 일치). → STATE-01로 등록(medium 유지) |
+
+---
+
+#### 4. 발견 후보 요약
+
+| id | 분류 | 심각도 | 핵심 |
+|---|---|---|---|
+| STATE-01 | memory | medium | eventIds: includes O(n) 탐색 + state 전체 직렬화(상한 없음) |
+| STATE-02 | memory | medium | run() overflow 후 fallback 타이머 없음: close 미착신 시 timeoutMs까지 대기 |
+| STATE-03 | checks | low | gates: reviews/decisions 디렉터리 전체 스캔(측정 미완) |
+| STATE-04 | checks | low | teams-org: predictLaunchPath 예외 무음 삼킴 2개소 |
+| STATE-05 | checks | low | workflow: validateWorkflowRequest 외부 미사용 export |
+
+medium 2개, low 3개. 합계 5개.
+
+---
+
+#### 5. 남은 의심
+
+- **STATE-01 Set 전환 직렬화 호환**: `eventIds`를 Set으로 바꾸면 `JSON.stringify`가 `{}`로 직렬화하므로 `writeJSON` 직전 `Array.from(state.eventIds)`로 변환하는 처리 필요. 기존 `state.json`에서 배열을 읽어 Set으로 변환하는 로드 경로 확인 필요.
+- **STATE-02 overflow 후 Windows close**: Windows에서 `child.kill()` 이후 손자 프로세스가 `close`를 보내지 않는 사례(F-05와 유사)가 overflow 경로에도 적용되는지 실측 확인 필요(미측정).
+- **STATE-03 측정 필요**: reviews/decisions 디렉터리가 장기 workflow·다수 재시도 시나리오에서 얼마나 쌓이는지 측정 후 low→medium 상향 여부 판단 가능.
+- **incidents.mjs state 크기**: `loadState`는 `state.json` 하나에 모든 인시던트를 저장하며, `maxOpen` 설정으로 활성 수가 제한되므로 실질적 위험은 낮을 것으로 추정(미측정).
