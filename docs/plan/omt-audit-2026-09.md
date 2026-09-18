@@ -3,13 +3,14 @@
 - 작성일: 2026-09-18
 - 상태: 완료 (audit-runtime-io·audit-state·audit-launch·audit-docs-repo·audit-tests 묶음 전체 조사 완료)
 - 대상: `plugins/oh-my-teams/scripts` (B1~B5 묶음), `plugins/oh-my-teams/references`, `plugins/oh-my-teams/skills`, `plugins/orca/scripts`, `scripts`, `evals`, `tests` (B6·B7·T1·T2 묶음)
-- 관련 문서: `.omt/audit/plan.md`, `.omt/audit/static-candidates.md`, `.omt/audit/checks/RESULTS.md`, `docs/plan/headless-runtime.md`, `docs/plan/ai-native-agent-organization.md`
+- 관련 문서: `docs/plan/headless-runtime.md`, `docs/plan/ai-native-agent-organization.md`
+- 조사 작업 파일은 PM 워크트리의 로컬 상태(.omt/, git 추적 제외)에 있다.
 
 ---
 
 ## 결론
 
-**메모리 high 3건·medium 3건·low 1건, 아키텍처 medium 1건·low 3건, checks medium 1건·low 14건으로 발견 항목 합계 25건이며, 다음 kickoff에서 F-01·F-02·F-03·F-05·STATE-02 순서로 수정을 시작할 것을 권고한다.**
+**메모리 high 3건·medium 3건·low 1건, 아키텍처 medium 1건·low 3건, checks medium 2건·low 14건으로 발견 항목 합계 26건이며, 다음 kickoff에서 F-01·F-02·F-03·F-05·STATE-02 순서로 수정을 시작할 것을 권고한다.**
 
 가장 중요한 발견 다섯 가지는 다음과 같다.
 
@@ -197,8 +198,9 @@
 | DOCS-09 | checks | low | `skills/form/SKILL.md:24-28` | 모델 선택지 자동 동기화 없음 |
 | TESTS4-07 | checks | low | `tests/` 전반 | 타임아웃 중단 시 t.after 클린업 미보장 |
 | TESTS4-08 | checks | low | `tests/` — `incidents.mjs`, `usage-ledger.mjs` 직접 단위 테스트 없음 | 핵심 상태 관리 경로 단위 테스트 부재 |
+| CHECKS-INT-01 | checks | medium | `tests/headless.test.mjs:564`, `tests/headless.test.mjs:28-37` | 병렬 npm test 시 Windows 11에서 t.after rmSync EPERM — integration gate 통과 실패 |
 
-**합계**: memory high 3건, memory medium 3건, memory low 1건 / architecture medium 1건(CLOSE-01), architecture low 3건 / checks medium 0건, checks low 14건. 총 25건.
+**합계**: memory high 3건, memory medium 3건, memory low 1건 / architecture medium 1건(CLOSE-01), architecture low 3건 / checks medium 2건(CHECKS-INT-01), checks low 14건. 총 26건.
 
 ### 상세 항목
 
@@ -836,6 +838,26 @@
 
 ---
 
+#### CHECKS-INT-01
+
+- **id**: CHECKS-INT-01
+- **분류**: checks
+- **심각도**: medium (측정으로 확인된 재현 가능한 실패이며, Windows + 병렬 실행이라는 특정 시나리오에 한정됨. 직렬 실행과 GitHub Actions CI를 우회 근거로 삼아 integration gate를 통과하지 못한 채 integration-pending으로 남음)
+- **파일:줄**: `tests/headless.test.mjs:564`, `tests/headless.test.mjs:28-37`
+- **증상**: 테스트 `"agy turn.json carries --print-timeout from worker default and per-turn timeoutMs"`(`headless.test.mjs:564`)가 기본 병렬 `npm test`(node --test 기본 동시 실행)에서 Windows 11에서 두 번 연속 실패했다. 테스트 본문은 통과하지만 `t.after`의 정리 단계(`headless.test.mjs:28-37`)의 `fs.rmSync(maxRetries 5, retryDelay 200)`가 `EPERM, Permission denied: ...\AppData\Local\Temp\omt-headless-XXXX`로 실패한다.
+- **근거**:
+  - 같은 파일을 단독 실행하면 14/14 통과.
+  - `--test-concurrency=1` 직렬 3묶음 실행에서 29개 파일 359/359 통과(합계 약 240초).
+  - 이번 kickoff의 workflow 통합 gate(고정 검사 `npm test`, verify 명령별 300초 제한)가 통과하지 못해 integration-pending으로 남았다.
+  - `--test-concurrency`는 `NODE_OPTIONS`로 줄 수 없어 우회하지 않았다. 전달 근거는 직렬 359/359와 PR의 GitHub Actions CI로 삼았다.
+  - 원인 가설: 테스트가 띄운 detached headless runner(또는 그 자식)가 정리 시점에 아직 임시 디렉터리를 잡고 있다. F-05(Windows 프로세스 트리 잔존)와 같은 유형이다. 가설은 가설로 적는다.
+  - 측정: 재현 2회 확인(병렬 실행). 직렬 실행 359/359 통과로 우회 경로 확인.
+- **제안 수정**: (a) 테스트 정리 전에 runner 종료를 기다리거나(stop 후 `exit.json` 확인), (b) headless-runner가 Windows에서 프로세스 트리를 종료하게 하고(F-05 수정과 연동), (c) 회귀 방지로 병렬 실행을 CI의 Windows 러너에서 돌린다.
+- **예상 작업 크기**: S-M (runner 종료 확인 로직 추가 + Windows 실환경 검증, F-05 수정과 함께 처리 가능)
+- **회귀 방지 검사**: CI Windows 러너에서 병렬 `npm test` 실행 추가.
+
+---
+
 #### CLOSE-01
 
 - **id**: CLOSE-01
@@ -950,7 +972,7 @@
 | 1 | `fix/headless-stream-read` | F-01, F-02 | M | high/memory, 폴링 경로 RSS 압박 즉시 개선 가능 |
 | 2 | `fix/usage-sources-stream` | F-03, F-06 | S-M | high/memory, eachJsonLine 스트림 전환으로 주석 불일치도 해소 |
 | 3 | `fix/core-overflow-fallback` | STATE-02 | S | medium/memory, overflow 후 close 미착신 Windows 위험 제거 |
-| 4 | `fix/headless-runner-kill-tree` | F-05 | M | medium/memory, Windows 손자 프로세스 정리(실환경 검증 병행) |
+| 4 | `fix/headless-runner-kill-tree` | F-05, CHECKS-INT-01 | M | medium/memory+checks, Windows 손자 프로세스 정리 및 병렬 테스트 정리 실패(같은 유형, 실환경 검증 병행) |
 | 5 | `fix/state-eventids-set` | STATE-01 | S | medium/memory, O(n) 탐색 제거 |
 | 6 | `docs/fix-close-branch-cleanup` | CLOSE-01 | XS | medium/architecture, close 절차에 브랜치 정리 단계 추가 |
 | 7 | `refactor/ledger-read` | F-04 | S | medium/memory, ledger 역방향 읽기(극단적 시나리오 대응) |
@@ -961,6 +983,6 @@
 
 ### 특이 사항
 
-- **F-05·STATE-02의 Windows close 문제**: 두 항목이 같은 근본 원인(Windows 프로세스 트리 `close` 미착신)을 공유하므로 함께 수정하는 것을 권고한다.
+- **F-05·CHECKS-INT-01·STATE-02의 Windows 프로세스 트리 문제**: F-05(headless-runner 손자 프로세스 정리 미보장)·CHECKS-INT-01(병렬 테스트 시 t.after rmSync EPERM)·STATE-02(overflow 후 close 미착신)가 같은 근본 원인(Windows 프로세스 트리 종료 미보장)을 공유하므로 함께 수정하는 것을 권고한다.
 - **F-01·F-02 캐시 설계**: F-01 캐시 추가와 F-02 tail 읽기 전환은 `headlessStatus`의 파싱 경로를 함께 변경하므로 하나의 PR로 묶는 것이 안전하다.
 - **TESTS4-07**: `npm test` 전체를 한 번의 실행으로 완료하려면 300초 제한을 늘리거나 가장 느린 테스트(deliver, worker allowance)의 원인을 조사해야 한다. 이는 단기 수정보다 별도 조사 태스크로 다루는 것을 권고한다.
