@@ -1,8 +1,8 @@
 # omt-audit 2026-09 보고서
 
 - 작성일: 2026-09-18
-- 상태: 초안 (audit-runtime-io 묶음 완료, 다른 묶음 미완)
-- 대상: plugins/oh-my-teams/scripts (B1·B5 묶음)
+- 상태: 초안 (audit-runtime-io·audit-state·audit-launch 묶음 완료, 다른 묶음 미완)
+- 대상: plugins/oh-my-teams/scripts (B1·B5·B3a·B3b·B4b 묶음)
 - 관련 문서: .omt/audit/plan.md, .omt/audit/static-candidates.md, .omt/audit/checks/RESULTS.md
 
 ## 작업 초안
@@ -499,3 +499,190 @@ medium 2개, low 3개. 합계 5개.
 - **STATE-02 overflow 후 Windows close**: Windows에서 `child.kill()` 이후 손자 프로세스가 `close`를 보내지 않는 사례(F-05와 유사)가 overflow 경로에도 적용되는지 실측 확인 필요(미측정).
 - **STATE-03 측정 필요**: reviews/decisions 디렉터리가 장기 workflow·다수 재시도 시나리오에서 얼마나 쌓이는지 측정 후 low→medium 상향 여부 판단 가능.
 - **incidents.mjs state 크기**: `loadState`는 `state.json` 하나에 모든 인시던트를 저장하며, `maxOpen` 설정으로 활성 수가 제한되므로 실질적 위험은 낮을 것으로 추정(미측정).
+
+---
+
+### audit-launch
+
+> 조사 대상: B3a(orca-adapter.mjs, local-adapter.mjs, adapters.mjs, execution.mjs, worker.mjs) + B3b(role-launch.mjs, role-terminal.mjs, launch-matrix.mjs, host-defaults.mjs) + B4b(contracts.mjs, kickoff-registry.mjs, delivery.mjs, workspace.mjs, status.mjs, org-draft.mjs, presets.mjs, quota.mjs)
+> 조사 기준 커밋: 4d1d7d6
+
+#### 1. 파일별 조사 상태
+
+| 파일 | 묶음 | 줄 수 | 조사 상태 |
+|---|---|---:|---|
+| plugins/oh-my-teams/scripts/orca-adapter.mjs | B3a | 870 | 조사함 |
+| plugins/oh-my-teams/scripts/local-adapter.mjs | B3a | 265 | 조사함 |
+| plugins/oh-my-teams/scripts/adapters.mjs | B3a | 107 | 조사함 |
+| plugins/oh-my-teams/scripts/execution.mjs | B3a | 134 | 조사함 |
+| plugins/oh-my-teams/scripts/worker.mjs | B3a | 713 | 조사함 |
+| plugins/oh-my-teams/scripts/role-launch.mjs | B3b | 454 | 조사함 |
+| plugins/oh-my-teams/scripts/role-terminal.mjs | B3b | 799 | 조사함 |
+| plugins/oh-my-teams/scripts/launch-matrix.mjs | B3b | 415 | 조사함 |
+| plugins/oh-my-teams/scripts/host-defaults.mjs | B3b | 152 | 조사함 |
+| plugins/oh-my-teams/scripts/contracts.mjs | B4b | 310 | 조사함 |
+| plugins/oh-my-teams/scripts/kickoff-registry.mjs | B4b | 424 | 조사함 |
+| plugins/oh-my-teams/scripts/delivery.mjs | B4b | 195 | 조사함 |
+| plugins/oh-my-teams/scripts/workspace.mjs | B4b | 184 | 조사함 |
+| plugins/oh-my-teams/scripts/status.mjs | B4b | 277 | 조사함 |
+| plugins/oh-my-teams/scripts/org-draft.mjs | B4b | 133 | 조사함 |
+| plugins/oh-my-teams/scripts/presets.mjs | B4b | 152 | 조사함 |
+| plugins/oh-my-teams/scripts/quota.mjs | B4b | 196 | 조사함 |
+
+---
+
+#### 2. 발견 후보
+
+---
+
+##### LAUNCH-01
+
+- **id**: LAUNCH-01
+- **분류**: memory
+- **심각도 가안**: low
+- **파일:줄**: `role-terminal.mjs:588-595` (`until` 함수), `role-terminal.mjs:539-545` (`readScreen` 함수)
+- **증상**: `openRoleTerminal`의 `until()` 내부 루프(`role-terminal.mjs:591-594`)가 `pollMs`(기본 1500ms) 간격으로 `observe()`를 반복 호출하고, `observe()`는 매번 `readScreen()`을 통해 `orca terminal read --terminal ... --screen --json`을 외부 프로세스로 실행한다. `settleMs`(기본 8000ms) 동안 최대 7회, Enter 전송 후 `readyMs`(기본 90000ms) 동안 최대 61회, 합계 최대 70회의 외부 프로세스가 생성된다. 이는 사전 후보 C-M8이 "감시 스크립트의 낭비와 같은 유형"으로 지적한 패턴이다. 단, `settleMs`·`readyMs`로 상한이 제한되므로 무한 폴링은 아니다.
+- **근거**: 코드 인용 — `role-terminal.mjs:588-596`:
+  ```js
+  const until = async (budgetMs) => {
+    const deadline = Date.now() + budgetMs;
+    let seen = await observe(orca, handle, typed, execute);      // 즉시 1회
+    while (!seen.started && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, pollMs)); // 1500ms 대기
+      seen = await observe(orca, handle, typed, execute);         // 폴링 1회
+    }
+    return seen;
+  };
+  ```
+  `role-terminal.mjs:539-545`:
+  ```js
+  async function readScreen(orca, handle, execute) {
+    const read = await runOrcaJson(
+      orca,
+      ["terminal", "read", "--terminal", handle, "--screen"],
+      { execute },
+    );
+    return read.result?.terminal?.tail ?? [];
+  }
+  ```
+  측정 결과 (코드 구조 분석, 워크트리 밖 임시 Node 스크립트):
+
+  | 경로 | settleMs(ms) | readyMs(ms) | pollMs(ms) | 최대 readScreen 호출 |
+  |---|---|---|---|---|
+  | 즉시 시작(최선) | 8,000 | - | 1,500 | 7 |
+  | Enter 전송 + 대기(최악) | 8,000 | 90,000 | 1,500 | 70 |
+
+  실제 외부 프로세스 실행 비용(orca CLI spawn 오버헤드)은 미측정(실환경 Orca 필요).
+- **제안 수정**: Orca가 `terminal wait --for tui-idle` 이벤트를 지원하므로, 폴링 대신 해당 명령 1회로 대기하고 타임아웃 시에만 screen read를 시도하는 방식으로 전환 검토. 또는 `pollMs`를 늘려 외부 프로세스 수를 줄이는 단기 완화 가능.
+- **예상 작업 크기**: S (폴링 루프를 `terminal wait` 단일 호출로 교체)
+- **회귀 방지 검사**: `role-terminal.test.mjs`의 launch 경로 테스트; Enter 전송 경로·trust 경로별 screen read 횟수 확인 추가
+
+---
+
+##### LAUNCH-02
+
+- **id**: LAUNCH-02
+- **분류**: architecture
+- **심각도 가안**: low
+- **파일:줄**: `role-terminal.mjs:24`, `role-terminal.mjs:342`, `role-terminal.mjs:396`, `role-terminal.mjs:416`, `role-terminal.mjs:520`, `role-terminal.mjs:540`, `role-terminal.mjs:571`, `role-terminal.mjs:601`, `role-terminal.mjs:619`, `role-terminal.mjs:746`
+- **증상**: `role-terminal.mjs`가 `orca-adapter.mjs`의 `runOrcaJson`과 `selectOrcaExecutable`을 직접 import하여 10개소에서 사용한다. 사전 후보 C-A1은 이를 "어댑터를 거치지 않는 직접 호출"로 지적했다. 단, `adapters.mjs`의 `executionAdapter` port는 실행 런타임(orca vs local)을 추상화하는 레이어이고, `role-terminal.mjs`가 사용하는 `runOrcaJson`은 Orca 터미널 UI(terminal create/read/rename/close/wait/send) 전용 유틸리티로, 실행 어댑터 port의 적용 범위(worker 생성·확인·중단)와 다르다. `CODE_QUALITY.md:68`은 `orca-adapter.mjs`를 "실행 파일 선택, runtime discovery, JSON 호출, worktree 생성"의 공통 위치로 선언하고 있어, 직접 import 자체는 공통 헬퍼 위치 규칙(R8)에 부합한다.
+- **근거**: `role-terminal.mjs:24`:
+  ```js
+  import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+  ```
+  `adapters.mjs:24-37`의 `EXECUTION_ADAPTERS`는 `translateCode`, `assertDiscovery`, `readWorkspaceClaim`, `confirmWorkspace` 4가지 실행 어댑터 port만 포함하며 `runOrcaJson`은 포함하지 않는다.
+  `CODE_QUALITY.md:68`: "`orca-adapter.mjs`: 실행 파일 선택, runtime discovery, JSON 호출, worktree 생성"
+  `static-candidates.md:26`: C-A1 — "어댑터 경유 규칙이 저장소에 명시되지 않았으므로 먼저 규칙 근거부터 확인해야 한다."
+  측정: 해당 없음(아키텍처 판단 문제).
+- **판정**: **규칙 근거 미확인** — `CODE_QUALITY.md:68`에서 직접 import의 근거는 확인되나, "어댑터를 거치지 않는 직접 호출 금지" 규칙이 `AGENTS.md`, `CODE_QUALITY.md` 등 정본 문서에 없어 규칙 위반으로 단정할 수 없다(`static-candidates.md`의 C-A1 판단과 동일). Senior/PM의 판정 필요.
+- **제안 수정**: 판정을 위해 `AGENTS.md` 또는 `CODE_QUALITY.md`에 "Orca 터미널 UI 조작은 `runOrcaJson` 직접 사용 가능, 실행 어댑터 port(`adapters.mjs`)는 worker 생명주기(start/stop/confirm)에만 적용"을 명시하거나, 위반 여부 확인 후 조치 결정.
+- **예상 작업 크기**: XS (문서 명시만 필요한 경우)
+- **회귀 방지 검사**: 문서 일관성 검사; `skill-instructions.test.mjs`
+
+---
+
+##### LAUNCH-03
+
+- **id**: LAUNCH-03
+- **분류**: checks
+- **심각도 가안**: low
+- **파일:줄**: `role-terminal.mjs:36`, `role-terminal.mjs:87-111`, `role-terminal.mjs:113-125`, `role-terminal.mjs:131-204`
+- **증상**: `readLaunchEnvironment`가 사용자 설정 파일(`~/.gemini/antigravity-cli/settings.json`, `~/.claude/settings.json`, `CODEX_HOME/config.toml` 또는 `~/.codex/config.toml`)을 읽기만 하고 쓰지 않는다. `role-terminal.mjs:36` 주석은 "사용자 설정 파일은 읽기만 하고 쓰지 않습니다"로 명시하고 있어 설계 의도에 부합한다. 사전 후보의 "사용자 설정 파일을 쓰지 않는다" 규칙(plan.md R13~R17에서 근거 확인 진행 중) 확인 결과, 이 경로는 위반이 없다.
+- **근거**: `role-terminal.mjs:36`:
+  ```
+  * 사용자 설정 파일은 읽기만 하고 쓰지 않습니다.
+  ```
+  `role-terminal.mjs:96-111` (Agy settings.json — readFileSync만):
+  ```js
+  const text = fs.readFileSync(agySettingsFile, "utf8");
+  const settings = JSON.parse(text);
+  ```
+  `role-terminal.mjs:117-121` (claude settings.json — readFileSync만):
+  ```js
+  const text = fs.readFileSync(claudeSettingsFile, "utf8");
+  const settings = JSON.parse(text);
+  ```
+  `role-terminal.mjs:159` (codex config.toml — readFileSync만):
+  ```js
+  const tomlText = fs.readFileSync(codexConfigFile, "utf8");
+  ```
+  fs.writeFile/writeFileSync/appendFile 호출 없음. 측정: 해당 없음.
+- **판정**: **문제 없음(규칙 준수 확인)** — 세 설정 파일 모두 읽기 전용 접근이며 주석의 선언과 일치. 발견 후보에서 제외 가능하나, "사용자 설정 파일을 쓰지 않는다" 규칙이 정본 문서(AGENTS.md 등)에 없음을 `static-candidates.md`(C-R2)가 이미 지적하고 있으므로, 규칙 근거 추가 여부는 B7 묶음이 결론낼 사안임.
+- **제안 수정**: 없음(현재 구현 적절). 다만 `ai-native-agent-organization.md:355`에 있다고 사전 후보가 언급한 근거 확인을 B7 묶음에서 완료해야 함.
+- **예상 작업 크기**: XS (문서 확인만)
+- **회귀 방지 검사**: `role-terminal.test.mjs`의 `readLaunchEnvironment` 경로; 설정 파일 쓰기 여부 확인 테스트
+
+---
+
+##### LAUNCH-04
+
+- **id**: LAUNCH-04
+- **분류**: checks
+- **심각도 가안**: low
+- **파일:줄**: `launch-matrix.mjs:8-11`, `launch-matrix.mjs:194-414`
+- **증상**: `MATRIX_RULES` 표는 위에서 아래로 순서대로 평가하며 첫 번째 매칭 행이 적용된다(`launch-matrix.mjs:8-11`). 표 주석과 설계 문서(`docs/plan/agy-terminal-path.md`) 출처가 명시되어 있고, `predictLaunchPath` 함수가 정본 역할을 수행한다(R6 규칙). 조사 결과, R6("실행 경로 판정은 `launch-matrix.mjs` 호환성 표가 정한다")는 `references/orca-runtime.md:98,171`을 근거로 하며, `launch-matrix.mjs`의 주석 및 `docs/plan/agy-terminal-path.md` 출처가 이를 뒷받침한다. 단, `MATRIX_RULES`는 현재 11개 규칙이 순서에 민감하게 작동하므로 규칙 추가·변경 시 의도치 않은 오버라이드 가능성이 있다.
+- **근거**: `launch-matrix.mjs:8-11`:
+  ```js
+  * 규칙은 위에서 아래로 순서대로 평가하며, 처음 조건이 맞는 행이 적용됩니다.
+  * 마지막 행은 나머지 모든 조합을 덮습니다.
+  * 출처: `docs/plan/agy-terminal-path.md` 설계 절.
+  ```
+  `predictLaunchPath` 함수가 `MATRIX_RULES`를 `find`로 순서대로 평가하고 결과에 버전 근거 등급을 적용(`applyVersionEvidence`, `applyVerificationGate`).
+  측정: 해당 없음(구조 분석 문제).
+- **판정**: **현재 구현 적절, 주의 필요** — 정본 역할(R6)은 충족. 순서 의존성은 구조적 특성이며, 현재 테스트(`tests/launch-matrix.test.mjs`, 705줄)가 다양한 조합을 검증하고 있다. 규칙 추가 시 순서 오버라이드 위험은 문서·테스트로 관리되어야 함.
+- **제안 수정**: 규칙 추가 지침(순서 결정 기준)을 `launch-matrix.mjs` 모듈 주석 또는 `docs/plan/agy-terminal-path.md`에 명시하는 것을 권장.
+- **예상 작업 크기**: XS (주석 보완)
+- **회귀 방지 검사**: `tests/launch-matrix.test.mjs`; 신규 규칙 추가 시 기존 조합 회귀 테스트 유지
+
+---
+
+#### 3. 사전 후보 확인·반박·보완
+
+| 사전 후보 | 판정 | 근거 |
+|---|---|---|
+| **C-M8** | **확인(낮은 우선순위)** | `role-terminal.mjs:588-595`에서 `pollMs=1500ms` 간격의 `orca terminal read` 외부 프로세스 반복 확인. 코드 구조 분석 기준 최대 70회(settleMs=8s, readyMs=90s). 단, `settleMs`·`readyMs`로 상한이 있어 무한 폴링 아님. 실제 프로세스 spawn 비용은 미측정(Orca 실환경 필요). → LAUNCH-01로 등록 |
+| **C-A1** | **규칙 근거 미확인** | `role-terminal.mjs:24`에서 `runOrcaJson`을 `orca-adapter.mjs`에서 직접 import 확인. `adapters.mjs`의 `executionAdapter` port는 worker 생명주기(start/stop/confirm) 전용이며 터미널 UI 조작은 포함하지 않음. `CODE_QUALITY.md:68`이 `orca-adapter.mjs`를 공통 JSON 호출 위치로 선언. "어댑터 경유 금지" 규칙은 정본 문서에 없음. → LAUNCH-02로 등록(규칙 근거 판정은 Senior/PM 필요) |
+
+---
+
+#### 4. 발견 후보 요약
+
+| id | 분류 | 심각도 | 핵심 |
+|---|---|---|---|
+| LAUNCH-01 | memory | low | role-terminal: pollMs 간격 orca terminal read 외부 프로세스 반복(최대 70회/launch) |
+| LAUNCH-02 | architecture | low | role-terminal: runOrcaJson 직접 import — 어댑터 경유 규칙 근거 미확인 |
+| LAUNCH-03 | checks | low | readLaunchEnvironment: 사용자 설정 파일 읽기 전용 확인(규칙 준수, 문제 없음) |
+| LAUNCH-04 | checks | low | launch-matrix: 순서 민감 규칙 표 — 규칙 추가 지침 부재 |
+
+low 4개. 합계 4개.
+
+---
+
+#### 5. 남은 의심
+
+- **LAUNCH-01 실측 필요**: `orca terminal read` 외부 프로세스 1회 spawn 비용(시간·RSS)은 실환경 Orca에서만 측정 가능. 비용이 높으면 `terminal wait` 전환 우선순위가 높아짐(미측정).
+- **LAUNCH-02 규칙 확정**: "어댑터를 거치지 않는 직접 호출 금지" 규칙의 정본 문서 존재 여부를 B7 묶음이 확인 후 판정 확정 필요.
+- **LAUNCH-03 규칙 근거 위치**: `ai-native-agent-organization.md:355`(사용자 설정 파일 쓰기 금지)가 실제 해당 내용을 담고 있는지 B7 묶음이 확인 필요.
+- **worker.mjs 사용자 설정 쓰기**: `worker.mjs`는 `fs.writeFile`을 사용하나 대상이 state/evidence 디렉터리에 한정됨을 추가 확인했으나, 설정 파일 접근 경로가 없음을 확인했으므로 별도 후보 없음.
+
+
