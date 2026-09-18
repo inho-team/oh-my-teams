@@ -1,8 +1,8 @@
 # omt-audit 2026-09 보고서
 
 - 작성일: 2026-09-18
-- 상태: 초안 (audit-runtime-io·audit-state·audit-launch 묶음 완료, 다른 묶음 미완)
-- 대상: plugins/oh-my-teams/scripts (B1·B5·B3a·B3b·B4b 묶음)
+- 상태: 초안 (audit-runtime-io·audit-state·audit-launch·audit-docs-repo·audit-tests 묶음 완료, 다른 묶음 미완)
+- 대상: plugins/oh-my-teams/scripts (B1·B5·B3a·B3b·B4b 묶음), tests/ (T1·T2 묶음)
 - 관련 문서: .omt/audit/plan.md, .omt/audit/static-candidates.md, .omt/audit/checks/RESULTS.md
 
 ## 작업 초안
@@ -1017,5 +1017,293 @@ medium 3개, low 6개. 합계 9개.
 - **DOCS-02 규칙 확정**: R13~R17 중 정본 문서에 추가해야 할 항목의 우선순위와 추가 형식(별도 절 vs 기존 절 보완)은 PM·Senior의 설계 판단 필요.
 - **DOCS-06 사용 추적**: `plugins/orca/scripts/orca-org.mjs`를 1.1 이전 설치에서 실제로 참조하는지 여부는 사용 로그나 릴리스 노트 확인 필요(미측정).
 - **DOCS-07 단일 정본 타당성**: `assist.md`의 모델 ID 동기화를 `metadata.mjs` 패턴으로 처리할 경우 비용 대비 효과 검토 필요.
-- **DOCS-08 코드 확인 필요**: `tests/code-quality.test.mjs`에서 `help/SKILL.md`의 스킬 목록 표를 실제 검사하는지 소스 코드(T1 묶음, 미조사) 확인 후 최종 판정.
+- **DOCS-08 확인 완료**: `tests/code-quality.test.mjs:172-213`에서 `help/SKILL.md`의 스킬 목록 표를 실제로 검사함을 확인. DOCS-08의 \"검사 여부 미확인\" 의심은 해소됨(검사 존재 확인). 단, 주석이 \"rebuild하지 않도록\"의 의도 설명이므로 삭제할 이유 없음.
 - **R16(사용자 설정 쓰기 금지) 정본화**: `role-terminal.mjs:36` 주석에만 선언된 이 규칙을 `AGENTS.md`나 `CODE_QUALITY.md`에 추가할 필요가 있는지 판단 필요.
+
+---
+
+### audit-tests
+
+> 조사 대상: T1(tests/*.mjs 20개) + T2(tests/*.mjs 11개), 합계 31개
+> 조사 기준 커밋: 4d1d7d6
+
+#### 1. 파일별 조사 상태
+
+| 파일 | 묶음 | 줄 수 | 조사 상태 |
+|---|---|---:|---|
+| tests/agy-start.test.mjs | T1 | 297 | 조사함 |
+| tests/boundary-and-gate.test.mjs | T1 | 344 | 조사함 |
+| tests/cleanup-and-portability.test.mjs | T1 | 145 | 조사함 |
+| tests/cli-integration.test.mjs | T1 | 424 | 조사함 |
+| tests/code-quality.test.mjs | T1 | 229 | 조사함 |
+| tests/dashboard.test.mjs | T1 | 301 | 조사함 |
+| tests/delivery.test.mjs | T1 | 360 | 조사함 |
+| tests/fake-agent.mjs | T1 | 95 | 조사함 |
+| tests/kickoff-registry.test.mjs | T1 | 486 | 조사함 |
+| tests/lock-recovery-and-release.test.mjs | T1 | 405 | 조사함 |
+| tests/org-draft.test.mjs | T1 | 173 | 조사함 |
+| tests/provider-adapters.test.mjs | T1 | 466 | 조사함 |
+| tests/reduced-organization.test.mjs | T1 | 263 | 조사함 |
+| tests/removed-skills.mjs | T1 | 48 | 조사함 |
+| tests/repository-metadata.test.mjs | T1 | 182 | 조사함 |
+| tests/review-format.test.mjs | T1 | 85 | 조사함 |
+| tests/run-depth.test.mjs | T1 | 303 | 조사함 |
+| tests/silent-wrong-results.test.mjs | T1 | 329 | 조사함 |
+| tests/supervision.test.mjs | T1 | 245 | 조사함 |
+| tests/workflow-recovery.test.mjs | T1 | 74 | 조사함 |
+| tests/execution-port.test.mjs | T2 | 780 | 조사함 |
+| tests/headless.test.mjs | T2 | 623 | 조사함 |
+| tests/launch-matrix.test.mjs | T2 | 705 | 조사함 |
+| tests/role-dispatch.test.mjs | T2 | 842 | 조사함 |
+| tests/role-terminal.test.mjs | T2 | 964 | 조사함 |
+| tests/runtime.test.mjs | T2 | 2416 | 조사함 |
+| tests/safety-net.test.mjs | T2 | 557 | 조사함 |
+| tests/skill-instructions.test.mjs | T2 | 1065 | 조사함 |
+| tests/usage-report.test.mjs | T2 | 686 | 조사함 |
+| tests/usage-sources.test.mjs | T2 | 670 | 조사함 |
+| tests/workflow-safety.test.mjs | T2 | 1071 | 조사함 |
+
+---
+
+#### 2. 발견 후보
+
+---
+
+##### TESTS4-01
+
+- **id**: TESTS4-01
+- **분류**: memory
+- **심각도 가안**: low
+- **파일:줄**: `tests/fake-agent.mjs:74-75`
+- **증상**: `fake-agent.mjs`는 prompt에 `SLEEP`이 포함되면 `setInterval(() => {}, 1000)`으로 프로세스를 무한히 살려둔다. 이 파일은 `headless.test.mjs`와 `dashboard.test.mjs`에서 `startHeadlessWorker`의 agent CLI로 실행되는 자식 프로세스다. 각 테스트는 `waitHeadless` + `stopHeadless`로 프로세스를 정상 종료시키지만, 종료가 실패하면(예: Windows 손자 프로세스 정리 미완 — F-05와 같은 원인) `setInterval`이 남는다. `headless.test.mjs:29-38`과 `dashboard.test.mjs:21-28`의 `t.after`는 300ms/1500ms 지연 후 `rmSync`를 시도하므로, runner 프로세스가 살아 있으면 파일 잠금 충돌이 발생한다(`maxRetries: 5, retryDelay: 200`으로 완화).
+- **근거**: 코드 인용 — `fake-agent.mjs:73-75`:
+  ```js
+  if (prompt.includes("CRASH")) process.exit(3);
+  if (prompt.includes("SLEEP")) {
+    setInterval(() => {}, 1000);  // 프로세스를 무한 살려두는 타이머
+  ```
+  `headless.test.mjs:306-318`: SLEEP 에이전트를 `stopHeadless`로 종료 후 `waitHeadless`로 확인하는 테스트가 있고, 정상 경로에서 올바르게 정리됨.
+  측정: 의도적 설계이므로 측정 없음.
+- **판정**: **문제 없음(설계 의도)** — SLEEP은 실행 중인 에이전트를 시뮬레이션하는 의도적 설계이며, 테스트가 `stopHeadless`·`waitHeadless`로 올바르게 종료함. 단, Windows에서 F-05 문제(손자 프로세스 미정리)가 발생하면 이 타이머가 잔존할 가능성 있음 — 발견 후보로는 낮은 우선순위.
+- **제안 수정**: 없음(현재 구현 적절). F-05가 수정되면 이 위험도 함께 줄어듦.
+- **예상 작업 크기**: XS (F-05 연동)
+- **회귀 방지 검사**: `headless.test.mjs`의 stop 경로; SLEEP 에이전트 종료 후 남은 프로세스 확인
+
+---
+
+##### TESTS4-02
+
+- **id**: TESTS4-02
+- **분류**: memory
+- **심각도 가안**: low
+- **파일:줄**: `tests/dashboard.test.mjs:21-28`, `tests/headless.test.mjs:29-38`, `tests/usage-report.test.mjs:35-44`
+- **증상**: `dashboard.test.mjs`·`headless.test.mjs`·`usage-report.test.mjs`의 `sandbox`/`tempDir` 함수는 `t.after(async () => { await new Promise(setTimeout(...)); fs.rmSync(...) })`로 정리한다. 이 패턴에서 `setTimeout` 대기(300ms·300ms·1500ms)는 detached headless runner가 파일을 해제하도록 기다리기 위함이다. 코드 주석(`"Give stopped runners a moment to release their files on Windows"`)이 이유를 설명한다. 대기 시간이 충분하지 않으면 `rmSync`가 실패할 수 있으며, `maxRetries: 5, retryDelay: 200`으로 최대 1초 추가 재시도가 있다. 대기 시간이 고정값이고 시스템 부하 상황에서는 부족할 수 있다.
+- **근거**: 코드 인용 — `dashboard.test.mjs:21-28`:
+  ```js
+  t.after(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    fs.rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+  });
+  ```
+  `usage-report.test.mjs:35-44`: 동일 패턴, 1500ms 대기(detached headless runner 해제 대기).
+  `headless.test.mjs:29-38`: 동일 패턴, 300ms 대기.
+  측정: 미측정(실환경 부하에 따라 다름).
+- **판정**: **설계 의도, 주의 필요** — Windows 파일 잠금 문제에 대한 현실적 대응이며, `maxRetries`로 어느 정도 완화됨. 단, CI 환경에서 부하가 높을 때 `rmSync` 실패 가능성이 있다. RESULTS.md에 따르면 1차 테스트 실행이 usage-report 도중에 시간 초과로 중단되었는데, 이 대기가 누적 소요 시간에 기여할 수 있다.
+- **제안 수정**: `waitHeadless`가 완전히 종료됨을 확인한 이후에 `rmSync`를 호출하도록 순서를 보장하거나, 대기 시간을 환경 변수로 조정 가능하게 변경. F-05(Windows 손자 프로세스 정리)가 해결되면 이 대기 필요성도 줄어듦.
+- **예상 작업 크기**: S (대기 조정 또는 종료 확인 강화)
+- **회귀 방지 검사**: `headless.test.mjs`·`dashboard.test.mjs`·`usage-report.test.mjs`; CI 환경 실행 안정성
+
+---
+
+##### TESTS4-03
+
+- **id**: TESTS4-03
+- **분류**: memory
+- **심각도 가안**: low
+- **파일:줄**: `tests/usage-sources.test.mjs:660-669`
+- **증상**: `usageHomes` 함수의 `agyHome` 기본값 검증 테스트(`tests/usage-sources.test.mjs:660-669`)가 `os.homedir()`를 직접 사용하여 기대값을 구성한다. 이 테스트는 `OMT_AGY_HOME` 환경변수를 주입하지 않아 실제 사용자 홈 디렉터리에 의존한다. 테스트가 실제 홈 디렉터리를 읽거나 쓰지는 않지만(경로 문자열 비교만), CI 환경의 홈 디렉터리 경로가 달라도 통과한다. 이와 달리 동일 파일의 다른 테스트들은 `tempDir`로 격리된 디렉터리를 사용하고 `usage-report.test.mjs`의 `isolateHomes`는 `HOME`·`USERPROFILE` 등을 빈 디렉터리로 교체한다.
+- **근거**: 코드 인용 — `usage-sources.test.mjs:660-669`:
+  ```js
+  const homes = usageHomes(
+    { codexHome: "/explicit/codex" },
+    { CLAUDE_CONFIG_DIR: "/env/claude", CODEX_HOME: "/env/codex" },
+    // OMT_AGY_HOME 미주입 → 기본값이 os.homedir() 기반
+  );
+  assert.equal(
+    homes.agyHome,
+    path.join(os.homedir(), ".gemini", "antigravity-cli"),
+  );
+  ```
+  이 테스트는 `usageHomes(options, env)` 함수에서 `env`에 `OMT_AGY_HOME`이 없을 때 `os.homedir()`를 사용함을 검증한다. 실제 홈 디렉터리를 읽거나 쓰지 않으며, 경로 문자열 일치를 검사한다.
+  측정: 해당 없음(경로 비교 문제).
+- **판정**: **낮은 우선순위, 검토 필요** — 실제 홈 경로를 읽거나 쓰지 않으므로 데이터 오염 위험은 없음. 단, `agyHome` 기본값이 `os.homedir()` 기반임을 검증하는 테스트가 실제 홈 경로에 의존하는 것은 격리 원칙에 약간 어긋난다. `usage-report.test.mjs:544-560`의 `isolateHomes` 패턴처럼 env를 주입하여 격리할 수 있다.
+- **제안 수정**: `usageHomes({ codexHome: "..." }, {})` 대신 `usageHomes({ codexHome: "..." }, { OMT_AGY_HOME: undefined })`와 명시적 env를 사용하고 `os.homedir()` 대신 가짜 homedir를 전달하는 방식으로 격리 강화. 또는 현재 테스트의 의도(기본값 확인)가 충족되므로 허용 가능.
+- **예상 작업 크기**: XS (env 격리 추가)
+- **회귀 방지 검사**: 기존 테스트 유지.
+
+---
+
+##### TESTS4-04
+
+- **id**: TESTS4-04
+- **분류**: checks
+- **심각도 가안**: medium
+- **파일:줄**: `tests/fake-agent.mjs:62-67`, `tests/headless.test.mjs:208-209`
+- **증상**: `fake-agent.mjs`는 Codex 모드에서 `FAKE_CODEX_HOME` 환경변수가 설정되면 `~/.codex/sessions/…` 형식과 동일한 롤아웃 파일을 생성한다(`fake-agent.mjs:62-67`). `headless.test.mjs:208-209`는 이 환경변수를 임시 디렉터리로 설정하고 `t.after`로 삭제하여 올바르게 격리한다. 단, `codexRolloutModel` 공개 함수(`headless.mjs`)의 실제 동작(rollout 파일에서 모델 추출)을 검증하는 `headless.test.mjs:300-450` 범위에 `FAKE_CODEX_HOME`을 사용하지 않는 코드 경로가 있는지 확인이 필요하다. 특히, Codex SLEEP 시나리오에서 rollout 파일이 생성된 상태로 runner가 종료되지 않을 경우 `FAKE_CODEX_HOME` 경로가 정리되지 않을 가능성이 있다.
+- **근거**: 코드 인용 — `fake-agent.mjs:60-67`:
+  ```js
+  const home = process.env.FAKE_CODEX_HOME;
+  if (home) {
+    const dir = path.join(home, "sessions", "2026", "09", "17");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(
+      path.join(dir, `rollout-2026-09-17T00-00-00-${id}.jsonl`),
+      ...
+    );
+  }
+  ```
+  `headless.test.mjs:207-209`:
+  ```js
+  process.env.FAKE_CODEX_HOME = box.codexHome;
+  t.after(() => delete process.env.FAKE_CODEX_HOME);
+  ```
+  `box.codexHome`은 `sandbox(t)`에서 반환된 임시 디렉터리 하위 경로이고 `t.after(async () => fs.rmSync(dir, ...))`로 정리됨.
+  측정: 해당 없음(설계 구조 분석).
+- **판정**: **확인(클린업 경로 적절)** — `FAKE_CODEX_HOME`은 임시 디렉터리로 격리되고 `sandbox.t.after`가 디렉터리 전체를 정리한다. 실제 `~/.codex`를 접근하지 않으므로 홈 경로 오염 없음. Codex SLEEP 시나리오에서 runner 미종료 시 F-05와 동일한 Windows 파일 잠금 문제가 발생할 수 있으나 `maxRetries`로 완화. 단, 검사 대상 행동(`codexRolloutModel` 함수)이 실제로 어떤 경로에서 테스트되는지 추가 확인이 필요하다(미확인 의심).
+- **제안 수정**: 없음(현재 격리 구조 적절). `codexRolloutModel`의 실제 동작 테스트 커버리지를 `headless.test.mjs`에서 확인 권장.
+- **예상 작업 크기**: XS
+- **회귀 방지 검사**: `headless.test.mjs`의 Codex 롤아웃 경로 테스트.
+
+---
+
+##### TESTS4-05
+
+- **id**: TESTS4-05
+- **분류**: checks
+- **심각도 가안**: medium
+- **파일:줄**: `tests/workflow-recovery.test.mjs:27-35`
+- **증상**: `workflow-recovery.test.mjs`는 `child_process.spawn`으로 Node.js 자식 프로세스를 직접 띄워 파일 잠금을 테스트한다. `t.after(() => child.kill("SIGKILL"))`을 등록하여 정리하고, 실제 테스트 본체에서도 `child.kill("SIGKILL")` 후 `await once(child, "close")`로 종료를 확인한다(`workflow-recovery.test.mjs:39-40`). 이 패턴은 올바르게 설계되어 있다. 단, Windows에서 `SIGKILL`이 `TerminateProcess`로 처리되므로 `Atomics.wait`로 블록된 프로세스가 즉시 종료될 것으로 기대하나, SharedArrayBuffer 기반 블로킹의 종료 동작이 모든 Node.js 버전에서 보장되는지 확인이 필요하다. `engines.node: >=22.13`(cleanup-and-portability.test.mjs:97-100 기준)이 전제됨.
+- **근거**: 코드 인용 — `workflow-recovery.test.mjs:27-35`:
+  ```js
+  const child = spawn(process.execPath, [
+    "--input-type=module",
+    "-e",
+    `import { withFileLock } from ${JSON.stringify(module)}; withFileLock(process.argv[1], () =>
+      {process.stdout.write('locked'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);});`,
+    lock,
+  ]);
+  t.after(() => child.kill("SIGKILL"));
+  ```
+  `workflow-recovery.test.mjs:35-40`: `t.after` 클린업과 명시적 `kill + await close`로 이중 보호.
+  측정: 해당 없음(설계 구조 분석).
+- **판정**: **확인(설계 적절, 주의 필요)** — 파일 잠금 회복 시나리오를 실제 자식 프로세스로 검증하는 적절한 설계. `t.after` 클린업이 있어 테스트 종료 시 자동 정리됨. `Atomics.wait` 기반 블로킹의 Windows 종료 동작은 Node.js >=22.13에서 지원됨(engines 조건 충족).
+- **제안 수정**: 없음(현재 구현 적절). Node.js 버전 범위가 변경될 경우 `Atomics.wait` 동작 확인 필요.
+- **예상 작업 크기**: XS
+- **회귀 방지 검사**: `workflow-recovery.test.mjs` 기존 테스트 유지.
+
+---
+
+##### TESTS4-06
+
+- **id**: TESTS4-06
+- **분류**: checks
+- **심각도 가안**: low
+- **파일:줄**: `tests/code-quality.test.mjs:172-213`
+- **증상**: `code-quality.test.mjs:172-213`은 `help/SKILL.md`의 스킬 목록 표(`<!-- help:start -->` 이후 블록)가 실제로 설치된 스킬 목록과 일치하는지 검사한다. DOCS-08(audit-docs-repo)에서 이 검사의 존재를 확인하지 못해 "미확인 의심"으로 남겼으나, T1 묶음 조사에서 검사가 존재함을 확인했다. 단, 이 테스트가 `plugins/oh-my-teams/skills/help/SKILL.md`를 직접 읽으므로, 스킬 목록이 변경될 때 `help/SKILL.md`와 테스트가 함께 갱신되어야 한다는 의존성이 있다. 검사(`code-quality.test.mjs:216-228`)는 스킬 목록을 스캔하지 말고 그대로 출력하도록(`그대로 출력한다`) 지시하는 내용도 포함된다.
+- **근거**: 코드 인용 — `code-quality.test.mjs:172-196`:
+  ```js
+  test("the help tables list exactly the installed skills", () => {
+    const skills = path.resolve("plugins/oh-my-teams/skills");
+    const installed = fs.readdirSync(skills)
+      .filter((entry) => fs.existsSync(path.join(skills, entry, "SKILL.md")));
+    const help = fs.readFileSync(path.join(skills, "help", "SKILL.md"), "utf8");
+    const rendered = help.split("<!-- help:start -->")[1];
+    // ... listed와 installed 교차 검사
+  });
+  ```
+  DOCS-08의 "미확인 의심" 해소: 검사 존재 확인. `help/SKILL.md:8`의 주석("이 표는 설치된 스킬 목록과 일치하도록 `tests/code-quality.test.mjs`가 검사한다") 내용이 사실임.
+  측정: 해당 없음.
+- **판정**: **문제 없음** — 검사가 존재하며 정상 동작 중. DOCS-08 의심 해소.
+- **제안 수정**: 없음.
+- **예상 작업 크기**: 해당 없음
+- **회귀 방지 검사**: `tests/code-quality.test.mjs` 기존 테스트 유지.
+
+---
+
+##### TESTS4-07
+
+- **id**: TESTS4-07
+- **분류**: checks
+- **심각도 가안**: low
+- **파일:줄**: `tests/` 전반 — 임시 디렉터리 생성 파일 (31개 중 `mkdtempSync` 사용 파일 23개)
+- **증상**: 대부분의 테스트 파일은 `mkdtempSync`로 임시 디렉터리를 생성하고 `t.after(() => fs.rmSync(...))` 또는 `try/finally { fs.rmSync(...) }` 패턴으로 정리한다. 워크트리에 임시 파일을 남기지 않는 설계가 일관되게 적용되어 있다. 단, 1차 npm test 실행이 usage-report 파일 도중에 300초 제한으로 중단되었다(RESULTS.md:8). 이 경우 `t.after` 클린업이 실행되지 않아 `os.tmpdir()` 아래에 임시 디렉터리가 남았을 가능성이 있다. Node.js test runner는 비정상 종료 시 `t.after` 콜백을 보장하지 않는다.
+- **근거**: RESULTS.md:8:
+  ```
+  npm test (1차, --test-concurrency=1) | 300초 제한으로 중단 | 300.4초
+  ```
+  임시 디렉터리 생성: `code-quality.test.mjs:16`, `dashboard.test.mjs:19`, `delivery.test.mjs:36`, `headless.test.mjs:27`, `kickoff-registry.test.mjs:28`, `lock-recovery-and-release.test.mjs:30`, 등. 모두 `os.tmpdir()` 아래에 생성.
+  측정: 미측정(실제 잔여 디렉터리 확인 미수행).
+- **판정**: **확인(설계는 적절, 타임아웃 시 클린업 미보장)** — 정상 실행 시 임시 디렉터리 클린업은 올바르게 구현됨. 타임아웃으로 중단될 경우 `os.tmpdir()`에 임시 디렉터리가 남을 수 있으나, OS 임시 디렉터리는 OS가 주기적으로 정리하며 워크트리에는 남지 않음(R17 준수). 실제 잔여 여부는 미측정.
+- **제안 수정**: 타임아웃 연장(300초)을 검토하거나, 가장 느린 테스트(deliver 26/21/17초, worker allowance 19초)의 성능 개선을 통해 전체 실행 시간을 줄이는 방안 검토. 또는 테스트 파일 병렬 실행 조정.
+- **예상 작업 크기**: S-M (타임아웃 조정 또는 느린 테스트 개선)
+- **회귀 방지 검사**: `npm test` 전체 실행 완료(현재 2차 분할 실행 필요).
+
+---
+
+##### TESTS4-08
+
+- **id**: TESTS4-08
+- **분류**: checks
+- **심각도 가안**: medium
+- **파일:줄**: `tests/` — `incidents.mjs`, `usage-ledger.mjs` 직접 테스트 없음
+- **증상**: `incidents.mjs`(265줄, B2)는 `boundary-and-gate.test.mjs:17`과 `runtime.test.mjs:69`에서 임포트되어 간접적으로 검사되나, `incidents.mjs`를 직접 대상으로 하는 전용 테스트 파일이 없다. 마찬가지로 `usage-ledger.mjs`(170줄, B5)는 `usage-report.test.mjs:16`에서만 임포트되며, `recordLaunch`·`readLaunches` 등의 핵심 함수를 직접 단위 테스트하는 파일이 없다. 두 모듈 모두 상태를 파일 시스템에 저장하고 읽는 중요 함수들을 갖고 있으며, 발견 후보 F-04(usage-ledger)와 C-M7(incidents.mjs state 크기)가 이들과 관련이 있다.
+- **근거**:
+  - `tests/` 디렉터리에 `incidents.test.mjs`·`usage-ledger.test.mjs` 없음 (inventory.csv 확인).
+  - `incidents.mjs` 관련: `boundary-and-gate.test.mjs:17`에서 `classifyIncident`, `incidentStatus` 임포트. `runtime.test.mjs:69`에서 `incidentStatus` 임포트 및 `:1984`에서 1개 인시던트 상태 검사.
+  - `usage-ledger.mjs` 관련: `usage-report.test.mjs:16`에서 `readLaunches`, `ledgerFile`, `recordLaunch` 임포트. F-04 발견 항목의 `recordLaunch` 전체 재읽기 패턴은 `usage-report.test.mjs`에서 간접 검증되지만, ledger 크기·회전 없는 상한 관련 단위 테스트 없음.
+  측정: 해당 없음(커버리지 구조 분석).
+- **판정**: **확인(커버리지 부분적)** — 두 모듈이 완전히 무커버 상태는 아니지만, 핵심 상태 관리 경로(incidents 상태 변이, ledger append/read 왕복)에 대한 직접 단위 테스트가 없다. F-04 회귀를 방지하는 `usage-ledger.mjs` 단위 테스트 추가가 권장된다.
+- **제안 수정**: `tests/usage-ledger.test.mjs`를 추가하여 `recordLaunch`·`readLaunches` 왕복, `resolveLaunchKickoff` 동작을 단위 테스트. `tests/incidents.test.mjs`를 추가하여 `classifyIncident`·`incidentStatus` 상태 변이를 단위 테스트. 또는 기존 파일에 테스트 케이스 추가.
+- **예상 작업 크기**: S (단위 테스트 2~3개 추가 × 2 파일)
+- **회귀 방지 검사**: 신규 `usage-ledger.test.mjs`·`incidents.test.mjs`.
+
+---
+
+#### 3. 사전 후보 판정표
+
+| 사전 후보 | 판정 | 근거 |
+|---|---|---|
+| 정적 사전 후보 없음 (T1·T2는 사전 후보 없음) | 해당 없음 | plan.md의 사전 후보(C-M*)는 B1·B2·B5 묶음 대상 |
+| **DOCS-08(audit-docs-repo 남은 의심)** | **해소** | `tests/code-quality.test.mjs:172-213`에서 스킬 목록 표 검사 확인 → TESTS4-06 등록 |
+
+---
+
+#### 4. 발견 후보 요약
+
+| id | 분류 | 심각도 | 핵심 |
+|---|---|---|---|
+| TESTS4-01 | memory | low | fake-agent SLEEP: setInterval 의도적 설계(F-05 해결 시 위험 감소) |
+| TESTS4-02 | memory | low | sandbox/tempDir async 클린업: Windows 파일 잠금 대기 고정값(F-05 연동) |
+| TESTS4-03 | memory | low | usage-sources 테스트: agyHome 기본값 검증이 실제 os.homedir() 의존 |
+| TESTS4-04 | checks | medium | fake-agent Codex FAKE_CODEX_HOME: 격리 적절, codexRolloutModel 커버리지 확인 필요 |
+| TESTS4-05 | checks | medium | workflow-recovery: spawn+Atomics.wait 기반 잠금 테스트 — 설계 적절, Windows 종료 동작 주의 |
+| TESTS4-06 | checks | low | code-quality 테스트: help 스킬 목록 검사 존재 확인(DOCS-08 해소) |
+| TESTS4-07 | checks | low | 타임아웃 중단 시 t.after 클린업 미보장 — OS tmpdir에 잔여 가능성 |
+| TESTS4-08 | checks | medium | incidents.mjs·usage-ledger.mjs 직접 단위 테스트 없음 |
+
+medium 3개, low 5개. 합계 8개.
+(문제 없음/설계 의도: TESTS4-01·TESTS4-05·TESTS4-06 — 발견 후보이나 조치 불필요)
+
+---
+
+#### 5. 남은 의심
+
+- **TESTS4-04 codexRolloutModel 커버리지**: `headless.test.mjs`에서 `codexRolloutModel` 함수를 직접 호출하여 검증하는 테스트가 있는지, 어느 코드 경로에서 호출되는지 추가 확인 필요(미확인).
+- **TESTS4-07 실제 잔여 디렉터리**: 1차 npm test 300초 타임아웃으로 중단된 후 `os.tmpdir()` 아래에 남은 `omt-*` 임시 디렉터리가 있는지 실제 확인 필요(미측정).
+- **TESTS4-02 실측**: CI 환경에서 300ms/1500ms 대기가 부족한 경우의 `rmSync` 실패율은 실환경 측정 필요.
+- **느린 테스트 원인**: RESULTS.md에서 가장 느린 테스트는 deliver(26초)·worker allowance(19초)·component acceptance(13.7초)·owning checkout(10.1초). 이 중 deliver는 실제 git worktree 생성·commit을 포함하므로 slow가 예상되지만, worker allowance·component acceptance의 소요 원인이 스크립트 복잡도인지 sleep 대기인지 확인 필요(미조사).
