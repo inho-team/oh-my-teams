@@ -10,7 +10,7 @@
 
 ## 결론
 
-**메모리 high 3건·medium 3건·low 1건, 아키텍처 medium 1건·low 3건, checks medium 2건·low 14건으로 발견 항목 합계 26건이며, 다음 kickoff에서 F-01·F-02·F-03·F-05·STATE-02 순서로 수정을 시작할 것을 권고한다.**
+**메모리 high 3건·medium 4건·low 1건, 아키텍처 medium 1건·low 3건, checks medium 1건·low 13건으로 발견 항목 합계 26건이며, 다음 kickoff에서 F-01·F-02·F-03·F-05·STATE-02 순서로 수정을 시작할 것을 권고한다.**
 
 가장 중요한 발견 다섯 가지는 다음과 같다.
 
@@ -200,7 +200,7 @@
 | TESTS4-08 | checks | low | `tests/` — `incidents.mjs`, `usage-ledger.mjs` 직접 단위 테스트 없음 | 핵심 상태 관리 경로 단위 테스트 부재 |
 | CHECKS-INT-01 | checks | medium | `tests/headless.test.mjs:564`, `tests/headless.test.mjs:28-37` | 병렬 npm test 시 Windows 11에서 t.after rmSync EPERM — integration gate 통과 실패 |
 
-**합계**: memory high 3건, memory medium 3건, memory low 1건 / architecture medium 1건(CLOSE-01), architecture low 3건 / checks medium 2건(CHECKS-INT-01), checks low 14건. 총 26건.
+**합계**: memory high 3건, memory medium 4건, memory low 1건 / architecture medium 1건(CLOSE-01), architecture low 3건 / checks medium 1건(CHECKS-INT-01), checks low 13건. 총 26건.
 
 ### 상세 항목
 
@@ -986,3 +986,7 @@
 - **F-05·CHECKS-INT-01·STATE-02의 Windows 프로세스 트리 문제**: F-05(headless-runner 손자 프로세스 정리 미보장)·CHECKS-INT-01(병렬 테스트 시 t.after rmSync EPERM)·STATE-02(overflow 후 close 미착신)가 같은 근본 원인(Windows 프로세스 트리 종료 미보장)을 공유하므로 함께 수정하는 것을 권고한다.
 - **F-01·F-02 캐시 설계**: F-01 캐시 추가와 F-02 tail 읽기 전환은 `headlessStatus`의 파싱 경로를 함께 변경하므로 하나의 PR로 묶는 것이 안전하다.
 - **TESTS4-07**: `npm test` 전체를 한 번의 실행으로 완료하려면 300초 제한을 늘리거나 가장 느린 테스트(deliver, worker allowance)의 원인을 조사해야 한다. 이는 단기 수정보다 별도 조사 태스크로 다루는 것을 권고한다.
+
+## 남은 사항
+
+- 결론 문장과 합계 문장의 발견 수치(memory medium, checks medium·low)는 PM이 요약표와 항목별 심각도에 맞춰 직접 정정했다. Junior·Senior 프로필의 Agy 할당량이 소진되어(429 RESOURCE_EXHAUSTED) 하위 역할에 맡길 수 없었고, 이사가 이 예외를 승인했다.
