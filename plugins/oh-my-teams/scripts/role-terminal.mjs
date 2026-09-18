@@ -25,8 +25,8 @@ import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
 import {
   predictLaunchPath,
   normalizeModelFamily,
-  SUPPORTED_ORCA_VERSION,
-  SUPPORTED_CLI_VERSION,
+  VERIFIED_ORCA_VERSION,
+  VERIFIED_CLI_VERSION,
 } from "./launch-matrix.mjs";
 
 /**
@@ -687,8 +687,8 @@ export async function openRoleTerminal({
   shell = platform === "win32" ? "powershell" : "posix",
   trustRecordExists = true,
   codexTrustRecordExists = "unknown",
-  orcaVersion = SUPPORTED_ORCA_VERSION,
-  cliVersion = SUPPORTED_CLI_VERSION,
+  orcaVersion = VERIFIED_ORCA_VERSION,
+  cliVersion = VERIFIED_CLI_VERSION,
   allowUnverified = false,
   allowUnverifiedApproval,
   execute = run,

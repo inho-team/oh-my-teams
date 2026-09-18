@@ -104,7 +104,7 @@ export function predictLaunchPath(params) {
 
 ### 2. 칸의 값 (MatrixResult 스키마)
 - `path`: `supervised-terminal` | `supervised-screen-path` | `headless` | `blocked`
-- `reason`: 차단 또는 예외 경로인 경우 이유 코드 목록 (예: `agent-trust-workspace`, `claude-permission-prompt`, `unsupported_version`, `no_agent_detected`, `agent-trust-workspace-buffer`, `codex-trust-workspace`).
+- `reason`: 차단 또는 예외 경로인 경우 이유 코드 목록 (예: `agent-trust-workspace`, `claude-permission-prompt`, `untested_version`, `untested_patch_version`, `no_agent_detected`, `agent-trust-workspace-buffer`, `codex-trust-workspace`).
 - `nextOwner` / `nextAction`: 거부 시 담당자와 다음 행동 가이드.
 - `evidence`: `verified`(날짜·버전·재현 기록) | `source-derived`(번들 위치) | `unverified`. Orca나 CLI 버전이 표가 다루는 범위를 벗어나면 결과가 `unverified`로 떨어지는 규칙을 둡니다.
 
@@ -116,7 +116,6 @@ export function predictLaunchPath(params) {
 
 | 조건(runner/model/platform/shell/trust/skipPrompt) | 예상 path | reason | nextOwner / nextAction | evidence |
 |---|---|---|---|---|
-| 지원 버전 범위 밖 | blocked | unsupported_version | pm / 버전 지원 확인 | unverified |
 | Agy / - / win32 / powershell / - / - (복합 명령 실행 시) | blocked | no_agent_detected | pm / 단일 명령으로 분리 | source-derived (out/shared/shell-process-detection.js) |
 | Agy / - / - / - / 신뢰 없음 / - | blocked | agent-trust-workspace | user / 폴더 신뢰 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 1-1절) |
 | Codex / - / - / - / 신뢰 없음 / - | blocked | codex-trust-workspace | user / 폴더 신뢰 | source-derived (out/main/index.js) |
@@ -136,7 +135,7 @@ export function predictLaunchPath(params) {
   - 검증 모드(`allowUnverified=true`): `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true / allowUnverified=true` -> 8번째 행(Agy / gemini / win32 / powershell / 신뢰 있음 / -)에 걸려 `supervised-terminal`
   - 검증 모드 해제(`allowUnverified=false`): `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true / allowUnverified=false` -> 8번째 행(Agy / gemini / win32 / powershell / 신뢰 있음 / -)에 도달하나 검증 모드가 아니므로 `blocked (unverified-terminal-creation)`
 - **Codex**: `Codex / - / - / - / 신뢰 없음 / -` -> 4번째 행(Codex / - / - / - / 신뢰 없음 / -)에 걸려 `blocked (codex-trust-workspace)`
-- **버전 범위 밖**: 지원 버전 범위 밖일 경우 -> 1번째 행(지원 버전 범위 밖)에 걸려 `blocked (unsupported_version)`
+- **검증에 쓰지 않은 버전**: 경로는 그대로 두고 근거 등급만 낮춘다. 패치 버전만 다르면 `untested_patch_version`을 붙이고 등급을 유지하며, 주·부 버전이 다르거나 버전을 확인하지 못하면 `untested_version`을 붙이고 등급을 한 단계 낮춘다(#61). Orca 버전은 Orca 터미널을 쓰는 경로에만, Antigravity CLI 버전은 Agy 역할에만 적용한다.
 
 
 ### 4. 인접 실패 칸과 사전 점검
@@ -148,7 +147,7 @@ export function predictLaunchPath(params) {
 5. **터미널 제목이 셸 경로로 남는 경우 (no_agent_detected)**:
    - **사전 거부**: 폭 조정(`mode con: cols=44`) 등 앞선 명령을 `agy`와 같은 줄에 붙이는 복합 명령 방식인 경우, 실행 전에 알 수 있으므로 매트릭스에서 미리 `no_agent_detected`로 차단(`blocked`)합니다.
    - **사후 거부**: 단일 명령으로 실행했음에도 실행 뒤 프로세스 이름이 셸로 남아 식별되지 않는 경우는 사후 거부 코드 `no_agent_detected`를 반환하며, 표 불일치 분류 규칙(`matrix-prediction-failure`)으로 연결합니다.
-6. **버전 범위 밖**: Orca/CLI 버전이 지원 범위 밖이면 `unsupported_version` (사전 거부)
+6. **검증에 쓰지 않은 버전**: 경로를 막지 않고 `untested_patch_version` 또는 `untested_version`으로 근거 등급만 낮춘다 (#61)
 
 ### 5. 거부 흐름과 표 불일치 신호
 - **실행 전 거부**: `plugins/oh-my-teams/scripts/role-terminal.mjs`에서 터미널을 열기 전(`workflow-reserve` 이전)에 표를 조회합니다. 표가 `blocked`를 반환하면 터미널 생성과 attempt 예약을 중단하고, 이유 코드와 `nextAction`을 반환합니다.

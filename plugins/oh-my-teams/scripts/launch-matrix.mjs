@@ -23,18 +23,20 @@
  */
 
 /**
- * 지원하는 Orca 버전 범위. 범위 밖이면 `unsupported_version`으로 차단합니다.
+ * 호환성 표를 실측으로 검증할 때 사용한 Orca 버전. 다른 버전에서는 차단하지 않고
+ * `classifyVersion`이 근거 등급을 낮춥니다.
  *
  * @type {string}
  */
-export const SUPPORTED_ORCA_VERSION = "1.4.204";
+export const VERIFIED_ORCA_VERSION = "1.4.204";
 
 /**
- * 지원하는 Antigravity CLI 버전 범위. 범위 밖이면 `unsupported_version`으로 차단합니다.
+ * 호환성 표를 실측으로 검증할 때 사용한 Antigravity CLI 버전. Agy 역할에만 적용하며,
+ * 다른 버전에서는 차단하지 않고 근거 등급을 낮춥니다.
  *
  * @type {string}
  */
-export const SUPPORTED_CLI_VERSION = "1.2.5";
+export const VERIFIED_CLI_VERSION = "1.2.5";
 
 /**
  * Agy 모델 이름을 계열('gemini', 'claude', 'gpt-oss')로 정규화합니다.
@@ -54,14 +56,91 @@ export function normalizeModelFamily(model) {
 }
 
 /**
- * 버전 문자열이 지원 버전과 일치하는지 확인합니다.
+ * 버전 문자열을 검증에 사용한 버전과 비교해 세 상태로 분류합니다.
+ *
+ * Orca는 사용자가 아무것도 바꾸지 않아도 자동으로 갱신되므로, 패치 버전이
+ * 달라졌다는 이유로 실행을 막으면 이미 검증된 경로까지 함께 멈춥니다(#61).
+ * 그래서 이 함수는 차단 여부가 아니라 근거 등급을 낮출 정도를 돌려줍니다.
  *
  * @param {string|undefined} version - 확인할 버전 문자열.
- * @param {string} supported - 지원하는 버전 문자열.
- * @returns {boolean} 지원 버전과 일치하면 true.
+ * @param {string} supported - 검증에 사용한 버전 문자열.
+ * @returns {"match"|"patch-diff"|"unknown"} 같은 버전이면 match, 주·부 버전이
+ *   같고 패치만 다르면 patch-diff, 그 밖(주·부 버전 차이, 빈 값, 형식 불일치)은
+ *   unknown.
  */
-function isVersionSupported(version, supported) {
-  return String(version ?? "").trim() === supported;
+export function classifyVersion(version, supported) {
+  const value = String(version ?? "").trim();
+  if (value === supported) return "match";
+  const parse = (text) => /^(\d+)\.(\d+)\./.exec(text);
+  const left = parse(value);
+  const right = parse(supported);
+  if (!left || !right) return "unknown";
+  if (left[1] === right[1] && left[2] === right[2]) return "patch-diff";
+  return "unknown";
+}
+
+/**
+ * 이 조합에서 실제로 의미가 있는 버전만 골라 가장 낮은 신뢰 상태를 돌려줍니다.
+ *
+ * Orca 버전은 Orca 터미널을 쓰는 경로에만, Antigravity CLI 버전은 Agy 역할에만
+ * 적용합니다. headless 경로는 Orca 터미널과 에이전트 인식을 거치지 않으므로 Orca
+ * 버전 차이의 영향을 받지 않습니다.
+ *
+ * @param {MatrixResult} candidate - 표가 고른 결과.
+ * @param {object} params - 환경 조합 파라미터.
+ * @returns {"match"|"patch-diff"|"unknown"} 적용 대상 가운데 가장 낮은 상태.
+ */
+function relevantVersionStatus(candidate, { runner, orcaVersion, cliVersion }) {
+  const statuses = [];
+  if (candidate.path !== "headless") {
+    statuses.push(classifyVersion(orcaVersion, VERIFIED_ORCA_VERSION));
+  }
+  if (runner === "agy") {
+    statuses.push(classifyVersion(cliVersion, VERIFIED_CLI_VERSION));
+  }
+  if (statuses.includes("unknown")) return "unknown";
+  if (statuses.includes("patch-diff")) return "patch-diff";
+  return "match";
+}
+
+/**
+ * 근거 등급을 한 단계 낮출 때 쓰는 대응표.
+ *
+ * @type {Record<string, 'verified'|'source-derived'|'unverified'>}
+ */
+const LOWER_EVIDENCE = {
+  verified: "source-derived",
+  "source-derived": "unverified",
+  unverified: "unverified",
+};
+
+/**
+ * 검증에 쓰지 않은 버전에서는 경로를 막는 대신 근거 등급을 낮춥니다.
+ *
+ * 패치 버전만 다르면 근거 등급을 그대로 두고 untested_patch_version만 붙입니다.
+ * 주·부 버전이 다르거나 버전을 확인하지 못했으면 근거 등급을 한 단계 낮추고
+ * untested_version을 붙입니다. 실측으로 검증한 칸은 한 단계 낮아져도 여전히 실행되고,
+ * 원래 unverified였던 칸만 검증 모드 승인을 요구합니다. 이미 막힌 결과는 그대로 둡니다.
+ *
+ * @param {MatrixResult} candidate - 표가 고른 결과.
+ * @param {object} params - 환경 조합 파라미터.
+ * @returns {MatrixResult} 근거 등급과 이유 코드를 조정한 결과.
+ */
+function applyVersionEvidence(candidate, params) {
+  if (candidate.path === "blocked") return candidate;
+  const status = relevantVersionStatus(candidate, params);
+  if (status === "match") return candidate;
+  const patchOnly = status === "patch-diff";
+  return {
+    ...candidate,
+    evidence: patchOnly
+      ? candidate.evidence
+      : LOWER_EVIDENCE[candidate.evidence],
+    reason: [
+      ...candidate.reason,
+      patchOnly ? "untested_patch_version" : "untested_version",
+    ],
+  };
 }
 
 /**
@@ -83,12 +162,17 @@ function applyVerificationGate(
   if (candidate.path !== "supervised-terminal") return candidate;
   if (candidate.evidence !== "unverified") return candidate;
   if (allowUnverified && allowUnverifiedApproval) return candidate;
+  const carried = candidate.reason.filter((code) => code !== "");
+  const versionNote = carried.includes("untested_version")
+    ? ` 검증에 사용한 버전은 Orca ${VERIFIED_ORCA_VERSION}, Antigravity CLI ${VERIFIED_CLI_VERSION}입니다.`
+    : "";
   return {
     path: "blocked",
-    reason: ["unverified-terminal-creation"],
+    reason: ["unverified-terminal-creation", ...carried],
     nextOwner: "pm",
     nextAction:
-      '검증되지 않은 조합입니다. --allow-unverified "<승인 문장>" 옵션으로 명시적 승인 후 재시도하세요.',
+      '검증되지 않은 조합입니다. --allow-unverified "<승인 문장>" 옵션으로 명시적 승인 후 재시도하세요.' +
+      versionNote,
     evidence: "unverified",
   };
 }
@@ -99,7 +183,7 @@ function applyVerificationGate(
  * 각 규칙은 `{ match(params): boolean, result: MatrixResult }` 형태입니다.
  *
  * 설계 3절의 표 순서를 그대로 따릅니다:
- * 버전 범위 → 복합 명령 Windows Agy → 신뢰 없음(Agy) → 신뢰 없음(Codex) →
+ * 복합 명령 Windows Agy → 신뢰 없음(Agy) → 신뢰 없음(Codex) →
  * Claude skipPrompt=false → Claude win32 skipPrompt=true → Agy claude 계열 →
  * Agy gemini win32/powershell → Agy win32/powershell(다른 계열) →
  * Agy gemini/gpt-oss POSIX → Claude POSIX skipPrompt=true →
@@ -108,19 +192,6 @@ function applyVerificationGate(
  * @type {Array<{match: function(object): boolean, result: MatrixResult}>}
  */
 const MATRIX_RULES = [
-  // 1. 지원 버전 범위 밖
-  {
-    match: ({ orcaVersion, cliVersion }) =>
-      !isVersionSupported(orcaVersion, SUPPORTED_ORCA_VERSION) ||
-      !isVersionSupported(cliVersion, SUPPORTED_CLI_VERSION),
-    result: {
-      path: "blocked",
-      reason: ["unsupported_version"],
-      nextOwner: "pm",
-      nextAction: "버전 지원 범위를 확인하세요.",
-      evidence: "unverified",
-    },
-  },
   // 2. Agy / win32 / powershell — 복합 명령 실행(폭 조정과 agy를 한 줄에)
   // isCompoundCommand=true인 경우에만 적용됩니다. Windows에서 구현은 폭 조정을
   // 생략하므로 단일 명령만 입력하여 이 행에 걸리지 않습니다.
@@ -325,7 +396,7 @@ export function predictLaunchPath(params) {
   for (const rule of MATRIX_RULES) {
     if (rule.match(params)) {
       return applyVerificationGate(
-        rule.result,
+        applyVersionEvidence(rule.result, params),
         allowUnverified,
         allowUnverifiedApproval,
       );
