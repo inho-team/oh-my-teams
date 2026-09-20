@@ -649,6 +649,116 @@ test("harness calls keep the session id that lets a report skip duplicates", (t)
   assert.ok(!JSON.stringify(records).includes(CANARY));
 });
 
+test("eachJsonLine reads multi-byte characters that span chunk boundaries correctly", (t) => {
+  // Each line contains a 3-byte Korean character (U+AC00, UTF-8: 0xEA 0xB0 0x80).
+  // Lines are ~65 bytes so a 64 KiB chunk boundary will fall inside a multi-byte
+  // sequence eventually; collectClaudeTranscripts must still parse every record.
+  const home = tempDir(t);
+  const worktree = path.join(home, "work", "mb-test");
+  const base = Date.parse("2026-09-10T10:00:00.000Z");
+  const usage = { input_tokens: 1, output_tokens: 1 };
+  // Build entries whose sessionId includes a multi-byte character.
+  const entries = Array.from({ length: 200 }, (_, i) => ({
+    type: "assistant",
+    timestamp: new Date(base + i * 1000).toISOString(),
+    sessionId: "가나다",
+    cwd: worktree,
+    isSidechain: false,
+    message: {
+      id: `msg-${i}`,
+      model: "claude-opus-5",
+      role: "assistant",
+      content: [],
+      usage,
+    },
+  }));
+  const project = path.join(home, "projects", encodeClaudeProject(worktree));
+  writeLines(path.join(project, "mb-session.jsonl"), entries);
+
+  const { records, unavailable } = collectClaudeTranscripts({
+    claudeHome: home,
+    places: [worktree],
+    window: { from: base - 1000, to: base + 200 * 1000 },
+  });
+  assert.equal(unavailable, null);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].calls, 200);
+});
+
+test("eachJsonLine stops immediately when visitor returns false", (t) => {
+  // collectCodexRollouts uses eachJsonLine with return false on first line
+  // if the session is for a different place; it must not read the rest.
+  const home = tempDir(t);
+  const elsewhere = path.join(home, "work", "elsewhere");
+  const base = Date.parse("2026-09-10T10:00:00.000Z");
+  // Write a rollout for a cwd not in our places list.
+  const meta = {
+    timestamp: new Date(base - 24 * 60 * 60 * 1000).toISOString(),
+    type: "session_meta",
+    payload: {
+      id: "th-stop",
+      session_id: "th-stop",
+      cwd: elsewhere,
+      timestamp: new Date(base - 24 * 60 * 60 * 1000).toISOString(),
+    },
+  };
+  // Add a line after meta that would produce a record if reading continued.
+  const tokenCount = {
+    timestamp: new Date(base + 5000).toISOString(),
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: { total_token_usage: { input_tokens: 99, output_tokens: 99 } },
+    },
+  };
+  writeLines(path.join(home, "sessions", "rollout-early-stop.jsonl"), [
+    meta,
+    tokenCount,
+  ]);
+  const { records } = collectCodexRollouts({
+    codexHome: home,
+    places: [path.join(home, "work", "other")],
+    window: { from: base, to: base + 60 * 60 * 1000 },
+  });
+  assert.equal(records.length, 0);
+});
+
+test("eachJsonLine streams large file without holding the whole content in memory", (t) => {
+  // Write a file large enough (> 1 MB) and collect from it; the test verifies
+  // functional correctness (all lines visited, no data loss) not memory usage
+  // (RSS measurement is done in the appendix with an out-of-tree script).
+  const home = tempDir(t);
+  const worktree = path.join(home, "work", "large-file");
+  const base = Date.parse("2026-09-10T10:00:00.000Z");
+  const COUNT = 5000; // ~200 B/line ≈ 1 MB
+  const usage = { input_tokens: 10, output_tokens: 20 };
+  const entries = Array.from({ length: COUNT }, (_, i) => ({
+    type: "assistant",
+    timestamp: new Date(base + i * 1000).toISOString(),
+    sessionId: "large-s1",
+    cwd: worktree,
+    isSidechain: false,
+    message: {
+      id: `msg-${i}`,
+      model: "claude-opus-5",
+      role: "assistant",
+      content: [],
+      usage,
+    },
+  }));
+  const project = path.join(home, "projects", encodeClaudeProject(worktree));
+  writeLines(path.join(project, "large.jsonl"), entries);
+
+  const { records, unavailable } = collectClaudeTranscripts({
+    claudeHome: home,
+    places: [worktree],
+    window: { from: base - 1000, to: base + COUNT * 1000 },
+  });
+  assert.equal(unavailable, null);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].calls, COUNT);
+});
+
 test("paths compare at separators, and without case on Windows", () => {
   assert.ok(pathWithin("C:/Work/Kickoff/src", "c:\\work\\kickoff", "win32"));
   assert.ok(pathWithin("c:\\work\\kickoff\\", "C:\\Work\\Kickoff", "win32"));

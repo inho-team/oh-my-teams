@@ -12,6 +12,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { readJSON } from "./core.mjs";
 import { headlessTurns } from "./headless.mjs";
 import { addTokenUsage, normalizeTokenUsage, TOKEN_FIELDS } from "./usage.mjs";
@@ -180,28 +181,64 @@ function modifiedSince(file, from) {
   }
 }
 
-// Entries are visited one at a time and dropped, so a long transcript's
-// message text is never held beyond the line being read. A visitor that
-// returns `false` stops reading the file.
+// Reads the file in fixed-size chunks and processes one line at a time, so
+// only two chunks are held in memory at once regardless of file size. A
+// visitor that returns `false` stops reading the file immediately.
+// StringDecoder is used so multi-byte characters spanning chunk boundaries
+// are never split.
 function eachJsonLine(file, visit) {
-  let text;
+  const CHUNK = 65536; // 64 KiB
+  let fd;
   try {
-    text = fs.readFileSync(file, "utf8");
+    fd = fs.openSync(file, "r");
   } catch {
     return;
   }
+  const buf = Buffer.allocUnsafe(CHUNK);
+  const decoder = new StringDecoder("utf8");
+  let tail = "";
   let index = 0;
-  for (const line of text.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    let entry;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      // A partial last line while the provider is still writing.
-      continue;
+  let stopped = false;
+  try {
+    let bytesRead;
+    do {
+      bytesRead = fs.readSync(fd, buf, 0, CHUNK, null);
+      tail += decoder.write(buf.subarray(0, bytesRead));
+      let start = 0;
+      let pos;
+      while ((pos = tail.indexOf("\n", start)) !== -1) {
+        const line = tail.slice(start, pos).replace(/\r$/, "");
+        start = pos + 1;
+        if (!line.trim()) continue;
+        let entry;
+        try {
+          entry = JSON.parse(line);
+        } catch {
+          // A partial last line while the provider is still writing.
+          continue;
+        }
+        if (visit(entry, index) === false) {
+          stopped = true;
+          break;
+        }
+        index += 1;
+      }
+      tail = stopped ? "" : tail.slice(start);
+    } while (bytesRead === CHUNK && !stopped);
+    // Flush any incomplete multi-byte sequence held by the decoder, then
+    // process any remaining text without a trailing newline (partial last line).
+    if (!stopped) {
+      tail += decoder.end();
+      if (tail.trim()) {
+        try {
+          visit(JSON.parse(tail), index);
+        } catch {
+          // Partial last line while the provider is still writing — ignore.
+        }
+      }
     }
-    if (visit(entry, index) === false) return;
-    index += 1;
+  } finally {
+    fs.closeSync(fd);
   }
 }
 
