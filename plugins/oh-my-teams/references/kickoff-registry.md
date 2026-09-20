@@ -52,10 +52,13 @@ node <runtime> kickoff-show --org <project>/.omt/organization.json
 node <runtime> kickoff-claim --org <project>/.omt/organization.json --from <claim.json>
 node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <id> --run <runId>
 node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <id> --reason completed
+node <runtime> kickoff-branch-cleanup --org <project>/.omt/organization.json --worktree <id> --branches <branch>[,<branch>...] [--remote <remote-name>]
 node <runtime> deliver --org <project>/.omt/organization.json --worktree <id> --source <통합 워크트리> --head <검증한 HEAD> --evidence <evidence.json> --task <task.json> [--report <report.json> --state <pm-state>]
 ```
 
 `kickoff-show`는 등록된 kickoff 전체를 돌려주며, `--worktree`를 주면 그 PM 워크트리의 항목만 돌려준다. `kickoff-bind`는 같은 `runId`를 다시 넣는 호출은 그대로 성공하지만 다른 Run을 넣으면 거부한다. 수신 확인을 놓친 재실행과 Run이 둘로 갈라지는 상황은 서로 다른 사건이기 때문이다. `kickoff-release`의 `--reason`은 `completed`, `disbanded`, `taken-over` 가운데 하나이며, 다른 kickoff의 항목은 건드리지 않는다. `deliver`는 `delivery.mode`가 `local-merge`인 kickoff만 병합하고, 병합한 HEAD와 주인 브랜치의 병합 커밋을 항목의 `delivered`에 남긴다. `local-merge` kickoff는 `delivered`가 없으면 `--reason completed`로 해제되지 않으며, 사용자가 전달 없이 닫기로 결정한 경우에만 `--force`를 붙인다.
+
+`kickoff-branch-cleanup`은 `close` 절차에서만 호출하며 `disband`에서는 호출하지 않는다. `disband`는 실패 결과를 복구할 수 있도록 브랜치를 보존해야 하기 때문이다. `--branches`에 쉼표로 구분한 브랜치 이름 목록을 주면, 각 브랜치의 커밋이 전달 대상(`local-merge`이면 병합 커밋, `pull-request`이면 병합된 PR의 커밋)에 이미 포함되어 있는지를 `git merge-base --is-ancestor`로 확인한 뒤 원격과 로컬에서 삭제한다. 확인이 되지 않은 브랜치는 삭제하지 않고 `skipped` 목록에 남긴다. `delivery.mode`가 `none`이거나 `delivered` 기록이 없는 경우에도 전달을 확인할 수 없으므로 모든 브랜치를 `skipped`에 남긴다.
 
 ## 주인 체크아웃과 병합
 

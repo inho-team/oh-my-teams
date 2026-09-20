@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
+  _codexRolloutCache,
   answerHeadless,
   codexRolloutModel,
   headlessCommand,
@@ -19,16 +20,69 @@ import {
   waitHeadless,
 } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import { main, parseArgs } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { killTree } from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
 
 const FAKE = path.resolve("tests/fake-agent.mjs");
+
+/**
+ * Waits until every runner recorded under stateDir has written its exit.json.
+ * This prevents rmSync from racing with a runner that still holds file handles,
+ * which causes EPERM on Windows when the directory is removed before the runner
+ * releases its open file descriptors (stream.jsonl, stderr.txt).
+ *
+ * @param {string} stateDir - Headless state directory (contains headless/).
+ * @param {number} [timeoutMs=8000] - Give up after this many ms.
+ * @returns {Promise<void>}
+ */
+async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
+  const headlessRoot = path.join(stateDir, "headless");
+  if (!fs.existsSync(headlessRoot)) return;
+  const deadline = Date.now() + timeoutMs;
+  const workerIds = fs
+    .readdirSync(headlessRoot)
+    .filter((name) => /^[a-z0-9][a-z0-9-]*$/.test(name));
+  for (const workerId of workerIds) {
+    const workerDir = path.join(headlessRoot, workerId);
+    // Request stop so any still-running turn begins to wind down.
+    const turnsDir = path.join(workerDir, "turns");
+    if (fs.existsSync(turnsDir)) {
+      const turnNumbers = fs
+        .readdirSync(turnsDir)
+        .filter((n) => /^\d+$/.test(n))
+        .map(Number)
+        .sort((a, b) => a - b);
+      const lastTurn = turnNumbers.at(-1);
+      if (lastTurn !== undefined) {
+        const turnDir = path.join(turnsDir, String(lastTurn));
+        const exitFile = path.join(turnDir, "exit.json");
+        const stopFile = path.join(turnDir, "stop.request");
+        if (!fs.existsSync(exitFile) && !fs.existsSync(stopFile)) {
+          try {
+            fs.writeFileSync(stopFile, new Date().toISOString());
+          } catch {
+            // Ignore if already written.
+          }
+        }
+        // Poll until exit.json appears or the deadline passes.
+        while (!fs.existsSync(exitFile) && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      }
+    }
+  }
+}
 
 function sandbox(t) {
   const dir = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-headless-")),
   );
+  const state = path.join(dir, "state");
   t.after(async () => {
-    // Give stopped runners a moment to release their files on Windows.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Wait for every runner to write exit.json before removing the directory.
+    // On Windows, a runner that still has stream.jsonl or stderr.txt open will
+    // cause rmSync to fail with EPERM. Waiting for exit.json ensures the runner
+    // has called fs.closeSync on those handles before we remove the tree.
+    await waitAllRunnersExited(state);
     fs.rmSync(dir, {
       recursive: true,
       force: true,
@@ -39,7 +93,7 @@ function sandbox(t) {
   const cwd = path.join(dir, "worktree");
   fs.mkdirSync(cwd);
   return {
-    state: path.join(dir, "state"),
+    state,
     cwd,
     codexHome: path.join(dir, "codex-home"),
   };
@@ -620,4 +674,271 @@ test("agy turn.json carries --print-timeout from worker default and per-turn tim
     90000,
     "turn.json timeoutMs matches per-turn value",
   );
+});
+
+test("F-01: codexRolloutModel does not re-scan the sessions tree on repeated calls for the same threadId", () => {
+  // 수정 전 구현에서는 호출마다 readdirSync를 실행하므로 이 테스트가 실패한다.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "omt-f01-cache-"));
+  try {
+    const codexHome = tmp;
+    const sessionDir = path.join(tmp, "sessions", "sub");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const threadId = "f01-test-thread";
+    const rollout = path.join(sessionDir, `rollout_${threadId}.jsonl`);
+    fs.writeFileSync(
+      rollout,
+      JSON.stringify({ type: "turn_context", payload: { model: "gpt-test" } }) +
+        "\n",
+    );
+
+    // 캐시를 비워 깨끗한 상태에서 시작한다.
+    _codexRolloutCache.clear();
+
+    let readdirCalls = 0;
+    const origReaddir = fs.readdirSync;
+    fs.readdirSync = (...args) => {
+      readdirCalls++;
+      return origReaddir.apply(fs, args);
+    };
+    try {
+      const m1 = codexRolloutModel(threadId, codexHome);
+      const callsAfterFirst = readdirCalls;
+      const m2 = codexRolloutModel(threadId, codexHome);
+      const callsAfterSecond = readdirCalls;
+      assert.equal(m1, "gpt-test", "first call must find the model");
+      assert.equal(m2, "gpt-test", "second call must return the same model");
+      // 두 번째 호출에서 readdirSync가 추가로 실행되지 않아야 한다 (캐시 적중).
+      assert.equal(
+        callsAfterSecond,
+        callsAfterFirst,
+        "second call must not re-scan: readdirSync call count must not increase",
+      );
+    } finally {
+      fs.readdirSync = origReaddir;
+      _codexRolloutCache.clear();
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("F-02: headlessStatus reads bytes proportional to STATUS_HEAD + STATUS_TAIL, not file size, for large streams", () => {
+  // 수정 전 구현에서는 readFileSync로 전체를 읽으므로 readBytes가 파일 크기와
+  // 같아지고 이 테스트가 실패한다.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "omt-f02-tail-"));
+  try {
+    const stateDir = path.join(tmp, "state");
+    const cwd = path.join(tmp, "cwd");
+    fs.mkdirSync(cwd);
+    const workerDir = path.join(stateDir, "headless", "large-stream");
+    const turnDir = path.join(workerDir, "turns", "1");
+    fs.mkdirSync(turnDir, { recursive: true });
+    writeJSON(path.join(workerDir, "worker.json"), {
+      schemaVersion: 1,
+      id: "large-stream",
+      role: "junior",
+      profile: "p",
+      provider: "claude",
+      binary: ["claude"],
+      modelRequested: null,
+      effortRequested: null,
+      cwd,
+      timeoutMs: 60000,
+    });
+    writeJSON(path.join(turnDir, "runner.json"), { pid: null });
+    writeJSON(path.join(turnDir, "exit.json"), { code: 0 });
+
+    // stream.jsonl: 헤더 이벤트 + 중간 더미 줄 대량 + result 이벤트
+    const header = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "s-large",
+      model: "claude-sonnet-5",
+    });
+    const middle = JSON.stringify({
+      type: "assistant",
+      message: { content: [] },
+    });
+    const result = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: "DONE: large stream done",
+      session_id: "s-large",
+    });
+    const streamFile = path.join(turnDir, "stream.jsonl");
+    // 헤더 + 2MB 중간 더미 + result
+    const OVER_THRESHOLD = 2 * 1024 * 1024; // STATUS_HEAD_BYTES + STATUS_TAIL_BYTES = 68KB < 2MB
+    const fd = fs.openSync(streamFile, "w");
+    fs.writeSync(fd, header + "\n");
+    let written = header.length + 1;
+    while (written < OVER_THRESHOLD) {
+      fs.writeSync(fd, middle + "\n");
+      written += middle.length + 1;
+    }
+    fs.writeSync(fd, result + "\n");
+    fs.closeSync(fd);
+    const fileSize = fs.statSync(streamFile).size;
+    assert.ok(
+      fileSize > OVER_THRESHOLD,
+      `stream.jsonl must be large (${fileSize} bytes)`,
+    );
+
+    // readSync 호출을 추적하여 읽은 총 바이트를 측정한다.
+    const origReadSync = fs.readSync;
+    let totalRead = 0;
+    fs.readSync = (fd2, buf, ...rest) => {
+      const n = origReadSync.call(fs, fd2, buf, ...rest);
+      totalRead += n;
+      return n;
+    };
+    const origReadFileSync = fs.readFileSync;
+    let readFileCalls = 0;
+    let readFileTotalBytes = 0;
+    fs.readFileSync = (...args) => {
+      const content = origReadFileSync.apply(fs, args);
+      if (
+        typeof args[0] === "string" &&
+        path.resolve(args[0]) === path.resolve(streamFile)
+      ) {
+        readFileCalls++;
+        readFileTotalBytes +=
+          typeof content === "string"
+            ? Buffer.byteLength(content, "utf8")
+            : content.length;
+      }
+      return content;
+    };
+    try {
+      const status = headlessStatus(stateDir, "large-stream");
+      assert.equal(status.session, "s-large", "session must be extracted");
+      assert.equal(status.outcome, "done", "marker must be found in tail");
+      // 파일 전체를 readFileSync로 읽었다면 readFileTotalBytes >= fileSize のはず.
+      // 수정 후에는 readFileSync로 stream을 읽지 않고 fd로 head+tail만 읽는다.
+      assert.equal(
+        readFileCalls,
+        0,
+        "headlessStatus must not call readFileSync for stream.jsonl (must use fd-based tail read)",
+      );
+      // fd 읽기: headlessStatus 직접 1회 + headlessUsageSummary→readTurn 1회
+      // = 최대 2 × (HEAD_BYTES + TAIL_BYTES). 파일 크기에는 비례하지 않는다.
+      const MAX_EXPECTED = 2 * (4 + 64) * 1024;
+      assert.ok(
+        totalRead <= MAX_EXPECTED,
+        `tail read must not exceed ${MAX_EXPECTED} bytes, read ${totalRead} (file is ${fileSize})`,
+      );
+    } finally {
+      fs.readSync = origReadSync;
+      fs.readFileSync = origReadFileSync;
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("F-01 cache-null-model-stale: a null model from a rollout file without turn_context is not cached, allowing a later poll to find the model", () => {
+  // 수정 전 구현에서는 rollout 파일을 찾아 null을 캐시에 저장했으므로,
+  // 이후 turn_context가 기록되어도 null이 계속 반환된다.
+  // 수정 후에는 null을 캐시하지 않아 다음 호출에서 재탐색한다.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "omt-f01-stale-"));
+  try {
+    const codexHome = tmp;
+    const sessionDir = path.join(tmp, "sessions", "sub");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const threadId = "stale-null-thread";
+    const rollout = path.join(sessionDir, `rollout_${threadId}.jsonl`);
+
+    // 1단계: rollout 파일은 있지만 turn_context 줄이 아직 없다.
+    fs.writeFileSync(
+      rollout,
+      JSON.stringify({ type: "thread.started" }) + "\n",
+    );
+
+    _codexRolloutCache.clear();
+    const m1 = codexRolloutModel(threadId, codexHome);
+    assert.equal(m1, null, "no turn_context yet → must return null");
+    // null이 캐시에 남아 있어서는 안 된다.
+    assert.ok(
+      !_codexRolloutCache.has(`${codexHome}:${threadId}`),
+      "null result must not be stored in the cache",
+    );
+
+    // 2단계: Codex가 turn_context를 기록한다.
+    fs.appendFileSync(
+      rollout,
+      JSON.stringify({ type: "turn_context", payload: { model: "gpt-late" } }) +
+        "\n",
+    );
+
+    const m2 = codexRolloutModel(threadId, codexHome);
+    assert.equal(
+      m2,
+      "gpt-late",
+      "after turn_context is written, the next call must find the model",
+    );
+    // 이제 캐시에 저장되어야 한다.
+    assert.equal(
+      _codexRolloutCache.get(`${codexHome}:${threadId}`),
+      "gpt-late",
+      "a resolved model must be cached so subsequent polls skip the scan",
+    );
+  } finally {
+    _codexRolloutCache.clear();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// F-05: killTree는 플랫폼별로 프로세스 트리를 종료하고 실패를 조용히 삼키지 않는다.
+test("F-05: killTree — POSIX에서 실제 자식 프로세스를 종료하고 killError가 null이다", async () => {
+  // Windows 실환경이 없으므로 POSIX 경로만 이 PC에서 확인한다.
+  // Windows 동작(taskkill /T /F /PID)은 코드 경로로 확인하며, 실측하지 못했다.
+  if (process.platform === "win32") {
+    // Windows 실환경 없음 — 코드 경로(taskkill /T /F /PID)만 확인, 실측 생략.
+    return;
+  }
+  const { spawn } = await import("node:child_process");
+  // 자식 프로세스를 detached로 시작해 자체 프로세스 그룹을 갖게 한다.
+  const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1e9)"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  const pid = child.pid;
+  assert.ok(pid, "child must have a pid");
+  // 자식이 시작할 시간을 준다.
+  await new Promise((r) => setTimeout(r, 200));
+  // killTree가 프로세스 그룹을 종료하고 null(오류 없음)을 반환해야 한다.
+  const killError = killTree(pid);
+  assert.equal(
+    killError,
+    null,
+    `killTree must return null on success, got: ${killError}`,
+  );
+  // 자식이 실제로 사라졌는지 확인한다.
+  await new Promise((r) => setTimeout(r, 300));
+  let alive = true;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    alive = false;
+  }
+  assert.equal(alive, false, "child process must be gone after killTree");
+});
+
+test("F-05: killTree — 존재하지 않는 pid는 오류 메시지를 반환하고 throw하지 않는다", () => {
+  // 절대 존재하지 않을 pid (최댓값 부근)를 넘겨 실패 경로를 검증한다.
+  const error = killTree(2147483000);
+  // POSIX에서는 ESRCH(No such process)가 반환되어야 한다.
+  // Windows 실환경 없음 — taskkill 실패 경로는 코드 경로로만 확인.
+  if (process.platform !== "win32") {
+    assert.ok(
+      typeof error === "string" && error.length > 0,
+      `killTree must return an error string for a non-existent pid, got: ${error}`,
+    );
+  }
+});
+
+test("F-05: killTree — pid가 null이면 즉시 null을 반환한다", () => {
+  assert.equal(killTree(null), null);
+  assert.equal(killTree(undefined), null);
+  assert.equal(killTree(0), null);
 });

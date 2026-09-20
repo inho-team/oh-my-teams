@@ -239,6 +239,7 @@
 - **제안 수정**: threadId를 캐시 키로 세션 결과를 프로세스 수명 동안 메모이즈하거나, Codex rollout 파일에 예측 가능한 경로 규칙이 있다면 직접 경로로 접근하도록 변경한다.
 - **예상 작업 크기**: S (캐시 Map 추가 + 테스트 보완)
 - **회귀 방지 검사**: `headless.test.mjs`의 Codex 경로 테스트. 캐시 무효화 시나리오 추가 필요.
+- **수정 완료** (task fix-headless-stream-read, 커밋 `7fed339`, `d3e0351`): `codexRolloutModel`에 프로세스 수명 캐시(`Map`)를 추가하여 첫 조회 이후에는 재귀 탐색 없이 캐시에서 반환하도록 변경. `turn_context`가 아직 기록되지 않아 `model`이 `null`인 경우에는 캐시에 저장하지 않아 확정 이전 상태를 보수적으로 처리함(`d3e0351`). 부록에 수정 전후 측정 수치 정리됨.
 
 ---
 
@@ -278,6 +279,7 @@
 - **제안 수정**: `headlessStatus`는 마지막 몇 줄(역순 탐색 또는 tail)만 읽어 result/marker를 추출하도록 파싱 방식을 변경한다. 전체 transcript가 필요한 `headlessDetail`은 사용자 요청 시에만 호출하도록 유지하되, 폴링 경로(`listHeadless`, `headlessStatus`)에서 transcript 전체 파싱을 분리한다.
 - **예상 작업 크기**: M (파싱 경로 분리 + 회귀 테스트)
 - **회귀 방지 검사**: `headless.test.mjs`의 status/detail 경로. 큰 스트림 fixture 추가 필요.
+- **수정 완료** (task fix-headless-stream-read, 커밋 `7fed339`): `headlessStatus`·`headlessUsageSummary`에서 `readFileSync` 전체 읽기를 head 4KB + tail 64KB fd 읽기로 교체. 파일이 68KB 미만이면 전체 읽기. 폴링 경로에서 파일 크기와 무관하게 고정 136KB만 읽으므로 RSS 압박 제거. 부록에 수정 전후 측정 수치 정리됨.
 
 ---
 
@@ -316,6 +318,7 @@
 - **제안 수정**: `readline`의 줄별 읽기 스트림(`createReadStream + createInterface`)으로 교체하여 전체 파일을 메모리에 올리지 않도록 변경한다. 주석("한 줄 이상 메시지를 붙잡지 않는다")도 구현에 맞게 수정하거나, 구현을 주석에 맞게 변경한다.
 - **예상 작업 크기**: S-M (스트림 읽기 전환 + 비동기 콜백 체인 조정 필요 여부 확인)
 - **회귀 방지 검사**: `usage-sources.test.mjs`. 큰 파일 fixture 또는 청크 읽기 검증 추가 필요.
+- **수정 완료** (task fix-usage-sources-stream, 커밋 `8f6cbfb`): `eachJsonLine`을 64 KiB 청크 단위 동기 읽기 + `StringDecoder` 경계 처리로 교체. 호출자 시그니처를 동기로 유지하면서 한 번에 보유하는 메모리를 청크(64 KiB) + tail 한 줄 분량으로 고정. 부록에 수정 전후 측정 수치 정리됨. 주석(F-06)도 실제 동작에 맞게 수정됨.
 
 ---
 
@@ -380,6 +383,8 @@
 - **제안 수정**: Windows에서 프로세스 트리 전체를 끝내려면 `taskkill /T /F /PID <pid>` 또는 Job Object를 사용한다. `headless-runner.mjs`에 플랫폼별 killTree 유틸리티 추가를 검토한다.
 - **예상 작업 크기**: M (플랫폼별 kill 로직 추가 + Windows 실환경 검증)
 - **회귀 방지 검사**: `headless.test.mjs`의 stop 경로. Windows 손자 프로세스 잔존 여부 확인 검사 추가.
+- **수정 완료** (task fix-process-tree-stop, 커밋 `5fd02d1`): `killTree(pid, signal)` 헬퍼 추가 — Windows: `taskkill /T /F /PID`로 손자까지 종료, POSIX: `process.kill(-pid, signal)`로 프로세스 그룹 전체 신호. `stopChild`가 `child.kill()` 대신 `killTree`를 사용하며, 종료 실패 메시지를 `killError`로 exit.json에 기록해 조용히 삼키지 않음. 자식을 `detached: true`(POSIX만)로 spawn해 독립 프로세스 그룹 형성. Windows 손자 프로세스 실측: Windows 실환경 없어 코드 경로(taskkill /T) + 공개 CI(PR #67 Windows 러너 EBUSY 재현)로 근거 삼음. 테스트: `tests/headless.test.mjs` — "F-05: killTree — POSIX에서 실제 자식 프로세스를 종료하고 killError가 null이다" 외 2개. 비고: F-05의 Windows 프로세스 트리 종료는 이 PC(macOS)에서 실측하지 못했으며, 코드 경로(taskkill /T)와 PR #67 Windows CI에서 관측된 같은 유형의 정리 실패를 근거로 삼았습니다.
+
 
 ---
 
@@ -404,6 +409,7 @@
 - **제안 수정**: 주석을 현재 구현("전체 파일을 읽고 줄 단위로 방문한다")에 맞게 수정하거나, 구현을 스트림 읽기로 변경 후 주석을 유지한다.
 - **예상 작업 크기**: XS (주석 수정만) 또는 S-M (구현 변경 포함, F-03과 동일)
 - **회귀 방지 검사**: F-03과 동일.
+- **수정 완료** (task fix-usage-sources-stream, 커밋 `8f6cbfb`): 구현을 64 KiB 청크 단위 읽기로 변경하면서 주석도 구현에 맞게 수정하여 주석과 구현의 불일치를 해소함.
 
 ---
 
@@ -456,6 +462,7 @@
 - **제안 수정**: `eventIds`를 `Set<string>`으로 교체하여 includes를 O(1)로 줄인다. JSON 직렬화 시 `Array.from(eventIds)`로 변환하거나 state 저장 직전에 배열로 바꾼다. 기존 `state.json`의 배열 형식을 로드할 때 Set으로 변환하는 마이그레이션 처리가 필요하다.
 - **예상 작업 크기**: S (Set 교체 + 직렬화 호환성 확인)
 - **회귀 방지 검사**: `workflow.test.mjs`의 이벤트 중복 방지 테스트. 기존 배열 state.json을 로드·저장하는 왕복 테스트 추가 필요.
+- **수정**: `workflow-store.mjs`에 `eventIdSets` WeakMap을 추가해 `appendWorkflowEvent` 최초 호출 시 Set 캐시를 구성한다. `state.eventIds`는 배열로 유지해 직렬화·외부 코드 호환을 보장한다. 왕복 테스트와 Set 캐시 동작 테스트를 `tests/workflow-recovery.test.mjs`에 추가했다. 커밋: `009b2aa` (브랜치: `dev-inho/audit-w1-eventids`).
 
 ---
 
@@ -499,6 +506,8 @@
 - **제안 수정**: overflow 시에도 `fallbackTimer = setTimeout(() => finish(-1), 1000)`을 추가하여 timeout과 대칭적으로 처리한다. `Buffer.byteLength` 재계산은 현재 길이를 별도 `totalBytes` 변수로 추적하면 O(1)로 줄일 수 있다.
 - **예상 작업 크기**: S (fallback 타이머 추가 + byteLength 카운터 변수 추가)
 - **회귀 방지 검사**: `core.mjs` 관련 `run` 테스트. overflow 후 close 미착신 시나리오(Windows 프로세스 트리) 추가 필요.
+- **수정 완료** (task fix-process-tree-stop, 커밋 `5fd02d1`): `totalBytes` 추적 변수 추가로 매 chunk마다 `Buffer.byteLength` 재계산 제거. overflow 후 `fallbackTimer = setTimeout(() => finish(-1), 1000)` 추가로 timeout 경로와 대칭화. 잘라내기 이후 `totalBytes`를 실제 byteLength로 재계산해 정확도 유지. 테스트: `tests/execution-port.test.mjs` — "STATE-02: run() overflow 후 close 없이도 fallback 타이머가 resolve한다", "STATE-02: run() overflow 후 stdout/stderr 잘라내기 길이가 정확하다". Windows close 미착신 시나리오는 Windows 실환경 없어 코드 경로로만 확인.
+
 
 ---
 
@@ -855,6 +864,8 @@
 - **제안 수정**: (a) 테스트 정리 전에 runner 종료를 기다리거나(stop 후 `exit.json` 확인), (b) headless-runner가 Windows에서 프로세스 트리를 종료하게 하고(F-05 수정과 연동), (c) 회귀 방지로 병렬 실행을 CI의 Windows 러너에서 돌린다.
 - **예상 작업 크기**: S-M (runner 종료 확인 로직 추가 + Windows 실환경 검증, F-05 수정과 함께 처리 가능)
 - **회귀 방지 검사**: CI Windows 러너에서 병렬 `npm test` 실행 추가.
+- **수정 완료** (task fix-process-tree-stop, 커밋 `5fd02d1`): `sandbox(t)` `t.after`에서 `waitAllRunnersExited(state)`를 호출해 모든 headless runner의 exit.json 기록을 확인한 뒤 `rmSync`를 실행. stop.request를 먼저 써 실행 중인 턴을 중단하고, exit.json이 나타날 때까지(최대 8초) 100ms 간격으로 폴링. 이 방식은 증상(EPERM)이 아닌 실제 원인(runner가 파일 핸들을 보유 중)을 해결함. 비고: 이 PC(macOS)에서 병렬 `npm test`가 371건 모두 통과하는 것으로 확인했습니다. Windows 실환경이 없어 Windows에서의 EPERM 제거는 코드 경로 + PR #67 CI 근거로만 확인했습니다.
+
 
 ---
 
@@ -874,6 +885,7 @@
 - **제안 수정**: `close` 절차의 6단계(또는 별도 정리 단계)에 다음을 추가한다. (a) 전달(병합)이 확인된 뒤 kickoff의 원격 브랜치와 로컬 브랜치를 삭제한다. (b) 하위 워크트리가 삭제되면 해당 워크트리 전용 브랜치도 삭제한다. (c) `disband`는 복구 가능성을 위해 브랜치를 보존하는 정책을 유지한다. `close/SKILL.md` 6단계와 7단계 사이에 브랜치 정리 절차를 명시하거나, 8단계 최종 정리 목록에 브랜치 삭제를 포함한다.
 - **예상 작업 크기**: XS (문서 절차 추가)
 - **회귀 방지 검사**: `tests/skill-instructions.test.mjs`에 close 절차에 브랜치 삭제 언급이 있는지 확인하는 검사 추가 권고.
+- **수정 완료** (task fix-close-branch-cleanup, 커밋 `5e23ce5`, `0391d40`): `kickoff-branch-cleanup` 명령을 `kickoff-registry.mjs`에 추가하고, `teams-org.mjs`의 CLI에 연결했다. 전달 확인은 `git merge-base --is-ancestor`로 커밋 포함 여부를 검사하고, 확인된 경우에만 원격·로컬 브랜치를 삭제한다. `close/SKILL.md`에 7단계로 브랜치 정리 절차를 추가하고, `disband`에서는 이 명령을 호출하지 않는다는 구분을 명시했다. `references/kickoff-registry.md` 명령 목록에 명령을 등록했다. `tests/kickoff-registry.test.mjs`에 전달 미확인 시 삭제 안 함, 전달 확인 후 임시 저장소에서 실제 삭제 검사를 추가하고, `tests/skill-instructions.test.mjs`에 close가 명령을 가리키고 disband는 보존한다는 검사를 추가했다. `0391d40`은 `remoteName` 파라미터 타입 JSDoc 오류를 후속 수정한 커밋이다.
 
 ---
 
@@ -967,19 +979,19 @@
 
 ### 수정 순서와 묶음(PR 단위 제안)
 
-| 우선순위 | PR 묶음 | 포함 항목 | 예상 크기 | 이유 |
-|---|---|---|---|---|
-| 1 | `fix/headless-stream-read` | F-01, F-02 | M | high/memory, 폴링 경로 RSS 압박 즉시 개선 가능 |
-| 2 | `fix/usage-sources-stream` | F-03, F-06 | S-M | high/memory, eachJsonLine 스트림 전환으로 주석 불일치도 해소 |
-| 3 | `fix/core-overflow-fallback` | STATE-02 | S | medium/memory, overflow 후 close 미착신 Windows 위험 제거 |
-| 4 | `fix/headless-runner-kill-tree` | F-05, CHECKS-INT-01 | M | medium/memory+checks, Windows 손자 프로세스 정리 및 병렬 테스트 정리 실패(같은 유형, 실환경 검증 병행) |
-| 5 | `fix/state-eventids-set` | STATE-01 | S | medium/memory, O(n) 탐색 제거 |
-| 6 | `docs/fix-close-branch-cleanup` | CLOSE-01 | XS | medium/architecture, close 절차에 브랜치 정리 단계 추가 |
-| 7 | `refactor/ledger-read` | F-04 | S | medium/memory, ledger 역방향 읽기(극단적 시나리오 대응) |
-| 8 | `docs/fix-rules-and-version` | DOCS-01, DOCS-02, DOCS-03, LAUNCH-02 | S | low/checks, 정본 문서 규칙 추가·버전 정책 수정·문서 충돌 해소 |
-| 9 | `test/add-unit-tests` | TESTS4-08, P-09, P-10 | S | low/checks, usage-ledger·incidents 단위 테스트 추가 |
-| 10 | `fix/minor-checks` | STATE-04, STATE-05, DOCS-04, DOCS-07, DOCS-09 | XS-S | low/checks, 예외 무음·미사용 export·문서 정합성 정리 |
-| 11 | `fix/legacy-compat` | DOCS-06 | XS | low/architecture, pre-1.1 호환 파일 사용 여부 확인 후 제거 |
+| 우선순위 | PR 묶음 | 포함 항목 | 예상 크기 | 이유 | 상태 |
+|---|---|---|---|---|---|
+| 1 | `fix/headless-stream-read` | F-01, F-02 | M | high/memory, 폴링 경로 RSS 압박 즉시 개선 가능 | ✅ 처리 완료 |
+| 2 | `fix/usage-sources-stream` | F-03, F-06 | S-M | high/memory, eachJsonLine 스트림 전환으로 주석 불일치도 해소 | ✅ 처리 완료 |
+| 3 | `fix/core-overflow-fallback` | STATE-02 | S | medium/memory, overflow 후 close 미착신 Windows 위험 제거 | ✅ 처리 완료 |
+| 4 | `fix/headless-runner-kill-tree` | F-05, CHECKS-INT-01 | M | medium/memory+checks, Windows 손자 프로세스 정리 및 병렬 테스트 정리 실패(같은 유형, 실환경 검증 병행) | ✅ 처리 완료 |
+| 5 | `fix/state-eventids-set` | STATE-01 | S | medium/memory, O(n) 탐색 제거 | ✅ 처리 완료 |
+| 6 | `docs/fix-close-branch-cleanup` | CLOSE-01 | XS | medium/architecture, close 절차에 브랜치 정리 단계 추가 | ✅ 처리 완료 |
+| 7 | `refactor/ledger-read` | F-04 | S | medium/memory, ledger 역방향 읽기(극단적 시나리오 대응) | 미처리 |
+| 8 | `docs/fix-rules-and-version` | DOCS-01, DOCS-02, DOCS-03, LAUNCH-02 | S | low/checks, 정본 문서 규칙 추가·버전 정책 수정·문서 충돌 해소 | 미처리 |
+| 9 | `test/add-unit-tests` | TESTS4-08, P-09, P-10 | S | low/checks, usage-ledger·incidents 단위 테스트 추가 | 미처리 |
+| 10 | `fix/minor-checks` | STATE-04, STATE-05, DOCS-04, DOCS-07, DOCS-09 | XS-S | low/checks, 예외 무음·미사용 export·문서 정합성 정리 | 미처리 |
+| 11 | `fix/legacy-compat` | DOCS-06 | XS | low/architecture, pre-1.1 호환 파일 사용 여부 확인 후 제거 | 미처리 |
 
 ### 특이 사항
 
@@ -990,3 +1002,75 @@
 ## 남은 사항
 
 - 결론 문장과 합계 문장의 발견 수치(memory medium, checks medium·low)는 PM이 요약표와 항목별 심각도에 맞춰 직접 정정했다. Junior·Senior 프로필의 Agy 할당량이 소진되어(429 RESOURCE_EXHAUSTED) 하위 역할에 맡길 수 없었고, 이사가 이 예외를 승인했다.
+
+---
+
+## 부록: F-01·F-02 수정 전후 측정 수치 (fix-headless-stream-read, 2026-09-20)
+
+측정 환경: macOS, Node.js v26.7.0. 스크립트는 워크트리 밖 `/tmp/omt-measure-{before,after}.mjs`(커밋 안 함).
+
+### F-01: `codexRolloutModel` sessions 트리 탐색 비용
+
+수정 전 — 호출마다 sessions 트리를 전체 재귀 탐색:
+
+| 세션 파일 수 | 1회 탐색 시간(ms) | RSS 증가(MB) |
+|---|---|---|
+| 100 | 0.7 | 2.5 |
+| 1,000 | 1.3 | 0.1 |
+| 5,000 | 5.0 | 4.0 |
+
+수정 후 — 첫 조회만 탐색하고 이후는 프로세스 수명 캐시(`Map`) 적중:
+
+| 세션 파일 수 | 1차 탐색(ms) | 캐시 히트(ms) |
+|---|---|---|
+| 100 | 0.5 | 0.000 |
+| 1,000 | 1.3 | 0.000 |
+| 5,000 | 3.7 | 0.000 |
+
+반복 폴링(waitHeadless 1초, dashboard 2.5~4초) 경로에서 세션 파일이 5,000개일 때 폴링 1회당 5ms → 0ms(캐시 적중)로 개선.
+
+> cache-null-model-stale 수정(후속 커밋)으로 `turn_context`가 아직 기록되지 않은 경우(`model = null`)는 캐시에 저장하지 않게 바뀌어, 해당 상태에서는 매 폴링마다 재탐색이 일어난다. 모델이 확정된 이후의 캐시 적중 동작(위 수치의 전제)은 그대로 유지된다.
+
+### F-02: `headlessStatus` stream.jsonl 읽기 비용
+
+수정 전 — `readFileSync`로 전체 읽기 후 `split(/\r?\n/)`→`JSON.parse`:
+
+| 파일 크기(MB) | 줄 수 | 시간(ms) | RSS 증가(MB) |
+|---|---|---|---|
+| 1.0 | 9,711 | 5.1 | 3.6 |
+| 10.0 | 97,092 | 43.1 | 53.5 |
+| 50.0 | 485,453 | 204.7 | 228.3 |
+
+수정 후 — head 4KB + tail 64KB fd 읽기(파일이 68KB 미만이면 전체 읽기):
+
+| 파일 크기(MB) | 읽은 KB | 시간(ms) | RSS 증가(MB) |
+|---|---|---|---|
+| 1.0 | 136.0 | 1.7 | 0.2 |
+| 10.0 | 136.0 | 1.4 | 0.0 |
+| 50.0 | 136.0 | 1.3 | 0.1 |
+
+> 읽은 136KB = headlessStatus 직접 1회(4+64KB) + headlessUsageSummary→readTurn 1회(4+64KB). 파일 크기가 1MB→50MB로 50배 늘어도 읽는 바이트는 고정. RSS 증가는 50MB 기준 228MB → 0.1MB로 약 2,300배 감소.
+
+## 부록: F-03·F-06 수정 전후 측정 수치 (fix-usage-sources-stream, 2026-09-20)
+
+측정 환경: macOS, Node.js v26.7.0. 스크립트는 워크트리 밖 `/tmp/omt-measure-f03/{before,after}.mjs`(커밋 안 함).
+선택 근거: 호출자 2곳(`collectClaudeTranscripts`, `readCodexRollout`)이 모두 동기 함수이며, 비동기 readline으로 전환하면 공개 export 시그니처까지 변경되므로, 동기 경로를 유지한 채 청크 단위로 읽어 줄 경계에서 처리하는 방식을 선택했다.
+
+### F-03: `eachJsonLine` 전체 파일 읽기 비용
+
+수정 전 — `readFileSync`로 파일 전체 읽기 후 `split(/\r?\n/)` 전체 줄 배열 생성:
+
+| 파일 크기(MB) | 줄 수 | 시간(ms) | RSS 증가(MB) |
+|---|---|---|---|
+| 10.0 | 45,004 | 36 | 41.6 |
+| 50.0 | 225,017 | 174 | 178.4 |
+
+수정 후 — 64 KiB 청크 단위 동기 읽기 + `StringDecoder` 경계 처리:
+
+| 파일 크기(MB) | 줄 수 | 시간(ms) | RSS 증가(MB) |
+|---|---|---|---|
+| 10.0 | 45,004 | 33 | 4.3 |
+| 50.0 | 225,017 | 158 | 4.9 |
+
+> RSS 증가는 50MB 기준 178MB → 4.9MB로 약 36배 감소. 처리 시간은 유사(33~36ms / 158~174ms). 한 번에 보유하는 메모리는 청크(64 KiB) + tail 한 줄 분량으로 파일 크기와 무관하게 고정된다.
+

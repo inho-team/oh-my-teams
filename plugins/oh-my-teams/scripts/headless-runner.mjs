@@ -9,7 +9,7 @@
  * works the same on Windows, where a signal from another process terminates
  * the runner before it can stop its child.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,41 @@ import { readJSON, resolveCommand, writeJSON } from "./core.mjs";
 
 const POLL_MS = 500;
 const KILL_GRACE_MS = 5000;
+
+/**
+ * Terminates a process tree rooted at the given pid.
+ *
+ * On Windows, `taskkill /T /F /PID` ends the process and all its descendants.
+ * On POSIX, SIGTERM is sent to the process group (negative pid) so grandchild
+ * processes spawned by the child are also signalled.
+ * Errors are returned (not thrown) so the caller can record them in exit.json.
+ *
+ * @param {number | null | undefined} pid - Root process id to kill.
+ * @param {string} [signal="SIGTERM"] - Signal for POSIX; Windows always uses /F.
+ * @returns {string | null} Error message if the attempt failed, otherwise null.
+ */
+export function killTree(pid, signal = "SIGTERM") {
+  if (!pid) return null;
+  try {
+    if (process.platform === "win32") {
+      // taskkill /T kills descendants; /F forces immediate termination.
+      const result = spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
+        windowsHide: true,
+        timeout: 5000,
+      });
+      if (result.status !== 0) {
+        const msg = (result.stderr ?? result.stdout ?? "").toString().trim();
+        return msg || `taskkill exited ${result.status}`;
+      }
+    } else {
+      // Negative pid targets the entire process group the child belongs to.
+      process.kill(-pid, signal);
+    }
+    return null;
+  } catch (error) {
+    return String(error.message);
+  }
+}
 
 /**
  * Runs the turn described by `<turnDir>/turn.json` to completion.
@@ -37,6 +72,9 @@ export function runTurn(turnDir) {
     env: process.env,
     shell: false,
     windowsHide: true,
+    // detached so the child gets its own process group on POSIX, enabling
+    // killTree to signal all grandchildren via the negative-pid group kill.
+    detached: process.platform !== "win32",
     stdio: ["pipe", stdout, stderr],
   });
   writeJSON(path.join(turnDir, "pids.json"), {
@@ -49,12 +87,16 @@ export function runTurn(turnDir) {
   return new Promise((resolve) => {
     let reason = null;
     let settled = false;
+    let killError = null;
     const startedAt = Date.now();
     const stopChild = (why) => {
       if (reason) return;
       reason = why;
-      child.kill();
-      setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS).unref();
+      killError = killTree(child.pid);
+      setTimeout(() => {
+        const err = killTree(child.pid, "SIGKILL");
+        if (err && !killError) killError = err;
+      }, KILL_GRACE_MS).unref();
     };
     const poll = setInterval(() => {
       if (fs.existsSync(path.join(turnDir, "stop.request")))
@@ -75,6 +117,7 @@ export function runTurn(turnDir) {
         timedOut: reason === "timed-out",
         stopped: reason === "stopped",
         error: error ? String(error.message) : null,
+        killError: killError ?? null,
         endedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAt,
       };

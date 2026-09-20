@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { run } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   NEUTRAL_FAILURE_KINDS,
   assertFailureSignal,
@@ -777,4 +778,44 @@ test("matrixPrediction이 없으면 blocked prompt는 matrix-mismatch가 붙지 
     `Expected no kind, got ${err.signal?.kind}`,
   );
   assert.doesNotMatch(err.message, /matrix-prediction-failure/);
+});
+
+// STATE-02: overflow 경로에도 fallback 타이머가 있어 close가 오지 않아도
+// timeoutMs까지 붙잡히지 않는다.
+test("STATE-02: run() overflow 후 close 없이도 fallback 타이머가 resolve한다", async () => {
+  // 자식이 maxBytes를 초과하는 출력을 낸 뒤 절대 close를 보내지 않는 상황을
+  // 시뮬레이션한다. Node.js로 `process.stdout.write` 후 영구 대기하는 인라인
+  // 스크립트를 실행하고, maxBytes를 아주 작게 설정해 overflow를 빠르게 유발한다.
+  // overflow 후 fallback 타이머(1초)가 resolve해야 하므로 timeoutMs를 충분히
+  // 크게(60초) 설정해 timeoutTimer가 먼저 발동하지 않게 한다.
+  const script =
+    "process.stdout.write('x'.repeat(200));" + "setInterval(()=>{},1e9);"; // never exit
+  const startMs = Date.now();
+  const result = await run([process.execPath, "-e", script], {
+    maxBytes: 100, // 200 bytes > 100 → overflow 즉시 유발
+    timeoutMs: 60000, // timeout이 아니라 overflow fallback으로 끝나야 한다
+  });
+  const elapsedMs = Date.now() - startMs;
+  assert.equal(result.overflow, true, "result.overflow must be true");
+  // fallback 타이머는 1000ms이므로 5초 이내에 끝나야 한다.
+  assert.ok(
+    elapsedMs < 5000,
+    `overflow fallback must resolve within 5 s, took ${elapsedMs} ms`,
+  );
+  assert.equal(result.timedOut, false, "must not be reported as timed-out");
+});
+
+test("STATE-02: run() overflow 후 stdout/stderr 잘라내기 길이가 정확하다", async () => {
+  // maxBytes=100, stdout 200 bytes → stdout/stderr 각각 최대 50 bytes
+  const script = "process.stdout.write('A'.repeat(200));";
+  const result = await run([process.execPath, "-e", script], {
+    maxBytes: 100,
+    timeoutMs: 60000,
+  });
+  assert.equal(result.overflow, true);
+  // 잘라낸 뒤 stdout.length <= 50 (ASCII이므로 byteLength === length)
+  assert.ok(
+    Buffer.byteLength(result.stdout) <= 50,
+    `stdout must be <= 50 bytes after slice, got ${Buffer.byteLength(result.stdout)}`,
+  );
 });

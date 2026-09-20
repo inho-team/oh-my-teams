@@ -6,6 +6,8 @@ import { assert, readJSON, withFileLock, writeJSON } from "./core.mjs";
 /** Identifier pattern shared by workflow, event, and attempt records. */
 export const WORKFLOW_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const pendingEvents = new WeakMap();
+/** Per-state Set cache for O(1) event-ID duplicate detection. */
+const eventIdSets = new WeakMap();
 
 function recoverTransaction(directory) {
   const file = path.join(directory, "transaction.json");
@@ -86,7 +88,13 @@ export function appendWorkflowEvent(directory, state, event) {
     typeof event.id === "string" && WORKFLOW_ID_PATTERN.test(event.id),
     "Event id required",
   );
-  if (state.eventIds.includes(event.id)) return false;
+  // Build a Set cache on first use for O(1) duplicate detection.
+  let ids = eventIdSets.get(state);
+  if (!ids) {
+    ids = new Set(state.eventIds);
+    eventIdSets.set(state, ids);
+  }
+  if (ids.has(event.id)) return false;
 
   const sequence = String(state.eventIds.length + 1).padStart(6, "0");
   const queued = pendingEvents.get(state) ?? [];
@@ -99,6 +107,7 @@ export function appendWorkflowEvent(directory, state, event) {
   });
   pendingEvents.set(state, queued);
   state.eventIds.push(event.id);
+  ids.add(event.id);
   return true;
 }
 
@@ -121,6 +130,7 @@ export function saveWorkflowState(stateDir, id, state) {
   });
   recoverTransaction(directory);
   pendingEvents.delete(state);
+  eventIdSets.delete(state);
 }
 
 /**
