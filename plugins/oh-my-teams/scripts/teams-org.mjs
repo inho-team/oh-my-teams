@@ -92,6 +92,22 @@ import {
 } from "./kickoff-registry.mjs";
 import { recordLaunch } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
+import {
+  acknowledgeSignal,
+  findCloseReadySignal,
+  listInbox,
+  notifyDirector,
+  readSignal,
+  replySignal,
+  sendSignal,
+  SIGNAL_KINDS,
+} from "./director.mjs";
+import {
+  acquireResource,
+  directorWatch,
+  releaseResource,
+  RESOURCE_KINDS,
+} from "./resources.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
@@ -186,6 +202,22 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   quota-record --snapshot FILE --state DIR
   quota-compare --before FILE --after FILE
   aggregate --expected id,id --report FILE [--report FILE ...]
+  director-signal --org FILE --worktree ID --kind decision|close-ready|blocked|progress
+                  --text TEXT [--head SHA --source DIR] [--orca EXECUTABLE]
+                  (writes a structured record to .omt/director/inbox/; notifies
+                  the director terminal when the registry entry names one)
+  director-inbox --org FILE
+                 (lists pending signals in the director's inbox)
+  director-reply --org FILE --signal ID --text TEXT [--orca EXECUTABLE]
+                 (records the director's decision and attempts PM notification)
+  director-ack --org FILE --signal ID
+               (marks a signal as acknowledged without a text reply)
+  resource-acquire --org FILE --worktree ID --kind test|worker|build [--note TEXT]
+                   (acquires a resource slot; checks free memory and reclaims dead-owner slots)
+  resource-release --org FILE --slot ID
+                   (releases an acquired resource slot)
+  director-watch --org FILE [--orca EXECUTABLE]
+                 (shows pending signals, slot usage, free memory, and PM liveness per kickoff)
 
 Existing organizations are reused; init never asks for subscriptions again.
 No command automatically pushes, merges, deploys, publishes, or deletes.`;
@@ -316,6 +348,21 @@ export const ALLOWED_OPTIONS = {
   "incident-status": ["state"],
   "quota-record": ["snapshot", "state"],
   "quota-compare": ["before", "after"],
+  "director-signal": [
+    "org",
+    "worktree",
+    "kind",
+    "text",
+    "head",
+    "source",
+    "orca",
+  ],
+  "director-inbox": ["org"],
+  "director-reply": ["org", "signal", "text", "orca"],
+  "director-ack": ["org", "signal"],
+  "resource-acquire": ["org", "worktree", "kind", "note"],
+  "resource-release": ["org", "slot"],
+  "director-watch": ["org", "orca"],
 };
 
 /** Options each subcommand must receive, keyed by command name. */
@@ -387,6 +434,13 @@ export const REQUIRED_OPTIONS = {
   "incident-status": ["state"],
   "quota-record": ["snapshot", "state"],
   "quota-compare": ["before", "after"],
+  "director-signal": ["org", "worktree", "kind", "text"],
+  "director-inbox": ["org"],
+  "director-reply": ["org", "signal", "text"],
+  "director-ack": ["org", "signal"],
+  "resource-acquire": ["org", "worktree", "kind"],
+  "resource-release": ["org", "slot"],
+  "director-watch": ["org"],
 };
 
 /**
@@ -1312,6 +1366,37 @@ async function executeCommand(args) {
         })),
         args.expected.split(","),
       );
+    case "director-signal": {
+      const { signaled, id, entry, record } = sendSignal(args.org, {
+        worktreeId: args.worktree,
+        kind: args.kind,
+        text: args.text,
+        head: args.head,
+        source: args.source,
+      });
+      const notification = await notifyDirector(entry, record, args.orca);
+      return { signaled, id, ...notification };
+    }
+    case "director-inbox":
+      return listInbox(args.org);
+    case "director-reply":
+      return replySignal(args.org, {
+        signalId: args.signal,
+        text: args.text,
+        orcaExecutable: args.orca,
+      });
+    case "director-ack":
+      return acknowledgeSignal(args.org, args.signal);
+    case "resource-acquire":
+      return acquireResource(args.org, {
+        worktreeId: args.worktree,
+        kind: args.kind,
+        note: args.note,
+      });
+    case "resource-release":
+      return releaseResource(args.org, args.slot);
+    case "director-watch":
+      return directorWatch(args.org, { orcaExecutable: args.orca });
     default:
       throw new Error(`Unknown command: ${args.command}`);
   }
