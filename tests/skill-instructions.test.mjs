@@ -229,6 +229,35 @@ test("the closing skills run the gates instead of judging by eye", () => {
   }
 });
 
+test("close runs branch cleanup and disband preserves branches", () => {
+  const close = readSkill("close");
+  const disband = readSkill("disband");
+
+  // CLOSE-01: the close skill must instruct the runtime to clean up branches.
+  assert.ok(
+    close.includes("node <runtime> kickoff-branch-cleanup"),
+    "close must reference kickoff-branch-cleanup",
+  );
+  // The command must carry the required options.
+  assert.ok(
+    close.includes("--org") &&
+      close.includes("--worktree") &&
+      close.includes("--branches"),
+    "close kickoff-branch-cleanup example must include --org, --worktree, --branches",
+  );
+  // disband must not instruct branch deletion; it preserves branches for recovery.
+  assert.ok(
+    !disband.includes("kickoff-branch-cleanup"),
+    "disband must not run kickoff-branch-cleanup",
+  );
+  // The distinction between close and disband must be stated in the close skill.
+  assert.match(
+    close,
+    /disband.*브랜치를 보존/,
+    "close must state that disband preserves branches",
+  );
+});
+
 test("a worker whose exit is unconfirmed is fenced, not released", () => {
   const runtime = fs.readFileSync(
     path.join(root, "plugins/oh-my-teams/references/orca-runtime.md"),

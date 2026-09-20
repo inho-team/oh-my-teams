@@ -84,7 +84,9 @@ import { nextSupervisionAction, organizationStatus } from "./status.mjs";
 import { draftOrganization } from "./org-draft.mjs";
 import {
   bindKickoffRun,
+  cleanupKickoffBranches,
   listKickoffs,
+  ownerProject,
   registerKickoff,
   releaseKickoff,
 } from "./kickoff-registry.mjs";
@@ -104,6 +106,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   kickoff-bind --org FILE --worktree ID --run ID
   kickoff-release --org FILE --worktree ID
                   --reason completed|disbanded|taken-over [--force]
+  kickoff-branch-cleanup --org FILE --worktree ID
+                         --branches BRANCH[,BRANCH...] [--remote NAME]
+                         (verifies delivery then deletes remote, local, and
+                         reclaimed sub-worktree branches; close only, not disband)
   deliver --org FILE --worktree ID --source DIR --head SHA
           --evidence FILE --task TRUSTED_TASK [--report FILE --state DIR]
           (merges a verified kickoff result into the branch its claim recorded;
@@ -196,6 +202,7 @@ export const ALLOWED_OPTIONS = {
   "kickoff-show": ["org", "worktree"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
+  "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote"],
   deliver: [
     "org",
     "worktree",
@@ -323,6 +330,7 @@ export const REQUIRED_OPTIONS = {
   "kickoff-show": ["org"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason"],
+  "kickoff-branch-cleanup": ["org", "worktree", "branches"],
   deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
   "prepare-input": ["org", "task", "repo", "output"],
@@ -922,6 +930,23 @@ async function executeCommand(args) {
         reason: args.reason,
         force: Boolean(args.force),
       });
+    case "kickoff-branch-cleanup": {
+      const { kickoffs } = listKickoffs(args.org, args.worktree);
+      assert(
+        kickoffs.length === 1,
+        `Worktree ${args.worktree} supervises no registered kickoff`,
+      );
+      const [entry] = kickoffs;
+      return cleanupKickoffBranches({
+        projectDir: ownerProject(args.org),
+        entry,
+        branches: args.branches
+          .split(",")
+          .map((b) => b.trim())
+          .filter(Boolean),
+        remoteName: args.remote ?? "origin",
+      });
+    }
     case "prepare":
       return compatibilityPrepare(args);
     case "prepare-input":
