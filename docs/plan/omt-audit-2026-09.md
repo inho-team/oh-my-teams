@@ -1039,3 +1039,26 @@
 
 > 읽은 136KB = headlessStatus 직접 1회(4+64KB) + headlessUsageSummary→readTurn 1회(4+64KB). 파일 크기가 1MB→50MB로 50배 늘어도 읽는 바이트는 고정. RSS 증가는 50MB 기준 228MB → 0.1MB로 약 2,300배 감소.
 
+## 부록: F-03·F-06 수정 전후 측정 수치 (fix-usage-sources-stream, 2026-09-20)
+
+측정 환경: macOS, Node.js v26.7.0. 스크립트는 워크트리 밖 `/tmp/omt-measure-f03/{before,after}.mjs`(커밋 안 함).
+선택 근거: 호출자 2곳(`collectClaudeTranscripts`, `readCodexRollout`)이 모두 동기 함수이며, 비동기 readline으로 전환하면 공개 export 시그니처까지 변경되므로, 동기 경로를 유지한 채 청크 단위로 읽어 줄 경계에서 처리하는 방식을 선택했다.
+
+### F-03: `eachJsonLine` 전체 파일 읽기 비용
+
+수정 전 — `readFileSync`로 파일 전체 읽기 후 `split(/\r?\n/)` 전체 줄 배열 생성:
+
+| 파일 크기(MB) | 줄 수 | 시간(ms) | RSS 증가(MB) |
+|---|---|---|---|
+| 10.0 | 45,004 | 36 | 41.6 |
+| 50.0 | 225,017 | 174 | 178.4 |
+
+수정 후 — 64 KiB 청크 단위 동기 읽기 + `StringDecoder` 경계 처리:
+
+| 파일 크기(MB) | 줄 수 | 시간(ms) | RSS 증가(MB) |
+|---|---|---|---|
+| 10.0 | 45,004 | 33 | 4.3 |
+| 50.0 | 225,017 | 158 | 4.9 |
+
+> RSS 증가는 50MB 기준 178MB → 4.9MB로 약 36배 감소. 처리 시간은 유사(33~36ms / 158~174ms). 한 번에 보유하는 메모리는 청크(64 KiB) + tail 한 줄 분량으로 파일 크기와 무관하게 고정된다.
+
