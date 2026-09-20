@@ -458,6 +458,7 @@
 - **제안 수정**: `eventIds`를 `Set<string>`으로 교체하여 includes를 O(1)로 줄인다. JSON 직렬화 시 `Array.from(eventIds)`로 변환하거나 state 저장 직전에 배열로 바꾼다. 기존 `state.json`의 배열 형식을 로드할 때 Set으로 변환하는 마이그레이션 처리가 필요하다.
 - **예상 작업 크기**: S (Set 교체 + 직렬화 호환성 확인)
 - **회귀 방지 검사**: `workflow.test.mjs`의 이벤트 중복 방지 테스트. 기존 배열 state.json을 로드·저장하는 왕복 테스트 추가 필요.
+- **수정**: `workflow-store.mjs`에 `eventIdSets` WeakMap을 추가해 `appendWorkflowEvent` 최초 호출 시 Set 캐시를 구성한다. `state.eventIds`는 배열로 유지해 직렬화·외부 코드 호환을 보장한다. 왕복 테스트와 Set 캐시 동작 테스트를 `tests/workflow-recovery.test.mjs`에 추가했다. 커밋: `009b2aa` (브랜치: `dev-inho/audit-w1-eventids`).
 
 ---
 
