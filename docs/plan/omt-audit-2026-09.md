@@ -380,6 +380,8 @@
 - **제안 수정**: Windows에서 프로세스 트리 전체를 끝내려면 `taskkill /T /F /PID <pid>` 또는 Job Object를 사용한다. `headless-runner.mjs`에 플랫폼별 killTree 유틸리티 추가를 검토한다.
 - **예상 작업 크기**: M (플랫폼별 kill 로직 추가 + Windows 실환경 검증)
 - **회귀 방지 검사**: `headless.test.mjs`의 stop 경로. Windows 손자 프로세스 잔존 여부 확인 검사 추가.
+- **수정 완료** (task fix-process-tree-stop): `killTree(pid, signal)` 헬퍼 추가 — Windows: `taskkill /T /F /PID`로 손자까지 종료, POSIX: `process.kill(-pid, signal)`로 프로세스 그룹 전체 신호. `stopChild`가 `child.kill()` 대신 `killTree`를 사용하며, 종료 실패 메시지를 `killError`로 exit.json에 기록해 조용히 삼키지 않음. 자식을 `detached: true`(POSIX만)로 spawn해 독립 프로세스 그룹 형성. Windows 손자 프로세스 실측: Windows 실환경 없어 코드 경로(taskkill /T) + 공개 CI(PR #67 Windows 러너 EBUSY 재현)로 근거 삼음. 테스트: `tests/headless.test.mjs` — "F-05: killTree — POSIX에서 실제 자식 프로세스를 종료하고 killError가 null이다" 외 2개.
+
 
 ---
 
@@ -499,6 +501,8 @@
 - **제안 수정**: overflow 시에도 `fallbackTimer = setTimeout(() => finish(-1), 1000)`을 추가하여 timeout과 대칭적으로 처리한다. `Buffer.byteLength` 재계산은 현재 길이를 별도 `totalBytes` 변수로 추적하면 O(1)로 줄일 수 있다.
 - **예상 작업 크기**: S (fallback 타이머 추가 + byteLength 카운터 변수 추가)
 - **회귀 방지 검사**: `core.mjs` 관련 `run` 테스트. overflow 후 close 미착신 시나리오(Windows 프로세스 트리) 추가 필요.
+- **수정 완료** (task fix-process-tree-stop): `totalBytes` 추적 변수 추가로 매 chunk마다 `Buffer.byteLength` 재계산 제거. overflow 후 `fallbackTimer = setTimeout(() => finish(-1), 1000)` 추가로 timeout 경로와 대칭화. 잘라내기 이후 `totalBytes`를 실제 byteLength로 재계산해 정확도 유지. 테스트: `tests/execution-port.test.mjs` — "STATE-02: run() overflow 후 close 없이도 fallback 타이머가 resolve한다", "STATE-02: run() overflow 후 stdout/stderr 잘라내기 길이가 정확하다". Windows close 미착신 시나리오는 Windows 실환경 없어 코드 경로로만 확인.
+
 
 ---
 
@@ -855,6 +859,8 @@
 - **제안 수정**: (a) 테스트 정리 전에 runner 종료를 기다리거나(stop 후 `exit.json` 확인), (b) headless-runner가 Windows에서 프로세스 트리를 종료하게 하고(F-05 수정과 연동), (c) 회귀 방지로 병렬 실행을 CI의 Windows 러너에서 돌린다.
 - **예상 작업 크기**: S-M (runner 종료 확인 로직 추가 + Windows 실환경 검증, F-05 수정과 함께 처리 가능)
 - **회귀 방지 검사**: CI Windows 러너에서 병렬 `npm test` 실행 추가.
+- **수정 완료** (task fix-process-tree-stop): `sandbox(t)` `t.after`에서 `waitAllRunnersExited(state)`를 호출해 모든 headless runner의 exit.json 기록을 확인한 뒤 `rmSync`를 실행. stop.request를 먼저 써 실행 중인 턴을 중단하고, exit.json이 나타날 때까지(최대 8초) 100ms 간격으로 폴링. 이 방식은 증상(EPERM)이 아닌 실제 원인(runner가 파일 핸들을 보유 중)을 해결함. macOS에서 병렬 `npm test` 371/371 통과 확인. Windows 실측: 실환경 없어 코드 경로 + PR #67 CI 근거로 확인.
+
 
 ---
 
