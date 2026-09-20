@@ -201,10 +201,20 @@ const PROVIDERS = {
 export const HEADLESS_PROVIDERS = Object.freeze(Object.keys(PROVIDERS));
 
 /**
+ * Process-lifetime cache: `"${home}:${threadId}"` → model string or null.
+ * Prevents the sessions-tree walk from repeating on every polling call for the
+ * same worker. Exported so tests can clear it between assertions.
+ *
+ * @type {Map<string, string | null>}
+ */
+export const _codexRolloutCache = new Map();
+
+/**
  * Finds the model a Codex session ran on in its rollout record.
  *
  * Codex's JSON stream names no model, but its session rollout records one in
- * `turn_context`.
+ * `turn_context`. Results are memoised for the life of the process so repeated
+ * polling calls do not re-scan the sessions tree (F-01).
  *
  * @param {string} threadId - Session id from `thread.started`.
  * @param {string} [codexHome] - Codex home; `$CODEX_HOME` or `~/.codex` by default.
@@ -213,6 +223,8 @@ export const HEADLESS_PROVIDERS = Object.freeze(Object.keys(PROVIDERS));
 export function codexRolloutModel(threadId, codexHome) {
   const home =
     codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
+  const cacheKey = `${home}:${threadId}`;
+  if (_codexRolloutCache.has(cacheKey)) return _codexRolloutCache.get(cacheKey);
   const root = path.join(home, "sessions");
   if (!fs.existsSync(root)) return null;
   const pending = [root];
@@ -231,6 +243,7 @@ export function codexRolloutModel(threadId, codexHome) {
             // A partial last line while Codex is still writing.
           }
         }
+        _codexRolloutCache.set(cacheKey, model);
         return model;
       }
     }
@@ -288,6 +301,64 @@ export function readHeadlessStream(provider, stream, options = {}) {
     eventCount: events.length,
     marker: kind ? { kind: kind.toLowerCase(), detail } : null,
   };
+}
+
+// Bytes read from the start of the stream to capture session/model events.
+const STATUS_HEAD_BYTES = 4 * 1024;
+// Bytes read from the end of the stream to capture result/marker events (F-02).
+const STATUS_TAIL_BYTES = 64 * 1024;
+
+/**
+ * Reads only the head and tail of a stream.jsonl file to extract the fields
+ * `headlessStatus` needs: session, model, marker, errors, and usage. For files
+ * smaller than HEAD+TAIL bytes the whole file is read. For larger files only
+ * the first STATUS_HEAD_BYTES and the last STATUS_TAIL_BYTES are loaded,
+ * cutting RSS growth proportional to file size on every polling call (F-02).
+ *
+ * Session-id and model appear in the first few events; result, marker, usage
+ * and provider errors appear in the last events. The middle of the stream
+ * (intermediate tool calls) is not needed by the polling path.
+ *
+ * @param {string} provider - Provider that wrote the stream.
+ * @param {string} filePath - Absolute path to the stream.jsonl file.
+ * @param {object} [options] - `codexHome` and `lookupModel` forwarded to the provider reader.
+ * @returns {object} Same shape as `readHeadlessStream`.
+ */
+function readHeadlessStreamFile(provider, filePath, options = {}) {
+  if (!fs.existsSync(filePath))
+    return readHeadlessStream(provider, "", options);
+  const stat = fs.statSync(filePath);
+  if (stat.size <= STATUS_HEAD_BYTES + STATUS_TAIL_BYTES) {
+    return readHeadlessStream(
+      provider,
+      fs.readFileSync(filePath, "utf8"),
+      options,
+    );
+  }
+  // Read head and tail windows; skip the middle of the file.
+  const fd = fs.openSync(filePath, "r");
+  const headBuf = Buffer.allocUnsafe(STATUS_HEAD_BYTES);
+  const headRead = fs.readSync(fd, headBuf, 0, STATUS_HEAD_BYTES, 0);
+  const tailBuf = Buffer.allocUnsafe(STATUS_TAIL_BYTES);
+  const tailRead = fs.readSync(
+    fd,
+    tailBuf,
+    0,
+    STATUS_TAIL_BYTES,
+    stat.size - STATUS_TAIL_BYTES,
+  );
+  fs.closeSync(fd);
+  // The head window may end in the middle of a line; drop that partial line so
+  // it does not cause a JSON parse error and corrupt a subsequent tail line.
+  const headText = headBuf.subarray(0, headRead).toString("utf8");
+  const headLastNl = headText.lastIndexOf("\n");
+  const safeHead = headLastNl >= 0 ? headText.slice(0, headLastNl + 1) : "";
+  // The tail window may start in the middle of a line; drop up to the first \n.
+  const tailText = tailBuf.subarray(0, tailRead).toString("utf8");
+  const tailFirstNl = tailText.indexOf("\n");
+  const safeTail =
+    tailFirstNl >= 0 ? tailText.slice(tailFirstNl + 1) : tailText;
+  return readHeadlessStream(provider, safeHead + safeTail, options);
 }
 
 const clip = (text, limit) => {
@@ -610,11 +681,9 @@ export function startHeadlessWorker({
 
 function readTurn(worker, turnDir, options) {
   const file = (name) => path.join(turnDir, name);
-  const stream = readHeadlessStream(
+  const stream = readHeadlessStreamFile(
     worker.provider,
-    fs.existsSync(file("stream.jsonl"))
-      ? fs.readFileSync(file("stream.jsonl"), "utf8")
-      : "",
+    file("stream.jsonl"),
     options,
   );
   const turn = fs.existsSync(file("turn.json"))
@@ -685,23 +754,13 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     readExit: () => (fs.existsSync(exitFile) ? readJSON(exitFile) : null),
   });
   const streamFile = path.join(turnDir, "stream.jsonl");
-  const stream = readHeadlessStream(
-    worker.provider,
-    fs.existsSync(streamFile) ? fs.readFileSync(streamFile, "utf8") : "",
-    options,
-  );
+  const stream = readHeadlessStreamFile(worker.provider, streamFile, options);
   // Resuming needs the session of the latest turn that reported one.
   let session = stream.session;
   for (const earlier of turns.slice(0, -1).reverse()) {
     if (session) break;
     const file = path.join(earlier, "stream.jsonl");
-    if (fs.existsSync(file)) {
-      session = readHeadlessStream(
-        worker.provider,
-        fs.readFileSync(file, "utf8"),
-        options,
-      ).session;
-    }
+    session = readHeadlessStreamFile(worker.provider, file, options).session;
   }
   let outcome = null;
   if (exit) {

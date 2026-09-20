@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
+  _codexRolloutCache,
   answerHeadless,
   codexRolloutModel,
   headlessCommand,
@@ -620,4 +621,163 @@ test("agy turn.json carries --print-timeout from worker default and per-turn tim
     90000,
     "turn.json timeoutMs matches per-turn value",
   );
+});
+
+test("F-01: codexRolloutModel does not re-scan the sessions tree on repeated calls for the same threadId", () => {
+  // 수정 전 구현에서는 호출마다 readdirSync를 실행하므로 이 테스트가 실패한다.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "omt-f01-cache-"));
+  try {
+    const codexHome = tmp;
+    const sessionDir = path.join(tmp, "sessions", "sub");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const threadId = "f01-test-thread";
+    const rollout = path.join(sessionDir, `rollout_${threadId}.jsonl`);
+    fs.writeFileSync(
+      rollout,
+      JSON.stringify({ type: "turn_context", payload: { model: "gpt-test" } }) +
+        "\n",
+    );
+
+    // 캐시를 비워 깨끗한 상태에서 시작한다.
+    _codexRolloutCache.clear();
+
+    let readdirCalls = 0;
+    const origReaddir = fs.readdirSync;
+    fs.readdirSync = (...args) => {
+      readdirCalls++;
+      return origReaddir.apply(fs, args);
+    };
+    try {
+      const m1 = codexRolloutModel(threadId, codexHome);
+      const callsAfterFirst = readdirCalls;
+      const m2 = codexRolloutModel(threadId, codexHome);
+      const callsAfterSecond = readdirCalls;
+      assert.equal(m1, "gpt-test", "first call must find the model");
+      assert.equal(m2, "gpt-test", "second call must return the same model");
+      // 두 번째 호출에서 readdirSync가 추가로 실행되지 않아야 한다 (캐시 적중).
+      assert.equal(
+        callsAfterSecond,
+        callsAfterFirst,
+        "second call must not re-scan: readdirSync call count must not increase",
+      );
+    } finally {
+      fs.readdirSync = origReaddir;
+      _codexRolloutCache.clear();
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("F-02: headlessStatus reads bytes proportional to STATUS_HEAD + STATUS_TAIL, not file size, for large streams", () => {
+  // 수정 전 구현에서는 readFileSync로 전체를 읽으므로 readBytes가 파일 크기와
+  // 같아지고 이 테스트가 실패한다.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "omt-f02-tail-"));
+  try {
+    const stateDir = path.join(tmp, "state");
+    const cwd = path.join(tmp, "cwd");
+    fs.mkdirSync(cwd);
+    const workerDir = path.join(stateDir, "headless", "large-stream");
+    const turnDir = path.join(workerDir, "turns", "1");
+    fs.mkdirSync(turnDir, { recursive: true });
+    writeJSON(path.join(workerDir, "worker.json"), {
+      schemaVersion: 1,
+      id: "large-stream",
+      role: "junior",
+      profile: "p",
+      provider: "claude",
+      binary: ["claude"],
+      modelRequested: null,
+      effortRequested: null,
+      cwd,
+      timeoutMs: 60000,
+    });
+    writeJSON(path.join(turnDir, "runner.json"), { pid: null });
+    writeJSON(path.join(turnDir, "exit.json"), { code: 0 });
+
+    // stream.jsonl: 헤더 이벤트 + 중간 더미 줄 대량 + result 이벤트
+    const header = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "s-large",
+      model: "claude-sonnet-5",
+    });
+    const middle = JSON.stringify({
+      type: "assistant",
+      message: { content: [] },
+    });
+    const result = JSON.stringify({
+      type: "result",
+      is_error: false,
+      result: "DONE: large stream done",
+      session_id: "s-large",
+    });
+    const streamFile = path.join(turnDir, "stream.jsonl");
+    // 헤더 + 2MB 중간 더미 + result
+    const OVER_THRESHOLD = 2 * 1024 * 1024; // STATUS_HEAD_BYTES + STATUS_TAIL_BYTES = 68KB < 2MB
+    const fd = fs.openSync(streamFile, "w");
+    fs.writeSync(fd, header + "\n");
+    let written = header.length + 1;
+    while (written < OVER_THRESHOLD) {
+      fs.writeSync(fd, middle + "\n");
+      written += middle.length + 1;
+    }
+    fs.writeSync(fd, result + "\n");
+    fs.closeSync(fd);
+    const fileSize = fs.statSync(streamFile).size;
+    assert.ok(
+      fileSize > OVER_THRESHOLD,
+      `stream.jsonl must be large (${fileSize} bytes)`,
+    );
+
+    // readSync 호출을 추적하여 읽은 총 바이트를 측정한다.
+    const origReadSync = fs.readSync;
+    let totalRead = 0;
+    fs.readSync = (fd2, buf, ...rest) => {
+      const n = origReadSync.call(fs, fd2, buf, ...rest);
+      totalRead += n;
+      return n;
+    };
+    const origReadFileSync = fs.readFileSync;
+    let readFileCalls = 0;
+    let readFileTotalBytes = 0;
+    fs.readFileSync = (...args) => {
+      const content = origReadFileSync.apply(fs, args);
+      if (
+        typeof args[0] === "string" &&
+        path.resolve(args[0]) === path.resolve(streamFile)
+      ) {
+        readFileCalls++;
+        readFileTotalBytes +=
+          typeof content === "string"
+            ? Buffer.byteLength(content, "utf8")
+            : content.length;
+      }
+      return content;
+    };
+    try {
+      const status = headlessStatus(stateDir, "large-stream");
+      assert.equal(status.session, "s-large", "session must be extracted");
+      assert.equal(status.outcome, "done", "marker must be found in tail");
+      // 파일 전체를 readFileSync로 읽었다면 readFileTotalBytes >= fileSize のはず.
+      // 수정 후에는 readFileSync로 stream을 읽지 않고 fd로 head+tail만 읽는다.
+      assert.equal(
+        readFileCalls,
+        0,
+        "headlessStatus must not call readFileSync for stream.jsonl (must use fd-based tail read)",
+      );
+      // fd 읽기: headlessStatus 직접 1회 + headlessUsageSummary→readTurn 1회
+      // = 최대 2 × (HEAD_BYTES + TAIL_BYTES). 파일 크기에는 비례하지 않는다.
+      const MAX_EXPECTED = 2 * (4 + 64) * 1024;
+      assert.ok(
+        totalRead <= MAX_EXPECTED,
+        `tail read must not exceed ${MAX_EXPECTED} bytes, read ${totalRead} (file is ${fileSize})`,
+      );
+    } finally {
+      fs.readSync = origReadSync;
+      fs.readFileSync = origReadFileSync;
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
