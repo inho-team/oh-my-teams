@@ -33,6 +33,7 @@ description: 설치된 oh my teams 스킬을 생애주기, 내부 역할과 지�
 
 | 스킬 | 용도 | 사용 시점 |
 |---|---|---|
+| `director` | 사용자와 대화하는 유일한 창구로서 목표를 확정하고 PM에게 인계하며 여러 kickoff를 감독하고 종료까지 책임진다. | kickoff를 선언하고 감독하는 이사 세션에서 사용한다. |
 | `pm` | 요청을 분석해 계획하고 배정하며 결과를 책임진다. | kickoff가 목표를 받아 전체를 지휘할 때 사용한다. |
 | `pl` | 작업을 분할하고 의존성과 워크트리를 배정한다. | 병렬 작업의 순서와 통합을 관리할 때 사용한다. |
 | `senior` | 설계를 정하고 중요한 변경의 의미를 검토한다. | 반복 실패와 통합 충돌을 해결할 때 사용한다. |
@@ -58,7 +59,6 @@ description: 설치된 oh my teams 스킬을 생애주기, 내부 역할과 지�
 | team-close | `close` |
 | team-disband | `disband` |
 | team-help | `help` |
-| director | `pm` |
 
 ## 일반적인 흐름
 
@@ -67,7 +67,7 @@ form → kickoff → close
               └→ disband
 ```
 
-한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있다. `kickoff`를 선언한 세션은 kickoff마다 감독할 워크트리를 만들어 목표를 넘기고, 이후 `status`·`close`·`disband`는 넘긴 쪽에서 수행한다.
+한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있다. 이사가 kickoff마다 감독할 워크트리를 만들어 PM에게 목표를 넘기고, 이후 `status`·`close`·`disband`는 이사 세션에서 수행한다.
 
 `status`와 `adjust`는 이 흐름의 단계가 아니라 언제든 호출할 수 있다. `status`는 현재 상태를 조회만 하고, `adjust`는 이후 kickoff에 적용할 조직을 바꾼다.
 

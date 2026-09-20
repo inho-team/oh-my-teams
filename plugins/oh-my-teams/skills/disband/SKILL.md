@@ -7,7 +7,7 @@ description: 실패·취소·중단된 oh my teams kickoff의 실행 팀을 안�
 
 성공으로 종료할 수 없는 kickoff를 정리한다. 해체는 성공 완료가 아니며 실패를 숨기거나 Goal을 `complete`로 바꾸지 않는다.
 
-해체할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회해 `<pm-state>` 경로를 확인한다. kickoff가 여럿이면 사용자가 지목한 것만 해체한다. PM 워크트리를 회수하므로 이 절차도 kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
+해체할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회해 `<pm-state>` 경로를 확인한다. kickoff가 여럿이면 사용자가 지목한 것만 해체한다. PM 워크트리를 회수하므로 이 절차도 이사가 맡으며, kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
 1. 해체 사유를 `failed`, `cancelled`, `abandoned` 가운데 하나로 기록하고, 충족한 기준과 미완료 기준을 분리한다.
 2. 새 작업 배정을 중단하고 살아 있는 worker와 프로세스에 취소를 전달한다. 종료가 확인되지 않은 프로세스를 사라진 것으로 간주하지 않는다.

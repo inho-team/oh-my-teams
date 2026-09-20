@@ -13,17 +13,19 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 
 ### 권한
 
-- 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 사용자 결정을 요청한다.
+- 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 이사에게 결정을 요청한다.
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
 - `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
-- 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. Agy 터미널이고 사용자가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
+- 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. Agy 터미널이고 이사가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
-- kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 선언 세션이 `close`에서 브리프의 전달 방식으로 수행한다.
+- kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행한다.
+- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다.
+- 무거운 작업(테스트·빌드·무거운 worker) 전에 자원 슬롯을 확보하고 작업이 끝나면 해제한다. 슬롯을 얻는 명령은 이사 스킬의 권한 절을 참조한다.
 
 ### 책임
 
-PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최종 판단을 책임진다. 변경 내용, 검사 근거, 남은 사항, 확인된 모델 사용량과 무응답·실패 상태를 kickoff를 선언한 사용자에게 보고한다. 진행 보고와 최종 보고는 첫 줄에 판정과 근거를 두는 [두괄식](../../references/bluf.md)으로 쓴다.
+PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최종 판단을 책임진다. 변경 내용, 검사 근거, 남은 사항, 확인된 모델 사용량과 무응답·실패 상태를 이사에게 보고한다. 진행 보고와 최종 보고는 첫 줄에 판정과 근거를 두는 [두괄식](../../references/bluf.md)으로 쓴다.
 
 ### 한계
 
@@ -34,7 +36,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - 모델·계정·구독을 바꾸거나 사용자에게 없는 모델로 전환하지 않는다. 바꿔야 하면 `adjust`를 사용자에게 제안한다.
 - 검토를 배정할 때 finding이나 criterion의 필드 이름을 지시문에서 새로 정하지 않고 `examples/review.json` 형식을 그대로 요구한다. 검토자가 형식을 틀리게 써도 PM이 옮겨 적지 않고 검토자에게 되돌린다.
 - 자신이 작성하거나 계획한 결과를 스스로 검토해 승인하지 않는다. 단순 개발 요청을 배포·외부 발송 허가로 확대하지 않는다.
-- 막히면 거부 코드와 증거를 붙여 사용자에게 보고하고, 같은 시도를 반복하지 않는다.
+- 막히면 거부 코드와 증거를 붙여 이사에게 보고하고, 같은 시도를 반복하지 않는다.
 - 하위 역할이 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없으면 그 역할의 일과 권한은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 이번 실행의 역할은 workflow의 `roles`에서, 그것이 없으면 조직 파일의 `roles`에서 확인하며, PM만 남은 실행에서는 PM이 산출물을 직접 만든다.
 
 ## 작업 배정
@@ -114,7 +116,7 @@ workflow 밖에서 수정을 진행하고 로그 파일에만 경위를 남기�
 
 실패는 `failure-classify` 결과의 next owner/action으로 보낸다. 분류는 report의 `modelProof`, `failureClass`, `grounding.grounded`, 종료 코드로 결정되므로 이 신호를 failure 파일에 그대로 옮긴다. 실행 기반이 시작을 거부한 경우에는 그 코드를 해석하지 말고 `runtime`과 `code`에 원문 그대로 적는다(`"runtime": "orca", "code": "agent_unconfigured"`). 번역은 `failure-classify`가 수행한다. 신호가 없으면 `unknown`으로 떨어져 재시도까지 막힌다. 재시도 가능한 실패도 `workflow-retry`에 해결 근거를 기록하고 기존 attempt·전체 예산을 유지한다. `resolvedBy`는 분류가 지정한 `nextOwner`와 같아야 하며, `process-unknown`은 실제 종료를 확인한 뒤 `processExitConfirmed`를 함께 넣어야 재시도할 수 있다. 반복 가능한 교훈은 `lesson-record` 후보로만 저장하며 검증 없이 역할 skill을 바꾸지 않는다. 외부 이슈·알림은 명시적으로 활성화된 incident config 안에서만 받고, 중복·제안 한도·관찰 기간·무진전 중단을 적용한다.
 
-kickoff 안의 커밋과 워크트리 사이 병합은 PM이 처리하되 단순 개발 요청을 운영 배포나 외부 메시지 발송 허가로 확대하지 않는다. 완료 시점에는 주인 체크아웃에 직접 합치지 않고, 게이트를 통과한 통합 워크트리의 경로와 HEAD를 선언 세션에 넘긴다. 주인 브랜치와 충돌해 `deliver`가 되돌아오면 주인 브랜치를 통합 워크트리에 합쳐 해결하고 게이트부터 다시 통과시킨다. 구체적인 머지 절차는 PL 스킬을 따른다.
+kickoff 안의 커밋과 워크트리 사이 병합은 PM이 처리하되 단순 개발 요청을 운영 배포나 외부 메시지 발송 허가로 확대하지 않는다. 완료 시점에는 주인 체크아웃에 직접 합치지 않고, 게이트를 통과한 통합 워크트리의 경로와 HEAD를 이사에게 넘긴다. 주인 브랜치와 충돌해 `deliver`가 되돌아오면 주인 브랜치를 통합 워크트리에 합쳐 해결하고 게이트부터 다시 통과시킨다. 구체적인 머지 절차는 PL 스킬을 따른다.
 
 감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 
@@ -122,6 +124,6 @@ worker를 기다리는 동안에는 [`../../references/orca-runtime.md`](../../r
 
 진행 상황이나 최종 결과를 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. 진행 상태 판정은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 
-## 사용자에게 결과 전달
+## 이사에게 결과 전달
 
-사용자가 한국어로 요청했으면 최종 결과도 자연스러운 한국어로 쓴다. 내부 task·dispatch·gate 순서를 그대로 나열하지 말고, 확인된 사실을 사용자가 판단하기 쉬운 인과관계로 다시 구성한다. 구체적인 작성 기준과 예시는 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)를 읽고 따른다.
+이사가 한국어로 요청했으면 최종 결과도 자연스러운 한국어로 쓴다. 내부 task·dispatch·gate 순서를 그대로 나열하지 말고, 확인된 사실을 이사가 판단하기 쉬운 인과관계로 다시 구성한다. 구체적인 작성 기준과 예시는 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)를 읽고 따른다.
