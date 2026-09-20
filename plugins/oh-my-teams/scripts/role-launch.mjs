@@ -15,7 +15,6 @@ import {
   definedRoles,
   DIRECTOR_ROLE,
   foldRole,
-  ROLE_LADDER,
   ROLES,
   ROOT_ROLE,
   validateOrg,

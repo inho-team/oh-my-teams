@@ -378,3 +378,56 @@ test("deliverKickoff warns and proceeds for legacy entry without director", asyn
     console.warn = originalWarn;
   }
 });
+
+// ─── 6. launchContext director 조회 경로 (finding 2) ──────────────────────
+
+test("director from registry reaches roleSpec via stateDir lookup (launchContext path)", (t) => {
+  const fixture = project(t);
+  const pmStateDir = path.join(fixture.dir, "pm-worktree", ".omt");
+  fs.mkdirSync(pmStateDir, { recursive: true });
+  const directorPath = path.join(fixture.dir, "director-checkout");
+  fs.mkdirSync(directorPath, { recursive: true });
+
+  // Register a kickoff with a director, using pmStateDir as pm.stateDir.
+  registerKickoff(fixture.org, {
+    goal: "test director lookup",
+    pm: {
+      worktreeId: "wt-director-lookup",
+      path: path.join(fixture.dir, "pm-worktree"),
+      stateDir: pmStateDir,
+    },
+    organizationRevision: readJSON(fixture.org).revision,
+    brief: fixture.brief,
+    delivery: { mode: "none" },
+    director: { terminalHandle: "term_lookup", checkoutPath: directorPath },
+  });
+
+  // Replicate the launchContext lookup: find the kickoff entry by stateDir.
+  const { kickoffs } = listKickoffs(fixture.org);
+  const resolvedStateDir = path.resolve(pmStateDir);
+  const entry = kickoffs.find(
+    (k) => path.resolve(k.pm.stateDir) === resolvedStateDir,
+  );
+  assert.ok(entry, "entry found by stateDir");
+  assert.ok(entry.director, "entry has director");
+  assert.equal(entry.director.terminalHandle, "term_lookup");
+
+  // Verify that passing this director to roleSpec produces a header with the handle.
+  const spec = roleSpec(readJSON(fixture.org), "pm", "kickoff를 감독한다.", {
+    director: entry.director,
+  });
+  assert.match(spec, /보고 대상: 이사 \(term_lookup\)/);
+});
+
+test("launchContext director lookup is non-fatal when registry has no matching entry", (t) => {
+  const fixture = project(t);
+  // No kickoff registered; listKickoffs returns empty, no director in run.
+  const { kickoffs } = listKickoffs(fixture.org);
+  const entry = kickoffs.find(
+    (k) => path.resolve(k.pm.stateDir) === path.resolve(fixture.dir),
+  );
+  assert.equal(entry, undefined);
+  // roleSpec without director still produces a valid header (no terminalHandle).
+  const spec = roleSpec(readJSON(fixture.org), "pm", "kickoff를 감독한다.");
+  assert.match(spec, /보고 대상: 이사(?! \()/);
+});

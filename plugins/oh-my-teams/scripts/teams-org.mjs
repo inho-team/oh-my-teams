@@ -798,6 +798,20 @@ function launchContext(args) {
   );
   const stateDir = path.resolve(args.state);
   const snapshot = readWorkflow(stateDir, args["workflow-id"]);
+  // Read the kickoff registry to find the director identifier for this run.
+  // The PM worktree's stateDir matches pm.stateDir in the registry entry.
+  // A missing registry, an absent entry, or any read error is non-fatal:
+  // existing kickoffs without a director record must continue to work.
+  let director;
+  try {
+    const { kickoffs } = listKickoffs(path.resolve(args.org));
+    const entry = kickoffs.find(
+      (k) => path.resolve(k.pm.stateDir) === stateDir,
+    );
+    if (entry?.director) director = entry.director;
+  } catch {
+    // Registry unreadable: proceed without director (non-fatal).
+  }
   return {
     org: snapshot.organization,
     run: {
@@ -806,6 +820,7 @@ function launchContext(args) {
       workflowId: args["workflow-id"],
       stateDir,
       workflowState: snapshot.state,
+      ...(director ? { director } : {}),
     },
   };
 }
