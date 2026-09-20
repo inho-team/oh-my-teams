@@ -781,3 +781,55 @@ test("F-02: headlessStatus reads bytes proportional to STATUS_HEAD + STATUS_TAIL
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("F-01 cache-null-model-stale: a null model from a rollout file without turn_context is not cached, allowing a later poll to find the model", () => {
+  // 수정 전 구현에서는 rollout 파일을 찾아 null을 캐시에 저장했으므로,
+  // 이후 turn_context가 기록되어도 null이 계속 반환된다.
+  // 수정 후에는 null을 캐시하지 않아 다음 호출에서 재탐색한다.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "omt-f01-stale-"));
+  try {
+    const codexHome = tmp;
+    const sessionDir = path.join(tmp, "sessions", "sub");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const threadId = "stale-null-thread";
+    const rollout = path.join(sessionDir, `rollout_${threadId}.jsonl`);
+
+    // 1단계: rollout 파일은 있지만 turn_context 줄이 아직 없다.
+    fs.writeFileSync(
+      rollout,
+      JSON.stringify({ type: "thread.started" }) + "\n",
+    );
+
+    _codexRolloutCache.clear();
+    const m1 = codexRolloutModel(threadId, codexHome);
+    assert.equal(m1, null, "no turn_context yet → must return null");
+    // null이 캐시에 남아 있어서는 안 된다.
+    assert.ok(
+      !_codexRolloutCache.has(`${codexHome}:${threadId}`),
+      "null result must not be stored in the cache",
+    );
+
+    // 2단계: Codex가 turn_context를 기록한다.
+    fs.appendFileSync(
+      rollout,
+      JSON.stringify({ type: "turn_context", payload: { model: "gpt-late" } }) +
+        "\n",
+    );
+
+    const m2 = codexRolloutModel(threadId, codexHome);
+    assert.equal(
+      m2,
+      "gpt-late",
+      "after turn_context is written, the next call must find the model",
+    );
+    // 이제 캐시에 저장되어야 한다.
+    assert.equal(
+      _codexRolloutCache.get(`${codexHome}:${threadId}`),
+      "gpt-late",
+      "a resolved model must be cached so subsequent polls skip the scan",
+    );
+  } finally {
+    _codexRolloutCache.clear();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

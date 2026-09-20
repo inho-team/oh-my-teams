@@ -1017,6 +1017,8 @@
 
 반복 폴링(waitHeadless 1초, dashboard 2.5~4초) 경로에서 세션 파일이 5,000개일 때 폴링 1회당 5ms → 0ms(캐시 적중)로 개선.
 
+> cache-null-model-stale 수정(후속 커밋)으로 `turn_context`가 아직 기록되지 않은 경우(`model = null`)는 캐시에 저장하지 않게 바뀌어, 해당 상태에서는 매 폴링마다 재탐색이 일어난다. 모델이 확정된 이후의 캐시 적중 동작(위 수치의 전제)은 그대로 유지된다.
+
 ### F-02: `headlessStatus` stream.jsonl 읽기 비용
 
 수정 전 — `readFileSync`로 전체 읽기 후 `split(/\r?\n/)`→`JSON.parse`:

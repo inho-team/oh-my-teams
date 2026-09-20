@@ -201,11 +201,13 @@ const PROVIDERS = {
 export const HEADLESS_PROVIDERS = Object.freeze(Object.keys(PROVIDERS));
 
 /**
- * Process-lifetime cache: `"${home}:${threadId}"` → model string or null.
+ * Process-lifetime cache: `"${home}:${threadId}"` → model string.
  * Prevents the sessions-tree walk from repeating on every polling call for the
- * same worker. Exported so tests can clear it between assertions.
+ * same worker. Only populated when the model is known (non-null); a null result
+ * is not cached so the next poll can retry once Codex writes `turn_context`.
+ * Exported so tests can clear it between assertions.
  *
- * @type {Map<string, string | null>}
+ * @type {Map<string, string>}
  */
 export const _codexRolloutCache = new Map();
 
@@ -243,7 +245,10 @@ export function codexRolloutModel(threadId, codexHome) {
             // A partial last line while Codex is still writing.
           }
         }
-        _codexRolloutCache.set(cacheKey, model);
+        // Only cache when the model is known. If turn_context has not been
+        // written yet, model is null; caching null would permanently hide the
+        // model once Codex writes it (cache-null-model-stale regression).
+        if (model !== null) _codexRolloutCache.set(cacheKey, model);
         return model;
       }
     }
