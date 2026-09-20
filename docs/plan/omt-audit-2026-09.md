@@ -881,6 +881,7 @@
 - **제안 수정**: `close` 절차의 6단계(또는 별도 정리 단계)에 다음을 추가한다. (a) 전달(병합)이 확인된 뒤 kickoff의 원격 브랜치와 로컬 브랜치를 삭제한다. (b) 하위 워크트리가 삭제되면 해당 워크트리 전용 브랜치도 삭제한다. (c) `disband`는 복구 가능성을 위해 브랜치를 보존하는 정책을 유지한다. `close/SKILL.md` 6단계와 7단계 사이에 브랜치 정리 절차를 명시하거나, 8단계 최종 정리 목록에 브랜치 삭제를 포함한다.
 - **예상 작업 크기**: XS (문서 절차 추가)
 - **회귀 방지 검사**: `tests/skill-instructions.test.mjs`에 close 절차에 브랜치 삭제 언급이 있는지 확인하는 검사 추가 권고.
+- **수정 완료** (task fix-close-branch-cleanup): `kickoff-branch-cleanup` 명령을 `kickoff-registry.mjs`에 추가하고, `teams-org.mjs`의 CLI에 연결했다. 전달 확인은 `git merge-base --is-ancestor`로 커밋 포함 여부를 검사하고, 확인된 경우에만 원격·로컬 브랜치를 삭제한다. `close/SKILL.md`에 7단계로 브랜치 정리 절차를 추가하고, `disband`에서는 이 명령을 호출하지 않는다는 구분을 명시했다. `references/kickoff-registry.md` 명령 목록에 명령을 등록했다. `tests/kickoff-registry.test.mjs`에 전달 미확인 시 삭제 안 함, 전달 확인 후 임시 저장소에서 실제 삭제 검사를 추가하고, `tests/skill-instructions.test.mjs`에 close가 명령을 가리키고 disband는 보존한다는 검사를 추가했다.
 
 ---
 

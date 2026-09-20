@@ -1,5 +1,6 @@
 /** Registry of the kickoffs running in a project, one entry per PM worktree. */
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -420,4 +421,124 @@ export function releaseKickoff(orgFile, { worktreeId, reason, force = false }) {
     fs.unlinkSync(file);
     return { released: true, reason, archived, entry };
   });
+}
+
+// Runs a git command in the given repository, returning stdout on success.
+// Returns null when the command exits non-zero, so callers decide what to skip.
+function tryGit(repoDir, args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: repoDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// Checks whether every commit reachable from tipRef is also reachable from
+// baseRef, which means the kickoff branch's content has reached baseRef.
+function isAncestor(repoDir, tipRef, baseRef) {
+  const result = tryGit(repoDir, [
+    "merge-base",
+    "--is-ancestor",
+    tipRef,
+    baseRef,
+  ]);
+  // tryGit returns null on non-zero exit (tip is not an ancestor).
+  return result !== null;
+}
+
+/**
+ * Deletes the kickoff's working branches after verifying delivery.
+ *
+ * The check is content-based: every commit reachable from the kickoff branch
+ * must already be reachable from the delivery target (owner branch for
+ * `local-merge`, or the merged PR head for `pull-request`). Deletion is
+ * skipped, not forced, when the check cannot be confirmed.
+ *
+ * `disband` preserves branches so that failed results stay recoverable.
+ * Call this function only from `close`, never from `disband`.
+ *
+ * @param {object} request - Cleanup request.
+ * @param {string} request.projectDir - Absolute path of the owner project.
+ * @param {object} request.entry - Validated kickoff registry entry.
+ * @param {string[]} request.branches - Branch names to delete (local and
+ *   remote share the same name; each is tried independently).
+ * @param {string[]} [request.remoteName="origin"] - Git remote to push the
+ *   deletions to. Pass an empty string to skip remote deletion.
+ * @returns {{deleted: string[], skipped: string[], errors: string[]}} Result.
+ */
+export function cleanupKickoffBranches({
+  projectDir,
+  entry,
+  branches,
+  remoteName = "origin",
+}) {
+  assert(
+    typeof projectDir === "string" && projectDir,
+    "projectDir required for branch cleanup",
+  );
+  assert(entry && typeof entry === "object", "registry entry required");
+  assert(Array.isArray(branches), "branches must be an array");
+
+  const deleted = [];
+  const skipped = [];
+  const errors = [];
+
+  // Determine the delivery target reference against which to verify content.
+  let deliveryRef;
+  if (entry.delivery?.mode === "local-merge" && entry.delivered?.mergeCommit) {
+    deliveryRef = entry.delivered.mergeCommit;
+  } else if (
+    entry.delivery?.mode === "pull-request" &&
+    entry.delivered?.mergeCommit
+  ) {
+    deliveryRef = entry.delivered.mergeCommit;
+  }
+  // delivery.mode === "none" or no delivered record: deliveryRef stays undefined.
+
+  for (const branch of branches) {
+    if (!branch || typeof branch !== "string") continue;
+
+    // Verify that the branch's content has reached the delivery target before
+    // deleting it. Branch name or PR status alone is not sufficient.
+    if (deliveryRef) {
+      const verified = isAncestor(projectDir, branch, deliveryRef);
+      if (!verified) {
+        skipped.push(branch);
+        continue;
+      }
+    } else {
+      // No delivery record: cannot confirm content was transferred.
+      skipped.push(branch);
+      continue;
+    }
+
+    // Delete the remote branch first so a local failure does not leave
+    // the remote in a state the caller cannot see.
+    if (remoteName) {
+      const remoteResult = tryGit(projectDir, [
+        "push",
+        remoteName,
+        "--delete",
+        branch,
+      ]);
+      if (remoteResult === null) {
+        // Remote branch may not exist (already deleted or never pushed); log but continue.
+        errors.push(`remote:${branch}`);
+      }
+    }
+
+    // Delete the local branch with --delete (safe; refuses unmerged).
+    const localResult = tryGit(projectDir, ["branch", "--delete", branch]);
+    if (localResult === null) {
+      errors.push(`local:${branch}`);
+    } else {
+      deleted.push(branch);
+    }
+  }
+
+  return { deleted, skipped, errors };
 }

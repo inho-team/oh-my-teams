@@ -1,6 +1,7 @@
 /** The kickoff registry: many kickoffs per project, one per PM worktree. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,6 +13,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   bindKickoffRun,
+  cleanupKickoffBranches,
   listKickoffs,
   registerKickoff,
   registryDirectory,
@@ -483,4 +485,96 @@ test("a claim naming a different worktree under each spelling is refused", (t) =
     "wt-a",
   );
   assert.deepEqual(ids(fixture), ["wt-a"]);
+});
+
+test("branch cleanup skips branches when delivery is not confirmed", (t) => {
+  const fixture = project(t);
+  // An entry with delivery.mode === "none" has no merge commit to verify against.
+  const result = cleanupKickoffBranches({
+    projectDir: fixture.dir,
+    entry: {
+      delivery: { mode: "none" },
+    },
+    branches: ["feat/my-kickoff"],
+  });
+  assert.deepEqual(result.deleted, []);
+  assert.deepEqual(result.skipped, ["feat/my-kickoff"]);
+});
+
+test("branch cleanup skips when delivered record is absent", (t) => {
+  const fixture = project(t);
+  // local-merge entry without a delivered record: merge not yet recorded.
+  const result = cleanupKickoffBranches({
+    projectDir: fixture.dir,
+    entry: {
+      delivery: { mode: "local-merge", branch: "main" },
+      // delivered is intentionally absent
+    },
+    branches: ["feat/my-kickoff"],
+  });
+  assert.deepEqual(result.deleted, []);
+  assert.deepEqual(result.skipped, ["feat/my-kickoff"]);
+});
+
+test("branch cleanup deletes branches whose content has reached the merge commit", (t) => {
+  // Build a temporary Git repository so no live branches are touched.
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-branch-cleanup-"));
+  t.after(() => fs.rmSync(repoDir, { recursive: true, force: true }));
+
+  const remoteDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-branch-cleanup-remote-"),
+  );
+  t.after(() => fs.rmSync(remoteDir, { recursive: true, force: true }));
+
+  // Initialise the bare remote and the local clone.
+  const git = (args, cwd = repoDir) =>
+    execFileSync("git", args, { cwd, stdio: "pipe", encoding: "utf8" }).trim();
+  execFileSync("git", ["init", "--bare", remoteDir], { stdio: "pipe" });
+  git(["init", "--initial-branch=main", repoDir], os.tmpdir());
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "Test"]);
+  git(["remote", "add", "local-remote", remoteDir]);
+
+  // Create an initial commit on main.
+  fs.writeFileSync(path.join(repoDir, "README.md"), "hello\n");
+  git(["add", "README.md"]);
+  git(["commit", "--message", "initial"]);
+  git(["push", "local-remote", "main"]);
+
+  // Create the kickoff branch off main.
+  git(["checkout", "-b", "feat/kickoff-work"]);
+  fs.writeFileSync(path.join(repoDir, "work.txt"), "work\n");
+  git(["add", "work.txt"]);
+  git(["commit", "--message", "kickoff work"]);
+  const kickoffHead = git(["rev-parse", "HEAD"]);
+  git(["push", "local-remote", "feat/kickoff-work"]);
+
+  // Merge the kickoff branch into main (simulating deliver).
+  git(["checkout", "main"]);
+  git(["merge", "--no-ff", "feat/kickoff-work", "--message", "merge kickoff"]);
+  const mergeCommit = git(["rev-parse", "HEAD"]);
+  git(["push", "local-remote", "main"]);
+
+  // The entry records the merge commit as delivery proof.
+  const entry = {
+    delivery: { mode: "local-merge", branch: "main" },
+    delivered: { head: kickoffHead, mergeCommit },
+  };
+
+  const result = cleanupKickoffBranches({
+    projectDir: repoDir,
+    entry,
+    branches: ["feat/kickoff-work"],
+    remoteName: "local-remote",
+  });
+
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(result.deleted, ["feat/kickoff-work"]);
+  // The local branch no longer exists.
+  assert.throws(() =>
+    execFileSync("git", ["rev-parse", "refs/heads/feat/kickoff-work"], {
+      cwd: repoDir,
+      stdio: "pipe",
+    }),
+  );
 });
