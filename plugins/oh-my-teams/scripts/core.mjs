@@ -517,6 +517,8 @@ export function run(
     let overflow = false;
     let finished = false;
     let fallbackTimer;
+    // Track accumulated byte length to avoid re-computing on every chunk.
+    let totalBytes = 0;
 
     const finish = (code, error) => {
       if (finished) return;
@@ -547,14 +549,19 @@ export function run(
     ]) {
       stream.setEncoding("utf8");
       stream.on("data", (data) => {
+        totalBytes += Buffer.byteLength(data);
         if (streamName === "stdout") stdout += data;
         else stderr += data;
 
-        if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > maxBytes) {
+        if (totalBytes > maxBytes) {
           overflow = true;
           stdout = stdout.slice(0, maxBytes / 2);
           stderr = stderr.slice(0, maxBytes / 2);
+          // Recompute after slicing so subsequent chunks are measured correctly.
+          totalBytes = Buffer.byteLength(stdout) + Buffer.byteLength(stderr);
           child.kill();
+          // Some process trees never deliver `close`; return an uncertain result.
+          fallbackTimer = setTimeout(() => finish(-1), 1000);
         }
       });
     }

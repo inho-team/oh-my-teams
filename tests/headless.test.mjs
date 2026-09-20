@@ -20,16 +20,69 @@ import {
   waitHeadless,
 } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import { main, parseArgs } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { killTree } from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
 
 const FAKE = path.resolve("tests/fake-agent.mjs");
+
+/**
+ * Waits until every runner recorded under stateDir has written its exit.json.
+ * This prevents rmSync from racing with a runner that still holds file handles,
+ * which causes EPERM on Windows when the directory is removed before the runner
+ * releases its open file descriptors (stream.jsonl, stderr.txt).
+ *
+ * @param {string} stateDir - Headless state directory (contains headless/).
+ * @param {number} [timeoutMs=8000] - Give up after this many ms.
+ * @returns {Promise<void>}
+ */
+async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
+  const headlessRoot = path.join(stateDir, "headless");
+  if (!fs.existsSync(headlessRoot)) return;
+  const deadline = Date.now() + timeoutMs;
+  const workerIds = fs
+    .readdirSync(headlessRoot)
+    .filter((name) => /^[a-z0-9][a-z0-9-]*$/.test(name));
+  for (const workerId of workerIds) {
+    const workerDir = path.join(headlessRoot, workerId);
+    // Request stop so any still-running turn begins to wind down.
+    const turnsDir = path.join(workerDir, "turns");
+    if (fs.existsSync(turnsDir)) {
+      const turnNumbers = fs
+        .readdirSync(turnsDir)
+        .filter((n) => /^\d+$/.test(n))
+        .map(Number)
+        .sort((a, b) => a - b);
+      const lastTurn = turnNumbers.at(-1);
+      if (lastTurn !== undefined) {
+        const turnDir = path.join(turnsDir, String(lastTurn));
+        const exitFile = path.join(turnDir, "exit.json");
+        const stopFile = path.join(turnDir, "stop.request");
+        if (!fs.existsSync(exitFile) && !fs.existsSync(stopFile)) {
+          try {
+            fs.writeFileSync(stopFile, new Date().toISOString());
+          } catch {
+            // Ignore if already written.
+          }
+        }
+        // Poll until exit.json appears or the deadline passes.
+        while (!fs.existsSync(exitFile) && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      }
+    }
+  }
+}
 
 function sandbox(t) {
   const dir = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-headless-")),
   );
+  const state = path.join(dir, "state");
   t.after(async () => {
-    // Give stopped runners a moment to release their files on Windows.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Wait for every runner to write exit.json before removing the directory.
+    // On Windows, a runner that still has stream.jsonl or stderr.txt open will
+    // cause rmSync to fail with EPERM. Waiting for exit.json ensures the runner
+    // has called fs.closeSync on those handles before we remove the tree.
+    await waitAllRunnersExited(state);
     fs.rmSync(dir, {
       recursive: true,
       force: true,
@@ -40,7 +93,7 @@ function sandbox(t) {
   const cwd = path.join(dir, "worktree");
   fs.mkdirSync(cwd);
   return {
-    state: path.join(dir, "state"),
+    state,
     cwd,
     codexHome: path.join(dir, "codex-home"),
   };
@@ -832,4 +885,60 @@ test("F-01 cache-null-model-stale: a null model from a rollout file without turn
     _codexRolloutCache.clear();
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// F-05: killTree는 플랫폼별로 프로세스 트리를 종료하고 실패를 조용히 삼키지 않는다.
+test("F-05: killTree — POSIX에서 실제 자식 프로세스를 종료하고 killError가 null이다", async () => {
+  // Windows 실환경이 없으므로 POSIX 경로만 이 PC에서 확인한다.
+  // Windows 동작(taskkill /T /F /PID)은 코드 경로로 확인하며, 실측하지 못했다.
+  if (process.platform === "win32") {
+    // Windows 실환경 없음 — 코드 경로(taskkill /T /F /PID)만 확인, 실측 생략.
+    return;
+  }
+  const { spawn } = await import("node:child_process");
+  // 자식 프로세스를 detached로 시작해 자체 프로세스 그룹을 갖게 한다.
+  const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1e9)"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  const pid = child.pid;
+  assert.ok(pid, "child must have a pid");
+  // 자식이 시작할 시간을 준다.
+  await new Promise((r) => setTimeout(r, 200));
+  // killTree가 프로세스 그룹을 종료하고 null(오류 없음)을 반환해야 한다.
+  const killError = killTree(pid);
+  assert.equal(
+    killError,
+    null,
+    `killTree must return null on success, got: ${killError}`,
+  );
+  // 자식이 실제로 사라졌는지 확인한다.
+  await new Promise((r) => setTimeout(r, 300));
+  let alive = true;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    alive = false;
+  }
+  assert.equal(alive, false, "child process must be gone after killTree");
+});
+
+test("F-05: killTree — 존재하지 않는 pid는 오류 메시지를 반환하고 throw하지 않는다", () => {
+  // 절대 존재하지 않을 pid (최댓값 부근)를 넘겨 실패 경로를 검증한다.
+  const error = killTree(2147483000);
+  // POSIX에서는 ESRCH(No such process)가 반환되어야 한다.
+  // Windows 실환경 없음 — taskkill 실패 경로는 코드 경로로만 확인.
+  if (process.platform !== "win32") {
+    assert.ok(
+      typeof error === "string" && error.length > 0,
+      `killTree must return an error string for a non-existent pid, got: ${error}`,
+    );
+  }
+});
+
+test("F-05: killTree — pid가 null이면 즉시 null을 반환한다", () => {
+  assert.equal(killTree(null), null);
+  assert.equal(killTree(undefined), null);
+  assert.equal(killTree(0), null);
 });
