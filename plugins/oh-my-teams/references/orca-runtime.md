@@ -130,7 +130,7 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 ### 역할 터미널에서 시작
 
-모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Agy 역할의 시작 경로는 `role-terminal`이 `scripts/launch-matrix.mjs`의 호환성 표를 조회해 정한다. 표가 `blocked`를 돌려주면 터미널을 만들기 전에(시도 예약 전에) 거부하고, `headless`를 돌려주면 아래 Agy 대기 판정 문단의 headless 경로를 따른다. `unverified` 칸에 해당하는 조합은 `--allow-unverified "<승인 문장>"`을 준 검증 실행에서만 터미널을 연다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
+모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Agy 역할의 시작 경로는 `role-terminal`이 `scripts/launch-matrix.mjs`의 호환성 표를 조회해 정한다. 표가 `blocked`를 돌려주면 터미널을 만들기 전에(시도 예약 전에) 거부하고, `headless`를 돌려주면 아래 Agy 대기 판정 문단의 headless 경로를 따른다. 실행 경로가 `supervised-terminal`이고 근거가 `unverified`인 조합도 별도 승인 없이 터미널을 연다. 결과의 `matrix`와 `warnings`에 근거 등급·환경·버전 경고를 남기며, 실행 후 준비 상태와 모델을 확인하기 전에는 작업을 넘기지 않는다. `--allow-unverified` 옵션은 이전 호출과의 호환을 위해 남겨 두며 알려진 실패를 우회하지 않는다. 검사 대상은 선언 세션이 아니라 저장된 역할 프로필의 실행기다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json

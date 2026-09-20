@@ -962,3 +962,37 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
   // 정리
   fsM.rmSync(tmpBase, { recursive: true, force: true });
 });
+
+test("Claude POSIX PM launches without approval and preserves evidence warnings and readiness", async () => {
+  const command = roleCommand(example(), "pm");
+  for (const orcaVersion of ["1.4.204", "1.4.205"]) {
+    for (const started of [true, false]) {
+      const orca = fakeOrca([
+        started ? ["Claude Code v2.1.277", "Opus 4.6"] : [PROMPT],
+      ]);
+      const result = await openRoleTerminal({
+        ...fast,
+        allowUnverified: false,
+        allowUnverifiedApproval: undefined,
+        worktree: "id:repo::/pm",
+        command,
+        orcaVersion,
+        executable: "orca",
+        execute: orca.execute,
+      });
+      assert.equal(orca.creates().length, 1);
+      assert.equal(result.provider, "claude");
+      assert.equal(result.profile, command.profile);
+      assert.equal(result.matrix.evidence, "unverified");
+      assert.equal(result.matrix.platform, "darwin");
+      assert.ok(result.warnings.includes("unverified-terminal-evidence"));
+      assert.equal(
+        result.warnings.includes("untested_patch_version"),
+        orcaVersion === "1.4.205",
+      );
+      assert.equal(result.ready, started);
+      assert.equal(result.screenCheck, "required");
+      if (!started) assert.equal(result.status, "blocked");
+    }
+  }
+});

@@ -664,7 +664,7 @@ async function launchOnce({
  * @param {boolean|string} [options.codexTrustRecordExists="unknown"] - Whether the worktree has a Codex trust record.
  * @param {string} [options.orcaVersion] - Orca version for matrix lookup.
  * @param {string} [options.cliVersion] - Antigravity CLI version for matrix lookup.
- * @param {boolean} [options.allowUnverified=false] - Permit unverified supervised-terminal paths.
+ * @param {boolean} [options.allowUnverified=false] - Legacy compatibility option; unverified evidence no longer blocks launch.
  * @param {string} [options.allowUnverifiedApproval] - Approval sentence recorded for accountability.
  * @param {Function} [options.execute=run] - Injectable command runner.
  * The matrix table is consulted before any terminal is created. A `blocked` or
@@ -716,9 +716,15 @@ export async function openRoleTerminal({
   });
   if (matrixResult.path === "blocked" || matrixResult.path === "headless") {
     const err = new Error(
-      `Role ${command.role} launch refused by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,
+      `Role ${command.role} (profile=${command.profile}, runner=${command.provider}, platform=${platform}, shell=${shell}) ` +
+        `launch refused by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,
     );
     err.matrixRefusal = {
+      role: command.role,
+      profile: command.profile,
+      provider: command.provider,
+      platform,
+      shell,
       path: matrixResult.path,
       reason: matrixResult.reason,
       nextAction: matrixResult.nextAction,
@@ -776,6 +782,8 @@ export async function openRoleTerminal({
     profile: command.profile,
     provider: command.provider,
     terminal: handle,
+    matrix: { ...matrixResult, platform, shell, orcaVersion },
+    warnings: matrixResult.reason,
     worktree,
     command: command.command,
     launched: typed,

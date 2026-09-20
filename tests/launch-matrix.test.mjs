@@ -308,10 +308,9 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
     orcaVersion: "2.0.0",
     cliVersion: VERIFIED_CLI_VERSION,
   });
-  // 이 칸은 원래 근거 등급이 unverified인 supervised-terminal이라 검증 게이트가 막는다.
-  // 버전 때문이 아니라 칸 자체가 미검증이라는 점을 이유 코드로 구분할 수 있다.
-  assert.equal(otherVersion.path, "blocked");
-  assert.ok(otherVersion.reason.includes("unverified-terminal-creation"));
+  // 미검증 경로와 버전 경고를 구분하고 실행 경로는 유지한다.
+  assert.equal(otherVersion.path, "supervised-terminal");
+  assert.ok(otherVersion.reason.includes("unverified-terminal-evidence"));
   assert.ok(otherVersion.reason.includes("untested_version"));
 });
 
@@ -455,7 +454,7 @@ test("classifyVersion은 같은 버전·패치 차이·그 밖을 구분한다",
   assert.equal(classifyVersion("unknown", "1.4.204"), "unknown");
 });
 
-test("unverified supervised-terminal은 검증 모드 없이 blocked된다", () => {
+test("unverified supervised-terminal은 승인 유무와 관계없이 경고와 함께 실행된다", () => {
   // Agy gemini posix - unverified
   const withoutApproval = predictLaunchPath({
     runner: "agy",
@@ -467,10 +466,10 @@ test("unverified supervised-terminal은 검증 모드 없이 blocked된다", () 
     allowUnverified: false,
     ...V,
   });
-  assert.equal(withoutApproval.path, "blocked");
-  assert.deepEqual(withoutApproval.reason, ["unverified-terminal-creation"]);
+  assert.equal(withoutApproval.path, "supervised-terminal");
+  assert.deepEqual(withoutApproval.reason, ["unverified-terminal-evidence"]);
 
-  // allowUnverified=true지만 승인 문장 없음 → blocked
+  // 기존 옵션만 전달해도 경고와 함께 실행한다.
   const withoutApprovalText = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.8-flash-high",
@@ -482,9 +481,9 @@ test("unverified supervised-terminal은 검증 모드 없이 blocked된다", () 
     allowUnverifiedApproval: undefined,
     ...V,
   });
-  assert.equal(withoutApprovalText.path, "blocked");
+  assert.equal(withoutApprovalText.path, "supervised-terminal");
   assert.deepEqual(withoutApprovalText.reason, [
-    "unverified-terminal-creation",
+    "unverified-terminal-evidence",
   ]);
 
   // allowUnverified=true 승인 문장 있음 → supervised-terminal
@@ -544,7 +543,7 @@ test("Windows Agy powershell 복합 명령은 no_agent_detected로 차단된다"
 test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한다", () => {
   // 실측 수정: 구현은 Windows에서 폭 조정을 생략해 단일 명령만 입력(isCompoundCommand=false).
   // gemini → 표 3행(신뢰 없음) 또는 표 8행(gemini win32 신뢰 있음) 도달.
-  // gemini + 신뢰 있음 → 8행 supervised-terminal/unverified → allowUnverified 없으면 blocked(unverified-terminal-creation)
+  // gemini + 신뢰 있음 → 8행 headless/verified, 승인 옵션과 무관하다.
   const geminiWithTrust = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
