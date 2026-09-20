@@ -20,7 +20,7 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행한다.
-- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 이사 스킬의 신호 명령을 따른다.
+- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다.
 - 무거운 작업(테스트·빌드·무거운 worker) 전에 자원 슬롯을 확보하고 작업이 끝나면 해제한다. 슬롯을 얻는 명령은 이사 스킬의 권한 절을 참조한다.
 
 ### 책임
