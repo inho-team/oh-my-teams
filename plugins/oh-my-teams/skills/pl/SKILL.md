@@ -95,6 +95,6 @@ task v1의 `merge-check`는 review gate를 조회하지 않고 통과시키므�
 
 ## 머지와 회수
 
-주인 체크아웃으로의 전달은 선언 세션이 `close`에서 브리프의 전달 방식으로 수행하며, PL은 그 입력이 될 통합 워크트리와 검증한 HEAD를 준비한다. 전달 방식이 `pull-request`여서 PR을 머지할 때에만 다음을 따른다. 최신 remote base와 PR HEAD를 조회하고, 통합 검증 결과와 일치하는지 확인한다. `gh pr merge --match-head-commit <verified-pr-head>` 등 현재 설치된 도구가 지원하는 HEAD 제한을 사용한다. base 변경이나 경쟁 머지로 검증 전제가 달라지면 새 통합 검사 후 진행한다. 머지 뒤 실제 착지 커밋을 확인한다.
+주인 체크아웃으로의 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행하며, PL은 그 입력이 될 통합 워크트리와 검증한 HEAD를 준비한다. 전달 방식이 `pull-request`여서 PR을 머지할 때에만 다음을 따른다. 최신 remote base와 PR HEAD를 조회하고, 통합 검증 결과와 일치하는지 확인한다. `gh pr merge --match-head-commit <verified-pr-head>` 등 현재 설치된 도구가 지원하는 HEAD 제한을 사용한다. base 변경이나 경쟁 머지로 검증 전제가 달라지면 새 통합 검사 후 진행한다. 머지 뒤 실제 착지 커밋을 확인한다.
 
 부모 보고에는 작업 ID·검증 키·변경 요약·실패/미해결 사항·원본 경로만 올린다. 전체 로그를 단계마다 다시 붙이지 않는다. accepted settlement 후 Orca worker-release를 사용하고, 워크트리 삭제는 코드와 증거가 보존되고 프로세스 종료가 입증된 경우에만 한다. 강제 종료/자동 clean/reset으로 실패 증거를 버리지 않는다.
