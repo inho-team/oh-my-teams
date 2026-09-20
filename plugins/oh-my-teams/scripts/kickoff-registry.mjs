@@ -177,6 +177,23 @@ export function validateEntry(stored) {
     entry.selfPm === undefined || text(entry.selfPm),
     "Kickoff selfPm must state why no handoff was possible",
   );
+  // director is optional: entries registered before director support was added
+  // are valid without it, and close/disband still work for them (with a warning).
+  if (entry.director !== undefined) {
+    assert(
+      entry.director && typeof entry.director === "object",
+      "Kickoff director must be an object when present",
+    );
+    assert(
+      text(entry.director.terminalHandle) ||
+        entry.director.terminalHandle === undefined,
+      "Kickoff director.terminalHandle must be a non-empty string when present",
+    );
+    assert(
+      text(entry.director.checkoutPath),
+      "Kickoff director.checkoutPath required when director is present",
+    );
+  }
   // Entries registered before delivery was recorded carry neither field.
   if (entry.delivery !== undefined) validateDelivery(entry.delivery);
   assert(
@@ -305,6 +322,20 @@ export function registerKickoff(orgFile, request) {
           : { branch: claim.delivery.branch }),
       },
       ...(claim.selfPm === undefined ? {} : { selfPm: claim.selfPm }),
+      // Director identifier is optional. When present, checkoutPath is required
+      // and is resolved to an absolute path so callers can compare it to cwd().
+      ...(claim.director === undefined
+        ? {}
+        : {
+            director: {
+              ...(text(claim.director?.terminalHandle)
+                ? { terminalHandle: claim.director.terminalHandle }
+                : {}),
+              checkoutPath: path.resolve(
+                text(claim.director?.checkoutPath) ?? "",
+              ),
+            },
+          }),
       createdAt: new Date().toISOString(),
     });
     writeJSON(file, entry);
@@ -381,11 +412,15 @@ export function recordDelivery(orgFile, { worktreeId, head, mergeCommit }) {
  * @param {string} request.worktreeId - PM worktree whose kickoff ends.
  * @param {string} request.reason - One of `RELEASE_REASONS`.
  * @param {boolean} [request.force=false] - Whether a takeover is authorized.
+ * @param {string} [request.callerCwd] - Caller's working directory for director check.
  * @returns {{released: boolean, reason: string, archived: string, entry: object}} Result.
  * @throws {Error} When the worktree holds no kickoff, the reason is unknown, or
  *   a takeover is requested without authorization.
  */
-export function releaseKickoff(orgFile, { worktreeId, reason, force = false }) {
+export function releaseKickoff(
+  orgFile,
+  { worktreeId, reason, force = false, callerCwd = process.cwd() },
+) {
   return withRegistry(orgFile, () => {
     const file = locateEntry(orgFile, worktreeId);
     assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
@@ -398,6 +433,23 @@ export function releaseKickoff(orgFile, { worktreeId, reason, force = false }) {
       reason !== "taken-over" || force,
       "A takeover needs explicit authorization; confirm it with the user first",
     );
+    // Director authority: only the session at the registered checkout path may
+    // release a kickoff. Legacy entries without a director field are allowed
+    // through with a warning to keep existing kickoffs closable.
+    if (!entry.director) {
+      console.warn(
+        "[omt] Warning: kickoff has no director record; kickoff-release proceeds without director verification.",
+      );
+    } else if (!force) {
+      const expected = path.resolve(entry.director.checkoutPath);
+      const actual = path.resolve(callerCwd);
+      assert(
+        actual === expected,
+        `kickoff-release must be run from the director's checkout at ${expected}; ` +
+          `current directory is ${actual}. ` +
+          "Run from the owner project checkout, or pass --force with the director's explicit authorization.",
+      );
+    }
     // A kickoff whose brief asked for a merge into the project is not complete
     // until that merge is recorded, or `status` would show the goal delivered.
     assert(

@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 import {
   assert,
   definedRoles,
+  DIRECTOR_ROLE,
   foldRole,
+  ROLE_LADDER,
   ROLES,
   ROOT_ROLE,
   validateOrg,
@@ -227,6 +229,11 @@ export function resolveRoleLaunch(
   { roles, terminal } = {},
 ) {
   const org = validateOrg(requestedOrg);
+  assert(
+    requestedRole !== DIRECTOR_ROLE,
+    "이사는 kickoff를 선언한 호스트 세션 자체이며 감독 worker나 역할 터미널로 띄우는 대상이 아니다. " +
+      "PM 터미널을 열려면 role-command를 사용하라.",
+  );
   const role = foldRole(activeRoles(org, roles), requestedRole);
   assert(
     role !== ROOT_ROLE,
@@ -325,6 +332,11 @@ function shellToken(token) {
  */
 export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
   const org = validateOrg(requestedOrg);
+  assert(
+    requestedRole !== DIRECTOR_ROLE,
+    "이사는 kickoff를 선언한 호스트 세션 자체이며 감독 worker나 역할 터미널로 띄우는 대상이 아니다. " +
+      "PM 터미널을 열려면 role-command를 사용하되 role에 pm을 지정하라.",
+  );
   const role = foldRole(activeRoles(org, roles), requestedRole);
   assertHeldRole(org, roles, requestedRole, role);
   const profileId = org.roles[role].profile;
@@ -400,6 +412,9 @@ const names = (list) =>
  * @param {string} [run.orgFile] - Organization file the launch read.
  * @param {string} [run.workflowId] - Workflow the task belongs to.
  * @param {string} [run.stateDir] - PM worktree state directory of that workflow.
+ * @param {object} [run.director] - Director identifiers from the kickoff registry.
+ * @param {string} [run.director.terminalHandle] - Orca terminal handle of the director session.
+ * @param {string} [run.director.checkoutPath] - Owner checkout path of the director.
  * @returns {string} Header, charter and task, in that order.
  * @throws {Error} When the role is unknown or the task is empty.
  */
@@ -407,7 +422,7 @@ export function roleSpec(
   requestedOrg,
   requestedRole,
   spec,
-  { roles, orgFile, workflowId, stateDir } = {},
+  { roles, orgFile, workflowId, stateDir, director } = {},
 ) {
   const org = validateOrg(requestedOrg);
   assert(typeof spec === "string" && spec.trim(), "Spec text required");
@@ -417,6 +432,11 @@ export function roleSpec(
   // reports to whichever role took its work over.
   const parentRole = org.roles[role].parent;
   const parent = parentRole && foldRole(declared, parentRole);
+  // PM has no parent in the org graph; it reports to the director who declared
+  // the kickoff. Every other role reports to its folded parent as before.
+  const reportTarget = parent
+    ? ROLE_NAMES[parent]
+    : `이사${director?.terminalHandle ? ` (${director.terminalHandle})` : ""}`;
   const inherited = ROLES.filter(
     (other) => !declared.includes(other) && foldRole(declared, other) === role,
   );
@@ -428,7 +448,7 @@ export function roleSpec(
   return [
     "# oh my teams 역할 지시",
     `역할: ${ROLE_NAMES[role]} (조직 revision ${org.revision})`,
-    `보고 대상: ${parent ? ROLE_NAMES[parent] : "사용자"}`,
+    `보고 대상: ${reportTarget}`,
     `이번 실행에 없어 이어받는 역할: ${names(inherited)}`,
     `직접 배정할 수 있는 역할: ${names(ROLES.filter((r) => dispatchable.includes(r)))}`,
     ...(orgFile ? [`조직 파일: ${orgFile}`] : []),
@@ -439,6 +459,9 @@ export function roleSpec(
     // Untracked files count toward verify's fingerprint, and the literacy-test
     // workers left node_modules and scratch scripts beside their report.
     "조사용 임시 스크립트, 의존성 설치, 내려받은 파일은 작업 워크트리가 아니라 워크트리 밖의 임시 디렉터리에서 만든다. 추적되지 않은 파일도 검증 증거의 지문에 들어가므로, 워크트리에 남기면 검증과 검토를 다시 해야 한다.",
+    // All PM-and-below roles must not contact the user directly; the director
+    // is the sole user-facing channel.
+    "사용자에게 직접 묻거나 보고하지 않는다. 결정이 필요하면 보고 대상에게 올린다.",
     // A parent reads many reports, so the verdict comes first; tying it to a
     // fixed set of values keeps the first line from claiming unverified success.
     "보고는 두괄식으로 쓴다. 첫 줄은 `완료`·`부분 완료`·`실패`·`차단` 가운데 확인한 증거가 받쳐 주는 판정과 그 근거 하나로 시작하고, 보고 대상이 내릴 결정이 있으면 둘째 줄에 적은 뒤 상세를 쓴다. 하위 역할에게 보내는 지시는 목표와 완료 조건을 먼저 쓴다.",

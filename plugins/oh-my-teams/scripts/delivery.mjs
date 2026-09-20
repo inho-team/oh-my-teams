@@ -67,6 +67,30 @@ export function assertNotKickoffOwner(directory, use) {
   );
 }
 
+// Checks that the caller is running from the director's registered checkout
+// path. Entries without a director field predate this feature and are allowed
+// through with a console warning so existing kickoffs remain closable.
+// When force is true the check is bypassed (mirrors the takeover pattern in
+// releaseKickoff).
+function assertDirectorAuthority(entry, callerCwd, use, force) {
+  if (!entry.director) {
+    // Legacy entry: no director recorded; warn and allow.
+    console.warn(
+      `[omt] Warning: kickoff has no director record; ${use} proceeds without director verification.`,
+    );
+    return;
+  }
+  const expected = path.resolve(entry.director.checkoutPath);
+  const actual = path.resolve(callerCwd);
+  if (force) return;
+  assert(
+    actual === expected,
+    `${use} must be run from the director's checkout at ${expected}; ` +
+      `current directory is ${actual}. ` +
+      "Run from the owner project checkout, or pass --force with the director's explicit authorization.",
+  );
+}
+
 /**
  * Merges a kickoff's verified head into the branch its brief named.
  *
@@ -95,9 +119,15 @@ export async function deliverKickoff({
   head,
   gate = async () => undefined,
   execute = run,
+  callerCwd = process.cwd(),
+  force = false,
 }) {
   const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
   assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
+  // Authority check: only the director (from the registered checkout path) may
+  // deliver. Entries without a director record predate this feature; they are
+  // allowed through with a warning so existing kickoffs stay closable.
+  assertDirectorAuthority(entry, callerCwd, "deliver", force);
   const delivery = entry.delivery;
   assert(
     delivery,
