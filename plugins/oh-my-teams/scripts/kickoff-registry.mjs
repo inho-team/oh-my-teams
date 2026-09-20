@@ -466,7 +466,7 @@ function isAncestor(repoDir, tipRef, baseRef) {
  * @param {object} request.entry - Validated kickoff registry entry.
  * @param {string[]} request.branches - Branch names to delete (local and
  *   remote share the same name; each is tried independently).
- * @param {string[]} [request.remoteName="origin"] - Git remote to push the
+ * @param {string} [request.remoteName="origin"] - Git remote to push the
  *   deletions to. Pass an empty string to skip remote deletion.
  * @returns {{deleted: string[], skipped: string[], errors: string[]}} Result.
  */
