@@ -120,7 +120,7 @@ const LOWER_EVIDENCE = {
  * 패치 버전만 다르면 근거 등급을 그대로 두고 untested_patch_version만 붙입니다.
  * 주·부 버전이 다르거나 버전을 확인하지 못했으면 근거 등급을 한 단계 낮추고
  * untested_version을 붙입니다. 실측으로 검증한 칸은 한 단계 낮아져도 여전히 실행되고,
- * 원래 unverified였던 칸만 검증 모드 승인을 요구합니다. 이미 막힌 결과는 그대로 둡니다.
+ * 미검증 근거는 경고로 남기며 이미 막힌 결과는 그대로 둡니다.
  *
  * @param {MatrixResult} candidate - 표가 고른 결과.
  * @param {object} params - 환경 조합 파라미터.
@@ -144,36 +144,20 @@ function applyVersionEvidence(candidate, params) {
 }
 
 /**
- * `unverified`인 `supervised-terminal` 결과를 검증 모드 여부로 처리합니다.
- *
- * 검증 모드(`allowUnverified=true`)일 때만 터미널 생성을 허용하고,
- * 그렇지 않으면 `blocked (unverified-terminal-creation)`으로 차단합니다.
+ * 실행 경로가 알려진 미검증 조합은 근거 등급을 유지하고 경고를 남깁니다.
+ * 검증 기록의 부재는 실행 실패가 아니며 실제 준비 상태는 터미널에서 확인합니다.
  *
  * @param {MatrixResult} candidate - 평가 결과 후보.
- * @param {boolean} allowUnverified - 검증 모드 허용 여부.
- * @param {string|undefined} allowUnverifiedApproval - 검증 모드 승인 문장.
- * @returns {MatrixResult} 최종 결과.
+ * @returns {MatrixResult} 미검증 경고가 포함된 결과.
  */
-function applyVerificationGate(
-  candidate,
-  allowUnverified,
-  allowUnverifiedApproval,
-) {
+function applyEvidenceWarning(candidate) {
   if (candidate.path !== "supervised-terminal") return candidate;
   if (candidate.evidence !== "unverified") return candidate;
-  if (allowUnverified && allowUnverifiedApproval) return candidate;
-  const carried = candidate.reason.filter((code) => code !== "");
-  const versionNote = carried.includes("untested_version")
-    ? ` 검증에 사용한 버전은 Orca ${VERIFIED_ORCA_VERSION}, Antigravity CLI ${VERIFIED_CLI_VERSION}입니다.`
-    : "";
   return {
-    path: "blocked",
-    reason: ["unverified-terminal-creation", ...carried],
-    nextOwner: "pm",
+    ...candidate,
+    reason: ["unverified-terminal-evidence", ...candidate.reason],
     nextAction:
-      '검증되지 않은 조합입니다. --allow-unverified "<승인 문장>" 옵션으로 명시적 승인 후 재시도하세요.' +
-      versionNote,
-    evidence: "unverified",
+      "검증 기록이 부족합니다. 실행 후 준비 상태와 모델을 확인하세요.",
   };
 }
 
@@ -386,20 +370,14 @@ const MATRIX_RULES = [
  * @param {string} params.cliVersion - Antigravity CLI 버전.
  * @param {boolean} [params.isCompoundCommand=false] - 실제로 입력하는 명령이 복합 명령(;로 연결)인지 여부.
  *   true일 때만 2행(no_agent_detected) 규칙이 적용됩니다.
- * @param {boolean} [params.allowUnverified=false] - 검증 모드. true일 때만 unverified인
- *   supervised-terminal 후보 칸이 터미널 생성을 허용합니다.
- * @param {string} [params.allowUnverifiedApproval] - 검증 모드 승인 문장. 책임 소재 추적용.
+ * @param {boolean} [params.allowUnverified=false] - 이전 호출과의 호환을 위한 옵션이며 경로에 영향을 주지 않습니다.
+ * @param {string} [params.allowUnverifiedApproval] - 이전 호출에서 전달하던 승인 문장입니다.
  * @returns {MatrixResult} 실행 경로 예측 결과.
  */
 export function predictLaunchPath(params) {
-  const { allowUnverified = false, allowUnverifiedApproval } = params;
   for (const rule of MATRIX_RULES) {
     if (rule.match(params)) {
-      return applyVerificationGate(
-        applyVersionEvidence(rule.result, params),
-        allowUnverified,
-        allowUnverifiedApproval,
-      );
+      return applyEvidenceWarning(applyVersionEvidence(rule.result, params));
     }
   }
   // 이 줄에 도달하면 프로그래밍 오류입니다 (마지막 규칙이 모든 조합을 덮습니다).

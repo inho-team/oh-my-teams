@@ -100,7 +100,7 @@ export function predictLaunchPath(params) {
 ```
 
 **검증 모드(`allowUnverified`) 전달 방식:**
-이 값은 터미널 생성 주체가 명령행 옵션으로 제공합니다. 예를 들어, `role-terminal --allow-unverified "<누가 무엇을 승인했는지>"` 옵션을 통해 전달하며, 결과에 승인 문장을 남겨 책임 소재를 추적합니다. 기본 실행(검증 모드 해제) 시에는 매트릭스에서 `unverified`인 `supervised-terminal` 경로에 도달하면 터미널 생성 전에 알리고 멈춥니다.
+초기 설계에서는 이 옵션으로 미검증 경로의 실행 승인을 받았습니다. #66 수정 후에는 실행 경로가 정해진 `supervised-terminal` 조합을 근거 등급만으로 차단하지 않습니다. `unverified-terminal-evidence` 경고와 환경 정보를 결과에 남기고, 실제 터미널의 준비 상태와 모델을 확인합니다. 옵션은 이전 호출과의 호환을 위해 유지합니다. 아래 표와 실측 기록의 검증 모드는 당시 정책을 나타내며 현재 실행 정책은 `launch-matrix.mjs`를 따릅니다.
 
 ### 2. 칸의 값 (MatrixResult 스키마)
 - `path`: `supervised-terminal` | `supervised-screen-path` | `headless` | `blocked`
