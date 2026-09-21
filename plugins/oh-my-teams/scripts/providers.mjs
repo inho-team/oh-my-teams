@@ -87,6 +87,10 @@ export function providerRequest(profile, cwd, prompt, timeoutMs = 300000) {
  * @throws {Error} When the provider is unsupported or is not process-backed.
  */
 export function providerCommand(profile, cwd, prompt, timeoutMs = 300000) {
+  assert(
+    !profile.runner,
+    "opencodex-headless-unverified: use the fixed-account provider invocation",
+  );
   const { argv, input, transport } = providerRequest(
     profile,
     cwd,

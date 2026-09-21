@@ -11,7 +11,10 @@ import {
   readOpenCodexObservation,
   validateOpenCodexRunner,
 } from "../plugins/oh-my-teams/scripts/opencodex.mjs";
-import { invoke } from "../plugins/oh-my-teams/scripts/providers.mjs";
+import {
+  invoke,
+  providerCommand,
+} from "../plugins/oh-my-teams/scripts/providers.mjs";
 
 const fingerprint = `sha256:${"a".repeat(64)}`;
 const profile = {
@@ -176,5 +179,17 @@ test("the public provider entrypoint refuses an unconfigured explicit runner wit
         1000,
       ),
     /opencodex-action-required/,
+  );
+});
+
+test("headless command construction cannot bypass an explicit OpenCodex runner", () => {
+  assert.throws(
+    () =>
+      providerCommand(
+        { ...profile, provider: "codex", command: ["codex"] },
+        "/tmp",
+        "test",
+      ),
+    /opencodex-headless-unverified/,
   );
 });
