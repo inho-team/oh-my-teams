@@ -889,7 +889,7 @@
   "sharedAntigravity": {
     "accountPrefix": "e4a44806",
     "fixedAccountFixtureStatus": "not-run",
-    "reason": "hold-until-2026-09-21T06:04:01Z",
+    "reason": "\ubbf8\uc2e4\ud589: \uc0ac\uc6a9\uc790 \uacb0\uc815\uc73c\ub85c Claude/Agy \ucd94\ub860 \uc911\ub2e8(2026-09-21 05:10Z)",
     "poolRequestStatus": "completed-with-oauth-account-429-recovery",
     "timingException": "PM confirmed user authorization in msg_db97868379da"
   },
@@ -1127,5 +1127,92 @@
       "files": true,
       "keychain": true
     }
+  },
+  "finalCleanup": {
+    "requestedAt": "2026-09-21T05:23:27.887421+00:00",
+    "pid": 18274,
+    "port": 18473,
+    "signal": "SIGTERM",
+    "temporaryDirectoryPreserved": true,
+    "observedAt": "2026-09-21T05:23:44.933555+00:00",
+    "remainingKnownLabProcesses": [],
+    "listeningPorts": {
+      "18473": false,
+      "18474": false,
+      "18475": false,
+      "18476": false
+    },
+    "proxyExitCode": 0,
+    "remainingLabArgumentMatchedPids": [],
+    "processScanAt": "2026-09-21T05:24:12.606917+00:00"
+  },
+  "finalSnapshot": {
+    "timestamp": "2026-09-21T05:23:45.017700+00:00",
+    "files": {
+      ".codex/config.toml": {
+        "exists": true,
+        "mtime_ns": 1789960577809199061,
+        "sha256": "7cdc764a7f203224592abae5b4b838e06c5a530ba45bd5030161375a0d83cb98"
+      },
+      ".claude/settings.json": {
+        "exists": true,
+        "mtime_ns": 1789642503855339875,
+        "sha256": "6eabc551fb3052311834595d2d24f836341757d3889717c4e5a75bead57a7be6"
+      },
+      ".opencodex": {
+        "exists": false,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      ".gemini": {
+        "exists": true,
+        "mtime_ns": 1789341168660791558,
+        "sha256": null
+      },
+      ".zshrc": {
+        "exists": true,
+        "mtime_ns": 1789343214072435497,
+        "sha256": "d066a470c19816a0b4c0d683ddbf5de864c6f71a65f914794a8af56203b675c0"
+      }
+    },
+    "keychain": {
+      "opencodex.provider-api-key.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "opencodex.native-main-profile.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "Claude Code-credentials": {
+        "exit": 0,
+        "metadata_sha256": "f6b03eee9499f98153667b83528e04df3764ace87b86d9c931988d0beafb2bd9",
+        "secret_requested": false
+      }
+    },
+    "unchanged": {
+      "files": true,
+      "keychain": false
+    }
+  },
+  "finalDecision": {
+    "decidedAt": "2026-09-21T05:10:00Z",
+    "receivedMessage": "msg_25fe12c85561",
+    "rule": "No further Claude or Antigravity inference; preserve completed evidence; close W1 after cleanup and checks"
+  },
+  "finalKeychainDates": {
+    "cdat": "20260604231104Z",
+    "mdat": "20260921045735Z"
+  },
+  "finalIsolationQualification": {
+    "configurationFilesUnchanged": true,
+    "openCodexKeychainServicesStillAbsent": true,
+    "claudeKeychainMetadataChanged": true,
+    "lastObservedUnchangedAt": "2026-09-21T04:26:26.379319Z",
+    "itemModifiedAt": "2026-09-21T04:57:35Z",
+    "attribution": "unknown; change predates proxy shutdown and occurred during the waiting interval",
+    "keychainSecretValuesRead": false
   }
 }
