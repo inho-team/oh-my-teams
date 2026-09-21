@@ -210,6 +210,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair \
 
 `validate`가 확인하는 조건과 위반할 때의 오류는 다음과 같습니다. 아래 조건 하나라도 어기면 오류 메시지는 모두 `Invalid OpenCodex runner binding: <프로필 ID>`입니다.
 
+- `provider`가 OpenCodex를 지원하는 provider(`codex`)여야 합니다.
 - `runner.kind`가 `opencodex`이고 `runner.mode`가 `fixed-account`여야 합니다.
 - `runner.accountHomeRef`가 프로필의 `account`와 같아야 합니다.
 - `account`는 `current`가 될 수 없습니다.

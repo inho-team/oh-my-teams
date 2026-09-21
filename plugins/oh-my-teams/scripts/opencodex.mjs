@@ -7,6 +7,12 @@ import net from "node:net";
 import { assert } from "./core.mjs";
 
 /**
+ * Providers that support OpenCodex fixed-account runner binding.
+ * @type {string[]}
+ */
+export const OPENCODEX_RUNNER_PROVIDERS = Object.freeze(["codex"]);
+
+/**
  * Validates a profile's optional OpenCodex runner without changing legacy profile behavior.
  * @param {object} profile - Organization profile.
  * @param {object} activeRuntime - Active runtime identity.
@@ -17,6 +23,12 @@ export function validateOpenCodexRunner(profile, activeRuntime) {
   const runner = profile.runner;
   assert(runner.kind === "opencodex", "opencodex-binding-unverified");
   assert(runner.mode === "fixed-account", "opencodex-pool-unverified");
+  if (profile.provider !== undefined) {
+    assert(
+      OPENCODEX_RUNNER_PROVIDERS.includes(profile.provider),
+      `Invalid OpenCodex runner binding: ${profile.id ?? "(unknown)"} (provider ${profile.provider} does not support runners)`,
+    );
+  }
   assert(
     typeof runner.accountHomeRef === "string" &&
       runner.accountHomeRef === profile.account,

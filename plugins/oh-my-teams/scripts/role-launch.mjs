@@ -382,7 +382,7 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
         effort: profile.effort ?? null,
         accountHomeRef: profile.runner.accountHomeRef,
         runtimeFingerprint: profile.runner.runtimeFingerprint,
-        actualRunner: "codex",
+        actualRunner: profile.provider,
       }
     : null;
   // Claude Code 2.1.221 and later compact a session at this window instead of
