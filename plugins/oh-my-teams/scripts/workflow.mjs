@@ -156,7 +156,7 @@ async function freezeTasks(request, baseDir, repo) {
 // which role the work was written for and which one ran it. The invariant that
 // an absent requestedRole means the role itself was requested is what lets a
 // depth change fold the work again from the original request.
-function assignRole(item, roles, selection) {
+function assignRole(item, roles, selection, declaredRoles) {
   const { requestedRole, source, reason } = selection;
   item.role = foldRole(roles, requestedRole);
   item.requestedRole = requestedRole === item.role ? undefined : requestedRole;
@@ -165,6 +165,12 @@ function assignRole(item, roles, selection) {
     reason,
     requestedRole,
     selectedRole: item.role,
+    foldReason:
+      requestedRole === item.role
+        ? null
+        : declaredRoles.includes(requestedRole)
+          ? "run-depth-excluded"
+          : "organization-role-unavailable",
   };
 }
 
@@ -177,7 +183,7 @@ function itemSelection(item) {
   };
 }
 
-function createTaskState(task, selection, roles) {
+function createTaskState(task, selection, roles, declaredRoles) {
   const item = {
     revision: task.revision,
     taskHash: taskHash(task),
@@ -188,7 +194,7 @@ function createTaskState(task, selection, roles) {
     attempts: [],
     rework: [],
   };
-  assignRole(item, roles, selection);
+  assignRole(item, roles, selection, declaredRoles);
   return item;
 }
 
@@ -240,7 +246,12 @@ function createInitialState(request, org, tasks) {
     tasks: Object.fromEntries(
       tasks.map((task) => [
         task.id,
-        createTaskState(task, selectionByTask[task.id], roles),
+        createTaskState(
+          task,
+          selectionByTask[task.id],
+          roles,
+          definedRoles(org),
+        ),
       ]),
     ),
     eventIds: [],
@@ -1422,7 +1433,13 @@ export function retryTask(stateDir, id, expectedRevision, input) {
     item.failure = null;
     // The depth may have changed since this task was dispatched; the retry runs
     // on whichever role the current depth gives its original request.
-    assignRole(item, state.roles ?? ROLES, itemSelection(item));
+    const org = readJSON(path.join(dir, "organization.json"));
+    assignRole(
+      item,
+      state.roles ?? ROLES,
+      itemSelection(item),
+      definedRoles(org),
+    );
     appendWorkflowEvent(dir, state, {
       id: input.eventId,
       type: "task-retry-ready",
@@ -1511,7 +1528,7 @@ export function setWorkflowDepth(stateDir, id, expectedRevision, input) {
 
     for (const item of Object.values(state.tasks)) {
       if (item.state === "pending")
-        assignRole(item, roles, itemSelection(item));
+        assignRole(item, roles, itemSelection(item), definedRoles(org));
     }
     const change = {
       from,

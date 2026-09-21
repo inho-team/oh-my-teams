@@ -244,6 +244,9 @@ function recordProviderCall(
       callNumber === 1
         ? firstSelectionReason
         : `fallback-after:${failure || "previous-attempt"}`,
+    role: report.role,
+    foldReason:
+      callNumber === 1 ? (report.selection?.foldReason ?? null) : null,
     preset: report.modelPolicy?.preset ?? null,
     presetRevision: report.modelPolicy?.revision ?? null,
     elapsedMs: response.elapsedMs,

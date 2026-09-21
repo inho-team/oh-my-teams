@@ -145,6 +145,7 @@ test("automatic selection sends only bounded low-risk work to Intern", async (t)
     reason: "low-risk-closed-deterministic",
     requestedRole: "intern",
     selectedRole: "intern",
+    foldReason: null,
   });
   assert.equal(state.tasks.privileged.role, "senior");
   assert.equal(state.tasks.privileged.selection.reason, "authority-elevated");
@@ -241,6 +242,9 @@ test("depth and a missing Intern fold automatic work while preserving its reason
   );
   assert.equal(shallowReport.role, "junior");
   assert.equal(shallowReport.selectionReason, "low-risk-closed-deterministic");
+  assert.equal(shallowReport.selection.foldReason, "run-depth-excluded");
+  assert.equal(shallowReport.calls[0].role, "junior");
+  assert.equal(shallowReport.calls[0].foldReason, "run-depth-excluded");
 
   const reduced = organization();
   delete reduced.roles.intern;
@@ -265,6 +269,10 @@ test("depth and a missing Intern fold automatic work while preserving its reason
     unavailableReport.selectionReason,
     "low-risk-closed-deterministic",
   );
+  assert.equal(
+    unavailableReport.selection.foldReason,
+    "organization-role-unavailable",
+  );
 });
 
 test("a legacy selection-free snapshot remains safe through a depth change", async (t) => {
@@ -287,6 +295,10 @@ test("a legacy selection-free snapshot remains safe through a depth change", asy
   });
   assert.equal(changed.state.tasks.bounded.role, "junior");
   assert.equal(changed.state.tasks.bounded.selection.reason, "legacy-role");
+  assert.equal(
+    changed.state.tasks.bounded.selection.foldReason,
+    "run-depth-excluded",
+  );
 });
 
 test("a legacy selection-free snapshot retains its role through retry", async (t) => {
@@ -317,6 +329,43 @@ test("a legacy selection-free snapshot retains its role through retry", async (t
   assert.equal(retried.tasks.bounded.state, "pending");
   assert.equal(retried.tasks.bounded.role, "intern");
   assert.equal(retried.tasks.bounded.selection.reason, "legacy-role");
+  assert.equal(retried.tasks.bounded.selection.foldReason, null);
+});
+
+test("pending work recalculates its fold reason when depth changes", async (t) => {
+  const bounded = task("bounded", {
+    scope: "closed",
+    verification: "deterministic",
+    authority: "standard",
+    design: "routine",
+  });
+  const { stateDir, request, state } = await create(t, { bounded });
+  const shallower = setWorkflowDepth(stateDir, request.id, state.revision, {
+    schemaVersion: 1,
+    eventId: "depth-three",
+    depth: 3,
+    reason: "The bounded task is the only remaining task.",
+    evidence: "tests/intern-first.test.mjs",
+  });
+  assert.equal(shallower.state.tasks.bounded.role, "junior");
+  assert.equal(
+    shallower.state.tasks.bounded.selection.foldReason,
+    "run-depth-excluded",
+  );
+  const deeper = setWorkflowDepth(
+    stateDir,
+    request.id,
+    shallower.state.revision,
+    {
+      schemaVersion: 1,
+      eventId: "depth-five",
+      depth: 5,
+      reason: "The Intern role is available again.",
+      evidence: "tests/intern-first.test.mjs",
+    },
+  );
+  assert.equal(deeper.state.tasks.bounded.role, "intern");
+  assert.equal(deeper.state.tasks.bounded.selection.foldReason, null);
 });
 
 test("work CLI enforces the workflow selection and records an escalation receipt", async (t) => {
