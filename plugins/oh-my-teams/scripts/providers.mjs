@@ -211,15 +211,17 @@ export async function invoke(
       "opencodex-action-required: run runtime-install first",
     );
     const paths = runtimePaths(root);
-    const binding = resolveOpenCodexBinding(profile, diagnosed.runtime);
+    const binding = {
+      ...resolveOpenCodexBinding(profile, diagnosed.runtime),
+      runtimePrefix: paths.runtime,
+    };
     const profileEnvironment = profileEnv(profile);
     const proxyEnvironment = openCodexEnvironment({
       ...binding,
-      env: profileEnvironment,
+      env: profile.env ?? {},
     });
     const proxy = await startOpenCodexProxy({
       ...binding,
-      runtimePrefix: paths.runtime,
     });
     try {
       const startedAt = Date.now();

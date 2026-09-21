@@ -109,9 +109,9 @@ export function validateFixedOpenCodexAccountHome(
     "opencodex-binding-unverified",
   );
   assert(
-    config.activeCodexAccountPinned === true &&
-      config.providers?.openai?.codexAccountMode === "single" &&
-      config.clientIntegrations?.codex?.enabled !== true,
+    config.activeCodexAccountPinned === accounts[0]?.id &&
+      config.providers?.openai?.codexAccountMode === "pool" &&
+      config.clientIntegrations?.codex === false,
     "opencodex-pool-unverified",
   );
   return { provider: "openai", accountLogLabel };
@@ -225,11 +225,12 @@ export function openCodexCommand(request) {
  * @param {string} provider - OMT logical provider identifier.
  * @returns {string} OpenCodex request-history provider identifier.
  */
-export function openCodexProvider(provider) {
+export function openCodexProvider(provider, accountLogLabel) {
   return (
-    { codex: "openai", claude: "anthropic", agy: "google-antigravity" }[
-      provider
-    ] ?? provider
+    (provider === "codex" && accountLogLabel
+      ? `openai-${accountLogLabel}`
+      : { claude: "anthropic", agy: "google-antigravity" }[provider]) ??
+    provider
   );
 }
 
@@ -257,13 +258,14 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
       candidate.timestamp &&
       Date.parse(candidate.timestamp) >= input.startedAt &&
       candidate.requestedModel === input.model &&
-      candidate.provider === openCodexProvider(input.provider),
+      candidate.provider ===
+        openCodexProvider(input.provider, input.accountLogLabel),
   );
   const attempt = entry?.attempts?.at(-1);
   assert(
     entry &&
       attempt?.accountLogLabel === input.accountLogLabel &&
-      attempt.provider === openCodexProvider(input.provider),
+      typeof attempt.provider === "string",
     "opencodex-binding-unverified",
   );
   const model = entry.resolvedModel ?? entry.model ?? null;

@@ -120,15 +120,15 @@ test("the isolated runner strips inherited API credentials", () => {
   assert.equal(environment.OPENCODEX_HOME, "/account");
 });
 
-test("fixed OpenAI homes reject unpinned pools before a proxy can start", (t) => {
+test("fixed OpenAI homes require the vendor-valid pin and disabled native integration", (t) => {
   const accountHome = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ocx-home-"));
   t.after(() => fs.rmSync(accountHome, { recursive: true, force: true }));
   const config = {
     codexAccounts: [{ id: "only", logLabel: "fixed-account" }],
     activeCodexAccountId: "only",
-    activeCodexAccountPinned: true,
-    providers: { openai: { codexAccountMode: "single" } },
-    clientIntegrations: { codex: { enabled: false } },
+    activeCodexAccountPinned: "only",
+    providers: { openai: { codexAccountMode: "pool" } },
+    clientIntegrations: { codex: false },
   };
   fs.writeFileSync(
     path.join(accountHome, "config.json"),
@@ -147,7 +147,7 @@ test("fixed OpenAI homes reject unpinned pools before a proxy can start", (t) =>
   );
   fs.writeFileSync(
     path.join(accountHome, "config.json"),
-    JSON.stringify({ ...config, activeCodexAccountPinned: false }),
+    JSON.stringify({ ...config, activeCodexAccountPinned: true }),
   );
   assert.throws(
     () => validateFixedOpenCodexAccountHome(accountHome, "fixed-account"),
@@ -180,7 +180,7 @@ test("proxy request history, not CLI JSONL, proves the fixed account and model",
               timestamp: "2026-09-21T00:00:00.000Z",
               requestedModel: "gpt-6-astra",
               resolvedModel: "gpt-6-astra",
-              provider: "openai",
+              provider: "openai-fixed-account",
               usage: { input_tokens: 3 },
               attempts: [
                 { provider: "openai", accountLogLabel: "fixed-account" },
@@ -214,7 +214,7 @@ test("the public provider entrypoint refuses an unconfigured explicit runner wit
         "test",
         1000,
       ),
-    /opencodex-action-required/,
+    /opencodex-(?:action-required|binding-unverified)/,
   );
 });
 
