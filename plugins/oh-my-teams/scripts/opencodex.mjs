@@ -1,5 +1,7 @@
 /** Fail-closed OpenCodex fixed-account runner binding validation. */
 import path from "node:path";
+import { spawn } from "node:child_process";
+import net from "node:net";
 import { assert } from "./core.mjs";
 
 /**
@@ -52,4 +54,82 @@ export function openCodexEnvironment(binding) {
     OPENCODEX_HOME: binding.accountHome,
     CODEX_HOME: binding.sessionHome,
   };
+}
+
+async function unusedPort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) =>
+    server.listen(0, "127.0.0.1", resolve).on("error", reject),
+  );
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+/**
+ * Starts an owned loopback OpenCodex process and waits for its health endpoint.
+ * This never invokes a login command and only terminates the child it started.
+ * @param {object} binding - Runtime prefix and isolated fixed-account homes.
+ * @returns {Promise<{port: number, pid: number | null, env: Record<string, string>, stop: () => Promise<void>}>} Owned proxy receipt.
+ */
+export async function startOpenCodexProxy(binding) {
+  const env = openCodexEnvironment(binding);
+  const port = binding.port ?? (await unusedPort());
+  const binary = path.join(
+    binding.runtimePrefix,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "ocx.cmd" : "ocx",
+  );
+  const child = spawn(binary, ["start", "--port", String(port)], {
+    cwd: binding.runtimePrefix,
+    env: { ...process.env, ...env },
+    stdio: "ignore",
+    shell: false,
+  });
+  const deadline = Date.now() + (binding.readyTimeoutMs ?? 15000);
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/healthz`);
+      if (response.ok) {
+        return {
+          port,
+          pid: child.pid ?? null,
+          env,
+          stop: async () => {
+            if (!child.killed) child.kill("SIGTERM");
+            await new Promise((resolve) => child.once("close", resolve));
+          },
+        };
+      }
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!child.killed) child.kill("SIGTERM");
+  throw new Error("opencodex-proxy-not-ready");
+}
+
+/**
+ * Builds the actual Codex CLI argv for an already-ready OpenCodex proxy.
+ * @param {object} request - Requested model, effort, cwd and proxy port.
+ * @returns {string[]} Shell-free Codex argv.
+ */
+export function openCodexCommand(request) {
+  assert(request.model, "opencodex-binding-unverified");
+  assert(request.effort, "opencodex-binding-unverified");
+  assert(Number.isInteger(request.port), "opencodex-proxy-not-ready");
+  return [
+    "codex",
+    "exec",
+    "--json",
+    "--cd",
+    request.cwd,
+    "--model",
+    request.model,
+    "--config",
+    `model_reasoning_effort=${request.effort}`,
+    "--config",
+    `openai_base_url=http://127.0.0.1:${request.port}/v1`,
+    "-",
+  ];
 }
