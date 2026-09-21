@@ -48,7 +48,7 @@ origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브�
 
 **결과 필드 (w1/rt-verify-claude.json)**
 - trust: not-asked (신뢰 질문이 나오지 않음)
-- submission: enter-sent (초기 진입 명령 Enter가 필요함)
+- submission: enter-sent (명령이 입력줄에 남아 있어 Enter를 한 번 보냄)
 - ready: true (터미널 준비 완료)
 - screen: "Haiku 4.5 · Claude Max" 모델 확인
 
@@ -78,7 +78,7 @@ origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브�
 **결과 필드 (w1/start-verify-claude-1.json)**
 - receipt.state: ready
 - receipt.stage: input_accepted (dispatch 입력이 수용됨)
-- turnStart: observed (명령이 입력줄에 남아 있어 Enter를 한 번 보냄)
+- turnStart: observed (worker-start 영수증이 턴 시작을 관측했다는 값)
 - dispatchId: ctx_1d04553e945f
 - freshContext.cleared: false
 - freshContext.reason: first-task (첫 작업이므로 대화 초기화 없음)
@@ -108,7 +108,7 @@ Codex의 주간 사용량 한도가 2026-09-26 06:11 KST에 리셋될 예정이�
 점진적 전달 확인 플래그 --ack를 사용하여 PM이 대기 중에 heartbeat 메시지를 자동으로 필터링하고, 실제 업무 메시지만 모델을 깨우는 동작을 검증했습니다.
 
 **관찰 내용**
-- --ack 플래그가 있는 대기에서 heartbeat가 여러 건 전달되었으나 래퍼가 흡수했고 모델을 깨우지 않았습니다(대기 1~6, 8~11, 13, 14, 17, 18 등).
+- --ack 플래그가 있는 대기에서 heartbeat가 여러 건 전달되었으나 래퍼가 흡수했고 모델을 깨우지 않았습니다. 예를 들어 대기 1(heartbeats: 1), 대기 2(heartbeats: 1), 대기 3(heartbeats: 1), 대기 5(heartbeats: 1), 대기 8(heartbeats: 1) 등에서 heartbeat가 흡수되었습니다.
 - --ack로 넘긴 delivery ID의 확인 처리는 replayed 플래그(false)로 확인되어 이전 메시지가 재전달되지 않습니다(대기 2, 3 등).
 - 같은 --ack를 여러 번 넘겨도 오류 없이 처리됩니다(대기 7, 8에서 delivery_69cfec6bc8d7를 두 번 넘김).
 - 일반적인 timeout 시간(progressCheckMs 900초)을 관찰했으나(대기 15), 첫 프로세스 종료 직후 재대기에서 1~2분 만에 이른 timedOut이 발생한 원인은 미검증입니다(대기 7).
