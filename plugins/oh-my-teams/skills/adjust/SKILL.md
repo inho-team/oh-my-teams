@@ -9,7 +9,7 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 
 프로젝트 `.omt/organization.json`을 읽는다. 없으면 `form`으로 이동한다. 사용자 요청으로 바뀌는 항목에 대해서만 필요한 선택을 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 받는다. 기존 구독 배정을 전부 다시 묻지 않는다.
 
-1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리한다. 이름 변경, 직급별 부모와 인원, 구독/모델, 추론 강도, 대체 순서, 보조 도구 허용, `opus-first`·`balanced`·`single-subscription` 프리셋을 지원한다. 역할 ID는 pm/pl/senior/junior/intern이며 이 이름은 바꿀 수 없다.
+1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리한다. 이름 변경, 직급별 부모와 인원, 구독/모델, 추론 강도, 대체 순서, 보조 도구 허용, 자문자 허용과 자문 예산, `opus-first`·`balanced`·`single-subscription`·`advisor-codex`·`advisor-claude` 프리셋을 지원한다. 역할 ID는 pm/pl/senior/junior/intern이며 이 이름은 바꿀 수 없다.
 2. 새 구독이나 과금 경로를 임의로 선택하지 않는다. 계정 연결은 아래 「계정과 실행기」를 따른다.
 3. 수정안을 별도 JSON에 쓰고 현재 스킬 기준 `../../scripts/teams-org.mjs`를 호출한다.
 
@@ -20,6 +20,7 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 - 추론 강도: 기록되지 않아 각 CLI 기본값을 쓰고 있다. Gemini는 강도가 필수라서 결성 때 Flash 3.8은 `medium`, Pro 3.1은 `high` ID로 저장되었다. 이전에 결성한 조직은 둘 다 `-high`일 수 있다.
 - 동시 인원·시도 횟수 1, 대체 프로필 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`) 3. 이 한도는 `work` 한 번과 workflow attempt 하나의 provider 호출 수 상한이며, 대화형 역할 터미널의 턴은 세지 않는다.
 - 보조 도구: `assistants`가 비어 있어 모든 역할의 `assist` 호출이 거부된다.
+- 자문자: `advisors`가 비어 있어 모든 역할의 `advise` 호출이 거부된다. 허용하면 자문 예산(`policy.adviceBudget`)은 kickoff 상태 하나당 6회가 기본값이다.
 - 계정: 모든 프로필이 현재 로그인 계정을 쓰며, 같은 실행기의 프로필은 하나의 `pool`로 묶여 있다.
 - 무응답 감독: `policy.supervision`이 `progressCheckMs: 900000`(15분), `unansweredLimit: 2`다. 이 값이 없는 이전 조직도 같은 기본값으로 읽힌다.
 
@@ -33,7 +34,16 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 
 `single-subscription` 프리셋은 모델을 하나도 바꾸지 않는다. 선언된 모든 역할의 동시 인원을 1로 낮추고, 주 프로필과 같은 할당량을 쓰는 대체 프로필만 대체 순서에서 제거한다. 계정이 다른 대체는 그대로 남는다. 구독 하나를 여러 역할이 나눠 쓰는 조직에 적용한다.
 
-프리셋은 먼저 `preset`으로 변경되는 역할의 프로필, 대체 순서와 **동시 인원**을 미리 본다. 프리셋은 동시 인원을 1로 고정하므로 인원을 늘려 둔 조직은 줄어든다. 미리보기의 `concurrency` 변화를 사용자에게 그대로 알린다. 기존 구독·계정 프로필을 재사용하며, 없는 모델 프로필은 사용자가 `adjust`로 연결하기 전까지 적용하지 않는다. 명시적으로 적용할 때만 `--apply`를 붙인다.
+`advisor-codex`와 `advisor-claude` 프리셋은 주도 역할과 물량 역할의 모델을 나누고, 프론티어 모델을 결정 관문의 자문자로 옮긴다. PM이 kickoff 내내 감독하는 동안 매 턴 누적 컨텍스트가 다시 입력되므로, 가장 비싼 모델을 PM에 두지 않고 필요한 순간에만 부르게 하려는 것이다. 호출 규칙은 [`../../references/advise.md`](../../references/advise.md)에 있다.
+
+| 프리셋 | PM | PL·Senior | Junior | Intern | 자문자(PM·PL·Senior에게 허용) |
+|---|---|---|---|---|---|
+| `advisor-codex` | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` | `gpt-5.6-luna` | `gpt-6-astra` |
+| `advisor-claude` | `opus` | `sonnet` | `sonnet` | `haiku` | `fable` |
+
+두 프리셋은 이미 그 실행기(Codex 또는 Claude)에서 돌던 역할만 옮긴다. Agy·Gemini처럼 다른 실행기에 배정된 역할은 다른 할당량을 쓰므로 그대로 두며, 옮긴 역할의 대체 순서는 비우고 동시 인원은 1로 둔다. 조직에 해당 모델의 프로필이 없으면 같은 실행기의 기존 프로필을 복사해 모델만 바꾼 프로필을 추가하므로, 새 계정이나 구독을 만들지 않는다. 같은 실행기의 프로필이 하나도 없으면 거부한다. 추가되는 프로필은 미리보기의 `addedProfiles`에, 자문 허용 목록의 변화는 `advisors`에 나오므로 적용하기 전에 사용자에게 알린다.
+
+프리셋은 먼저 `preset`으로 변경되는 역할의 프로필, 대체 순서와 **동시 인원**을 미리 본다. 프리셋은 동시 인원을 1로 고정하므로 인원을 늘려 둔 조직은 줄어든다. 미리보기의 `concurrency` 변화를 사용자에게 그대로 알린다. `opus-first`와 `balanced`는 기존 구독·계정 프로필을 재사용하며, 없는 모델 프로필은 사용자가 `adjust`로 연결하기 전까지 적용하지 않는다. 명시적으로 적용할 때만 `--apply`를 붙인다.
 
 ```text
 node <runtime> preset --org <project>/.omt/organization.json --name balanced --revision <read-revision>

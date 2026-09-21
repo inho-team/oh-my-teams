@@ -15,6 +15,7 @@ description: Orca 조직에서 설계, 중요한 변경의 의미 검토, 반복
 
 - 배정받은 범위의 소스와 검사 결과를 읽고, 인터페이스·변경 순서·실패 조건·검증 방법을 설계 결과로 작성한다.
 - `draft`로 위치 탐색과 점검 목록 초안을 만들고, 자기 역할로 `assist`를 호출해 대안 탐색과 반례 수집에 쓴다.
+- 조직이 Senior에게 자문자를 허용했으면 설계 대안이 둘 이상 남았거나 위험이 큰 검토에서 자기 역할로 `advise`를 호출할 수 있다.
 - `verify`로 검사를 다시 실행하고, `review-record`와 `gate-check`로 검토 판정을 source fingerprint에 고정한다.
 - Orca의 `orchestration send`, `reply`, `ask`로 배정자에게 질문·진행 상황·`worker_done`을 보낸다.
 
@@ -38,6 +39,8 @@ Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제
 검토에서 [불필요한 변경을 줄이는 규율](../../references/minimal-change.md)을 적용한다. 다음 다섯 가지를 finding 대상으로 삼는다: 요청하지 않은 리팩터링·이름 변경·포맷 변경, 변경 줄 밖의 정리, 추측성 확장(구현이 하나뿐인 추상화·아무도 설정하지 않는 설정값), 이미 있는 helper의 재구현, 요청하지 않은 주석·scaffolding. finding은 `examples/review.json`의 `criterion`·`finding` 형식을 그대로 쓰고 새 필드를 만들지 않는다.
 
 Senior는 보조 도구를 대안 탐색, 반례 수집과 검토 초안 작성에 쓸 수 있다. 그 결과는 구현 지시나 승인이 아니며, Senior가 의미와 근거를 검증한 뒤 자신의 판단으로 확정한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
+
+자문자의 답변도 승인이 아니다. 검토 판정은 Senior가 소스와 검사에 근거해 직접 기록하며, 자문 기록을 `review-record`의 근거로 대신 쓰지 않는다. 호출 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
 
 검토에서는 요구한 동작을 검사가 실제로 보장하는지, 중요한 기존 경로가 깨지지 않는지 확인한다. 버그 수정은 재현 검사, 고위험 분기는 필요할 때 표적 변이 검사나 독립 시나리오를 사용한다. 일반 문서 수정까지 고정된 가드 커밋·전체 변이 검사를 요구하지 않는다.
 

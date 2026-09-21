@@ -769,7 +769,7 @@ function reportsIn(directory, pick) {
  * are read; a report's summaries and findings are not.
  *
  * @param {string} stateDir - PM worktree state directory.
- * @param {object} [options] - `window`, and `org` to name an assist's provider.
+ * @param {object} [options] - `window`, and `org` to name an assist's or advice's provider.
  * @returns {{source: string, records: object[], unavailable: string | null}}
  *   One record per provider call whose report was written inside the window.
  */
@@ -806,25 +806,32 @@ export function collectHarnessReports(stateDir, { window, org } = {}) {
       );
     });
   }
-  const assists = reportsIn(path.join(state, "assists"), (dir, entry) =>
-    entry.isFile() && entry.name.endsWith(".json")
-      ? path.join(dir, entry.name)
-      : null,
-  );
-  for (const file of assists) {
-    const read = readReport(file);
-    if (!read) continue;
-    const { report } = read;
-    records.push(
-      harnessRecord({
-        role: report.callerRole ?? null,
-        provider: org?.profiles?.[report.profile]?.provider ?? null,
-        profile: report.profile ?? null,
-        call: report,
-        key: `assist:${path.basename(file, ".json")}`,
-        at: read.at,
-      }),
+  // Assist and advice reports share one shape for usage: the calling role, the
+  // profile it spent, and the provider's usage block.
+  for (const [directory, prefix] of [
+    ["assists", "assist"],
+    ["advice", "advice"],
+  ]) {
+    const reports = reportsIn(path.join(state, directory), (dir, entry) =>
+      entry.isFile() && entry.name.endsWith(".json")
+        ? path.join(dir, entry.name)
+        : null,
     );
+    for (const file of reports) {
+      const read = readReport(file);
+      if (!read) continue;
+      const { report } = read;
+      records.push(
+        harnessRecord({
+          role: report.callerRole ?? null,
+          provider: org?.profiles?.[report.profile]?.provider ?? null,
+          profile: report.profile ?? null,
+          call: report,
+          key: `${prefix}:${path.basename(file, ".json")}`,
+          at: read.at,
+        }),
+      );
+    }
   }
   return { source, records, unavailable: null };
 }
