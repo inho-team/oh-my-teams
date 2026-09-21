@@ -111,7 +111,15 @@
     "purpose": "unauthenticated local transport negative control",
     "exit": 1,
     "events": ["thread.started", "turn.started", "error", "turn.failed"],
-    "errorKinds": ["401", "401"]
+    "errorKinds": ["401", "401"],
+    "localHttpControl": {
+      "status": 401,
+      "error": {
+        "message": "OpenAI account pool has no usable account credential",
+        "type": "authentication_error",
+        "code": "invalid_api_key"
+      }
+    }
   },
   "subscriptions": [
     {

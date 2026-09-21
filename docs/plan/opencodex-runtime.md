@@ -104,7 +104,7 @@ env OPENCODEX_HOME=/tmp/omt-opencodex-probe.dAKX3U/ocx \
 
 ## 관측한 실행 단계와 관측하지 못한 단계
 
-Codex CLI의 설치된 `exec --help`에서 `--config/-c`, `--json`, `--ephemeral`, `--ignore-user-config`와 sandbox 인수를 확인했습니다. 별도 인증 없는 로컬 연결 음성 대조에서는 빈 제공자 설정을 유지하고 존재하지 않는 모델을 요청했습니다. `model_provider=probe`, `model_providers.probe.base_url=http://127.0.0.1:18473/v1`, `wire_api=responses`, `requires_openai_auth=false`를 CLI 인수로만 지정했습니다. 결과는 다음과 같습니다.
+Codex CLI의 설치된 `exec --help`에서 `--config/-c`, `--json`, `--ephemeral`, `--ignore-user-config`와 sandbox 인수를 확인했습니다. 별도 인증 없는 로컬 연결 음성 대조에서는 빈 제공자 설정을 유지하고 존재하지 않는 모델을 요청했습니다. `model_provider=probe`, `model_providers.probe.base_url=http://127.0.0.1:18473/v1`, `wire_api=responses`, `requires_openai_auth=false`를 CLI 인수로만 지정했습니다. 별도 로컬 HTTP 음성 대조의 오류 원문은 `OpenAI account pool has no usable account credential`이었고, 오류 유형은 `authentication_error`, 코드는 `invalid_api_key`였습니다. 존재하지 않는 모델도 계정 pool 인증 오류로 처리되었으므로 이 대조는 특정 제공자 라우팅의 정확성을 입증하지 않습니다. 결과는 다음과 같습니다.
 
 | 단계 | 관측 범위 |
 |---|---|
