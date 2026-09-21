@@ -7,7 +7,7 @@ description: oh my teams 조직 작업의 분할·의존성·Orca worktree 배�
 
 조직 스냅샷과 작업 범위를 읽는다. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery 절차로 현재 `orca-cli`, `orchestration`을 사용한다. 확장된 실행 인수가 필요하면 현재 가이드가 가리키는 관련 참조만 읽는다.
 
-PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분석하고, 중단기 실행 계획·의존성·작업 파동을 결정한다. 구체적인 구현 방법은 Senior에게, 기능 구현과 제한된 실무는 Junior에게 배정한다. PL이 만드는 결과물은 계획과 통합·검증 기록이며, 작업의 최종 산출물은 배정받은 역할이 만든다. 보조 도구는 조사와 점검 목록 초안에 쓰되 계획과 통합 결과는 직접 검증한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다. 조직이 PL에게 자문자를 허용했으면 파동과 의존성을 확정하기 전에만 자문을 구하며, 그 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
+PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분석하고, 중단기 실행 계획·의존성·작업 파동을 결정한다. 구체적인 구현 방법과 상위 등급 구현은 Senior에게, 닫힌 범위의 구현과 제한된 실무는 Junior에게 배정한다. 등급 기준과 Senior 구현의 검토 규칙은 [pm](../pm/SKILL.md)의 「구현 등급」을 따른다. PL이 만드는 결과물은 계획과 통합·검증 기록이며, 작업의 최종 산출물은 배정받은 역할이 만든다. 보조 도구는 조사와 점검 목록 초안에 쓰되 계획과 통합 결과는 직접 검증한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다. 조직이 PL에게 자문자를 허용했으면 파동과 의존성을 확정하기 전에만 자문을 구하며, 그 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
 
 ## 권한·책임·한계
 

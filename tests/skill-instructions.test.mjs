@@ -838,7 +838,10 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // Orca refuses nested workers by default, so PL cannot be the dispatcher.
   assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
   assert.match(readSkill("pl"), /기본값이 1/);
-  assert.match(readSkill("senior"), /- Junior가 이번 실행에 있으면 기능 구현/);
+  assert.match(
+    readSkill("senior"),
+    /- 구현 task의 담당으로 배정받지 않았고 Junior가 이번 실행에 있으면 기능 구현/,
+  );
   assert.match(readSkill("kickoff"), /`PM 실행` 절/);
   // A session that could not start the PM went on as PM itself.
   assert.match(readSkill("kickoff"), /선언 세션은 PM을 대신 맡지 않는다/);
@@ -1097,4 +1100,20 @@ test("minimal-change discipline lives in one place and each role links it", () =
     /\\"/,
     "pm SKILL.md must not contain escaped quotes",
   );
+});
+
+test("a senior may implement only a task assigned to it, and never reviews its own work", () => {
+  const senior = readSkill("senior");
+  const pm = readSkill("pm");
+  // Tiering by reasoning strength: the assignment is the marker, so no new
+  // contract field is needed, and review independence stays with the runtime.
+  assert.match(senior, /workflow task의 `role`이 `senior`/);
+  assert.match(
+    senior,
+    /직접 구현한 task의 필수 검토는 다른 Senior 실행이나 PL·PM이 맡으며/,
+  );
+  assert.match(pm, /## 구현 등급/);
+  assert.match(pm, /workflow task의 `role`을 `senior`로 적는다/);
+  assert.match(pm, /같은 실행이 검토하면 런타임이 거부한다/);
+  assert.match(readSkill("pl"), /「구현 등급」을 따른다/);
 });

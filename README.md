@@ -18,6 +18,8 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 
 구독·모델·승인처럼 사용자가 정해야 하는 항목은 [사용자 선택 질문 계약](plugins/oh-my-teams/references/user-choice.md)을 따른다. 호스트가 구조화된 선택 도구를 제공하면 그것으로 묻고(Claude Code에서는 `AskUserQuestion`), 제공하지 않으면 번호를 매긴 선택지를 한 번에 제시한다. Codex CLI 0.154.0에는 이 용도로 확인된 도구가 없으므로 후자를 쓴다.
 
+**2.6.1 변경:** 구현 task의 담당을 추론 강도로 정한다. 설계와 구현이 한 번에 필요한 상위 등급 구현은 Senior가 직접 맡고, 닫힌 범위의 구현은 Junior가 맡는다. Senior가 구현한 task는 다른 Senior 실행이나 PL·PM이 검토한다. 기준은 [pm](plugins/oh-my-teams/skills/pm/SKILL.md)의 「구현 등급」에 있다.
+
 **2.6.0 변경:** Intern 역할을 삭제했다. 좁은 편집·인용 수집·반복 실무는 Junior가 직접 맡으며, 실행 깊이는 1~4가 된다. `intern`을 선언한 조직 파일은 런타임이 거부하므로, Intern 프로필이 필요하면 Junior로 옮기고 `intern` 역할과 허용 목록 항목을 지운 뒤 `adjust`로 저장한다. 2.6.0 이전에 시작한 kickoff의 workflow 스냅샷과 기록은 `intern`을 `junior`로, 깊이 5를 깊이 4로 읽으므로 그대로 이어서 진행할 수 있다.
 
 **2.0.0 비호환 변경:** 생애주기 스킬 이름에서 `team-` 접두어를 제거했다. `team-form`은 `form`, `team-kickoff`는 `kickoff`가 되었으며 `status`, `adjust`, `close`, `disband`, `help`도 같다. 이전 호환 별칭 `team-setup`, `team-show`, `team-edit`, `org-setup`, `org-show`, `org-edit`과 `director`는 모두 삭제했으므로 그 이름으로는 스킬을 찾을 수 없다. 조직 파일 형식과 런타임 명령은 바뀌지 않았으므로 기존 `.omt/` 설정은 그대로 쓴다.
@@ -27,7 +29,7 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 ```text
 PM       분석·중장기 계획·최종 결과
 └─ PL    분석·중단기 계획·분할·통합
-   └─ Senior  구체적인 구현 방법·중요 변경 검토
+   └─ Senior  구체적인 구현 방법·상위 등급 구현·중요 변경 검토
       └─ Junior  기능 구현·제한된 편집·반복 실무
 ```
 

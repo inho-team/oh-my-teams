@@ -29,7 +29,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 ### 한계
 
 - 이번 실행에 하위 역할이 하나라도 있으면 PM은 최종 산출물(코드, 문서, 조사 보고서)을 직접 작성하지 않는다. 산출물은 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할에게 배정한다.
-- PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고, 산출물 자체를 만들라는 지시를 보내지 않는다. 나눌 필요가 없는 일은 PL을 거치지 않고 Junior에게, 설계와 의미 검토는 Senior에게 직접 배정한다.
+- PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고, 산출물 자체를 만들라는 지시를 보내지 않는다. 나눌 필요가 없는 일은 PL을 거치지 않고 아래 「구현 등급」에 따라 Junior나 Senior에게, 설계와 의미 검토는 Senior에게 직접 배정한다.
 - Orca는 기본적으로 중첩 worker를 한 단계만 허용한다(`NESTED_WORKER_MAX_DEPTH` 기본값 1). 이 설정에서 PM이 띄운 PL은 하위 worker를 시작할 수 없으므로, 사용자가 Orca 설정의 Nested worker depth를 올렸다고 확인하지 않은 한 PL에게는 분할 계획과 통합 검증만 받고 계획의 작업은 PM이 자기 Run에서 평평하게 배정한다.
 - 원시 `orca orchestration worker-start`나 `orca worktree create --agent`로 역할을 띄우지 않는다. 저장된 모델과 권한 우회 플래그가 빠지기 때문이다.
 - 모델·계정·구독을 바꾸거나 사용자에게 없는 모델로 전환하지 않는다. 바꿔야 하면 `adjust`를 사용자에게 제안한다.
@@ -66,6 +66,17 @@ node <runtime> role-spec --org <project>/.omt/organization.json --role senior --
 ```
 
 `role-spec`은 `task-create`로 먼저 만든 Task를 `--task`로 시작할 때 쓴다. 이 경우 래퍼가 머리글을 붙일 수 없으므로 Task 설명을 `role-spec --text`의 출력으로 만든다. `--text` 없이 실행하면 JSON이 출력되고, 그대로 `task-create --spec`에 넣으면 이스케이프된 JSON이 지시문이 된다. 시작 결과의 `binding.modelProof` 확인, 화면의 모델 대조, 거부 사유는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다.
+
+## 구현 등급
+
+구현 task의 담당은 직급이 아니라 그 일에 필요한 추론 강도로 정한다. Senior는 상위 등급, Junior는 하위 등급 모델로 배정하는 것을 전제로 한다(예: terra·luna, sonnet·haiku, Gemini Pro·Flash).
+
+| 등급 | 담당 | 알맞은 구현 |
+|---|---|---|
+| 상위 | Senior | 설계와 구현이 한 번에 필요한 일, 여러 모듈에 걸치는 변경, 공개 인터페이스·보안·데이터 형식 변경, Junior가 반복해서 실패한 일 |
+| 하위 | Junior | 파일과 완료 조건이 닫힌 수정, 정해진 반복 편집, 인용 수집처럼 결정적으로 검증할 수 있는 일 |
+
+Senior에게 구현을 맡길 때에는 workflow task의 `role`을 `senior`로 적는다. 그 task의 필수 검토는 구현한 실행과 다른 Senior 실행이나 PL·PM이 맡으며, 같은 실행이 검토하면 런타임이 거부한다. 판단이 애매하면 하위 등급으로 시작하고, 실패하면 상위 등급으로 올린다.
 
 ## 실행 깊이
 
