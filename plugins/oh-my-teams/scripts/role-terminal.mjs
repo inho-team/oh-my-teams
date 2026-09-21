@@ -490,6 +490,9 @@ export function agentStarted(lines, command) {
   const found = locateCommand(lines, command);
   const rows = found?.rows ?? (lines ?? []).filter((line) => line.trim());
   if (rows.length === 0) return false;
+  // Orca can expose a just-submitted shell command without the prompt prefix.
+  // That text is input acceptance, not a rendered agent interface or turn proof.
+  if (!found && squeeze(rows.join("")) === squeeze(command)) return false;
   if (!found) return !PROMPT_MARK.test(rows.at(-1));
   if (found.end === rows.length - 1) return false;
   return rows.at(-1).trim() !== found.prompt;

@@ -1,0 +1,8 @@
+{
+  "name": "oh-my-teams-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@bitkyc08/opencodex": "2.59.0"
+  }
+}

@@ -633,6 +633,18 @@ function validateProfile(id, profile, pools) {
     profile.pool === undefined || Object.hasOwn(pools, profile.pool),
     `Unknown pool for profile: ${id}`,
   );
+  if (profile.runner !== undefined) {
+    assert(
+      profile.runner &&
+        profile.runner.kind === "opencodex" &&
+        profile.runner.mode === "fixed-account" &&
+        profile.runner.accountHomeRef === profile.account &&
+        /^sha256:[a-f0-9]{64}$/.test(profile.runner.runtimeFingerprint) &&
+        profile.account !== "current" &&
+        profile.model !== null,
+      `Invalid OpenCodex runner binding: ${id}`,
+    );
+  }
   assert(
     !profile.env ||
       Object.entries(profile.env).every(

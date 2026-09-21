@@ -182,6 +182,7 @@ test("a command left at the prompt is told apart from a started agent", () => {
   ];
   assert.equal(commandPending(waiting, command), true);
   assert.equal(agentStarted(waiting, command), false);
+  assert.equal(agentStarted([command], command), false);
   // A long command wraps, and the break may swallow the space.
   const wrapped = [
     `${PROMPT} agy --dangerously-skip-permissions --model gemini-3.8-flash`,

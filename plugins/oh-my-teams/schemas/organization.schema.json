@@ -124,6 +124,20 @@
           "$comment": "Reasoning effort. Omit to keep the provider default. Each adapter in scripts/providers/ states the levels it accepts and core.mjs narrows the set from that registry: agy and ollama low|medium|high, codex low|medium|high|xhigh|max|ultra, claude low|medium|high|xhigh|max."
         },
         "pool": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "runner": {
+          "type": "object",
+          "required": ["kind", "mode", "accountHomeRef", "runtimeFingerprint"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "opencodex" },
+            "mode": { "const": "fixed-account" },
+            "accountHomeRef": { "type": "string", "minLength": 1 },
+            "runtimeFingerprint": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
+        },
         "env": {
           "type": "object",
           "additionalProperties": {
