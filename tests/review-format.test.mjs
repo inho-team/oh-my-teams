@@ -67,7 +67,7 @@ test("every role's instructions keep scratch files out of the worktree", () => {
   // #38: Junior and Senior left node_modules, package.json and scratch scripts
   // in the report worktree, and untracked files change verify's fingerprint.
   const org = example("organization.json");
-  for (const role of ["pl", "senior", "junior", "intern"]) {
+  for (const role of ["pl", "senior", "junior"]) {
     assert.match(
       roleSpec(org, role, "작업"),
       /워크트리 밖의 임시 디렉터리에서 만든다/,

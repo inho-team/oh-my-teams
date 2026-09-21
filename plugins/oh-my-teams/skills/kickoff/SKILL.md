@@ -25,7 +25,7 @@ kickoff를 선언한 세션은 목표를 확정해 브리프로 넘기고 PM 워
 
 Goal의 objective에는 사용자가 원하는 결과, 측정 가능한 수용 기준, 비목표, 필수 검사와 요청된 전달 범위를 포함한다. 전달 범위에는 결과를 원본 프로젝트의 어느 브랜치에 어떤 방식(`local-merge`, `pull-request`, `none`)으로 넣을지를 반드시 포함한다. 이 값은 종료할 때 주인 체크아웃에 병합하는 허가가 되므로, 브리프에 문장으로 적고 등록 요청의 `delivery`에도 같은 값을 적는다. 이 가운데 사용자 요청과 저장소 상태에서 확정할 수 없는 항목은 선언 세션이 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 한 번에 확인해 브리프에 담고, PM 세션은 그 브리프로 Goal을 만든다. 확인하지 못한 수용 기준을 추측해 채우지 않으며, 사용자가 이미 답한 항목을 PM 세션에서 다시 묻지 않는다. 브리프는 [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 수용 기준을 맨 앞에 두고, 범위·제약·전달 방식과 근거를 뒤에 쓴다. 사용자가 토큰 예산을 명시하지 않았다면 임의의 토큰 예산을 설정하지 않는다. 네이티브 Goal이 없는 호스트에서는 같은 계약을 oh my teams workflow와 Orca Run에 보존하되, 네이티브 기능이 있는 것처럼 보고하지 않는다.
 
-kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이고, PM·PL·Intern은 그 아래의 실행 주체다.
+kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이고, PM·PL·Senior·Junior는 그 아래의 실행 주체다.
 
 ## 실행 주기
 

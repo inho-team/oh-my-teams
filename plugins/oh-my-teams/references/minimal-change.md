@@ -41,4 +41,3 @@ finding은 `examples/review.json`의 `criterion`·`finding` 형식을 그대로 
 | PL | 작업 분할 | `files`를 목표에 필요한 최소 집합으로 정하고, 기존 helper·패턴 재사용 여부를 확인하며, 버그 수정은 호출자들이 공유하는 원인 위치에 배정한다 |
 | Senior | 검토 | 위 다섯 가지 판정 대상을 finding으로 기록하고 두 예외를 적용한다 |
 | Junior | 구현 | `### 한계` 절의 규율을 지키며 구현한다 |
-| Intern | 구현 | `### 한계` 절의 규율을 지키며 구현한다 |

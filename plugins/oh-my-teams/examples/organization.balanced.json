@@ -75,13 +75,6 @@
       "concurrency": 1,
       "attempts": 1,
       "fallbacks": ["agy-opus"]
-    },
-    "intern": {
-      "parent": "junior",
-      "profile": "agy-oss",
-      "concurrency": 1,
-      "attempts": 1,
-      "fallbacks": ["agy-sonnet"]
     }
   },
   "policy": {
@@ -94,7 +87,6 @@
     "pm": ["agy-oss"],
     "pl": ["agy-oss"],
     "senior": ["agy-oss"],
-    "junior": ["agy-oss"],
-    "intern": ["agy-oss"]
+    "junior": ["agy-oss"]
   }
 }

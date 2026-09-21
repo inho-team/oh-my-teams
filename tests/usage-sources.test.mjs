@@ -549,13 +549,13 @@ test("headless streams report usage for each provider, summed over turns", (t) =
 
   headlessWorker(
     state,
-    "intern-1",
+    "senior-1",
     {
-      role: "intern",
+      role: "senior",
       profile: "codex-profile",
       provider: "codex",
       modelRequested: "gpt-5.6-luna",
-      cwd: path.join(dir, "intern"),
+      cwd: path.join(dir, "senior"),
       createdAt: at(base, 5),
     },
     [
@@ -576,9 +576,9 @@ test("headless streams report usage for each provider, summed over turns", (t) =
   assert.equal(byWorker["junior-1"].costUsd, 0.5);
   assert.equal(byWorker["junior-1"].measured, true);
   assert.deepEqual(byWorker["junior-1"].modelReported, ["claude-sonnet-5"]);
-  assert.equal(byWorker["intern-1"].measured, "partial");
-  assert.equal(byWorker["intern-1"].reason, "headless-turn-running");
-  assert.equal(byWorker["intern-1"].sessionKey, "codex-headless");
+  assert.equal(byWorker["senior-1"].measured, "partial");
+  assert.equal(byWorker["senior-1"].reason, "headless-turn-running");
+  assert.equal(byWorker["senior-1"].sessionKey, "codex-headless");
   assert.ok(!JSON.stringify(records).includes(CANARY));
 });
 
@@ -602,7 +602,7 @@ test("harness calls keep the session id that lets a report skip duplicates", (t)
 
   writeJSON(path.join(dir, "runs", "run-1", "report.json"), {
     runId: "run-1",
-    role: "intern",
+    role: "junior",
     summary: CANARY,
     calls: [
       {
@@ -639,7 +639,7 @@ test("harness calls keep the session id that lets a report skip duplicates", (t)
   const [first, second, assist] = records;
   assert.equal(first.sessionKey, "th-harness");
   assert.equal(first.promptTokens, 90);
-  assert.equal(first.role, "intern");
+  assert.equal(first.role, "junior");
   assert.equal(second.measured, false);
   assert.equal(second.reason, "harness-call-without-usage");
   assert.equal(second.sessionKey, "harness:run-1:2");

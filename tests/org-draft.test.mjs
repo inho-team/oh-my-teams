@@ -44,22 +44,22 @@ test("an omitted role's work folds onto the tier above it", () => {
     tiers: 3,
     models: models(3),
   });
-  // Three tiers drop PL and Intern. Narrow edits addressed to Intern must land
-  // on Junior, and splitting work addressed to PL on PM, or they reach nobody.
-  assert.equal(resolveRole(org, "intern"), "junior");
+  // Three tiers drop PL. Splitting work addressed to PL must land on PM, or it
+  // reaches nobody; the roles three tiers keep resolve to themselves.
   assert.equal(resolveRole(org, "pl"), "pm");
+  assert.equal(resolveRole(org, "senior"), "senior");
+  assert.equal(resolveRole(org, "junior"), "junior");
 });
 
 test("a draft spends nothing beyond the models the user chose", () => {
   const org = draftOrganization({
     name: "team",
-    tiers: 5,
+    tiers: 4,
     models: [
       "claude:default",
       "agy:claude-opus-4-6-thinking",
       "agy:gemini-3.1-pro-high",
       "agy:gemini-3.8-flash-high",
-      "agy:gpt-oss-120b-medium",
     ],
   });
   // Formation asks for models only. Anything else it saved without asking has
@@ -114,8 +114,8 @@ test("profiles of one provider share a pool, and a repeated model one profile", 
 
 test("a draft refuses what it cannot fill in without asking", () => {
   assert.throws(
-    () => draftOrganization({ name: "t", tiers: 6, models: models(6) }),
-    /tiers must be 1\.\.5/,
+    () => draftOrganization({ name: "t", tiers: 5, models: models(5) }),
+    /tiers must be 1\.\.4/,
   );
   assert.throws(
     () => draftOrganization({ name: "t", tiers: 2, models: models(1) }),

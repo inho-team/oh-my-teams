@@ -210,8 +210,8 @@ test("a settled task never lets another task report the workflow as ready", asyn
     goal: "Derived status",
     repo: ".",
     tasks: [
-      { file: "alpha.json", role: "intern" },
-      { file: "beta.json", role: "intern" },
+      { file: "alpha.json", role: "junior" },
+      { file: "beta.json", role: "junior" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 4, maxCalls: 4 },

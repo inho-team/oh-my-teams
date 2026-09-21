@@ -133,7 +133,7 @@ test("a launch is tied to its kickoff by state, by PM worktree, or through an ea
   assert.equal(first.line.kickoffPmWorktreeId, fixture.worktreeId);
   const fromPm = recordLaunch(fixture.orgFile, {
     via: "headless-start",
-    role: "intern",
+    role: "junior",
     callerCwd: path.join(fixture.pmPath, "sub"),
   });
   assert.equal(fromPm.line.kickoffPmWorktreeId, fixture.worktreeId);
@@ -190,7 +190,7 @@ test("sessions go to the role launched in their place, and unclear ones are not 
   const launches = [
     line(10, "pl", "codex", w1, "t-pl"),
     line(20, "senior", "agy", w1, "t-senior"),
-    line(60, "intern", "agy", w1, "t-intern"),
+    line(60, "pl", "agy", w1, "t-pl-agy"),
     line(60.5, "junior", "agy", w1, "t-junior"),
     // Another kickoff's launch in the same worktree is not this kickoff's.
     { ...line(30, "junior", "codex", w1, "t-x"), kickoffPmWorktreeId: "o" },
@@ -202,11 +202,11 @@ test("sessions go to the role launched in their place, and unclear ones are not 
       ["pm", "registry"],
       ["pl", "ledger"],
       ["senior", "ledger"],
-      ["intern", "ledger"],
+      ["pl", "ledger"],
       ["junior", "ledger"],
     ],
   );
-  // Intern's launch in the same worktree and provider ends Senior's hold.
+  // PL's Agy launch in the same worktree and provider ends Senior's hold.
   assert.equal(places[2].to, base + 60 * MINUTE);
 
   const session = (key, provider, cwd, minutes, extra = {}) =>
@@ -232,7 +232,7 @@ test("sessions go to the role launched in their place, and unclear ones are not 
       session("sibling", "claude", `${pm}-2`, 30),
       session("early-agy", "agy", w1, 5),
       session("declared", "agy", null, 1, {
-        role: "intern",
+        role: "junior",
         attribution: { method: "declared" },
         modelRequested: "m",
         modelReported: ["m"],
@@ -249,15 +249,15 @@ test("sessions go to the role launched in their place, and unclear ones are not 
   assert.equal(byKey.senior.role, "senior");
   assert.equal(byKey["late-senior"].role, "ambiguous");
   assert.deepEqual(byKey["late-senior"].attribution.roles.sort(), [
-    "intern",
     "junior",
+    "pl",
   ]);
   assert.equal(byKey["late-senior"].measured, "partial");
   assert.equal(byKey.sibling.role, "unattributed");
   assert.equal(byKey.sibling.attribution.reason, "no-place");
   assert.equal(byKey["early-agy"].role, "unattributed");
   assert.equal(byKey["early-agy"].attribution.reason, "outside-launch-window");
-  assert.equal(byKey.declared.role, "intern");
+  assert.equal(byKey.declared.role, "junior");
   assert.equal(byKey.declared.modelVerdict, "matched");
 
   // Windows reports one checkout in several spellings.
@@ -313,13 +313,13 @@ function tokenTotal(base, minutes, input, output) {
   };
 }
 
-// PL on Codex and Senior on Agy share one worktree; Intern runs headless on
+// PL on Codex and Senior on Agy share one worktree; Junior runs headless on
 // Codex, whose own rollout must not be counted a second time.
 function kickoffWithSessions(t) {
   const base = Date.now() - 120 * MINUTE;
   const fixture = project(t, { createdAt: at(base, 0) });
   const shared = path.join(fixture.dir, "shared-worktree");
-  const internDir = path.join(fixture.dir, "intern-worktree");
+  const juniorDir = path.join(fixture.dir, "junior-worktree");
   const launch = (minutes, fields) =>
     recordLaunch(
       fixture.orgFile,
@@ -344,10 +344,10 @@ function kickoffWithSessions(t) {
   });
   launch(15, {
     via: "headless-start",
-    role: "intern",
+    role: "junior",
     provider: "codex",
-    worktreePath: internDir,
-    workerId: "intern-1",
+    worktreePath: juniorDir,
+    workerId: "junior-1",
   });
 
   const sessions = path.join(fixture.homes.codexHome, "sessions", "2026");
@@ -370,24 +370,24 @@ function kickoffWithSessions(t) {
     tokenTotal(base, 7, 3000, 200),
   ]);
   codexRollout(
-    path.join(sessions, "rollout-intern.jsonl"),
-    "th-intern",
-    internDir,
+    path.join(sessions, "rollout-junior.jsonl"),
+    "th-junior",
+    juniorDir,
     base,
     [tokenTotal(base, 16, 500, 50)],
   );
 
-  const worker = path.join(fixture.stateDir, "headless", "intern-1");
+  const worker = path.join(fixture.stateDir, "headless", "junior-1");
   writeJSON(path.join(worker, "worker.json"), {
     schemaVersion: 1,
-    id: "intern-1",
-    role: "intern",
+    id: "junior-1",
+    role: "junior",
     profile: "codex-current",
     provider: "codex",
     binary: ["codex"],
     modelRequested: "gpt-5.6-sol",
     effortRequested: null,
-    cwd: internDir,
+    cwd: juniorDir,
   });
   writeJSON(path.join(worker, "turns", "1", "turn.json"), {
     number: 1,
@@ -398,7 +398,7 @@ function kickoffWithSessions(t) {
     endedAt: at(base, 17),
   });
   writeLines(path.join(worker, "turns", "1", "stream.jsonl"), [
-    { type: "thread.started", thread_id: "th-intern" },
+    { type: "thread.started", thread_id: "th-junior" },
     {
       type: "item.completed",
       item: { type: "agent_message", text: `${CANARY}\nDONE: ok` },
@@ -451,8 +451,8 @@ test("a report shares measured tokens by role and leaves the unmeasured null", a
   assert.equal(kickoff.excludedDuplicates, 1);
   assert.equal(kickoff.byRole.pl.promptTokens, 3000);
   assert.equal(kickoff.byRole.pl.turns, 1);
-  assert.equal(kickoff.byRole.intern.promptTokens, 1000);
-  assert.deepEqual(kickoff.byRole.intern.sources, ["headless"]);
+  assert.equal(kickoff.byRole.junior.promptTokens, 1000);
+  assert.deepEqual(kickoff.byRole.junior.sources, ["headless"]);
   assert.equal(kickoff.byRole.senior.steps, 12);
   assert.equal(kickoff.byRole.senior.promptTokens, null);
   assert.equal(kickoff.byRole.senior.outputTokens, null);
@@ -461,7 +461,7 @@ test("a report shares measured tokens by role and leaves the unmeasured null", a
   ]);
   assert.equal(kickoff.share.senior, "unmeasured");
   assert.equal(kickoff.share.pl, Number((3200 / 4200).toFixed(4)));
-  assert.equal(kickoff.share.intern, Number((1000 / 4200).toFixed(4)));
+  assert.equal(kickoff.share.junior, Number((1000 / 4200).toFixed(4)));
   assert.deepEqual(kickoff.coverage.unmeasuredRoles, ["senior"]);
   assert.equal(kickoff.coverage.measuredSessions, 2);
   assert.equal(kickoff.coverage.totalSessions, 3);

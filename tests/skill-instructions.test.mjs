@@ -49,12 +49,12 @@ test("every example organization can run the assist the skills advertise", async
       checks: [[process.execPath, "-e", "process.exit(0)"]],
     };
 
-    // pm, pl, senior, junior and intern all tell the model it may call assist.
+    // pm, pl, senior and junior all tell the model it may call assist.
     // The preset examples carried no `assistants` block, so every one of those
     // roles failed with "Assistant profile not allowed" on an organization
-    // built from them. A reduced organization need not declare all five, and
+    // built from them. A reduced organization need not declare all four, and
     // there the assist runs as the role that took the absent one's duties over.
-    for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+    for (const role of ["pm", "pl", "senior", "junior"]) {
       const report = await assist(dir, org, task, {
         role,
         kind: "research",
@@ -505,18 +505,21 @@ test("a kickoff is released by its ending, never by a reading", () => {
   assert.match(status, /등록 항목을 지우거나 고쳐 쓰지 않는다/);
 });
 
-test("form asks for the five role models, and not for a ladder size", () => {
+test("form asks for the four role models, and not for a ladder size", () => {
   const form = readSkill("form");
   // Formation used to ask for the name, parents, slots, subscriptions,
   // fallbacks, exhaustion policy, call limit and assistant allowlist before a
   // team existed, and then for a ladder size. Every organization now declares
-  // all five roles; how many a run uses is the PM's depth decision per kickoff.
-  assert.match(form, /질문은 두 번으로 끝난다/);
+  // all four roles; how many a run uses is the PM's depth decision per kickoff.
+  // Four models fit one structured question, so formation asks exactly once.
+  assert.match(form, /질문은 한 번으로 끝난다/);
+  assert.match(form, /PM·PL·Senior·Junior의 모델을 한꺼번에 묻는다/);
   assert.match(form, /몇 단계로 운영할지는 묻지 않는다/);
   assert.match(form, /묻지 않고 정하는 것/);
   const draft = /node <runtime> org-draft([^\n`]*)/.exec(form);
   assert.ok(draft, "form must draft the organization");
   assert.doesNotMatch(draft[1], /--tiers/);
+  assert.match(draft[1], /--models <pm>,<pl>,<senior>,<junior> /);
 });
 
 test("the depth table the PM reads is the depth the runtime applies", () => {
@@ -526,7 +529,6 @@ test("the depth table the PM reads is the depth the runtime applies", () => {
     PL: "pl",
     Senior: "senior",
     Junior: "junior",
-    Intern: "intern",
   };
   // The table is what the PM reasons from when it picks a depth; DEPTH_ROLES is
   // what workflow creation and workflow-depth record. A mismatch would have the
@@ -537,6 +539,7 @@ test("the depth table the PM reads is the depth the runtime applies", () => {
       match[2],
     ]),
   );
+  assert.deepEqual([...rows.keys()], Object.keys(DEPTH_ROLES));
   for (const [depth, roles] of Object.entries(DEPTH_ROLES)) {
     const row = rows.get(depth);
     assert.ok(row, `pm must describe depth ${depth}`);
@@ -599,7 +602,6 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
       "agy:gemini-3.8-flash-medium",
       "agy:claude-sonnet-4-6",
     ],
-    intern: ["claude:haiku", "codex:gpt-5.6-luna", "agy:gpt-oss-120b-medium"],
   };
 
   // Parse each role row from the table and compare against EXPECTED.
@@ -608,7 +610,6 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
     PL: "pl",
     Senior: "senior",
     Junior: "junior",
-    Intern: "intern",
   };
   const found = {};
   for (const [line] of table.matchAll(/^\| ([A-Za-z]+) \|([^|]+)\|$/gm)) {
@@ -660,16 +661,15 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
   for (const [role, choices] of Object.entries(EXPECTED)) {
     for (const choice of choices) {
       const { provider, model } = parseModelChoice(choice);
-      // Build a minimal 5-role org using this choice for the target role,
-      // filling the other four slots with a compatible placeholder.
+      // Build a minimal 4-role org using this choice for the target role,
+      // filling the other three slots with a compatible placeholder.
       const PLACEHOLDERS = {
         pm: "claude:fable",
         pl: "claude:opus",
         senior: "claude:sonnet",
         junior: "claude:haiku",
-        intern: "agy:gpt-oss-120b-medium",
       };
-      const slots = ["pm", "pl", "senior", "junior", "intern"].map((r) =>
+      const slots = ["pm", "pl", "senior", "junior"].map((r) =>
         r === role ? choice : PLACEHOLDERS[r],
       );
       const org = draftOrganization({ name: "test", models: slots });
@@ -859,8 +859,8 @@ test("form says what a default model runs today and reads Codex models at ask ti
   assert.match(form, /지금은 gpt-6-astra가 실행됩니다/);
   assert.match(form, /현재 해석값/);
   // The new table (criterion 1) lists gpt-5.6-sol, gpt-5.6-terra and
-  // gpt-5.6-luna as explicit confirmed choices for PL, Senior, Junior and
-  // Intern. They are no longer "stale hardcoded IDs" but deliberate selections
+  // gpt-5.6-luna as explicit confirmed choices for PL, Senior and Junior.
+  // They are no longer "stale hardcoded IDs" but deliberate selections
   // verified in the brief (2026-09-17). The provider-confirmation section no
   // longer enumerates a static Codex list; it refers to codex.listed instead.
   assert.match(form, /질문 수와 선택지 수는 늘지 않고/);
@@ -927,7 +927,7 @@ test("every role charter names only commands that exist", () => {
     "worker-abandon",
     "worker-release",
   ]);
-  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+  for (const role of ["pm", "pl", "senior", "junior"]) {
     const text = readSkill(role);
     const charter = text.split("## 권한·책임·한계")[1]?.split(/\n## /)[0];
     assert.ok(charter, `${role} lacks the charter section`);
@@ -935,7 +935,13 @@ test("every role charter names only commands that exist", () => {
       assert.ok(charter.includes(part), `${role} charter lacks ${part}`);
     }
     // The fold rule is what lets a reduced team act without a missing role.
-    assert.match(charter, /resolveRole/, `${role} charter omits folding`);
+    // Junior is the lowest rung, so no role's work folds onto it; it instead
+    // names the alias that hands it work a pre-2.6.0 record gave to Intern.
+    if (role === "junior") {
+      assert.match(charter, /canonicalRole/, "junior charter omits Intern");
+    } else {
+      assert.match(charter, /resolveRole/, `${role} charter omits folding`);
+    }
     const authority = charter.split("### 책임")[0];
     for (const [, token] of authority.matchAll(/`([a-z]+(?:-[a-z]+)+)`/g)) {
       assert.ok(
@@ -944,7 +950,7 @@ test("every role charter names only commands that exist", () => {
       );
     }
   }
-  for (const role of ["senior", "junior", "intern"]) {
+  for (const role of ["senior", "junior"]) {
     assert.match(readSkill(role), /`worker-start`를 호출하지 않/);
   }
 });
@@ -963,7 +969,7 @@ test("a silent worker is asked, then escalated, and never shown as progressing",
   for (const role of ["pm", "pl"]) {
     assert.match(readSkill(role), /무응답 worker 감독/);
   }
-  for (const role of ["pl", "senior", "junior", "intern"]) {
+  for (const role of ["pl", "senior", "junior"]) {
     assert.match(readSkill(role), /진행 요청에는/);
     assert.match(readSkill(role), /heartbeat/);
   }
@@ -1049,8 +1055,8 @@ test("minimal-change discipline lives in one place and each role links it", () =
     );
   }
 
-  // 수용 기준 1: 다섯 역할 스킬이 정본을 링크한다
-  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+  // 수용 기준 1: 네 역할 스킬이 정본을 링크한다
+  for (const role of ["pm", "pl", "senior", "junior"]) {
     assert.match(
       readSkill(role),
       /references\/minimal-change\.md/,
@@ -1058,8 +1064,8 @@ test("minimal-change discipline lives in one place and each role links it", () =
     );
   }
 
-  // 수용 기준 5: Junior·Intern의 링크가 ### 한계 절 안에 있다
-  for (const role of ["junior", "intern"]) {
+  // 수용 기준 5: Junior의 링크가 ### 한계 절 안에 있다
+  for (const role of ["junior"]) {
     const text = readSkill(role);
     const limitsSection = text.split("### 한계")[1]?.split(/\n## /)[0];
     assert.ok(limitsSection, `${role} must have a ### 한계 section`);

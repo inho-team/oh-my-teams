@@ -74,7 +74,7 @@ function profileId({ provider, model }) {
  *
  * @param {object} request - Draft request.
  * @param {string} request.name - Organization name.
- * @param {number} [request.tiers=FULL_DEPTH] - Ladder size from 1 to 5.
+ * @param {number} [request.tiers=FULL_DEPTH] - Ladder size from 1 to 4.
  * @param {string[]} request.models - One `provider:model` choice per tier.
  * @returns {object} Validated organization ready for `init --from`.
  * @throws {Error} When the ladder, a choice, or the result is invalid.
@@ -83,7 +83,7 @@ export function draftOrganization({ name, tiers = FULL_DEPTH, models }) {
   // Formation declares every role; how many a run uses is chosen per kickoff.
   // A smaller ladder stays available for an organization that cannot staff one.
   const roles = DEPTH_ROLES[tiers];
-  assert(roles, "tiers must be 1..5");
+  assert(roles, `tiers must be 1..${FULL_DEPTH}`);
   assert(
     Array.isArray(models) && models.length === roles.length,
     `Choose exactly one model per tier: ${roles.length} expected`,

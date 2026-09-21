@@ -69,17 +69,13 @@ test("role names stay fixed so routing and skills keep addressing them", () => {
 test("work addressed to an absent role folds onto the closest declared one", () => {
   const org = reduced();
   assert.deepEqual(
-    ["pm", "pl", "senior", "junior", "intern"].map((role) =>
-      resolveRole(org, role),
-    ),
-    ["pm", "pm", "pm", "junior", "junior"],
+    ["pm", "pl", "senior", "junior"].map((role) => resolveRole(org, role)),
+    ["pm", "pm", "pm", "junior"],
   );
   // A full ladder resolves every role to itself, so folding is inert there.
   assert.deepEqual(
-    ["pm", "pl", "senior", "junior", "intern"].map((role) =>
-      resolveRole(full(), role),
-    ),
-    ["pm", "pl", "senior", "junior", "intern"],
+    ["pm", "pl", "senior", "junior"].map((role) => resolveRole(full(), role)),
+    ["pm", "pl", "senior", "junior"],
   );
   assert.throws(() => resolveRole(org, "cto"), /Unknown role: cto/);
   assert.throws(() => foldRole(["junior"], "pm"), /No declared role/);
@@ -112,9 +108,7 @@ test("a reviewer at or above the required rank satisfies the requirement", () =>
   for (const role of ["pm", "pl", "senior"]) {
     assert.equal(validateReviewInput(review(role), task).id, "review-1");
   }
-  for (const role of ["junior", "intern"]) {
-    assert.throws(() => validateReviewInput(review(role), task), /Reviewer/);
-  }
+  assert.throws(() => validateReviewInput(review("junior"), task), /Reviewer/);
 });
 
 test("the single-subscription preset serializes roles and drops shared-quota fallbacks", () => {
@@ -151,16 +145,16 @@ test("a workflow folds task assignment and failure routing onto declared roles",
   const request = {
     schemaVersion: 1,
     id: "reduced-fold",
-    goal: "Run a five-role plan on a two-role team",
+    goal: "Run a four-role plan on a two-role team",
     repo: ".",
-    tasks: [{ file: "a.json", role: "intern" }],
+    tasks: [{ file: "a.json", role: "senior" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 2 },
   };
   const state = await createWorkflow(stateDir, request, reduced(), dir);
   assert.deepEqual(state.roles, ["pm", "junior"]);
-  assert.equal(state.tasks.a.role, "junior");
-  assert.equal(state.tasks.a.requestedRole, "intern");
+  assert.equal(state.tasks.a.role, "pm");
+  assert.equal(state.tasks.a.requestedRole, "senior");
 
   attachExecution(stateDir, request.id, state.revision, {
     schemaVersion: 1,

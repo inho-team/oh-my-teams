@@ -21,8 +21,8 @@
     "depth": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 5,
-      "description": "Roles this run uses: 1 PM; 2 +Junior; 3 +Senior; 4 +Intern; 5 +PL. Omitted means every role the organization declares."
+      "maximum": 4,
+      "description": "Roles this run uses: 1 PM; 2 +Junior; 3 +Senior; 4 +PL. Omitted means every role the organization declares. A depth of 5 saved before 2.6.0 reads as 4."
     },
     "tasks": {
       "type": "array",
@@ -33,7 +33,7 @@
         "required": ["file", "role"],
         "properties": {
           "file": { "type": "string", "minLength": 1 },
-          "role": { "enum": ["pm", "pl", "senior", "junior", "intern"] }
+          "role": { "enum": ["pm", "pl", "senior", "junior"] }
         }
       }
     },

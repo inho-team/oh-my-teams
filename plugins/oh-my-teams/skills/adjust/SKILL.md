@@ -9,7 +9,7 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 
 프로젝트 `.omt/organization.json`을 읽는다. 없으면 `form`으로 이동한다. 사용자 요청으로 바뀌는 항목에 대해서만 필요한 선택을 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 받는다. 기존 구독 배정을 전부 다시 묻지 않는다.
 
-1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리한다. 이름 변경, 직급별 부모와 인원, 구독/모델, 추론 강도, 대체 순서, 보조 도구 허용, 자문자 허용과 자문 예산, `opus-first`·`balanced`·`single-subscription`·`advisor-codex`·`advisor-claude` 프리셋을 지원한다. 역할 ID는 pm/pl/senior/junior/intern이며 이 이름은 바꿀 수 없다.
+1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리한다. 이름 변경, 직급별 부모와 인원, 구독/모델, 추론 강도, 대체 순서, 보조 도구 허용, 자문자 허용과 자문 예산, `opus-first`·`balanced`·`single-subscription`·`advisor-codex`·`advisor-claude` 프리셋을 지원한다. 역할 ID는 pm/pl/senior/junior이며 이 이름은 바꿀 수 없다. Intern 역할은 2.6.0에서 삭제되었으므로, `intern`이 남은 조직 파일은 런타임이 거부한다. 그런 조직은 Intern 프로필이 필요하면 Junior로 옮기고 `intern` 역할과 허용 목록 항목을 지운 뒤 `edit`로 저장한다.
 2. 새 구독이나 과금 경로를 임의로 선택하지 않는다. 계정 연결은 아래 「계정과 실행기」를 따른다.
 3. 수정안을 별도 JSON에 쓰고 현재 스킬 기준 `../../scripts/teams-org.mjs`를 호출한다.
 
@@ -36,10 +36,10 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 
 `advisor-codex`와 `advisor-claude` 프리셋은 주도 역할과 물량 역할의 모델을 나누고, 프론티어 모델을 결정 관문의 자문자로 옮긴다. PM이 kickoff 내내 감독하는 동안 매 턴 누적 컨텍스트가 다시 입력되므로, 가장 비싼 모델을 PM에 두지 않고 필요한 순간에만 부르게 하려는 것이다. 호출 규칙은 [`../../references/advise.md`](../../references/advise.md)에 있다.
 
-| 프리셋 | PM | PL·Senior | Junior | Intern | 자문자(PM·PL·Senior에게 허용) |
-|---|---|---|---|---|---|
-| `advisor-codex` | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` | `gpt-5.6-luna` | `gpt-6-astra` |
-| `advisor-claude` | `opus` | `sonnet` | `sonnet` | `haiku` | `fable` |
+| 프리셋 | PM | PL·Senior | Junior | 자문자(PM·PL·Senior에게 허용) |
+|---|---|---|---|---|
+| `advisor-codex` | `gpt-5.6-sol` | `gpt-5.6-terra` | `gpt-5.6-luna` | `gpt-6-astra` |
+| `advisor-claude` | `opus` | `sonnet` | `haiku` | `fable` |
 
 두 프리셋은 이미 그 실행기(Codex 또는 Claude)에서 돌던 역할만 옮긴다. Agy·Gemini처럼 다른 실행기에 배정된 역할은 다른 할당량을 쓰므로 그대로 두며, 옮긴 역할의 대체 순서는 비우고 동시 인원은 1로 둔다. 조직에 해당 모델의 프로필이 없으면 같은 실행기의 기존 프로필을 복사해 모델만 바꾼 프로필을 추가하므로, 새 계정이나 구독을 만들지 않는다. 같은 실행기의 프로필이 하나도 없으면 거부한다. 추가되는 프로필은 미리보기의 `addedProfiles`에, 자문 허용 목록의 변화는 `advisors`에 나오므로 적용하기 전에 사용자에게 알린다.
 

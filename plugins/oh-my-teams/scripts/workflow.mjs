@@ -6,10 +6,12 @@ import {
   FULL_DEPTH,
   ROLES,
   assert,
+  canonicalRole,
   definedRoles,
   depthRoles,
   foldRole,
   hash,
+  migrateLegacyOrg,
   readJSON,
   validateOrg,
   writeJSON,
@@ -66,14 +68,14 @@ export function validateWorkflowRequest(request) {
         item.file.trim() &&
         ROLES.includes(item.role),
     ),
-    "Each workflow task needs a file and role",
+    `Each workflow task needs a file and a role from ${ROLES.join("/")}`,
   );
   assert(
     request.depth === undefined ||
       (Number.isInteger(request.depth) &&
         request.depth >= 1 &&
         request.depth <= FULL_DEPTH),
-    "Workflow depth must be 1..5 when given",
+    `Workflow depth must be 1..${FULL_DEPTH} when given`,
   );
   assert(
     Number.isInteger(request.policy?.maxRunning) &&
@@ -303,7 +305,10 @@ export async function createWorkflow(
  * @throws {Error} When the workflow or a referenced revision is unavailable.
  */
 export function readWorkflow(stateDir, id) {
-  return readWorkflowSnapshot(stateDir, id);
+  const snapshot = readWorkflowSnapshot(stateDir, id);
+  // A workflow frozen before 2.6.0 may bind intern; it runs on the migrated
+  // ladder, and its stored roles resolve through the legacy aliases.
+  return { ...snapshot, organization: migrateLegacyOrg(snapshot.organization) };
 }
 
 function dependenciesReady(task, state) {
@@ -471,8 +476,10 @@ function dispatchCapacity(state) {
 }
 
 function roleRunningCount(state, role) {
+  // A task saved before 2.6.0 may name intern; it holds a Junior slot.
   return Object.values(state.tasks).filter(
-    (item) => occupiesSlot(item) && item.role === role,
+    (item) =>
+      occupiesSlot(item) && canonicalRole(item.role) === canonicalRole(role),
   ).length;
 }
 
@@ -494,11 +501,11 @@ function dispatchActions(state, tasks, organization) {
       continue;
     }
     const selectedForRole = selected.filter(
-      (id) => state.tasks[id].role === item.role,
+      (id) => canonicalRole(state.tasks[id].role) === canonicalRole(item.role),
     ).length;
     if (
       roleRunningCount(state, item.role) + selectedForRole >=
-      organization.roles[item.role].concurrency
+      organization.roles[canonicalRole(item.role)].concurrency
     ) {
       continue;
     }
@@ -911,7 +918,7 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
     );
     assert(
       roleRunningCount(state, item.role) <
-        organization.roles[item.role].concurrency,
+        organization.roles[canonicalRole(item.role)].concurrency,
       `No ${item.role} concurrency slot available`,
     );
     const callAllowance =
@@ -970,7 +977,7 @@ export function claimWorkflowCall(stateDir, id, input) {
     );
     assert(
       item.taskHash === input.taskHash &&
-        item.role === input.role &&
+        canonicalRole(item.role) === canonicalRole(input.role) &&
         state.organizationHash === input.organizationHash,
       "Worker does not match frozen workflow inputs",
     );
@@ -1285,7 +1292,7 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
     );
     assert(
       roleRunningCount(state, item.role) <
-        organization.roles[item.role].concurrency,
+        organization.roles[canonicalRole(item.role)].concurrency,
       `No ${item.role} concurrency slot available`,
     );
 
@@ -1413,7 +1420,7 @@ function validateDepthInput(input) {
     Number.isInteger(input.depth) &&
       input.depth >= 1 &&
       input.depth <= FULL_DEPTH,
-    "Depth must be 1..5",
+    `Depth must be 1..${FULL_DEPTH}`,
   );
   assert(
     typeof input.reason === "string" &&
@@ -1453,9 +1460,12 @@ export function setWorkflowDepth(stateDir, id, expectedRevision, input) {
       "Workflow changed; read state again",
     );
 
-    const org = readJSON(path.join(dir, "organization.json"));
+    const org = migrateLegacyOrg(readJSON(path.join(dir, "organization.json")));
     const from = state.depth ?? FULL_DEPTH;
-    const previous = state.roles ?? definedRoles(org);
+    // Roles saved before 2.6.0 may list intern, which Junior now holds.
+    const previous = [
+      ...new Set((state.roles ?? definedRoles(org)).map(canonicalRole)),
+    ];
     const roles = depthRoles(definedRoles(org), input.depth);
     assert(
       input.depth !== from || roles.join() !== previous.join(),
@@ -1464,7 +1474,8 @@ export function setWorkflowDepth(stateDir, id, expectedRevision, input) {
 
     const removed = previous.filter((role) => !roles.includes(role));
     const busy = Object.entries(state.tasks).filter(
-      ([, item]) => occupiesSlot(item) && removed.includes(item.role),
+      ([, item]) =>
+        occupiesSlot(item) && removed.includes(canonicalRole(item.role)),
     );
     assert(
       busy.length === 0,
