@@ -255,15 +255,22 @@ export function killWindowsProcessTree(pid) {
  * Lists the live processes that belong to a Windows proxy tree.
  *
  * A record names the launcher `group`, its `processStart` (CreationDate) when it
- * could be read, `notBefore` (a time before the launcher was spawned) and the
- * `snapshot` of `(pid, created)` pairs taken when the proxy was healthy. Windows
- * never re-parents an orphan, so a process whose parent pid is the launcher and
- * that was created after `notBefore` still belongs to the tree when the
- * launcher is gone. A pair counts only when pid and creation time both match, so
- * a reused pid is never taken for the original. A live launcher pid with another
- * creation time is a reused pid, and its children are then not ours.
+ * could be read, `notBefore` (a time before the launcher was spawned), the
+ * `snapshot` of `(pid, created)` pairs taken when the proxy was healthy and,
+ * once the launcher was seen to exit, `launcherGoneBy` (a time by which it was
+ * already gone). A process counts only when its identity is shown:
+ * - a snapshot pair whose pid and creation time both match;
+ * - the launcher, only when a live process at its pid has the recorded
+ *   `processStart`. Without a recorded start, or with another one, the pid is
+ *   unproven or reused, and neither it nor its children count;
+ * - a child, only when its parent is an owned process that was created before
+ *   it. Windows keeps an orphan's parent pid, so a child of a launcher that is
+ *   gone counts only if `launcherGoneBy` is recorded and the child was created
+ *   between `notBefore` (and the launcher's start, when known) and
+ *   `launcherGoneBy`. The launcher's pid could not be reused before that time,
+ *   so a stranger that later took the pid never qualifies.
  * @param {{pid: number, ppid: number, created: string}[]} table - Current process table.
- * @param {{group: number, processStart: string | null, notBefore: string, snapshot?: {pid: number, created: string}[]}} record - Recorded proxy tree.
+ * @param {{group: number, processStart: string | null, notBefore: string, launcherGoneBy?: string, snapshot?: {pid: number, created: string}[]}} record - Recorded proxy tree.
  * @returns {{pid: number, created: string}[]} Live members of the tree.
  */
 export function windowsOwnedProcesses(table, record) {
@@ -277,27 +284,53 @@ export function windowsOwnedProcesses(table, record) {
     if (row?.created === known.created) add(row);
   }
   const root = byPid.get(record.group);
-  const rootIsOurs =
-    !root ||
-    (record.processStart
-      ? root.created === record.processStart
-      : BigInt(root.created) >= notBefore);
-  if (rootIsOurs) {
-    if (root) add(root);
-    const queue = [record.group];
-    const seen = new Set(queue);
-    while (queue.length > 0) {
-      const parent = queue.shift();
-      for (const row of table) {
-        if (row.ppid !== parent || seen.has(row.pid)) continue;
-        if (BigInt(row.created) < notBefore) continue;
-        seen.add(row.pid);
-        add(row);
-        queue.push(row.pid);
-      }
+  const start = record.processStart ? BigInt(record.processStart) : null;
+  // Each entry is a proven parent: its pid, when it started, and the latest a
+  // child of it may have been created (null: no bound, the parent is alive).
+  const queue = [];
+  if (root) {
+    if (start !== null && root.created === record.processStart) {
+      add(root);
+      queue.push({ pid: root.pid, created: start, until: null });
+    }
+  } else if (record.launcherGoneBy) {
+    queue.push({
+      pid: record.group,
+      created: start ?? notBefore,
+      until: BigInt(record.launcherGoneBy),
+    });
+  }
+  const seen = new Set(queue.map((parent) => parent.pid));
+  while (queue.length > 0) {
+    const parent = queue.shift();
+    for (const row of table) {
+      if (row.ppid !== parent.pid || seen.has(row.pid)) continue;
+      const created = BigInt(row.created);
+      if (created < notBefore || created <= parent.created) continue;
+      if (parent.until !== null && created > parent.until) continue;
+      seen.add(row.pid);
+      add(row);
+      queue.push({ pid: row.pid, created, until: null });
     }
   }
   return [...members.values()];
+}
+
+/**
+ * Tells whether a live process holds the launcher's pid without its identity being shown.
+ * That is the case when no start time was recorded and no snapshot pair names
+ * it: the process may be ours or a stranger that reused the pid, so it must
+ * neither be ended nor be taken for gone.
+ * @param {{pid: number, ppid: number, created: string}[]} table - Current process table.
+ * @param {object} record - Recorded proxy tree, as for `windowsOwnedProcesses`.
+ * @returns {boolean} True when the pid is live and its owner is unproven.
+ */
+export function windowsRootUnproven(table, record) {
+  const root = table.find((row) => row.pid === record.group);
+  if (!root || record.processStart) return false;
+  return !(record.snapshot ?? []).some(
+    (known) => known.pid === root.pid && known.created === root.created,
+  );
 }
 
 /**
@@ -348,6 +381,10 @@ async function terminateWindowsTree(record, graceMs) {
   for (let pass = 0; pass < 2; pass += 1) {
     const table = windowsProcessTable();
     assert(table, "opencodex-proxy-exit-unverifiable");
+    assert(
+      !windowsRootUnproven(table, record),
+      "opencodex-proxy-exit-unverifiable",
+    );
     const members = windowsOwnedProcesses(table, record);
     if (members.length === 0) break;
     for (const member of members) killWindowsProcessTree(member.pid);
@@ -355,11 +392,16 @@ async function terminateWindowsTree(record, graceMs) {
   }
   const table = windowsProcessTable();
   assert(
-    table && windowsOwnedProcesses(table, record).length === 0,
+    table &&
+      !windowsRootUnproven(table, record) &&
+      windowsOwnedProcesses(table, record).length === 0,
     "opencodex-proxy-exit-unverifiable",
   );
   return { termination: "exited-snapshot", descendantsExited: false };
 }
+
+// A Unix millisecond time as a FILETIME string, the unit of `CreationDate`.
+const filetimeAt = (ms) => String((BigInt(ms) + 11644473600000n) * 10000n);
 
 function processAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -509,6 +551,10 @@ async function endWindowsProxy(record, graceMs) {
     /^\d+$/.test(record.notBefore ?? ""),
     "opencodex-proxy-exit-unverifiable",
   );
+  assert(
+    !windowsRootUnproven(table, record),
+    "opencodex-proxy-exit-unverifiable",
+  );
   if (windowsOwnedProcesses(table, record).length === 0) return false;
   await terminateWindowsTree(record, graceMs);
   return true;
@@ -629,7 +675,10 @@ export async function acquireOpenCodexLease(accountHome, options = {}) {
       const pending = `${proxyFile(file, lease.token)}.pending`;
       const record = {
         group,
-        processStart: extra.processStart ?? processStartTime(group),
+        processStart:
+          "processStart" in extra
+            ? extra.processStart
+            : processStartTime(group),
         ...extra,
       };
       fs.writeFileSync(
@@ -724,7 +773,7 @@ export async function startOpenCodexProxy(binding) {
     fs.mkdirSync(proxyHome, { recursive: true, mode: 0o700 });
     const launch = openCodexLaunch(binding.runtimePrefix);
     // Nothing of this tree can predate the spawn; the margin absorbs clock skew.
-    notBefore = String((BigInt(Date.now() - 2000) + 11644473600000n) * 10000n);
+    notBefore = filetimeAt(Date.now() - 2000);
     child = spawn(
       launch.command,
       [...launch.args, "start", "--port", String(port)],
@@ -758,11 +807,39 @@ export async function startOpenCodexProxy(binding) {
   child.once("close", () => {
     exited = true;
   });
+  // Our own handle keeps the launcher's pid from being reused until this event,
+  // so a child of that pid created before now is the launcher's, not a stranger's.
+  child.once("exit", () => {
+    if (!windows || !tree) return;
+    try {
+      tree = lease.setProxy(child.pid, {
+        ...tree,
+        launcherGoneBy: filetimeAt(Date.now()),
+      });
+    } catch {
+      // Without the bound, fewer processes count as owned, never more.
+    }
+  });
+  // While that handle holds the pid, only the launcher can own it, so its start
+  // time may be read from the process table when the spawn-time read failed.
+  const withStart = (record, rows) => {
+    const row = rows?.find((item) => item.pid === child.pid);
+    return record.processStart ||
+      record.launcherGoneBy ||
+      !row ||
+      BigInt(row.created) < BigInt(record.notBefore)
+      ? record
+      : { ...record, processStart: row.created };
+  };
   // The lease is released only once the owned group is proven gone.
   let stopping = null;
   const stop = () => {
     stopping ??= (async () => {
       const graceMs = binding.stopGraceMs ?? 3000;
+      if (windows && child.pid) {
+        const filled = withStart(tree, windowsProcessTable(child.pid));
+        if (filled !== tree) tree = lease.setProxy(child.pid, filled);
+      }
       const receipt = !child.pid
         ? { termination: "exited", descendantsExited: true }
         : windows
@@ -787,6 +864,7 @@ export async function startOpenCodexProxy(binding) {
           const table = windowsProcessTable();
           const listeners = windowsListenerPids(port);
           if (table && listeners) {
+            tree = withStart(tree, table);
             listenerPid = windowsOwnedListener(
               table,
               tree,

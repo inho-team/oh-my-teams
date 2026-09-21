@@ -21,6 +21,7 @@ import {
   windowsOwnedListener,
   windowsOwnedProcesses,
   windowsProcessTable,
+  windowsRootUnproven,
 } from "../plugins/oh-my-teams/scripts/opencodex.mjs";
 import { killRecorded, writeFakeOcx } from "./fake-ocx.mjs";
 import { run } from "../plugins/oh-my-teams/scripts/core.mjs";
@@ -789,8 +790,79 @@ test("a dead launcher's descendants stay owned because Windows keeps their paren
     { pid: 12, ppid: 11, created: at(30) },
     { pid: 20, ppid: 1, created: at(40) },
   ];
-  const record = { group: 10, processStart: at(10), notBefore: at(0) };
+  const record = {
+    group: 10,
+    processStart: at(10),
+    notBefore: at(0),
+    launcherGoneBy: at(100),
+  };
   assert.deepEqual(pidsOf(windowsOwnedProcesses(table, record)), [11, 12]);
+  // The launcher's start time is optional: it may have died before it was read.
+  assert.deepEqual(
+    pidsOf(windowsOwnedProcesses(table, { ...record, processStart: null })),
+    [11, 12],
+  );
+});
+
+test("a child of a dead launcher's reused pid is not owned", () => {
+  // Reviewer's repro: pid 10 was the launcher, is gone, and pid 11 was created
+  // long after any launcher with that pid could have started it.
+  const late = [{ pid: 11, ppid: 10, created: at(90000010) }];
+  const base = { group: 10, processStart: at(10), notBefore: at(0) };
+  // Nothing shows the launcher was gone, so its identity is not shown either.
+  assert.deepEqual(windowsOwnedProcesses(late, base), []);
+  // Seen gone at 100: a child created after that belongs to a stranger.
+  assert.deepEqual(
+    windowsOwnedProcesses(late, { ...base, launcherGoneBy: at(100) }),
+    [],
+  );
+  // A child created before the launcher started cannot be its child.
+  const early = [{ pid: 11, ppid: 10, created: at(5) }];
+  assert.deepEqual(
+    windowsOwnedProcesses(early, { ...base, launcherGoneBy: at(100) }),
+    [],
+  );
+  // The snapshot still names what was known to be ours.
+  assert.deepEqual(
+    windowsOwnedProcesses(late, {
+      ...base,
+      snapshot: [{ pid: 11, created: at(90000010) }],
+    }),
+    [{ pid: 11, created: at(90000010) }],
+  );
+});
+
+test("a live launcher pid with no recorded start time is not owned", () => {
+  // Reviewer's repro: a stranger reused pid 10 and started pid 11.
+  const table = [
+    { pid: 10, ppid: 1, created: at(90000000) },
+    { pid: 11, ppid: 10, created: at(90000010) },
+  ];
+  const unknown = { group: 10, processStart: null, notBefore: at(0) };
+  assert.deepEqual(windowsOwnedProcesses(table, unknown), []);
+  // Nothing was proven either way, so the caller must not treat it as gone.
+  assert.equal(windowsRootUnproven(table, unknown), true);
+  // With the start recorded, the same table is a reused pid: not ours, and gone.
+  const known = { ...unknown, processStart: at(10) };
+  assert.deepEqual(windowsOwnedProcesses(table, known), []);
+  assert.equal(windowsRootUnproven(table, known), false);
+  // A snapshot pair with the same creation time does prove the pid.
+  const seen = { ...unknown, snapshot: [{ pid: 10, created: at(90000000) }] };
+  assert.deepEqual(pidsOf(windowsOwnedProcesses(table, seen)), [10]);
+  assert.equal(windowsRootUnproven(table, seen), false);
+  // No live process at the pid: nothing to prove.
+  assert.equal(windowsRootUnproven([], unknown), false);
+});
+
+test("a descendant must be created after its own parent", () => {
+  const table = [
+    { pid: 10, ppid: 1, created: at(10) },
+    { pid: 11, ppid: 10, created: at(20) },
+    // Its parent pid is ours, but it started before that parent did.
+    { pid: 12, ppid: 11, created: at(15) },
+  ];
+  const record = { group: 10, processStart: at(10), notBefore: at(0) };
+  assert.deepEqual(pidsOf(windowsOwnedProcesses(table, record)), [10, 11]);
 });
 
 test("a reused launcher pid takes no children with it", () => {

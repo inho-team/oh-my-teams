@@ -20,7 +20,11 @@ Windows에는 프로세스 그룹이 없으므로 소유 트리를 `(pid, Creati
 
 - spawn 직전에 `notBefore`(spawn 2초 전의 FILETIME)를 기록합니다. 이 시각보다 먼저 만들어진 프로세스는 트리에 속하지 않습니다.
 - `Get-CimInstance Win32_Process`로 `{pid, ppid, created}` 표를 읽고, 런처에서 시작해 `ppid`를 따라 후손을 찾습니다. Windows는 부모가 죽어도 자식의 `ppid`를 갱신하지 않으므로 죽은 런처의 후손도 찾을 수 있습니다.
-- pid가 재사용된 경우는 `created`가 다르므로 원래 프로세스로 취급하지 않습니다. 런처 pid가 살아 있는데 `created`가 기록과 다르면 그 pid의 자식은 이 트리의 것이 아닙니다.
+- 프로세스는 신원이 증명될 때에만 소유로 인정합니다. 인정하는 경우는 세 가지입니다.
+  - 스냅샷에 적힌 `(pid, created)` 쌍이 지금 표와 둘 다 일치할 때.
+  - 런처 pid에서 살아 있는 프로세스의 `created`가 기록된 시작 시각(`processStart`)과 같을 때. 시작 시각을 기록하지 못했거나 값이 다르면 그 pid는 소유가 증명되지 않은 것이며 그 pid와 자식은 소유로 세지 않습니다. 시작 시각이 없고 스냅샷에도 없는 프로세스가 런처 pid에 살아 있으면 종료 증명은 실패(`opencodex-proxy-exit-unverifiable`)하고 그 프로세스를 종료하지도 않습니다.
+  - 소유로 인정된 부모의 자식이면서 부모보다 늦게 만들어졌을 때(손자 이하도 같습니다).
+- 런처가 이미 사라졌다면 그 pid의 자식은 런처의 종료를 관찰한 시각(`launcherGoneBy`)이 기록되어 있고, 자식이 `notBefore`(알고 있으면 런처의 시작 시각)와 `launcherGoneBy` 사이에 만들어졌을 때에만 후손으로 인정합니다. 부모 프로세스 핸들을 쥔 동안에는 그 pid를 다른 프로세스가 재사용할 수 없으므로 종료 관찰 시각 이전에 만들어진 자식은 런처의 것입니다. 종료를 관찰하지 못한 기록에서는 런처가 사라진 뒤의 후손을 스냅샷 밖에서 찾지 않으며, 그 후손은 종료 대상이 되지 못할 수 있습니다.
 - 프록시를 소유했다고 인정하려면 `Get-NetTCPConnection -State Listen`의 리스너가 정확히 하나여야 하고, 그 pid가 헬스 응답 본문의 `pid`와 같아야 하며, 그 pid가 트리 구성원이어야 합니다. 하나라도 어긋나거나 조회에 실패하면 거부합니다(fail-closed).
 - 헬스 본문의 `pid` 대조는 Windows 분기에서만 합니다. POSIX 동작은 바뀌지 않았습니다.
 
@@ -83,7 +87,7 @@ Windows에는 프로세스 그룹이 없으므로 소유 트리를 `(pid, Creati
 
 모든 OS에서 실행되는 새 테스트:
 
-- `tests/opencodex.test.mjs`: a Windows proxy tree is the launcher and its descendants created after the spawn / a dead launcher's descendants stay owned because Windows keeps their parent pid / a reused launcher pid takes no children with it / a snapshot pair counts only when pid and creation time both match / a Windows listener is owned only when it is the sole listener, in the tree and named by health / the runtime launch names this Node for the package entry on Windows and the bin script elsewhere
+- `tests/opencodex.test.mjs`: a Windows proxy tree is the launcher and its descendants created after the spawn / a dead launcher's descendants stay owned because Windows keeps their parent pid / a child of a dead launcher's reused pid is not owned / a live launcher pid with no recorded start time is not owned / a descendant must be created after its own parent / a reused launcher pid takes no children with it / a snapshot pair counts only when pid and creation time both match / a Windows listener is owned only when it is the sole listener, in the tree and named by health / the runtime launch names this Node for the package entry on Windows and the bin script elsewhere
 - `tests/headless.test.mjs`: a proxy that proves only an exited snapshot leaves the turn unverified
 - `tests/dependencies.test.mjs`: a passing health check ends the launcher it started, a health check on Windows ends the launcher's child, not only the launcher (뒤의 것은 Windows 전용)
 
