@@ -32,7 +32,7 @@ kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook �
 [pm](../pm/SKILL.md)과 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)을 읽고 다음 주기를 수행한다.
 
 1. 원래 Goal과 현재 저장소 상태를 대조하고, 아직 충족되지 않은 수용 기준 가운데 다음으로 의미 있는 작업을 선택한다.
-2. PM이 과제 난이도로 정한 실행 깊이의 역할만 활성화하여 구현·검토·통합을 진행하고, 판단이 바뀌면 깊이를 조정한다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 독립 편집에는 Orca child worktree를 사용한다. 역할은 원시 `orca orchestration worker-start`가 아니라 `worker-start --org --role --workflow-id --state` 래퍼로만 띄우고, 산출물은 PM·PL이 아니라 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할이 만든다.
+2. PM의 [task 작성과 역할 선택 규칙](../pm/SKILL.md#작업-배정)에 따라 workflow를 만들고, 과제 난이도로 정한 실행 깊이의 역할만 활성화하여 구현·검토·통합을 진행하며, 판단이 바뀌면 깊이를 조정한다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 독립 편집에는 Orca child worktree를 사용한다. 역할은 원시 `orca orchestration worker-start`가 아니라 `worker-start --org --role --workflow-id --state` 래퍼로만 띄우고, 산출물은 PM·PL이 아니라 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할이 만든다.
 3. 각 주기마다 코드 변경, 새 검사 결과, 검토 결과, 명확해진 장애물 중 하나 이상의 확인 가능한 진전을 남긴다.
 4. 실패하면 같은 시도를 무한 반복하지 않는다. 실패 원인과 시도를 기록하고 접근 방법이나 담당 역할을 바꾼다. `work` 실행·attempt마다 적용되는 provider 호출 한도, workflow의 호출 예산과 attempt 한도, 사용자가 정한 중단 조건을 지킨다. 대화형 역할 터미널의 턴은 이 한도에 세지 않으므로, 사용량은 `usage-report`로 따로 확인한다.
 5. worker를 기다리는 동안 `check --wait`의 제한 시간마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.

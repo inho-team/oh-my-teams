@@ -4,6 +4,7 @@
  * 실행 예:
  * node experiments/delegation-economics/mac-usage.mjs --user <evidence.json> \
  *   --checkpoint <usage-checkpoint.json> --launches <launches.jsonl> \
+ *   --connection <pm-connection.json> \
  *   --out docs/plan/delegation-economics/mac-usage-evidence.json
  */
 
@@ -14,14 +15,14 @@ import path from "node:path";
 /**
  * 명령줄 인자를 읽는다.
  * @param {string[]} argv 명령줄 인자이다.
- * @returns {{user: string, checkpoint: string, launches: string, workflowState: string, workflowOrganization: string, registryState: string, rollout: string, out: string}}
- * 입력과 출력 경로이다.
+ * @returns {Record<string, string>} 입력과 출력 경로이다.
  */
 export function parseArgs(argv) {
   const result = {
     user: null,
     checkpoint: null,
     launches: null,
+    connection: null,
     workflowState: null,
     workflowOrganization: null,
     registryState: null,
@@ -34,6 +35,7 @@ export function parseArgs(argv) {
     if (flag === "--user") result.user = value;
     else if (flag === "--checkpoint") result.checkpoint = value;
     else if (flag === "--launches") result.launches = value;
+    else if (flag === "--connection") result.connection = value;
     else if (flag === "--workflow-state") result.workflowState = value;
     else if (flag === "--workflow-organization")
       result.workflowOrganization = value;
@@ -134,6 +136,71 @@ export function readLaunches(file) {
 }
 
 /**
+ * Verifies that a local PM connection is corroborated by its saved evidence.
+ * @param {Record<string, any>} connection Local run, terminal, and thread input.
+ * @param {Record<string, any>} checkpoint Saved usage checkpoint.
+ * @param {Array<Record<string, any>>} launches Launch ledger entries.
+ * @param {Record<string, any>} workflowState Current workflow state.
+ * @returns {void}
+ * @throws {Error} When a connection value has no matching evidence.
+ */
+export function validateManualConnection(
+  connection,
+  checkpoint,
+  launches,
+  workflowState,
+) {
+  if (connection?.schemaVersion !== 1) {
+    throw new Error("연결 입력의 schemaVersion은 1이어야 합니다.");
+  }
+  for (const key of ["runId", "terminal", "threadId", "workflowId"]) {
+    if (typeof connection[key] !== "string" || !connection[key]) {
+      throw new Error(`연결 입력에 ${key} 문자열이 필요합니다.`);
+    }
+  }
+  if (
+    typeof connection.sources?.runBinding !== "string" ||
+    typeof connection.sources?.launchLedger !== "string"
+  ) {
+    throw new Error("연결 입력에 runBinding과 launchLedger 출처가 필요합니다.");
+  }
+  if (connection.workflowId !== workflowState.id) {
+    throw new Error(
+      "연결 입력의 workflowId가 workflow state와 일치하지 않습니다.",
+    );
+  }
+  const binding = readJson(connection.sources.runBinding).result?.run;
+  if (
+    binding?.id !== connection.runId ||
+    binding?.coordinator_handle !== connection.terminal
+  ) {
+    throw new Error(
+      "연결 입력의 runId 또는 terminal이 run binding과 일치하지 않습니다.",
+    );
+  }
+  if (
+    !launches.some(
+      (launch) =>
+        launch.role === "pm" && launch.terminal === connection.terminal,
+    )
+  ) {
+    throw new Error("연결 입력의 terminal이 PM launch ledger에 없습니다.");
+  }
+  if (
+    !checkpoint.records?.some(
+      (record) =>
+        record.sessionKey === connection.threadId &&
+        record.provider === "codex" &&
+        (record.modelReported ?? []).includes("gpt-6-astra"),
+    )
+  ) {
+    throw new Error(
+      "연결 입력의 threadId가 Astra checkpoint 기록과 일치하지 않습니다.",
+    );
+  }
+}
+
+/**
  * 실행 기록의 역할과 도구 종류를 근거가 있는 범위에서 요약한다.
  * @param {Record<string, any>} record usage 기록이다.
  * @returns {Record<string, any>} 개인정보를 제외한 실행 요약이다.
@@ -162,7 +229,7 @@ export function summarizeRecord(record) {
 
 /**
  * 사용자 집계·OMT 연결·Astra 분류를 생성한다.
- * @param {{user: string, checkpoint: string, launches: string, out: string}} args 입력과 출력 경로이다.
+ * @param {{user: string, checkpoint: string, launches: string, connection: string, out: string}} args 입력과 출력 경로이다.
  * @returns {Record<string, any>} 기록한 익명 근거이다.
  */
 export function buildEvidence(args) {
@@ -170,6 +237,7 @@ export function buildEvidence(args) {
     args.user,
     args.checkpoint,
     args.launches,
+    args.connection,
     args.workflowState,
     args.workflowOrganization,
     args.registryState,
@@ -186,6 +254,8 @@ export function buildEvidence(args) {
   const workflowId = "intern-first-r3";
   const records = checkpoint.records ?? [];
   const launches = readLaunches(args.launches);
+  const connection = readJson(args.connection);
+  validateManualConnection(connection, checkpoint, launches, workflowState);
   const workflowLaunches = launches.filter(
     (launch) => launch.workflowId === workflowId,
   );
@@ -299,11 +369,9 @@ export function buildEvidence(args) {
         launchAt: "2026-09-21T05:11:46.880Z",
         checkpointRecordFrom: astra[0]?.firstAt ?? null,
         checkpointRecordTo: astra[0]?.lastAt ?? null,
-        runHash: identifierHash("run_55a527acdd09"),
-        terminalHash: identifierHash(
-          "term_bae15edf-c10c-4e2e-9878-c8e5ec97acc1",
-        ),
-        threadHash: identifierHash("01a0c260-c41d-7a51-aae8-cba3bc36d75d"),
+        runHash: identifierHash(connection.runId),
+        terminalHash: identifierHash(connection.terminal),
+        threadHash: identifierHash(connection.threadId),
       },
       attributionEvidence: {
         roleConnection: "PM OMT execution",
