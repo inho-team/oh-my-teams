@@ -1094,7 +1094,11 @@ test("a reused proxy group id is not ended", proxyProof, async (t) => {
     token: "t4",
     pid: box.deadPid(),
     processStart: null,
-    proxy: { group: stranger, processStart: "Mon Jan  1 00:00:00 2001" },
+    // A start time that no live process has: `lstart` text on POSIX, a FILETIME on Windows.
+    proxy: {
+      group: stranger,
+      processStart: win ? "116444736000000000" : "Mon Jan  1 00:00:00 2001",
+    },
   });
   const lease = await acquireOpenCodexLease(box.accountHome);
   assert.equal(lease.recovered.terminated, false);
