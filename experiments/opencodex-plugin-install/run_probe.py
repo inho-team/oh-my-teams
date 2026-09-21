@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 PLUGIN = ROOT / "plugin"
+OCX = Path("/tmp/omt-opencodex-probe.dAKX3U/install/node_modules/.bin/ocx")
 
 
 def run(command, *, cwd, env):
@@ -68,6 +69,71 @@ def main():
                 ),
             }
         )
+        claude_marketplace = temp_root / "claude-marketplace"
+        (claude_marketplace / ".claude-plugin").mkdir(parents=True)
+        shutil.copy2(
+            ROOT / ".claude-plugin" / "marketplace.json",
+            claude_marketplace / ".claude-plugin" / "marketplace.json",
+        )
+        shutil.copytree(PLUGIN, claude_marketplace / "plugin")
+        claude_add = run(
+            [
+                "claude",
+                "--bare",
+                "plugin",
+                "marketplace",
+                "add",
+                str(claude_marketplace),
+                "--scope",
+                "local",
+            ],
+            cwd=temp_root,
+            env=env,
+        )
+        records["checks"].append({"name": "claude_marketplace_add", **claude_add})
+        claude_install = run(
+            [
+                "claude",
+                "--bare",
+                "plugin",
+                "install",
+                "install-probe@omt-isolated-probe",
+                "--scope",
+                "local",
+                "--yes",
+                "--json",
+            ],
+            cwd=temp_root,
+            env=env,
+        )
+        claude_install.update(
+            {
+                "name": "claude_plugin_install",
+                "marker_lines": marker.read_text().splitlines() if marker.exists() else [],
+            }
+        )
+        records["checks"].append(claude_install)
+        records["checks"].append(
+            {
+                "name": "claude_plugin_install_repeat",
+                **run(
+                    [
+                        "claude",
+                        "--bare",
+                        "plugin",
+                        "install",
+                        "install-probe@omt-isolated-probe",
+                        "--scope",
+                        "local",
+                        "--yes",
+                        "--json",
+                    ],
+                    cwd=temp_root,
+                    env=env,
+                ),
+                "marker_lines": marker.read_text().splitlines() if marker.exists() else [],
+            }
+        )
         records["checks"].append(
             {
                 "name": "npm_ci_ignore_scripts",
@@ -103,6 +169,7 @@ def main():
             marketplace / ".agents" / "plugins" / "marketplace.json",
         )
         shutil.copytree(PLUGIN, marketplace / "plugin")
+        marker_before_codex = marker.read_text().splitlines() if marker.exists() else []
         codex_env = env | {"CODEX_HOME": str(codex_home)}
         records["checks"].append(
             {
@@ -124,6 +191,7 @@ def main():
             {
                 "name": "codex_plugin_add",
                 "cache_has_node_modules": (cache_plugin / "node_modules").is_dir(),
+                "marker_before_host_install": marker_before_codex,
                 "marker_lines": marker.read_text().splitlines() if marker.exists() else [],
             }
         )
@@ -137,6 +205,7 @@ def main():
             {
                 "name": "codex_plugin_add_repeat",
                 "cache_has_node_modules": (cache_plugin / "node_modules").is_dir(),
+                "marker_before_host_install": marker_before_codex,
                 "marker_lines": marker.read_text().splitlines() if marker.exists() else [],
             }
         )
@@ -147,9 +216,31 @@ def main():
             if path.is_file() and "auth" not in path.name.lower()
         )
         records["lifecycle_marker_lines"] = marker.read_text().splitlines() if marker.exists() else []
+        ocx_home = temp_root / "ocx-home"
+        ocx_env = env | {
+            "HOME": str(ocx_home),
+            "XDG_CONFIG_HOME": str(ocx_home / "config"),
+            "XDG_DATA_HOME": str(ocx_home / "data"),
+            "XDG_CACHE_HOME": str(ocx_home / "cache"),
+            "CODEX_HOME": str(ocx_home / "codex"),
+        }
+        for path in [
+            ocx_home,
+            ocx_home / "config",
+            ocx_home / "data",
+            ocx_home / "cache",
+            ocx_home / "codex",
+        ]:
+            path.mkdir(parents=True, exist_ok=True)
         records["ocx_2_59_0"] = {
-            "status": "not_run",
-            "reason": "ocx is not on PATH; no OpenCodex 2.59.0 executable was available.",
+            "path": str(OCX),
+            "version": run([str(OCX), "--version"], cwd=temp_root, env=ocx_env),
+            "health": run([str(OCX), "health", "--json"], cwd=temp_root, env=ocx_env),
+            "ready": run([str(OCX), "ready", "--json"], cwd=temp_root, env=ocx_env),
+            "capabilities": run(
+                [str(OCX), "capabilities", "--json"], cwd=temp_root, env=ocx_env
+            ),
+            "isolated_home": str(ocx_home),
         }
         (ROOT / "result.json").write_text(json.dumps(records, indent=2) + "\n")
 
