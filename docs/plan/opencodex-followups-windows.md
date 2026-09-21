@@ -24,7 +24,7 @@ Windows에는 프로세스 그룹이 없으므로 소유 트리를 `(pid, Creati
   - 스냅샷에 적힌 `(pid, created)` 쌍이 지금 표와 둘 다 일치할 때.
   - 런처 pid에서 살아 있는 프로세스의 `created`가 기록된 시작 시각(`processStart`)과 같을 때. 시작 시각을 기록하지 못했거나 값이 다르면 그 pid는 소유가 증명되지 않은 것이며 그 pid와 자식은 소유로 세지 않습니다. 시작 시각이 없고 스냅샷에도 없는 프로세스가 런처 pid에 살아 있으면 종료 증명은 실패(`opencodex-proxy-exit-unverifiable`)하고 그 프로세스를 종료하지도 않습니다.
   - 소유로 인정된 부모의 자식이면서 부모보다 늦게 만들어졌을 때(손자 이하도 같습니다).
-- 런처가 이미 사라졌다면 그 pid의 자식은 런처의 종료를 관찰한 시각(`launcherGoneBy`)이 기록되어 있고, 자식이 `notBefore`(알고 있으면 런처의 시작 시각)와 `launcherGoneBy` 사이에 만들어졌을 때에만 후손으로 인정합니다. 부모 프로세스 핸들을 쥔 동안에는 그 pid를 다른 프로세스가 재사용할 수 없으므로 종료 관찰 시각 이전에 만들어진 자식은 런처의 것입니다. 종료를 관찰하지 못한 기록에서는 런처가 사라진 뒤의 후손을 스냅샷 밖에서 찾지 않으며, 그 후손은 종료 대상이 되지 못할 수 있습니다.
+- 런처가 이미 사라졌다면 그 pid의 자식은 런처의 종료를 관찰한 시각(`launcherGoneBy`)이 기록되어 있고, 자식이 `notBefore`(알고 있으면 런처의 시작 시각)와 `launcherGoneBy` 사이에 만들어졌을 때에만 후손으로 인정합니다. 부모 프로세스 핸들을 쥔 동안에는 그 pid를 다른 프로세스가 재사용할 수 없으므로 종료 관찰 시각 이전에 만들어진 자식은 런처의 것입니다. 종료를 관찰하지 못한 채 저장된 기록(런처가 다른 프로세스에서 이미 죽은 경우)에서는 런처가 사라진 뒤의 후손을 스냅샷 밖에서 찾지 않으며, 그 후손은 종료 대상이 되지 못할 수 있습니다. 종료 증명이 런처를 직접 끝내는 경우에는 이 제한이 적용되지 않습니다(아래 "종료 증명").
 - 프록시를 소유했다고 인정하려면 `Get-NetTCPConnection -State Listen`의 리스너가 정확히 하나여야 하고, 그 pid가 헬스 응답 본문의 `pid`와 같아야 하며, 그 pid가 트리 구성원이어야 합니다. 하나라도 어긋나거나 조회에 실패하면 거부합니다(fail-closed).
 - 헬스 본문의 `pid` 대조는 Windows 분기에서만 합니다. POSIX 동작은 바뀌지 않았습니다.
 
@@ -33,6 +33,8 @@ Windows에는 프로세스 그룹이 없으므로 소유 트리를 `(pid, Creati
 ### 종료 증명
 
 종료는 `taskkill /PID <pid> /T /F`로 하고, 종료 코드는 증거로 쓰지 않습니다. 프로세스 표를 다시 읽어 소유 트리에 남은 구성원이 없음을 확인해야 종료로 인정하며, 표를 읽지 못하면 `opencodex-proxy-exit-unverifiable`로 실패하고 lease를 유지합니다.
+
+종료 증명은 패스마다 고정된 기록으로 트리를 다시 계산하지 않고, 지금까지 본 구성원을 기록에 이어서 더합니다(`terminateWindowsTree`). 패스마다 소유로 인정된 프로세스의 `(pid, created)` 쌍을 스냅샷에 더하므로, 런처를 끝낸 뒤에도 그 전에 관찰한 후손은 자기 쌍으로 계속 종료 대상입니다. 소유로 증명된 런처를 표에서 더 이상 볼 수 없게 된 첫 관찰의 직후에는 `launcherGoneBy`를 기록해서, 종료 중에 런처가 새로 시작한 자식도 그 시각 이전에 만들어졌다면 종료 대상으로 셉니다. 런처가 살아 있는 동안 종료를 시작한 경로(상태 확인, `stop`, 죽은 소유자의 lease 회수)에서는 이 두 가지로 스냅샷 밖의 후손이 종료 증명에서 빠지지 않습니다. 살아남은 후손이 있으면 증명은 실패하고 lease는 풀리지 않습니다. 이 기록은 그 호출 안에서만 쓰이며 lease 파일에는 저장하지 않습니다.
 
 증명이 통과해도 결과는 `{termination: "exited-snapshot", descendantsExited: false}`입니다. POSIX의 `{termination: "exited", descendantsExited: true}`와 구분하는 이유는 스냅샷 이후에 생겨 트리를 벗어난 프로세스를 이 방식으로는 볼 수 없기 때문입니다. `runnerTurnProven`의 요건은 바꾸지 않았고(PM 결정), 그 결과 Windows runner turn은 완료해도 unverified로 남습니다. 이 성질은 `tests/headless.test.mjs`의 "a proxy that proves only an exited snapshot leaves the turn unverified" 테스트가 모든 OS에서 확인합니다.
 
@@ -133,11 +135,11 @@ Windows에서 건너뛰는 11개 전부입니다. 사유는 테스트의 skip �
 
 ## 설계와 다르게 구현한 곳
 
-- 종료 증명을 스냅샷만으로 하지 않고 프로세스 표에서 트리를 다시 계산합니다. 스냅샷 이후에 생긴 후손도 `ppid` 체인에 있으면 종료 대상에 더하므로 설계보다 엄격합니다. 이전 판정을 약하게 만드는 방향의 변경은 없습니다.
+- 종료 증명을 스냅샷만으로 하지 않고 프로세스 표에서 트리를 다시 계산합니다. 스냅샷 이후에 생긴 후손도 `ppid` 체인에 있으면 종료 대상에 더하므로 설계보다 엄격합니다. 다만 신원을 증명하지 못한 프로세스(시작 시각을 모르는 채 살아 있는 런처 pid, 종료 관찰 시각 뒤에 만들어진 죽은 런처 pid의 자식)는 소유로 세지 않으며, 이 점은 6fef56f의 판정보다 좁습니다. 좁아진 부분이 종료 증명을 약하게 만들지 않도록, 종료 증명은 살아 있던 런처를 끝낸 뒤에도 스냅샷 밖 후손을 계속 종료 대상으로 셉니다. 종료를 관찰하지 못한 기록에서 사라진 런처의 후손은 여전히 찾지 못합니다.
 - 종료 결과의 `descendantsExited`를 `false`로 둡니다. `headless-runner.mjs`가 `proxyExited = stopped?.descendantsExited === true`로 읽으므로, 이 값이 `true`이면 소비처가 트리 전체 종료로 오해하기 때문입니다.
 - `notBefore`(spawn 2초 전 시각)를 새로 도입했습니다. 스냅샷이 없는 시점(헬스 확인 전 실패, 죽은 소유자의 고아 정리)에도 pid 재사용과 옛 프로세스를 걸러내기 위해서입니다.
 - 리스너 조회는 `Get-NetTCPConnection`을 씁니다.
-- `healthCheck`, `openCodexLaunch`, `windowsProcessTable`, `windowsOwnedProcesses`, `windowsOwnedListener`, `killWindowsProcessTree`를 export 했습니다. 테스트가 직접 호출하기 위해서이며 코드 품질 감사의 공개 export 수가 이에 맞게 바뀌었습니다(`npm run sync`).
+- `healthCheck`, `openCodexLaunch`, `windowsProcessTable`, `windowsOwnedProcesses`, `windowsOwnedListener`, `windowsRootUnproven`, `terminateWindowsTree`, `killWindowsProcessTree`를 export 했습니다. 테스트가 직접 호출하기 위해서이며 코드 품질 감사의 공개 export 수가 이에 맞게 바뀌었습니다(`npm run sync`).
 
 ## 미검증 항목
 

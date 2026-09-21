@@ -16,6 +16,7 @@ import {
   processGroupMembers,
   readOpenCodexObservation,
   startOpenCodexProxy,
+  terminateWindowsTree,
   validateFixedOpenCodexAccountHome,
   validateOpenCodexRunner,
   windowsOwnedListener,
@@ -890,6 +891,120 @@ test("a snapshot pair counts only when pid and creation time both match", () => 
     ],
   };
   assert.deepEqual(pidsOf(windowsOwnedProcesses(table, record)), [20]);
+});
+
+// A simulated Windows host: `rows` is the process table, a kill removes the
+// named pid and its descendants except `unkillable` pids, and `onKill` may add
+// processes that appear while the kill runs.
+function fakeWindowsHost(rows, { unkillable = [], onKill } = {}) {
+  let live = rows.map((row) => ({ ...row }));
+  const killed = [];
+  const descendantsOf = (pid) =>
+    live
+      .filter((row) => row.ppid === pid)
+      .flatMap((row) => [row.pid, ...descendantsOf(row.pid)]);
+  return {
+    killed,
+    io: {
+      table: () => live.map((row) => ({ ...row })),
+      kill: (pid) => {
+        killed.push(pid);
+        const doomed = new Set([pid, ...descendantsOf(pid)]);
+        live = live.filter(
+          (row) => !doomed.has(row.pid) || unkillable.includes(row.pid),
+        );
+        live.push(...(onKill?.(pid, killed.length) ?? []));
+      },
+    },
+  };
+}
+
+const launcherRecord = {
+  group: 10,
+  processStart: at(10),
+  notBefore: at(0),
+  snapshot: [
+    { pid: 10, created: at(10) },
+    { pid: 11, created: at(20) },
+  ],
+};
+const launcherRows = [
+  { pid: 10, ppid: 1, created: at(10) },
+  { pid: 11, ppid: 10, created: at(20) },
+];
+
+test("a survivor outside the snapshot keeps the exit unproven after the launcher is gone", async () => {
+  // Reviewer's repro: pid 12 is the launcher's child but was not in the health
+  // snapshot, and taskkill cannot end it. The launcher is gone after pass 1.
+  const host = fakeWindowsHost(
+    [...launcherRows, { pid: 12, ppid: 10, created: at(30) }],
+    { unkillable: [12] },
+  );
+  await assert.rejects(
+    terminateWindowsTree(launcherRecord, 50, host.io),
+    /opencodex-proxy-exit-unverifiable/,
+  );
+  // It was seen while the launcher lived, so it is ended by its own pair later.
+  assert.equal(host.killed.filter((pid) => pid === 12).length >= 1, true);
+});
+
+test("a child started while the launcher is being killed still has to be gone", async () => {
+  // Pid 13 appears during the kill, so no earlier table names it; its parent
+  // pid is the launcher's, which is absent by the time it is seen.
+  const spawnLate = (pid, count) =>
+    count === 1 ? [{ pid: 13, ppid: 10, created: at(40) }] : [];
+  const stuck = fakeWindowsHost(launcherRows, {
+    unkillable: [13],
+    onKill: spawnLate,
+  });
+  await assert.rejects(
+    terminateWindowsTree(launcherRecord, 50, stuck.io),
+    /opencodex-proxy-exit-unverifiable/,
+  );
+  assert.equal(stuck.killed.includes(13), true);
+  // When the later kill does end it, the proof passes and says only "snapshot".
+  const ended = fakeWindowsHost(launcherRows, { onKill: spawnLate });
+  assert.deepEqual(await terminateWindowsTree(launcherRecord, 50, ended.io), {
+    termination: "exited-snapshot",
+    descendantsExited: false,
+  });
+  assert.equal(ended.killed.includes(13), true);
+});
+
+test("a stranger that takes the launcher's pid or its orphans' parent pid after the kill is not ended", async () => {
+  const far = at(100000000000000000);
+  // A stranger later holds pid 10, with a child of its own.
+  const reused = fakeWindowsHost(launcherRows, {
+    onKill: (pid, count) =>
+      count === 1
+        ? [
+            { pid: 10, ppid: 1, created: far },
+            { pid: 15, ppid: 10, created: far },
+          ]
+        : [],
+  });
+  await terminateWindowsTree(launcherRecord, 50, reused.io);
+  assert.deepEqual(reused.killed, [10, 11]);
+  // A stranger's child of the vanished pid, created after we saw it gone.
+  const orphan = fakeWindowsHost(launcherRows, {
+    onKill: (pid, count) =>
+      count === 1 ? [{ pid: 16, ppid: 10, created: far }] : [],
+  });
+  await terminateWindowsTree(launcherRecord, 50, orphan.io);
+  assert.equal(orphan.killed.includes(16), false);
+});
+
+test("a launcher pid that no record can prove is neither ended nor taken for gone", async () => {
+  const host = fakeWindowsHost(launcherRows);
+  await assert.rejects(
+    terminateWindowsTree(
+      { group: 10, processStart: null, notBefore: at(0) },
+      50,
+      host.io,
+    ),
+    /opencodex-proxy-exit-unverifiable/,
+  );
+  assert.deepEqual(host.killed, []);
 });
 
 test("a Windows listener is owned only when it is the sole listener, in the tree and named by health", () => {

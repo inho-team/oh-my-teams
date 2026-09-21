@@ -357,46 +357,76 @@ export function windowsOwnedListener(table, record, listeners, healthPid) {
     : null;
 }
 
-async function waitForWindowsExit(record, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const table = windowsProcessTable();
-    if (table && windowsOwnedProcesses(table, record).length === 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
-
-// Ends a recorded Windows tree and shows that none of it remains. The proof is
-// only as strong as the snapshot: a process that started after it and left the
-// tree is missed, so the receipt says `exited-snapshot`, never `exited`, and
-// `descendantsExited` stays false because a whole tree was not shown empty.
-// The tree is recomputed from the process table on every pass, which can only
-// add processes to what must be gone, never remove any.
-async function terminateWindowsTree(record, graceMs) {
+/**
+ * Ends a recorded Windows tree and shows that none of it remains.
+ *
+ * The proof is only as strong as the snapshot: a process that started after it
+ * and left the tree is missed, so the receipt says `exited-snapshot`, never
+ * `exited`, and `descendantsExited` stays false because a whole tree was not
+ * shown empty. The record is kept between passes so that ending the launcher
+ * does not shrink what must be gone: every member seen joins the snapshot as a
+ * (pid, created) pair, and once the launcher that was proven a member is absent
+ * from the table, `launcherGoneBy` is stamped so that its later children, which
+ * Windows leaves attached to the vanished pid, still count. Anything that
+ * stays alive, or cannot be judged, throws `opencodex-proxy-exit-unverifiable`.
+ * @param {object} record - Recorded proxy tree, as for `windowsOwnedProcesses`.
+ * @param {number} graceMs - How long to wait for the tree to end after each kill.
+ * @param {{table?: Function, kill?: Function}} [io] - Process table reader and tree killer, replaceable in tests.
+ * @returns {Promise<{termination: string, descendantsExited: boolean}>} Receipt of the proven exit.
+ */
+export async function terminateWindowsTree(record, graceMs, io = {}) {
+  const readTable = io.table ?? windowsProcessTable;
+  const kill = io.kill ?? killWindowsProcessTree;
   assert(record?.group, "opencodex-proxy-exit-unverifiable");
   assert(
     /^\d+$/.test(record.notBefore ?? ""),
     "opencodex-proxy-exit-unverifiable",
   );
-  for (let pass = 0; pass < 2; pass += 1) {
-    const table = windowsProcessTable();
-    assert(table, "opencodex-proxy-exit-unverifiable");
+  let tracked = record;
+  let launcherSeen = false;
+  const observe = (table) => {
+    if (
+      launcherSeen &&
+      !tracked.launcherGoneBy &&
+      !table.some((row) => row.pid === tracked.group)
+    )
+      tracked = { ...tracked, launcherGoneBy: filetimeAt(Date.now()) };
     assert(
-      !windowsRootUnproven(table, record),
+      !windowsRootUnproven(table, tracked),
       "opencodex-proxy-exit-unverifiable",
     );
-    const members = windowsOwnedProcesses(table, record);
+    const members = windowsOwnedProcesses(table, tracked);
+    if (members.some((member) => member.pid === tracked.group))
+      launcherSeen = true;
+    const seen = new Set(
+      (tracked.snapshot ?? []).map((known) => `${known.pid}/${known.created}`),
+    );
+    const added = members.filter(
+      (member) => !seen.has(`${member.pid}/${member.created}`),
+    );
+    if (added.length > 0)
+      tracked = {
+        ...tracked,
+        snapshot: [...(tracked.snapshot ?? []), ...added],
+      };
+    return members;
+  };
+  for (let pass = 0; pass < 2; pass += 1) {
+    const table = readTable();
+    assert(table, "opencodex-proxy-exit-unverifiable");
+    const members = observe(table);
     if (members.length === 0) break;
-    for (const member of members) killWindowsProcessTree(member.pid);
-    await waitForWindowsExit(record, graceMs);
+    for (const member of members) kill(member.pid);
+    const deadline = Date.now() + graceMs;
+    while (Date.now() < deadline) {
+      const rows = readTable();
+      if (rows && observe(rows).length === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
-  const table = windowsProcessTable();
-  assert(
-    table &&
-      !windowsRootUnproven(table, record) &&
-      windowsOwnedProcesses(table, record).length === 0,
-    "opencodex-proxy-exit-unverifiable",
-  );
+  const table = readTable();
+  assert(table, "opencodex-proxy-exit-unverifiable");
+  assert(observe(table).length === 0, "opencodex-proxy-exit-unverifiable");
   return { termination: "exited-snapshot", descendantsExited: false };
 }
 
