@@ -18,6 +18,8 @@ import {
   validateOpenCodexRunner,
 } from "../plugins/oh-my-teams/scripts/opencodex.mjs";
 import { modelBinding } from "../plugins/oh-my-teams/scripts/providers.mjs";
+import { readJSON, run } from "../plugins/oh-my-teams/scripts/core.mjs";
+import { work } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { modelVerdict } from "../plugins/oh-my-teams/scripts/headless.mjs";
 
 const fingerprint = `sha256:${"a".repeat(64)}`;
@@ -839,4 +841,222 @@ test("one run's session homes must differ from each other and from every account
       ),
     overlap,
   );
+});
+
+test("a home file or entry that is not an object is refused with the standard code", (t) => {
+  const write = (provider, files) => {
+    const home = oauthHome(t, provider);
+    for (const [name, value] of Object.entries(files))
+      fs.writeFileSync(path.join(home, name), JSON.stringify(value));
+    return home;
+  };
+  const cases = {
+    "auth.json is null": (p) => ({ "auth.json": null }),
+    "auth.json is a list": (p) => ({ "auth.json": [] }),
+    "auth.json is a string": (p) => ({ "auth.json": "x" }),
+    "config.json is null": (p) => ({ "config.json": null }),
+    "config.json is a list": (p) => ({ "config.json": [] }),
+    "the target's auth entry is a list": (p) => ({ "auth.json": { [p]: [] } }),
+    "another auth entry is a list": (p) => ({
+      "auth.json": {
+        [p]: {
+          activeAccountId: ACCOUNT_ID[p],
+          accounts: [{ id: ACCOUNT_ID[p], credential: { source: "oauth" } }],
+        },
+        other: [],
+      },
+    }),
+  };
+  for (const provider of Object.keys(ACCOUNT_ID)) {
+    for (const [name, files] of Object.entries(cases))
+      assert.throws(
+        () =>
+          validateFixedOpenCodexOAuthHome(
+            write(provider, files(provider)),
+            provider,
+          ),
+        (error) =>
+          error.message === "opencodex-binding-unverified" &&
+          error.constructor === Error,
+        `${provider}: ${name}`,
+      );
+    for (const [name, edit] of Object.entries({
+      "config.providers is a list": ({ config }) => (config.providers = []),
+      "config.providers holds a string entry": ({ config }) =>
+        (config.providers.extra = "x"),
+      "config.providers.openai is null": ({ config }) =>
+        (config.providers.openai = null),
+      "config.providers.openai is a list": ({ config }) =>
+        (config.providers.openai = []),
+      "the target's provider entry is null": ({ config }, p) =>
+        (config.providers[p] = null),
+    }))
+      assert.throws(
+        () =>
+          validateFixedOpenCodexOAuthHome(
+            oauthHome(t, provider, (files) => edit(files, provider)),
+            provider,
+          ),
+        (error) => error.message === "opencodex-binding-unverified",
+        `${provider}: ${name}`,
+      );
+  }
+});
+
+// ---- the work path ---------------------------------------------------------
+
+const organization = readJSON(
+  new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
+);
+
+async function workRepo(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-oauth-work-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const args of [
+    ["init"],
+    ["config", "user.name", "Test"],
+    ["config", "user.email", "test@example.invalid"],
+  ])
+    assert.equal((await run(["git", ...args], { cwd: dir })).code, 0);
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
+  fs.writeFileSync(path.join(dir, "value.txt"), "wrong\n");
+  await run(["git", "add", ".gitignore", "value.txt"], { cwd: dir });
+  await run(["git", "commit", "-m", "seed"], { cwd: dir });
+  return dir;
+}
+
+const workTask = {
+  schemaVersion: 2,
+  revision: 1,
+  kind: "edit",
+  id: "oauth-work",
+  goal: "Session home overlap",
+  instruction: "Make the change",
+  nonGoals: [],
+  constraints: [],
+  files: ["value.txt"],
+  checks: [[process.execPath, "-e", "process.exit(0)"]],
+  acceptance: [
+    { id: "check", description: "check", method: "check", checkIndexes: [0] },
+  ],
+  dependencies: [],
+  contractRefs: [],
+  contextRefs: [],
+  openQuestions: [],
+  reviewRequirements: [],
+  environment: "test",
+  baseRef: "HEAD",
+  risk: "low",
+};
+
+// Runner accounts are OpenAI here: validateOrg still refuses claude and agy
+// runners, and the overlap rule does not depend on the provider.
+function runnerOrganization(accounts) {
+  const org = structuredClone(organization);
+  for (const [role, account] of Object.entries(accounts)) {
+    org.profiles[`ocx-${account}`] = {
+      provider: "codex",
+      command: ["omt-no-such-cli"],
+      account,
+      subscription: "Fixed subscription",
+      model: "gpt-6-astra",
+      effort: "medium",
+      runner: {
+        kind: "opencodex",
+        mode: "fixed-account",
+        accountHomeRef: account,
+        runtimeFingerprint: fingerprint,
+      },
+    };
+    org.roles[role].profile = `ocx-${account}`;
+  }
+  return org;
+}
+
+async function runWork(t, org, environment) {
+  const dir = await workRepo(t);
+  const saved = { ...process.env };
+  for (const key of Object.keys(process.env))
+    if (key.startsWith("OMT_OPENCODEX_")) delete process.env[key];
+  Object.assign(process.env, environment);
+  t.after(() => {
+    for (const key of Object.keys(process.env))
+      if (key.startsWith("OMT_OPENCODEX_")) delete process.env[key];
+    Object.assign(process.env, saved);
+  });
+  const stateDir = path.join(dir, ".omt");
+  const calls = [];
+  const outcome = await work(dir, org, structuredClone(workTask), {
+    stateDir,
+    call: async () => {
+      calls.push(1);
+      throw new Error("reached-provider-call");
+    },
+  }).then(
+    () => null,
+    (error) => error,
+  );
+  return { outcome, calls, stateDir };
+}
+
+test("work refuses runner accounts whose session homes are shared or are an account home", async (t) => {
+  const org = runnerOrganization({ junior: "acct-a", senior: "acct-b" });
+  const overlap = /session homes must differ/;
+  const cases = {
+    "two accounts on the one shared session home": {
+      OMT_OPENCODEX_ACCT_A_HOME: "/omt-test/a",
+      OMT_OPENCODEX_ACCT_B_HOME: "/omt-test/b",
+      OMT_OPENCODEX_SESSION_HOME: "/omt-test/session",
+    },
+    "two accounts on the same per-account session home": {
+      OMT_OPENCODEX_ACCT_A_HOME: "/omt-test/a",
+      OMT_OPENCODEX_ACCT_B_HOME: "/omt-test/b",
+      OMT_OPENCODEX_ACCT_A_SESSION_HOME: "/omt-test/session",
+      OMT_OPENCODEX_ACCT_B_SESSION_HOME: "/omt-test/session",
+    },
+    "a session home that is another account's home": {
+      OMT_OPENCODEX_ACCT_A_HOME: "/omt-test/a",
+      OMT_OPENCODEX_ACCT_B_HOME: "/omt-test/b",
+      OMT_OPENCODEX_ACCT_A_SESSION_HOME: "/omt-test/a-session",
+      OMT_OPENCODEX_ACCT_B_SESSION_HOME: "/omt-test/a",
+    },
+  };
+  for (const [name, environment] of Object.entries(cases)) {
+    const { outcome, calls, stateDir } = await runWork(t, org, environment);
+    assert.match(outcome?.message ?? "", overlap, name);
+    assert.equal(calls.length, 0, `${name}: no provider call`);
+    // Refused before a slot is taken or a run is recorded.
+    assert.equal(fs.existsSync(path.join(stateDir, "slots")), false, name);
+    assert.equal(fs.existsSync(path.join(stateDir, "runs")), false, name);
+  }
+});
+
+test("work keeps its behavior for runs with no runner or a single runner account", async (t) => {
+  const distinct = {
+    OMT_OPENCODEX_ACCT_A_HOME: "/omt-test/a",
+    OMT_OPENCODEX_ACCT_B_HOME: "/omt-test/b",
+    OMT_OPENCODEX_ACCT_A_SESSION_HOME: "/omt-test/a-session",
+    OMT_OPENCODEX_ACCT_B_SESSION_HOME: "/omt-test/b-session",
+  };
+  const runs = {
+    "no runner profile": [organization, {}],
+    "no runner profile with unrelated variables": [
+      organization,
+      { OMT_OPENCODEX_SESSION_HOME: "/omt-test/a" },
+    ],
+    "one runner account": [
+      runnerOrganization({ junior: "acct-a" }),
+      { ...distinct, OMT_OPENCODEX_SESSION_HOME: "/omt-test/shared" },
+    ],
+    "two runner accounts with apart homes": [
+      runnerOrganization({ junior: "acct-a", senior: "acct-b" }),
+      distinct,
+    ],
+  };
+  for (const [name, [org, environment]] of Object.entries(runs)) {
+    const { outcome, calls } = await runWork(t, org, environment);
+    // The check passes and the run reaches the provider call.
+    assert.match(outcome?.message ?? "", /reached-provider-call/, name);
+    assert.equal(calls.length, 1, name);
+  }
 });

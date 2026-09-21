@@ -212,6 +212,9 @@ function readHomeJson(accountHome, name) {
   }
 }
 
+const isRecord = (value) =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 // Absent, null, empty text, an empty list or an empty object.
 const isEmpty = (value) =>
   value === undefined ||
@@ -239,6 +242,19 @@ export function validateFixedOpenCodexOAuthHome(
   );
   const auth = readHomeJson(accountHome, "auth.json");
   const config = readHomeJson(accountHome, "config.json");
+  // A file or entry that is not an object cannot describe an account; refuse it
+  // with the standard code instead of failing on a property read.
+  assert(
+    isRecord(auth) &&
+      isRecord(config) &&
+      Object.values(auth).every((item) => item === null || isRecord(item)) &&
+      (config.providers === undefined ||
+        (isRecord(config.providers) &&
+          Object.values(config.providers).every(
+            (item) => item === null || isRecord(item),
+          ))),
+    "opencodex-binding-unverified",
+  );
   const entry = auth[provider];
   const accounts = entry?.accounts;
   const account = accounts?.[0];
@@ -285,7 +301,7 @@ export function validateFixedOpenCodexOAuthHome(
       target.disabled !== true &&
       config.defaultProvider === provider &&
       (config.providers.openai === undefined ||
-        config.providers.openai.disabled === true),
+        config.providers.openai?.disabled === true),
     "opencodex-binding-unverified",
   );
   // 6. Anthropic keeps the pool switch on and nothing else about it.
