@@ -21,7 +21,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assert, run } from "./core.mjs";
-import { classifyPromptScreen } from "./prompt-answers.mjs";
+import {
+  classifyPromptScreen,
+  trustQuestionVisible,
+} from "./prompt-answers.mjs";
 import {
   checkTerminalIdle,
   runOrcaJson,
@@ -752,7 +755,7 @@ export async function openRoleTerminal({
   let { handle, seen, submission } = first;
   let reopened = null;
   let closeError = null;
-  if (first.trust === "accepted" && !trustQuestion(seen.screen)) {
+  if (first.trust === "accepted" && !trustQuestionVisible(seen.screen)) {
     try {
       await runOrcaJson(orca, ["terminal", "close", "--terminal", handle], {
         execute,
@@ -774,7 +777,7 @@ export async function openRoleTerminal({
       }));
     }
   }
-  const trustBlocked = trustQuestion(seen.screen);
+  const trustBlocked = trustQuestionVisible(seen.screen);
   const ready = seen.started && !trustBlocked && !closeError;
   const titlePinned = ready
     ? await pinTerminalTitle({ orca, handle, title: tabTitle, execute })

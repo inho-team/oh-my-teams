@@ -506,6 +506,33 @@ test("a reopened terminal asking for trust again is blocked, not reopened", asyn
   assert.equal(forgot.creates().length, 2);
 });
 
+test("a trust question still on the screen under other lines is not reopened but blocked", async () => {
+  const command = roleCommand(example(), "senior");
+  const asked = [
+    `${PROMPT} ${typedFor(command)}`,
+    "Do you trust the contents of this project?",
+    "> Yes, I trust this folder",
+    "  No, exit",
+  ];
+  // The screen was not redrawn after Enter: the question is still shown, with
+  // lines below it, so it must not be taken for an answered question.
+  const stale = [...asked, "  something drawn below the question"];
+  assert.equal(trustQuestion(stale), false);
+  const kept = fakeOrca([asked, asked, stale]);
+  const opened = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute: kept.execute,
+    ...fast,
+  });
+  assert.equal(opened.trust, "accepted");
+  assert.equal(opened.reopened, null);
+  assert.equal(opened.ready, false);
+  assert.equal(opened.status, "blocked");
+  assert.equal(kept.creates().length, 1);
+  assert.deepEqual(kept.closes(), []);
+});
+
 test("a trusted terminal that will not close is reported, not doubled", async () => {
   const command = roleCommand(example(), "senior");
   const asked = [

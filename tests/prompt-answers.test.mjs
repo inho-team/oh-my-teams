@@ -15,6 +15,7 @@ import {
   classifyPromptScreen,
   decideApproval,
   judgeCommandScope,
+  trustQuestionVisible,
 } from "../plugins/oh-my-teams/scripts/prompt-answers.mjs";
 import { trustQuestion } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 
@@ -45,6 +46,12 @@ const EXPECTED = {
   "claude-2.1.278-askuser-changed": ["user-question", "redirect", undefined],
 };
 
+// The folder the three trust captures were taken in. Codex and Claude answer
+// only when the caller names the folder the screen shows.
+const CAPTURED = {
+  worktree:
+    "/private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp.6Kiqw25mrE",
+};
 const screen = (name) => fixtures[name].lines;
 const swap = (lines, from, to) =>
   lines.map((line) => (line === from ? to : line));
@@ -52,7 +59,7 @@ const swap = (lines, from, to) =>
 test("every captured fixture has an expected classification and key", () => {
   assert.deepEqual(Object.keys(fixtures).sort(), Object.keys(EXPECTED).sort());
   for (const [name, [kind, action, key]] of Object.entries(EXPECTED)) {
-    const result = classifyPromptScreen(screen(name));
+    const result = classifyPromptScreen(screen(name), CAPTURED);
     assert.equal(result.kind, kind, name);
     assert.equal(result.action, action, name);
     assert.equal(result.key?.name, key, name);
@@ -62,7 +69,7 @@ test("every captured fixture has an expected classification and key", () => {
 
 test("a key is returned only with its sending arguments, and Esc is never returned", () => {
   for (const name of Object.keys(fixtures)) {
-    const { key } = classifyPromptScreen(screen(name));
+    const { key } = classifyPromptScreen(screen(name), CAPTURED);
     if (!key) continue;
     assert.ok(
       ["captured-input", "footer-text", "existing-behavior"].includes(
@@ -74,10 +81,12 @@ test("a key is returned only with its sending arguments, and Esc is never return
   }
   const down = classifyPromptScreen(
     screen("claude-2.1.278-folder-trust-default"),
+    CAPTURED,
   ).key;
   assert.deepEqual(down.send, { text: "\u001b[B", enter: false });
   const enter = classifyPromptScreen(
     screen("codex-0.155.1-folder-trust-default"),
+    CAPTURED,
   ).key;
   assert.deepEqual(enter.send, { text: "", enter: true });
 });
@@ -85,6 +94,7 @@ test("a key is returned only with its sending arguments, and Esc is never return
 test("the result records the compared lines, the selected choice and why nothing is sent", () => {
   const sent = classifyPromptScreen(
     screen("codex-0.155.1-folder-trust-default"),
+    CAPTURED,
   );
   assert.equal(sent.reason, null);
   assert.equal(sent.cli, "codex");
@@ -101,6 +111,7 @@ test("the result records the compared lines, the selected choice and why nothing
   assert.ok(sent.evidence.after);
   const withheld = classifyPromptScreen(
     screen("codex-0.155.1-folder-trust-changed"),
+    CAPTURED,
   );
   assert.deepEqual(withheld.evidence.selected, { index: 2, label: "No, quit" });
   assert.match(withheld.reason, /No, quit/);
@@ -109,12 +120,14 @@ test("the result records the compared lines, the selected choice and why nothing
 test("Claude's trust question opens on No, so it is moved with Down and confirmed only once Yes is selected", () => {
   const opening = classifyPromptScreen(
     screen("claude-2.1.278-folder-trust-default"),
+    CAPTURED,
   );
   assert.equal(opening.evidence.selected.label, "No, exit");
   assert.equal(opening.key.name, "Down");
   assert.match(opening.evidence.after, /다시 읽어/);
   const moved = classifyPromptScreen(
     screen("claude-2.1.278-folder-trust-changed"),
+    CAPTURED,
   );
   assert.equal(moved.evidence.selected.label, "Yes, I trust this folder");
   assert.equal(moved.key.name, "Enter");
@@ -148,7 +161,7 @@ test("a different selection state is not answered", () => {
     ),
   };
   for (const [name, lines] of Object.entries(cases)) {
-    const result = classifyPromptScreen(lines);
+    const result = classifyPromptScreen(lines, CAPTURED);
     assert.equal(result.action, "none", name);
     assert.equal(result.key, null, name);
     assert.ok(result.reason, name);
@@ -181,7 +194,7 @@ test("wording that differs from the capture is not answered", () => {
     "agy missing yes": agy.filter((line) => !line.includes("Yes, I trust")),
   };
   for (const [name, lines] of Object.entries(cases)) {
-    const result = classifyPromptScreen(lines);
+    const result = classifyPromptScreen(lines, CAPTURED);
     assert.equal(result.action, "none", name);
     assert.equal(result.key, null, name);
   }
@@ -194,13 +207,13 @@ test("a question left in the buffer after the CLI exited is not answered", () =>
     "codex-0.155.1-folder-trust-default",
     "agy-1.2.7-folder-trust-default",
   ]) {
-    const stale = classifyPromptScreen([...screen(name), prompt]);
+    const stale = classifyPromptScreen([...screen(name), prompt], CAPTURED);
     assert.equal(stale.action, "none", name);
     assert.equal(stale.key, null, name);
-    const typed = classifyPromptScreen([
-      ...screen(name),
-      `${prompt} claude --model haiku`,
-    ]);
+    const typed = classifyPromptScreen(
+      [...screen(name), `${prompt} claude --model haiku`],
+      CAPTURED,
+    );
     assert.equal(typed.action, "none", name);
   }
 });
@@ -242,12 +255,13 @@ test("a trust question is answered only when the screen names the role's worktre
 test("a screen of another CLI than the one asked about is not answered", () => {
   const result = classifyPromptScreen(
     screen("codex-0.155.1-folder-trust-default"),
-    { cli: "agy" },
+    { ...CAPTURED, cli: "agy" },
   );
   assert.equal(result.kind, "unknown");
   assert.equal(result.action, "none");
   assert.equal(
     classifyPromptScreen(screen("codex-0.155.1-folder-trust-default"), {
+      ...CAPTURED,
       cli: "codex",
     }).action,
     "send-key",
@@ -301,7 +315,7 @@ test("screens that were not captured classify as unknown and are never answered"
     "agent prompt": [" ▐▛███▛█   Claude Code v2.1.278", "❯ hello"],
   };
   for (const [name, lines] of Object.entries(screens)) {
-    const result = classifyPromptScreen(lines);
+    const result = classifyPromptScreen(lines, CAPTURED);
     assert.equal(result.kind, "unknown", name);
     assert.equal(result.action, "none", name);
     assert.equal(result.key, null, name);
@@ -314,7 +328,7 @@ test("a user question screen is told apart from unknown and is sent back to the 
     "claude-2.1.278-askuser-default",
     "claude-2.1.278-askuser-changed",
   ]) {
-    const result = classifyPromptScreen(screen(name));
+    const result = classifyPromptScreen(screen(name), CAPTURED);
     assert.equal(result.kind, "user-question", name);
     assert.equal(result.action, "redirect", name);
     assert.equal(result.key, null, name);
@@ -359,7 +373,7 @@ test("a screen that only resembles the user question is unknown", () => {
     "header missing": ask.filter((line) => !line.includes("☐")),
   };
   for (const [name, lines] of Object.entries(cases)) {
-    const result = classifyPromptScreen(lines);
+    const result = classifyPromptScreen(lines, CAPTURED);
     assert.equal(result.kind, "unknown", name);
     assert.equal(result.action, "none", name);
   }
@@ -621,7 +635,7 @@ const decide = (overrides) =>
   decideApproval({
     request: { command: "npm test", cwd: SCOPE.worktree },
     choices: [ALWAYS, ONCE, DENY],
-    selected: 0,
+    selected: 1,
     scope: SCOPE,
     ...overrides,
   });
@@ -634,7 +648,7 @@ test("an approval inside the scope is allowed once with the key of the one-time 
   assert.equal(result.reason, null);
   assert.equal(result.evidence.chosen, ONCE.label);
   assert.equal(result.evidence.scope.verdict, "allow");
-  assert.deepEqual(result.evidence.selected, { index: 1, label: ALWAYS.label });
+  assert.deepEqual(result.evidence.selected, { index: 2, label: ONCE.label });
 });
 
 test("a choice that widens the grant is never picked", () => {
@@ -650,7 +664,7 @@ test("a choice that widens the grant is never picked", () => {
     "이번 세션 동안 항상 허용",
     "Allow every time",
   ]) {
-    const result = decide({ choices: [{ ...ONCE, label }, DENY] });
+    const result = decide({ choices: [{ ...ONCE, label }, DENY], selected: 0 });
     assert.equal(result.action, "escalate", label);
     assert.equal(result.key, null, label);
   }
@@ -659,12 +673,11 @@ test("a choice that widens the grant is never picked", () => {
     decide({ choices: [ONCE, { ...ONCE, label: "Allow again" }] }).action,
     "escalate",
   );
-  for (const result of [
-    decide(),
-    decide({ choices: [ONCE, ALWAYS], selected: 1 }),
-  ]) {
-    assert.notEqual(result.key, ALWAYS.key);
-  }
+  assert.notEqual(decide().key, ALWAYS.key);
+  // With the always row selected, Enter would grant it, so nothing is sent.
+  const onAlways = decide({ choices: [ONCE, ALWAYS], selected: 1 });
+  assert.equal(onAlways.action, "escalate");
+  assert.equal(onAlways.key, null);
 });
 
 test("an approval without a known selection, key or scope is not answered", () => {
@@ -699,4 +712,109 @@ test("a forbidden approval is not answered whatever choices are offered", () => 
     assert.equal(result.evidence.scope.verdict, "deny");
     assert.match(result.reason, /금지/);
   }
+});
+
+test("an approval is not answered when the selected choice is not the one-time choice", () => {
+  // Enter would confirm whichever choice is selected, here "always".
+  const onAlways = decide({ choices: [ONCE, ALWAYS, DENY], selected: 1 });
+  assert.equal(onAlways.action, "escalate");
+  assert.equal(onAlways.key, null);
+  assert.deepEqual(onAlways.evidence.selected, {
+    index: 2,
+    label: ALWAYS.label,
+  });
+  assert.equal(
+    decide({ choices: [ONCE, ALWAYS, DENY], selected: 2 }).action,
+    "escalate",
+  );
+  const onOnce = decide({ choices: [ALWAYS, ONCE, DENY], selected: 1 });
+  assert.equal(onOnce.action, "send-key");
+  assert.equal(onOnce.key, KEY);
+});
+
+test("an approval key other than Enter, or a malformed one, is never sent", () => {
+  const keys = {
+    esc: { name: "Esc", send: { text: "\u001b", enter: false } },
+    down: { name: "Down", send: { text: "\u001b[B", enter: false } },
+    text: { name: "Enter", send: { text: "y", enter: true } },
+    "no send": { name: "Enter" },
+    "enter without newline": {
+      name: "Enter",
+      send: { text: "", enter: false },
+    },
+  };
+  for (const [name, key] of Object.entries(keys)) {
+    const result = decide({
+      choices: [ALWAYS, { ...ONCE, key }, DENY],
+      selected: 1,
+    });
+    assert.equal(result.action, "escalate", name);
+    assert.equal(result.key, null, name);
+  }
+});
+
+test("a trust question is not answered without the role's worktree, except Agy's existing path", () => {
+  for (const name of [
+    "codex-0.155.1-folder-trust-default",
+    "claude-2.1.278-folder-trust-default",
+    "claude-2.1.278-folder-trust-changed",
+  ]) {
+    const result = classifyPromptScreen(screen(name));
+    assert.equal(result.kind, "trust", name);
+    assert.equal(result.action, "none", name);
+    assert.equal(result.key, null, name);
+    assert.match(result.reason, /워크트리/, name);
+    assert.equal(
+      classifyPromptScreen(screen(name), { cli: fixtures[name].cli }).action,
+      "none",
+      name,
+    );
+  }
+  // trustQuestion has never known the worktree, so Agy still answers without it.
+  assert.equal(
+    classifyPromptScreen(screen("agy-1.2.7-folder-trust-default")).action,
+    "send-key",
+  );
+});
+
+test("a check command split over lines is not the check command", () => {
+  for (const command of [
+    "npm\ntest",
+    "npm run\nformat",
+    "npm\r\ntest",
+    "npm run\r\n\r\nformat",
+  ]) {
+    const result = at({ command });
+    assert.equal(result.verdict, "escalate", JSON.stringify(command));
+    assert.ok(
+      !result.passed.some((item) => item.startsWith("check-command")),
+      JSON.stringify(command),
+    );
+  }
+  // Spaces and tabs between words are still the same command.
+  assert.equal(at({ command: "npm\trun  format" }).verdict, "allow");
+  assert.equal(at({ command: "npm test\n" }).verdict, "allow");
+});
+
+test("a trust question still on the screen is visible even when it is no longer answerable", () => {
+  // The old check read the question text and the selected row anywhere, and
+  // only the Agy capture has both, so that is the screen it can be shown on.
+  const live = screen("agy-1.2.7-folder-trust-default");
+  assert.equal(trustQuestionVisible(live), true);
+  // Lines drawn below the choices make it unanswerable but not gone.
+  const below = [...live, "  something drawn below the question"];
+  assert.equal(classifyPromptScreen(below, { cli: "agy" }).action, "none");
+  assert.equal(trustQuestionVisible(below), true);
+  // The question text alone, or the selected row alone, is not the question.
+  assert.equal(
+    trustQuestionVisible(live.filter((line) => !/Do you trust/.test(line))),
+    false,
+  );
+  assert.equal(
+    trustQuestionVisible(
+      swap(live, "> Yes, I trust this folder", "  Yes, I trust this folder"),
+    ),
+    false,
+  );
+  assert.equal(trustQuestionVisible(undefined), false);
 });

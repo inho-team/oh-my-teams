@@ -5,8 +5,14 @@
  * filesystem, or sends a key. The caller reads the screen, calls in, and
  * decides how to send the key that comes back.
  *
- * Phrases, selection markers and keys come only from the screens captured in
+ * Phrases and selection markers come only from the screens captured in
  * `tests/fixtures/prompt-screens/` (see `docs/plan/prompt-screen-captures.md`).
+ * Keys are of three kinds, recorded in `key.basis`: `captured-input` was sent
+ * during the capture (Claude's Down), `existing-behavior` is what the Agy
+ * launch already did (Enter), and `footer-text` was read off the screen's own
+ * footer but never sent (Enter on Codex's and Claude's trust questions). The
+ * effect of a `footer-text` key is unverified: the caller must read the screen
+ * again after sending it and treat a question that is still there as unanswered.
  * A screen is recognized only when its question text, the rows of its choices,
  * which row is selected and the lines below the choices all match a captured
  * screen. Anything else is `unknown` and is never answered. Update notices and
@@ -34,9 +40,18 @@ const blank = (line) => !String(line ?? "").trim();
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // A shell prompt after a question means the CLI exited and left its text.
 const SHELL_PROMPT = /(^|\s)[%$#]\s*$/;
+// Agy draws its model status ("Gemini 3.8 Flash · high") right-aligned; the
+// capture has 97 leading spaces. The threshold of 10 is a chosen value, not an
+// observed one. Roles run Agy at 44 columns, where a status text longer than
+// about 34 characters would have fewer than 10 spaces: that question is then
+// not answered, which stops the launch instead of trusting a wrong screen.
 const RIGHT_ALIGNED = /^\s{10,}\S/;
 
 const YES = "Yes, I trust this folder";
+// The Enter of Codex's and Claude's trust questions was never sent during the
+// capture. Its effect is unverified, so the screen must be read again after it.
+const UNVERIFIED_ENTER =
+  "질문이 사라지고 에이전트 화면이 나타나야 합니다. 이 Enter는 캡처에서 보낸 적이 없어 효과가 확인되지 않았으므로, 보낸 뒤 화면을 다시 읽어 질문이 사라졌는지 확인해야 하고 질문이 남아 있으면 다시 보내지 않습니다.";
 const workspaceAfterHeading = (rows, end) => {
   const at = rows.findLastIndex(
     (line, i) => i < end && /^\s*Accessing workspace:\s*$/.test(line),
@@ -63,6 +78,9 @@ const TRUST_PROFILES = [
     footer: /^\s*↑\/↓ Navigate · enter Confirm\s*$/,
     footerRequired: false,
     status: RIGHT_ALIGNED,
+    // The Agy answer never knew the worktree (`trustQuestion`), so it keeps
+    // answering without one; the other profiles refuse to.
+    worktreeRequired: false,
     workspace: workspaceAfterHeading,
     answers: {
       [YES]: {
@@ -86,6 +104,7 @@ const TRUST_PROFILES = [
     footer: /^\s*Press enter to continue\s*$/,
     footerRequired: true,
     status: null,
+    worktreeRequired: true,
     workspace: (rows, end) => {
       const line = rows.findLast(
         (text, i) => i < end && /^>\s*You are in \S/.test(text),
@@ -96,7 +115,7 @@ const TRUST_PROFILES = [
       "Yes, continue": {
         key: ENTER,
         basis: "footer-text",
-        after: "질문이 사라지고 에이전트 화면이 나타납니다.",
+        after: UNVERIFIED_ENTER,
       },
     },
   },
@@ -116,6 +135,7 @@ const TRUST_PROFILES = [
     footer: /^\s*Enter to confirm · Esc to cancel\s*$/,
     footerRequired: true,
     status: null,
+    worktreeRequired: true,
     workspace: workspaceAfterHeading,
     answers: {
       "No, exit": {
@@ -126,7 +146,7 @@ const TRUST_PROFILES = [
       [YES]: {
         key: ENTER,
         basis: "footer-text",
-        after: "질문이 사라지고 에이전트 화면이 나타납니다.",
+        after: UNVERIFIED_ENTER,
       },
     },
   },
@@ -229,6 +249,14 @@ function readTrust(profile, rows, context) {
   );
   evidence.selected = { index: selected.index, label: selected.label };
 
+  if (!context.worktree && profile.worktreeRequired) {
+    return outcome("trust", "none", {
+      cli: profile.cli,
+      evidence,
+      reason:
+        "역할 워크트리가 주어지지 않아 화면의 작업 폴더가 역할 워크트리인지 확인할 수 없어 답하지 않습니다.",
+    });
+  }
   if (context.worktree) {
     const seen = profile.workspace(rows, questionAt);
     evidence.workspace = seen;
@@ -290,6 +318,31 @@ function readUserQuestion(rows) {
   };
 }
 
+const TRUST_QUESTION_ANYWHERE =
+  /Do you trust the contents of this (project|folder|directory)\?/;
+const TRUST_SELECTED_ANYWHERE = /^\s*[>❯]\s*Yes, I trust this folder\s*$/;
+
+/**
+ * Reports whether a folder trust question is still on the screen.
+ *
+ * This is not the "may be answered" check of `classifyPromptScreen`, which
+ * also requires the question to be the live screen with nothing below it. A
+ * question that is still on the screen but no longer answerable, such as one
+ * with other lines drawn below the choices, must keep blocking the caller, so
+ * this reads the question text and the selected row anywhere on the screen,
+ * exactly as the check did before the classifier existed.
+ *
+ * @param {string[]} lines - Screen lines, oldest first.
+ * @returns {boolean} True when the question text and a selected "Yes, I trust this folder" row are both present.
+ */
+export function trustQuestionVisible(lines) {
+  const rows = lines ?? [];
+  return (
+    rows.some((line) => TRUST_QUESTION_ANYWHERE.test(line)) &&
+    rows.some((line) => TRUST_SELECTED_ANYWHERE.test(line))
+  );
+}
+
 /**
  * Classifies a terminal screen as a captured question or as unknown.
  *
@@ -305,6 +358,7 @@ function readUserQuestion(rows) {
  * @param {object} [context] - What the caller knows about the terminal.
  * @param {string} [context.cli] - `agy`, `codex` or `claude`; a screen of another CLI is not answered.
  * @param {string} [context.worktree] - The role's worktree; a trust question is answered only when the screen names it.
+ *   Codex and Claude questions are not answered without it; Agy's, which never knew it, still is.
  * @returns {{kind: string, cli: string|null, action: string, key: object|null, reason: string|null, evidence: object,
  *   excerpt?: string[], instruction?: string}} Classification with the key to send, if any.
  */
@@ -688,10 +742,15 @@ export function judgeCommandScope(request, scope) {
     else passed.push(`cwd:${cwd}`);
   }
   if (command) {
-    const given = command.split(/\s+/).join(" ");
-    const known = (ctx.checks ?? []).some(
-      (check) => [].concat(check).join(" ").split(/\s+/).join(" ") === given,
-    );
+    // A line break separates commands in a shell, so it is never folded into a
+    // space: only spaces and tabs are normalized, and a break never matches.
+    const words = (text) => text.split(/[ \t]+/).join(" ");
+    const given = words(command.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, ""));
+    const known =
+      !/[\r\n]/.test(command.trim()) &&
+      (ctx.checks ?? []).some(
+        (check) => words([].concat(check).join(" ")) === given,
+      );
     if (known) passed.push(`check-command:${given}`);
     else
       note(
@@ -770,6 +829,13 @@ export function decideApproval({ request, choices, selected, scope }) {
       "현재 선택된 선택지를 확인할 수 없어 PM에게 올립니다.",
     );
   evidence.selected = { index: selected + 1, label: list[selected].label };
+  // The key sent is the selected row's confirmation, so the selected row itself
+  // must be the once-only grant; a key computed for another row would be wrong.
+  if (list[selected].grant !== "once")
+    return stop(
+      "escalate",
+      "현재 선택된 선택지가 한 번만 허용이 아니라서 Enter를 보내면 다른 권한이 승인되므로 PM에게 올립니다.",
+    );
   if (
     list.some(
       (choice) => choice.grant === "once" && BROADENING.test(choice.label),
@@ -785,13 +851,26 @@ export function decideApproval({ request, choices, selected, scope }) {
       "escalate",
       "한 번만 허용하는 선택지를 하나로 정할 수 없어 PM에게 올립니다.",
     );
-  if (!once[0].key)
+  if (once[0] !== list[selected])
+    return stop(
+      "escalate",
+      "선택된 선택지와 한 번만 허용하는 선택지가 달라 PM에게 올립니다.",
+    );
+  const key = once[0].key;
+  if (!key)
     return stop(
       "escalate",
       "한 번만 허용하는 선택지에 보낼 키가 확인되지 않아 PM에게 올립니다.",
     );
+  // Only a bare Enter confirms the selected row. Esc cancels, Down moves the
+  // selection, and text or a no-newline send would not confirm anything.
+  if (key.name !== "Enter" || key.send?.text !== "" || key.send?.enter !== true)
+    return stop(
+      "escalate",
+      "보낼 키가 선택된 선택지를 확정하는 Enter가 아니라 PM에게 올립니다.",
+    );
   return outcome("approval", "send-key", {
-    key: once[0].key,
+    key,
     evidence: { ...evidence, chosen: once[0].label },
   });
 }
