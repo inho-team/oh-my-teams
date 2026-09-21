@@ -36,5 +36,11 @@
   ],
   "environment": "node22-lockfile-and-fixtures-revision-1",
   "baseRef": "origin/main",
-  "risk": "normal"
+  "risk": "low",
+  "delegation": {
+    "scope": "closed",
+    "verification": "independent-review",
+    "authority": "standard",
+    "design": "routine"
+  }
 }

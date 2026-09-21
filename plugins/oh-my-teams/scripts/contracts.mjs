@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { assert, hash, inside } from "./core.mjs";
+import { validateDelegationMetadata } from "./delegation.mjs";
 
 // File ownership decides which tasks may run in parallel, and that decision is
 // made by comparing these strings. "src/a.js", "./src/a.js" and "src\\a.js" all
@@ -237,6 +238,7 @@ export function validateTask(task) {
   validateReferences(task.contextRefs ?? [], "contextRefs");
   validateOpenQuestions(task.openQuestions);
   validateReviewRequirements(task, acceptanceIds);
+  validateDelegationMetadata(task);
   return task;
 }
 

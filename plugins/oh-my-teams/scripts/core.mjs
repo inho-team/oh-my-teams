@@ -798,6 +798,11 @@ export function validateOrg(org) {
       org.policy.repeatFailureLimit >= 1,
     "repeatFailureLimit required",
   );
+  assert(
+    org.policy.delegation === undefined ||
+      org.policy.delegation?.strategy === "intern-first",
+    "delegation strategy must be intern-first",
+  );
   validateSupervision(org.policy.supervision);
   return org;
 }

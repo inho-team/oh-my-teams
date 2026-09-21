@@ -71,6 +71,7 @@ test("a draft spends nothing beyond the models the user chose", () => {
     assert.deepEqual(binding.fallbacks, []);
   }
   assert.equal(org.policy.onExhaustion, "stop");
+  assert.deepEqual(org.policy.delegation, { strategy: "intern-first" });
   assert.equal(org.assistants, undefined);
 
   // Effort is left to each CLI until adjust sets it.

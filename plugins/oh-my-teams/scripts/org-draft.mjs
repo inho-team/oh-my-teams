@@ -20,6 +20,7 @@ export const DRAFT_DEFAULTS = Object.freeze({
   concurrency: 1,
   attempts: 1,
   policy: Object.freeze({
+    delegation: Object.freeze({ strategy: "intern-first" }),
     onExhaustion: "stop",
     maxCalls: 3,
     timeoutMs: 300000,
