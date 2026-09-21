@@ -26,6 +26,7 @@ import {
   promptAnswerSummary,
   readPromptAnswers,
 } from "../plugins/oh-my-teams/scripts/prompt-supervision.mjs";
+import { checkTerminalIdle } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { openRoleTerminal } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import { organizationStatus } from "../plugins/oh-my-teams/scripts/status.mjs";
@@ -193,13 +194,16 @@ async function kickoff(
 
 // Orca as the supervisor path meets it. `terminals[handle]` holds the
 // worktree Orca reports and the screen now shown; `advance[handle]` lists the
-// screens shown after each key sent to it, the last one repeating.
+// screens shown after each key sent to it, the last one repeating. `waits[handle]`
+// is what `terminal wait --for tui-idle` returns for it (a `wait` result, or a
+// function returning the raw command result); without one the terminal is idle.
 function fakeOrca({
   runs = { [PM]: RUN },
   terminals = {},
   advance = {},
   creates = [],
   worktrees = {},
+  waits = {},
 }) {
   const calls = [];
   const opened = [...creates];
@@ -251,7 +255,11 @@ function fakeOrca({
       queue[next.handle] = [...(next.advance ?? [])];
       return reply({ terminal: { handle: next.handle } });
     }
-    if (verb === "wait") return reply({ wait: { satisfied: true } });
+    if (verb === "wait") {
+      const waited = waits[flag("--terminal")];
+      if (typeof waited === "function") return waited();
+      return reply({ wait: waited ?? { satisfied: true } });
+    }
     if (verb === "list") return reply({ terminals: [] });
     if (verb === "rename") return reply({ rename: {} });
     if (verb === "close") return reply({ close: { closed: true } });
@@ -1066,4 +1074,155 @@ test("two user questions that differ only in their text are each redirected once
   assert.equal(second.messages().length, 1);
   assert.equal(orca.messages().length, 1);
   assert.equal(orca.keys().length + second.keys().length, 0);
+});
+
+// A command approval was never captured, so the classifier does not know it;
+// Orca's tui-idle wait still stops on it and names a blockedReason.
+const APPROVAL = [
+  "Would you like to run the following command?",
+  "  npm run deploy -- --token sk-live-0123456789abcdef",
+  "› 1. Yes, proceed",
+  "  2. No, and tell Codex what to do differently",
+];
+const approvalBlocked = {
+  satisfied: false,
+  blockedReason: "agent-approval-prompt",
+};
+
+test("an unrecognized screen that Orca reports as a question escalates instead of cycling", async (t) => {
+  const fixture = await kickoff(t);
+  const orca = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, APPROVAL) },
+    waits: { [SENIOR]: approvalBlocked },
+  });
+  // The pre-check refuses this terminal because of the question ...
+  await assert.rejects(
+    () => checkTerminalIdle(SENIOR, { execute: orca.execute }),
+    (error) => error.signal.code === "agent-approval-prompt",
+  );
+  // ... and its message sends the supervisor here, which used to end with
+  // "no-question" and send it straight back to the pre-check.
+  const asked = await answer(fixture, orca);
+  assert.equal(asked.status, "escalate");
+  assert.equal(asked.next, "report-upstream");
+  assert.equal(asked.blockedReason, "agent-approval-prompt");
+  assert.equal(asked.orcaState, "blocked");
+  assert.equal(asked.sent, false);
+  assert.equal(orca.keys().length, 0);
+  assert.equal(orca.messages().length, 0, "the worker is sent nothing");
+  // The record keeps the reason and none of the unrecognized screen.
+  const [line] = readPromptAnswers(fixture.stateDir);
+  assert.equal(line.blockedReason, "agent-approval-prompt");
+  assert.deepEqual(line.excerpt, []);
+  const text = fs.readFileSync(promptAnswerFile(fixture.stateDir), "utf8");
+  assert.doesNotMatch(text, /sk-live|npm run deploy/);
+  const summary = promptAnswerSummary(fixture.stateDir);
+  assert.equal(summary.unresolved[0].blockedReason, "agent-approval-prompt");
+});
+
+test("the same stopped screen read again is not recorded or reported again, and a change is", async (t) => {
+  const fixture = await kickoff(t);
+  const orca = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, APPROVAL) },
+    waits: { [SENIOR]: approvalBlocked },
+  });
+  const first = await answer(fixture, orca);
+  const again = await answer(fixture, orca);
+  // It still reports the stop, so a loop never mistakes it for a clear screen.
+  assert.equal(again.status, "escalate");
+  assert.equal(again.next, "report-upstream");
+  assert.equal(again.repeated, true);
+  assert.equal(again.repeatOf, first.id);
+  assert.equal(readPromptAnswers(fixture.stateDir).length, 1);
+  // Another question under the same reason is a new attempt, not a repeat.
+  const other = fakeOrca({
+    terminals: {
+      [SENIOR]: at(ROLE_WORKTREE, [
+        ...APPROVAL.slice(0, 1),
+        "  rm -rf ./data",
+        ...APPROVAL.slice(2),
+      ]),
+    },
+    waits: { [SENIOR]: approvalBlocked },
+  });
+  const moved = await answer(fixture, other);
+  assert.equal(moved.repeated, undefined);
+  assert.notEqual(moved.id, first.id);
+  assert.equal(readPromptAnswers(fixture.stateDir).length, 2);
+  // So is the same screen under another reason from Orca.
+  const reason = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, APPROVAL) },
+    waits: {
+      [SENIOR]: { satisfied: false, blockedReason: "agent-update-prompt" },
+    },
+  });
+  const changed = await answer(fixture, reason);
+  assert.equal(changed.blockedReason, "agent-update-prompt");
+  assert.equal(readPromptAnswers(fixture.stateDir).length, 3);
+});
+
+test("an unrecognized screen Orca does not report as stopped is no-question", async (t) => {
+  const fixture = await kickoff(t);
+  const timeout = () => ({
+    code: 1,
+    stdout: JSON.stringify({
+      ok: false,
+      error: { code: "timeout", message: "terminal wait timed out" },
+    }),
+  });
+  for (const wait of [{ satisfied: true }, { satisfied: false }, timeout]) {
+    const orca = fakeOrca({
+      terminals: { [SENIOR]: at(ROLE_WORKTREE, APPROVAL) },
+      waits: { [SENIOR]: wait },
+    });
+    const asked = await answer(fixture, orca);
+    assert.equal(asked.status, "no-question");
+    assert.equal(asked.next, "resume-precheck");
+    assert.equal(asked.blockedReason, undefined);
+    assert.equal(orca.keys().length, 0);
+  }
+});
+
+test("an unrecognized screen whose Orca state cannot be read is not judged clear", async (t) => {
+  const fixture = await kickoff(t);
+  const failures = [
+    () => ({ code: 1, stdout: "", stderr: "orca: connection refused" }),
+    () => ({ code: 0, stdout: "not json" }),
+    () => ({ code: 0, stdout: JSON.stringify({ ok: true, result: {} }) }),
+    () => ({ code: 0, stdout: "", timedOut: true }),
+    () => ({
+      code: 1,
+      stdout: JSON.stringify({
+        ok: false,
+        error: { code: "terminal_not_found", message: "no such terminal" },
+      }),
+    }),
+  ];
+  for (const wait of failures) {
+    const orca = fakeOrca({
+      terminals: { [SENIOR]: at(ROLE_WORKTREE, APPROVAL) },
+      waits: { [SENIOR]: wait },
+    });
+    const asked = await answer(fixture, orca);
+    assert.equal(asked.status, "refused");
+    assert.equal(asked.refusal, "orca-state-unavailable");
+    assert.equal(asked.next, "report-upstream");
+    assert.match(asked.reason, /not judged clear/);
+    assert.equal(orca.keys().length, 0);
+  }
+});
+
+test("a recognized question is answered without asking Orca for its state", async (t) => {
+  const fixture = await kickoff(t);
+  const orca = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, CODEX_ASKS) },
+    advance: { [SENIOR]: [CODEX_DONE] },
+    waits: { [SENIOR]: approvalBlocked },
+  });
+  assert.equal((await answer(fixture, orca)).status, "resolved");
+  assert.equal(
+    orca.calls.filter((call) => call[0] === "terminal" && call[1] === "wait")
+      .length,
+    0,
+  );
 });
