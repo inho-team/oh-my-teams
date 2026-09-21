@@ -13,6 +13,7 @@ import {
   agentStarted,
   clearRoleTerminal,
   commandPending,
+  commandTyping,
   freshContextDecision,
   AGY_BANNER_COLUMNS,
   launchLine,
@@ -210,6 +211,99 @@ test("a command left at the prompt is told apart from a started agent", () => {
   assert.equal(commandPending(exited, command), false);
   assert.equal(agentStarted(exited, command), false);
   assert.equal(agentStarted([], command), false);
+});
+
+test("a command still being echoed is neither pending nor a started agent", async () => {
+  // Observed on Orca 1.4.206: typing a command into a fresh shell one piece at a
+  // time made every cut-off line read as `started`, so a slow echo ended in
+  // ready: true while the whole command was still landing at the prompt.
+  const command =
+    "claude --dangerously-skip-permissions --model opus[1m] --autocompact 250k";
+  const cutOffs = [
+    [`${PROMPT} cla`],
+    [`${PROMPT} claude --dangerously-skip-permis`],
+    [
+      `${PROMPT} claude --dangerously-skip-permissions --model opus[1m] --a`,
+      "ut",
+    ],
+  ];
+  for (const screen of cutOffs) {
+    assert.equal(commandTyping(screen, command), true, screen.join("|"));
+    assert.equal(commandPending(screen, command), false);
+    assert.equal(agentStarted(screen, command), false);
+  }
+  // The whole command is pending, not typing; a bare prompt is neither.
+  const whole = [`${PROMPT} ${command}`];
+  assert.equal(commandTyping(whole, command), false);
+  assert.equal(commandPending(whole, command), true);
+  assert.equal(commandTyping([PROMPT], command), false);
+  assert.equal(commandTyping(["Claude Code", "❯"], command), false);
+});
+
+test("Enter waits for the echo to finish and is then sent exactly once", async () => {
+  const command = roleCommand(example(), "senior");
+  const line = typedFor(command);
+  const cut = `${PROMPT} ${line.slice(0, 20)}`;
+  const whole = `${PROMPT} ${line}`;
+  // The first reads see a partial echo, then the whole line, then, once Enter
+  // has been sent, the agent.
+  let reads = 0;
+  let entered = false;
+  const calls = [];
+  const execute = async (argv) => {
+    const verb = argv[2];
+    calls.push(argv.slice(1, -1));
+    const reply = (result) => ({
+      code: 0,
+      stdout: JSON.stringify({ ok: true, result }),
+    });
+    if (verb === "create") return reply({ terminal: { handle: "term_1" } });
+    if (verb === "wait") return reply({ wait: { satisfied: true } });
+    if (verb === "read") {
+      reads += 1;
+      if (entered)
+        return reply({ terminal: { tail: [whole, "Antigravity", ">"] } });
+      return reply({ terminal: { tail: [reads <= 3 ? cut : whole] } });
+    }
+    if (verb === "send") {
+      // Never Enter over a cut-off line.
+      assert.ok(
+        reads > 3,
+        "Enter was sent while the command was still echoing",
+      );
+      entered = true;
+      return reply({ send: { accepted: true } });
+    }
+    if (verb === "list") return reply({ terminals: [] });
+    if (verb === "rename") return reply({ rename: { title: "x" } });
+    throw new Error(`unexpected verb ${verb}`);
+  };
+  const opened = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute,
+    settleMs: 5,
+    readyMs: 200,
+    pollMs: 1,
+    platform: "darwin",
+    allowUnverified: true,
+    allowUnverifiedApproval: "test-approved",
+  });
+  assert.equal(opened.ready, true);
+  assert.equal(opened.submission, "enter-sent");
+  assert.equal(calls.filter((call) => call[1] === "send").length, 1);
+
+  // An echo that never finishes is reported blocked, without any Enter.
+  const stuck = fakeOrca([[cut]]);
+  const blocked = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute: stuck.execute,
+    ...fast,
+  });
+  assert.equal(blocked.ready, false);
+  assert.equal(blocked.status, "blocked");
+  assert.deepEqual(stuck.sends(), []);
 });
 
 test("a role terminal Orca started itself gets no extra Enter", async () => {

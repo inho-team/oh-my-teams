@@ -50,10 +50,10 @@ arrow 함수, template이 섞인 긴 실행문에 대한 회귀 테스트가 포
 
 | 항목 | 결과 |
 |---|---:|
-| 활성 `.mjs` 파일 | 99/99 모듈 문서화 |
-| 공개 export | 338/338 JSDoc |
-| 인식한 매개변수 태그 | 283개 (의미적 정확성은 별도 검토 대상) |
-| 공개 함수 | 288/288 `@returns` |
+| 활성 `.mjs` 파일 | 101/101 모듈 문서화 |
+| 공개 export | 344/344 JSDoc |
+| 인식한 매개변수 태그 | 288개 (의미적 정확성은 별도 검토 대상) |
+| 공개 함수 | 293/293 `@returns` |
 | 오류 계약을 가진 공개 API | 151개 `@throws` 명시 |
 | 장문 실행문·문서 누락 | 0건 |
 
@@ -66,5 +66,6 @@ arrow 함수, template이 섞인 긴 실행문에 대한 회귀 테스트가 포
 - `workflow-store.mjs`: workflow 경로, 잠금, event append, snapshot 읽기
 - `status.mjs`: 실행·gate·quota 상태의 읽기 전용 projection
 - `orca-adapter.mjs`: 실행 파일 선택, runtime discovery, JSON 호출, worktree 생성
+- `prompt-submission.mjs`: 프롬프트 전달 결과 판정(수락과 제출의 구분), 한 번만 보내는 전송과 재관측
 
 주석은 코드 동작을 그대로 번역하지 않는다. 권한 경계, 캐시 무효화, 프로세스 생존 불명, append-only 기록처럼 잘못 단순화하기 쉬운 이유를 설명한다.

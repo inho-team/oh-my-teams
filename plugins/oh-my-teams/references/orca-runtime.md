@@ -171,12 +171,36 @@ workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 
 `<orca> terminal create --command`를 직접 호출해 역할 터미널을 열지 않는다. Orca는 명령을 새 셸의 프롬프트에 입력만 하고 실행하지 않는 경우가 잦으며, 이 상태에서 보낸 브리프나 작업은 agent가 아니라 셸에 입력된다. `role-terminal`은 다음을 한 번에 수행한다.
 
 1. `role-command`와 같은 명령으로 터미널을 만든다. `scripts/launch-matrix.mjs`의 호환성 표가 `supervised-terminal`을 돌려주는 Agy 역할 중 POSIX 셸에서는 `stty cols 44`를 앞에 붙인다. Windows에서는 폭 조정을 생략한다(`role-terminal.mjs`의 폭 조정 조건; `docs/plan/agy-terminal-path.md`의 「설계」 7절).
-2. 짧게 `tui-idle`을 기다린 뒤 화면을 읽고, 마지막 줄에 명령이 프롬프트에 입력된 채 남아 있으면 Enter를 한 번 보낸다. 결과의 `submission`은 Orca가 스스로 실행했으면 `orca`, Enter를 보냈으면 `enter-sent`다. 시작된 agent에 입력이 들어가지 않도록 Enter는 두 번 보내지 않는다.
-3. agent가 명령 아래에 자기 화면을 그릴 때까지 화면을 다시 읽는다. Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족되므로 준비 여부를 판단하는 근거로 쓰지 않는다. 화면 너비 때문에 명령이 여러 줄로 나뉘어도 같은 명령으로 인식한다.
+2. 짧게 `tui-idle`을 기다린 뒤 화면을 읽고, 마지막 줄에 명령 전체가 프롬프트에 입력된 채 남아 있으면 Enter를 한 번 보낸다. 셸이 명령을 아직 조금씩 에코하는 중이어서 화면에 명령의 앞부분만 보이면 에코가 끝나기를 기다리고, 잘린 줄에는 Enter를 보내지 않는다. 결과의 `submission`은 Orca가 스스로 실행했으면 `orca`, Enter를 보냈으면 `enter-sent`다. 시작된 agent에 입력이 들어가지 않도록 Enter는 두 번 보내지 않는다.
+3. agent가 명령 아래에 자기 화면을 그릴 때까지 화면을 다시 읽는다. Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족되므로 준비 여부를 판단하는 근거로 쓰지 않는다. 화면 너비 때문에 명령이 여러 줄로 나뉘어도 같은 명령으로 인식한다. 명령의 앞부분만 에코된 화면은 시작된 agent로 보지 않는다. 이전 구현은 이런 화면을 시작으로 판정해서, 에코가 느린 셸에서는 명령이 입력줄에 남은 채 `ready: true`를 돌려줄 수 있었다(`docs/plan/prompt-submission.md`).
 4. Agy는 처음 여는 폴더마다 폴더 신뢰 질문("Do you trust the contents of this project?")을 띄우며, 권한 우회 플래그로도 건너뛰지 않는다. 역할의 워크트리는 사용자 저장소에서 이 실행을 위해 만든 것이고 역할은 이미 승인 없이 도구를 실행하므로, "Yes, I trust this folder"가 선택된 경우에만 Enter를 한 번 보내 신뢰한다. 결과의 `trust`는 질문이 없었으면 `not-asked`, 답했으면 `accepted`다. 신뢰한 폴더는 Agy 설정의 `trustedWorkspaces`에 남는다.
 5. 신뢰 질문에 답한 터미널은 버퍼에 질문 문구가 남는다. Orca의 시작 판정기는 이 문구를 찾아 `worker-start --terminal`을 `agent-trust-workspace`로 차단하므로, 답한 뒤 질문이 화면에서 사라졌으면 그 터미널을 `terminal close`로 닫고 같은 워크트리에서 같은 명령으로 한 번만 다시 연다. 이때 신뢰는 이미 기록되어 있으므로 새 터미널에는 질문이 나오지 않는다. 결과의 `terminal`은 다시 연 터미널이고, `trust`는 `accepted`를 유지하며, `reopened`에 닫은 터미널(`closedTerminal`)과 이유가 남는다. 다시 열지 않았으면 `reopened`는 `null`이다. 다시 연 터미널에서도 질문이 나오면 신뢰가 기록되지 않은 것이므로 답하지도, 또 닫지도 않고 차단으로 돌려준다. 첫 터미널을 닫지 못했으면 새 터미널을 열지 않고 `closeError`에 오류 원문을 담아 차단으로 돌려준다.
 6. 준비가 확인되면 탭 제목을 `terminal rename`으로 다시 지정한다. 그리고 같은 워크트리에서 agent가 없고, 이름이 없거나 Orca 기본 이름(`Terminal <n>`)이며, 화면에 프롬프트 한 줄만 있는 셸 탭을 `terminal close`로 닫는다. `worktree create`가 함께 여는 빈 셸이 역할 탭 옆에 남아 다른 역할의 탭처럼 보였기 때문이다. 처음에는 이 셸의 이름을 `[shell]`로 바꿨지만, Orca가 아직 화면에 띄우지 않은 탭은 이름이 `Terminal <n>`으로 되돌아가서 효과가 없었다. 사람이 이름을 붙였거나 명령을 입력한 셸, 다른 agent의 탭은 닫지 않는다. 결과의 `title`, `titlePinned`, `shellsClosed`에 적용 내용이 담긴다. 이유는 아래 「역할 탭 제목」 절에 있다.
 7. 마지막 화면을 `screen`에 담는다. agent가 끝내 화면을 그리지 않았거나, 명령이 여전히 프롬프트에 남아 있거나, 신뢰 질문이 남아 있거나, 신뢰에 답한 터미널을 닫지 못했으면 `ready: false`, `status: "blocked"`로 종료 코드 1을 돌려준다. 이때는 브리프나 작업을 보내지 않고 화면을 증거로 붙여 보고한다.
+
+### 프롬프트 전달과 제출 확인
+
+`terminal send --text <텍스트> --enter`가 돌려주는 `accepted: true`는 입력이 터미널에 들어갔다는 것만 증명하며, agent가 그 입력으로 턴을 시작했다는 뜻이 아니다. Orca 1.4.206에서 agent 터미널로 보낸 프롬프트의 영수증에는 `result.send.prompt`가 있고 `requestId`와 `stages`가 담긴다. 기본 전송은 제출을 0초만 관측하므로 `stages`가 `["input_accepted"]`에서 끝나며, 이때의 경고는 실패가 아니라 미증명을 뜻한다. Claude 터미널에서 기본 전송이 이 영수증을 돌려준 시점에 턴은 이미 진행 중이었다. 셸 터미널의 영수증은 `provider: "unsupported"`이고 `turn_started`가 끝내 오지 않는다. 빈 텍스트에 `--enter`만 보낸 전송에는 `prompt` 블록이 없다.
+
+`scripts/prompt-submission.mjs`의 `deliverPrompt`가 전달을 다음 순서로 확인하며, `director-signal`의 이사 알림과 `director-reply`의 PM 알림이 이를 쓴다. 손으로 보낼 때에도 같은 순서를 따른다.
+
+1. `--wait-submit <초>`를 붙여 텍스트를 한 번만 보낸다. `stages`에 `turn_started`가 있으면 제출된 것이다(`submitted`).
+2. 없으면 화면을 읽고 입력 상자를 본다. 입력 상자는 화면 맨 아래에서 `❯`, `›`, `>`로 시작하는 줄이다.
+
+| 영수증과 화면 | 판정 | 동작 |
+|---|---|---|
+| 입력 상자에 승인한 텍스트만 남아 있다 | `unsubmitted` | Enter를 한 번 보낸다 |
+| 입력 상자가 비었고 텍스트가 기록에 보인다 | `already-started` | 아무것도 보내지 않는다 |
+| 입력 상자에 다른 내용이 있다 | `foreign-input` | 아무것도 보내지 않는다. Enter가 그 내용을 제출하기 때문이다 |
+| 화면이 판정하지 못한다 | `unclear` | 아래 3번 |
+| Orca가 거부하거나 응답하지 않았다 | `failed` | 오류 원문을 남기고 다시 보내지 않는다 |
+
+3. `unclear`이면 같은 명령에 영수증의 `--retry-request <requestId>`를 붙여 한 번 다시 실행하고 판정한다. 같은 요청 ID는 관측만 다시 하고 텍스트를 다시 입력하지 않는다. 셸 터미널에서 실제 ID로 반복했을 때 `replayed: true`가 오고 화면에 명령이 한 번만 남는 것을 확인했다. Claude 터미널에서는 `input_accepted`로 끝난 요청을 이 방법으로 다시 관측하자 `turn_started`가 추가되었다. 그래도 결정되지 않으면 Enter 없이 `unclear`와 `requestId`를 보고한다.
+4. Enter는 승인한 텍스트만 입력 상자에 남은 것이 화면에서 확인된 때에만 한 번 보낸다. Enter 뒤에도 미제출이면 다시 누르지 않고 `unsubmitted`로 보고한다.
+
+결과의 `delivery`에는 `outcome`, `reason`, `stages`, `requestId`, `enterSent`, `retried`, `warnings`가 담긴다. `notified`는 `submitted`나 `already-started`일 때에만 `true`이며, 실패하면 Orca가 돌려준 오류 원문이 `notifyError`에 그대로 남는다. 종료 코드나 `accepted`만 보고 성공이나 실패를 단정하지 않는다. 이전에는 `--json` 없이 종료 코드만 확인해서, 이사 알림이 `notifyError: "exit 1"`로만 남고 원인과 입력 수락 여부를 알 수 없었다.
+
+확인하지 못한 범위는 다음과 같다. 화면으로 입력 상자를 볼 수 없는 경우가 있다. 이 저장소의 Claude 터미널에 Enter 없이 보낸 텍스트는 `terminal read`(화면 읽기와 일반 읽기 모두)에 나타나지 않았지만, 이어서 Enter를 보내자 그 텍스트가 제출되었다. 이때 판정은 `unclear`가 되므로 재전송이나 Enter 없이 `--retry-request`로 관측한다. 대기열에 등록된 입력의 영수증 단계 이름, 구버전 호스트가 `--wait-submit`이나 `--retry-request`를 거부할 때의 응답 형태, Codex와 Agy 입력 상자의 표시, 여러 줄 붙여넣기의 표시는 관측하지 못했다. 구버전 호스트가 옵션을 거부하면 `failed`와 오류 원문을 남기며, 옵션 없이 자동으로 다시 보내지는 않는다. 모호한 전송 실패와 구별할 수 없어 텍스트가 두 번 들어갈 수 있기 때문이다. 또한 `clearRoleTerminal`의 `/clear` 전송은 아직 이 확인을 거치지 않는다.
 
 ### 역할 탭 제목
 
@@ -201,10 +225,10 @@ PM은 감독 worker가 아니므로 `worker-start`로 띄우지 않는다. `orca
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
 node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --worktree id:<worktreeId> [--title <kickoff 요약>]
-<orca> terminal send --terminal <handle> --text "<브리프 경로와 시작 지시>" --enter --json
+<orca> terminal send --terminal <handle> --text "<브리프 경로와 시작 지시>" --enter --wait-submit 10 --json
 ```
 
-`role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model> --autocompact 250k`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. Claude 명령의 `--autocompact`(Claude Code 2.1.221 이상)는 세션이 그 크기에 이르면 대화를 압축하게 해서, 오래 실행되는 역할이 매 호출마다 전체 기록을 다시 보내지 않게 한다. 값은 조직의 `policy.claudeAutoCompact`(100000~1000000 사이의 정수 토큰)이며, 없으면 250000을 쓰고 `"auto"`이면 플래그를 붙이지 않는다. Codex와 Agy 명령에는 붙이지 않는다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 브리프를 보내지 않고 이사에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 이사가 PM을 대신 맡지도 않는다.
+`role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model> --autocompact 250k`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. Claude 명령의 `--autocompact`(Claude Code 2.1.221 이상)는 세션이 그 크기에 이르면 대화를 압축하게 해서, 오래 실행되는 역할이 매 호출마다 전체 기록을 다시 보내지 않게 한다. 값은 조직의 `policy.claudeAutoCompact`(100000~1000000 사이의 정수 토큰)이며, 없으면 250000을 쓰고 `"auto"`이면 플래그를 붙이지 않는다. Codex와 Agy 명령에는 붙이지 않는다. 브리프를 보낸 뒤에는 영수증의 `stages`에 `turn_started`가 있는지 확인하고, 없으면 「프롬프트 전달과 제출 확인」 절의 순서로 다룬다. `accepted: true`만으로 시작되었다고 보고하지 않으며, 응답이 없어도 같은 브리프를 다시 보내지 않는다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 브리프를 보내지 않고 이사에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 이사가 PM을 대신 맡지도 않는다.
 
 ## 무응답 worker 감독
 
