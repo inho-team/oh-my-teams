@@ -15,7 +15,10 @@
     "src/cli/account-auth.ts": "6f29519104aeee1782b2b45fa655028ad0640b371bbd7d632cbc32609f05f279",
     "src/server/management/oauth-account-routes.ts": "2068d4903d8d782d709537de393420209667d8ccae78b828d5a87dc069b4f976",
     "src/oauth/google-antigravity.ts": "c31b22b4e6152236290f53a0a155956da46408590c7c01850830ec4520b7da5f",
-    "src/server/system-env-shell.ts": "a5b42798e19147789101447fbcd9f50395315cf50ac12c7232728339091d60f7"
+    "src/server/system-env-shell.ts": "a5b42798e19147789101447fbcd9f50395315cf50ac12c7232728339091d60f7",
+    "src/oauth/generic-account-failover.ts": "7a1c0f06116f8791385d0898401ee9c7b9ac0dfbae625ea540c95c2bda9edcab",
+    "src/oauth/pool-settings-capability.ts": "e0fba3eb346f1b5897f5cbbbec0379fdd6e84aa974cd17eef4567db6ff5289b7",
+    "src/codex/account-label.ts": "3aa32a3ad7302cb4606ca9d685daa16282be8613a96b25eb1ad66435d88a06cc"
   },
   "preInstallFiles": {
     ".codex/config.toml": {
@@ -124,57 +127,895 @@
   "subscriptions": [
     {
       "subscription": "chatgpt",
-      "requestedModel": "unresolved",
+      "requestedModel": "gpt-6-astra",
       "observedModels": [],
-      "status": "not-run",
-      "timestamp": "2026-09-21T03:22:23.084334+00:00",
+      "requestedEffort": "medium",
+      "status": "task-completed-attribution-unverified",
+      "timestamp": "2026-09-21T03:58:11.623536+00:00",
       "accountAttribution": "unverified",
-      "usage": {},
-      "events": {},
-      "commandExecutions": 0,
-      "fileChanges": 0,
-      "completion": "not-observed",
-      "error": "isolated-login-required",
+      "usage": {
+        "input_tokens": 35543,
+        "cached_input_tokens": 23040,
+        "output_tokens": 201
+      },
+      "events": {
+        "thread.started": 1,
+        "turn.started": 1,
+        "item.completed": 5,
+        "item.started": 3,
+        "turn.completed": 1
+      },
+      "commandExecutions": 2,
+      "fileChanges": 1,
+      "completion": "exit-zero-and-turn.completed",
+      "error": null,
+      "httpStatuses": [],
+      "quotaErrorObserved": false,
       "baselineTestExit": 1,
       "fixtureHashBefore": "adac0122533fab0a7230782fc4f3cb702d28f8cc1479b90dd6770c63985977e5",
-      "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/fixture-xit54bzb",
-      "credentialStoreExists": false
+      "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/fixture-bqb28z0z",
+      "credentialStoreExists": true,
+      "exitCode": 0,
+      "stderrPresent": true,
+      "postTestExit": 0,
+      "fixtureHashAfter": "f632aa00a4aae8167e0604e38ccdf5b6f1b7cb3210b55c7600ac6c3b10a3b16d",
+      "testUnchanged": true
     },
     {
       "subscription": "claude",
       "requestedModel": "anthropic/claude-sonnet-4-6",
       "observedModels": [],
-      "status": "not-run",
-      "timestamp": "2026-09-21T03:22:23.198540+00:00",
+      "requestedEffort": null,
+      "status": "task-completed-attribution-unverified",
+      "timestamp": "2026-09-21T03:58:23.555343+00:00",
       "accountAttribution": "unverified",
-      "usage": {},
-      "events": {},
-      "commandExecutions": 0,
+      "usage": {
+        "input_tokens": 36440,
+        "cached_input_tokens": 24002,
+        "output_tokens": 305
+      },
+      "events": {
+        "thread.started": 1,
+        "item.completed": 6,
+        "turn.started": 1,
+        "item.started": 2,
+        "turn.completed": 1
+      },
+      "commandExecutions": 2,
       "fileChanges": 0,
-      "completion": "not-observed",
-      "error": "isolated-login-required",
+      "completion": "exit-zero-and-turn.completed",
+      "error": null,
+      "httpStatuses": [],
+      "quotaErrorObserved": false,
       "baselineTestExit": 1,
       "fixtureHashBefore": "adac0122533fab0a7230782fc4f3cb702d28f8cc1479b90dd6770c63985977e5",
-      "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/fixture-w935ezoi",
-      "credentialStoreExists": false
+      "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/fixture-ortwqjzz",
+      "credentialStoreExists": true,
+      "exitCode": 0,
+      "stderrPresent": true,
+      "postTestExit": 0,
+      "fixtureHashAfter": "f632aa00a4aae8167e0604e38ccdf5b6f1b7cb3210b55c7600ac6c3b10a3b16d",
+      "testUnchanged": true
+    }
+  ],
+  "postLoginSnapshot": {
+    "timestamp": "2026-09-21T03:55:54.613075+00:00",
+    "files": {
+      ".codex/config.toml": {
+        "exists": true,
+        "mtime_ns": 1789960577809199061,
+        "sha256": "7cdc764a7f203224592abae5b4b838e06c5a530ba45bd5030161375a0d83cb98"
+      },
+      ".claude/settings.json": {
+        "exists": true,
+        "mtime_ns": 1789642503855339875,
+        "sha256": "6eabc551fb3052311834595d2d24f836341757d3889717c4e5a75bead57a7be6"
+      },
+      ".opencodex": {
+        "exists": false,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      ".gemini": {
+        "exists": true,
+        "mtime_ns": 1789341168660791558,
+        "sha256": null
+      },
+      ".zshrc": {
+        "exists": true,
+        "mtime_ns": 1789343214072435497,
+        "sha256": "d066a470c19816a0b4c0d683ddbf5de864c6f71a65f914794a8af56203b675c0"
+      }
+    },
+    "keychain": {
+      "opencodex.provider-api-key.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "opencodex.native-main-profile.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "Claude Code-credentials": {
+        "exit": 0,
+        "metadata_sha256": "063b400b4f0f4099f03c8547fd250f7a7d293b800d7bd4839f817da4627a3c67",
+        "secret_requested": false
+      }
+    },
+    "unchanged": {
+      "files": true,
+      "keychain": true
+    }
+  },
+  "postFourRunsSnapshot": {
+    "timestamp": "2026-09-21T04:05:53.268420+00:00",
+    "files": {
+      ".codex/config.toml": {
+        "exists": true,
+        "mtime_ns": 1789960577809199061,
+        "sha256": "7cdc764a7f203224592abae5b4b838e06c5a530ba45bd5030161375a0d83cb98"
+      },
+      ".claude/settings.json": {
+        "exists": true,
+        "mtime_ns": 1789642503855339875,
+        "sha256": "6eabc551fb3052311834595d2d24f836341757d3889717c4e5a75bead57a7be6"
+      },
+      ".opencodex": {
+        "exists": false,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      ".gemini": {
+        "exists": true,
+        "mtime_ns": 1789341168660791558,
+        "sha256": null
+      },
+      ".zshrc": {
+        "exists": true,
+        "mtime_ns": 1789343214072435497,
+        "sha256": "d066a470c19816a0b4c0d683ddbf5de864c6f71a65f914794a8af56203b675c0"
+      }
+    },
+    "keychain": {
+      "opencodex.provider-api-key.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "opencodex.native-main-profile.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "Claude Code-credentials": {
+        "exit": 0,
+        "metadata_sha256": "063b400b4f0f4099f03c8547fd250f7a7d293b800d7bd4839f817da4627a3c67",
+        "secret_requested": false
+      }
+    },
+    "unchanged": {
+      "files": true,
+      "keychain": true
+    }
+  },
+  "accountSummary": {
+    "openai": [
+      {
+        "provider": "openai",
+        "type": "codex",
+        "plan": null,
+        "active": false,
+        "needsReauth": true,
+        "paused": false,
+        "idHash": "4d15359242e0c81d5ffecca8ffab7964a02b96b065d0d7e4d1819f009bfa3105",
+        "hasEmail": true
+      },
+      {
+        "provider": "openai",
+        "type": "codex",
+        "plan": "pro",
+        "active": false,
+        "needsReauth": false,
+        "paused": false,
+        "idHash": "ce07c82d6dd22ba3051e214548b1767e3e26244739ef03773ad05f2281101434",
+        "hasEmail": true
+      }
+    ],
+    "anthropic": [
+      {
+        "provider": "anthropic",
+        "type": "oauth",
+        "active": true,
+        "plan": null,
+        "idHash": "b15269c7b0a47dad35ae856890307083de83a67e00b079ad894d2d999119ca79",
+        "hasEmail": true
+      }
+    ]
+  },
+  "requestHistory": {
+    "entries": [
+      {
+        "timestamp": 1789963747257,
+        "requestedModel": "google-antigravity/claude-sonnet-4-6",
+        "model": "claude-sonnet-4-6",
+        "resolvedModel": "claude-sonnet-4-6",
+        "provider": "google-antigravity",
+        "status": 200,
+        "usageStatus": "reported",
+        "usage": {
+          "inputTokens": 250,
+          "outputTokens": 8
+        },
+        "attempts": [
+          {
+            "ordinal": 1,
+            "provider": "google-antigravity",
+            "model": "claude-sonnet-4-6",
+            "adapter": "google",
+            "status": 200,
+            "sendCount": 2,
+            "accountLogLabel": "oa45d2e",
+            "durationMs": 2798,
+            "recoveryKinds": ["oauth-account-429"]
+          }
+        ],
+        "routeKind": "explicit-provider"
+      },
+      {
+        "timestamp": 1789963109045,
+        "requestedModel": "anthropic/claude-sonnet-4-6",
+        "model": "claude-sonnet-4-6",
+        "resolvedModel": "claude-sonnet-4-6",
+        "provider": "anthropic",
+        "status": 200,
+        "usageStatus": "reported",
+        "usage": {
+          "inputTokens": 12434,
+          "outputTokens": 32,
+          "cachedInputTokens": 12160,
+          "cacheReadInputTokens": 12160,
+          "cacheCreationInputTokens": 273
+        },
+        "attempts": [
+          {
+            "ordinal": 1,
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "adapter": "anthropic",
+            "status": 200,
+            "sendCount": 1,
+            "durationMs": 1883,
+            "recoveryKinds": []
+          }
+        ],
+        "routeKind": "explicit-provider"
+      },
+      {
+        "timestamp": 1789963106416,
+        "requestedModel": "anthropic/claude-sonnet-4-6",
+        "model": "claude-sonnet-4-6",
+        "resolvedModel": "claude-sonnet-4-6",
+        "provider": "anthropic",
+        "status": 200,
+        "usageStatus": "reported",
+        "usage": {
+          "inputTokens": 12161,
+          "outputTokens": 135,
+          "cachedInputTokens": 11842,
+          "cacheReadInputTokens": 11842,
+          "cacheCreationInputTokens": 318
+        },
+        "attempts": [
+          {
+            "ordinal": 1,
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "adapter": "anthropic",
+            "status": 200,
+            "sendCount": 1,
+            "durationMs": 2442,
+            "recoveryKinds": []
+          }
+        ],
+        "routeKind": "explicit-provider"
+      },
+      {
+        "timestamp": 1789963103897,
+        "requestedModel": "anthropic/claude-sonnet-4-6",
+        "model": "claude-sonnet-4-6",
+        "resolvedModel": "claude-sonnet-4-6",
+        "provider": "anthropic",
+        "status": 200,
+        "usageStatus": "reported",
+        "usage": {
+          "inputTokens": 11845,
+          "outputTokens": 138,
+          "cachedInputTokens": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 11842
+        },
+        "attempts": [
+          {
+            "ordinal": 1,
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "adapter": "anthropic",
+            "status": 200,
+            "sendCount": 1,
+            "durationMs": 2431,
+            "recoveryKinds": []
+          }
+        ],
+        "routeKind": "explicit-provider"
+      },
+      {
+        "timestamp": 1789963102082,
+        "requestedModel": "gpt-6-astra",
+        "model": "gpt-6-astra",
+        "resolvedModel": "gpt-6-astra",
+        "provider": "openai-p51c91e",
+        "status": 200,
+        "usageStatus": "reported",
+        "usage": {
+          "inputTokens": 12080,
+          "outputTokens": 34,
+          "totalTokens": 12114,
+          "cachedInputTokens": 11648,
+          "cacheReadInputTokens": 11648,
+          "cacheCreationInputTokens": 0,
+          "reasoningOutputTokens": 0
+        },
+        "attempts": [
+          {
+            "ordinal": 1,
+            "provider": "openai-p51c91e",
+            "model": "gpt-6-astra",
+            "adapter": "openai-responses",
+            "status": 200,
+            "sendCount": 1,
+            "accountLogLabel": "p51c91e",
+            "requestedEffort": "medium",
+            "durationMs": 2880,
+            "recoveryKinds": []
+          }
+        ],
+        "routeKind": "native"
+      },
+      {
+        "timestamp": 1789963096566,
+        "requestedModel": "gpt-6-astra",
+        "model": "gpt-6-astra",
+        "resolvedModel": "gpt-6-astra",
+        "provider": "openai-p51c91e",
+        "status": 200,
+        "usageStatus": "reported",
+        "usage": {
+          "inputTokens": 11850,
+          "outputTokens": 109,
+          "totalTokens": 11959,
+          "cachedInputTokens": 11392,
+          "cacheReadInputTokens": 11392,
+          "cacheCreationInputTokens": 0,
+          "reasoningOutputTokens": 0
+        },
+        "attempts": [
+          {
+            "ordinal": 1,
+            "provider": "openai-p51c91e",
+            "model": "gpt-6-astra",
+            "adapter": "openai-responses",
+            "status": 200,
+            "sendCount": 1,
+            "accountLogLabel": "p51c91e",
+            "requestedEffort": "medium",
+            "durationMs": 5201,
+            "recoveryKinds": []
+          }
+        ],
+        "routeKind": "native"
+      },
+      {
+        "timestamp": 1789963091909,
+        "requestedModel": "gpt-6-astra",
+        "model": "gpt-6-astra",
+        "resolvedModel": "gpt-6-astra",
+        "provider": "openai-p51c91e",
+        "status": 200,
+        "usageStatus": "reported",
+        "usage": {
+          "inputTokens": 11613,
+          "outputTokens": 58,
+          "totalTokens": 11671,
+          "cachedInputTokens": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "reasoningOutputTokens": 0
+        },
+        "attempts": [
+          {
+            "ordinal": 1,
+            "provider": "openai-p51c91e",
+            "model": "gpt-6-astra",
+            "adapter": "openai-responses",
+            "status": 200,
+            "sendCount": 1,
+            "accountLogLabel": "p51c91e",
+            "requestedEffort": "medium",
+            "durationMs": 4567,
+            "recoveryKinds": []
+          }
+        ],
+        "routeKind": "native"
+      },
+      {
+        "timestamp": 1789961447907,
+        "requestedModel": "nonexistent-probe/model",
+        "model": "nonexistent-probe/model",
+        "provider": "openai",
+        "status": 401,
+        "usageStatus": "unreported",
+        "usage": {},
+        "attempts": [],
+        "routeKind": "default-provider"
+      },
+      {
+        "timestamp": 1789960998871,
+        "requestedModel": "nonexistent-probe/model",
+        "model": "nonexistent-probe/model",
+        "provider": "openai",
+        "status": 401,
+        "usageStatus": "unreported",
+        "usage": {},
+        "attempts": [],
+        "routeKind": "default-provider"
+      }
+    ],
+    "hasMore": false,
+    "modelObservationScope": "proxy routing/history, not independently verified upstream identity"
+  },
+  "multiAccountReactiveFailoverProof": {
+    "provider": "google-antigravity",
+    "configuredEnabled": false,
+    "configuredThreshold": 0,
+    "reactiveFailoverEnabled": true,
+    "inferenceRequests": 0
+  },
+  "antigravityAccounts": [
+    {
+      "lab": "agy-143f974f",
+      "result": {
+        "subscription": "antigravity",
+        "requestedModel": "google-antigravity/claude-sonnet-4-6",
+        "observedModels": [],
+        "requestedEffort": null,
+        "status": "task-completed-attribution-unverified",
+        "timestamp": "2026-09-21T04:04:02.007410+00:00",
+        "accountAttribution": "unverified",
+        "usage": {
+          "input_tokens": 36368,
+          "cached_input_tokens": 23701,
+          "output_tokens": 242
+        },
+        "events": {
+          "thread.started": 1,
+          "item.completed": 6,
+          "turn.started": 1,
+          "item.started": 2,
+          "turn.completed": 1
+        },
+        "commandExecutions": 2,
+        "fileChanges": 0,
+        "fixtureReadCommands": 2,
+        "testCommands": 1,
+        "completion": "exit-zero-and-turn.completed",
+        "error": null,
+        "httpStatuses": [],
+        "quotaErrorObserved": false,
+        "redactedErrors": [],
+        "baselineTestExit": 1,
+        "fixtureHashBefore": "adac0122533fab0a7230782fc4f3cb702d28f8cc1479b90dd6770c63985977e5",
+        "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/agy-143f974f/fixture-1zlw6h1e",
+        "credentialStoreExists": true,
+        "exitCode": 0,
+        "stderrPresent": true,
+        "postTestExit": 0,
+        "fixtureHashAfter": "f632aa00a4aae8167e0604e38ccdf5b6f1b7cb3210b55c7600ac6c3b10a3b16d",
+        "testUnchanged": true
+      },
+      "before": {
+        "accountCount": 1,
+        "activeAccountHash": "54c3146ea12eefe5f06a065a14ab49336d6d15a39d0370b5890143207f503452",
+        "expectedLogLabel": "oa45d2e",
+        "reactiveFailoverEnabled": false,
+        "autoSwitch": {
+          "provider": "google-antigravity",
+          "autoSwitchThreshold": 0,
+          "enabled": false,
+          "poolEnabled": false,
+          "inert": true
+        }
+      },
+      "after": {
+        "accountCount": 1,
+        "activeAccountHash": "54c3146ea12eefe5f06a065a14ab49336d6d15a39d0370b5890143207f503452",
+        "expectedLogLabel": "oa45d2e",
+        "reactiveFailoverEnabled": false,
+        "autoSwitch": {
+          "provider": "google-antigravity",
+          "autoSwitchThreshold": 0,
+          "enabled": false,
+          "poolEnabled": false,
+          "inert": true
+        }
+      },
+      "requests": {
+        "entries": [
+          {
+            "timestamp": 1789963449513,
+            "requestedModel": "google-antigravity/claude-sonnet-4-6",
+            "model": "claude-sonnet-4-6",
+            "resolvedModel": "claude-sonnet-4-6",
+            "provider": "google-antigravity",
+            "status": 200,
+            "usageStatus": "reported",
+            "usage": {
+              "inputTokens": 12408,
+              "outputTokens": 30,
+              "cachedInputTokens": 11913
+            },
+            "attempts": [
+              {
+                "ordinal": 1,
+                "provider": "google-antigravity",
+                "model": "claude-sonnet-4-6",
+                "adapter": "google",
+                "status": 200,
+                "sendCount": 1,
+                "accountLogLabel": "oa45d2e"
+              }
+            ],
+            "routeKind": "explicit-provider"
+          },
+          {
+            "timestamp": 1789963445436,
+            "requestedModel": "google-antigravity/claude-sonnet-4-6",
+            "model": "claude-sonnet-4-6",
+            "resolvedModel": "claude-sonnet-4-6",
+            "provider": "google-antigravity",
+            "status": 200,
+            "usageStatus": "reported",
+            "usage": {
+              "inputTokens": 12123,
+              "outputTokens": 136,
+              "cachedInputTokens": 11788
+            },
+            "attempts": [
+              {
+                "ordinal": 1,
+                "provider": "google-antigravity",
+                "model": "claude-sonnet-4-6",
+                "adapter": "google",
+                "status": 200,
+                "sendCount": 1,
+                "accountLogLabel": "oa45d2e"
+              }
+            ],
+            "routeKind": "explicit-provider"
+          },
+          {
+            "timestamp": 1789963442214,
+            "requestedModel": "google-antigravity/claude-sonnet-4-6",
+            "model": "claude-sonnet-4-6",
+            "resolvedModel": "claude-sonnet-4-6",
+            "provider": "google-antigravity",
+            "status": 200,
+            "usageStatus": "reported",
+            "usage": {
+              "inputTokens": 11837,
+              "outputTokens": 76
+            },
+            "attempts": [
+              {
+                "ordinal": 1,
+                "provider": "google-antigravity",
+                "model": "claude-sonnet-4-6",
+                "adapter": "google",
+                "status": 200,
+                "sendCount": 1,
+                "accountLogLabel": "oa45d2e"
+              }
+            ],
+            "routeKind": "explicit-provider"
+          }
+        ],
+        "hasMore": false,
+        "modelObservationScope": "proxy routing/history, not independently verified upstream identity"
+      }
     },
     {
-      "subscription": "antigravity",
-      "requestedModel": "google-antigravity/claude-sonnet-4-6",
-      "observedModels": [],
-      "status": "not-run",
-      "timestamp": "2026-09-21T03:22:23.303488+00:00",
-      "accountAttribution": "unverified",
-      "usage": {},
-      "events": {},
-      "commandExecutions": 0,
-      "fileChanges": 0,
-      "completion": "not-observed",
-      "error": "isolated-login-required",
-      "baselineTestExit": 1,
-      "fixtureHashBefore": "adac0122533fab0a7230782fc4f3cb702d28f8cc1479b90dd6770c63985977e5",
-      "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/fixture-hgdii5up",
-      "credentialStoreExists": false
+      "lab": "agy-5926ffe8",
+      "result": {
+        "subscription": "antigravity",
+        "requestedModel": "google-antigravity/claude-sonnet-4-6",
+        "observedModels": [],
+        "requestedEffort": null,
+        "status": "task-completed-attribution-unverified",
+        "timestamp": "2026-09-21T04:04:12.766752+00:00",
+        "accountAttribution": "unverified",
+        "usage": {
+          "input_tokens": 36312,
+          "cached_input_tokens": 23696,
+          "output_tokens": 199
+        },
+        "events": {
+          "thread.started": 1,
+          "item.completed": 6,
+          "turn.started": 1,
+          "item.started": 2,
+          "turn.completed": 1
+        },
+        "commandExecutions": 2,
+        "fileChanges": 0,
+        "fixtureReadCommands": 1,
+        "testCommands": 1,
+        "completion": "exit-zero-and-turn.completed",
+        "error": null,
+        "httpStatuses": [],
+        "quotaErrorObserved": false,
+        "redactedErrors": [],
+        "baselineTestExit": 1,
+        "fixtureHashBefore": "adac0122533fab0a7230782fc4f3cb702d28f8cc1479b90dd6770c63985977e5",
+        "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/agy-5926ffe8/fixture-gcs3qzko",
+        "credentialStoreExists": true,
+        "exitCode": 0,
+        "stderrPresent": true,
+        "postTestExit": 0,
+        "fixtureHashAfter": "39ab906ebe949762d29155aa669864879d1ff5694fb067b470a0da00e005ef69",
+        "testUnchanged": true
+      },
+      "before": {
+        "accountCount": 1,
+        "activeAccountHash": "ed09b83623fb1ec17ce93fd8ac72c9a0e1ff697752988c3cc855770361e2d16d",
+        "expectedLogLabel": "o097be0",
+        "reactiveFailoverEnabled": false,
+        "autoSwitch": {
+          "provider": "google-antigravity",
+          "autoSwitchThreshold": 0,
+          "enabled": false,
+          "poolEnabled": false,
+          "inert": true
+        }
+      },
+      "after": {
+        "accountCount": 1,
+        "activeAccountHash": "ed09b83623fb1ec17ce93fd8ac72c9a0e1ff697752988c3cc855770361e2d16d",
+        "expectedLogLabel": "o097be0",
+        "reactiveFailoverEnabled": false,
+        "autoSwitch": {
+          "provider": "google-antigravity",
+          "autoSwitchThreshold": 0,
+          "enabled": false,
+          "poolEnabled": false,
+          "inert": true
+        }
+      },
+      "requests": {
+        "entries": [
+          {
+            "timestamp": 1789963458589,
+            "requestedModel": "google-antigravity/claude-sonnet-4-6",
+            "model": "claude-sonnet-4-6",
+            "resolvedModel": "claude-sonnet-4-6",
+            "provider": "google-antigravity",
+            "status": 200,
+            "usageStatus": "reported",
+            "usage": {
+              "inputTokens": 12362,
+              "outputTokens": 28,
+              "cachedInputTokens": 11907
+            },
+            "attempts": [
+              {
+                "ordinal": 1,
+                "provider": "google-antigravity",
+                "model": "claude-sonnet-4-6",
+                "adapter": "google",
+                "status": 200,
+                "sendCount": 1,
+                "accountLogLabel": "o097be0"
+              }
+            ],
+            "routeKind": "explicit-provider"
+          },
+          {
+            "timestamp": 1789963455659,
+            "requestedModel": "google-antigravity/claude-sonnet-4-6",
+            "model": "claude-sonnet-4-6",
+            "resolvedModel": "claude-sonnet-4-6",
+            "provider": "google-antigravity",
+            "status": 200,
+            "usageStatus": "reported",
+            "usage": {
+              "inputTokens": 12112,
+              "outputTokens": 102,
+              "cachedInputTokens": 11789
+            },
+            "attempts": [
+              {
+                "ordinal": 1,
+                "provider": "google-antigravity",
+                "model": "claude-sonnet-4-6",
+                "adapter": "google",
+                "status": 200,
+                "sendCount": 1,
+                "accountLogLabel": "o097be0"
+              }
+            ],
+            "routeKind": "explicit-provider"
+          },
+          {
+            "timestamp": 1789963452967,
+            "requestedModel": "google-antigravity/claude-sonnet-4-6",
+            "model": "claude-sonnet-4-6",
+            "resolvedModel": "claude-sonnet-4-6",
+            "provider": "google-antigravity",
+            "status": 200,
+            "usageStatus": "reported",
+            "usage": {
+              "inputTokens": 11838,
+              "outputTokens": 69
+            },
+            "attempts": [
+              {
+                "ordinal": 1,
+                "provider": "google-antigravity",
+                "model": "claude-sonnet-4-6",
+                "adapter": "google",
+                "status": 200,
+                "sendCount": 1,
+                "accountLogLabel": "o097be0"
+              }
+            ],
+            "routeKind": "explicit-provider"
+          }
+        ],
+        "hasMore": false,
+        "modelObservationScope": "proxy routing/history, not independently verified upstream identity"
+      }
     }
-  ]
+  ],
+  "sharedAntigravity": {
+    "accountPrefix": "e4a44806",
+    "fixedAccountFixtureStatus": "not-run",
+    "reason": "hold-until-2026-09-21T06:04:01Z",
+    "poolRequestStatus": "completed-with-oauth-account-429-recovery",
+    "timingException": "PM confirmed user authorization in msg_db97868379da"
+  },
+  "subscriptionEvidence": {
+    "antigravity": "User confirmed all three accounts have subscriptions; API did not expose paidTier/currentTier",
+    "claude": "User confirmed Claude Max login; API plan null",
+    "chatgpt": "Pool account plan pro; user completed ChatGPT subscription login"
+  },
+  "codexAccountLogMapping": [
+    {
+      "idHash": "ce07c82d6dd22ba3051e214548b1767e3e26244739ef03773ad05f2281101434",
+      "logLabel": "p51c91e"
+    }
+  ],
+  "poolTransition": {
+    "startedAt": "2026-09-21T04:09:07.250888+00:00",
+    "requestedModel": "google-antigravity/claude-sonnet-4-6",
+    "clientSendCount": 1,
+    "activeBeforeHash": "eac6973b247ec5108639a36ca0cadbcfdd50425b03ec98383cbce0237d0faac4",
+    "declaredAccounts": [
+      {
+        "idHash": "eac6973b247ec5108639a36ca0cadbcfdd50425b03ec98383cbce0237d0faac4",
+        "logLabel": "o7bcb01"
+      },
+      {
+        "idHash": "54c3146ea12eefe5f06a065a14ab49336d6d15a39d0370b5890143207f503452",
+        "logLabel": "oa45d2e"
+      },
+      {
+        "idHash": "ed09b83623fb1ec17ce93fd8ac72c9a0e1ff697752988c3cc855770361e2d16d",
+        "logLabel": "o097be0"
+      }
+    ],
+    "httpStatus": 200,
+    "responseModel": "claude-sonnet-4-6",
+    "responseStatus": "completed",
+    "accountHeaderNames": [],
+    "usage": {
+      "input_tokens": 250,
+      "output_tokens": 8,
+      "total_tokens": 258
+    },
+    "durationMs": 2808,
+    "finishedAt": "2026-09-21T04:09:10.059271+00:00",
+    "activeAfterHash": "54c3146ea12eefe5f06a065a14ab49336d6d15a39d0370b5890143207f503452",
+    "history": {
+      "timestamp": 1789963747257,
+      "requestedModel": "google-antigravity/claude-sonnet-4-6",
+      "model": "claude-sonnet-4-6",
+      "resolvedModel": "claude-sonnet-4-6",
+      "provider": "google-antigravity",
+      "status": 200,
+      "usageStatus": "reported",
+      "usage": {
+        "inputTokens": 250,
+        "outputTokens": 8
+      },
+      "attempts": [
+        {
+          "ordinal": 1,
+          "provider": "google-antigravity",
+          "model": "claude-sonnet-4-6",
+          "adapter": "google",
+          "status": 200,
+          "sendCount": 2,
+          "accountLogLabel": "oa45d2e",
+          "durationMs": 2798,
+          "recoveryKinds": ["oauth-account-429"]
+        }
+      ],
+      "routeKind": "explicit-provider"
+    }
+  },
+  "postPoolSnapshot": {
+    "timestamp": "2026-09-21T04:12:08.958888+00:00",
+    "files": {
+      ".codex/config.toml": {
+        "exists": true,
+        "mtime_ns": 1789960577809199061,
+        "sha256": "7cdc764a7f203224592abae5b4b838e06c5a530ba45bd5030161375a0d83cb98"
+      },
+      ".claude/settings.json": {
+        "exists": true,
+        "mtime_ns": 1789642503855339875,
+        "sha256": "6eabc551fb3052311834595d2d24f836341757d3889717c4e5a75bead57a7be6"
+      },
+      ".opencodex": {
+        "exists": false,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      ".gemini": {
+        "exists": true,
+        "mtime_ns": 1789341168660791558,
+        "sha256": null
+      },
+      ".zshrc": {
+        "exists": true,
+        "mtime_ns": 1789343214072435497,
+        "sha256": "d066a470c19816a0b4c0d683ddbf5de864c6f71a65f914794a8af56203b675c0"
+      }
+    },
+    "keychain": {
+      "opencodex.provider-api-key.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "opencodex.native-main-profile.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "Claude Code-credentials": {
+        "exit": 0,
+        "metadata_sha256": "063b400b4f0f4099f03c8547fd250f7a7d293b800d7bd4839f817da4627a3c67",
+        "secret_requested": false
+      }
+    },
+    "unchanged": {
+      "files": true,
+      "keychain": true
+    }
+  },
+  "isolatedProxyShutdown": {
+    "18474": 0,
+    "18475": 0
+  }
 }

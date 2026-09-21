@@ -18,7 +18,10 @@ import tempfile
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--subscription', choices=['chatgpt', 'claude', 'antigravity'], required=True)
 parser.add_argument('--model', required=True)
+parser.add_argument('--effort', choices=['low','medium','high','xhigh','max','ultra'])
 parser.add_argument('--lab', type=Path, required=True)
+parser.add_argument('--port', type=int, default=18473)
+parser.add_argument('--not-before', default='2026-09-21T06:04:01+00:00')
 parser.add_argument('--execute', action='store_true')
 parser.add_argument('--routing-reviewed', action='store_true')
 args = parser.parse_args()
@@ -28,9 +31,9 @@ if lab == repo or repo in lab.parents:
     parser.error('lab must be outside the worktree')
 now = datetime.datetime.now(datetime.timezone.utc)
 result = dict(subscription=args.subscription, requestedModel=args.model,
-              observedModels=[], status='not-run', timestamp=now.isoformat(),
+              observedModels=[], requestedEffort=args.effort, status='not-run', timestamp=now.isoformat(),
               accountAttribution='unverified', usage={}, events={}, commandExecutions=0,
-              fileChanges=0, completion='not-observed', error=None, httpStatuses=[], quotaErrorObserved=False)
+              fileChanges=0, fixtureReadCommands=0, testCommands=0, completion='not-observed', error=None, httpStatuses=[], quotaErrorObserved=False, redactedErrors=[])
 result_path = lab / (args.subscription + '-result.json')
 work = Path(tempfile.mkdtemp(prefix='fixture-', dir=lab))
 shutil.copytree(Path(__file__).parent / 'fixture', work, dirs_exist_ok=True)
@@ -49,11 +52,21 @@ credential = lab / 'ocx' / ('codex-accounts.json' if args.subscription == 'chatg
 result['credentialStoreExists'] = credential.is_file()
 if not credential.is_file():
     result['error'] = 'isolated-login-required'
-elif args.subscription == 'antigravity' and now < datetime.datetime(2026, 9, 21, 6, 4, tzinfo=datetime.timezone.utc):
-    result['error'] = 'shared-quota-hold-until-2026-09-21T06:04Z'
+elif args.subscription == 'antigravity' and now < datetime.datetime.fromisoformat(args.not_before):
+    result['error'] = 'quota-hold-until-' + args.not_before
 elif not args.execute or not args.routing_reviewed:
     result['error'] = 'execution-and-account-routing-review-required'
 else:
+    def private_strings(value):
+        if isinstance(value, str):
+            return [value] if len(value) >= 8 else []
+        if isinstance(value, dict):
+            return [s for v in value.values() for s in private_strings(v)]
+        if isinstance(value, list):
+            return [s for v in value for s in private_strings(v)]
+        return []
+
+    private_values = private_strings(json.loads(credential.read_text()))
     # Reserve once before launch, including failures/timeouts; never retry Agy automatically.
     if args.subscription == 'antigravity':
         with (lab / 'antigravity-attempt.lock').open('x') as lock:
@@ -65,13 +78,15 @@ else:
                '--skip-git-repo-check', '-C', str(work), '-s', 'workspace-write',
                '-c', 'approval_policy="never"', '-c', 'cli_auth_credentials_store="file"',
                '-c', 'model_provider="probe"', '-c', 'model_providers.probe.name="OpenCodex probe"',
-               '-c', 'model_providers.probe.base_url="http://127.0.0.1:18473/v1"',
+               '-c', f'model_providers.probe.base_url="http://127.0.0.1:{args.port}/v1"',
                '-c', 'model_providers.probe.wire_api="responses"',
                '-c', 'model_providers.probe.requires_openai_auth=false',
                '-c', 'model_providers.probe.request_max_retries=0',
                '-c', 'model_providers.probe.stream_max_retries=0', '-m', args.model,
                'Read sum.js and sum.test.js, fix only sum.js, run node --test sum.test.js, then finish. '
                'Do not read other directories, credentials, environment variables, or use network tools.']
+    if args.effort:
+        command[2:2] = ['-c', 'model_reasoning_effort=' + json.dumps(args.effort)]
     try:
         child = subprocess.run(command, cwd=work, env=env, capture_output=True,
                                text=True, timeout=180)
@@ -90,6 +105,11 @@ else:
             item = event.get('item', {})
             if kind == 'item.completed' and item.get('type') == 'command_execution':
                 result['commandExecutions'] += 1
+                cmd = item.get('command', '')
+                if re.search(r'cat|sed|readFile', cmd) and 'sum.js' in cmd:
+                    result['fixtureReadCommands'] += 1
+                if re.search(r'node\s+--test', cmd):
+                    result['testCommands'] += 1
             if kind == 'item.completed' and item.get('type') == 'file_change':
                 result['fileChanges'] += 1
             usage = event.get('usage', {})
@@ -101,7 +121,14 @@ else:
             if isinstance(model, str) and re.fullmatch(r'[a-zA-Z0-9._/-]{1,100}', model):
                 if model not in result['observedModels']:
                     result['observedModels'].append(model)
-            diagnostic = str(event.get('message', '')) + str(event.get('error', ''))
+            error = event.get('error', {})
+            diagnostic = str(event.get('message', '')) + (str(error.get('message', '')) if isinstance(error, dict) else str(error))
+            if kind in ['error', 'turn.failed'] and diagnostic:
+                redacted = diagnostic
+                for private in private_values:
+                    redacted = redacted.replace(private, '[redacted]')
+                redacted = re.sub(r'https?://\S+|[\w.+-]+@[\w.-]+|Bearer\s+\S+|(?:sk-|ya29\.)[\w.-]+', '[redacted]', redacted)
+                result['redactedErrors'].append(redacted[:2000])
             for code in re.findall(r'\b(?:400|401|403|404|429|500|502|503)\b', diagnostic):
                 if int(code) not in result['httpStatuses']:
                     result['httpStatuses'].append(int(code))
