@@ -2414,3 +2414,73 @@ test("ungrounded answers route to workspace rebinding", () => {
     grounded: false,
   });
 });
+
+// ─── 이사(director) 역할 존재·보고 체계 ──────────────────────────────────────
+// These tests provide evidence for the director-role eval scenario (scenarios.json).
+// They verify: (1) the director skill file exists and has the required sections,
+// (2) PM-and-below spec headers report to 이사, not to 사용자.
+import {
+  DIRECTOR_ROLE,
+  ROLE_LADDER,
+  ROLES,
+} from "../plugins/oh-my-teams/scripts/core.mjs";
+import { roleSpec } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
+
+test("director skill exists, has authority-responsibility-limits section, and PM-and-below report to 이사", () => {
+  // 1) DIRECTOR_ROLE is defined and sits above pm in ROLE_LADDER
+  assert.equal(DIRECTOR_ROLE, "director");
+  assert.equal(ROLE_LADDER[0], DIRECTOR_ROLE);
+  assert.equal(ROLES.includes(DIRECTOR_ROLE), false);
+
+  // 2) The director skill file contains the required 권한·책임·한계 section
+  const skillPath = new URL(
+    "../plugins/oh-my-teams/skills/director/SKILL.md",
+    import.meta.url,
+  );
+  const skillContent = fs.readFileSync(skillPath, "utf8");
+  assert.match(
+    skillContent,
+    /권한·책임·한계/,
+    "director skill must have a 권한·책임·한계 section",
+  );
+  assert.match(
+    skillContent,
+    /### 권한/,
+    "director skill must have a 권한 subsection",
+  );
+  assert.match(
+    skillContent,
+    /### 한계/,
+    "director skill must have a 한계 subsection",
+  );
+
+  // 3) PM spec header reports to 이사, not to 사용자
+  const pmSpec = roleSpec(
+    readJSON(
+      new URL(
+        "../plugins/oh-my-teams/examples/organization.json",
+        import.meta.url,
+      ),
+    ),
+    "pm",
+    "kickoff를 감독한다.",
+  );
+  assert.match(pmSpec, /보고 대상: 이사/);
+  assert.doesNotMatch(pmSpec, /보고 대상: 사용자/);
+
+  // 4) All PM-and-below roles include the no-direct-user-contact sentence
+  const sentence = "사용자에게 직접 묻거나 보고하지 않는다.";
+  const org = readJSON(
+    new URL(
+      "../plugins/oh-my-teams/examples/organization.json",
+      import.meta.url,
+    ),
+  );
+  for (const role of ROLES) {
+    const spec = roleSpec(org, role, "작업한다.");
+    assert.ok(
+      spec.includes(sentence),
+      `${role} spec is missing the no-direct-user-contact sentence`,
+    );
+  }
+});

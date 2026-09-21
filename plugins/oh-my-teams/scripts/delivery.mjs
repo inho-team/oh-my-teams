@@ -16,6 +16,7 @@ import {
   ownerProject,
   recordDelivery,
 } from "./kickoff-registry.mjs";
+import { findCloseReadySignal } from "./director.mjs";
 
 async function git(repo, args, execute) {
   const result = await execute(["git", "-C", repo, ...args]);
@@ -151,6 +152,25 @@ export async function deliverKickoff({
       branch: delivery.branch,
       ...entry.delivered,
     };
+  }
+
+  // close-ready signal check: the PM sends this signal when the integration
+  // worktree is ready for delivery, recording the verified HEAD and source.
+  // If the signal exists, its head must match the requested deliver head.
+  // If it is absent, delivery proceeds with a warning (legacy kickoffs without
+  // the signal channel can still be closed).
+  const closeReadySignal = findCloseReadySignal(orgFile, worktreeId);
+  if (closeReadySignal) {
+    assert(
+      closeReadySignal.head === head,
+      `close-ready signal records HEAD ${closeReadySignal.head} but deliver requested ${head}; ` +
+        "the PM must send a new close-ready signal for the current integration HEAD",
+    );
+  } else {
+    console.warn(
+      `[omt] Warning: no close-ready signal found for ${worktreeId}; ` +
+        "proceeding without PM close-ready confirmation.",
+    );
   }
 
   const owner = ownerProject(orgFile);

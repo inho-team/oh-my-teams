@@ -15,9 +15,9 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 
 - 사용자와 목표·수용 기준·전달 방식을 확정하고, 확정한 내용을 브리프로 써서 PM에게 인계한다.
 - 여러 kickoff를 동시에 감독하고, PM의 결정 요청(`director-signal --kind decision`)에 결정을 내린다.
-- `director-inbox`로 미처리 신호를 조회하고, `director-reply --signal <id> --text ...`로 결정을 기록하고 PM 터미널에 전달하며, `director-ack`으로 수신을 확인한다.
-- `director-watch`로 kickoff별 신호·슬롯 점유·여유 메모리·PM liveness를 한 번에 조회한다.
-- 무거운 작업 전에 `resource-acquire --org <org> --worktree <pm> --kind test|worker|build --note ...`로 자원 슬롯을 확보하고, 작업이 끝나면 `resource-release`로 해제한다.
+- `director-inbox --org <project>/.omt/organization.json`으로 미처리 신호를 조회하고, `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`로 결정을 기록하고 PM 터미널에 전달하며, `director-ack --org <project>/.omt/organization.json --signal <id>`으로 수신을 확인한다.
+- `director-watch --org <project>/.omt/organization.json`으로 kickoff별 신호·슬롯 점유·여유 메모리·PM liveness를 한 번에 조회한다.
+- 무거운 작업 전에 `resource-acquire --org <project>/.omt/organization.json --worktree <pm> --kind test|worker|build --note ...`로 자원 슬롯을 확보하고, 작업이 끝나면 `resource-release --org <project>/.omt/organization.json --slot <slotId>`로 해제한다.
 - `close`로 성공한 kickoff를 전달·병합·정리하고, `disband`로 실패하거나 취소된 kickoff를 해체한다.
 - 주인 브랜치 병합 여부를 결정한다.
 
@@ -49,10 +49,10 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 
 PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]`로 이사에게 신호를 보낸다. 이사는 다음 명령으로 신호를 처리한다.
 
-- `director-inbox`: 미처리 신호 조회
-- `director-reply --signal <id> --text ...`: 결정을 기록하고 PM 터미널에 전달
-- `director-ack`: 수신 확인
-- `director-watch`: kickoff별 신호·슬롯 점유·여유 메모리·PM liveness 요약 조회
+- `director-inbox --org <project>/.omt/organization.json`: 미처리 신호 조회
+- `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`: 결정을 기록하고 PM 터미널에 전달
+- `director-ack --org <project>/.omt/organization.json --signal <id>`: 수신 확인
+- `director-watch --org <project>/.omt/organization.json`: kickoff별 신호·슬롯 점유·여유 메모리·PM liveness 요약 조회
 
 `close-ready` 신호는 `close`의 입력(통합 워크트리·HEAD)과 연결된다. `close`는 그 신호가 없거나 HEAD가 다르면 경고하고 거부한다.
 
@@ -64,4 +64,10 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 node <runtime> kickoff-show --org <project>/.omt/organization.json
 ```
 
-무거운 작업(테스트·빌드·무거운 worker) 전에 이사가 직접 또는 PM을 통해 자원 슬롯을 확보하고, 작업이 끝나면 해제한다. 슬롯 확보·해제 명령은 `resource-acquire`와 `resource-release`이며, 인자 형식은 런타임 문서를 따른다.
+무거운 작업(테스트·빌드·무거운 worker) 전에 이사가 직접 또는 PM을 통해 자원 슬롯을 확보하고, 작업이 끝나면 해제한다.
+
+```text
+node <runtime> resource-acquire --org <project>/.omt/organization.json \
+  --worktree <pm-worktree-id> --kind test|worker|build --note "작업 설명"
+node <runtime> resource-release --org <project>/.omt/organization.json --slot <slotId>
+```

@@ -527,6 +527,8 @@ export function cleanupKickoffBranches({
   entry,
   branches,
   remoteName = "origin",
+  callerCwd = process.cwd(),
+  force = false,
 }) {
   assert(
     typeof projectDir === "string" && projectDir,
@@ -534,6 +536,23 @@ export function cleanupKickoffBranches({
   );
   assert(entry && typeof entry === "object", "registry entry required");
   assert(Array.isArray(branches), "branches must be an array");
+
+  // Authority check: same policy as releaseKickoff.
+  // Entries without a director record predate this feature; allowed with warning.
+  if (!entry.director) {
+    console.warn(
+      "[omt] Warning: kickoff has no director record; kickoff-branch-cleanup proceeds without director verification.",
+    );
+  } else if (!force) {
+    const expected = path.resolve(entry.director.checkoutPath);
+    const actual = path.resolve(callerCwd);
+    assert(
+      actual === expected,
+      `kickoff-branch-cleanup must be run from the director's checkout at ${expected}; ` +
+        `current directory is ${actual}. ` +
+        "Run from the owner project checkout, or pass --force with the director's explicit authorization.",
+    );
+  }
 
   const deleted = [];
   const skipped = [];

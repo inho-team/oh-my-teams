@@ -319,6 +319,7 @@ test("acquireResource writes a slot record and releaseResource removes it", (t) 
     worktreeId,
     kind: "test",
     note: "running tests",
+    freeMemory: () => 2 * 1024 * 1024 * 1024, // 2 GiB fixture, host-independent
   });
   assert.ok(acq.acquired);
   assert.ok(acq.id);
@@ -363,13 +364,18 @@ test("acquireResource reclaims dead-owner slots and reports their ids", (t) => {
   const { orgFile, worktreeId } = makeProject(t);
 
   // Acquire first slot.
-  const live = acquireResource(orgFile, { worktreeId, kind: "build" });
+  const live = acquireResource(orgFile, {
+    worktreeId,
+    kind: "build",
+    freeMemory: () => 2 * 1024 * 1024 * 1024, // 2 GiB fixture, host-independent
+  });
   assert.ok(live.acquired);
 
   // Acquire a second slot; the liveness check says the first owner is dead.
   const second = acquireResource(orgFile, {
     worktreeId,
     kind: "build",
+    freeMemory: () => 2 * 1024 * 1024 * 1024, // 2 GiB fixture, host-independent
     liveness: (owner) => (owner.pid === live.record.pid ? "dead" : "alive"),
   });
 

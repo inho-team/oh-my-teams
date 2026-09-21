@@ -841,7 +841,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(readSkill("senior"), /- Junior가 이번 실행에 있으면 기능 구현/);
   assert.match(readSkill("kickoff"), /`PM 실행` 절/);
   // A session that could not start the PM went on as PM itself.
-  assert.match(readSkill("kickoff"), /선언 세션은 PM을 대신 맡지 않는다/);
+  assert.match(readSkill("kickoff"), /이사는 PM을 대신 맡지 않는다/);
   assert.match(readReference("kickoff-registry.md"), /인계에 실패한 것이다/);
   assert.match(
     readReference("kickoff-registry.md"),

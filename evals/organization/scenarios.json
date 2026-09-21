@@ -62,9 +62,9 @@
     },
     {
       "id": "director-role",
-      "description": "이사(director) 스킬이 존재하고 권한·책임·한계 절이 있으며, PM 이하 역할이 이사에게 보고한다고 적혀 있다.",
+      "description": "이사(director) 스킬이 존재하고 권한·책임·한계 절이 있으며, PM 이하 역할이 이사에게 보고하고 사용자에게 직접 접촉하지 않는다.",
       "evidenceTests": [
-        "minimal-change discipline lives in one place and each role links it"
+        "director skill exists, has authority-responsibility-limits section, and PM-and-below report to 이사"
       ]
     }
   ]

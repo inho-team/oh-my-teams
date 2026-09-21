@@ -118,13 +118,19 @@ export function acquireResource(orgFile, request) {
     }
 
     const id = crypto.randomUUID();
+    // Use request.ownerPid when the caller knows which long-lived process owns
+    // the slot (e.g. the PM process that spawned this CLI invocation). Falling
+    // back to process.pid means the slot's owner is this CLI process, which
+    // exits immediately after acquire; the next acquire call will then see the
+    // slot as dead and reclaim it. Pass the actual owner PID to prevent that.
+    const ownerPid = request.ownerPid ?? process.pid;
     const record = {
       schemaVersion: 1,
       id,
       worktreeId: request.worktreeId,
       kind: request.kind,
       note: request.note ?? "",
-      pid: process.pid,
+      pid: ownerPid,
       hostname: os.hostname(),
       acquiredAt: new Date().toISOString(),
     };
@@ -173,19 +179,34 @@ export async function queryPmLiveness(entry, orcaExecutable) {
   try {
     const result = await run(argv, { timeoutMs: 8000 });
     if (result.code !== 0) return "unverifiable";
-    let workers;
+    let parsed;
     try {
-      workers = JSON.parse(result.stdout);
+      parsed = JSON.parse(result.stdout);
     } catch {
       return "unverifiable";
     }
+    // Orca worker-list returns {result: {workers: [...], ...}} envelope.
+    // Fall back to treating a top-level array as the worker list so tests and
+    // older Orca versions that return a plain array still work.
+    const workers = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.result?.workers)
+        ? parsed.result.workers
+        : null;
     if (!Array.isArray(workers)) return "unverifiable";
     const pmPath = entry.pm?.path;
     if (!pmPath) return "unverifiable";
-    const found = workers.some(
+    // Find the worker entry for the PM worktree.
+    const found = workers.find(
       (w) => typeof w.worktree === "string" && w.worktree.includes(pmPath),
     );
-    return found ? "alive" : "unverifiable";
+    if (!found) return "unverifiable";
+    // Use the projection.liveness field when present; do not infer alive from
+    // the mere presence of an entry — the PM may have stopped responding.
+    const liveness = found.projection?.liveness ?? found.liveness;
+    if (liveness === "alive") return "alive";
+    if (liveness === "dead") return "dead";
+    return "unverifiable";
   } catch {
     return "unverifiable";
   }

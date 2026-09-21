@@ -129,7 +129,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   deliver --org FILE --worktree ID --source DIR --head SHA
           --evidence FILE --task TRUSTED_TASK [--report FILE --state DIR]
           (merges a verified kickoff result into the branch its claim recorded;
-          run by the declaring session in close)
+          run by the director in close)
   prepare --org FILE --task FILE --repo DIR --name NAME [--orca EXECUTABLE]
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
@@ -234,7 +234,7 @@ export const ALLOWED_OPTIONS = {
   "kickoff-show": ["org", "worktree"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
-  "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote"],
+  "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
   deliver: [
     "org",
     "worktree",
@@ -800,7 +800,7 @@ async function injectFallback(args, org, run, launch, refusal) {
   const approval = String(args["inject-fallback"]).trim();
   assert(
     approval.length >= 10,
-    "--inject-fallback takes the user's approval in words, e.g. who approved it and why",
+    "--inject-fallback takes the director's approval in words, e.g. who approved it and why",
   );
   const injected = await injectTask(path.resolve(args.repo), {
     task: args.task,
@@ -1014,6 +1014,8 @@ async function executeCommand(args) {
           .map((b) => b.trim())
           .filter(Boolean),
         remoteName: args.remote ?? "origin",
+        callerCwd: process.cwd(),
+        force: args.force ?? false,
       });
     }
     case "prepare":

@@ -33,7 +33,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고, 산출물 자체를 만들라는 지시를 보내지 않는다. 나눌 필요가 없는 일은 PL을 거치지 않고 Junior나 Intern에게, 설계와 의미 검토는 Senior에게 직접 배정한다.
 - Orca는 기본적으로 중첩 worker를 한 단계만 허용한다(`NESTED_WORKER_MAX_DEPTH` 기본값 1). 이 설정에서 PM이 띄운 PL은 하위 worker를 시작할 수 없으므로, 사용자가 Orca 설정의 Nested worker depth를 올렸다고 확인하지 않은 한 PL에게는 분할 계획과 통합 검증만 받고 계획의 작업은 PM이 자기 Run에서 평평하게 배정한다.
 - 원시 `orca orchestration worker-start`나 `orca worktree create --agent`로 역할을 띄우지 않는다. 저장된 모델과 권한 우회 플래그가 빠지기 때문이다.
-- 모델·계정·구독을 바꾸거나 사용자에게 없는 모델로 전환하지 않는다. 바꿔야 하면 `adjust`를 사용자에게 제안한다.
+- 모델·계정·구독을 바꾸거나 이사에게 없는 모델로 전환하지 않는다. 바꿔야 하면 `adjust`를 이사에게 보고해 사용자 결정을 받도록 한다.
 - 검토를 배정할 때 finding이나 criterion의 필드 이름을 지시문에서 새로 정하지 않고 `examples/review.json` 형식을 그대로 요구한다. 검토자가 형식을 틀리게 써도 PM이 옮겨 적지 않고 검토자에게 되돌린다.
 - 자신이 작성하거나 계획한 결과를 스스로 검토해 승인하지 않는다. 단순 개발 요청을 배포·외부 발송 허가로 확대하지 않는다.
 - 막히면 거부 코드와 증거를 붙여 이사에게 보고하고, 같은 시도를 반복하지 않는다.
@@ -104,7 +104,7 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 필수 검토가 `changes-requested`나 `inconclusive`로 끝나거나 열린 finding을 남기면, 그것은 실패가 아니므로 `workflow-retry`가 아니라 검토 반려 루프로 처리한다.
 
 1. 반려한 검토의 finding을 구현 역할에게 그대로 넘겨 같은 워크트리에서 고치게 한다. 새 Orca Dispatch를 만들면 그 receipt를 받는다.
-2. `workflow-rework`로 그 receipt를 현재 attempt에 연결한다. 입력은 `eventId`, `taskId`, 현재 `attemptId`, 반려한 검토의 `reviewId`, 수정 실행의 `receipt`다. 런타임은 그 검토가 이 task의 현재 실행을 검토했는지, attempt의 호출 한도가 남았는지 확인하며, 새 attempt를 쓰지 않는다. 한도가 남지 않았으면 거부되므로 사용자에게 예산 결정을 받는다.
+2. `workflow-rework`로 그 receipt를 현재 attempt에 연결한다. 입력은 `eventId`, `taskId`, 현재 `attemptId`, 반려한 검토의 `reviewId`, 수정 실행의 `receipt`다. 런타임은 그 검토가 이 task의 현재 실행을 검토했는지, attempt의 호출 한도가 남았는지 확인하며, 새 attempt를 쓰지 않는다. 한도가 남지 않았으면 거부되므로 이사에게 보고해 사용자 예산 결정을 받도록 한다.
 3. 수정 실행이 끝나면 `workflow-settle`로 정산하고, 검토자가 **수정 실행의 ID**를 `implementationExecutionId`로 적어 다시 검토한다. 앞선 검토의 finding은 같은 `id`에 `resolved`와 `resolution`을 적어 닫는다. 생략하면 열린 채로 남는다.
 4. `accept` 뒤 `workflow-resume`을 실행하면 수정 실행의 gate가 task를 `accepted`로 올린다.
 

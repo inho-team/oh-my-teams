@@ -132,12 +132,13 @@ export async function notifyDirector(entry, record, orcaExecutable) {
   if (!handle) return { notified: false };
   const argv = [
     orcaExecutable ?? "orca",
-    "orchestration",
+    "terminal",
     "send",
     "--terminal",
     handle,
     "--text",
     `[omt] ${record.kind} from ${record.worktreeId}: ${record.text}`,
+    "--enter",
   ];
   try {
     const result = await run(argv, { timeoutMs: 10000 });
@@ -197,12 +198,43 @@ export async function replySignal(orgFile, request) {
     writeJSON(file, updated);
   });
 
-  // PM terminal notification is best-effort; failure is reported, not thrown.
+  // PM terminal notification: look up the kickoff entry for this signal's
+  // worktree and attempt delivery if a PM terminal handle is recorded.
+  // The kickoff registry does not store the PM's terminal handle, so delivery
+  // falls back to leaving the reply text in the signal record itself, which
+  // the PM reads through director-inbox. This is reported as notified: false
+  // with a clear reason so callers can distinguish skip from error.
   let notified = false;
   let notifyError;
-  // The PM terminal handle is not stored in the registry; notification is
-  // skipped here and callers may extend this path when a handle is available.
-  void notified;
+  try {
+    const { kickoffs } = listKickoffs(orgFile, updated.worktreeId);
+    const entry = kickoffs[0];
+    if (entry?.pm?.terminalHandle) {
+      // PM terminal handle is present; attempt delivery via terminal send.
+      const orcaExec = request.orcaExecutable ?? "orca";
+      const argv = [
+        orcaExec,
+        "terminal",
+        "send",
+        "--terminal",
+        entry.pm.terminalHandle,
+        "--text",
+        `[omt reply] ${updated.reply}`,
+        "--enter",
+      ];
+      const result = await run(argv, { timeoutMs: 10000 });
+      if (result.code === 0) {
+        notified = true;
+      } else {
+        notifyError = result.stderr.trim() || `exit ${result.code}`;
+      }
+    } else {
+      // No PM terminal handle in registry; PM reads reply via director-inbox.
+      notifyError = "no-pm-terminal-handle";
+    }
+  } catch (error) {
+    notifyError = error.message;
+  }
 
   return {
     replied: true,

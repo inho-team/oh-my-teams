@@ -37,10 +37,18 @@ async function runEvidenceTest(name) {
   const text = `${result.stdout}\n${result.stderr}`;
   // TAP marks a selected test `ok`; a name that matches nothing reports zero
   // passes, which must read as missing evidence rather than as success.
-  const passed = /^# pass 1$/m.test(text);
+  // Specifically, `# pass 0` means no test ran for this name, which is a
+  // false-positive failure: the file itself produces `ok 1` even with zero
+  // matching tests. We check for exactly `# pass 1` AND the absence of
+  // `# pass 0` to catch both zero-match and multi-match edge cases.
+  const passCount = (() => {
+    const m = /^# pass (\d+)$/m.exec(text);
+    return m ? parseInt(m[1], 10) : 0;
+  })();
+  const passed = passCount >= 1 && result.code === 0 && !result.timedOut;
   return {
     name,
-    passed: passed && result.code === 0 && !result.timedOut,
+    passed,
     exitCode: result.code,
     timedOut: result.timedOut,
     elapsedMs: Date.now() - started,

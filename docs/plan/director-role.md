@@ -92,3 +92,24 @@ C. 이사 기록 없는 기존 항목은 경고 후 허용, 이사 기록이 있
 - 분리 (`--director-force` 도입): API 변경 범위가 넓고(CLI, 테스트, 문서 일체 수정 필요), 실질적 보안 개선보다 사용 마찰 증가 효과가 더 크다. 비상 출구의 복잡도를 높여 정작 필요한 상황에서 쓰기 어렵게 만든다.
 
 **결론**: force 겹침은 의도된 설계이며, 이 결정을 이 문서에 명시한다.
+
+---
+
+## 5. eval 시나리오 근거 연결 방식
+
+### 결정: runtime.test.mjs에 이사 전용 테스트를 추가하고 scenarios.json이 그 이름을 가리킨다 (선택지 B 변형)
+
+**선택지**
+
+A. runtime.test.mjs에 전용 검사를 두고 이름만 바꾼다. 실행기 변경은 작지만 이미 director-role.test.mjs에 있는 검사를 복제하고 파일별 책임을 흐린다.  
+B. 근거를 파일+테스트 이름으로 명시하거나 여러 허용 테스트 파일에서 이름을 해석하도록 실행기를 고친다. 기존 검사를 재사용할 수 있지만 manifest 호환과 중복 이름·0개 일치·복수 일치 거부 검사가 필요하다.
+
+**채택: B 변형** (선택지 A와 B의 절충)
+
+run.mjs의 실행기는 현재 `tests/runtime.test.mjs` 한 파일만 봄. director-role.test.mjs:132,152,163의 기존 테스트를 복제하는 대신, `runtime.test.mjs`에 이사 스킬 존재·필수 절·PM 이하 보고 체계를 함께 검사하는 독립 테스트를 추가했다. 이 방식이 채택된 이유:
+
+- `evals/organization/run.mjs`의 실행기 파일 경로를 하드코딩 변경하지 않아도 된다. 실행기가 `runtime.test.mjs`만 보도록 설계된 것은 현재 범위에서 바꿀 경우 manifest 호환과 중복 이름 처리 등 부가 복잡도가 생긴다.
+- 새 테스트는 director-role.test.mjs의 검사와 동일한 내용이지만, eval 시나리오의 근거 역할을 하는 단일 진입점으로 기능한다.
+- `# pass 0` 거짓 통과 문제(항목 11)를 함께 수정해, 이름 불일치시 failed를 반환하도록 run.mjs를 수정했다.
+
+**테스트 이름**: `"director skill exists, has authority-responsibility-limits section, and PM-and-below report to 이사"` (`tests/runtime.test.mjs` 끝에 추가)
