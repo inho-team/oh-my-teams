@@ -15,6 +15,12 @@ import {
   decodeAgentCli,
   tryParseJson,
 } from "./providers/shared.mjs";
+import { doctor, runtimePaths } from "./dependencies.mjs";
+import {
+  openCodexCommand,
+  resolveOpenCodexBinding,
+  startOpenCodexProxy,
+} from "./opencodex.mjs";
 
 /**
  * Returns the effort a profile asks for after re-checking provider support.
@@ -190,6 +196,57 @@ export async function invoke(
   execute = run,
   request = httpRun,
 ) {
+  if (profile.runner?.kind === "opencodex") {
+    const root = process.env.OMT_RUNTIME_ROOT;
+    assert(root, "opencodex-action-required: configure OMT_RUNTIME_ROOT");
+    const diagnosed = await doctor(root);
+    assert(
+      diagnosed.status === "ready",
+      "opencodex-action-required: run runtime-install first",
+    );
+    const paths = runtimePaths(root);
+    const binding = resolveOpenCodexBinding(profile, diagnosed.runtime);
+    const proxy = await startOpenCodexProxy({
+      ...binding,
+      runtimePrefix: paths.runtime,
+    });
+    try {
+      const argv = openCodexCommand({
+        cwd,
+        port: proxy.port,
+        model: profile.model,
+        effort: profile.effort,
+      });
+      const result = await execute(argv, {
+        cwd,
+        input: prompt,
+        timeoutMs,
+        env: { ...profileEnv(profile), ...proxy.env },
+      });
+      const decoded = adapterFor({ ...profile, provider: "codex" }).decode(
+        result.stdout,
+        { profile, cwd, transport: "process" },
+      );
+      const bindingResult = modelBinding(profile, decoded);
+      assert(
+        bindingResult.status === "matched",
+        "opencodex-model-unproven-or-mismatched",
+      );
+      return {
+        ...result,
+        ...decoded,
+        modelBinding: bindingResult,
+        failureClass: classifyAgentCliFailure(result, decoded),
+        exhausted: false,
+        observed: {
+          accountLogLabel: binding.accountLogLabel,
+          model: decoded.effectiveModel ?? null,
+        },
+      };
+    } finally {
+      await proxy.stop();
+    }
+  }
   const adapter = adapterFor(profile);
   const spec = providerRequest(profile, cwd, prompt, timeoutMs);
   const result =

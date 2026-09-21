@@ -133,3 +133,33 @@ export function openCodexCommand(request) {
     "-",
   ];
 }
+
+/**
+ * Resolves a named fixed-account binding from explicit process environment references.
+ * @param {object} profile - Organization profile with an OpenCodex runner.
+ * @param {object} runtime - Active runtime diagnosis result.
+ * @param {NodeJS.ProcessEnv} [environment=process.env] - Explicit caller configuration.
+ * @returns {object} Secret-free fixed-account binding.
+ */
+export function resolveOpenCodexBinding(
+  profile,
+  runtime,
+  environment = process.env,
+) {
+  const runner = validateOpenCodexRunner(profile, runtime);
+  if (!runner) return null;
+  const key = runner.accountHomeRef.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const accountHome = environment[`OMT_OPENCODEX_${key}_HOME`];
+  const accountLogLabel = environment[`OMT_OPENCODEX_${key}_LABEL`];
+  const sessionHome = environment.OMT_OPENCODEX_SESSION_HOME;
+  assert(
+    accountHome && accountLogLabel && sessionHome,
+    "opencodex-action-required: configure named account home, label and session home",
+  );
+  return {
+    accountHome,
+    accountLogLabel,
+    sessionHome,
+    runtimePrefix: runtime.runtimePrefix,
+  };
+}

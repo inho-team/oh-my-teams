@@ -6,6 +6,7 @@ import {
   openCodexEnvironment,
   validateOpenCodexRunner,
 } from "../plugins/oh-my-teams/scripts/opencodex.mjs";
+import { invoke } from "../plugins/oh-my-teams/scripts/providers.mjs";
 
 const fingerprint = `sha256:${"a".repeat(64)}`;
 const profile = {
@@ -85,4 +86,23 @@ test("the OpenCodex runner invokes actual Codex JSONL with explicit proxy and mo
     "/tmp/work",
   ]);
   assert.ok(argv.includes("openai_base_url=http://127.0.0.1:43123/v1"));
+});
+
+test("the public provider entrypoint refuses an unconfigured explicit runner without fallback", async () => {
+  await assert.rejects(
+    () =>
+      invoke(
+        {
+          ...profile,
+          provider: "codex",
+          command: ["codex"],
+          subscription: "test",
+          effort: "medium",
+        },
+        "/tmp",
+        "test",
+        1000,
+      ),
+    /opencodex-action-required/,
+  );
 });
