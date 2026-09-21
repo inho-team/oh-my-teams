@@ -78,6 +78,40 @@ export function sha256(file) {
 }
 
 /**
+ * state에서 검토 가능한 JSON 기록의 익명 출처를 수집한다.
+ * @param {string} stateDir state 디렉터리이다.
+ * @param {string} collectedAt 수집 시각이다.
+ * @returns {Array<Record<string, string>>} 상대 파일명과 지문이다.
+ */
+export function sourceEvidence(stateDir, collectedAt) {
+  const roots = ["workflows", "headless", "reviews", "reviews-inbox"];
+  return roots.flatMap((root) => {
+    const rootDir = path.join(stateDir, root);
+    if (!fs.existsSync(rootDir)) return [];
+    const files = [];
+    const visit = (current) => {
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        const file = path.join(current, entry.name);
+        if (entry.isDirectory()) visit(file);
+        else if (entry.isFile() && entry.name.endsWith(".json")) {
+          files.push(file);
+        }
+      }
+    };
+    visit(rootDir);
+    return files.sort().map((file) => {
+      const digest = sha256(file);
+      return {
+        area: root,
+        file: `${root}/${digest.slice(0, 16)}.json`,
+        sha256: digest,
+        collectedAt,
+      };
+    });
+  });
+}
+
+/**
  * 숫자 두 개의 차이를 분 단위로 계산한다.
  * @param {string|null|undefined} from 시작 시각이다.
  * @param {string|null|undefined} to 종료 시각이다.
@@ -168,9 +202,12 @@ export function readWorker(stateDir, workerId) {
  * @returns {Record<string, any>} 익명화한 state 집계이다.
  */
 export function aggregateState(stateDir) {
+  const collectedAt = new Date().toISOString();
   if (!fs.existsSync(stateDir)) {
     return {
-      input: path.basename(stateDir),
+      input: path.basename(path.dirname(stateDir)),
+      collectedAt,
+      sourceEvidence: [],
       unavailable: {
         value: null,
         reason: "state 디렉터리가 존재하지 않습니다.",
@@ -270,7 +307,12 @@ export function aggregateState(stateDir) {
       },
     };
   });
-  return { input: path.basename(stateDir), workflows };
+  return {
+    input: `${path.basename(path.dirname(stateDir))}-${path.basename(stateDir)}`,
+    collectedAt,
+    sourceEvidence: sourceEvidence(stateDir, collectedAt),
+    workflows,
+  };
 }
 
 /**

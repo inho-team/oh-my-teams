@@ -62,12 +62,62 @@
       "entry": "dbc764127a51",
       "workflowId": "intern-first-r3",
       "status": "active",
-      "organizationRevision": 1,
+      "organizationRevision": 3,
+      "workflowRevision": 14,
+      "organizationSnapshotRevision": 3,
+      "collectedAt": "2026-09-21T05:55:59.853Z",
       "window": {
         "from": "2026-09-21T04:48:06.558Z",
         "to": "2026-09-21T05:24:33.465Z",
         "open": true
       }
+    },
+    "revisionProvenance": {
+      "currentWorkflow": {
+        "workflowId": "intern-first-r3",
+        "organizationRevision": 3,
+        "workflowRevision": 14,
+        "organizationSnapshotRevision": 3,
+        "source": {
+          "file": "state.json",
+          "sha256": "94617b676151db76ad977c6c119c572b238483060e70ed78dcc8a37b5c8f4b8c",
+          "collectedAt": "2026-09-21T05:55:59.853Z"
+        },
+        "organizationSource": {
+          "file": "organization.json",
+          "sha256": "cb5908a3fe187ca709668e19afaaf4008c6992b185b1bc7a497415c0b9400aab",
+          "collectedAt": "2026-09-21T05:55:59.853Z"
+        }
+      },
+      "priorKickoffRegistry": {
+        "workflowId": "audit-wave1",
+        "organizationRevision": 1,
+        "workflowRevision": 30,
+        "source": {
+          "file": "state.json",
+          "sha256": "4608f1cac50eecfb473a235c75ae02db3b50914d2feab466d6ccf1887ee09311",
+          "collectedAt": "2026-09-21T05:55:59.853Z"
+        }
+      },
+      "relation": "checkpoint usage belongs to the prior kickoff registry window; current workflow revision 3 is recorded separately and is not substituted into the prior usage totals."
+    },
+    "windowComparison": {
+      "userMacPeriod": {
+        "timezone": "Asia/Seoul",
+        "start": "2026-09-21T00:00:00+09:00",
+        "end": "2026-09-21T14:23:45+09:00",
+        "partialWeek": true
+      },
+      "checkpointWindow": {
+        "from": "2026-09-21T04:48:06.558Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "open": true
+      },
+      "identical": false,
+      "overlap": true,
+      "overlapFrom": "2026-09-21T04:48:06.558Z",
+      "overlapTo": "2026-09-21T05:23:45.000Z",
+      "note": "The Mac aggregate period and checkpoint window overlap but are not identical."
     },
     "sources": {
       "headless": {
@@ -636,13 +686,64 @@
         "workspace": "intern-first-review",
         "terminalPresent": true,
         "workerPresent": true
+      },
+      {
+        "at": "2026-09-21T05:38:19.587Z",
+        "via": "worker-start",
+        "role": "junior",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-runtime",
+        "terminalPresent": true,
+        "workerPresent": true
+      },
+      {
+        "at": "2026-09-21T05:52:41.801Z",
+        "via": "worker-start",
+        "role": "junior",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-report",
+        "terminalPresent": true,
+        "workerPresent": true
       }
     ]
   },
+  "manualConnection": {
+    "role": "pm",
+    "provider": "codex",
+    "model": "gpt-6-astra",
+    "workspace": "docs-delegation-economics",
+    "connectionMethod": [
+      "launch-ledger row",
+      "run-use binding",
+      "Codex thread metadata match"
+    ],
+    "scope": {
+      "launchAt": "2026-09-21T05:11:46.880Z",
+      "checkpointRecordFrom": "2026-09-21T05:14:04.659Z",
+      "checkpointRecordTo": "2026-09-21T05:24:32.202Z",
+      "runHash": "1d1f59c69f9addcd98cd03e25946b1ff41882c07b1bd6ea27ee3b918f8d1e79e",
+      "terminalHash": "6c6a339295bbd2eb1d71b37c3a9ab25171f49b17119700e2e3dfc61bd059a56d",
+      "threadHash": "49f6e8a3c935ab6774316141d5c227b32a66abd0ccf12fab13120c7573ae2ffb"
+    },
+    "attributionEvidence": {
+      "roleConnection": "PM OMT execution",
+      "taskUse": "unclassified",
+      "tokens": null,
+      "reason": "The launch, run binding, worktree, terminal, and rollout thread agree on the PM connection; no evidence assigns Astra tokens to a specific task use."
+    },
+    "rolloutSource": {
+      "file": "codex-rollout.jsonl",
+      "sha256": "469f2d0dfd8430d643fb3c6ef6657c0e136643d9c0c785bee8eb707ba68909b3",
+      "collectedAt": "2026-09-21T05:55:59.853Z"
+    }
+  },
   "astraClassification": {
     "measuredRecords": 1,
-    "classifiedRecords": 0,
-    "unclassifiedRecords": 1,
+    "manuallyConnectedRecords": 1,
+    "classifiedRecords": 1,
+    "unclassifiedRecords": 0,
     "categories": {
       "planningAssignmentAggregation": {
         "records": 0,
@@ -669,7 +770,7 @@
         "tokens": null
       }
     },
-    "reason": "Astra record has no explicit role or task connection in the read-only usage evidence; model name alone is not used for role inference."
+    "reason": "The Astra record is manually connected to the PM OMT execution by launch, run-use, and thread metadata; task-use categories remain unclassified and their token fields remain null."
   },
   "measurementLimits": [
     "User-provided Mac totals cover all local Codex usage, not OMT-only usage, and were not independently recomputed.",

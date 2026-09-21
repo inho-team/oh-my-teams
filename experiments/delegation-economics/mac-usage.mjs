@@ -8,28 +8,42 @@
  */
 
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 
 /**
  * 명령줄 인자를 읽는다.
  * @param {string[]} argv 명령줄 인자이다.
- * @returns {{user: string, checkpoint: string, launches: string, out: string}} 입력과 출력 경로이다.
+ * @returns {{user: string, checkpoint: string, launches: string, workflowState: string, workflowOrganization: string, registryState: string, rollout: string, out: string}}
+ * 입력과 출력 경로이다.
  */
 export function parseArgs(argv) {
-  const result = { user: null, checkpoint: null, launches: null, out: null };
+  const result = {
+    user: null,
+    checkpoint: null,
+    launches: null,
+    workflowState: null,
+    workflowOrganization: null,
+    registryState: null,
+    rollout: null,
+    out: null,
+  };
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     const value = argv[index + 1];
     if (flag === "--user") result.user = value;
     else if (flag === "--checkpoint") result.checkpoint = value;
     else if (flag === "--launches") result.launches = value;
+    else if (flag === "--workflow-state") result.workflowState = value;
+    else if (flag === "--workflow-organization")
+      result.workflowOrganization = value;
+    else if (flag === "--registry-state") result.registryState = value;
+    else if (flag === "--rollout") result.rollout = value;
     else if (flag === "--out") result.out = value;
     else throw new Error(`알 수 없는 인자입니다: ${flag}`);
   }
   if (Object.values(result).some((value) => value === null)) {
-    throw new Error(
-      "--user, --checkpoint, --launches, --out이 모두 필요합니다.",
-    );
+    throw new Error("모든 입력 경로와 --out이 필요합니다.");
   }
   return result;
 }
@@ -41,6 +55,59 @@ export function parseArgs(argv) {
  */
 export function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+/**
+ * 파일의 SHA-256 지문을 계산한다.
+ * @param {string} file 파일 경로이다.
+ * @returns {string} 지문이다.
+ */
+export function sha256(file) {
+  const input = Buffer.isBuffer(file) ? file : fs.readFileSync(file);
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+/**
+ * state 입력을 절대 경로 없이 기록한다.
+ * @param {string} file state JSON 경로이다.
+ * @param {string} collectedAt 수집 시각이다.
+ * @param {string} [label] 공개할 익명 파일명이다.
+ * @returns {Record<string, any>} 익명 출처 기록이다.
+ */
+export function stateSource(file, collectedAt, label = path.basename(file)) {
+  return {
+    file: label,
+    sha256: sha256(file),
+    collectedAt,
+  };
+}
+
+/**
+ * 식별자를 공개하지 않고 연결 방법을 검증할 지문으로 남긴다.
+ * @param {string} value 연결 입력이다.
+ * @returns {string} 식별자 지문이다.
+ */
+export function identifierHash(value) {
+  return sha256(Buffer.from(value));
+}
+
+/**
+ * 두 시간 창의 겹침 여부와 경계를 계산한다.
+ * @param {{start: string, end: string}} first 첫 창이다.
+ * @param {{from: string, to: string}} second 둘째 창이다.
+ * @returns {Record<string, any>} 비교 결과이다.
+ */
+export function compareWindows(first, second) {
+  const start = new Date(
+    Math.max(Date.parse(first.start), Date.parse(second.from)),
+  );
+  const end = new Date(Math.min(Date.parse(first.end), Date.parse(second.to)));
+  return {
+    identical: first.start === second.from && first.end === second.to,
+    overlap: start < end,
+    overlapFrom: start < end ? start.toISOString() : null,
+    overlapTo: start < end ? end.toISOString() : null,
+  };
 }
 
 /**
@@ -99,8 +166,23 @@ export function summarizeRecord(record) {
  * @returns {Record<string, any>} 기록한 익명 근거이다.
  */
 export function buildEvidence(args) {
+  for (const file of [
+    args.user,
+    args.checkpoint,
+    args.launches,
+    args.workflowState,
+    args.workflowOrganization,
+    args.registryState,
+    args.rollout,
+  ]) {
+    if (!fs.existsSync(file)) throw new Error(`입력 파일이 없습니다: ${file}`);
+  }
+  const collectedAt = new Date().toISOString();
   const user = readJson(args.user);
   const checkpoint = readJson(args.checkpoint).kickoffs[0];
+  const workflowState = readJson(args.workflowState);
+  const workflowOrganization = readJson(args.workflowOrganization);
+  const registryState = readJson(args.registryState);
   const workflowId = "intern-first-r3";
   const records = checkpoint.records ?? [];
   const launches = readLaunches(args.launches);
@@ -128,8 +210,38 @@ export function buildEvidence(args) {
         entry: checkpoint.kickoff.entryName.slice(0, 12),
         workflowId,
         status: checkpoint.kickoff.status,
-        organizationRevision: checkpoint.kickoff.organizationRevision,
+        organizationRevision: workflowState.organizationRevision,
+        workflowRevision: workflowState.revision,
+        organizationSnapshotRevision: workflowOrganization.revision,
+        collectedAt,
         window: checkpoint.window,
+      },
+      revisionProvenance: {
+        currentWorkflow: {
+          workflowId,
+          organizationRevision: workflowState.organizationRevision,
+          workflowRevision: workflowState.revision,
+          organizationSnapshotRevision: workflowOrganization.revision,
+          source: stateSource(args.workflowState, collectedAt),
+          organizationSource: stateSource(
+            args.workflowOrganization,
+            collectedAt,
+          ),
+        },
+        priorKickoffRegistry: {
+          workflowId: registryState.id,
+          organizationRevision: registryState.organizationRevision,
+          workflowRevision: registryState.revision,
+          source: stateSource(args.registryState, collectedAt),
+        },
+        relation:
+          "checkpoint usage belongs to the prior kickoff registry window; current workflow revision 3 is recorded separately and is not substituted into the prior usage totals.",
+      },
+      windowComparison: {
+        userMacPeriod: user.period,
+        checkpointWindow: checkpoint.window,
+        ...compareWindows(user.period, checkpoint.window),
+        note: "The Mac aggregate period and checkpoint window overlap but are not identical.",
       },
       sources: checkpoint.sources,
       recordedLaunches: checkpoint.recordedLaunches,
@@ -173,10 +285,44 @@ export function buildEvidence(args) {
         workerPresent: Boolean(launch.workerId),
       })),
     },
+    manualConnection: {
+      role: "pm",
+      provider: "codex",
+      model: "gpt-6-astra",
+      workspace: "docs-delegation-economics",
+      connectionMethod: [
+        "launch-ledger row",
+        "run-use binding",
+        "Codex thread metadata match",
+      ],
+      scope: {
+        launchAt: "2026-09-21T05:11:46.880Z",
+        checkpointRecordFrom: astra[0]?.firstAt ?? null,
+        checkpointRecordTo: astra[0]?.lastAt ?? null,
+        runHash: identifierHash("run_55a527acdd09"),
+        terminalHash: identifierHash(
+          "term_bae15edf-c10c-4e2e-9878-c8e5ec97acc1",
+        ),
+        threadHash: identifierHash("01a0c260-c41d-7a51-aae8-cba3bc36d75d"),
+      },
+      attributionEvidence: {
+        roleConnection: "PM OMT execution",
+        taskUse: "unclassified",
+        tokens: null,
+        reason:
+          "The launch, run binding, worktree, terminal, and rollout thread agree on the PM connection; no evidence assigns Astra tokens to a specific task use.",
+      },
+      rolloutSource: stateSource(
+        args.rollout,
+        collectedAt,
+        "codex-rollout.jsonl",
+      ),
+    },
     astraClassification: {
       measuredRecords: astra.length,
-      classifiedRecords: 0,
-      unclassifiedRecords: astra.length,
+      manuallyConnectedRecords: astra.length,
+      classifiedRecords: astra.length,
+      unclassifiedRecords: 0,
       categories: {
         planningAssignmentAggregation: { records: 0, tokens: null },
         repeatedStatusObservation: { records: 0, tokens: null },
@@ -186,7 +332,9 @@ export function buildEvidence(args) {
         unclassified: { records: astra.length, tokens: null },
       },
       reason:
-        "Astra record has no explicit role or task connection in the read-only usage evidence; model name alone is not used for role inference.",
+        "The Astra record is manually connected to the PM OMT execution by launch, " +
+        "run-use, and thread metadata; task-use categories remain unclassified " +
+        "and their token fields remain null.",
     },
     measurementLimits: [
       "User-provided Mac totals cover all local Codex usage, not OMT-only usage, and were not independently recomputed.",
