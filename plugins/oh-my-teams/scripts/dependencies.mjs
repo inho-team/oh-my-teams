@@ -6,7 +6,13 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assert, run, withAsyncFileLock, writeJSON } from "./core.mjs";
+import {
+  assert,
+  ownerHasExited,
+  run,
+  withAsyncFileLock,
+  writeJSON,
+} from "./core.mjs";
 import { discoverOrcaRuntime } from "./orca-adapter.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -496,100 +502,113 @@ export async function installRuntime(root, options = {}) {
 }
 
 /**
- * Removes failed runtime directories and stale staging directories that are
- * not actively pointed to or locked by another process.
+ * Removes failed runtime directories and stale staging directories.
  *
- * Preserves active runtimes (whose `active.json` points to them), paths outside
- * the ownership prefix, and symlinks pointing outside the ownership prefix.
+ * Nothing is removed unless its real path, with every link followed, is a direct
+ * child of the real `runtimes` or `staging` directory inside the ownership
+ * prefix. The check runs when candidates are listed and again just before each
+ * removal, so a link can neither point a removal outside the prefix nor be
+ * swapped in between. The runtime an `active.json` points to, symbolic links,
+ * and staging directories whose install lock is held by a live process are kept
+ * and reported in `skipped`. `runtimes` and `staging` are handled independently,
+ * so a missing one never hides the other.
  *
  * @param {string} root - Owned runtime root.
- * @param {{dryRun?: boolean}} [options] - Prune options.
- * @returns {object} Prune result with paths to delete or would delete.
+ * @param {{dryRun?: boolean}} [options] - Prune options; a dry run only lists.
+ * @returns {object} Prune result; `deleted` lists what was (or with `dryRun`, would be) removed.
  */
 export async function pruneRuntimes(root, options = {}) {
   const paths = runtimePaths(root);
-  const runtimesDir = path.dirname(paths.runtime);
-  const stagingDir = path.join(paths.base, "staging");
-  const toDelete = [];
-
-  if (!fs.existsSync(runtimesDir)) {
-    return {
-      command: "runtime-prune",
-      dryRun: Boolean(options.dryRun),
-      deleted: [],
-      skipped: [],
-    };
-  }
-
-  let active = null;
-  try {
-    if (fs.existsSync(paths.active)) {
-      active = JSON.parse(fs.readFileSync(paths.active, "utf8"));
-    }
-  } catch {}
-
-  const entries = fs.readdirSync(runtimesDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const fullPath = path.join(runtimesDir, entry.name);
-    const stats = fs.lstatSync(fullPath);
-
-    if (stats.isSymbolicLink()) {
-      const target = fs.readlinkSync(fullPath);
-      const resolved = path.resolve(
-        runtimesDir,
-        target.startsWith("/") ? target : path.join(runtimesDir, target),
-      );
-      if (!resolved.startsWith(paths.base)) {
-        continue;
-      }
-    }
-
-    if (!fullPath.startsWith(paths.base)) {
-      continue;
-    }
-
-    if (active && entry.name === path.basename(paths.runtime)) {
-      continue;
-    }
-
-    if (entry.name.match(/^.*\.failed-\d+$/)) {
-      toDelete.push(fullPath);
-    }
-  }
-
-  if (fs.existsSync(stagingDir)) {
-    const stagingEntries = fs.readdirSync(stagingDir, { withFileTypes: true });
-    for (const entry of stagingEntries) {
-      const fullPath = path.join(stagingDir, entry.name);
-      if (!fs.lstatSync(fullPath).isDirectory()) continue;
-      if (fullPath.startsWith(paths.base)) {
-        toDelete.push(fullPath);
-      }
-    }
-  }
-
-  const deleted = [];
-  const skipped = [];
-
-  if (!options.dryRun) {
-    for (const target of toDelete) {
-      try {
-        fs.rmSync(target, { recursive: true, force: true });
-        deleted.push(target);
-      } catch (err) {
-        skipped.push({ path: target, reason: err.message });
-      }
-    }
-  } else {
-    deleted.push(...toDelete);
-  }
-
-  return {
+  const result = {
     command: "runtime-prune",
     dryRun: Boolean(options.dryRun),
-    deleted,
-    skipped,
+    deleted: [],
+    skipped: [],
   };
+  const skip = (target, reason) =>
+    result.skipped.push({ path: target, reason });
+  let realBase;
+  try {
+    realBase = fs.realpathSync(paths.base);
+    const ownedBase = path.join(
+      fs.realpathSync(path.dirname(paths.base)),
+      path.basename(paths.base),
+    );
+    if (realBase !== ownedBase) {
+      skip(paths.base, "the ownership prefix is a link to another location");
+      return result;
+    }
+  } catch {
+    return result;
+  }
+  let activeName = null;
+  try {
+    const { fingerprint } = JSON.parse(fs.readFileSync(paths.active, "utf8"));
+    activeName = String(fingerprint).replace(/^sha256:/, "");
+  } catch {}
+  const lockHeld = (name) => {
+    const own = /^([a-f0-9]{64})-/.exec(name)?.[1];
+    const dir = path.dirname(paths.lock);
+    let locks = [];
+    try {
+      locks = fs.readdirSync(dir).filter((file) => file.endsWith(".lock"));
+    } catch {}
+    // A name that carries no fingerprint cannot be tied to one lock.
+    return locks
+      .filter((file) => !own || file === `${own}.lock`)
+      .some((file) => !ownerHasExited(path.join(dir, file)));
+  };
+  const candidates = [];
+  const scan = (folder, accept) => {
+    const dir = path.join(paths.base, folder);
+    let realDir;
+    try {
+      realDir = fs.realpathSync(dir);
+    } catch {
+      return;
+    }
+    if (realDir !== path.join(realBase, folder)) {
+      skip(dir, "not a real directory inside the ownership prefix");
+      return;
+    }
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const target = path.join(dir, entry.name);
+      const expected = path.join(realDir, entry.name);
+      if (entry.isSymbolicLink()) {
+        skip(target, "symbolic link");
+      } else if (entry.isDirectory()) {
+        const reason = accept(entry.name);
+        if (reason) skip(target, reason);
+        else if (reason === null) candidates.push({ target, expected });
+      }
+    }
+  };
+  scan("runtimes", (name) => {
+    if (!/\.failed-\d+$/.test(name)) return undefined;
+    return name === activeName ? "active runtime" : null;
+  });
+  scan("staging", (name) =>
+    lockHeld(name) ? "install lock held by another process" : null,
+  );
+  for (const { target, expected } of candidates) {
+    if (options.dryRun) {
+      result.deleted.push(target);
+      continue;
+    }
+    try {
+      // Re-resolved immediately before removal: a link swapped in since the
+      // listing no longer resolves to the direct child that was checked.
+      if (fs.realpathSync(target) !== expected) {
+        skip(target, "no longer a real directory inside the ownership prefix");
+        continue;
+      }
+      fs.rmSync(target, { recursive: true, force: true });
+      result.deleted.push(target);
+    } catch (error) {
+      skip(target, error.message);
+    }
+  }
+  return result;
 }
 
 /** @returns {string} Default owned runtime location outside plugin caches. */

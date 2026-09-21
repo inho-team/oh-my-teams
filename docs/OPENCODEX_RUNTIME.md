@@ -125,7 +125,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 1. 먼저 `runtime-doctor`와 같은 진단을 합니다. 런타임이 이미 정상(`runtimeHealthy`)이면 아무것도 바꾸지 않고 결과에 `reused: true`를 담아 돌려줍니다. 카탈로그의 다른 검사가 실패했더라도 정상 런타임은 다시 설치하지 않습니다.
 2. 정상이 아니면 `~/.omt/runtime/opencodex/locks/<지문>.lock`을 잡고 `staging/<지문>-<임의 ID>` 디렉터리에 `package.json`과 `package-lock.json`을 복사한 뒤 `npm ci`를 실행합니다(제한 시간 180초).
-3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다. 임시 홈은 `~/.omt/runtime/opencodex/health-<uuid>/` 아래에 만들어지며, 성공과 실패 모두에서 정리됩니다. HOME, USERPROFILE, HOMEDRIVE, HOMEPATH(Windows 전용)는 모두 임시 경로로 격리되어 상태 확인이 실제 사용자 디렉터리에 영향을 주지 않습니다.
+3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다. 임시 홈은 `~/.omt/runtime/opencodex/health-<uuid>/` 아래에 만들어지며, 성공과 실패 모두에서 정리됩니다. `HOME`, `USERPROFILE`, `OPENCODEX_HOME`, `CODEX_HOME`은 모든 플랫폼에서 임시 경로로 격리하고, Windows에서는 `HOMEDRIVE`와 `HOMEPATH`도 임시 경로로 바꿉니다. 그 밖의 플랫폼에서는 두 변수를 물려받지 않도록 제거합니다. 그래서 상태 확인이 실제 사용자 홈 디렉터리를 읽거나 쓰지 않습니다.
 4. 모두 통과하면 `staging`을 `runtimes/<지문>`으로 옮기고, 활성 포인터 `active.json`을 임시 파일 교체 방식으로 갱신한 뒤 다시 진단한 결과에 `installed: true`를 담아 돌려줍니다.
 5. 성공과 실패에 관계없이 이번 실행의 `staging` 디렉터리는 마지막에 삭제합니다.
 
@@ -196,16 +196,18 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-prune \
 `runtime-prune`은 이전 설치와 수리 과정에서 남긴 잔여물을 정리합니다. 정리 대상은 다음과 같습니다:
 
 - `runtimes/<지문>.failed-<밀리초 타임스탬프>` 형태의 실패한 런타임 디렉터리
-- `staging/` 디렉터리 내의 이전 설치 과정 임시 파일들
+- `staging/` 아래에 남은 이전 설치의 디렉터리(첫 설치가 중단되어 `runtimes/`가 없는 경우도 포함합니다)
 
 다음 항목은 보호되어 정리 대상에서 제외됩니다:
 
 - 활성 포인터가 가리키는 현재 런타임
-- 다른 프로세스가 잠금을 보유한 staging 디렉터리
+- 살아 있는 프로세스가 설치 잠금(`locks/<지문>.lock`)을 보유한 staging 디렉터리. 소유자가 종료했음이 확인된 잠금은 보호하지 않습니다.
 - 소유 접두사(`~/.omt/runtime/opencodex/`) 밖의 경로
-- 심볼릭 링크로 접두사 밖을 가리키는 경로
+- 심볼릭 링크인 항목과, 링크 때문에 실제 경로가 접두사 밖이 되는 `runtimes`, `staging` 디렉터리
 
-`--dry-run`은 지울 대상을 출력하기만 하고 실제로 삭제하지 않습니다.
+접두사 보호는 삭제 직전에 실제 경로(`realpath`)를 다시 확인하는 방식이라 링크를 따라가 밖을 지우는 일이 없습니다. 지우지 않은 항목은 결과의 `skipped`에 사유와 함께 남습니다.
+
+`--dry-run`은 같은 검사를 거쳐 지울 대상을 `deleted`에 담아 출력하기만 하고 실제로 삭제하지 않습니다.
 
 ## 고정 계정 runner 설정
 
