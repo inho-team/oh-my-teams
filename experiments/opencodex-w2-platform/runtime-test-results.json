@@ -1,15 +1,63 @@
 {
   "schemaVersion": 1,
-  "timestamp": "2026-09-21T12:02:25Z",
+  "head": "a1a74241e51619650962efef5c8d0de42a3802f0",
+  "timestamp": "2026-09-21T21:13:38.893505Z",
+  "environment": {
+    "node": "v26.7.0",
+    "os": {
+      "ProductName": "macOS",
+      "ProductVersion": "15.7.4",
+      "BuildVersion": "24G517"
+    }
+  },
+  "global_state_before": {
+    ".codex": {
+      "exists": true,
+      "files": 14048,
+      "mtime": 1789992818.8815653,
+      "size": 37472285495
+    },
+    ".claude": {
+      "exists": true,
+      "files": 6566,
+      "mtime": 1789992818.937978,
+      "size": 1482902059
+    },
+    ".opencodex": {
+      "exists": false
+    },
+    "launchctl_ANTHROPIC_BASE_URL": "",
+    "rc_files": {
+      ".bashrc": {
+        "exists": true,
+        "mtime": 1783577294.4627495,
+        "size": 0,
+        "hash_prefix": "e3b0c442"
+      },
+      ".zshrc": {
+        "exists": true,
+        "mtime": 1789343214.0724354,
+        "size": 2950,
+        "hash_prefix": "d066a470"
+      },
+      ".bash_profile": {
+        "exists": true,
+        "mtime": 1753976468.3943565,
+        "size": 230,
+        "hash_prefix": "baf72a6e"
+      }
+    }
+  },
   "tests": {
     "doctor-before": {
-      "command": "runtime-doctor",
+      "command": "runtime-doctor --org /Users/jinsungkim/orca/oh-my-teams/.omt/organization.json --state /var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp7o0w_i9q --format json",
+      "code": 0,
       "result": {
         "schemaVersion": 1,
         "command": "runtime-doctor",
         "status": "needs-install",
         "runtimeHealthy": false,
-        "checkedAt": "2026-09-21T12:02:25.297Z",
+        "checkedAt": "2026-09-21T12:13:39.542Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -28,17 +76,17 @@
           }
         ],
         "nextAction": "Run runtime-install; authentication is never automated."
-      },
-      "status": "pass"
+      }
     },
     "install-dryrun": {
-      "command": "runtime-install --dry-run",
+      "command": "runtime-install --org /Users/jinsungkim/orca/oh-my-teams/.omt/organization.json --state /var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp7o0w_i9q --dry-run",
+      "code": 0,
       "result": {
         "schemaVersion": 1,
         "command": "runtime-install",
         "status": "needs-install",
         "runtimeHealthy": false,
-        "checkedAt": "2026-09-21T12:02:25.368Z",
+        "checkedAt": "2026-09-21T12:13:39.616Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -59,16 +107,19 @@
         "nextAction": "Run runtime-install; authentication is never automated.",
         "dryRun": true
       },
-      "status": "pass"
+      "files_before_count": 0,
+      "files_after_count": 0,
+      "files_changed": false
     },
     "install-actual": {
-      "command": "runtime-install",
+      "command": "runtime-install --org /Users/jinsungkim/orca/oh-my-teams/.omt/organization.json --state /var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp7o0w_i9q",
+      "code": 0,
       "result": {
         "schemaVersion": 1,
         "command": "runtime-install",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:02:30.654Z",
+        "checkedAt": "2026-09-21T12:13:44.158Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -170,126 +221,18 @@
         "nextAction": null,
         "installed": true
       },
-      "status": "pass"
-    },
-    "doctor-after": {
-      "command": "runtime-doctor",
-      "result": {
-        "schemaVersion": 1,
-        "command": "runtime-doctor",
-        "status": "ready",
-        "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:02:33.276Z",
-        "runtime": {
-          "id": "opencodex",
-          "version": "2.59.0",
-          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
-        },
-        "checks": [
-          {
-            "id": "node",
-            "status": "pass",
-            "evidence": "v26.7.0"
-          },
-          {
-            "id": "runtime-install",
-            "status": "pass",
-            "evidence": "opencodex 2.59.0"
-          },
-          {
-            "id": "node",
-            "status": "pass",
-            "evidence": "v26.7.0",
-            "requiredFor": [
-              "omt-runtime",
-              "npm-install",
-              "opencodex",
-              "orca-cli"
-            ]
-          },
-          {
-            "id": "git",
-            "status": "pass",
-            "evidence": "git version 2.50.1 (Apple Git-155)",
-            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
-          },
-          {
-            "id": "git:rev-parse---show-toplevel",
-            "status": "pass",
-            "evidence": "Confirm that the current directory is a Git repository.",
-            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
-          },
-          {
-            "id": "git:worktree-list",
-            "status": "pass",
-            "evidence": "Confirm that Git worktree listing is available.",
-            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
-          },
-          {
-            "id": "codex",
-            "status": "pass",
-            "evidence": "codex-cli 0.155.1",
-            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
-          },
-          {
-            "id": "codex:exec---help",
-            "status": "pass",
-            "evidence": "Confirm that non-interactive execution is available.",
-            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
-          },
-          {
-            "id": "codex:features-list",
-            "status": "pass",
-            "evidence": "Read the feature set from the selected Codex executable.",
-            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
-          },
-          {
-            "id": "orca-cli",
-            "status": "pass",
-            "evidence": "orca",
-            "requiredFor": [
-              "orca-worktree",
-              "orca-terminal",
-              "supervised-worker"
-            ]
-          },
-          {
-            "id": "orca-desktop",
-            "status": "pass",
-            "evidence": "orca",
-            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
-          },
-          {
-            "id": "gh",
-            "status": "pass",
-            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
-            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
-          },
-          {
-            "id": "gh:repo-view---help",
-            "status": "pass",
-            "evidence": "Confirm repository inspection capability.",
-            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
-          },
-          {
-            "id": "gh:pr---help",
-            "status": "pass",
-            "evidence": "Confirm pull request capability.",
-            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
-          }
-        ],
-        "nextAction": null
-      },
-      "status": "pass"
+      "tree_hash": "cd632c8c5db5bf8c4085c583f1b999f7f2b59bd2cd6c3a5c04406e3483507afd",
+      "file_count": 5299
     },
     "install-second": {
-      "command": "runtime-install (2nd)",
+      "command": "runtime-install --org /Users/jinsungkim/orca/oh-my-teams/.omt/organization.json --state /var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp7o0w_i9q",
+      "code": 0,
       "result": {
         "schemaVersion": 1,
         "command": "runtime-install",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:02:34.459Z",
+        "checkedAt": "2026-09-21T12:13:47.549Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -391,120 +334,84 @@
         "nextAction": null,
         "reused": true
       },
-      "status": "pass"
+      "tree_hash": "cd632c8c5db5bf8c4085c583f1b999f7f2b59bd2cd6c3a5c04406e3483507afd",
+      "file_count": 5299,
+      "tree_hash_equal": true,
+      "file_count_equal": true,
+      "npm_called_likely": false
     },
-    "damage-repair": {
+    "damage-manifest": {
+      "damage_method": "corrupt_manifest_json",
       "damaged_status": "needs-install",
-      "repair_result": {
-        "schemaVersion": 1,
-        "command": "runtime-repair",
-        "status": "ready",
-        "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:02:38.737Z",
-        "runtime": {
-          "id": "opencodex",
-          "version": "2.59.0",
-          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
-        },
-        "checks": [
-          {
-            "id": "node",
-            "status": "pass",
-            "evidence": "v26.7.0"
-          },
-          {
-            "id": "runtime-install",
-            "status": "pass",
-            "evidence": "opencodex 2.59.0"
-          },
-          {
-            "id": "node",
-            "status": "pass",
-            "evidence": "v26.7.0",
-            "requiredFor": [
-              "omt-runtime",
-              "npm-install",
-              "opencodex",
-              "orca-cli"
-            ]
-          },
-          {
-            "id": "git",
-            "status": "pass",
-            "evidence": "git version 2.50.1 (Apple Git-155)",
-            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
-          },
-          {
-            "id": "git:rev-parse---show-toplevel",
-            "status": "pass",
-            "evidence": "Confirm that the current directory is a Git repository.",
-            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
-          },
-          {
-            "id": "git:worktree-list",
-            "status": "pass",
-            "evidence": "Confirm that Git worktree listing is available.",
-            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
-          },
-          {
-            "id": "codex",
-            "status": "pass",
-            "evidence": "codex-cli 0.155.1",
-            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
-          },
-          {
-            "id": "codex:exec---help",
-            "status": "pass",
-            "evidence": "Confirm that non-interactive execution is available.",
-            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
-          },
-          {
-            "id": "codex:features-list",
-            "status": "pass",
-            "evidence": "Read the feature set from the selected Codex executable.",
-            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
-          },
-          {
-            "id": "orca-cli",
-            "status": "pass",
-            "evidence": "orca",
-            "requiredFor": [
-              "orca-worktree",
-              "orca-terminal",
-              "supervised-worker"
-            ]
-          },
-          {
-            "id": "orca-desktop",
-            "status": "pass",
-            "evidence": "orca",
-            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
-          },
-          {
-            "id": "gh",
-            "status": "pass",
-            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
-            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
-          },
-          {
-            "id": "gh:repo-view---help",
-            "status": "pass",
-            "evidence": "Confirm repository inspection capability.",
-            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
-          },
-          {
-            "id": "gh:pr---help",
-            "status": "pass",
-            "evidence": "Confirm pull request capability.",
-            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
-          }
-        ],
-        "nextAction": null,
-        "installed": true
-      },
+      "repair_command": "runtime-repair",
+      "repair_status": "ready",
       "repaired_status": "ready",
-      "status": "pass"
+      "result": "pass"
+    },
+    "failed-staging": {
+      "command": "runtime-repair (with failing npm in PATH)",
+      "code": 1,
+      "runtime_files_before": 5299,
+      "runtime_files_after": 5299,
+      "runtime_preserved": true
     }
   },
-  "global_state": {}
+  "global_state_after": {
+    ".codex": {
+      "exists": true,
+      "files": 14048,
+      "mtime": 1789992836.164446,
+      "size": 37472177614
+    },
+    ".claude": {
+      "exists": true,
+      "files": 6566,
+      "mtime": 1789992818.937978,
+      "size": 1482902059
+    },
+    ".opencodex": {
+      "exists": false
+    },
+    "launchctl_ANTHROPIC_BASE_URL": "",
+    "rc_files": {
+      ".bashrc": {
+        "exists": true,
+        "mtime": 1783577294.4627495,
+        "size": 0,
+        "hash_prefix": "e3b0c442"
+      },
+      ".zshrc": {
+        "exists": true,
+        "mtime": 1789343214.0724354,
+        "size": 2950,
+        "hash_prefix": "d066a470"
+      },
+      ".bash_profile": {
+        "exists": true,
+        "mtime": 1753976468.3943565,
+        "size": 230,
+        "hash_prefix": "baf72a6e"
+      }
+    }
+  },
+  "global_state_diff": {
+    ".codex": {
+      "before": {
+        "exists": true,
+        "files": 14048,
+        "mtime": 1789992818.8815653,
+        "size": 37472285495
+      },
+      "after": {
+        "exists": true,
+        "files": 14048,
+        "mtime": 1789992836.164446,
+        "size": 37472177614
+      }
+    },
+    "rc_files": "unchanged",
+    ".opencodex": "unchanged",
+    ".claude": "unchanged",
+    "launchctl_ANTHROPIC_BASE_URL": "unchanged"
+  }
 }
