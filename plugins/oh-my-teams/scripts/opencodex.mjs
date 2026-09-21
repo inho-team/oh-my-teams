@@ -12,21 +12,50 @@ import { assert } from "./core.mjs";
  */
 export const OPENCODEX_RUNNER_PROVIDERS = Object.freeze(["codex"]);
 
+// Logical providers that run on a subscription OAuth account, with the
+// provider name OpenCodex stores their account under and prefixes their models
+// with. Codex (OpenAI) is not listed: its home and its model names are unchanged.
+const OAUTH_PROVIDERS = Object.freeze({
+  claude: "anthropic",
+  agy: "google-antigravity",
+});
+
+/**
+ * Returns the model an OpenCodex request history records for a profile model.
+ * A model carrying its own provider's prefix is recorded without it; any other
+ * model, and every Codex model, is recorded as written.
+ * @param {string | undefined} provider - OMT logical provider identifier.
+ * @param {string} model - Profile model `M`.
+ * @returns {string} `strip(M)`.
+ */
+export function stripOpenCodexModelPrefix(provider, model) {
+  const prefix = OAUTH_PROVIDERS[provider];
+  return prefix && model.startsWith(`${prefix}/`)
+    ? model.slice(prefix.length + 1)
+    : model;
+}
+
 /**
  * Validates a profile's optional OpenCodex runner without changing legacy profile behavior.
  * @param {object} profile - Organization profile.
  * @param {object} activeRuntime - Active runtime identity.
  * @param {string} [profileId] - Organization profile ID (the key of `org.profiles`) named in a rejection message.
+ * @param {readonly string[]} [supportedProviders] - Providers that may hold a runner; tests inject a list, callers use the exported one.
  * @returns {{kind: string, mode: string, accountHomeRef: string, runtimeFingerprint: string} | null} Valid runner or null for legacy.
  */
-export function validateOpenCodexRunner(profile, activeRuntime, profileId) {
+export function validateOpenCodexRunner(
+  profile,
+  activeRuntime,
+  profileId,
+  supportedProviders = OPENCODEX_RUNNER_PROVIDERS,
+) {
   if (!profile.runner) return null;
   const runner = profile.runner;
   assert(runner.kind === "opencodex", "opencodex-binding-unverified");
   assert(runner.mode === "fixed-account", "opencodex-pool-unverified");
   if (profile.provider !== undefined) {
     assert(
-      OPENCODEX_RUNNER_PROVIDERS.includes(profile.provider),
+      supportedProviders.includes(profile.provider),
       `Invalid OpenCodex runner binding: ${profileId ?? "(unknown)"} (provider ${profile.provider} does not support runners)`,
     );
   }
@@ -40,6 +69,17 @@ export function validateOpenCodexRunner(profile, activeRuntime, profileId) {
     "opencodex-binding-unverified",
   );
   assert(profile.model !== null, "opencodex-binding-unverified");
+  // A prefix naming another provider would send the turn to that provider's
+  // account, so it is refused before any turn starts.
+  assert(
+    !OAUTH_PROVIDERS[profile.provider] ||
+      !Object.entries(OAUTH_PROVIDERS).some(
+        ([logical, prefix]) =>
+          logical !== profile.provider &&
+          profile.model.startsWith(`${prefix}/`),
+      ),
+    "opencodex-binding-unverified: model prefix names another provider",
+  );
   return runner;
 }
 
@@ -144,6 +184,163 @@ export function validateFixedOpenCodexAccountHome(
     `opencodex-global-change-blocked: account home lacks ${missing.join(", ")}`,
   );
   return { provider: "openai", accountLogLabel };
+}
+
+const digest6 = (text) =>
+  crypto.createHash("sha256").update(text).digest("hex").slice(0, 6);
+
+/**
+ * Computes the secret-free label OpenCodex records for an OAuth account.
+ * Only the label is returned; the account id is never printed or stored.
+ * @param {string} provider - `anthropic` or `google-antigravity`.
+ * @param {string} accountId - Account id from `auth.json`.
+ * @returns {string} `anthropic-p<hex6>` (the provider suffix) or `o<hex6>` (the attempt label).
+ */
+export function openCodexAccountLabel(provider, accountId) {
+  return provider === "anthropic"
+    ? `anthropic-p${digest6(accountId)}`
+    : `o${digest6(`${provider}\0${accountId}`)}`;
+}
+
+function readHomeJson(accountHome, name) {
+  const file = path.join(accountHome, name);
+  assert(fs.existsSync(file), "opencodex-binding-unverified");
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    throw new Error("opencodex-binding-unverified");
+  }
+}
+
+const isRecord = (value) =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+// Absent, null, empty text, an empty list or an empty object.
+const isEmpty = (value) =>
+  value === undefined ||
+  value === null ||
+  value === "" ||
+  (typeof value === "object" && Object.keys(value).length === 0);
+
+/**
+ * Verifies that a Claude or Antigravity account home holds exactly one OAuth
+ * account and offers OpenCodex no other account, provider or key to route to.
+ * Credential contents and account ids are never returned or persisted.
+ * @param {string} accountHome - Isolated OpenCodex account directory.
+ * @param {string} provider - `anthropic` or `google-antigravity`.
+ * @param {string} [expectedLabel] - Label the profile names; when given it must equal the label computed from the account id.
+ * @returns {{provider: string, accountLogLabel: string}} Fixed account proof with the computed label.
+ */
+export function validateFixedOpenCodexOAuthHome(
+  accountHome,
+  provider,
+  expectedLabel,
+) {
+  assert(
+    Object.values(OAUTH_PROVIDERS).includes(provider),
+    "opencodex-binding-unverified",
+  );
+  const auth = readHomeJson(accountHome, "auth.json");
+  const config = readHomeJson(accountHome, "config.json");
+  // A file or entry that is not an object cannot describe an account; refuse it
+  // with the standard code instead of failing on a property read.
+  assert(
+    isRecord(auth) &&
+      isRecord(config) &&
+      Object.values(auth).every((item) => item === null || isRecord(item)) &&
+      (config.providers === undefined ||
+        (isRecord(config.providers) &&
+          Object.values(config.providers).every(
+            (item) => item === null || isRecord(item),
+          ))),
+    "opencodex-binding-unverified",
+  );
+  const entry = auth[provider];
+  const accounts = entry?.accounts;
+  const account = accounts?.[0];
+  // 1. Exactly one account, and it is the active one.
+  assert(
+    Array.isArray(accounts) &&
+      accounts.length === 1 &&
+      typeof account?.id === "string" &&
+      account.id !== "" &&
+      entry.activeAccountId === account.id,
+    "opencodex-binding-unverified",
+  );
+  // 2. No other provider's account and no Codex pool a route could fall to.
+  const storeFile = path.join(accountHome, "codex-accounts.json");
+  assert(
+    Object.keys(auth).every(
+      (name) => name === provider || isEmpty(auth[name]?.accounts),
+    ) &&
+      isEmpty(config.codexAccounts) &&
+      (!fs.existsSync(storeFile) ||
+        isEmpty(readHomeJson(accountHome, "codex-accounts.json"))),
+    "opencodex-binding-unverified",
+  );
+  // 3. A subscription login that does not need to sign in again.
+  assert(
+    account.credential?.source === "oauth" && !account.needsReauth,
+    "opencodex-binding-unverified",
+  );
+  // 4. No combo and no API key entry: a bare model name could reach a key route.
+  const configured = Object.values(config.providers ?? {});
+  assert(
+    isEmpty(config.combos) &&
+      configured.every((item) =>
+        Object.keys(item ?? {}).every(
+          (key) => !/^apiKey/i.test(key) || isEmpty(item[key]),
+        ),
+      ),
+    "opencodex-binding-unverified",
+  );
+  // 5. Routing: the target is the OAuth default and OpenAI is not active.
+  const target = config.providers?.[provider];
+  assert(
+    target?.authMode === "oauth" &&
+      target.disabled !== true &&
+      config.defaultProvider === provider &&
+      (config.providers.openai === undefined ||
+        config.providers.openai?.disabled === true),
+    "opencodex-binding-unverified",
+  );
+  // 6. Anthropic keeps the pool switch on and nothing else about it.
+  if (provider === "anthropic") {
+    const pool = config.anthropicAccountPool;
+    assert(
+      pool?.enabled === true &&
+        typeof pool === "object" &&
+        Object.keys(pool).length === 1,
+      "opencodex-pool-unverified",
+    );
+  }
+  // 7. Antigravity has no generic account failover setting.
+  assert(
+    provider !== "google-antigravity" ||
+      config.oauthAccountFailover === undefined,
+    "opencodex-pool-unverified",
+  );
+  // 8. Starting the proxy must not change anything outside this home.
+  const claudeCode = config.claudeCode;
+  const guards = {
+    runtimeRole: config.runtimeRole === "hub",
+    "clientIntegrations.codex": config.clientIntegrations?.codex === false,
+    "claudeCode.integration":
+      claudeCode?.enabled === false ||
+      (claudeCode?.systemEnv === false && claudeCode?.injectAgents === false),
+  };
+  const missing = Object.keys(guards).filter((name) => !guards[name]);
+  assert(
+    missing.length === 0,
+    `opencodex-global-change-blocked: account home lacks ${missing.join(", ")}`,
+  );
+  // 9. The label the profile names is the one this account's id produces.
+  const accountLogLabel = openCodexAccountLabel(provider, account.id);
+  assert(
+    expectedLabel === undefined || expectedLabel === accountLogLabel,
+    "opencodex-binding-unverified",
+  );
+  return { provider, accountLogLabel };
 }
 
 async function unusedPort() {
@@ -611,12 +808,23 @@ export function openCodexCommand(request) {
   return argv;
 }
 
+// The label an OAuth profile names: the provider suffix for Claude, the
+// attempt label for Antigravity.
+const OAUTH_LABEL_PATTERN = Object.freeze({
+  claude: /^anthropic-p[a-f0-9]{6}$/,
+  agy: /^o[a-f0-9]{6}$/,
+});
+
 /**
  * Returns the provider name recorded by OpenCodex for an OMT logical provider.
+ * A Claude profile with its account label is recorded under that label, which
+ * is the `anthropic-p<hex6>` suffix the account pool adds to the provider.
  * @param {string} provider - OMT logical provider identifier.
+ * @param {string} [accountLogLabel] - Account label of the fixed-account binding.
  * @returns {string} OpenCodex request-history provider identifier.
  */
 export function openCodexProvider(provider, accountLogLabel) {
+  if (provider === "claude" && accountLogLabel) return accountLogLabel;
   return (
     (provider === "codex" && accountLogLabel
       ? `openai-${accountLogLabel}`
@@ -692,8 +900,10 @@ function rowTime(entry) {
 // Every attempt of a request must itself be a single, first-try success on the
 // fixed account. A recovery, a resend or a failed attempt inside a request that
 // ended 2xx would hide an account or provider transition this adapter cannot
-// prove, so any of them makes the request unowned by the fixed binding.
-function attemptsProveFixedAccount(entry, expectedProvider, input) {
+// prove, so any of them makes the request unowned by the fixed binding. A
+// Claude attempt carries no account label; its account is proved by the
+// provider suffix, which every attempt must equal.
+function attemptsProveFixedAccount(entry, expectedProvider, input, model) {
   const attempts = entry?.attempts;
   return (
     Array.isArray(attempts) &&
@@ -701,9 +911,10 @@ function attemptsProveFixedAccount(entry, expectedProvider, input) {
     attempts.every(
       (attempt, index) =>
         attempt?.ordinal === index + 1 &&
-        attempt.accountLogLabel === input.accountLogLabel &&
+        (input.provider === "claude" ||
+          attempt.accountLogLabel === input.accountLogLabel) &&
         attempt.provider === expectedProvider &&
-        attempt.model === input.model &&
+        attempt.model === model &&
         Number.isInteger(attempt.status) &&
         attempt.status >= 200 &&
         attempt.status < 300 &&
@@ -734,18 +945,28 @@ async function ownedHistoryRows(input, fetcher) {
  * unstable row rejects the observation instead of shrinking it.
  * @param {object} input - Loopback proxy and requested binding data.
  * @param {typeof fetch} [fetcher=fetch] - Injectable loopback fetch implementation.
- * @returns {Promise<object>} `requestId`, every `requestIds`, `provider`, `accountLogLabel`, `model`, `usage`, and every owned request and attempt.
+ * @returns {Promise<object>} `requestId`, every `requestIds`, `provider`,
+ * `accountLogLabel`, `model` (the profile model), `resolvedModel` (the model
+ * the history recorded), `usage`, and every owned request and attempt.
  * @throws {Error} `opencodex-binding-unverified` when ownership or any row is not proven.
  */
 export async function readOpenCodexObservation(input, fetcher = fetch) {
   const capturedAt = input.historyBoundary?.capturedAt;
   assert(Number.isFinite(capturedAt), "opencodex-binding-unverified");
+  assert(
+    !OAUTH_LABEL_PATTERN[input.provider] ||
+      OAUTH_LABEL_PATTERN[input.provider].test(input.accountLogLabel),
+    "opencodex-binding-unverified",
+  );
   const created = await ownedHistoryRows(input, fetcher);
   assert(created.length > 0, "opencodex-binding-unverified");
   const expectedProvider = openCodexProvider(
     input.provider,
     input.accountLogLabel,
   );
+  // The history records a prefixed model without its prefix, so the executed
+  // model is compared with `strip(M)` while the request is compared with `M`.
+  const executedModel = stripOpenCodexModelPrefix(input.provider, input.model);
   const valid = (entry) => {
     const model = entry?.resolvedModel ?? entry?.model;
     const startedAt = rowTime(entry);
@@ -754,13 +975,13 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
       startedAt !== null &&
       startedAt >= capturedAt &&
       entry.requestedModel === input.model &&
-      model === input.model &&
+      model === executedModel &&
       entry.provider === expectedProvider &&
       Number.isInteger(entry.status) &&
       entry.status >= 200 &&
       entry.status < 300 &&
       entry.terminalStatus === "completed" &&
-      attemptsProveFixedAccount(entry, expectedProvider, input)
+      attemptsProveFixedAccount(entry, expectedProvider, input, executedModel)
     );
   };
   assert(created.every(valid), "opencodex-binding-unverified");
@@ -779,11 +1000,61 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
     requestIds: ids,
     provider: expectedProvider,
     accountLogLabel: input.accountLogLabel,
+    // `model` stays the profile model `M`: the consumers compare it with the
+    // profile, so returning `strip(M)` would refuse every prefixed turn.
     model: input.model,
+    resolvedModel: executedModel,
     usage: created.length === 1 ? (created[0].usage ?? null) : null,
     attempts: created.flatMap((entry) => entry.attempts),
     requests: created,
   };
+}
+
+const openCodexRefKey = (ref) => ref.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+
+// Claude and Antigravity profiles take only their own account's session home.
+// An OpenAI profile keeps the single shared variable as its fallback.
+function openCodexSessionHome(profile, environment) {
+  const key = openCodexRefKey(profile.runner.accountHomeRef);
+  const own = environment[`OMT_OPENCODEX_${key}_SESSION_HOME`];
+  return OAUTH_PROVIDERS[profile.provider]
+    ? own
+    : own || environment.OMT_OPENCODEX_SESSION_HOME;
+}
+
+/**
+ * Checks that the runner accounts of one run keep their homes apart: no two
+ * accounts share a session home, and no session home is any account's home.
+ * Accounts whose homes are not configured are skipped; binding refuses them.
+ * @param {object[]} profiles - Profiles the run uses; those without a runner are ignored.
+ * @param {NodeJS.ProcessEnv} [environment=process.env] - Explicit caller configuration.
+ * @returns {void}
+ * @throws {Error} `opencodex-binding-unverified` when session homes overlap each other or an account home.
+ */
+export function assertDistinctOpenCodexHomes(
+  profiles,
+  environment = process.env,
+) {
+  const accounts = new Map();
+  for (const profile of profiles) {
+    const ref = profile?.runner?.accountHomeRef;
+    if (typeof ref !== "string" || accounts.has(ref)) continue;
+    const home = environment[`OMT_OPENCODEX_${openCodexRefKey(ref)}_HOME`];
+    const session = openCodexSessionHome(profile, environment);
+    accounts.set(ref, {
+      home: home && path.resolve(home),
+      session: session && path.resolve(session),
+    });
+  }
+  const homes = [...accounts.values()].map((item) => item.home);
+  const sessions = [...accounts.values()]
+    .map((item) => item.session)
+    .filter(Boolean);
+  assert(
+    new Set(sessions).size === sessions.length &&
+      sessions.every((session) => !homes.includes(session)),
+    "opencodex-binding-unverified: session homes must differ from each other and from every account home",
+  );
 }
 
 /**
@@ -792,6 +1063,7 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
  * @param {object} runtime - Active runtime diagnosis result.
  * @param {NodeJS.ProcessEnv} [environment=process.env] - Explicit caller configuration.
  * @param {string} [profileId] - Organization profile ID named in a rejection message.
+ * @param {readonly string[]} [supportedProviders] - Providers that may hold a runner; tests inject a list, callers use the exported one.
  * @returns {object} Secret-free fixed-account binding.
  */
 export function resolveOpenCodexBinding(
@@ -799,18 +1071,32 @@ export function resolveOpenCodexBinding(
   runtime,
   environment = process.env,
   profileId,
+  supportedProviders = OPENCODEX_RUNNER_PROVIDERS,
 ) {
-  const runner = validateOpenCodexRunner(profile, runtime, profileId);
+  const runner = validateOpenCodexRunner(
+    profile,
+    runtime,
+    profileId,
+    supportedProviders,
+  );
   if (!runner) return null;
-  const key = runner.accountHomeRef.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const key = openCodexRefKey(runner.accountHomeRef);
   const accountHome = environment[`OMT_OPENCODEX_${key}_HOME`];
   const accountLogLabel = environment[`OMT_OPENCODEX_${key}_LABEL`];
-  const sessionHome = environment.OMT_OPENCODEX_SESSION_HOME;
+  const sessionHome = openCodexSessionHome(profile, environment);
   assert(
     accountHome && accountLogLabel && sessionHome,
     "opencodex-action-required: configure named account home, label and session home",
   );
-  validateFixedOpenCodexAccountHome(accountHome, accountLogLabel);
+  if (OAUTH_PROVIDERS[profile.provider]) {
+    validateFixedOpenCodexOAuthHome(
+      accountHome,
+      OAUTH_PROVIDERS[profile.provider],
+      accountLogLabel,
+    );
+  } else {
+    validateFixedOpenCodexAccountHome(accountHome, accountLogLabel);
+  }
   return {
     accountHome,
     accountLogLabel,
