@@ -524,7 +524,8 @@ export function resolveCommand(argv, env = process.env) {
  * @param {number} [options.timeoutMs=300000] - Time before requesting termination.
  * @param {NodeJS.ProcessEnv} [options.env=process.env] - Child environment.
  * @param {number} [options.maxBytes=8388608] - Combined output safety limit.
- * @returns {Promise<object>} Exit code, output, timeout, overflow, PID, and timing.
+ * @param {boolean} [options.detached=false] - Start the child as its own POSIX process group leader, so its `pid` names a group whose emptiness can be checked.
+ * @returns {Promise<object>} Exit code, output, timeout, overflow, exit observation, stdin acceptance, PID, and timing.
  * @throws {Error} When `argv` is not a non-empty string array.
  */
 export function run(
@@ -535,6 +536,7 @@ export function run(
     timeoutMs = 300000,
     env = process.env,
     maxBytes = 8 * 1024 * 1024,
+    detached = false,
   } = {},
 ) {
   assert(
@@ -554,6 +556,7 @@ export function run(
       env,
       windowsHide: true,
       shell: false,
+      detached: detached && process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -561,11 +564,13 @@ export function run(
     let timedOut = false;
     let overflow = false;
     let finished = false;
+    // True only after the whole input was flushed to the child's stdin.
+    let inputAccepted = false;
     let fallbackTimer;
     // Track accumulated byte length to avoid re-computing on every chunk.
     let totalBytes = 0;
 
-    const finish = (code, error) => {
+    const finish = (code, error, exitObserved = false) => {
       if (finished) return;
       finished = true;
       clearTimeout(timeoutTimer);
@@ -576,6 +581,8 @@ export function run(
         stderr: stderr + (error ? String(error.message) : ""),
         timedOut,
         overflow,
+        exitObserved,
+        inputAccepted,
         pid: child.pid ?? null,
         elapsedMs: Date.now() - startedAt,
       });
@@ -612,9 +619,11 @@ export function run(
     }
 
     child.on("error", (error) => finish(-1, error));
-    child.on("close", (code) => finish(code));
+    child.on("close", (code) => finish(code, undefined, true));
     child.stdin.on("error", () => {});
-    child.stdin.end(input);
+    child.stdin.end(input, (error) => {
+      if (!error) inputAccepted = true;
+    });
   });
 }
 
@@ -678,6 +687,18 @@ function validateProfile(id, profile, pools) {
     profile.pool === undefined || Object.hasOwn(pools, profile.pool),
     `Unknown pool for profile: ${id}`,
   );
+  if (profile.runner !== undefined) {
+    assert(
+      profile.runner &&
+        profile.runner.kind === "opencodex" &&
+        profile.runner.mode === "fixed-account" &&
+        profile.runner.accountHomeRef === profile.account &&
+        /^sha256:[a-f0-9]{64}$/.test(profile.runner.runtimeFingerprint) &&
+        profile.account !== "current" &&
+        profile.model !== null,
+      `Invalid OpenCodex runner binding: ${id}`,
+    );
+  }
   assert(
     !profile.env ||
       Object.entries(profile.env).every(
@@ -690,7 +711,8 @@ function validateProfile(id, profile, pools) {
   if (profile.account !== "current") {
     assert(
       (profile.env && Object.keys(profile.env).length > 0) ||
-        (transport === "process" && profile.command.length > 1),
+        (transport === "process" && profile.command.length > 1) ||
+        profile.runner?.kind === "opencodex",
       `Named account ${id} needs an actual command/profile or environment binding`,
     );
   }

@@ -3,6 +3,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, readJSON, run } from "../plugins/oh-my-teams/scripts/core.mjs";
+import {
+  defaultRuntimeRoot,
+  doctor as runtimeDoctor,
+  installRuntime,
+} from "../plugins/oh-my-teams/scripts/dependencies.mjs";
 
 const PLUGIN_ID = "oh-my-teams@oh-my-teams";
 const LEGACY_PLUGIN_ID = "orca@orca-skills";
@@ -266,6 +271,8 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
     statesByClient[client] = await listPlugins(client, root, commandRunner);
   }
   const plan = buildInstallPlan(options, root, desiredVersion, statesByClient);
+  const runtimeRoot = dependencies.runtimeRoot ?? defaultRuntimeRoot();
+  plan.runtime = await runtimeDoctor(runtimeRoot);
   if (options.dryRun) {
     console.log(JSON.stringify(plan, null, 2));
     return plan;
@@ -273,6 +280,20 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
 
   if (plan.clients.claude) await installClaude(plan, root, commandRunner);
   if (plan.clients.codex) await installCodex(plan, root, commandRunner);
+  try {
+    plan.runtime = await installRuntime(runtimeRoot);
+  } catch (error) {
+    // The plugins are already installed; report that with the runtime failure
+    // instead of leaving the caller without the plan.
+    plan.runtime = {
+      status: "install-failed",
+      error: String(error.message),
+      nextAction:
+        "The plugins are installed. Run runtime-repair once the cause is fixed.",
+    };
+    console.log(JSON.stringify(plan, null, 2));
+    throw error;
+  }
   console.log(JSON.stringify(plan, null, 2));
   console.log(
     "Installed oh my teams. Start a new conversation and invoke the form " +

@@ -1,0 +1,1394 @@
+{
+  "schemaVersion": 2,
+  "repository": {
+    "head": "f6ba7876b0040500babd61d38ef75108cc7d4568",
+    "dirty": false,
+    "status_porcelain": [],
+    "plugin_tree": "d9ba65eaea0e9cbb4a9e14d1e48b2acb25613cab",
+    "organization_file": "plugins/oh-my-teams/examples/organization.json",
+    "organization_sha256": "3ce8c693d136aba4ccfde17825a8a30ac8d34b87166e84a1119bb75d27192727"
+  },
+  "environment": {
+    "node": "v26.7.0",
+    "npm": "11.19.0",
+    "sw_vers": {
+      "ProductName": "macOS",
+      "ProductVersion": "15.7.4",
+      "BuildVersion": "24G517"
+    },
+    "machine": "arm64"
+  },
+  "started_utc": "2026-09-21T12:59:34Z",
+  "tests": {
+    "doctor-before": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
+      "code": 0,
+      "seconds": 0.1,
+      "stderr_head": "",
+      "npm_calls": [],
+      "npm_ci_calls": 0,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-doctor",
+        "status": "needs-install",
+        "runtimeHealthy": false,
+        "checkedAt": "2026-09-21T12:59:34.385Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "fail",
+            "evidence": "No active runtime pointer"
+          }
+        ],
+        "nextAction": "Run runtime-install; authentication is never automated."
+      },
+      "watched_directories": [
+        "home",
+        "state",
+        "cache",
+        "config",
+        "data",
+        "work"
+      ],
+      "listing_before": {
+        "home": {
+          "kind": "dir"
+        },
+        "home/.codex": {
+          "kind": "dir"
+        },
+        "home/.opencodex": {
+          "kind": "dir"
+        },
+        "state": {
+          "kind": "dir"
+        },
+        "cache": {
+          "kind": "dir"
+        },
+        "config": {
+          "kind": "dir"
+        },
+        "data": {
+          "kind": "dir"
+        },
+        "work": {
+          "kind": "dir"
+        }
+      },
+      "listing_after": {
+        "home": {
+          "kind": "dir"
+        },
+        "home/.codex": {
+          "kind": "dir"
+        },
+        "home/.opencodex": {
+          "kind": "dir"
+        },
+        "state": {
+          "kind": "dir"
+        },
+        "cache": {
+          "kind": "dir"
+        },
+        "config": {
+          "kind": "dir"
+        },
+        "data": {
+          "kind": "dir"
+        },
+        "work": {
+          "kind": "dir"
+        }
+      },
+      "listing_diff": {
+        "added": [],
+        "removed": [],
+        "changed": [],
+        "identical": true
+      }
+    },
+    "install-dryrun": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install --org <org> --state <temp> --dry-run",
+      "code": 0,
+      "seconds": 0.08,
+      "stderr_head": "",
+      "npm_calls": [],
+      "npm_ci_calls": 0,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-install",
+        "status": "needs-install",
+        "runtimeHealthy": false,
+        "checkedAt": "2026-09-21T12:59:34.467Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "fail",
+            "evidence": "No active runtime pointer"
+          }
+        ],
+        "nextAction": "Run runtime-install; authentication is never automated.",
+        "dryRun": true
+      },
+      "watched_directories": [
+        "home",
+        "state",
+        "cache",
+        "config",
+        "data",
+        "work"
+      ],
+      "listing_before": {
+        "home": {
+          "kind": "dir"
+        },
+        "home/.codex": {
+          "kind": "dir"
+        },
+        "home/.opencodex": {
+          "kind": "dir"
+        },
+        "state": {
+          "kind": "dir"
+        },
+        "cache": {
+          "kind": "dir"
+        },
+        "config": {
+          "kind": "dir"
+        },
+        "data": {
+          "kind": "dir"
+        },
+        "work": {
+          "kind": "dir"
+        }
+      },
+      "listing_after": {
+        "home": {
+          "kind": "dir"
+        },
+        "home/.codex": {
+          "kind": "dir"
+        },
+        "home/.opencodex": {
+          "kind": "dir"
+        },
+        "state": {
+          "kind": "dir"
+        },
+        "cache": {
+          "kind": "dir"
+        },
+        "config": {
+          "kind": "dir"
+        },
+        "data": {
+          "kind": "dir"
+        },
+        "work": {
+          "kind": "dir"
+        }
+      },
+      "listing_diff": {
+        "added": [],
+        "removed": [],
+        "changed": [],
+        "identical": true
+      },
+      "omt_directory_created": false
+    },
+    "install-actual": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install --org <org> --state <temp>",
+      "code": 0,
+      "seconds": 7.08,
+      "stderr_head": "",
+      "npm_calls": [
+        {
+          "argv": "ci",
+          "in_runtime_staging": true
+        }
+      ],
+      "npm_ci_calls": 1,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-install",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:59:39.900Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null,
+        "installed": true
+      },
+      "tree": {
+        "exists": true,
+        "files": 5294,
+        "symlinks": 5,
+        "dirs": 685,
+        "sha256": "9817cc13b291b7fc9996f5aedb76727218fe5dfff6d56dbb409535c7168c6a53"
+      },
+      "active_json": {
+        "fingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f",
+        "version": "2.59.0",
+        "ocxVersion": "opencodex 2.59.0"
+      }
+    },
+    "doctor-after": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
+      "code": 0,
+      "seconds": 1.21,
+      "stderr_head": "",
+      "npm_calls": [],
+      "npm_ci_calls": 0,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-doctor",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:59:43.713Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null
+      }
+    },
+    "install-second": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install --org <org> --state <temp>",
+      "code": 0,
+      "seconds": 1.26,
+      "stderr_head": "",
+      "npm_calls": [],
+      "npm_ci_calls": 0,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-install",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:59:44.969Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null,
+        "reused": true
+      },
+      "tree": {
+        "exists": true,
+        "files": 5294,
+        "symlinks": 5,
+        "dirs": 685,
+        "sha256": "9817cc13b291b7fc9996f5aedb76727218fe5dfff6d56dbb409535c7168c6a53"
+      },
+      "tree_hash_equal": true
+    },
+    "doctor-damaged": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
+      "code": 0,
+      "seconds": 0.08,
+      "stderr_head": "",
+      "npm_calls": [],
+      "npm_ci_calls": 0,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-doctor",
+        "status": "needs-install",
+        "runtimeHealthy": false,
+        "checkedAt": "2026-09-21T12:59:45.499Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-integrity",
+            "status": "fail",
+            "evidence": "Runtime manifest or lockfile does not match the active identity"
+          }
+        ],
+        "nextAction": "Run runtime-install; authentication is never automated."
+      }
+    },
+    "repair-real-npm": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair --org <org> --state <temp>",
+      "code": 0,
+      "seconds": 5.54,
+      "stderr_head": "",
+      "npm_calls": [
+        {
+          "argv": "ci",
+          "in_runtime_staging": true
+        }
+      ],
+      "npm_ci_calls": 1,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-repair",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:59:49.339Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null,
+        "installed": true
+      }
+    },
+    "doctor-repaired": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
+      "code": 0,
+      "seconds": 1.3,
+      "stderr_head": "",
+      "npm_calls": [],
+      "npm_ci_calls": 0,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-doctor",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:59:52.340Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null
+      },
+      "runtimes_entries": [
+        "fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f",
+        "fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f.failed-<epoch-ms>"
+      ]
+    },
+    "failed-staging": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair --org <org> --state <temp>",
+      "code": 1,
+      "seconds": 0.32,
+      "stderr_head": "runtime-npm-install-failed:",
+      "npm_calls": [
+        {
+          "argv": "ci",
+          "in_runtime_staging": true
+        }
+      ],
+      "npm_ci_calls": 1,
+      "result": {
+        "parse_error": true,
+        "raw": ""
+      },
+      "before": {
+        "active_json_sha256": "cfbd8630c95b096b5fc8ab5a2a2728fad9682dc355ed21e7e747418b0736472c",
+        "runtime_tree": {
+          "exists": true,
+          "files": 5294,
+          "symlinks": 5,
+          "dirs": 685,
+          "sha256": "86b2f3b256cc8faaebc858348b7c882ea955db76a01ca9734e9fc3f03a60bfe0"
+        },
+        "runtimes_entries": [
+          "fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f",
+          "fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f.failed-<epoch-ms>"
+        ],
+        "staging_entries": []
+      },
+      "after": {
+        "active_json_sha256": "cfbd8630c95b096b5fc8ab5a2a2728fad9682dc355ed21e7e747418b0736472c",
+        "runtime_tree": {
+          "exists": true,
+          "files": 5294,
+          "symlinks": 5,
+          "dirs": 685,
+          "sha256": "86b2f3b256cc8faaebc858348b7c882ea955db76a01ca9734e9fc3f03a60bfe0"
+        },
+        "runtimes_entries": [
+          "fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f",
+          "fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f.failed-<epoch-ms>"
+        ],
+        "staging_entries": []
+      },
+      "active_json_equal": true,
+      "runtime_tree_equal": true,
+      "runtimes_entries_equal": true
+    },
+    "repair-after-failure": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair --org <org> --state <temp>",
+      "code": 0,
+      "seconds": 6.07,
+      "stderr_head": "",
+      "npm_calls": [
+        {
+          "argv": "ci",
+          "in_runtime_staging": true
+        }
+      ],
+      "npm_ci_calls": 1,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-repair",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:59:57.857Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null,
+        "installed": true
+      }
+    },
+    "doctor-recovered": {
+      "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
+      "code": 0,
+      "seconds": 1.33,
+      "stderr_head": "",
+      "npm_calls": [],
+      "npm_ci_calls": 0,
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-doctor",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T13:00:00.963Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "fail",
+            "evidence": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null
+      }
+    }
+  },
+  "isolation": {
+    "guard_control": {
+      "probe_attempts": 3,
+      "write_below_real_home_denied": true,
+      "denials_logged": 0,
+      "denial_logged": false
+    },
+    "env_overrides": [
+      "CODEX_HOME",
+      "HOME",
+      "OPENCODEX_HOME",
+      "XDG_CACHE_HOME",
+      "XDG_CONFIG_HOME",
+      "XDG_DATA_HOME",
+      "XDG_STATE_HOME"
+    ],
+    "temp_directory_outside_real_home_and_repository": true,
+    "write_guard": "sandbox-exec: deny file-write* below the real home and the repository",
+    "npm": "PATH shim that records every call",
+    "isolated_home_top_level": [".codex", ".npm", ".omt", ".opencodex"],
+    "sandbox_denials_excluding_control": {
+      "log_exit_code": 0,
+      "denials": [],
+      "reliable": false,
+      "note": "the kernel log did not record the control probes, so an empty list proves nothing"
+    }
+  },
+  "expectations": {
+    "doctor-before reports needs-install": true,
+    "doctor-before leaves the isolated home and the state, cache, config, data and work directories identical": true,
+    "dry-run leaves the isolated home and the state, cache, config, data and work directories identical, creates no ~/.omt": true,
+    "first install runs npm ci exactly once and installs": true,
+    "doctor-after reports a healthy runtime": true,
+    "second install reuses without npm ci and leaves the tree equal": true,
+    "corrupted manifest is reported as needs-install": true,
+    "repair runs npm ci exactly once and the runtime is healthy again": true,
+    "failing npm: exit code non-zero, one npm ci, error names the failed install": true,
+    "failing npm: active.json, runtime tree and runtimes listing unchanged, no staging left": true,
+    "repair after the failure restores a healthy runtime": true,
+    "the write guard refuses every probe write below the real home": true
+  },
+  "finished_utc": "2026-09-21T13:00:06Z",
+  "real_user_state": {
+    "compared": "files an OpenCodex run could change, listed under before/after",
+    "not_attributable": "everything else under ~/.codex and ~/.claude (session logs, databases) is written by live sessions and is not compared",
+    "before": {
+      "files": {
+        "~/.codex/config.toml": {
+          "exists": true,
+          "size": 17611,
+          "mtime_ns": 1789991642458679320,
+          "sha256_prefix": "611e19bea506"
+        },
+        "~/.claude/settings.json": {
+          "exists": true,
+          "size": 50671,
+          "mtime_ns": 1789994910445904642,
+          "sha256_prefix": "a8e812415a75"
+        },
+        "~/.claude/settings.local.json": {
+          "exists": true,
+          "size": 379,
+          "mtime_ns": 1774328214260518777,
+          "sha256_prefix": "def48e07e2ee"
+        },
+        "~/.claude/plugins/installed_plugins.json": {
+          "exists": true,
+          "size": 1163,
+          "mtime_ns": 1789991641398486034,
+          "sha256_prefix": "b4e67259629b"
+        },
+        "~/.zshenv": {
+          "exists": true,
+          "size": 209,
+          "mtime_ns": 1789965823374342589,
+          "sha256_prefix": "2f4a600e5bf3"
+        },
+        "~/.zprofile": {
+          "exists": true,
+          "size": 480,
+          "mtime_ns": 1789222209194609314,
+          "sha256_prefix": "cd44c687e620"
+        },
+        "~/.zshrc": {
+          "exists": true,
+          "size": 2950,
+          "mtime_ns": 1789343214072435497,
+          "sha256_prefix": "d066a470c198"
+        },
+        "~/.zlogin": {
+          "exists": false
+        },
+        "~/.bash_profile": {
+          "exists": true,
+          "size": 230,
+          "mtime_ns": 1753976468394356520,
+          "sha256_prefix": "baf72a6eb3e8"
+        },
+        "~/.bash_login": {
+          "exists": false
+        },
+        "~/.bashrc": {
+          "exists": true,
+          "size": 0,
+          "mtime_ns": 1783577294462749459,
+          "sha256_prefix": "e3b0c44298fc"
+        },
+        "~/.profile": {
+          "exists": true,
+          "size": 47,
+          "mtime_ns": 1753976468391636389,
+          "sha256_prefix": "b90b3a4fcbcf"
+        },
+        "~/.codex/auth.json": {
+          "exists": true,
+          "size": 3923,
+          "mtime_ns": 1789739408182754464
+        }
+      },
+      "trees": {
+        "~/.opencodex": {
+          "exists": false
+        },
+        "~/.omt": {
+          "exists": true,
+          "files": 5300,
+          "size": 172833075,
+          "max_mtime_ns": 1789974666905947721,
+          "sha256": "a46b13bf4d55f8d8cfbee79fc4f86ff9d3adbf7a5272ec3fe6f5173a7e07a495"
+        }
+      },
+      "launchctl_ANTHROPIC_BASE_URL": {
+        "set": false,
+        "sha256_prefix": null
+      }
+    },
+    "after": {
+      "files": {
+        "~/.codex/config.toml": {
+          "exists": true,
+          "size": 17611,
+          "mtime_ns": 1789991642458679320,
+          "sha256_prefix": "611e19bea506"
+        },
+        "~/.claude/settings.json": {
+          "exists": true,
+          "size": 50671,
+          "mtime_ns": 1789994910445904642,
+          "sha256_prefix": "a8e812415a75"
+        },
+        "~/.claude/settings.local.json": {
+          "exists": true,
+          "size": 379,
+          "mtime_ns": 1774328214260518777,
+          "sha256_prefix": "def48e07e2ee"
+        },
+        "~/.claude/plugins/installed_plugins.json": {
+          "exists": true,
+          "size": 1163,
+          "mtime_ns": 1789991641398486034,
+          "sha256_prefix": "b4e67259629b"
+        },
+        "~/.zshenv": {
+          "exists": true,
+          "size": 209,
+          "mtime_ns": 1789965823374342589,
+          "sha256_prefix": "2f4a600e5bf3"
+        },
+        "~/.zprofile": {
+          "exists": true,
+          "size": 480,
+          "mtime_ns": 1789222209194609314,
+          "sha256_prefix": "cd44c687e620"
+        },
+        "~/.zshrc": {
+          "exists": true,
+          "size": 2950,
+          "mtime_ns": 1789343214072435497,
+          "sha256_prefix": "d066a470c198"
+        },
+        "~/.zlogin": {
+          "exists": false
+        },
+        "~/.bash_profile": {
+          "exists": true,
+          "size": 230,
+          "mtime_ns": 1753976468394356520,
+          "sha256_prefix": "baf72a6eb3e8"
+        },
+        "~/.bash_login": {
+          "exists": false
+        },
+        "~/.bashrc": {
+          "exists": true,
+          "size": 0,
+          "mtime_ns": 1783577294462749459,
+          "sha256_prefix": "e3b0c44298fc"
+        },
+        "~/.profile": {
+          "exists": true,
+          "size": 47,
+          "mtime_ns": 1753976468391636389,
+          "sha256_prefix": "b90b3a4fcbcf"
+        },
+        "~/.codex/auth.json": {
+          "exists": true,
+          "size": 3923,
+          "mtime_ns": 1789739408182754464
+        }
+      },
+      "trees": {
+        "~/.opencodex": {
+          "exists": false
+        },
+        "~/.omt": {
+          "exists": true,
+          "files": 5300,
+          "size": 172833075,
+          "max_mtime_ns": 1789974666905947721,
+          "sha256": "a46b13bf4d55f8d8cfbee79fc4f86ff9d3adbf7a5272ec3fe6f5173a7e07a495"
+        }
+      },
+      "launchctl_ANTHROPIC_BASE_URL": {
+        "set": false,
+        "sha256_prefix": null
+      }
+    },
+    "diff": {
+      "~/.bash_login": "unchanged",
+      "~/.bash_profile": "unchanged",
+      "~/.bashrc": "unchanged",
+      "~/.claude/plugins/installed_plugins.json": "unchanged",
+      "~/.claude/settings.json": "unchanged",
+      "~/.claude/settings.local.json": "unchanged",
+      "~/.codex/auth.json": "unchanged",
+      "~/.codex/config.toml": "unchanged",
+      "~/.profile": "unchanged",
+      "~/.zlogin": "unchanged",
+      "~/.zprofile": "unchanged",
+      "~/.zshenv": "unchanged",
+      "~/.zshrc": "unchanged",
+      "~/.omt": "unchanged",
+      "~/.opencodex": "unchanged",
+      "launchctl_ANTHROPIC_BASE_URL": "unchanged"
+    }
+  }
+}
