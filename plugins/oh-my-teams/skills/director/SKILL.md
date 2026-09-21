@@ -67,7 +67,6 @@ node <runtime> kickoff-show --org <project>/.omt/organization.json
 무거운 작업(테스트·빌드·무거운 worker) 전에 이사가 직접 또는 PM을 통해 자원 슬롯을 확보하고, 작업이 끝나면 해제한다.
 
 ```text
-node <runtime> resource-acquire --org <project>/.omt/organization.json \
-  --worktree <pm-worktree-id> --kind test|worker|build --note "작업 설명"
+node <runtime> resource-acquire --org <project>/.omt/organization.json --worktree <pm-worktree-id> --kind test|worker|build --note "작업 설명"
 node <runtime> resource-release --org <project>/.omt/organization.json --slot <slotId>
 ```

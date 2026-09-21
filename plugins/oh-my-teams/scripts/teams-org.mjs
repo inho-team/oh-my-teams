@@ -212,8 +212,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                  (records the director's decision and attempts PM notification)
   director-ack --org FILE --signal ID
                (marks a signal as acknowledged without a text reply)
-  resource-acquire --org FILE --worktree ID --kind test|worker|build [--note TEXT]
-                   (acquires a resource slot; checks free memory and reclaims dead-owner slots)
+  resource-acquire --org FILE --worktree ID --kind test|worker|build [--note TEXT] [--owner-pid PID]
+                   (acquires a resource slot; --owner-pid sets the long-lived owner process, defaults to current PID)
   resource-release --org FILE --slot ID
                    (releases an acquired resource slot)
   director-watch --org FILE [--orca EXECUTABLE]
@@ -360,7 +360,7 @@ export const ALLOWED_OPTIONS = {
   "director-inbox": ["org"],
   "director-reply": ["org", "signal", "text", "orca"],
   "director-ack": ["org", "signal"],
-  "resource-acquire": ["org", "worktree", "kind", "note"],
+  "resource-acquire": ["org", "worktree", "kind", "note", "owner-pid"],
   "resource-release": ["org", "slot"],
   "director-watch": ["org", "orca"],
 };
@@ -1394,6 +1394,7 @@ async function executeCommand(args) {
         worktreeId: args.worktree,
         kind: args.kind,
         note: args.note,
+        ownerPid: args["owner-pid"] ? Number(args["owner-pid"]) : undefined,
       });
     case "resource-release":
       return releaseResource(args.org, args.slot);

@@ -414,3 +414,33 @@ test("processLiveness returns 'unverifiable' for a foreign hostname", () => {
 test("processLiveness returns 'unverifiable' for null input", () => {
   assert.equal(processLiveness(null), "unverifiable");
 });
+
+test("acquireResource does not reclaim a slot whose ownerPid is still alive", (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+
+  // First acquire with the current process as owner (simulates a long-lived PM
+  // process that passes its own PID via --owner-pid). The slot must survive a
+  // second acquire that uses the real liveness check.
+  const first = acquireResource(orgFile, {
+    worktreeId,
+    kind: "build",
+    freeMemory: () => 2 * 1024 * 1024 * 1024, // 2 GiB fixture
+    ownerPid: process.pid, // current process: definitely alive
+  });
+  assert.ok(first.acquired, "first acquire must succeed");
+
+  // Second acquire with liveness = processLiveness (the real checker). Because
+  // process.pid is the ownerPid of the first slot, liveness returns 'alive',
+  // so the slot must NOT be reclaimed.
+  const second = acquireResource(orgFile, {
+    worktreeId,
+    kind: "build",
+    freeMemory: () => 2 * 1024 * 1024 * 1024, // 2 GiB fixture
+    // liveness defaults to processLiveness; no override needed
+  });
+  assert.ok(second.acquired, "second acquire must succeed");
+  assert.ok(
+    !second.reclaimedIds.includes(first.id),
+    "alive-owner slot must NOT be reclaimed by a subsequent acquire",
+  );
+});

@@ -197,15 +197,23 @@ export async function queryPmLiveness(entry, orcaExecutable) {
     const pmPath = entry.pm?.path;
     if (!pmPath) return "unverifiable";
     // Find the worker entry for the PM worktree.
-    const found = workers.find(
-      (w) => typeof w.worktree === "string" && w.worktree.includes(pmPath),
-    );
+    // Actual Orca worker-list response (verified against live CLI 2026-09-21):
+    //   w.resource.worktreeId  — e.g. "<uuid>::<path>"
+    //   w.projection.workspace.id — same format
+    // There is no top-level w.worktree field.
+    const found = workers.find((w) => {
+      const rid = w.resource?.worktreeId ?? "";
+      const wid = w.projection?.workspace?.id ?? "";
+      return rid.includes(pmPath) || wid.includes(pmPath);
+    });
     if (!found) return "unverifiable";
-    // Use the projection.liveness field when present; do not infer alive from
-    // the mere presence of an entry — the PM may have stopped responding.
-    const liveness = found.projection?.liveness ?? found.liveness;
-    if (liveness === "alive") return "alive";
-    if (liveness === "dead") return "dead";
+    // projection.liveness is an object { verdict, reason, observedAt }, not a
+    // plain string. Extract the verdict and map to the three canonical values.
+    // Do not infer alive from the mere presence of an entry.
+    const verdict =
+      found.projection?.liveness?.verdict ?? found.projection?.liveness;
+    if (verdict === "alive") return "alive";
+    if (verdict === "dead") return "dead";
     return "unverifiable";
   } catch {
     return "unverifiable";

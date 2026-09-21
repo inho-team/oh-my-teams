@@ -23,34 +23,59 @@ function escapeForPattern(name) {
 
 async function runEvidenceTest(name) {
   const started = Date.now();
-  const result = await run(
-    [
-      process.execPath,
-      "--test",
-      "--test-reporter=tap",
-      "--test-name-pattern",
-      `^${escapeForPattern(name)}$`,
-      "tests/runtime.test.mjs",
-    ],
-    { cwd: root, timeoutMs: 180000 },
-  );
-  const text = `${result.stdout}\n${result.stderr}`;
-  // TAP marks a selected test `ok`; a name that matches nothing reports zero
-  // passes, which must read as missing evidence rather than as success.
-  // Specifically, `# pass 0` means no test ran for this name, which is a
-  // false-positive failure: the file itself produces `ok 1` even with zero
-  // matching tests. We check for exactly `# pass 1` AND the absence of
-  // `# pass 0` to catch both zero-match and multi-match edge cases.
-  const passCount = (() => {
-    const m = /^# pass (\d+)$/m.exec(text);
-    return m ? parseInt(m[1], 10) : 0;
-  })();
-  const passed = passCount >= 1 && result.code === 0 && !result.timedOut;
+  // Run across all test files so evidence tests can live in any *.test.mjs.
+  // Each file is run separately so the --test-name-pattern inner plan (1..N)
+  // can be read per-file. The counts are then summed to detect:
+  //   total=0  → test name not found anywhere → false positive → failed
+  //   total=1  → exactly one test matched → passed (if exit code is 0)
+  //   total>1  → duplicate names across files → ambiguous → failed
+  const { readdirSync } = await import("node:fs");
+  const testFiles = readdirSync(path.join(root, "tests"))
+    .filter((f) => f.endsWith(".test.mjs"))
+    .map((f) => path.join("tests", f));
+
+  let totalInner = 0;
+  let anyFail = false;
+  let anyTimeout = false;
+  let lastCode = 0;
+  for (const file of testFiles) {
+    const result = await run(
+      [
+        process.execPath,
+        "--test",
+        "--test-reporter=tap",
+        "--test-name-pattern",
+        `^${escapeForPattern(name)}$`,
+        file,
+      ],
+      { cwd: root, timeoutMs: 180000 },
+    );
+    const text = `${result.stdout}\n${result.stderr}`;
+    // The TAP output has two layers:
+    //   1..0                     ← inner plan: 0 tests matched the pattern
+    //   ok 1 - tests/foo.mjs    ← outer runner reports the file as ok
+    //   1..1                     ← outer plan: 1 file ran
+    //   # pass 1                 ← outer counts the file, not tests
+    //
+    // Reading "# pass N" is therefore unreliable. Read the FIRST plan line
+    // ("1..N") which counts the tests matching --test-name-pattern in this file.
+    const firstPlanMatch = /^1\.\.(\d+)$/m.exec(text);
+    const innerCount = firstPlanMatch ? parseInt(firstPlanMatch[1], 10) : 0;
+    totalInner += innerCount;
+    if (result.code !== 0) anyFail = true;
+    if (result.timedOut) anyTimeout = true;
+    lastCode = result.code;
+  }
+  // N=0 means no test ran → missing evidence.
+  // N>1 means duplicate test names → ambiguous evidence.
+  // N=1 is the only acceptable outcome.
+  const passed = totalInner === 1 && !anyFail && !anyTimeout;
   return {
     name,
     passed,
-    exitCode: result.code,
-    timedOut: result.timedOut,
+    exitCode: lastCode,
+    timedOut: anyTimeout,
+    innerCount: totalInner,
     elapsedMs: Date.now() - started,
   };
 }
