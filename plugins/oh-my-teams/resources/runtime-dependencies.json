@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 2,
+  "dependencies": [
+    {
+      "id": "node",
+      "requiredFor": ["omt-runtime", "npm-install", "opencodex", "orca-cli"],
+      "platforms": ["macos", "windows"],
+      "detect": {
+        "command": "node --version",
+        "minimum": ">=22.13.0",
+        "pathCommand": "command -v node (macOS) or Get-Command node (PowerShell)",
+        "failureKinds": ["missing", "path-mismatch", "version-too-old"]
+      },
+      "install": {
+        "macos": "Download the official macOS installer or binary from https://nodejs.org/en/download/.",
+        "windows": "Download the official Windows installer from https://nodejs.org/en/download/.",
+        "repair": "Install a supported LTS release, open a new shell, then rerun node --version and npm --version. Do not silently alter PATH."
+      },
+      "sources": [
+        "https://nodejs.org/en/download/",
+        "https://nodejs.org/en/about/previous-releases"
+      ]
+    },
+    {
+      "id": "git",
+      "requiredFor": ["worktrees", "repository-evidence", "pull-requests"],
+      "platforms": ["macos", "windows"],
+      "detect": {
+        "command": "git --version",
+        "recommendedMinimum": ">=2.23.0",
+        "pathCommand": "command -v git (macOS) or Get-Command git (PowerShell)",
+        "featureChecks": ["git rev-parse --show-toplevel", "git worktree list"],
+        "failureKinds": [
+          "missing",
+          "path-mismatch",
+          "not-a-repository",
+          "feature-unavailable"
+        ]
+      },
+      "install": {
+        "macos": "Run git --version to invoke Xcode Command Line Tools, or use the official installer at https://git-scm.com/install/mac.",
+        "windows": "Install Git for Windows from https://git-scm.com/install/windows. The official page also documents winget.",
+        "repair": "Start a new shell after installation, verify git --version, and use git config --list --show-origin when configuration precedence is suspect."
+      },
+      "sources": [
+        "https://git-scm.com/book/en/v2/Getting-Started-Installing-Git",
+        "https://git-scm.com/book/en/v2/Getting-Started-First-Time-Git-Setup",
+        "https://git-scm.com/install/windows"
+      ]
+    },
+    {
+      "id": "codex",
+      "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"],
+      "platforms": ["macos", "windows"],
+      "detect": {
+        "command": "codex --version",
+        "authCommand": "codex login status",
+        "featureChecks": ["codex exec --help", "codex features list"],
+        "failureKinds": [
+          "missing",
+          "path-mismatch",
+          "unsupported-platform",
+          "not-authenticated",
+          "feature-unavailable"
+        ],
+        "versionSource": "The active codex executable reports its own version; do not duplicate it in this catalog."
+      },
+      "install": {
+        "macos": "Use the official standalone installer https://chatgpt.com/codex/install.sh, npm install -g @openai/codex, or the documented Homebrew cask.",
+        "windows": "Use the official PowerShell installer https://chatgpt.com/codex/install.ps1 or npm install -g @openai/codex. The native installer is distinct from WSL2 support.",
+        "login": "After installation, run codex login and complete the user-controlled browser flow; verify with codex login status.",
+        "repair": "Resolve the executable with the platform PATH command, remove ambiguity between standalone and npm-managed installs only with explicit user action, and rerun codex --version. Never print auth.json or tokens."
+      },
+      "sources": [
+        "https://github.com/openai/codex/blob/main/README.md",
+        "https://github.com/openai/codex/blob/main/docs/install.md",
+        "https://developers.openai.com/codex/cli"
+      ]
+    },
+    {
+      "id": "opencodex",
+      "requiredFor": ["opencodex-backend", "model-routing"],
+      "platforms": ["macos", "windows"],
+      "detect": {
+        "commands": ["ocx --version", "opencodex --version"],
+        "featureChecks": ["ocx --help", "ocx status"],
+        "failureKinds": [
+          "missing",
+          "path-mismatch",
+          "version-mismatch",
+          "codex-backend-missing",
+          "not-configured"
+        ],
+        "versionSource": "plugins/oh-my-teams/package.json dependency version; this catalog must not define a second OpenCodex version constant."
+      },
+      "install": {
+        "macos": "With Node and npm ready, install the exact dependency version declared by plugins/oh-my-teams/package.json using npm; no separate Bun installation is required by the official guide.",
+        "windows": "With Node and npm ready, install the exact dependency version declared by plugins/oh-my-teams/package.json using npm. Windows execution is documented as an install path, not as a completed platform measurement.",
+        "login": "Configure the provider or user-controlled ChatGPT login required by the selected route, then verify the local server and Codex backend separately.",
+        "repair": "Check both command names and PATH, compare the installed package version with package.json, and reinstall only in an owned staging prefix. Do not claim pool switching or automatic account changes from a healthy process alone."
+      },
+      "sources": [
+        "https://opencodex.me/getting-started/installation/",
+        "https://opencodex.me/"
+      ]
+    },
+    {
+      "id": "orca-cli",
+      "requiredFor": ["orca-worktree", "orca-terminal", "supervised-worker"],
+      "platforms": ["macos", "windows"],
+      "detect": {
+        "command": "orca --version",
+        "featureChecks": [
+          "orca --help",
+          "orca worktree --help",
+          "orca terminal --help"
+        ],
+        "failureKinds": [
+          "missing",
+          "path-mismatch",
+          "cli-app-version-mismatch",
+          "capability-unavailable",
+          "runtime-unavailable"
+        ]
+      },
+      "install": {
+        "macos": "Install the official Orca desktop app from https://onorca.dev/download or use brew install --cask stablyai/orca/orca; verify the bundled CLI is on PATH.",
+        "windows": "Install the official Windows .exe from https://onorca.dev/download or the Orca GitHub releases page; verify the CLI from the installed app is on PATH.",
+        "repair": "Start a new shell, rerun orca --version, and rediscover the CLI/runtime pair when versions differ. Do not substitute another terminal or agent runtime."
+      },
+      "sources": [
+        "https://github.com/stablyai/orca/blob/main/README.md",
+        "https://github.com/stablyai/orca/blob/main/skill-guides/orca-cli.md"
+      ]
+    },
+    {
+      "id": "orca-desktop",
+      "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"],
+      "platforms": ["macos", "windows"],
+      "detect": {
+        "binary": "orca --version",
+        "process": "Orca desktop process must be observable on the host before GUI-dependent features are enabled.",
+        "featureChecks": [
+          "owned worktree is visible",
+          "terminal capability is available",
+          "runtime identity matches the CLI"
+        ],
+        "failureKinds": [
+          "not-installed",
+          "not-running",
+          "wrong-runtime",
+          "capability-unavailable"
+        ]
+      },
+      "install": {
+        "macos": "Download the Apple Silicon or Intel desktop build from https://onorca.dev/download, or install the official Homebrew cask.",
+        "windows": "Download and run the official Windows installer from https://onorca.dev/download.",
+        "repair": "Launch Orca manually, confirm the app process and CLI report the same installation, then retry the requested capability. A CLI being present does not prove that the desktop service is running."
+      },
+      "sources": [
+        "https://onorca.dev/download",
+        "https://github.com/stablyai/orca/releases"
+      ]
+    },
+    {
+      "id": "gh",
+      "requiredFor": ["pull-requests", "github-api", "remote-evidence"],
+      "platforms": ["macos", "windows"],
+      "detect": {
+        "command": "gh --version",
+        "authCommand": "gh auth status",
+        "featureChecks": ["gh repo view --help", "gh pr --help"],
+        "failureKinds": [
+          "missing",
+          "path-mismatch",
+          "not-authenticated",
+          "insufficient-repository-access"
+        ]
+      },
+      "install": {
+        "macos": "Install from the official GitHub CLI page https://cli.github.com/ or use the documented Homebrew package.",
+        "windows": "Install from the official GitHub CLI page https://cli.github.com/ using the documented Windows installer or winget path.",
+        "login": "Run gh auth login and complete the user-controlled flow; verify with gh auth status. Do not expose gh auth token output.",
+        "repair": "Check PATH, host selection, and repository access separately. Reauthenticate only when the user chooses it; a successful binary check is not an authentication check."
+      },
+      "sources": [
+        "https://cli.github.com/",
+        "https://cli.github.com/manual/",
+        "https://cli.github.com/manual/gh_auth_login"
+      ]
+    }
+  ]
+}
