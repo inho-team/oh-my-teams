@@ -45,16 +45,16 @@ Windows에는 프로세스 그룹이 없으므로 소유 트리를 `(pid, Creati
 ## CI 검증 결과
 
 - 저장소: `inho-team/oh-my-teams`, 브랜치 `dev-inho/ocf-win`, draft PR [#80](https://github.com/inho-team/oh-my-teams/pull/80)(`[CI 전용]`, 병합하지 않고 닫았습니다).
-- 코드 변경을 검증한 실행: <https://github.com/inho-team/oh-my-teams/actions/runs/35644612580> (커밋 `7909e24`, 독립 검토 반려 2건을 고친 뒤의 실행).
+- 코드 변경을 검증한 실행: <https://github.com/inho-team/oh-my-teams/actions/runs/35646799744> (커밋 `28da937`, 재검토 반려 1건을 고친 뒤의 실행).
 - 앞선 실행: 첫 구현(`efc77db`)은 Windows에서 1건이 실패했고(원인과 수정은 아래 "CI로 새로 알게 된 사실"), 검토 반려 수정의 첫 push(`686d7c8`)는 Windows에서 테스트 1건이 실패했습니다. 후자는 Windows에서 `processStart`를 FILETIME이 아닌 형식으로 적은 테스트 입력이 원인이었고, 이제 잘못된 형식의 시작 시각은 종료 증명을 `opencodex-lease-unverifiable`로 실패시킵니다.
 
 | OS | 전체 | 통과 | 실패 | 건너뜀 |
 |---|---|---|---|---|
-| windows-latest | 578 | 567 | 0 | 11 |
-| ubuntu-latest | 578 | 575 | 0 | 3 |
-| macos-latest | 578 | 575 | 0 | 3 |
+| windows-latest | 582 | 571 | 0 | 11 |
+| ubuntu-latest | 582 | 579 | 0 | 3 |
+| macos-latest | 582 | 579 | 0 | 3 |
 
-로컬(macOS)의 `npm run format`, `sync`, `lint`, `test`도 통과했습니다(578개 중 575개 통과, 3개 건너뜀).
+로컬(macOS)의 `npm run format`, `sync`, `lint`, `test`도 통과했습니다(582개 중 579개 통과, 3개 건너뜀).
 
 ## Windows에서 새로 실행된 테스트
 
