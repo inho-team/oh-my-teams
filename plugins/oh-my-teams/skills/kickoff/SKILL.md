@@ -17,7 +17,7 @@ node <runtime> kickoff-claim --org <project>/.omt/organization.json --from <clai
 node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <id> --run <runId>
 ```
 
-`kickoff-show`에 같은 목표가 이미 있으면 새로 시작하지 않고 기록된 PM 워크트리에서 재개한다. 다른 목표는 함께 진행해도 되지만, 같은 구독을 쓰는 kickoff가 늘면 할당량을 함께 소모한다는 점을 사용자에게 알린다. `kickoff-claim`은 같은 워크트리가 이미 kickoff를 감독하고 있거나 요청 파일에 전달 방식(`delivery`)이 없으면 실패하므로 그 결과를 성공으로 보고하지 않는다. 요청 파일의 형식, 병렬 kickoff의 비용, 인계 절차와 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
+`kickoff-show`에 같은 목표가 이미 있으면 새로 시작하지 않고 기록된 PM 워크트리에서 재개한다. 다른 목표는 함께 진행해도 되지만, 같은 구독을 쓰는 kickoff가 늘면 할당량을 함께 소모한다는 점을 사용자에게 알린다. 이사가 시작하는 kickoff의 요청 파일에는 `director: {terminalHandle, checkoutPath}`를 적는다. 다른 이름의 키는 무시되고 이사 기록 없이 등록되므로 결과의 `warnings`를 확인한다. `kickoff-claim`은 같은 워크트리가 이미 kickoff를 감독하고 있거나 요청 파일에 전달 방식(`delivery`)이 없으면 실패하므로 그 결과를 성공으로 보고하지 않는다. 요청 파일의 형식, 병렬 kickoff의 비용, 인계 절차와 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
 이사는 목표를 확정해 브리프로 넘기고 PM 워크트리를 만든 뒤, 등록하고 인계 사실을 알린다. PM은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `PM 실행` 절에 따라 `role-terminal`로 PM 프로필의 명령을 실행한 새 터미널에서 띄운다. `orca worktree create --agent`나 `terminal create --command`를 직접 호출해 띄우지 않으며, `role-terminal`이 `ready: false`를 돌려주거나 PM 프로필의 모델을 전달할 수 없거나 화면의 모델이 다르면 멈추고 보고한다. 이사는 PM을 대신 맡지 않는다.
 

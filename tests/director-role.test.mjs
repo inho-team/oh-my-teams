@@ -1,9 +1,11 @@
 /** Covers the director role: ladder placement, launch refusal, header, registry, and close authority. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   DIRECTOR_ROLE,
   ROLE_LADDER,
@@ -242,6 +244,72 @@ test("registry entry stores director without terminalHandle when omitted", (t) =
   assert.ok(entry.director);
   assert.equal(entry.director.terminalHandle, undefined);
   assert.ok(entry.director.checkoutPath);
+});
+
+test("a claim in the documented form registers a director without any warning", (t) => {
+  const fixture = project(t);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (msg) => warnings.push(msg);
+  try {
+    const result = registerKickoff(
+      fixture.org,
+      claimFor(fixture, "wt-doc-form", {
+        terminalHandle: "term_doc",
+        checkoutPath: fixture.dir,
+      }),
+    );
+    assert.equal(result.warnings, undefined);
+    assert.equal(result.entry.director.terminalHandle, "term_doc");
+  } finally {
+    console.warn = original;
+  }
+  assert.deepEqual(warnings, []);
+});
+
+test("a claim key outside the claim format is reported instead of silently dropped", (t) => {
+  const fixture = project(t);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (msg) => warnings.push(msg);
+  try {
+    const result = registerKickoff(fixture.org, {
+      ...claimFor(fixture, "wt-typo", {
+        terminal: "term_typo",
+        checkoutPath: fixture.dir,
+      }),
+      directorTerminal: "term_typo",
+    });
+    assert.equal(result.claimed, true);
+    assert.equal(result.entry.director.terminalHandle, undefined);
+    assert.deepEqual(result.warnings, [
+      'Claim key "directorTerminal" is not part of the claim format and was ignored',
+      'Claim key "director.terminal" is not part of the claim format and was ignored',
+    ]);
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /directorTerminal/);
+});
+
+test("a director without checkoutPath is refused instead of borrowing the working directory", (t) => {
+  const fixture = project(t);
+  for (const director of [
+    { terminalHandle: "term_x" },
+    { terminalHandle: "term_x", path: fixture.dir },
+    {},
+  ]) {
+    assert.throws(
+      () =>
+        registerKickoff(
+          fixture.org,
+          claimFor(fixture, "wt-no-checkout", director),
+        ),
+      /director\.checkoutPath required/,
+    );
+  }
+  assert.deepEqual(listKickoffs(fixture.org).kickoffs, []);
 });
 
 // ─── 5. deliver와 kickoff-release의 이사 권한 거부 ───────────────────────
@@ -541,38 +609,211 @@ test("assertDirectorAuthority succeeds from the director checkout path", (t) => 
   );
 });
 
-// ─── 9. 기록 후 kickoff-branch-cleanup이 mergeCommit을 찾아 진행 ─────────
+// ─── 9. 병합 기록은 실제 git 병합만 받고 그 기록으로 cleanup이 진행 ──────────
 
-test("recordDelivery + cleanupKickoffBranches proceeds with mergeCommit for pull-request", (t) => {
-  const fixture = project(t);
+// 주인 체크아웃 자리에 임시 저장소를 만들고, 원격으로 쓸 bare 저장소를 붙인다.
+// main에서 갈라진 feat/work 브랜치가 하나 있고 두 브랜치 모두 원격에 있다.
+function gitProject(t) {
+  // macOS resolves the temporary directory through a symlink; the authority
+  // check compares paths as written, so the fixture uses the resolved one.
+  const raw = project(t);
+  const dir = fs.realpathSync(raw.dir);
+  const fixture = {
+    ...raw,
+    dir,
+    org: path.join(dir, ".omt", "organization.json"),
+  };
+  const remote = tempDir(t);
+  const git = (...args) =>
+    execFileSync("git", args, {
+      cwd: fixture.dir,
+      stdio: "pipe",
+      encoding: "utf8",
+    }).trim();
+  execFileSync("git", ["init", "--bare", remote], { stdio: "pipe" });
+  git("init", "--initial-branch=main");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  git("remote", "add", "origin", remote);
+  fs.writeFileSync(path.join(fixture.dir, "README.md"), "hello\n");
+  git("add", "README.md");
+  git("commit", "--message", "initial");
+  git("push", "origin", "main");
+  git("checkout", "-b", "feat/work");
+  fs.writeFileSync(path.join(fixture.dir, "work.txt"), "work\n");
+  git("add", "work.txt");
+  git("commit", "--message", "work");
+  const head = git("rev-parse", "HEAD");
+  git("push", "origin", "feat/work");
+  git("checkout", "main");
+  const remoteHas = (branch) =>
+    execFileSync("git", ["ls-remote", "--heads", "origin", branch], {
+      cwd: fixture.dir,
+      stdio: "pipe",
+      encoding: "utf8",
+    }).trim() !== "";
   registerKickoff(fixture.org, {
-    ...claimFor(fixture, "wt-pr-cleanup", { checkoutPath: fixture.dir }),
+    ...claimFor(fixture, "wt-git", {
+      checkoutPath: fixture.dir,
+    }),
     delivery: { mode: "pull-request", branch: "main" },
   });
+  return { ...fixture, git, head, remoteHas };
+}
 
-  const recorded = recordDelivery(fixture.org, {
-    worktreeId: "wt-pr-cleanup",
-    head: "abc123",
-    mergeCommit: "merge-abc",
-  });
-  assert.equal(recorded.recorded, true);
-  assert.equal(recorded.entry.delivered.mergeCommit, "merge-abc");
+function mergeWork(fixture) {
+  fixture.git("merge", "--no-ff", "feat/work", "--message", "merge work");
+  return fixture.git("rev-parse", "HEAD");
+}
 
-  const [entry] = listKickoffs(fixture.org, "wt-pr-cleanup").kickoffs;
-  assert.equal(entry.delivered?.mergeCommit, "merge-abc");
-  // cleanupKickoffBranches should see a deliveryRef and try to run isAncestor.
-  // In a non-git dir the check fails (skipped), but no "no delivery record" skip.
-  const result = cleanupKickoffBranches({
+function cleanUp(fixture) {
+  const [entry] = listKickoffs(fixture.org, "wt-git").kickoffs;
+  return cleanupKickoffBranches({
     projectDir: fixture.dir,
     entry,
-    branches: ["feat/nonexistent-branch"],
-    remoteName: "",
+    branches: ["feat/work"],
+    remoteName: "origin",
     callerCwd: fixture.dir,
-    force: false,
   });
-  // Branch is skipped because isAncestor fails in a non-git dir, but
-  // the function ran without throwing, meaning it found the deliveryRef.
-  assert.ok(Array.isArray(result.skipped) || Array.isArray(result.errors));
+}
+
+test("a recorded real merge commit lets cleanup delete the merged branch", (t) => {
+  const fixture = gitProject(t);
+  const mergeCommit = mergeWork(fixture);
+  fixture.git("push", "origin", "main");
+
+  const recorded = recordDelivery(fixture.org, {
+    worktreeId: "wt-git",
+    head: fixture.head,
+    mergeCommit,
+  });
+  assert.equal(recorded.entry.delivered.head, fixture.head);
+  assert.equal(recorded.entry.delivered.mergeCommit, mergeCommit);
+
+  const result = cleanUp(fixture);
+  assert.deepEqual(result.deleted, ["feat/work"]);
+  assert.deepEqual(result.skipped, []);
+  assert.equal(fixture.remoteHas("feat/work"), false);
+  assert.throws(() => fixture.git("rev-parse", "refs/heads/feat/work"));
+});
+
+test("a merge commit that only the remote branch holds is accepted, and its full id is stored", (t) => {
+  const fixture = gitProject(t);
+  const before = fixture.git("rev-parse", "main");
+  const mergeCommit = mergeWork(fixture);
+  fixture.git("push", "origin", "main");
+  // The local branch has not fetched the merge, as after a PR merged on the remote.
+  fixture.git("reset", "--hard", before);
+
+  const recorded = recordDelivery(fixture.org, {
+    worktreeId: "wt-git",
+    head: fixture.head.slice(0, 10),
+    mergeCommit: mergeCommit.slice(0, 10),
+  });
+  assert.equal(recorded.entry.delivered.head, fixture.head);
+  assert.equal(recorded.entry.delivered.mergeCommit, mergeCommit);
+});
+
+test("a branch tip recorded as the merge commit is refused, and cleanup deletes nothing", (t) => {
+  const fixture = gitProject(t);
+
+  assert.throws(
+    () =>
+      recordDelivery(fixture.org, {
+        worktreeId: "wt-git",
+        head: fixture.head,
+        mergeCommit: fixture.head,
+      }),
+    /not reachable from refs\/heads\/main/,
+  );
+  const [entry] = listKickoffs(fixture.org, "wt-git").kickoffs;
+  assert.equal(entry.delivered, undefined);
+
+  const result = cleanUp(fixture);
+  assert.deepEqual(result.deleted, []);
+  assert.deepEqual(result.skipped, ["feat/work"]);
+  assert.equal(fixture.remoteHas("feat/work"), true);
+  assert.ok(fixture.git("rev-parse", "refs/heads/feat/work"));
+});
+
+test("a merge commit that does not contain the delivered head is refused", (t) => {
+  const fixture = gitProject(t);
+  const unrelated = fixture.git("rev-parse", "main");
+  mergeWork(fixture);
+
+  assert.throws(
+    () =>
+      recordDelivery(fixture.org, {
+        worktreeId: "wt-git",
+        head: fixture.head,
+        mergeCommit: unrelated,
+      }),
+    /not contained in merge commit/,
+  );
+  assert.equal(
+    listKickoffs(fixture.org, "wt-git").kickoffs[0].delivered,
+    undefined,
+  );
+});
+
+test("an unknown or option-like merge commit is refused", (t) => {
+  const fixture = gitProject(t);
+  for (const mergeCommit of [
+    "0123456789abcdef0123456789abcdef01234567",
+    "--all",
+    "main",
+    "",
+    undefined,
+  ]) {
+    assert.throws(
+      () =>
+        recordDelivery(fixture.org, {
+          worktreeId: "wt-git",
+          head: fixture.head,
+          mergeCommit,
+        }),
+      /is not a commit in/,
+    );
+  }
+  assert.equal(
+    listKickoffs(fixture.org, "wt-git").kickoffs[0].delivered,
+    undefined,
+  );
+});
+
+test("kickoff-merge-record refuses an unmerged commit through the command line", (t) => {
+  const fixture = gitProject(t);
+  const run = (mergeCommit) =>
+    spawnSync(
+      process.execPath,
+      [
+        fileURLToPath(
+          new URL(
+            "../plugins/oh-my-teams/scripts/teams-org.mjs",
+            import.meta.url,
+          ),
+        ),
+        "kickoff-merge-record",
+        "--org",
+        fixture.org,
+        "--worktree",
+        "wt-git",
+        "--head",
+        fixture.head,
+        "--merge-commit",
+        mergeCommit,
+      ],
+      { cwd: fixture.dir, encoding: "utf8" },
+    );
+
+  const refused = run(fixture.head);
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /not reachable from/);
+  assert.equal(fixture.remoteHas("feat/work"), true);
+
+  const accepted = run(mergeWork(fixture));
+  assert.equal(accepted.status, 0, accepted.stderr);
+  assert.equal(JSON.parse(accepted.stdout).recorded, true);
 });
 
 // ─── 10. 이사 기록이 없는 기존 항목의 호환 ──────────────────────────────

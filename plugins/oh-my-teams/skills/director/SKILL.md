@@ -31,7 +31,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 - 산출물(코드, 문서, 테스트)을 직접 만들지 않는다.
 - 사용자가 확정한 전달 방식 밖으로 범위를 넓히지 않는다. `delivery`에 기록되지 않은 외부 배포나 병합이 필요하면 사용자에게 다시 확인한다.
 - 이사가 사용자에게 반드시 확인해야 하는 경우는 다음과 같다. 전달 방식이나 주 버전처럼 사용자가 이미 확정한 계약을 바꿔야 할 때, 브리프에 없는 새 범위가 추가로 필요할 때, 외부 발송이나 배포 권한이 새로 필요할 때다.
-- kickoff-claim 요청에는 자기 식별자(Orca 터미널 핸들과 주인 체크아웃 경로)를 적어야 PM이 신호를 보낼 대상을 안다.
+- kickoff-claim 요청에는 자기 식별자를 `director.terminalHandle`(Orca 터미널 핸들)과 `director.checkoutPath`(주인 체크아웃 경로)로 적어야 PM이 신호를 보낼 대상을 안다.
 
 ## kickoff 시작과 감독
 
@@ -41,7 +41,13 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 2. 사용자에게 확인해야 하는 목표, 수용 기준, 비목표, 필수 검사와 전달 범위를 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 한 번에 확정한다.
 3. 확정한 내용을 브리프 파일로 쓴다.
 4. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `PM 실행` 절에 따라 `role-terminal`로 PM 세션을 열고 브리프 경로를 전달한다.
-5. `kickoff-claim`으로 등록하고, 자기 식별자(터미널 핸들과 주인 체크아웃 경로)를 요청 파일에 적는다.
+5. `kickoff-claim`으로 등록하고, 자기 식별자(터미널 핸들과 주인 체크아웃 경로)를 요청 파일의 `director`에 적는다. 필드 이름은 정확히 다음과 같다.
+
+   ```json
+   "director": { "terminalHandle": "<이사 세션의 Orca 터미널 핸들>", "checkoutPath": "<주인 체크아웃 절대 경로>" }
+   ```
+
+   다른 이름으로 적으면 그 키는 무시되고 이사 기록 없이 등록되며, 이후 종료·병합 권한 검사가 경고만 남기고 진행한다. 등록 결과의 `warnings`나 `[omt] Warning:` 줄이 나오면 요청 파일을 고쳐 다시 등록한다.
 
 이후 이사는 조회와 종료를 담당하는 관제 자리로 남는다. Goal을 만들지 않고 Run도 바인딩하지 않는다.
 
@@ -60,7 +66,7 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 
 `close-ready` 신호를 받은 뒤 [close](../close/SKILL.md) 절차로 전달·병합·정리를 수행한다. PM 워크트리를 회수하므로 이 절차는 이사 세션에서 수행한다. 자기가 서 있는 워크트리는 스스로 제거할 수 없기 때문이다.
 
-`pull-request` 전달에서는 PR을 병합하기 전에 신호와 HEAD를 대조하고, 병합 후 등록부에 기록한다.
+`pull-request` 전달에서는 PR을 병합하기 전에 신호와 HEAD를 대조하고, 병합 후 등록부에 기록한다. 기록 전에 주인 체크아웃에서 `git fetch`로 병합을 받아 두어야 하며, 런타임은 `--merge-commit`이 `delivery.branch`에서 도달할 수 있고 `--head`를 포함하는지 확인하고 아니면 거부한다.
 
 ```text
 node <runtime> kickoff-check-close-ready --org <project>/.omt/organization.json --worktree <pm-worktree-id> --head <verified-head>

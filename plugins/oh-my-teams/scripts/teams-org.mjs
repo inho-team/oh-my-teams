@@ -135,7 +135,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                          (checks that the PM's close-ready signal exists and
                          matches HEAD; for pull-request kickoffs before PR merge)
   kickoff-merge-record --org FILE --worktree ID --head SHA --merge-commit SHA
+                       [--remote NAME]
                          (records a PR merge into the registry; director only;
+                         rejects a merge commit that is not reachable from
+                         the delivery branch or does not contain --head;
                          enables kickoff-branch-cleanup for pull-request kickoffs)
   deliver --org FILE --worktree ID --source DIR --head SHA
           --evidence FILE --task TRUSTED_TASK [--report FILE --state DIR]
@@ -250,7 +253,14 @@ export const ALLOWED_OPTIONS = {
   "kickoff-release": ["org", "worktree", "reason", "force"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
   "kickoff-check-close-ready": ["org", "worktree", "head"],
-  "kickoff-merge-record": ["org", "worktree", "head", "merge-commit", "force"],
+  "kickoff-merge-record": [
+    "org",
+    "worktree",
+    "head",
+    "merge-commit",
+    "remote",
+    "force",
+  ],
   deliver: [
     "org",
     "worktree",
@@ -1060,6 +1070,7 @@ async function executeCommand(args) {
         worktreeId: args.worktree,
         head: args.head,
         mergeCommit: args["merge-commit"],
+        remoteName: args.remote ?? "origin",
       });
     }
     case "prepare":

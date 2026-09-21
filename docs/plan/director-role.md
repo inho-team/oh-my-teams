@@ -172,6 +172,8 @@ B. 새 `kickoff-merge-record` 명령을 추가하고 `recordDelivery`를 호출�
 **인자**: `--org FILE --worktree ID --head SHA --merge-commit SHA`
 `--head`는 전달한 kickoff HEAD, `--merge-commit`은 PR 병합 커밋이다.
 
+**병합 커밋 검증**: 9.1절에서 정한 대로 기록하기 전에 주인 체크아웃의 git으로 병합 커밋을 검증한다. `--remote NAME`(기본 `origin`)은 원격에서 병합된 PR을 받을 브랜치를 고르는 선택 인자다.
+
 **구현 위치**: `teams-org.mjs`에 `kickoff-merge-record` 케이스 추가, `ALLOWED_OPTIONS`와 `REQUIRED_OPTIONS`에 등록. `assertDirectorAuthority`를 `delivery.mjs`에서 export하여 재사용한다.
 
 ---
@@ -250,3 +252,53 @@ B. 동작을 문서에 맞춰, 신호가 없으면 거부한다.
 C. 이사 기록이 있는 새 항목만 신호를 요구하고 없는 옛 항목은 경고한다.
 
 **채택: A.** B는 기존 kickoff 호환을 깨서 제약을 어긴다. C는 새 항목의 강제를 높이지만 등록 시점이 아니라 `director` 필드 유무로 신구를 가르게 되어, 이사가 PM 무응답 상황에서 종료해야 할 때 우회 수단이 필요해진다. 이번 범위는 문서와 동작의 불일치를 없애는 것이므로 C는 이후 결정으로 남긴다. close 스킬에는 신호 없이 종료했다면 PM의 완료 준비 확인이 없었다는 사실을 보고에 적도록 했다. 테스트는 두 스킬이 실제 동작과 같은 문장을 쓰고 "신호가 없거나 … 거부" 문구를 다시 쓰지 않는지 검사하며, 동작 자체는 7절의 `checkCloseReady` 테스트가 검사한다.
+
+---
+
+## 9. 독립 검토가 반려한 두 건의 수정 (2026-09-21)
+
+독립 검토(`review-mainline`)가 `merge-record-unverified-merge-commit`과 `director-claim-fields-undocumented`를 반려했다. 결정적 테스트는 `tests/director-role.test.mjs`에 있다.
+
+### 9.1 병합 커밋은 기록하기 전에 git으로 검증한다
+
+**결정: `recordDelivery`가 주인 체크아웃의 git으로 병합 커밋을 검증하고, 통과한 값만 전체 커밋 ID로 저장한다.**
+
+`kickoff-branch-cleanup`은 기록된 병합 커밋을 전달의 증거로 믿고, 브랜치가 그 커밋에 포함되면 원격과 로컬 브랜치를 지운다. 이전에는 `kickoff-merge-record`가 `--merge-commit`을 검사 없이 저장했으므로, 병합되지 않은 브랜치의 끝 커밋을 병합 커밋으로 적으면 그 브랜치가 삭제되었다. 기존 테스트는 git 저장소가 아닌 디렉터리에서 실행되어 cleanup이 항상 브랜치를 건너뛰었고, 그래서 단언이 항상 참이었다.
+
+기록 전에 확인하는 세 조건은 다음과 같다.
+
+1. `--merge-commit`이 주인 체크아웃에 실제로 있는 커밋이다. 16진수 7~64자만 받으므로 옵션처럼 보이는 값이나 브랜치 이름은 git에 닿기 전에 거부된다.
+2. 그 커밋이 `delivery.branch`에서 도달할 수 있다. 로컬 브랜치와 `refs/remotes/<remote>/<branch>` 중 하나면 충분하다. PR은 원격에서 병합되므로 로컬 브랜치가 아직 병합을 받지 못한 경우가 정상이기 때문이다.
+3. `--head`가 그 병합 커밋의 조상이다. 다른 kickoff의 병합 커밋이나 무관한 커밋을 적는 실수를 막는다.
+
+**선택지**
+
+A. `kickoff-merge-record` 명령에서만 검증한다.
+B. `recordDelivery`에서 검증해 모든 기록 경로에 적용한다.
+C. B에 더해 `kickoff-branch-cleanup`도 삭제 직전에 병합 커밋이 배송 브랜치에 있는지 다시 확인한다.
+
+**채택: B.** 등록부에 `delivered`를 쓰는 함수는 `recordDelivery` 하나이고, `deliver`의 자동 병합도 이 함수를 거친다. 명령에만 검사를 두면 함수를 직접 쓰는 경로가 검사를 우회하므로, 검증이 값을 저장하는 자리에 있어야 한다. `deliver`가 만든 병합 커밋은 배송 브랜치 끝이므로 같은 검증을 그대로 통과한다. C는 손으로 고친 등록 항목까지 막지만, 등록부 파일을 직접 고치는 것은 권한 검사 밖의 일이고 cleanup에 원격 최신성 판단을 더하면 오래된 로컬 브랜치 때문에 정상 삭제가 막힌다. 이후 결정으로 남긴다.
+
+- 검사를 통과하지 못하면 등록부를 쓰지 않으므로 `delivered`가 없고, cleanup은 모든 브랜치를 `skipped`에 남긴다. 테스트가 원격과 로컬 브랜치가 남아 있는지 직접 확인한다.
+- 짧은 커밋 ID를 받아도 전체 ID로 풀어서 저장한다. cleanup과 멱등 검사가 같은 값을 비교하게 하기 위해서다.
+- 병합 커밋이 `--head`를 포함하지 않는 squash 병합은 거부된다. cleanup도 같은 이유로 그 브랜치를 지우지 않았으므로 새로 생긴 제약이 아니고, squash 병합의 정리는 이후 결정으로 남긴다.
+- 원격에서 병합한 PR은 `git fetch`로 받은 뒤 기록해야 한다. 거부 메시지가 이를 안내한다.
+
+### 9.2 claim 요청의 형식을 문서에 적고, 무시한 키는 경고로 드러낸다
+
+**결정: `director: {terminalHandle, checkoutPath}` 형식을 kickoff-registry.md의 claim 형식 절, director 스킬 5단계, kickoff 스킬에 적는다. 형식에 없는 claim 키는 등록을 막지 않고 경고하며, `director`가 있는데 `checkoutPath`가 없으면 거부한다.**
+
+알 수 없는 claim 키는 항목을 만드는 과정에서 조용히 버려졌다. 스킬이 필드 이름을 적지 않았으므로 `director.terminal`처럼 다른 이름을 쓰면 이사 기록 없이 등록되었고, 이후 종료·병합 권한 검사는 "이사 기록이 없는 기존 항목"으로 취급해 경고 후 허용으로 물러났다. 3절이 이 물러남을 기존 항목의 호환을 위해 허용한 것이므로, 오타 하나가 권한 검사를 끄는 우회로가 되었다.
+
+**선택지**
+
+A. 문서만 고치고 동작은 그대로 둔다.
+B. 알 수 없는 claim 키를 모두 거부한다.
+C. 알 수 없는 키는 경고하되 등록하고, `director`의 필수 필드가 없으면 거부한다.
+
+**채택: C.**
+- A: 문서를 읽지 않은 호출자는 여전히 조용히 권한 검사가 꺼진 등록을 만든다. 문서화만으로는 검토가 지적한 실패 경로가 남는다.
+- B: 이전에 작성된 claim 파일은 이 형식에 없는 키를 담을 수 있다. 저장된 항목에서 복사한 `schemaVersion`이나 `createdAt`이 그 예다. 알 수 없는 키를 거부하면 기존 claim 문서의 호환이 깨지므로 계약 제약에 어긋난다.
+- C: 무시한 키가 `warnings`(등록 결과 JSON)와 표준 오류에 나타나 호출자가 바로 알게 된다. 등록은 그대로 성공하므로 기존 claim은 영향이 없다. 반면 `director`를 적었다는 것은 이사 기록을 원한다는 뜻이므로, 경로가 없을 때 작업 디렉터리로 대신 채우면(이전 동작) 엉뚱한 디렉터리가 이사 체크아웃으로 기록된다. 이 경우만 거부한다. `director`를 아예 적지 않은 claim은 3절의 호환 경로 그대로 받는다.
+
+경고 대상은 최상위의 `goal`, `pm`, `organizationRevision`, `brief`, `delivery`, `selfPm`, `director`, `runId`, `schemaVersion`, `createdAt`(그리고 이름이 바뀌기 전의 `coordinator`, `selfCoordinator`)을 뺀 키와, `director` 안의 `terminalHandle`, `checkoutPath`를 뺀 키다. `director.terminalHandle`을 생략하는 것은 이전과 같이 허용한다.

@@ -36,6 +36,23 @@ const RENAMED_KEYS = [
   ["selfCoordinator", "selfPm"],
 ];
 
+// Keys a kickoff-claim request may carry. `schemaVersion` and `createdAt` belong
+// to stored entries but appear in claims copied from one, so they are not
+// reported as mistakes. Any other key is dropped when the entry is written.
+const CLAIM_KEYS = [
+  "goal",
+  "pm",
+  "organizationRevision",
+  "brief",
+  "delivery",
+  "selfPm",
+  "director",
+  "runId",
+  "schemaVersion",
+  "createdAt",
+];
+const DIRECTOR_KEYS = ["terminalHandle", "checkoutPath"];
+
 function text(value) {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
@@ -263,7 +280,8 @@ export function listKickoffs(orgFile, worktreeId) {
  * @param {string} orgFile - Organization JSON path.
  * @param {object} request - Goal, pm, brief path, and organizationRevision. The
  *   pre-rename keys `coordinator` and `selfCoordinator` are also accepted.
- * @returns {{claimed: boolean, file: string, entry: object}} Stored entry.
+ * @returns {{claimed: boolean, file: string, entry: object, warnings?: string[]}}
+ *   Stored entry, and the claim keys that were ignored when there were any.
  * @throws {Error} When the worktree already holds a kickoff or the claim is invalid.
  */
 export function registerKickoff(orgFile, request) {
@@ -304,6 +322,27 @@ export function registerKickoff(orgFile, request) {
       claim.organizationRevision === revision,
       `Organization is at revision ${revision}; read it again before registering`,
     );
+    // A director object without a checkout path would otherwise resolve to the
+    // caller's working directory and pass every later authority check from there.
+    assert(
+      claim.director === undefined || text(claim.director?.checkoutPath),
+      "Claim director.checkoutPath required when director is present " +
+        "(form: director: {terminalHandle, checkoutPath})",
+    );
+    // Unknown keys are dropped when the entry is written. Renamed director
+    // fields would then register no director and later authority checks would
+    // warn and proceed, so the claim's sender is told which keys were ignored.
+    const ignored = [
+      ...Object.keys(claim).filter((key) => !CLAIM_KEYS.includes(key)),
+      ...Object.keys(claim.director ?? {})
+        .filter((key) => !DIRECTOR_KEYS.includes(key))
+        .map((key) => `director.${key}`),
+    ];
+    const warnings = ignored.map(
+      (key) =>
+        `Claim key "${key}" is not part of the claim format and was ignored`,
+    );
+    for (const warning of warnings) console.warn(`[omt] Warning: ${warning}`);
     const entry = validateEntry({
       schemaVersion: 1,
       goal: claim.goal,
@@ -339,7 +378,12 @@ export function registerKickoff(orgFile, request) {
       createdAt: new Date().toISOString(),
     });
     writeJSON(file, entry);
-    return { claimed: true, file, entry };
+    return {
+      claimed: true,
+      file,
+      entry,
+      ...(warnings.length === 0 ? {} : { warnings }),
+    };
   });
 }
 
@@ -369,29 +413,130 @@ export function bindKickoffRun(orgFile, { worktreeId, runId }) {
   });
 }
 
+// Runs a git command in the given repository, returning stdout on success.
+// Returns null when the command exits non-zero, so callers decide what to skip.
+function tryGit(repoDir, args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: repoDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// Checks whether every commit reachable from tipRef is also reachable from
+// baseRef, which means the kickoff branch's content has reached baseRef.
+function isAncestor(repoDir, tipRef, baseRef) {
+  const result = tryGit(repoDir, [
+    "merge-base",
+    "--is-ancestor",
+    tipRef,
+    baseRef,
+  ]);
+  // tryGit returns null on non-zero exit (tip is not an ancestor).
+  return result !== null;
+}
+
+// Resolves a commit id to the full object name, or null when it names no commit.
+// Only hexadecimal ids are accepted, so an option-like value never reaches git.
+function resolveCommit(repoDir, id) {
+  if (typeof id !== "string" || !/^[0-9a-fA-F]{7,64}$/.test(id)) return null;
+  return tryGit(repoDir, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${id}^{commit}`,
+  ]);
+}
+
+/**
+ * Confirms in the owner checkout that a recorded merge really delivered a head.
+ *
+ * The merge commit must exist, must be reachable from the delivery branch (the
+ * local branch, or `<remote>/<branch>` after a PR merged on the remote), and
+ * must contain the delivered head. `kickoff-branch-cleanup` trusts the recorded
+ * merge commit, so a value that fails here must never be stored.
+ *
+ * @param {string} projectDir - Owner project checkout holding the repository.
+ * @param {{branch: string, head: string, mergeCommit: string, remoteName?: string}} delivery -
+ *   Delivery branch and the two commits being recorded.
+ * @returns {{head: string, mergeCommit: string}} Both commits as full object names.
+ * @throws {Error} When a commit is unknown, unreachable from the branch, or the
+ *   head is not contained in the merge commit.
+ */
+export function verifyDeliveredCommits(
+  projectDir,
+  { branch, head, mergeCommit, remoteName = "origin" },
+) {
+  const mergeFull = resolveCommit(projectDir, mergeCommit);
+  assert(
+    mergeFull,
+    `Merge commit ${mergeCommit} is not a commit in ${projectDir}; fetch the merge first`,
+  );
+  const headFull = resolveCommit(projectDir, head);
+  assert(headFull, `Delivered head ${head} is not a commit in ${projectDir}`);
+  const refs = [`refs/heads/${branch}`];
+  if (remoteName) refs.push(`refs/remotes/${remoteName}/${branch}`);
+  assert(
+    refs.some(
+      (ref) =>
+        tryGit(projectDir, ["rev-parse", "--verify", "--quiet", ref]) !==
+          null && isAncestor(projectDir, mergeFull, ref),
+    ),
+    `Merge commit ${mergeFull} is not reachable from ${refs.join(" or ")}; ` +
+      "it was not merged into the delivery branch, or the checkout has not fetched the merge yet",
+  );
+  assert(
+    isAncestor(projectDir, headFull, mergeFull),
+    `Delivered head ${headFull} is not contained in merge commit ${mergeFull}`,
+  );
+  return { head: headFull, mergeCommit: mergeFull };
+}
+
 /**
  * Records that a kickoff's result was merged into the owning project.
  *
+ * The commits are checked against the owner checkout's git before anything is
+ * written, and the full object names are stored.
+ *
  * @param {string} orgFile - Organization JSON path.
- * @param {{worktreeId: string, head: string, mergeCommit: string}} delivery -
- *   PM worktree, the delivered head, and the merge commit on the owner branch.
+ * @param {{worktreeId: string, head: string, mergeCommit: string, remoteName?: string}} delivery -
+ *   PM worktree, the delivered head, the merge commit on the owner branch, and
+ *   the remote whose branch may hold a merge made elsewhere (default `origin`).
  * @returns {{recorded: boolean, entry: object}} Updated entry.
- * @throws {Error} When the worktree holds no kickoff or another head was delivered.
+ * @throws {Error} When the worktree holds no kickoff or delivers to no branch,
+ *   another head was delivered, or the commits fail verification.
  */
-export function recordDelivery(orgFile, { worktreeId, head, mergeCommit }) {
+export function recordDelivery(
+  orgFile,
+  { worktreeId, head, mergeCommit, remoteName = "origin" },
+) {
   return withRegistry(orgFile, () => {
     const file = locateEntry(orgFile, worktreeId);
     assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
     const entry = validateEntry(readJSON(file));
     assert(
-      !entry.delivered || entry.delivered.head === head,
+      text(entry.delivery?.branch),
+      "Kickoff records no delivery branch to verify a merge against",
+    );
+    const verified = verifyDeliveredCommits(ownerProject(orgFile), {
+      branch: entry.delivery.branch,
+      head,
+      mergeCommit,
+      remoteName,
+    });
+    assert(
+      !entry.delivered || entry.delivered.head === verified.head,
       `Kickoff already delivered ${entry.delivered?.head}`,
     );
     const updated = validateEntry({
       ...entry,
       delivered: entry.delivered ?? {
-        head,
-        mergeCommit,
+        head: verified.head,
+        mergeCommit: verified.mergeCommit,
         at: new Date().toISOString(),
       },
     });
@@ -473,33 +618,6 @@ export function releaseKickoff(
     fs.unlinkSync(file);
     return { released: true, reason, archived, entry };
   });
-}
-
-// Runs a git command in the given repository, returning stdout on success.
-// Returns null when the command exits non-zero, so callers decide what to skip.
-function tryGit(repoDir, args) {
-  try {
-    return execFileSync("git", args, {
-      cwd: repoDir,
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf8",
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
-// Checks whether every commit reachable from tipRef is also reachable from
-// baseRef, which means the kickoff branch's content has reached baseRef.
-function isAncestor(repoDir, tipRef, baseRef) {
-  const result = tryGit(repoDir, [
-    "merge-base",
-    "--is-ancestor",
-    tipRef,
-    baseRef,
-  ]);
-  // tryGit returns null on non-zero exit (tip is not an ancestor).
-  return result !== null;
 }
 
 /**
