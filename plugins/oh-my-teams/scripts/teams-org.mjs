@@ -85,6 +85,7 @@ import {
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
+import { recordCheckpoint } from "./handoff.mjs";
 import {
   incidentStatus,
   ingestIncident,
@@ -194,7 +195,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
-            [--text]
+            [--workflow-task ID] [--text]
   role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
   role-terminal --org FILE --role ROLE --worktree SELECTOR [--title TEXT]
                 [--workflow-id ID --state DIR] [--orca EXECUTABLE]
@@ -243,6 +244,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-rework --id ID --state DIR --revision N --rework FILE
                   (attaches the corrected execution after a review asked for changes)
   workflow-depth --id ID --state DIR --revision N --change FILE
+  handoff-checkpoint --state DIR --workflow-id ID --workflow-task ID --file FILE
+                     [--repo DIR]
+                     (validates the checkpoint sections and records HEAD of
+                     --repo, default the current directory)
   failure-classify --failure FILE [--org FILE --state DIR]
   lesson-record --lesson FILE --state DIR
   incident-ingest --event FILE --config FILE --state DIR
@@ -322,7 +327,15 @@ export const ALLOWED_OPTIONS = {
   "runtime-doctor": ["org", "state", "format"],
   "runtime-install": ["org", "state", "dry-run"],
   "runtime-repair": ["org", "state", "dry-run"],
-  "role-spec": ["org", "role", "spec", "workflow-id", "state", "text"],
+  "role-spec": [
+    "org",
+    "role",
+    "spec",
+    "workflow-id",
+    "state",
+    "workflow-task",
+    "text",
+  ],
   "terminal-idle-check": ["terminal", "orca", "org", "role"],
   "headless-start": [
     "org",
@@ -407,6 +420,13 @@ export const ALLOWED_OPTIONS = {
   "workflow-retry": ["id", "state", "revision", "retry"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
+  "handoff-checkpoint": [
+    "state",
+    "workflow-id",
+    "workflow-task",
+    "file",
+    "repo",
+  ],
   "failure-classify": ["failure", "org", "state"],
   "lesson-record": ["lesson", "state"],
   "incident-ingest": ["event", "config", "state"],
@@ -500,6 +520,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-retry": ["id", "state", "revision", "retry"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
+  "handoff-checkpoint": ["state", "workflow-id", "workflow-task", "file"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
   "incident-ingest": ["event", "config", "state"],
@@ -986,6 +1007,7 @@ function launchContext(args) {
       workflowId: args["workflow-id"],
       stateDir,
       workflowState: snapshot.state,
+      ...(args["workflow-task"] ? { workflowTask: args["workflow-task"] } : {}),
       ...(director ? { director } : {}),
     },
   };
@@ -1558,6 +1580,16 @@ async function executeCommand(args) {
         args.id,
         Number(args.revision),
         readJSON(args.retry),
+      );
+    case "handoff-checkpoint":
+      return recordCheckpoint(
+        path.resolve(args.state),
+        args["workflow-id"],
+        args["workflow-task"],
+        {
+          text: fs.readFileSync(path.resolve(args.file), "utf8"),
+          repo: path.resolve(args.repo ?? "."),
+        },
       );
     case "workflow-depth":
       return setWorkflowDepth(

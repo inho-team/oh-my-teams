@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { HANDOFF_SECTIONS } from "./handoff.mjs";
 import {
   canonicalRole,
   assert,
@@ -147,6 +148,27 @@ const skillsDir = path.resolve(
   "../skills",
 );
 const referencesDir = path.resolve(skillsDir, "../references");
+const teamsOrgScript = path.resolve(skillsDir, "../scripts/teams-org.mjs");
+
+// A worker that hits its usage limit cannot write anything more, so the
+// fallback profile that takes the task over reads the last checkpoint the
+// worker kept while it still could.
+function checkpointRule(workflowId, stateDir, workflowTask) {
+  if (!workflowId || !workflowTask) return [];
+  const command = [
+    "node",
+    teamsOrgScript,
+    "handoff-checkpoint",
+    `--state ${stateDir}`,
+    `--workflow-id ${workflowId}`,
+    `--workflow-task ${workflowTask}`,
+    "--file <checkpoint.md>",
+  ].join(" ");
+  return [
+    `handoff checkpoint: 커밋할 때마다, 그리고 검사 결과가 나올 때마다 작업 워크트리 밖의 checkpoint.md를 갱신한 뒤 작업 워크트리에서 \`${command}\`를 실행한다.`,
+    `checkpoint.md에는 ${HANDOFF_SECTIONS.map((name) => `\`## ${name}\``).join(", ")} 절을 한 번씩, 비우지 않고 쓴다. 사용 한도에 걸리면 다른 프로필이 이 문서와 워크트리를 읽고 이어받는다.`,
+  ];
+}
 const BARE_COMMAND = /^[A-Za-z0-9._-]+$/;
 
 function launchableProfile(role, profileId, profile) {
@@ -448,6 +470,7 @@ const names = (list) =>
  * @param {object} [run.director] - Director identifiers from the kickoff registry.
  * @param {string} [run.director.terminalHandle] - Orca terminal handle of the director session.
  * @param {string} [run.director.checkoutPath] - Owner checkout path of the director.
+ * @param {string} [run.workflowTask] - Workflow task ID; with `workflowId` it adds the checkpoint rule.
  * @returns {string} Header, charter and task, in that order.
  * @throws {Error} When the role is unknown or the task is empty.
  */
@@ -455,7 +478,7 @@ export function roleSpec(
   requestedOrg,
   requestedRole,
   spec,
-  { roles, orgFile, workflowId, stateDir, director } = {},
+  { roles, orgFile, workflowId, stateDir, director, workflowTask } = {},
 ) {
   const org = validateOrg(requestedOrg);
   assert(typeof spec === "string" && spec.trim(), "Spec text required");
@@ -486,6 +509,7 @@ export function roleSpec(
     `직접 배정할 수 있는 역할: ${names(ROLES.filter((r) => dispatchable.includes(r)))}`,
     ...(orgFile ? [`조직 파일: ${orgFile}`] : []),
     ...(workflowId ? [`workflow: ${workflowId} (state ${stateDir})`] : []),
+    ...checkpointRule(workflowId, stateDir, workflowTask),
     `역할 스킬 전문: ${path.join(skillsDir, role, "SKILL.md")}`,
     "",
     "아래 권한·책임·한계를 벗어나는 요청은 수행하지 않고, 거부 사유와 함께 보고 대상에게 돌려보낸다.",
