@@ -110,6 +110,37 @@ def tree_manifest(directory):
     return {"exists": True, "files": files, "symlinks": links, "dirs": dirs, "sha256": digest}
 
 
+def list_entries(scratch, names):
+    """List every entry below the named scratch subdirectories with size and sha256.
+
+    Keys are paths relative to the scratch directory. Directories and symlinks are
+    listed too, so an empty directory that appears or disappears is visible.
+    """
+    entries = {}
+    for name in names:
+        top = Path(scratch) / name
+        entries[name] = {"kind": "dir"}
+        for current, dirnames, filenames in os.walk(top, followlinks=False):
+            for child in sorted(dirnames) + sorted(filenames):
+                full = Path(current) / child
+                rel = str(full.relative_to(scratch))
+                if full.is_symlink():
+                    entries[rel] = {"kind": "symlink", "target": os.readlink(full)}
+                elif full.is_dir():
+                    entries[rel] = {"kind": "dir"}
+                else:
+                    entries[rel] = {"kind": "file", "size": full.stat().st_size, "sha256": sha256_file(full)}
+    return entries
+
+
+def diff_entries(before, after):
+    """Return the paths added, removed and changed between two listings."""
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    changed = sorted(key for key in set(before) & set(after) if before[key] != after[key])
+    return {"added": added, "removed": removed, "changed": changed, "identical": not (added or removed or changed)}
+
+
 def metadata_digest(directory):
     """Summarise a directory by names, sizes and mtimes only, without reading contents."""
     directory = Path(directory)
@@ -332,9 +363,16 @@ def main():
             "npm": "PATH shim that records every call",
         }
 
-        def cli_run(name, subcommand, extra=(), shim=forward):
-            """Run one teams-org.mjs runtime command and store its result."""
+        watched = ["home", "state", "cache", "config", "data", "work"]
+
+        def cli_run(name, subcommand, extra=(), shim=forward, track=False):
+            """Run one teams-org.mjs runtime command and store its result.
+
+            With track=True the whole isolated home and the state, cache, config, data
+            and work directories are listed before and after, and the difference is stored.
+            """
             env["PATH"] = f"{shim}:{original_path}"
+            listing_before = list_entries(scratch, watched) if track else None
             calls_before = len(read_npm_calls(npm_log))
             cmd = [*guard, "node", str(cli), subcommand, "--org", str(org), "--state", str(scratch / "state"), *extra]
             done = run(cmd, env=env, cwd=str(scratch / "work"))
@@ -348,6 +386,12 @@ def main():
                 "npm_ci_calls": sum(1 for call in calls if call["argv"].split(" ")[0] == "ci"),
                 "result": parse_json(done["stdout"]),
             }
+            if track:
+                listing_after = list_entries(scratch, watched)
+                entry["watched_directories"] = watched
+                entry["listing_before"] = listing_before
+                entry["listing_after"] = listing_after
+                entry["listing_diff"] = diff_entries(listing_before, listing_after)
             results["tests"][name] = entry
             return entry
 
@@ -367,9 +411,9 @@ def main():
 
         real_before = snapshot_real_state(real_home)
 
-        cli_run("doctor-before", "runtime-doctor", ["--format", "json"])
+        cli_run("doctor-before", "runtime-doctor", ["--format", "json"], track=True)
 
-        entry = cli_run("install-dryrun", "runtime-install", ["--dry-run"])
+        entry = cli_run("install-dryrun", "runtime-install", ["--dry-run"], track=True)
         entry["omt_directory_created"] = (home / ".omt").exists()
 
         cli_run("install-actual", "runtime-install")
@@ -434,7 +478,8 @@ def main():
     healthy = lambda name: tests[name]["result"].get("runtimeHealthy") is True
     checks = {
         "doctor-before reports needs-install": tests["doctor-before"]["result"].get("status") == "needs-install",
-        "dry-run creates no ~/.omt in the isolated home": tests["install-dryrun"]["omt_directory_created"] is False and tests["install-dryrun"]["result"].get("dryRun") is True,
+        "doctor-before leaves the isolated home and the state, cache, config, data and work directories identical": tests["doctor-before"]["listing_diff"]["identical"],
+        "dry-run leaves the isolated home and the state, cache, config, data and work directories identical, creates no ~/.omt": tests["install-dryrun"]["listing_diff"]["identical"] and tests["install-dryrun"]["omt_directory_created"] is False and tests["install-dryrun"]["result"].get("dryRun") is True,
         "first install runs npm ci exactly once and installs": tests["install-actual"]["code"] == 0 and tests["install-actual"]["npm_ci_calls"] == 1 and tests["install-actual"]["result"].get("installed") is True,
         "doctor-after reports a healthy runtime": healthy("doctor-after"),
         "second install reuses without npm ci and leaves the tree equal": tests["install-second"]["result"].get("reused") is True and tests["install-second"]["npm_ci_calls"] == 0 and tests["install-second"]["tree_hash_equal"] is True,
