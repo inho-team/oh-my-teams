@@ -173,3 +173,80 @@ B. 새 `kickoff-merge-record` 명령을 추가하고 `recordDelivery`를 호출�
 `--head`는 전달한 kickoff HEAD, `--merge-commit`은 PR 병합 커밋이다.
 
 **구현 위치**: `teams-org.mjs`에 `kickoff-merge-record` 케이스 추가, `ALLOWED_OPTIONS`와 `REQUIRED_OPTIONS`에 등록. `assertDirectorAuthority`를 `delivery.mjs`에서 export하여 재사용한다.
+
+---
+
+## 8. 남은 결함 네 가지의 수정 (2026-09-21, 최신 origin/main 2.6.1 위에서)
+
+작업 계약: `.omt/workflows/director-role-w4/tasks/director-mainline/revisions/1.json`
+
+각 항목의 결정적 테스트는 `tests/director-role.test.mjs`와 `tests/director-signal.test.mjs`에 있다.
+
+### 8.1 accepted-risk authority의 스키마와 런타임 일치
+
+**결정: 스키마에 `director`를 추가하고, 허용 목록의 정본을 `gates.mjs`의 `ACCEPTED_RISK_AUTHORITIES` 하나로 둔다.**
+
+브리프 수용 기준 3은 사용자 승인을 요구하던 경로(`accepted-risk`의 `authority: user`)를 이사 결정으로 받을 수 있게 하라고 정한다. 런타임(`gates.mjs`)은 이미 `pm`·`user`·`director`를 받았지만 `schemas/review.schema.json`이 `pm`·`user`만 열거해서, 이사가 결정한 위험을 담은 review 입력은 스키마를 따르는 소비자에게 거부되었다.
+
+**선택지**
+
+A. 스키마만 `["pm", "user", "director"]`로 고친다.
+B. A에 더해 런타임이 쓰는 목록을 `ACCEPTED_RISK_AUTHORITIES`로 내보내고, 오류 문구도 그 목록에서 만든다.
+C. 런타임을 `pm`·`user`로 줄인다.
+
+**채택: B.** C는 이사 결정을 담는 경로를 없애 수용 기준 3에 어긋난다. A만으로는 두 목록이 다시 어긋날 수 있으므로, 목록을 한 곳에 두고 테스트가 스키마의 열거와 그 목록을 직접 비교하게 한다. 테스트는 각 authority가 `validateReviewInput`을 통과하고 `senior`·`junior`·누락은 거부되는지도 확인한다. Senior 스킬의 서술(`pm`·`user`)은 Senior가 스스로 위험을 수용하지 않는다는 한계를 말하는 것이어서 바꾸지 않았다.
+
+### 8.2 PM liveness는 Orca의 값을 그대로 쓴다
+
+**결정: `queryPmLiveness`는 `live`·`exited`·`unverifiable`을 반환하고, 조회 실패와 알 수 없는 값은 `unverifiable`로 보존한다.**
+
+이전 구현은 `alive`·`dead`만 인식하고 나머지를 `unverifiable`로 돌렸는데, Orca는 그 두 값을 보고하지 않는다. 실제 `worker-list`는 각 항목의 `projection.liveness`에 다음 모양을 담는다.
+
+```json
+{"verdict": "live", "observedAt": 1789958205199, "source": "agent_status"}
+{"verdict": "unverifiable", "reason": "stale_status", "observedAt": 1789895814805}
+```
+
+그래서 살아 있는 PM도 항상 `unverifiable`로 보였다. `orca-runtime.md`의 「worker-list와 liveness」 절이 정한 세 값과 반환 값을 맞추었다. 프로세스 PID를 검사하는 `processLiveness`(`alive`·`dead`·`unverifiable`)는 자원 슬롯 회수용이며 관측 대상이 달라 그대로 두었다. 두 어휘를 섞지 않도록 반환 타입을 JSDoc에 명시했다.
+
+Orca가 실제로 쓰는 값을 인식하면서 함께 정한 규율은 다음과 같다.
+
+- 목록에 PM 워크트리가 있다는 사실만으로 살아 있다고 판단하지 않는다. `verdict`가 `live`일 때에만 `live`다.
+- 알 수 없는 값(옛 구현이 만들어 낸 `alive`·`dead` 포함), 조회 실패, 응답 파싱 실패, PM 워크트리 항목 부재는 모두 `unverifiable`이다.
+- 같은 워크트리에 dispatch가 여러 개면 첫 항목이 아니라 전부를 본다. 하나라도 `live`이면 `live`이고, 모두 `exited`일 때에만 `exited`이며, 그 밖에는 `unverifiable`이다. 실제 응답에는 이미 끝난 dispatch가 앞에 오는 일이 있어서 첫 항목만 보면 살아 있는 PM을 놓친다. 종료는 확인되지 않은 항목이 하나라도 남으면 단정하지 않는다.
+- 워크트리 대조는 `<uuid>::<path>` 식별자나 경로 전체의 일치로 한다. 부분 문자열로 비교하면 `<path>-2` 같은 형제 워크트리의 `live`가 PM의 것으로 읽힌다. 이전에는 `alive`가 나오지 않아 드러나지 않았으나, `live`를 인식하면 오판이 곧바로 보고된다.
+
+테스트는 위 실제 응답 모양을 fixture로 고정한다. 명령 실행기를 `execute` 인자로 주입할 수 있게 해서(`deliverKickoff`와 같은 방식) Orca 없이 결정적으로 검사한다.
+
+### 8.3 자원 슬롯 소유자의 기본값
+
+**결정: `--owner-pid`를 생략하면 소유자를 알 수 없는 슬롯(`pid: null`)으로 기록하고, 자동 회수 대상에서 뺀다. 결과에 경고를 싣는다. 값이 있으면 양의 정수여야 한다.**
+
+이전에는 생략하면 소유자가 acquire를 실행한 CLI 자신의 PID가 되었다. CLI는 곧 종료하므로 슬롯이 곧바로 죽은 소유자의 것이 되어 다음 획득에서 회수되었고, 슬롯이 무거운 작업을 보호하지 못했다.
+
+**선택지**
+
+A. `--owner-pid`가 없으면 거부한다.
+B. 소유자 미상으로 기록하고 회수 대상에서 뺀다.
+C. 부모 프로세스(`process.ppid`)를 소유자로 추정한다.
+
+**채택: B.**
+- A: 슬롯을 얻는 쪽은 대개 셸을 통해 CLI를 실행하는 세션이라 오래 사는 자기 PID를 알기 어렵다. 거부하면 자원 조율 자체를 우회하게 만든다.
+- C: 추정한 PID는 셸 하나만 가리켜 작업보다 먼저 끝날 수 있다. 저장소는 소유자를 확인하지 못하면 죽었다고 단정하지 않는다(`ownerHasExited`, `processLiveness`의 `unverifiable`). 추측으로 소유자를 정하는 것은 그 원칙에 어긋난다.
+- B: 회수가 늦어지는 쪽(슬롯이 남는 오류)이 회수가 이르는 쪽(작업 중인 슬롯이 사라져 동시 점유를 허용하는 오류)보다 안전하고 눈에 보인다. 남은 슬롯은 `director-watch`에 나타나며 `resource-release`로 해제한다. 비용은 소유자가 죽어도 자동 회수가 없다는 점이므로, 결과의 `warning`과 이사 스킬이 `--owner-pid`를 넘기도록 안내한다.
+
+`--owner-pid abc` 같은 값은 이전에는 `NaN`으로 기록되어 JSON에서 `null`이 되었다. 이제는 양의 정수가 아니면 거부한다. 슬롯 회수 순회는 `pid`가 `null`인 슬롯을 명시적으로 건너뛰므로, 주입된 `liveness` 함수가 모두 죽었다고 답해도 회수하지 않는다.
+
+### 8.4 close-ready 신호가 없을 때의 문서와 동작
+
+**결정: 동작을 유지하고 문서를 동작에 맞춘다.** 신호가 있는데 HEAD가 다르면 거부하고, 신호가 없으면 경고한 뒤 진행한다.
+
+director 스킬과 close 스킬의 도입부는 신호가 없어도 거부한다고 적었으나, `checkCloseReady`는 신호가 없으면 경고 후 `legacy: true`로 진행한다. 이 동작은 6절이 근거를 둔 기존 kickoff 호환이다. 신호 통로가 생기기 전에 등록된 항목은 신호를 보낼 수 없으므로, 신호가 없다고 거부하면 종료할 수 없게 된다. 브리프 수용 기준 4의 "경고·거부"는 두 경우에 각각 대응한다(없으면 경고, HEAD가 다르면 거부).
+
+**선택지**
+
+A. 문서를 동작에 맞춘다.
+B. 동작을 문서에 맞춰, 신호가 없으면 거부한다.
+C. 이사 기록이 있는 새 항목만 신호를 요구하고 없는 옛 항목은 경고한다.
+
+**채택: A.** B는 기존 kickoff 호환을 깨서 제약을 어긴다. C는 새 항목의 강제를 높이지만 등록 시점이 아니라 `director` 필드 유무로 신구를 가르게 되어, 이사가 PM 무응답 상황에서 종료해야 할 때 우회 수단이 필요해진다. 이번 범위는 문서와 동작의 불일치를 없애는 것이므로 C는 이후 결정으로 남긴다. close 스킬에는 신호 없이 종료했다면 PM의 완료 준비 확인이 없었다는 사실을 보고에 적도록 했다. 테스트는 두 스킬이 실제 동작과 같은 문장을 쓰고 "신호가 없거나 … 거부" 문구를 다시 쓰지 않는지 검사하며, 동작 자체는 7절의 `checkCloseReady` 테스트가 검사한다.

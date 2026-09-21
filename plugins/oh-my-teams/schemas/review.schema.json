@@ -54,7 +54,7 @@
           "status": { "enum": ["open", "resolved", "accepted-risk"] },
           "description": { "type": "string", "minLength": 1 },
           "resolution": { "type": "string" },
-          "authority": { "enum": ["pm", "user"] },
+          "authority": { "enum": ["pm", "user", "director"] },
           "reason": { "type": "string" }
         }
       }

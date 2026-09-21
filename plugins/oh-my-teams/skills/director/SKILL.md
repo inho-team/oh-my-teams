@@ -54,7 +54,7 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 - `director-ack --org <project>/.omt/organization.json --signal <id>`: 수신 확인
 - `director-watch --org <project>/.omt/organization.json`: kickoff별 신호·슬롯 점유·여유 메모리·PM liveness 요약 조회
 
-`close-ready` 신호는 `close`의 입력(통합 워크트리·HEAD)과 연결된다. `close`는 그 신호가 없거나 HEAD가 다르면 경고하고 거부한다.
+`close-ready` 신호는 `close`의 입력(통합 워크트리·HEAD)과 연결된다. 신호가 있는데 HEAD가 다르면 거부하고, 신호가 없으면 경고한 뒤 진행한다. 신호가 없는 경우는 신호 통로가 생기기 전에 등록된 kickoff를 종료할 수 있도록 남겨 둔 호환 경로다.
 
 ## 종료
 
@@ -74,7 +74,9 @@ node <runtime> kickoff-show --org <project>/.omt/organization.json
 무거운 작업(테스트·빌드·무거운 worker) 전에 이사가 직접 또는 PM을 통해 자원 슬롯을 확보하고, 작업이 끝나면 해제한다.
 
 ```text
-node <runtime> resource-acquire --org <project>/.omt/organization.json --worktree <pm-worktree-id> --kind test|worker|build --note "작업 설명"
+node <runtime> resource-acquire --org <project>/.omt/organization.json --worktree <pm-worktree-id> --kind test|worker|build --note "작업 설명" --owner-pid <소유 프로세스 PID>
 node <runtime> resource-release --org <project>/.omt/organization.json --slot <slotId>
 ```
+
+`--owner-pid`에는 슬롯을 점유하는 오래 실행되는 프로세스(작업을 실행하는 세션이나 worker)의 PID를 넘긴다. 그 프로세스가 끝나면 다음 획득 때 슬롯이 회수된다. 생략하면 소유자가 알 수 없는 슬롯이 되어 자동으로 회수되지 않고 `resource-release`로만 해제되므로, 결과의 `warning`이 알려 주는 슬롯 ID를 작업이 끝날 때 반드시 해제한다.
 

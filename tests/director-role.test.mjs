@@ -34,6 +34,10 @@ import {
 } from "../plugins/oh-my-teams/scripts/delivery.mjs";
 import { sendSignal } from "../plugins/oh-my-teams/scripts/director.mjs";
 import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import {
+  ACCEPTED_RISK_AUTHORITIES,
+  validateReviewInput,
+} from "../plugins/oh-my-teams/scripts/gates.mjs";
 
 const example = () =>
   readJSON(
@@ -612,5 +616,99 @@ test("assertDirectorAuthority warns and proceeds for legacy entry without direct
     assert.ok(warnings.some((w) => w.includes("no director record")));
   } finally {
     console.warn = original;
+  }
+});
+
+// ─── 8. 결함 수정: accepted-risk authority 스키마 일치 ─────────────────────
+
+const REVIEW_SCHEMA = readJSON(
+  new URL("../plugins/oh-my-teams/schemas/review.schema.json", import.meta.url),
+);
+
+test("the review schema and the runtime accept the same accepted-risk authorities", () => {
+  const schemaAuthorities =
+    REVIEW_SCHEMA.properties.findings.items.properties.authority.enum;
+  assert.deepEqual(schemaAuthorities, [...ACCEPTED_RISK_AUTHORITIES]);
+  assert.ok(schemaAuthorities.includes("director"));
+
+  const task = {
+    schemaVersion: 2,
+    revision: 1,
+    kind: "edit",
+    id: "reviewed",
+    goal: "Check the accepted-risk authorities",
+    instruction: "Make the change",
+    nonGoals: [],
+    constraints: [],
+    files: ["reviewed.txt"],
+    checks: [[process.execPath, "-e", "process.exit(0)"]],
+    acceptance: [
+      { id: "semantic", description: "reads correctly", method: "review" },
+    ],
+    dependencies: [],
+    contractRefs: [],
+    contextRefs: [],
+    openQuestions: [],
+    reviewRequirements: [
+      {
+        id: "review-senior",
+        kind: "agent-review",
+        role: "senior",
+        criteria: ["semantic"],
+      },
+    ],
+    environment: "test",
+    baseRef: "HEAD",
+    risk: "low",
+  };
+  const review = (authority) => ({
+    schemaVersion: 1,
+    id: "review-1",
+    requirementId: "review-senior",
+    reviewer: {
+      kind: "agent-review",
+      role: "senior",
+      executionId: "reviewer-exec",
+    },
+    implementationExecutionId: "implementation-exec",
+    conclusion: "approved",
+    criteria: [{ id: "semantic", conclusion: "approved", evidence: "read" }],
+    findings: [
+      {
+        id: "risk-1",
+        status: "accepted-risk",
+        description: "a known gap",
+        authority,
+        reason: "decided by the deciding role",
+      },
+    ],
+  });
+  for (const authority of schemaAuthorities) {
+    assert.equal(validateReviewInput(review(authority), task).id, "review-1");
+  }
+  for (const authority of ["senior", "junior", undefined]) {
+    assert.throws(
+      () => validateReviewInput(review(authority), task),
+      /Accepted risk needs PM\/user\/director authority/,
+    );
+  }
+});
+
+// ─── 9. 결함 수정: close-ready 신호가 없을 때의 문서와 동작 ───────────────
+
+test("director and close skills describe the close-ready check as the runtime runs it", () => {
+  const skills = ["director", "close"].map((name) =>
+    fs.readFileSync(
+      new URL(
+        `../plugins/oh-my-teams/skills/${name}/SKILL.md`,
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  for (const text of skills) {
+    // A missing signal warns and proceeds; only a different HEAD refuses.
+    assert.match(text, /다르면 거부하고, 신호가 없으면 경고한 뒤 진행/);
+    assert.doesNotMatch(text, /신호가 없거나[^.]*거부/);
   }
 });

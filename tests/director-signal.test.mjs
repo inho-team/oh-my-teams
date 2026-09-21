@@ -18,6 +18,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/director.mjs";
 import {
   acquireResource,
+  queryPmLiveness,
   releaseResource,
   RESOURCE_KINDS,
 } from "../plugins/oh-my-teams/scripts/resources.mjs";
@@ -363,10 +364,12 @@ test("acquireResource rejects when free memory is below threshold", (t) => {
 test("acquireResource reclaims dead-owner slots and reports their ids", (t) => {
   const { orgFile, worktreeId } = makeProject(t);
 
-  // Acquire first slot.
+  // Acquire first slot. The owner is named: a slot with no owner is never
+  // reclaimed, so it could not exercise reclaim.
   const live = acquireResource(orgFile, {
     worktreeId,
     kind: "build",
+    ownerPid: process.pid,
     freeMemory: () => 2 * 1024 * 1024 * 1024, // 2 GiB fixture, host-independent
   });
   assert.ok(live.acquired);
@@ -443,4 +446,192 @@ test("acquireResource does not reclaim a slot whose ownerPid is still alive", (t
     !second.reclaimedIds.includes(first.id),
     "alive-owner slot must NOT be reclaimed by a subsequent acquire",
   );
+});
+
+// ─── 자원 슬롯 소유자 기본값 ─────────────────────────────────────────────────
+
+const PLENTY_OF_MEMORY = () => 2 * 1024 * 1024 * 1024;
+
+test("acquireResource without ownerPid records an unknown owner and warns", (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  const result = acquireResource(orgFile, {
+    worktreeId,
+    kind: "test",
+    freeMemory: PLENTY_OF_MEMORY,
+  });
+  assert.equal(result.record.pid, null, "the CLI's own pid is not the owner");
+  assert.notEqual(result.record.pid, process.pid);
+  assert.match(result.warning, /never reclaimed automatically/);
+  assert.match(result.warning, new RegExp(result.id));
+  const stored = readJSON(
+    path.join(path.dirname(orgFile), "resources", `${result.id}.json`),
+  );
+  assert.equal(stored.pid, null);
+});
+
+test("a slot with an unknown owner survives every later acquire, even one that calls every owner dead", (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  const unknown = acquireResource(orgFile, {
+    worktreeId,
+    kind: "test",
+    freeMemory: PLENTY_OF_MEMORY,
+  });
+  for (const liveness of [undefined, () => "dead"]) {
+    const next = acquireResource(orgFile, {
+      worktreeId,
+      kind: "test",
+      ownerPid: process.pid,
+      freeMemory: PLENTY_OF_MEMORY,
+      liveness,
+    });
+    assert.ok(!next.reclaimedIds.includes(unknown.id));
+    assert.equal(next.warning, undefined, "a known owner needs no warning");
+    releaseResource(orgFile, next.id);
+  }
+  // Only an explicit release frees it.
+  assert.ok(releaseResource(orgFile, unknown.id).released);
+});
+
+test("acquireResource refuses an ownerPid that is not a positive integer", (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  for (const ownerPid of [0, -4, 1.5, Number.NaN, "123"]) {
+    assert.throws(
+      () =>
+        acquireResource(orgFile, {
+          worktreeId,
+          kind: "test",
+          ownerPid,
+          freeMemory: PLENTY_OF_MEMORY,
+        }),
+      /ownerPid must be a positive integer/,
+      String(ownerPid),
+    );
+  }
+});
+
+// ─── PM liveness: Orca 의 실제 verdict 값 ────────────────────────────────────
+
+const PM_PATH = "/work/pm-worktree";
+const PM_ENTRY = {
+  pm: { worktreeId: `repo::${PM_PATH}`, path: PM_PATH },
+};
+
+// One `worker-list` entry in the shape a live Orca returns: the verdict sits in
+// `projection.liveness` and the worktree in `projection.workspace.id`.
+const orcaWorker = (workspacePath, liveness) => ({
+  dispatchId: "ctx_fixture",
+  workerState: "supervised",
+  resource: null,
+  projection: {
+    workspace: {
+      id: `repo::${workspacePath}`,
+      kind: "folder_or_worktree",
+    },
+    liveness,
+  },
+});
+
+const orcaAnswer = (workers) => async () => ({
+  code: 0,
+  stdout: JSON.stringify({
+    id: "fixture",
+    ok: true,
+    result: { workers, counts: {}, page: {}, scope: {} },
+  }),
+});
+
+const LIVE = {
+  verdict: "live",
+  observedAt: 1789958205199,
+  source: "agent_status",
+};
+const STALE = {
+  verdict: "unverifiable",
+  reason: "stale_status",
+  observedAt: 1789895814805,
+};
+const EXITED = { verdict: "exited", observedAt: 1789958205199 };
+
+test("queryPmLiveness reads the verdicts Orca actually reports", async () => {
+  const verdict = (liveness) =>
+    queryPmLiveness(
+      PM_ENTRY,
+      undefined,
+      orcaAnswer([orcaWorker(PM_PATH, liveness)]),
+    );
+  assert.equal(await verdict(LIVE), "live");
+  assert.equal(await verdict(EXITED), "exited");
+  assert.equal(await verdict(STALE), "unverifiable");
+});
+
+test("queryPmLiveness never turns absence, failure or an unknown value into live or exited", async () => {
+  const ask = (execute) => queryPmLiveness(PM_ENTRY, undefined, execute);
+  // Values the previous implementation invented; Orca does not report them.
+  for (const verdict of ["alive", "dead", "running", "", null, 7]) {
+    assert.equal(
+      await ask(orcaAnswer([orcaWorker(PM_PATH, { verdict })])),
+      "unverifiable",
+      String(verdict),
+    );
+  }
+  // The PM worktree is absent from the list: presence elsewhere proves nothing.
+  assert.equal(await ask(orcaAnswer([])), "unverifiable");
+  assert.equal(
+    await ask(orcaAnswer([orcaWorker("/work/other", LIVE)])),
+    "unverifiable",
+  );
+  // A sibling whose path merely starts with the PM path is another worktree.
+  assert.equal(
+    await ask(orcaAnswer([orcaWorker(`${PM_PATH}-2`, LIVE)])),
+    "unverifiable",
+  );
+  // Failed and unreadable queries.
+  assert.equal(
+    await ask(async () => ({ code: 1, stdout: "" })),
+    "unverifiable",
+  );
+  assert.equal(
+    await ask(async () => ({ code: 0, stdout: "not json" })),
+    "unverifiable",
+  );
+  assert.equal(
+    await ask(async () => ({ code: 0, stdout: JSON.stringify({ ok: true }) })),
+    "unverifiable",
+  );
+  assert.equal(
+    await ask(async () => {
+      throw new Error("spawn failed");
+    }),
+    "unverifiable",
+  );
+});
+
+test("queryPmLiveness weighs every entry of the PM worktree, not the first one", async () => {
+  const ask = (...livenesses) =>
+    queryPmLiveness(
+      PM_ENTRY,
+      undefined,
+      orcaAnswer(livenesses.map((liveness) => orcaWorker(PM_PATH, liveness))),
+    );
+  // An old settled dispatch listed first must not hide the live one.
+  assert.equal(await ask(STALE, LIVE), "live");
+  assert.equal(await ask(EXITED, LIVE), "live");
+  // Exited is concluded only when nothing in the worktree is live or unknown.
+  assert.equal(await ask(EXITED, EXITED), "exited");
+  assert.equal(await ask(EXITED, STALE), "unverifiable");
+});
+
+test("queryPmLiveness asks Orca for worker-list with the given executable", async () => {
+  const calls = [];
+  await queryPmLiveness(PM_ENTRY, "/opt/orca", async (argv, options) => {
+    calls.push({ argv, options });
+    return { code: 0, stdout: "[]" };
+  });
+  assert.deepEqual(calls[0].argv, [
+    "/opt/orca",
+    "orchestration",
+    "worker-list",
+    "--json",
+  ]);
+  assert.ok(calls[0].options.timeoutMs > 0);
 });

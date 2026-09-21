@@ -58,7 +58,7 @@ PM과 이사가 화면 문자열 신호(`MAIN-DECISION:`, `CLOSE-READY:`)와 공
 
 ### 2.1 슬롯 레코드 형식
 
-슬롯 레코드는 `.omt/resources/<uuid>.json`에 저장된다.
+슬롯 레코드는 `.omt/resources/<uuid>.json`에 저장된다. `pid`는 `--owner-pid`로 받은 소유 프로세스이며, 생략하면 `null`(소유자 미상)이다.
 
 ```json
 {
@@ -79,11 +79,11 @@ PM과 이사가 화면 문자열 신호(`MAIN-DECISION:`, `CLOSE-READY:`)와 공
 
 ### 2.3 죽은 소유자 회수
 
-슬롯 획득 시 기존 슬롯의 `pid`와 `hostname`을 검사한다. 같은 호스트의 죽은 프로세스가 소유한 슬롯은 `fs.unlinkSync`로 회수한다. 다른 호스트이거나 liveness를 확인할 수 없으면 `"unverifiable"`로 보존하고 회수하지 않는다. 이 규칙은 core.mjs의 `ownerHasExited`와 같은 원칙이며, 외부에서 주입할 수 있는 `liveness` 함수로 테스트 격리를 지원한다.
+슬롯 획득 시 기존 슬롯의 `pid`와 `hostname`을 검사한다. 같은 호스트의 죽은 프로세스가 소유한 슬롯은 `fs.unlinkSync`로 회수한다. 다른 호스트이거나 liveness를 확인할 수 없으면 `"unverifiable"`로 보존하고 회수하지 않는다. `pid`가 `null`인 슬롯은 소유자가 죽었는지 판단할 수 없으므로 검사하지 않고 회수하지 않으며, `resource-release`로만 해제된다(선택 근거는 `director-role.md` 8.3). 이 규칙은 core.mjs의 `ownerHasExited`와 같은 원칙이며, 외부에서 주입할 수 있는 `liveness` 함수로 테스트 격리를 지원한다.
 
 ### 2.4 PM liveness 판정
 
-`queryPmLiveness`는 Orca CLI로 PM liveness를 조회한다. Orca 조회가 실패하거나 worker 목록에서 PM을 특정할 수 없으면 `"unverifiable"`을 반환한다. `"alive"`나 `"dead"`로 단정하지 않는다. 이는 저장소 기존 규율(`unverifiable`로 보존)과 동일한 원칙이다.
+`queryPmLiveness`는 Orca의 `worker-list`로 PM liveness를 조회하고 Orca의 값 `"live"`·`"exited"`·`"unverifiable"`을 그대로 반환한다. Orca 조회가 실패하거나 알 수 없는 값이거나 worker 목록에서 PM을 특정할 수 없으면 `"unverifiable"`을 반환하며, 목록에 있다는 사실만으로 `"live"`로 단정하지 않는다(상세는 `director-role.md` 8.2). 이는 저장소 기존 규율(`unverifiable`로 보존)과 동일한 원칙이다.
 
 ---
 

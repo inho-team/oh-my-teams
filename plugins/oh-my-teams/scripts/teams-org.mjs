@@ -227,7 +227,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   director-ack --org FILE --signal ID
                (marks a signal as acknowledged without a text reply)
   resource-acquire --org FILE --worktree ID --kind test|worker|build [--note TEXT] [--owner-pid PID]
-                   (acquires a resource slot; --owner-pid sets the long-lived owner process, defaults to current PID)
+                   (acquires a resource slot; --owner-pid names the long-lived owner process, omitted the owner is unknown and the slot is only freed by resource-release)
   resource-release --org FILE --slot ID
                    (releases an acquired resource slot)
   director-watch --org FILE [--orca EXECUTABLE]

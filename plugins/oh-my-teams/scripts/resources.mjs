@@ -69,16 +69,24 @@ function minFreeMemory(orgFile) {
  * @param {string} request.worktreeId - PM worktree acquiring the slot.
  * @param {string} request.kind - One of RESOURCE_KINDS.
  * @param {string} [request.note] - Optional description of the intended use.
+ * @param {number} [request.ownerPid] - Long-lived process that owns the slot.
+ *   Omitted, the owner is recorded as unknown (`pid: null`) and the slot is
+ *   never reclaimed automatically; release it with `releaseResource`.
  * @param {Function} [request.freeMemory] - Injectable free-memory reporter (bytes).
  * @param {Function} [request.liveness] - Injectable liveness checker for reclaim.
- * @returns {{acquired: boolean, id: string, record: object, reclaimedIds: string[]}} Result.
- * @throws {Error} When the kind is invalid, the worktree is unknown, or free
- *   memory is below the threshold.
+ * @returns {{acquired: boolean, id: string, record: object, reclaimedIds: string[], warning?: string}} Result.
+ * @throws {Error} When the kind is invalid, `ownerPid` is not a positive
+ *   integer, the worktree is unknown, or free memory is below the threshold.
  */
 export function acquireResource(orgFile, request) {
   assert(
     RESOURCE_KINDS.includes(request.kind),
     `Unknown resource kind: ${request.kind}`,
+  );
+  const ownerPid = request.ownerPid ?? null;
+  assert(
+    ownerPid === null || (Number.isInteger(ownerPid) && ownerPid > 0),
+    `ownerPid must be a positive integer: ${request.ownerPid}`,
   );
 
   // Verify that the worktree is registered.
@@ -105,6 +113,8 @@ export function acquireResource(orgFile, request) {
     const existing = readSlots(orgFile);
     const reclaimedIds = [];
     for (const slot of existing) {
+      // An unknown owner cannot be shown dead, so its slot is never reclaimed.
+      if (slot.pid === null) continue;
       const verdict = checkLiveness({ pid: slot.pid, hostname: slot.hostname });
       if (verdict === "dead") {
         const slotFile = path.join(slotsDir(orgFile), `${slot.id}.json`);
@@ -118,12 +128,9 @@ export function acquireResource(orgFile, request) {
     }
 
     const id = crypto.randomUUID();
-    // Use request.ownerPid when the caller knows which long-lived process owns
-    // the slot (e.g. the PM process that spawned this CLI invocation). Falling
-    // back to process.pid means the slot's owner is this CLI process, which
-    // exits immediately after acquire; the next acquire call will then see the
-    // slot as dead and reclaim it. Pass the actual owner PID to prevent that.
-    const ownerPid = request.ownerPid ?? process.pid;
+    // The slot's owner must outlive this CLI process, which exits right after
+    // acquire. Recording the CLI's own PID would make every slot look dead at
+    // the next acquire, so an omitted owner is recorded as unknown instead.
     const record = {
       schemaVersion: 1,
       id,
@@ -135,7 +142,13 @@ export function acquireResource(orgFile, request) {
       acquiredAt: new Date().toISOString(),
     };
     writeJSON(path.join(slotsDir(orgFile), `${id}.json`), record);
-    return { acquired: true, id, record, reclaimedIds };
+    const result = { acquired: true, id, record, reclaimedIds };
+    if (ownerPid === null) {
+      result.warning =
+        "No ownerPid was given: the slot is never reclaimed automatically. " +
+        `Release it with resource-release --slot ${id}, or acquire with --owner-pid.`;
+    }
+    return result;
   });
 }
 
@@ -156,20 +169,42 @@ export function releaseResource(orgFile, slotId) {
   });
 }
 
+// Orca reports each worker's liveness as `projection.liveness.verdict`, one of
+// `live`, `exited` or `unverifiable` (for example
+// `{"verdict":"live","observedAt":1789958205199,"source":"agent_status"}`).
+// Any other value is not Orca's, so it is read as unverifiable.
+const ORCA_LIVENESS = new Set(["live", "exited", "unverifiable"]);
+
+// True when a worker-list entry belongs to the PM worktree. The workspace id
+// is `<uuid>::<path>`, so the path must match whole, not as a substring that
+// a sibling worktree such as `<path>-2` would also satisfy.
+function inPmWorktree(worker, entry) {
+  const ids = [worker.resource?.worktreeId, worker.projection?.workspace?.id];
+  const pmPath = entry.pm?.path;
+  return ids.some(
+    (id) =>
+      typeof id === "string" &&
+      (id === entry.pm?.worktreeId ||
+        id === pmPath ||
+        (pmPath && id.endsWith(`::${pmPath}`))),
+  );
+}
+
 /**
  * Reports the current PM liveness status for a kickoff registry entry.
  *
- * Uses Orca to query the PM worktree. A failed query is preserved as
- * `"unverifiable"` rather than concluded as alive or terminated.
+ * Uses Orca's `worker-list` and keeps Orca's own vocabulary. A failed query,
+ * an unknown value, or a PM worktree with no entry is preserved as
+ * `"unverifiable"`. The PM is `"live"` when any of its worktree's entries is
+ * live, and `"exited"` only when every one of them has exited. The mere
+ * presence of an entry never proves the PM alive.
  *
  * @param {object} entry - Kickoff registry entry.
  * @param {string} [orcaExecutable] - Orca binary path.
- * @returns {Promise<"alive"|"dead"|"unverifiable">} PM liveness verdict.
+ * @param {Function} [execute=run] - Injectable command runner.
+ * @returns {Promise<"live"|"exited"|"unverifiable">} PM liveness verdict.
  */
-export async function queryPmLiveness(entry, orcaExecutable) {
-  // Orca provides no reliable synchronous PM liveness query via its CLI in
-  // non-interactive contexts. We attempt a brief status call; any error,
-  // non-zero exit, or timeout results in "unverifiable".
+export async function queryPmLiveness(entry, orcaExecutable, execute = run) {
   const argv = [
     orcaExecutable ?? "orca",
     "orchestration",
@@ -177,43 +212,24 @@ export async function queryPmLiveness(entry, orcaExecutable) {
     "--json",
   ];
   try {
-    const result = await run(argv, { timeoutMs: 8000 });
+    const result = await execute(argv, { timeoutMs: 8000 });
     if (result.code !== 0) return "unverifiable";
-    let parsed;
-    try {
-      parsed = JSON.parse(result.stdout);
-    } catch {
-      return "unverifiable";
-    }
-    // Orca worker-list returns {result: {workers: [...], ...}} envelope.
-    // Fall back to treating a top-level array as the worker list so tests and
-    // older Orca versions that return a plain array still work.
-    const workers = Array.isArray(parsed)
-      ? parsed
-      : Array.isArray(parsed?.result?.workers)
-        ? parsed.result.workers
-        : null;
+    const parsed = JSON.parse(result.stdout);
+    // Orca answers `{result: {workers: [...]}}`; a bare array is accepted for
+    // older Orca versions.
+    const workers = Array.isArray(parsed) ? parsed : parsed?.result?.workers;
     if (!Array.isArray(workers)) return "unverifiable";
-    const pmPath = entry.pm?.path;
-    if (!pmPath) return "unverifiable";
-    // Find the worker entry for the PM worktree.
-    // Actual Orca worker-list response (verified against live CLI 2026-09-21):
-    //   w.resource.worktreeId  — e.g. "<uuid>::<path>"
-    //   w.projection.workspace.id — same format
-    // There is no top-level w.worktree field.
-    const found = workers.find((w) => {
-      const rid = w.resource?.worktreeId ?? "";
-      const wid = w.projection?.workspace?.id ?? "";
-      return rid.includes(pmPath) || wid.includes(pmPath);
-    });
-    if (!found) return "unverifiable";
-    // projection.liveness is an object { verdict, reason, observedAt }, not a
-    // plain string. Extract the verdict and map to the three canonical values.
-    // Do not infer alive from the mere presence of an entry.
-    const verdict =
-      found.projection?.liveness?.verdict ?? found.projection?.liveness;
-    if (verdict === "alive") return "alive";
-    if (verdict === "dead") return "dead";
+    const verdicts = workers
+      .filter((worker) => inPmWorktree(worker, entry))
+      .map((worker) => {
+        const liveness = worker.projection?.liveness;
+        const verdict = liveness?.verdict ?? liveness;
+        return ORCA_LIVENESS.has(verdict) ? verdict : "unverifiable";
+      });
+    if (verdicts.includes("live")) return "live";
+    if (verdicts.length > 0 && verdicts.every((v) => v === "exited")) {
+      return "exited";
+    }
     return "unverifiable";
   } catch {
     return "unverifiable";

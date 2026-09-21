@@ -18,12 +18,23 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const isId = (value) => typeof value === "string" && ID_PATTERN.test(value);
 const REVIEW_CONCLUSIONS = ["approved", "changes-requested", "inconclusive"];
 const FINDING_STATUSES = ["open", "resolved", "accepted-risk"];
+
+/**
+ * Roles that may decide an accepted-risk finding. `schemas/review.schema.json`
+ * lists the same values, and a test keeps the two from drifting apart.
+ */
+export const ACCEPTED_RISK_AUTHORITIES = Object.freeze([
+  "pm",
+  "user",
+  "director",
+]);
 // Printed with every finding refusal, so the reviewer can fix its own record
 // instead of another role rewriting the review into this shape.
 const FINDING_FORMAT =
   "Each finding is {id: lowercase letters, digits and hyphens; status: open|resolved|accepted-risk; " +
-  "description}; a resolved finding adds resolution, an accepted-risk finding adds authority (pm|user|director) " +
-  "and reason. See examples/review.json and examples/review.changes-requested.json.";
+  "description}; a resolved finding adds resolution, an accepted-risk finding adds authority (" +
+  ACCEPTED_RISK_AUTHORITIES.join("|") +
+  ") and reason. See examples/review.json and examples/review.changes-requested.json.";
 
 const reviewFile = (stateDir, id) =>
   path.join(stateDir, "reviews", `${id}.json`);
@@ -66,7 +77,7 @@ function validateFinding(finding, index) {
   }
   if (finding.status === "accepted-risk") {
     check(
-      ["pm", "user", "director"].includes(finding.authority) &&
+      ACCEPTED_RISK_AUTHORITIES.includes(finding.authority) &&
         typeof finding.reason === "string" &&
         finding.reason.trim(),
       `Accepted risk needs PM/user/director authority and reason: ${finding.id}`,
