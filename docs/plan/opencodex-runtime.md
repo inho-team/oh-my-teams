@@ -1,6 +1,6 @@
 # OpenCodex 2.59.0 격리 검증
 
-부분 완료: ChatGPT·Claude와 추가 Antigravity 두 계정이 같은 픽스처 작업을 완료했습니다. 다만 풀 안 자동 전환도 한 번 관측했지만 모든 전환의 정확한 시각·이전 계정 기록, 공유 계정 고정 비교와 감독 세션의 권한·취소 검증이 남아 있어 OMT의 공통 실행 경로 전환은 아직 보류합니다.
+부분 완료: ChatGPT·Claude와 추가 Antigravity 두 계정이 같은 픽스처 작업을 완료했습니다. 다만 풀 안 자동 전환도 한 번 관측했지만 모든 전환의 정확한 시각·이전 계정 기록, 공유 계정 고정 비교와 신뢰 이후 입력 제출·진행 중인 상위 요청 취소 검증이 남아 있어 OMT의 공통 실행 경로 전환은 아직 보류합니다.
 
 이 문서는 조사 결과이며 OMT 런타임의 지원 선언이 아닙니다. 작업은 `origin/main`의 `184c2de`를 기준으로 한 `docs/opencodex-probe` 브랜치에서 수행했습니다. 관측 환경은 macOS, Codex CLI 0.155.1, OpenCodex 2.59.0이며 Windows에서는 실행하지 않았습니다. 조직 revision 1의 구독을 유지하고 모델이나 계정을 대신 선택하지 않았습니다.
 
@@ -141,12 +141,34 @@ PM은 사용자 승인을 확인한 메시지 `msg_db97868379da`에서 재설정
 | 성공 완료 | 네 작업에서 `turn.completed`와 종료 코드 0을 함께 확인했습니다. |
 | 실패 종료 | 로그인 전 로컬 음성 대조에서 인증 401, `turn.failed`, 종료 코드 1을 확인했습니다. 원문은 `OpenAI account pool has no usable account credential`이었습니다. |
 | 모델 관측 | CLI 이벤트에는 model 필드가 없어 배열이 비어 있습니다. 별도의 프록시 request-history에서 requestedModel과 resolvedModel을 대조했습니다. |
-| 권한 질문·폴더 신뢰 | 확인하지 못했습니다. 비대화 exec의 준비만으로 감독 터미널의 신뢰·Enter 문제를 해결했다고 판단하지 않습니다. |
-| 취소 | 활성 모델 turn과 자손 프로세스 전체의 취소는 확인하지 못했습니다. |
+| 권한 질문·폴더 신뢰 | 새 Git 폴더와 새 CODEX_HOME에서 권한 우회 플래그를 사용했는데도 폴더 신뢰 질문이 나타났습니다. 지시에 따라 답하지 않고 관측 후 터미널을 닫았습니다. |
+| 취소 | ChatGPT 경로에서 turn.started 직후 SIGINT를 보내 종료 코드 1을 관측했습니다. 직후 자손 PID 하나가 남았으나 후속 관측에서는 알려진 PID가 모두 사라졌습니다. 프록시에는 새 요청이 없었으므로 진행 중인 상위 요청 취소까지 입증하지는 않습니다. |
+
+### 취소와 대화형 화면 실측
+
+[cancel.py](../../experiments/opencodex/cancel.py)는 고정한 ChatGPT Pro 계정, gpt-6-astra/medium 경로에서 한 번만 실행했습니다. 04:22:24.155810Z에 시작했고 `thread.started`, `turn.started`를 읽은 직후인 04:22:24.307327Z에 해당 프로세스 그룹으로 SIGINT를 보냈습니다. 04:22:24.343338Z에 종료 코드 1을 받았으며 추가 SIGTERM은 필요하지 않았습니다. 완료나 실패 turn 이벤트는 없었습니다. SIGINT 직전 발견한 프로세스 여섯 개 중 하나가 직후 관측에 남았지만 후속 ps 관측에서는 모두 없어졌습니다. 정확한 후속 관측 시각은 evidence.json의 laterObservationAt에 있습니다.
+
+프록시 request-history는 기존 9건에서 늘지 않았습니다. 따라서 이번 관측은 **로컬 turn 시작 후 상위 요청 기록이 생기기 전의 취소**입니다. 상위 제공자의 스트리밍 요청이 이미 시작된 상태에서의 취소나 과금 중단을 입증하지는 않습니다. OMT는 사용자의 취소 의도와 신호 기록을 보존해야 하며 종료 코드 1만으로 일반 실패라고 단정해서는 안 됩니다.
+
+대화형 실험에서는 `/tmp/omt-opencodex-probe.dAKX3U/tui-trust`에 픽스처와 새 Git 저장소를 만들고, 새 `tui-codex` 홈과 프록시 CLI 인수, `--dangerously-bypass-approvals-and-sandbox`로 Codex를 띄웠습니다. 최초 실행 명령에 exec 전용 `--ignore-user-config`를 넣어 CLI 오류가 발생했으므로 이를 제거하고 같은 빈 홈으로 실행했습니다. 이 오류 단계에서는 모델을 호출하지 않았습니다. 최초 terminal create 뒤에는 셸 명령만 보였고 별도 Enter 뒤 CLI가 실행되었으므로, 터미널 생성 자체도 모델 turn 시작의 증거가 되지 않았습니다.
+
+`orca terminal read --screen`은 실제 렌더링 화면에서 다음 내용을 반환했습니다.
+
+```text
+Do you trust the contents of this directory?
+Trusting the directory allows project-local config, hooks, and exec policies to load.
+› 1. Yes, continue
+  2. No, quit
+  Press enter to continue
+```
+
+신뢰 질문에는 답하지 말라는 PM 지시가 있어 모델 프롬프트와 Enter를 보내지 않았습니다. 이 화면에서 Enter는 단순 제출이 아니라 신뢰 승인으로 작동하기 때문입니다. 셸 실행 명령의 send receipt는 `input_accepted`, provider `unsupported`였으며, 이를 모델 프롬프트의 제출 증거로 사용하지 않았습니다. 신뢰 이후의 `terminal send --enter --wait-submit`과 `turn_started` 구분은 아직 미검증입니다. 관측 터미널은 `terminal close`의 `ptyKilled=true`로 종료했습니다.
+
+프록시와 권한 우회 플래그를 함께 사용해도 폴더 신뢰 단계가 남는다는 반례는 확보했습니다. OMT가 신뢰·권한 대화상자와 일반 프롬프트를 구분해야 한다는 요구는 공통 프록시 도입 후에도 유지됩니다.
 
 ## 판정과 남은 검증
 
-세 구독 계열에서 같은 작은 저장소 작업을 수행할 수 있다는 긍정적인 증거가 생겼습니다. 그러나 공통 실행 경로의 전면 전환은 아직 보류합니다. 동시 요청에서 풀 전환을 완전하게 기록할 수 있는지, 공유 계정의 고정 비교, 감독 세션의 권한 질문과 취소, Windows 실행과 Senior 독립 검토가 남아 있기 때문입니다.
+세 구독 계열에서 같은 작은 저장소 작업을 수행할 수 있다는 긍정적인 증거가 생겼습니다. 그러나 공통 실행 경로의 전면 전환은 아직 보류합니다. 동시 요청에서 풀 전환을 완전하게 기록할 수 있는지, 공유 계정의 고정 비교, 신뢰 이후 입력 제출과 상위 요청 진행 중 취소, Windows 실행과 Senior 독립 검토가 남아 있기 때문입니다.
 
 계정별 고정 실행은 단일 계정 홈으로 격리하고, 선언된 풀 안의 자동 전환은 요청별 계정 표식을 보존하는 별도 계약으로 다뤄야 합니다. OpenCodex의 auto-switch 표시를 그대로 OMT의 자동 전환 금지 정책으로 해석해서는 안 됩니다. 프로세스·토큰 갱신 소유권과 OAuth 파일 취급도 설치기의 `npm install` 한 줄로 해결되지 않습니다.
 

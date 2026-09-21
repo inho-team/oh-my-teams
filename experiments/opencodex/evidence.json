@@ -1017,5 +1017,115 @@
   "isolatedProxyShutdown": {
     "18474": 0,
     "18475": 0
+  },
+  "cancellation": {
+    "startedAt": "2026-09-21T04:22:24.155810+00:00",
+    "model": "gpt-6-astra",
+    "effort": "medium",
+    "events": ["thread.started", "turn.started"],
+    "signals": [
+      {
+        "signal": "SIGINT",
+        "at": "2026-09-21T04:22:24.307327+00:00"
+      }
+    ],
+    "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/cancel-fixture-9esq1i2v",
+    "exitCode": 1,
+    "stderrPresent": true,
+    "knownPidsBeforeSignal": [8278, 8283, 8286, 8287, 8288, 8290],
+    "remainingKnownPids": [8287],
+    "finishedAt": "2026-09-21T04:22:24.343338+00:00",
+    "remainingKnownPidsLater": [],
+    "laterObservationAt": "2026-09-21T04:23:13.732571+00:00",
+    "proxyHistoryNewEntries": 0
+  },
+  "tuiTrust": {
+    "observedAt": "2026-09-21T04:25:18.871897+00:00",
+    "terminalHandle": "term_cc632ec6-1d67-4e28-a061-856072e263b0",
+    "source": "screen",
+    "screenLines": [
+      "  Welcome to Codex, OpenAI's command-line coding agent",
+      "> You are in /tmp/omt-opencodex-probe.dAKX3U/tui-trust",
+      "  Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt injection.",
+      "  Trusting the directory allows project-local config, hooks, and exec policies to load.",
+      "\u203a 1. Yes, continue",
+      "  2. No, quit",
+      "  Press enter to continue"
+    ],
+    "trustAnswered": false,
+    "modelPromptSent": false,
+    "reasonNotSent": "Enter at this dialog would accept trust, contrary to the explicit observe-only instruction",
+    "bypassFlag": "--dangerously-bypass-approvals-and-sandbox",
+    "codexHome": "/tmp/omt-opencodex-probe.dAKX3U/tui-codex",
+    "close": {
+      "handle": "term_cc632ec6-1d67-4e28-a061-856072e263b0",
+      "tabId": "c2d37734-159b-4cfb-8cba-03dfa75fe453",
+      "ptyKilled": true
+    },
+    "shellLaunchReceipt": {
+      "handle": "term_cc632ec6-1d67-4e28-a061-856072e263b0",
+      "accepted": true,
+      "bytesWritten": 46,
+      "prompt": {
+        "requestId": "6a710565-46cb-45a0-9d62-b97a94d49d4e",
+        "stages": ["input_accepted"],
+        "provider": "unsupported",
+        "observation": "unsupported",
+        "processIncarnation": "c152713f-c0af-44c3-a1bd-b3ba38705302",
+        "generation": 562,
+        "baselineWorkingSequence": 0
+      }
+    }
+  },
+  "postLifecycleSnapshot": {
+    "timestamp": "2026-09-21T04:26:26.379319+00:00",
+    "files": {
+      ".codex/config.toml": {
+        "exists": true,
+        "mtime_ns": 1789960577809199061,
+        "sha256": "7cdc764a7f203224592abae5b4b838e06c5a530ba45bd5030161375a0d83cb98"
+      },
+      ".claude/settings.json": {
+        "exists": true,
+        "mtime_ns": 1789642503855339875,
+        "sha256": "6eabc551fb3052311834595d2d24f836341757d3889717c4e5a75bead57a7be6"
+      },
+      ".opencodex": {
+        "exists": false,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      ".gemini": {
+        "exists": true,
+        "mtime_ns": 1789341168660791558,
+        "sha256": null
+      },
+      ".zshrc": {
+        "exists": true,
+        "mtime_ns": 1789343214072435497,
+        "sha256": "d066a470c19816a0b4c0d683ddbf5de864c6f71a65f914794a8af56203b675c0"
+      }
+    },
+    "keychain": {
+      "opencodex.provider-api-key.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "opencodex.native-main-profile.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "Claude Code-credentials": {
+        "exit": 0,
+        "metadata_sha256": "063b400b4f0f4099f03c8547fd250f7a7d293b800d7bd4839f817da4627a3c67",
+        "secret_requested": false
+      }
+    },
+    "unchanged": {
+      "files": true,
+      "keychain": true
+    }
   }
 }
