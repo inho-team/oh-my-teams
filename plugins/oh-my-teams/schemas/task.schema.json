@@ -68,12 +68,26 @@
     },
     "environment": { "type": "string", "minLength": 1 },
     "baseRef": { "type": "string", "minLength": 1 },
-    "risk": { "enum": ["low", "normal", "high"] }
+    "risk": { "enum": ["low", "normal", "high"] },
+    "delegation": { "$ref": "#/$defs/delegation" }
   },
   "$defs": {
     "strings": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "verification", "authority", "design"],
+      "properties": {
+        "scope": { "enum": ["closed", "open"] },
+        "verification": {
+          "enum": ["deterministic", "independent-review"]
+        },
+        "authority": { "enum": ["standard", "elevated"] },
+        "design": { "enum": ["routine", "significant"] }
+      }
     },
     "ref": {
       "type": "object",
