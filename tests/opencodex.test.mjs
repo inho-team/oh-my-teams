@@ -177,7 +177,7 @@ test("proxy request history, not CLI JSONL, proves the fixed account and model",
         json: async () => ({
           entries: [
             {
-              timestamp: "2026-09-21T00:00:00.000Z",
+              timestamp: 1789963102082,
               requestedModel: "gpt-6-astra",
               resolvedModel: "gpt-6-astra",
               provider: "openai-fixed-account",

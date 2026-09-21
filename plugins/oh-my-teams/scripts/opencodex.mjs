@@ -256,7 +256,9 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
   const entry = entries.find(
     (candidate) =>
       candidate.timestamp &&
-      Date.parse(candidate.timestamp) >= input.startedAt &&
+      (typeof candidate.timestamp === "number"
+        ? candidate.timestamp
+        : Date.parse(candidate.timestamp)) >= input.startedAt &&
       candidate.requestedModel === input.model &&
       candidate.provider ===
         openCodexProvider(input.provider, input.accountLogLabel),
