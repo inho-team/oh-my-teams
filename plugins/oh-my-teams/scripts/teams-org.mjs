@@ -698,6 +698,7 @@ function startHeadlessRole(args) {
     binary: [command.argv[0]],
     model: command.modelRequested,
     effort: command.effortRequested,
+    runner: command.runner ?? null,
     cwd,
     prompt: `${roleSpec(org, command.role, args.spec, run)}
 ${HEADLESS_PROTOCOL}
@@ -1083,6 +1084,10 @@ async function executeCommand(args) {
     case "role-terminal": {
       const { org, run: runCtx } = launchContext(args);
       const command = roleCommand(org, args.role, runCtx);
+      assert(
+        !command.runner,
+        "An explicit OpenCodex runner is supported by headless-start only; role-terminal cannot run it as native Codex",
+      );
       const target = selectedWorktreePath(args.worktree, process.cwd());
       if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
       const launchedAt = new Date().toISOString();

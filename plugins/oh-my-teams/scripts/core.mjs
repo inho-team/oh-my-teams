@@ -657,7 +657,8 @@ function validateProfile(id, profile, pools) {
   if (profile.account !== "current") {
     assert(
       (profile.env && Object.keys(profile.env).length > 0) ||
-        (transport === "process" && profile.command.length > 1),
+        (transport === "process" && profile.command.length > 1) ||
+        profile.runner?.kind === "opencodex",
       `Named account ${id} needs an actual command/profile or environment binding`,
     );
   }

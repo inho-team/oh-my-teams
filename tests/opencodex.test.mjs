@@ -87,10 +87,11 @@ test("the OpenCodex runner invokes actual Codex JSONL with explicit proxy and mo
     model: "gpt-6-astra",
     effort: "medium",
   });
-  assert.deepEqual(argv.slice(0, 5), [
+  assert.deepEqual(argv.slice(0, 6), [
     "codex",
     "exec",
     "--json",
+    "--dangerously-bypass-approvals-and-sandbox",
     "--cd",
     "/tmp/work",
   ]);

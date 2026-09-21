@@ -127,6 +127,39 @@ async function unusedPort() {
   return port;
 }
 
+function processAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+async function stopOwnedProxy(child) {
+  if (!child.pid || child.exitCode !== null) return;
+  try {
+    if (process.platform === "win32") child.kill("SIGTERM");
+    else process.kill(-child.pid, "SIGTERM");
+  } catch {}
+  await Promise.race([
+    new Promise((resolve) => child.once("close", resolve)),
+    new Promise((resolve) => setTimeout(resolve, 3000)),
+  ]);
+  if (processAlive(child.pid)) {
+    try {
+      if (process.platform === "win32") child.kill("SIGKILL");
+      else process.kill(-child.pid, "SIGKILL");
+    } catch {}
+    await Promise.race([
+      new Promise((resolve) => child.once("close", resolve)),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  }
+  assert(!processAlive(child.pid), "opencodex-proxy-exit-unverifiable");
+}
+
 /**
  * Starts an owned loopback OpenCodex process and waits for its health endpoint.
  * This never invokes a login command and only terminates the child it started.
@@ -135,7 +168,7 @@ async function unusedPort() {
  */
 export async function startOpenCodexProxy(binding) {
   const env = openCodexEnvironment(binding);
-  const port = binding.port ?? (await unusedPort());
+  const port = await unusedPort();
   const binary = path.join(
     binding.runtimePrefix,
     "node_modules",
@@ -147,6 +180,7 @@ export async function startOpenCodexProxy(binding) {
     env: isolatedOpenCodexEnvironment(process.env, env),
     stdio: "ignore",
     shell: false,
+    detached: process.platform !== "win32",
   });
   let exited = false;
   let spawnError = null;
@@ -161,25 +195,21 @@ export async function startOpenCodexProxy(binding) {
     if (spawnError || exited) break;
     try {
       const response = await fetch(`http://127.0.0.1:${port}/healthz`);
-      if (response.ok) {
+      if (response.ok && child.pid && !exited) {
         return {
           port,
           pid: child.pid ?? null,
           env,
           stop: async () => {
             if (child.exitCode !== null || exited) return;
-            child.kill("SIGTERM");
-            await Promise.race([
-              new Promise((resolve) => child.once("close", resolve)),
-              new Promise((resolve) => setTimeout(resolve, 3000)),
-            ]);
+            await stopOwnedProxy(child);
           },
         };
       }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (child.exitCode === null && !exited) child.kill("SIGTERM");
+  if (child.exitCode === null && !exited) await stopOwnedProxy(child);
   throw new Error("opencodex-proxy-not-ready");
 }
 
@@ -192,10 +222,12 @@ export function openCodexCommand(request) {
   assert(request.model, "opencodex-binding-unverified");
   assert(request.effort, "opencodex-binding-unverified");
   assert(Number.isInteger(request.port), "opencodex-proxy-not-ready");
-  return [
+  const argv = [
     "codex",
     "exec",
+    ...(request.session ? ["resume", request.session] : []),
     "--json",
+    "--dangerously-bypass-approvals-and-sandbox",
     "--cd",
     request.cwd,
     "--model",
@@ -218,6 +250,7 @@ export function openCodexCommand(request) {
     "model_providers.omt-opencodex.stream_max_retries=0",
     "-",
   ];
+  return argv;
 }
 
 /**

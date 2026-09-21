@@ -176,6 +176,23 @@ test("a named account or a path command cannot be launched as a plain name", () 
   const pathOrg = example();
   pathOrg.profiles["claude-current"].command = ["C:\\Tools\\claude.cmd"];
   assert.throws(() => roleCommand(pathOrg, "pm"), /bare executable name/);
+
+  org.profiles["ocx"] = {
+    provider: "codex",
+    command: ["codex"],
+    account: "fixed-account",
+    subscription: "Fixed subscription",
+    model: "gpt-6-astra",
+    effort: "medium",
+    runner: {
+      kind: "opencodex",
+      mode: "fixed-account",
+      accountHomeRef: "fixed-account",
+      runtimeFingerprint: `sha256:${"a".repeat(64)}`,
+    },
+  };
+  org.roles.junior.profile = "ocx";
+  assert.equal(roleCommand(org, "junior").runner.actualRunner, "codex");
 });
 
 test("PM is never started as a worker", () => {

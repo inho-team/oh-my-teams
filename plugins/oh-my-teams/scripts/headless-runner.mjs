@@ -14,6 +14,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJSON, resolveCommand, writeJSON } from "./core.mjs";
+import { defaultRuntimeRoot, doctor, runtimePaths } from "./dependencies.mjs";
+import {
+  isolatedOpenCodexEnvironment,
+  openCodexCommand,
+  openCodexEnvironment,
+  readOpenCodexObservation,
+  resolveOpenCodexBinding,
+  startOpenCodexProxy,
+} from "./opencodex.mjs";
 
 const POLL_MS = 500;
 const KILL_GRACE_MS = 5000;
@@ -59,17 +68,76 @@ export function killTree(pid, signal = "SIGTERM") {
  * @param {string} turnDir - Directory holding turn.json and receiving output.
  * @returns {Promise<object>} The exit record written to exit.json.
  */
-export function runTurn(turnDir) {
+export async function runTurn(turnDir) {
   const turn = readJSON(path.join(turnDir, "turn.json"));
   const input = turn.stdinFile
     ? fs.readFileSync(path.join(turnDir, turn.stdinFile), "utf8")
     : "";
   const stdout = fs.openSync(path.join(turnDir, "stream.jsonl"), "a");
   const stderr = fs.openSync(path.join(turnDir, "stderr.txt"), "a");
-  const command = resolveCommand(turn.argv);
+  let proxy = null;
+  let binding = null;
+  let command;
+  let environment = process.env;
+  let startedAt = null;
+  try {
+    if (turn.runner) {
+      if (turn.runner.kind !== "opencodex")
+        throw new Error("opencodex-binding-unverified");
+      const diagnosed = await doctor(defaultRuntimeRoot());
+      if (diagnosed.status !== "ready")
+        throw new Error("opencodex-action-required: run runtime-install first");
+      const profile = {
+        provider: turn.runner.logicalProvider,
+        account: turn.runner.logicalAccount,
+        model: turn.runner.model,
+        effort: turn.runner.effort,
+        runner: {
+          kind: turn.runner.kind,
+          mode: turn.runner.mode,
+          accountHomeRef: turn.runner.accountHomeRef,
+          runtimeFingerprint: turn.runner.runtimeFingerprint,
+        },
+      };
+      binding = {
+        ...resolveOpenCodexBinding(profile, diagnosed.runtime),
+        runtimePrefix: runtimePaths(defaultRuntimeRoot()).runtime,
+      };
+      proxy = await startOpenCodexProxy(binding);
+      startedAt = Date.now();
+      command = openCodexCommand({
+        cwd: turn.cwd,
+        port: proxy.port,
+        model: turn.runner.model,
+        effort: turn.runner.effort,
+        session: turn.session,
+      });
+      environment = isolatedOpenCodexEnvironment(
+        process.env,
+        openCodexEnvironment(binding),
+      );
+    } else {
+      command = resolveCommand(turn.argv);
+    }
+  } catch (error) {
+    fs.closeSync(stdout);
+    fs.closeSync(stderr);
+    const record = {
+      code: null,
+      signal: null,
+      timedOut: false,
+      stopped: false,
+      error: String(error.message),
+      killError: null,
+      endedAt: new Date().toISOString(),
+      durationMs: 0,
+    };
+    writeJSON(path.join(turnDir, "exit.json"), record);
+    return record;
+  }
   const child = spawn(command[0], command.slice(1), {
     cwd: turn.cwd,
-    env: process.env,
+    env: environment,
     shell: false,
     windowsHide: true,
     // detached so the child gets its own process group on POSIX, enabling
@@ -121,8 +189,27 @@ export function runTurn(turnDir) {
         endedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAt,
       };
-      writeJSON(path.join(turnDir, "exit.json"), record);
-      resolve(record);
+      Promise.resolve()
+        .then(async () => {
+          if (proxy && binding && startedAt) {
+            const observed = await readOpenCodexObservation({
+              ...binding,
+              port: proxy.port,
+              provider: turn.runner.logicalProvider,
+              model: turn.runner.model,
+              startedAt,
+            });
+            writeJSON(path.join(turnDir, "opencodex.json"), observed);
+          }
+        })
+        .catch((observationError) => {
+          record.error ??= String(observationError.message);
+        })
+        .then(async () => {
+          if (proxy) await proxy.stop();
+          writeJSON(path.join(turnDir, "exit.json"), record);
+          resolve(record);
+        });
     };
     child.on("error", (error) => finish(null, null, error));
     child.on("close", (code, signal) => finish(code, signal));
