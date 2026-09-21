@@ -37,7 +37,23 @@ PM       분석·중장기 계획·최종 결과
 
 ## 설치
 
-Node.js 22+, Git, Orca와 사용할 실행기를 설치·로그인한다. PR 작업에는 `gh`가 필요하다. 새 런타임은 Python·macOS sandbox-exec에 의존하지 않는다.
+### 필수 의존성
+
+플러그인을 설치하기 전에 다음 소프트웨어를 설치하고 로그인해야 합니다.
+
+| 소프트웨어 | 버전 | 용도 | 설치 방법 |
+|---|---|---|---|
+| Node.js | 22.13 이상 | 런타임 및 설치 스크립트 실행 | https://nodejs.org/en/download/ |
+| Git | 최신 | 저장소 관리 및 작업 추적 | https://git-scm.com/downloads |
+| Claude Code 또는 Codex | 최신 | 에이전트 실행 | claude.ai/code 또는 Codex 앱 설치 |
+| Orca CLI | 최신 | workflow 감독 및 orchestration | https://docs.orca.dev/docs/install |
+| gh (GitHub CLI) | 최신 | pull request 작업(선택) | https://cli.github.com/ |
+
+새 oh my teams 런타임은 Python이나 macOS `sandbox-exec`에 의존하지 않습니다.
+
+### 플러그인 설치
+
+설치기를 실행하면 플러그인을 로컬 마켓으로 등록하고 OpenCodex 2.59.0을 준비합니다.
 
 ```powershell
 ./install.ps1 -HostName both
@@ -47,9 +63,58 @@ Node.js 22+, Git, Orca와 사용할 실행기를 설치·로그인한다. PR 작
 sh install.sh both   # claude | codex | both
 ```
 
-설치기는 현재 저장소를 호스트별 로컬 마켓으로 등록한다. 설치 후 **새 대화**에서 스킬을 사용한다. Claude 세션 전용 시험은 `claude --plugin-dir ./plugins/oh-my-teams`로 가능하다. 개발 변경 자체는 전역 설치나 사용자의 조직 설정을 자동 변경하지 않는다.
+설치기는 다음을 수행합니다.
 
-새 설치 식별자는 `oh-my-teams@oh-my-teams`다. 기존 `/orca:director` 호출에 대응하던 `director` 별칭은 2.0.0에서 삭제했으므로 지휘 역할은 `pm`으로 직접 부른다. 조직 설정과 실행 기록은 `.omt/`에 저장한다. `~/.orca-skills` 고정 링크는 사용하지 않는다. 이전 구현·실측은 [legacy/0.6.1](legacy/0.6.1/README.md)에 보존했고 자동 스킬 발견에서 제외했다.
+- 현재 저장소를 호스트(Claude 또는 Codex)의 로컬 마켓으로 등록합니다.
+- 기존 설치 상태를 확인하고 레거시 플러그인 마이그레이션 계획을 만듭니다.
+- OpenCodex 공통 실행 경로를 `.omt/opencodex/` 아래에 설치합니다.
+
+`--dry-run`을 추가하면 실제 변경 없이 계획만 표시합니다. `--remove-legacy`를 함께 사용하면 레거시 플러그인을 제거합니다.
+
+```sh
+sh install.sh both --dry-run --remove-legacy
+```
+
+설치 후 **새 대화**에서 스킬을 사용합니다. Claude 세션 전용 시험은 `claude --plugin-dir ./plugins/oh-my-teams`로 가능합니다. 개발 변경 자체는 전역 설치나 사용자의 조직 설정을 자동 변경하지 않습니다.
+
+새 설치 식별자는 `oh-my-teams@oh-my-teams`입니다. 기존 `/orca:director` 호출에 대응하던 `director` 별칭은 2.0.0에서 삭제했으므로 지휘 역할은 `pm`으로 직접 부릅니다. 조직 설정과 실행 기록은 `.omt/`에 저장됩니다. `~/.orca-skills` 고정 링크는 사용하지 않습니다. 이전 구현·실측은 [legacy/0.6.1](legacy/0.6.1/README.md)에 보존했고 자동 스킬 발견에서 제외했습니다.
+
+### 첫 실행 점검
+
+설치 후에는 다음 명령으로 OpenCodex 런타임이 준비되었는지 확인합니다.
+
+```sh
+node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor \
+  --org .omt/organization.json \
+  --state .omt
+```
+
+이 명령은 Node.js, Git, Codex, OpenCodex, Orca, GitHub CLI 등의 의존성을 확인합니다. 모든 검사가 `pass`로 표시되면 설치가 완료된 것입니다.
+
+의존성이 부족하면 다음 명령으로 자동 설치를 시도합니다.
+
+```sh
+node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
+  --org .omt/organization.json \
+  --state .omt
+```
+
+문제가 해결되지 않으면 [OpenCodex 런타임 설치 안내](docs/OPENCODEX_RUNTIME.md)를 참고하십시오.
+
+### 의존성
+
+| 항목 | 필수 | 기능 |
+|---|---|---|
+| Node.js | ✓ | 런타임 실행, npm 패키지 관리 |
+| npm | ✓ | 의존성 설치 |
+| Git | ✓ | 저장소 관리, worktree 생성 |
+| Codex CLI 또는 Claude Code | ✓ | 구독별 에이전트 실행(Codex) 또는 기본 실행기(Claude) |
+| Orca CLI | ✓ | workflow 감독, orchestration, 상태 관리 |
+| Orca Desktop | 선택 | GUI 기반 작업 모니터링 |
+| OpenCodex | ✓ | 공통 실행 경로, 다구독 통합 |
+| gh (GitHub CLI) | 선택 | pull request 생성 및 관리 |
+
+각 항목의 설치 및 문제 해결 방법은 [OpenCodex 런타임 설치 안내](docs/OPENCODEX_RUNTIME.md)를 참고하십시오.
 
 ## 모델과 구독
 
