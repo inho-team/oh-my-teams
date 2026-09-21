@@ -66,6 +66,14 @@
       "evidenceTests": [
         "director skill exists, has authority-responsibility-limits section, and PM-and-below report to 이사"
       ]
+    },
+    {
+      "id": "experimental-judgment-isolation",
+      "description": "An experimental Jev judgment is off by default, changes no command result, and is never read by a gate.",
+      "evidenceTests": [
+        "an organization without the experimental block stays valid and judges nothing",
+        "no gate or acceptance path reads a judgment"
+      ]
     }
   ]
 }

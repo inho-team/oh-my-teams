@@ -231,6 +231,8 @@ node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <
 
 이 판정은 재시도나 종료를 결정하지 않는다. 종료와 재시도는 위 「worker-start 실패 복구」와 `failure-classify` 결과를 따른다. `unverifiable` worker는 살아 있다고 간주하지 않고 확인이나 보고로 보낸다. 사용자에게 상태를 알릴 때 무응답 worker는 `진행 중`이 아니라 결과의 `display`대로 `무응답 N분`으로 적는다.
 
+조직이 실험 Jev 판단을 켰으면(`policy.experimental.jev`) `supervision-wait`에 `--state <pm-state>`를, `supervision-next`에 `--dispatch <id> --state <pm-state>`를 함께 넘긴다. 두 명령이 돌려주는 결과는 바뀌지 않으며, 판단은 상태 디렉터리의 `judgments`에만 기록된다. 규칙은 [`jev.md`](jev.md)를 따른다.
+
 하위 worker는 진행 요청을 받으면 `orchestration reply --id <msg_id> --body <진행 상황>`으로 현재 단계, 끝낸 항목과 남은 항목, 장애물을 곧바로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다. 답의 첫 줄에는 [`bluf.md`](bluf.md)대로 현재 단계와 예상되는 다음 사건을 쓰고, 끝낸 항목과 남은 항목, 장애물은 그 뒤에 쓴다.
 
 ## worker-list와 liveness
