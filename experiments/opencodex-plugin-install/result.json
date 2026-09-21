@@ -28,8 +28,8 @@
   "isolation": {
     "home": "/tmp/omt-host-probe-egf0y4ps/home",
     "codex_home": "/tmp/omt-host-probe-egf0y4ps/codex",
-    "original_home_not_read": true,
-    "credentials_copied": false
+    "credentials_copied": false,
+    "global_home_state": "unverified"
   },
   "checks": [
     {

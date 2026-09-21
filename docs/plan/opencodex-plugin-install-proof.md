@@ -4,7 +4,7 @@
 
 ## 범위와 격리
 
-실험은 `/tmp/omt-host-probe-*` 전용 디렉터리에서 수행했습니다. `HOME`과 `CODEX_HOME`을 임시 경로로 지정했고, 기존 인증 파일을 읽거나 복사하지 않았으며, 전역 plugin 목록과 원래 설정을 변경하지 않았습니다. fixture의 lifecycle script는 `OMT_MARKER`가 가리키는 임시 파일에 시각과 `postinstall` 문자열만 기록합니다.
+실험은 `/tmp/omt-host-probe-*` 전용 디렉터리에서 수행했습니다. `HOME`과 `CODEX_HOME`을 해당 임시 경로로 지정했고, 실험 과정에서 자격 증명을 복사하지 않았습니다(`credentials_copied=false`). 기존 전역 home의 읽기 여부와 plugin 목록·원래 설정의 전후 상태는 확인하지 않았으므로 전역 상태 무변경은 검증되지 않았습니다. fixture의 lifecycle script는 `OMT_MARKER`가 가리키는 임시 파일에 시각과 `postinstall` 문자열만 기록합니다.
 
 실험 fixture와 재현 명령은 [run_probe.py](../../experiments/opencodex-plugin-install/run_probe.py)에 있고, 원시 결과는 [result.json](../../experiments/opencodex-plugin-install/result.json)에 있습니다.
 

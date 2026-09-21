@@ -54,8 +54,8 @@ def main():
             "isolation": {
                 "home": str(host_home),
                 "codex_home": str(codex_home),
-                "original_home_not_read": True,
                 "credentials_copied": False,
+                "global_home_state": "unverified",
             },
             "checks": [],
         }
