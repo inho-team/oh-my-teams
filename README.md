@@ -45,8 +45,9 @@ PM       분석·중장기 계획·최종 결과
 |---|---|---|---|
 | Node.js | 22.13 이상 | 런타임 및 설치 스크립트 실행 | https://nodejs.org/en/download/ |
 | Git | 최신 | 저장소 관리 및 작업 추적 | https://git-scm.com/downloads |
-| Claude Code 또는 Codex | 최신 | 에이전트 실행 | claude.ai/code 또는 Codex 앱 설치 |
-| Orca CLI | 최신 | workflow 감독 및 orchestration | https://docs.orca.dev/docs/install |
+| Claude Code | 최신 | 호스트 및 에이전트 실행 | 이 저장소의 의존성 카탈로그에 설치 출처가 없으므로 이미 설치한 Claude Code를 사용합니다. |
+| Codex CLI | 최신 | 호스트 및 에이전트 실행 | macOS는 https://chatgpt.com/codex/install.sh, Windows는 https://chatgpt.com/codex/install.ps1, 또는 `npm install -g @openai/codex` |
+| Orca CLI | 최신 | workflow 감독 및 orchestration | https://onorca.dev/download |
 | gh (GitHub CLI) | 최신 | pull request 작업(선택) | https://cli.github.com/ |
 
 새 oh my teams 런타임은 Python이나 macOS `sandbox-exec`에 의존하지 않습니다.
@@ -56,7 +57,7 @@ PM       분석·중장기 계획·최종 결과
 설치기를 실행하면 호스트에 플러그인을 설치하고, `plugins/oh-my-teams/package.json`에 정확한 버전으로 고정된 OpenCodex 런타임을 준비합니다.
 
 ```powershell
-./install.ps1 -HostName both
+./install.ps1 both
 ```
 
 ```sh

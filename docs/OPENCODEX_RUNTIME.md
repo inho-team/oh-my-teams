@@ -19,7 +19,7 @@ sh install.sh both   # claude | codex | both
 ```
 
 ```powershell
-./install.ps1 -HostName both
+./install.ps1 both
 ```
 
 `install.mjs`는 다음 순서로 동작합니다.
