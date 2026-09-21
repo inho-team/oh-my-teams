@@ -1085,8 +1085,11 @@ test(
     assert.equal(alive(orphan), true);
     runner.kill("SIGKILL");
     await new Promise((resolve) => runner.once("exit", resolve));
-    // The dead runner never ran its cleanup: the proxy and the lease remain.
-    assert.equal(alive(orphan), true);
+    // The dead runner never ran its cleanup, so the lease remains. On POSIX the
+    // proxy remains too; on Windows libuv puts children in a kill-on-close job,
+    // so the proxy dies with its runner and the next turn finds nothing to end.
+    if (win) assert.equal(await gone(orphan), true);
+    else assert.equal(alive(orphan), true);
     assert.equal(fs.existsSync(runtime.lease), true);
     const proxy = await startOpenCodexProxy(runtime.binding);
     try {
