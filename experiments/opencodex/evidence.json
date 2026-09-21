@@ -1,0 +1,172 @@
+{
+  "recordedAt": "2026-09-21T03:25Z",
+  "version": "2.59.0",
+  "lab": "/tmp/omt-opencodex-probe.dAKX3U",
+  "installLog": "\n> bun@1.4.0 postinstall\n> node install.js\n\n\nadded 100 packages in 4s\nnpm warn install-scripts 1 package has install scripts not yet covered by allowScripts:\nnpm warn install-scripts   bun@1.4.0 (postinstall: node install.js)\nnpm warn install-scripts\nnpm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.\n",
+  "installLockSha256": "a00d73d7d347dd778c9194f1b673654e9c57f38a9d748e2068b1e8543381a4bb",
+  "sourceHashes": {
+    "src/config/paths.ts": "c95e06d52ea41a77d5edcab36d259d167e688a294362121949ad712b9a8a39b1",
+    "src/codex/paths.ts": "f14512fec482d38044172cee72532372bb32757f964b4c2c90f1349c4d07c32c",
+    "src/oauth/store.ts": "cd6fa924c3c510a66dcf5103a23df048210c6d1f83f8aa2894629d6d9bf6260b",
+    "src/oauth/local-token-detect.ts": "528369fcd23bc88a7ee444a1a6f0dd7a4601ab5403819d3e0a9acf1fc84f44b3",
+    "src/providers/key-store.ts": "505246208f9fa354edd27ac25f458409ee11d302df8d54f3a91fd0372e0edfc3",
+    "src/codex/native-profile-store.ts": "5e0fe1c4b791d3c772fbea5d95e2a474172fad374ce050b7ca764b5728735edd",
+    "src/cli/index.ts": "3037c9d7f2ee6d9c2542bb8efa3934a2f030e2bc25d9def72b34fb2f38353a13",
+    "src/cli/account-auth.ts": "6f29519104aeee1782b2b45fa655028ad0640b371bbd7d632cbc32609f05f279",
+    "src/server/management/oauth-account-routes.ts": "2068d4903d8d782d709537de393420209667d8ccae78b828d5a87dc069b4f976",
+    "src/oauth/google-antigravity.ts": "c31b22b4e6152236290f53a0a155956da46408590c7c01850830ec4520b7da5f",
+    "src/server/system-env-shell.ts": "a5b42798e19147789101447fbcd9f50395315cf50ac12c7232728339091d60f7"
+  },
+  "preInstallFiles": {
+    ".codex/config.toml": {
+      "exists": true,
+      "mtime_ns": 1789960577809199061,
+      "sha256": "7cdc764a7f203224592abae5b4b838e06c5a530ba45bd5030161375a0d83cb98"
+    },
+    ".claude/settings.json": {
+      "exists": true,
+      "mtime_ns": 1789642503855339875,
+      "sha256": "6eabc551fb3052311834595d2d24f836341757d3889717c4e5a75bead57a7be6"
+    },
+    ".opencodex": {
+      "exists": false,
+      "mtime_ns": null,
+      "sha256": null
+    },
+    ".gemini": {
+      "exists": true,
+      "mtime_ns": 1789341168660791558,
+      "sha256": null
+    }
+  },
+  "preStartKeychain": {
+    "opencodex.provider-api-key.v1": {
+      "exit": 44,
+      "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "secret_requested": false
+    },
+    "opencodex.native-main-profile.v1": {
+      "exit": 44,
+      "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "secret_requested": false
+    },
+    "Claude Code-credentials": {
+      "exit": 0,
+      "metadata_sha256": "063b400b4f0f4099f03c8547fd250f7a7d293b800d7bd4839f817da4627a3c67",
+      "secret_requested": false
+    }
+  },
+  "postStartSnapshot": {
+    "timestamp": "2026-09-21T03:24:45.103055+00:00",
+    "files": {
+      ".codex/config.toml": {
+        "exists": true,
+        "mtime_ns": 1789960577809199061,
+        "sha256": "7cdc764a7f203224592abae5b4b838e06c5a530ba45bd5030161375a0d83cb98"
+      },
+      ".claude/settings.json": {
+        "exists": true,
+        "mtime_ns": 1789642503855339875,
+        "sha256": "6eabc551fb3052311834595d2d24f836341757d3889717c4e5a75bead57a7be6"
+      },
+      ".opencodex": {
+        "exists": false,
+        "mtime_ns": null,
+        "sha256": null
+      },
+      ".gemini": {
+        "exists": true,
+        "mtime_ns": 1789341168660791558,
+        "sha256": null
+      },
+      ".zshrc": {
+        "exists": true,
+        "mtime_ns": 1789343214072435497,
+        "sha256": "d066a470c19816a0b4c0d683ddbf5de864c6f71a65f914794a8af56203b675c0"
+      }
+    },
+    "keychain": {
+      "opencodex.provider-api-key.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "opencodex.native-main-profile.v1": {
+        "exit": 44,
+        "metadata_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "secret_requested": false
+      },
+      "Claude Code-credentials": {
+        "exit": 0,
+        "metadata_sha256": "063b400b4f0f4099f03c8547fd250f7a7d293b800d7bd4839f817da4627a3c67",
+        "secret_requested": false
+      }
+    },
+    "unchanged": {
+      "files": true,
+      "keychain": true
+    }
+  },
+  "transport": {
+    "purpose": "unauthenticated local transport negative control",
+    "exit": 1,
+    "events": ["thread.started", "turn.started", "error", "turn.failed"],
+    "errorKinds": ["401", "401"]
+  },
+  "subscriptions": [
+    {
+      "subscription": "chatgpt",
+      "requestedModel": "unresolved",
+      "observedModels": [],
+      "status": "not-run",
+      "timestamp": "2026-09-21T03:22:23.084334+00:00",
+      "accountAttribution": "unverified",
+      "usage": {},
+      "events": {},
+      "commandExecutions": 0,
+      "fileChanges": 0,
+      "completion": "not-observed",
+      "error": "isolated-login-required",
+      "baselineTestExit": 1,
+      "fixtureHashBefore": "adac0122533fab0a7230782fc4f3cb702d28f8cc1479b90dd6770c63985977e5",
+      "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/fixture-xit54bzb",
+      "credentialStoreExists": false
+    },
+    {
+      "subscription": "claude",
+      "requestedModel": "anthropic/claude-sonnet-4-6",
+      "observedModels": [],
+      "status": "not-run",
+      "timestamp": "2026-09-21T03:22:23.198540+00:00",
+      "accountAttribution": "unverified",
+      "usage": {},
+      "events": {},
+      "commandExecutions": 0,
+      "fileChanges": 0,
+      "completion": "not-observed",
+      "error": "isolated-login-required",
+      "baselineTestExit": 1,
+      "fixtureHashBefore": "adac0122533fab0a7230782fc4f3cb702d28f8cc1479b90dd6770c63985977e5",
+      "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/fixture-w935ezoi",
+      "credentialStoreExists": false
+    },
+    {
+      "subscription": "antigravity",
+      "requestedModel": "google-antigravity/claude-sonnet-4-6",
+      "observedModels": [],
+      "status": "not-run",
+      "timestamp": "2026-09-21T03:22:23.303488+00:00",
+      "accountAttribution": "unverified",
+      "usage": {},
+      "events": {},
+      "commandExecutions": 0,
+      "fileChanges": 0,
+      "completion": "not-observed",
+      "error": "isolated-login-required",
+      "baselineTestExit": 1,
+      "fixtureHashBefore": "adac0122533fab0a7230782fc4f3cb702d28f8cc1479b90dd6770c63985977e5",
+      "workDirectory": "/private/tmp/omt-opencodex-probe.dAKX3U/fixture-hgdii5up",
+      "credentialStoreExists": false
+    }
+  ]
+}
