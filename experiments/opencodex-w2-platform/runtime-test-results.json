@@ -1,0 +1,510 @@
+{
+  "schemaVersion": 1,
+  "timestamp": "2026-09-21T12:02:25Z",
+  "tests": {
+    "doctor-before": {
+      "command": "runtime-doctor",
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-doctor",
+        "status": "needs-install",
+        "runtimeHealthy": false,
+        "checkedAt": "2026-09-21T12:02:25.297Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "fail",
+            "evidence": "No active runtime pointer"
+          }
+        ],
+        "nextAction": "Run runtime-install; authentication is never automated."
+      },
+      "status": "pass"
+    },
+    "install-dryrun": {
+      "command": "runtime-install --dry-run",
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-install",
+        "status": "needs-install",
+        "runtimeHealthy": false,
+        "checkedAt": "2026-09-21T12:02:25.368Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "fail",
+            "evidence": "No active runtime pointer"
+          }
+        ],
+        "nextAction": "Run runtime-install; authentication is never automated.",
+        "dryRun": true
+      },
+      "status": "pass"
+    },
+    "install-actual": {
+      "command": "runtime-install",
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-install",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:02:30.654Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "pass",
+            "evidence": "Confirm that the current directory is a Git repository.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "pass",
+            "evidence": "Confirm that Git worktree listing is available.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null,
+        "installed": true
+      },
+      "status": "pass"
+    },
+    "doctor-after": {
+      "command": "runtime-doctor",
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-doctor",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:02:33.276Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "pass",
+            "evidence": "Confirm that the current directory is a Git repository.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "pass",
+            "evidence": "Confirm that Git worktree listing is available.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null
+      },
+      "status": "pass"
+    },
+    "install-second": {
+      "command": "runtime-install (2nd)",
+      "result": {
+        "schemaVersion": 1,
+        "command": "runtime-install",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:02:34.459Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "pass",
+            "evidence": "Confirm that the current directory is a Git repository.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "pass",
+            "evidence": "Confirm that Git worktree listing is available.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null,
+        "reused": true
+      },
+      "status": "pass"
+    },
+    "damage-repair": {
+      "damaged_status": "needs-install",
+      "repair_result": {
+        "schemaVersion": 1,
+        "command": "runtime-repair",
+        "status": "ready",
+        "runtimeHealthy": true,
+        "checkedAt": "2026-09-21T12:02:38.737Z",
+        "runtime": {
+          "id": "opencodex",
+          "version": "2.59.0",
+          "prefixFingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f"
+        },
+        "checks": [
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0"
+          },
+          {
+            "id": "runtime-install",
+            "status": "pass",
+            "evidence": "opencodex 2.59.0"
+          },
+          {
+            "id": "node",
+            "status": "pass",
+            "evidence": "v26.7.0",
+            "requiredFor": [
+              "omt-runtime",
+              "npm-install",
+              "opencodex",
+              "orca-cli"
+            ]
+          },
+          {
+            "id": "git",
+            "status": "pass",
+            "evidence": "git version 2.50.1 (Apple Git-155)",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:rev-parse---show-toplevel",
+            "status": "pass",
+            "evidence": "Confirm that the current directory is a Git repository.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "git:worktree-list",
+            "status": "pass",
+            "evidence": "Confirm that Git worktree listing is available.",
+            "requiredFor": ["worktrees", "repository-evidence", "pull-requests"]
+          },
+          {
+            "id": "codex",
+            "status": "pass",
+            "evidence": "codex-cli 0.155.1",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:exec---help",
+            "status": "pass",
+            "evidence": "Confirm that non-interactive execution is available.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "codex:features-list",
+            "status": "pass",
+            "evidence": "Read the feature set from the selected Codex executable.",
+            "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"]
+          },
+          {
+            "id": "orca-cli",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": [
+              "orca-worktree",
+              "orca-terminal",
+              "supervised-worker"
+            ]
+          },
+          {
+            "id": "orca-desktop",
+            "status": "pass",
+            "evidence": "orca",
+            "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"]
+          },
+          {
+            "id": "gh",
+            "status": "pass",
+            "evidence": "gh version 2.97.0 (2026-07-31)\nhttps://github.com/cli/cli/releases/tag/v2.97.0",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:repo-view---help",
+            "status": "pass",
+            "evidence": "Confirm repository inspection capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          },
+          {
+            "id": "gh:pr---help",
+            "status": "pass",
+            "evidence": "Confirm pull request capability.",
+            "requiredFor": ["pull-requests", "github-api", "remote-evidence"]
+          }
+        ],
+        "nextAction": null,
+        "installed": true
+      },
+      "repaired_status": "ready",
+      "status": "pass"
+    }
+  },
+  "global_state": {}
+}
