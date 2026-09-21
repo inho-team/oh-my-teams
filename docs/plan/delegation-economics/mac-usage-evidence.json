@@ -65,7 +65,7 @@
       "organizationRevision": 3,
       "workflowRevision": 14,
       "organizationSnapshotRevision": 3,
-      "collectedAt": "2026-09-21T05:55:59.853Z",
+      "collectedAt": "2026-09-21T06:03:34.680Z",
       "window": {
         "from": "2026-09-21T04:48:06.558Z",
         "to": "2026-09-21T05:24:33.465Z",
@@ -81,12 +81,12 @@
         "source": {
           "file": "state.json",
           "sha256": "94617b676151db76ad977c6c119c572b238483060e70ed78dcc8a37b5c8f4b8c",
-          "collectedAt": "2026-09-21T05:55:59.853Z"
+          "collectedAt": "2026-09-21T06:03:34.680Z"
         },
         "organizationSource": {
           "file": "organization.json",
           "sha256": "cb5908a3fe187ca709668e19afaaf4008c6992b185b1bc7a497415c0b9400aab",
-          "collectedAt": "2026-09-21T05:55:59.853Z"
+          "collectedAt": "2026-09-21T06:03:34.680Z"
         }
       },
       "priorKickoffRegistry": {
@@ -96,7 +96,7 @@
         "source": {
           "file": "state.json",
           "sha256": "4608f1cac50eecfb473a235c75ae02db3b50914d2feab466d6ccf1887ee09311",
-          "collectedAt": "2026-09-21T05:55:59.853Z"
+          "collectedAt": "2026-09-21T06:03:34.680Z"
         }
       },
       "relation": "checkpoint usage belongs to the prior kickoff registry window; current workflow revision 3 is recorded separately and is not substituted into the prior usage totals."
@@ -735,15 +735,18 @@
     },
     "rolloutSource": {
       "file": "codex-rollout.jsonl",
-      "sha256": "469f2d0dfd8430d643fb3c6ef6657c0e136643d9c0c785bee8eb707ba68909b3",
-      "collectedAt": "2026-09-21T05:55:59.853Z"
+      "sha256": "efeedfe7962efa1a0b1a51ad74d857800ef7b84b1de86f28c717173b98ce6cd3",
+      "collectedAt": "2026-09-21T06:03:34.680Z"
     }
   },
   "astraClassification": {
     "measuredRecords": 1,
     "manuallyConnectedRecords": 1,
-    "classifiedRecords": 1,
-    "unclassifiedRecords": 0,
+    "roleConnectedRecords": 1,
+    "taskUseDenominator": 1,
+    "classifiedRecords": 0,
+    "unclassifiedRecords": 1,
+    "taskUseUnclassifiedRatio": 1,
     "categories": {
       "planningAssignmentAggregation": {
         "records": 0,

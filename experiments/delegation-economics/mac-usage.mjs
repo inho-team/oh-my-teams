@@ -321,8 +321,11 @@ export function buildEvidence(args) {
     astraClassification: {
       measuredRecords: astra.length,
       manuallyConnectedRecords: astra.length,
-      classifiedRecords: astra.length,
-      unclassifiedRecords: 0,
+      roleConnectedRecords: astra.length,
+      taskUseDenominator: astra.length,
+      classifiedRecords: 0,
+      unclassifiedRecords: astra.length,
+      taskUseUnclassifiedRatio: astra.length ? 1 : null,
       categories: {
         planningAssignmentAggregation: { records: 0, tokens: null },
         repeatedStatusObservation: { records: 0, tokens: null },
@@ -344,6 +347,19 @@ export function buildEvidence(args) {
       "No billing, quota deduction, currency conversion, or savings rate is inferred.",
     ],
   };
+  const categoryRecords = Object.values(
+    output.astraClassification.categories,
+  ).reduce((sum, category) => sum + category.records, 0);
+  if (
+    categoryRecords !== output.astraClassification.taskUseDenominator ||
+    output.astraClassification.classifiedRecords +
+      output.astraClassification.unclassifiedRecords !==
+      output.astraClassification.taskUseDenominator
+  ) {
+    throw new Error(
+      "Astra task-use 집계의 분모와 category 합계가 일치하지 않습니다.",
+    );
+  }
   fs.mkdirSync(path.dirname(args.out), { recursive: true });
   fs.writeFileSync(args.out, `${JSON.stringify(output, null, 2)}\n`);
   return output;
