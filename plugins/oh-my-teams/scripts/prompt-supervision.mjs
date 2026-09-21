@@ -260,6 +260,29 @@ export function screenFingerprint(terminal, classification) {
     .slice(0, 24);
 }
 
+/**
+ * Digests the text of a question the classifier extracted.
+ *
+ * The fingerprint of a user-question screen holds only its header and footer
+ * rows, so two different questions can share it. The redirect names a state by
+ * the fingerprint and this digest together, and a screen without extracted text
+ * gets an empty digest. The key path does not use it.
+ *
+ * @param {object} classification - Result of `classifyPromptScreen`.
+ * @returns {string} Hex digest of the question text, or "" when it has none.
+ */
+export function questionDigest(classification) {
+  const rows = Array.isArray(classification.excerpt)
+    ? classification.excerpt.map(squeezeRow).filter(Boolean)
+    : [];
+  if (!rows.length) return "";
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(rows))
+    .digest("hex")
+    .slice(0, 24);
+}
+
 async function readTerminalScreen(orca, terminal, execute) {
   try {
     const read = await runOrcaJson(
@@ -522,7 +545,9 @@ export async function answerTerminalPrompt({
   if (found.action === "redirect") {
     // The worker is told once per screen state, under the same lock as a key,
     // so a supervision loop that reads the same question again does not pile
-    // the same instruction onto the worker.
+    // the same instruction onto the worker. The state includes the question
+    // text: another question under the same header is told again.
+    const digest = questionDigest(found);
     const redirectLock = `${promptAnswerFile(stateDir)}.lock`;
     try {
       return await withAsyncFileLock(
@@ -531,6 +556,7 @@ export async function answerTerminalPrompt({
           const told = readPromptAnswers(stateDir).find(
             (record) =>
               record.fingerprint === fingerprint &&
+              (record.questionDigest ?? "") === digest &&
               record.action === "redirect" &&
               (record.redirect?.sent === true || record.status === "sending"),
           );
@@ -538,6 +564,7 @@ export async function answerTerminalPrompt({
             return finish({
               ...description,
               fingerprint,
+              questionDigest: digest,
               status: "refused",
               refusal: "already-answered",
               sent: false,
@@ -549,6 +576,7 @@ export async function answerTerminalPrompt({
             ...base,
             ...description,
             fingerprint,
+            questionDigest: digest,
             status: "sending",
             sent: false,
             key: null,

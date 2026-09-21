@@ -1032,3 +1032,38 @@ test("the same user question screen is redirected once, however often it is read
   const retried = await answer(failing, flaky, { execute });
   assert.equal(retried.status, "redirected");
 });
+
+test("two user questions that differ only in their text are each redirected once", async (t) => {
+  const fixture = await kickoff(t, { seniorProvider: "claude" });
+  const orca = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, CLAUDE_ASKUSER) },
+  });
+  const first = await answer(fixture, orca);
+  assert.equal(first.status, "redirected");
+  // The same header, choices and selection, with another question above them.
+  const asked = CLAUDE_ASKUSER.findIndex(
+    (line) => line === "A와 B 중 하나를 선택해주세요.",
+  );
+  assert.ok(asked >= 0, "the fixture shows a question line");
+  const other = CLAUDE_ASKUSER.map((line, index) =>
+    index === asked ? "완전히 다른 질문: 데이터베이스를 지금 지울까요?" : line,
+  );
+  const second = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, other) },
+  });
+  const moved = await answer(fixture, second);
+  assert.equal(moved.status, "redirected");
+  assert.equal(second.messages().length, 1);
+  assert.notEqual(moved.questionDigest, first.questionDigest);
+  assert.equal(moved.fingerprint, first.fingerprint);
+  // Each of the two screens is told once, however often it is read again.
+  const repeatOther = await answer(fixture, second);
+  const repeatFirst = await answer(fixture, orca);
+  for (const repeat of [repeatOther, repeatFirst]) {
+    assert.equal(repeat.status, "refused");
+    assert.equal(repeat.refusal, "already-answered");
+  }
+  assert.equal(second.messages().length, 1);
+  assert.equal(orca.messages().length, 1);
+  assert.equal(orca.keys().length + second.keys().length, 0);
+});
