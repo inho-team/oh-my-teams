@@ -22,7 +22,12 @@ import {
   roleSpec,
 } from "./role-launch.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
-import { assertNotKickoffOwner, deliverKickoff } from "./delivery.mjs";
+import {
+  assertNotKickoffOwner,
+  deliverKickoff,
+  assertDirectorAuthority,
+  checkCloseReady,
+} from "./delivery.mjs";
 import { startDashboard } from "./dashboard.mjs";
 import {
   answerHeadless,
@@ -87,6 +92,7 @@ import {
   cleanupKickoffBranches,
   listKickoffs,
   ownerProject,
+  recordDelivery,
   registerKickoff,
   releaseKickoff,
 } from "./kickoff-registry.mjs";
@@ -125,6 +131,12 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                          --branches BRANCH[,BRANCH...] [--remote NAME]
                          (verifies delivery then deletes remote, local, and
                          reclaimed sub-worktree branches; close only, not disband)
+  kickoff-check-close-ready --org FILE --worktree ID --head SHA
+                         (checks that the PM's close-ready signal exists and
+                         matches HEAD; for pull-request kickoffs before PR merge)
+  kickoff-merge-record --org FILE --worktree ID --head SHA --merge-commit SHA
+                         (records a PR merge into the registry; director only;
+                         enables kickoff-branch-cleanup for pull-request kickoffs)
   deliver --org FILE --worktree ID --source DIR --head SHA
           --evidence FILE --task TRUSTED_TASK [--report FILE --state DIR]
           (merges a verified kickoff result into the branch its claim recorded;
@@ -234,6 +246,8 @@ export const ALLOWED_OPTIONS = {
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
+  "kickoff-check-close-ready": ["org", "worktree", "head"],
+  "kickoff-merge-record": ["org", "worktree", "head", "merge-commit", "force"],
   deliver: [
     "org",
     "worktree",
@@ -377,6 +391,8 @@ export const REQUIRED_OPTIONS = {
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
+  "kickoff-check-close-ready": ["org", "worktree", "head"],
+  "kickoff-merge-record": ["org", "worktree", "head", "merge-commit"],
   deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
   "prepare-input": ["org", "task", "repo", "output"],
@@ -1015,6 +1031,30 @@ async function executeCommand(args) {
         remoteName: args.remote ?? "origin",
         callerCwd: process.cwd(),
         force: args.force ?? false,
+      });
+    }
+    case "kickoff-check-close-ready":
+      return checkCloseReady({
+        orgFile: args.org,
+        worktreeId: args.worktree,
+        head: args.head,
+      });
+    case "kickoff-merge-record": {
+      const [entry] = listKickoffs(args.org, args.worktree).kickoffs;
+      assert(
+        entry,
+        `Worktree ${args.worktree} supervises no registered kickoff`,
+      );
+      assertDirectorAuthority(
+        entry,
+        process.cwd(),
+        "kickoff-merge-record",
+        Boolean(args.force),
+      );
+      return recordDelivery(args.org, {
+        worktreeId: args.worktree,
+        head: args.head,
+        mergeCommit: args["merge-commit"],
       });
     }
     case "prepare":

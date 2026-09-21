@@ -68,12 +68,23 @@ export function assertNotKickoffOwner(directory, use) {
   );
 }
 
-// Checks that the caller is running from the director's registered checkout
-// path. Entries without a director field predate this feature and are allowed
-// through with a console warning so existing kickoffs remain closable.
-// When force is true the check is bypassed (mirrors the takeover pattern in
-// releaseKickoff).
-function assertDirectorAuthority(entry, callerCwd, use, force) {
+/**
+ * Checks that the caller is running from the director's registered checkout
+ * path.
+ *
+ * Entries without a director field predate this feature and are allowed
+ * through with a console warning so existing kickoffs remain closable.
+ * When force is true the check is bypassed (mirrors the takeover pattern in
+ * releaseKickoff).
+ *
+ * @param {object} entry - Validated kickoff registry entry.
+ * @param {string} callerCwd - Caller's working directory to compare.
+ * @param {string} use - Description of the operation, for the error message.
+ * @param {boolean} [force=false] - When true, bypasses the check.
+ * @returns {void}
+ * @throws {Error} When the caller is not at the director's checkout path.
+ */
+export function assertDirectorAuthority(entry, callerCwd, use, force) {
   if (!entry.director) {
     // Legacy entry: no director recorded; warn and allow.
     console.warn(
@@ -90,6 +101,44 @@ function assertDirectorAuthority(entry, callerCwd, use, force) {
       `current directory is ${actual}. ` +
       "Run from the owner project checkout, or pass --force with the director's explicit authorization.",
   );
+}
+
+/**
+ * Checks whether the PM's close-ready signal matches the requested HEAD for a
+ * pull-request kickoff.
+ *
+ * For pull-request deliveries, `deliverKickoff` refuses before the signal
+ * check runs. This function provides the check as a standalone step so the
+ * director can verify the signal before merging a PR manually. Returns
+ * `{ready: true}` when the signal matches, or throws when it does not. When no
+ * signal exists the kickoff predates the signal channel: a warning is emitted
+ * and the function returns `{ready: true, legacy: true}` so existing kickoffs
+ * remain closable.
+ *
+ * @param {object} options - Check options.
+ * @param {string} options.orgFile - Organization JSON path.
+ * @param {string} options.worktreeId - PM worktree of the kickoff.
+ * @param {string} options.head - Integration HEAD SHA to verify against the signal.
+ * @returns {{ready: boolean, legacy?: boolean, signal?: object}} Result.
+ * @throws {Error} When a signal exists but its head does not match.
+ */
+export function checkCloseReady({ orgFile, worktreeId, head }) {
+  const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
+  assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
+  const signal = findCloseReadySignal(orgFile, worktreeId);
+  if (!signal) {
+    console.warn(
+      `[omt] Warning: no close-ready signal found for ${worktreeId}; ` +
+        "proceeding without PM close-ready confirmation.",
+    );
+    return { ready: true, legacy: true };
+  }
+  assert(
+    signal.head === head,
+    `close-ready signal records HEAD ${signal.head} but requested HEAD is ${head}; ` +
+      "the PM must send a new close-ready signal for the current integration HEAD",
+  );
+  return { ready: true, signal };
 }
 
 /**

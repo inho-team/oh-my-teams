@@ -113,3 +113,63 @@ run.mjs의 실행기는 현재 `tests/runtime.test.mjs` 한 파일만 봄. direc
 - `# pass 0` 거짓 통과 문제(항목 11)를 함께 수정해, 이름 불일치시 failed를 반환하도록 run.mjs를 수정했다.
 
 **테스트 이름**: `"director skill exists, has authority-responsibility-limits section, and PM-and-below report to 이사"` (`tests/runtime.test.mjs` 끝에 추가)
+
+---
+
+## 6. pull-request 전달에서의 종료 검사 제공 방식
+
+### 결정: 별도 `kickoff-check-close-ready` 명령을 제공한다
+
+작업 계약: `.omt/workflows/director-role-w3/tasks/director-close-path/revisions/1.json`
+
+**배경**
+
+`deliverKickoff`는 `delivery.mode === "pull-request"`이면 139~143행에서 즉시 거부한다. close-ready 신호와 HEAD를 대조하는 검사(162행)는 그보다 아래에 있어 `pull-request` 전달에서는 실행되지 않는다. 브리프 수용 기준 4의 마지막 항목("close-ready 신호가 없거나 HEAD가 다르면 경고·거부한다")이 실제로는 동작하지 않는 결함이다.
+
+**선택지**
+
+A. `deliverKickoff` 내부 로직을 재구성해 `pull-request` 모드에서도 신호 검사만 실행하고 실제 병합은 건너뛴다.
+
+B. `delivery.mjs`에 `checkCloseReady(orgFile, worktreeId, head)` 함수를 추가하고, `teams-org.mjs`에 `kickoff-check-close-ready` 명령으로 배선한다.
+
+C. `director-signal`의 `close-ready` 조회를 지시하는 문서만 수정하고 런타임 강제를 만들지 않는다.
+
+**채택: B**
+
+- A: `deliverKickoff`의 인터페이스를 변경하면 기존 `local-merge` 동작과 기존 테스트가 영향을 받는다. 함수가 조건에 따라 두 가지 의미를 갖게 되어 호출 계약이 불명확해진다.
+- C: 문서만으로는 런타임 강제가 없으므로 브리프 수용 기준 4를 충족하지 못한다.
+- B: `delivery.mjs`에 집중된 독립 함수로 제공하면 기존 `deliverKickoff`를 건드리지 않고 `pull-request` 경로에서도 신호 검사를 수행할 수 있다. 이사는 PR을 병합하기 전에 `kickoff-check-close-ready`를 실행해 신호 유무와 HEAD 일치를 확인한다. 이 명령은 상태를 변경하지 않는 조회·검사 명령이므로 반복 실행이 안전하다.
+
+**신호가 없는 기존 kickoff 처리**
+
+이사 도입 전에 등록된 kickoff는 신호 통로 자체가 없었다. 이런 항목에 대해 신호 검사를 거부하면 기존 kickoff가 종료 불가능해지므로, 계약 제약을 위반한다. 따라서 기존 `deliverKickoff`와 동일한 정책을 적용한다: 신호가 없으면 경고 후 진행 허용(warning), 신호가 있는데 HEAD가 다르면 오류로 거부한다.
+
+**구현 위치**: `delivery.mjs`에 `checkCloseReady` 함수 추가, `teams-org.mjs`에 `kickoff-check-close-ready` 명령 배선.
+
+---
+
+## 7. PR 병합 기록 명령
+
+### 결정: `kickoff-merge-record` 명령을 추가하고 이사 권한 검사를 `assertDirectorAuthority`로 적용한다
+
+**배경**
+
+`kickoff-registry.mjs`의 `recordDelivery`는 export되어 있지만 `teams-org.mjs`에 CLI 명령으로 배선되지 않았다. PR 방식으로 병합한 사실을 등록부에 남길 공식 경로가 없고, `entry.delivered.mergeCommit`을 요구하는 `kickoff-branch-cleanup`을 `pull-request` kickoff에서는 쓸 수 없었다.
+
+**선택지**
+
+A. `deliver` 명령의 `pull-request` 거부를 완화해 직접 `recordDelivery`를 호출하게 한다.
+
+B. 새 `kickoff-merge-record` 명령을 추가하고 `recordDelivery`를 호출하며 이사 권한 검사를 `assertDirectorAuthority`로 적용한다.
+
+**채택: B**
+
+- A: `deliver`는 `local-merge` 전용이다. 이 의미를 바꾸면 문서·테스트 전체와의 호환이 깨진다.
+- B: 별도 명령으로 분리하면 역할이 명확하다. `deliver`는 실제 git 병합을 수행하고, `kickoff-merge-record`는 외부(PR)에서 병합된 사실만 기록한다. 이사 권한 검사는 `delivery.mjs`의 `assertDirectorAuthority`를 그대로 재사용한다.
+
+**이사 기록이 없는 기존 항목**: `assertDirectorAuthority`와 동일한 정책을 따른다. 이사 기록이 없으면 경고 후 허용, 이사 기록이 있으면 체크아웃 경로를 확인한다.
+
+**인자**: `--org FILE --worktree ID --head SHA --merge-commit SHA`
+`--head`는 전달한 kickoff HEAD, `--merge-commit`은 PR 병합 커밋이다.
+
+**구현 위치**: `teams-org.mjs`에 `kickoff-merge-record` 케이스 추가, `ALLOWED_OPTIONS`와 `REQUIRED_OPTIONS`에 등록. `assertDirectorAuthority`를 `delivery.mjs`에서 export하여 재사용한다.

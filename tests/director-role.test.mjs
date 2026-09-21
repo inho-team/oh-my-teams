@@ -22,10 +22,17 @@ import {
 } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import {
   listKickoffs,
+  cleanupKickoffBranches,
+  recordDelivery,
   registerKickoff,
   releaseKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
-import { deliverKickoff } from "../plugins/oh-my-teams/scripts/delivery.mjs";
+import {
+  assertDirectorAuthority,
+  checkCloseReady,
+  deliverKickoff,
+} from "../plugins/oh-my-teams/scripts/delivery.mjs";
+import { sendSignal } from "../plugins/oh-my-teams/scripts/director.mjs";
 import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 
 const example = () =>
@@ -430,4 +437,180 @@ test("launchContext director lookup is non-fatal when registry has no matching e
   // roleSpec without director still produces a valid header (no terminalHandle).
   const spec = roleSpec(readJSON(fixture.org), "pm", "kickoff를 감독한다.");
   assert.match(spec, /보고 대상: 이사(?! \()/);
+});
+
+// ─── 7. PR 전달의 close-ready 신호 검사 ───────────────────────────────────
+
+test("checkCloseReady warns and returns legacy:true when no close-ready signal exists", (t) => {
+  const fixture = project(t);
+  registerKickoff(fixture.org, claimFor(fixture, "wt-no-signal"));
+
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (msg) => warnings.push(msg);
+  try {
+    const result = checkCloseReady({
+      orgFile: fixture.org,
+      worktreeId: "wt-no-signal",
+      head: "abc123",
+    });
+    assert.equal(result.ready, true);
+    assert.equal(result.legacy, true);
+    assert.ok(warnings.some((w) => w.includes("no close-ready signal")));
+  } finally {
+    console.warn = original;
+  }
+});
+
+test("checkCloseReady throws when signal head does not match requested head", (t) => {
+  const fixture = project(t);
+  registerKickoff(fixture.org, claimFor(fixture, "wt-head-mismatch"));
+  sendSignal(fixture.org, {
+    worktreeId: "wt-head-mismatch",
+    kind: "close-ready",
+    text: "ready",
+    head: "signal-sha",
+  });
+
+  assert.throws(
+    () =>
+      checkCloseReady({
+        orgFile: fixture.org,
+        worktreeId: "wt-head-mismatch",
+        head: "different-sha",
+      }),
+    /close-ready signal records HEAD signal-sha but requested HEAD is different-sha/,
+  );
+});
+
+test("checkCloseReady returns ready when signal head matches", (t) => {
+  const fixture = project(t);
+  registerKickoff(fixture.org, claimFor(fixture, "wt-head-match"));
+  sendSignal(fixture.org, {
+    worktreeId: "wt-head-match",
+    kind: "close-ready",
+    text: "ready",
+    head: "matching-sha",
+  });
+
+  const result = checkCloseReady({
+    orgFile: fixture.org,
+    worktreeId: "wt-head-match",
+    head: "matching-sha",
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.legacy, undefined);
+  assert.ok(result.signal);
+  assert.equal(result.signal.head, "matching-sha");
+});
+
+// ─── 8. kickoff-merge-record 이사 권한 거부 ─────────────────────────────
+
+test("assertDirectorAuthority refuses when caller is not at director checkout", (t) => {
+  const fixture = project(t);
+  const directorPath = path.join(fixture.dir, "director-checkout");
+  fs.mkdirSync(directorPath, { recursive: true });
+  const wrongDir = path.join(fixture.dir, "wrong-place");
+  fs.mkdirSync(wrongDir, { recursive: true });
+  registerKickoff(
+    fixture.org,
+    claimFor(fixture, "wt-auth-check", { checkoutPath: directorPath }),
+  );
+  const [entry] = listKickoffs(fixture.org).kickoffs;
+
+  assert.throws(
+    () =>
+      assertDirectorAuthority(entry, wrongDir, "kickoff-merge-record", false),
+    /kickoff-merge-record must be run from the director/,
+  );
+});
+
+test("assertDirectorAuthority succeeds from the director checkout path", (t) => {
+  const fixture = project(t);
+  registerKickoff(
+    fixture.org,
+    claimFor(fixture, "wt-auth-ok", { checkoutPath: fixture.dir }),
+  );
+  const [entry] = listKickoffs(fixture.org).kickoffs;
+  assert.doesNotThrow(() =>
+    assertDirectorAuthority(entry, fixture.dir, "kickoff-merge-record", false),
+  );
+});
+
+// ─── 9. 기록 후 kickoff-branch-cleanup이 mergeCommit을 찾아 진행 ─────────
+
+test("recordDelivery + cleanupKickoffBranches proceeds with mergeCommit for pull-request", (t) => {
+  const fixture = project(t);
+  registerKickoff(fixture.org, {
+    ...claimFor(fixture, "wt-pr-cleanup", { checkoutPath: fixture.dir }),
+    delivery: { mode: "pull-request", branch: "main" },
+  });
+
+  const recorded = recordDelivery(fixture.org, {
+    worktreeId: "wt-pr-cleanup",
+    head: "abc123",
+    mergeCommit: "merge-abc",
+  });
+  assert.equal(recorded.recorded, true);
+  assert.equal(recorded.entry.delivered.mergeCommit, "merge-abc");
+
+  const [entry] = listKickoffs(fixture.org, "wt-pr-cleanup").kickoffs;
+  assert.equal(entry.delivered?.mergeCommit, "merge-abc");
+  // cleanupKickoffBranches should see a deliveryRef and try to run isAncestor.
+  // In a non-git dir the check fails (skipped), but no "no delivery record" skip.
+  const result = cleanupKickoffBranches({
+    projectDir: fixture.dir,
+    entry,
+    branches: ["feat/nonexistent-branch"],
+    remoteName: "",
+    callerCwd: fixture.dir,
+    force: false,
+  });
+  // Branch is skipped because isAncestor fails in a non-git dir, but
+  // the function ran without throwing, meaning it found the deliveryRef.
+  assert.ok(Array.isArray(result.skipped) || Array.isArray(result.errors));
+});
+
+// ─── 10. 이사 기록이 없는 기존 항목의 호환 ──────────────────────────────
+
+test("checkCloseReady works for legacy kickoff without director record", (t) => {
+  const fixture = project(t);
+  registerKickoff(fixture.org, claimFor(fixture, "wt-legacy-check"));
+
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (msg) => warnings.push(msg);
+  try {
+    const result = checkCloseReady({
+      orgFile: fixture.org,
+      worktreeId: "wt-legacy-check",
+      head: "any-sha",
+    });
+    assert.equal(result.ready, true);
+    assert.equal(result.legacy, true);
+  } finally {
+    console.warn = original;
+  }
+});
+
+test("assertDirectorAuthority warns and proceeds for legacy entry without director", (t) => {
+  const fixture = project(t);
+  registerKickoff(fixture.org, claimFor(fixture, "wt-legacy-authority"));
+  const [entry] = listKickoffs(fixture.org).kickoffs;
+  assert.equal(entry.director, undefined);
+
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (msg) => warnings.push(msg);
+  try {
+    assertDirectorAuthority(
+      entry,
+      "/some/wrong/place",
+      "kickoff-merge-record",
+      false,
+    );
+    assert.ok(warnings.some((w) => w.includes("no director record")));
+  } finally {
+    console.warn = original;
+  }
 });

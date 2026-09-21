@@ -60,6 +60,13 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 
 `close-ready` 신호를 받은 뒤 [close](../close/SKILL.md) 절차로 전달·병합·정리를 수행한다. PM 워크트리를 회수하므로 이 절차는 이사 세션에서 수행한다. 자기가 서 있는 워크트리는 스스로 제거할 수 없기 때문이다.
 
+`pull-request` 전달에서는 PR을 병합하기 전에 신호와 HEAD를 대조하고, 병합 후 등록부에 기록한다.
+
+```text
+node <runtime> kickoff-check-close-ready --org <project>/.omt/organization.json --worktree <pm-worktree-id> --head <verified-head>
+node <runtime> kickoff-merge-record --org <project>/.omt/organization.json --worktree <pm-worktree-id> --head <verified-head> --merge-commit <pr-merge-commit>
+```
+
 ```text
 node <runtime> kickoff-show --org <project>/.omt/organization.json
 ```
@@ -70,3 +77,4 @@ node <runtime> kickoff-show --org <project>/.omt/organization.json
 node <runtime> resource-acquire --org <project>/.omt/organization.json --worktree <pm-worktree-id> --kind test|worker|build --note "작업 설명"
 node <runtime> resource-release --org <project>/.omt/organization.json --slot <slotId>
 ```
+
