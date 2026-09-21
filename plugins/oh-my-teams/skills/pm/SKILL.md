@@ -19,6 +19,7 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 - 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. Agy 터미널이고 사용자가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
+- 조직이 PM에게 자문자를 허용했으면 계획 확정, 최종 수용, 반복 실패 같은 결정 관문에서만 자기 역할로 `advise`를 호출한다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 선언 세션이 `close`에서 브리프의 전달 방식으로 수행한다.
 
 ### 책임
@@ -49,6 +50,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - 역할별 모델·계정·동시 인원과 fallback을 조직 파일에서 읽는다. 조직도는 보고 구조이며 모든 작업이 모든 단계를 통과해야 한다는 뜻이 아니다. Orca 중첩 깊이 제한에 걸리면 PM/PL이 평평한 작업 파동으로 배정한다.
 - 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다.
 - PM은 자료 정리와 반론 수집을 보조 도구에 맡길 수 있으나 목표·우선순위·수용 결정은 위임하지 않는다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
+- 자문자는 PM보다 비싼 모델이므로 감독이나 보고 취합에는 부르지 않는다. 대화 전문 대신 결정할 질문과 요약만 브리프로 보내고, 자문을 따르든 따르지 않든 결정은 PM이 내린다. 호출 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
 
 제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 감독 worker로 배정한다. 여러 작업으로 나누고 통합해야 하면 PL에게 분할 계획과 통합을 맡기고, 나눌 필요가 없으면 수행할 역할에게 직접 배정한다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 주고, [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 완료 조건부터 쓴다.
 

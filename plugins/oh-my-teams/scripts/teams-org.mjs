@@ -42,7 +42,7 @@ import {
   worktreeLabel,
 } from "./role-terminal.mjs";
 import { predictLaunchPath } from "./launch-matrix.mjs";
-import { assist, draft, validateTask, work } from "./worker.mjs";
+import { advise, assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
@@ -97,7 +97,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
-  preset --org FILE --name opus-first|balanced|single-subscription --revision N
+  preset --org FILE --name opus-first|balanced|single-subscription|advisor-codex|advisor-claude --revision N
          [--apply]
   show --org FILE [--state DIR] [--json]
   validate --org FILE
@@ -159,6 +159,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
   assist --org FILE --task FILE --repo DIR --state DIR --role ROLE
          --kind research|checklist|edit [--profile PROFILE]
+  advise --org FILE --brief FILE --repo DIR --state DIR --role ROLE
+         --kind plan|design|review|unblock [--profile PROFILE]
+         (read-only advisor call; spends one slot of policy.adviceBudget)
   verify --task FILE --repo DIR --state DIR
   merge-check --evidence FILE --task TRUSTED_TASK --repo DIR --base REF
               [--report FILE --state DIR]
@@ -292,6 +295,7 @@ export const ALLOWED_OPTIONS = {
   work: ["org", "task", "repo", "state", "role", "workflow-id", "attempt-id"],
   draft: ["org", "task", "repo", "kind"],
   assist: ["org", "task", "repo", "state", "role", "kind", "profile"],
+  advise: ["org", "brief", "repo", "state", "role", "kind", "profile"],
   verify: ["task", "repo", "state"],
   "merge-check": ["evidence", "task", "repo", "base", "report", "state"],
   aggregate: ["expected", "report"],
@@ -363,6 +367,7 @@ export const REQUIRED_OPTIONS = {
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
   assist: ["org", "task", "repo", "state", "role", "kind"],
+  advise: ["org", "brief", "repo", "state", "role", "kind"],
   verify: ["task", "repo", "state"],
   "merge-check": ["evidence", "task", "repo", "base"],
   aggregate: ["expected"],
@@ -1145,6 +1150,18 @@ async function executeCommand(args) {
         path.resolve(args.repo),
         readJSON(args.org),
         readJSON(args.task),
+        {
+          role: args.role,
+          kind: args.kind,
+          stateDir: path.resolve(args.state),
+          profileId: args.profile,
+        },
+      );
+    case "advise":
+      return advise(
+        path.resolve(args.repo),
+        readJSON(args.org),
+        readJSON(args.brief),
         {
           role: args.role,
           kind: args.kind,

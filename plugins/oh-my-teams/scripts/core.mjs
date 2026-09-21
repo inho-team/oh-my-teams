@@ -79,6 +79,8 @@ export const MODEL_POLICY_PRESETS = [
   "opus-first",
   "balanced",
   "single-subscription",
+  "advisor-codex",
+  "advisor-claude",
 ];
 
 /**
@@ -777,6 +779,19 @@ export function validateOrg(org) {
     }
   }
 
+  if (org.advisors) {
+    for (const [role, profiles] of Object.entries(org.advisors)) {
+      assert(Object.hasOwn(org.roles, role), `Unknown advisor role: ${role}`);
+      assert(
+        Array.isArray(profiles) &&
+          profiles.length > 0 &&
+          new Set(profiles).size === profiles.length &&
+          profiles.every((profile) => Object.hasOwn(org.profiles, profile)),
+        `Invalid advisor profiles: ${role}`,
+      );
+    }
+  }
+
   assert(
     ["stop", "fallback"].includes(org.policy.onExhaustion),
     "onExhaustion must be stop or fallback",
@@ -799,7 +814,33 @@ export function validateOrg(org) {
     "repeatFailureLimit required",
   );
   validateSupervision(org.policy.supervision);
+  assert(
+    org.policy.adviceBudget === undefined ||
+      (Number.isInteger(org.policy.adviceBudget) &&
+        org.policy.adviceBudget >= 1 &&
+        org.policy.adviceBudget <= 50),
+    "adviceBudget must be 1..50",
+  );
   return org;
+}
+
+/**
+ * Advisor calls one shared state directory may spend when the policy sets none.
+ *
+ * An advisor is the most expensive model an organization runs, so its calls are
+ * counted per kickoff state rather than per task: a run that keeps asking is a
+ * run whose plan needs a person, not another opinion.
+ */
+export const ADVICE_BUDGET_DEFAULT = 6;
+
+/**
+ * Reads how many advisor calls one shared state directory may spend.
+ *
+ * @param {object} org - Validated organization.
+ * @returns {number} Effective advice budget.
+ */
+export function adviceBudget(org) {
+  return org.policy?.adviceBudget ?? ADVICE_BUDGET_DEFAULT;
 }
 
 /**
@@ -931,6 +972,12 @@ export function chart(org) {
   }
 
   visit(ROOT_ROLE, 0);
+  for (const [role, profiles] of Object.entries(org.advisors ?? {})) {
+    const models = profiles.map(
+      (id) => `${id} (${org.profiles[id].model ?? "host-default"})`,
+    );
+    lines.push(`ADVISOR for ${role.toUpperCase()}: ${models.join(", ")}`);
+  }
   return lines.join("\n");
 }
 
