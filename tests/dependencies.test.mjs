@@ -628,6 +628,8 @@ test("prune keeps staging whose lock a live process holds, and removes it once t
   assert.equal(fs.existsSync(unnamed), false);
 });
 
+// POSIX only: it links directories with symlinks, which Windows creates only with
+// a privilege, and pruning is outside the Windows proxy task, so it is not ported.
 test(
   "prune never removes anything outside the ownership prefix through a link",
   posixOnly,
