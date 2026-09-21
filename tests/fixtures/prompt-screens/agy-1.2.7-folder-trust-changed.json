@@ -3,7 +3,7 @@
   "version": "1.2.7",
   "kind": "folder-trust-changed",
   "selected": 2,
-  "capturedAt": "2026-09-22T00:00:00Z",
+  "capturedAt": "2026-09-21T15:21:44.812Z",
   "command": "agy --dangerously-skip-permissions",
   "lines": [
     "Accessing workspace:",
