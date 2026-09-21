@@ -150,9 +150,13 @@
         "macos": "With Node and npm ready, install the exact dependency version declared by plugins/oh-my-teams/package.json using npm; no separate Bun installation is required by the official guide.",
         "windows": "With Node and npm ready, install the exact dependency version declared by plugins/oh-my-teams/package.json using npm. Windows execution is documented as an install path, not as a completed platform measurement.",
         "login": {
-          "argv": ["ocx", "login"],
+          "argv": ["ocx", "account", "login", "<provider>"],
+          "accountCheck": {
+            "argv": ["ocx", "account", "list", "<provider>", "--json"],
+            "description": "Confirm exactly one account using machine-readable account metadata, then report only a secret-free label."
+          },
           "environment": ["OPENCODEX_HOME=<owned-empty-directory>"],
-          "description": "Log in exactly one user-selected account in a separate OPENCODEX_HOME. Do not read or copy existing Claude credentials. Verify exactly one account and a secret-free account label with ocx status; block on missing, multiple, or secret-bearing labels."
+          "description": "Log in exactly one user-selected account in a separate OPENCODEX_HOME. Do not read or copy existing Claude credentials. Block on missing, multiple, or secret-bearing account labels."
         },
         "repair": "Check both command names and PATH, compare the installed package version with package.json, and reinstall only in an owned staging prefix. Do not claim pool switching or automatic account changes from a healthy process alone."
       },
@@ -197,7 +201,7 @@
             "result.runtime.appVersion",
             "result.runtime.reachable",
             "result.runtime.state",
-            "result.capabilities",
+            "result.runtime.capabilities",
             "_meta.runtimeId or result.runtime.runtimeId"
           ]
         },
@@ -246,7 +250,8 @@
             "result.runtime.appVersion",
             "result.runtime.reachable",
             "result.runtime.state",
-            "result.capabilities",
+            "result.runtime.capabilities",
+            "result.app.running",
             "_meta.runtimeId or result.runtime.runtimeId"
           ]
         },
