@@ -299,6 +299,11 @@ async function takeReclaimMutex(file, token, waitMs) {
     // The holder may have released between the failed link and this read.
     if (!holder && !fs.existsSync(mutex)) continue;
     if (!holder || !recordOwnerLive(holder)) {
+      // A holder that released and exited, or a new holder that took the
+      // mutex after the read, is not a dead reclaimer: judge the file again.
+      const again = readRecord(mutex);
+      if (again?.token !== holder?.token) continue;
+      if (!again && !fs.existsSync(mutex)) continue;
       throw new Error(
         `opencodex-lease-reclaim-stuck: a reclaimer that is gone left ${mutex}; ` +
           "remove it by hand once no process is reclaiming this home",
