@@ -20,6 +20,7 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
+import { deliverPrompt } from "./prompt-submission.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
 
 /** Signal kinds PM may send to the Director. */
@@ -185,42 +186,51 @@ export function closeKickoffSignals(orgFile, worktreeId, reason) {
   });
 }
 
+// Sends one notification into a terminal and keeps how far it got. `notified`
+// is true only once the input was submitted or is already being handled, so an
+// input Orca merely accepted is not reported as delivered. Orca's own error
+// text and warnings are kept as they came, and nothing is sent twice.
+async function notifyTerminal(orca, terminal, text, execute) {
+  const result = await deliverPrompt({ orca, terminal, text, execute });
+  const { delivered, error, ...delivery } = result;
+  return {
+    notified: delivered,
+    ...(delivered ? {} : { notifyError: error ?? result.reason }),
+    delivery,
+  };
+}
+
 /**
  * Delivers a terminal notification to the Director after writing the signal.
  *
- * Call after `sendSignal`. When Orca delivery fails, the result carries
- * `notifyError` and `notified: false`; the record on disk is unaffected.
+ * Call after `sendSignal`. The notification counts as delivered only when the
+ * Director's agent started its turn or took the input; an input Orca accepted
+ * but nobody submitted comes back as `notified: false`. `delivery` carries the
+ * outcome, the receipt stages and the request ID, and `notifyError` keeps
+ * Orca's own error text. The text is never sent a second time: the follow-up
+ * calls replay the same request ID, and one bare Enter follows only when the
+ * text is seen waiting in the input box. The record on disk is unaffected.
  *
  * @param {object} entry - Kickoff registry entry.
  * @param {object} record - Signal record returned by `sendSignal`.
  * @param {string} [orcaExecutable] - Orca binary path.
- * @returns {Promise<{notified: boolean, notifyError?: string}>} Notification result.
+ * @param {Function} [execute] - Injectable command runner.
+ * @returns {Promise<{notified: boolean, notifyError?: string, delivery?: object}>} Notification result.
  */
-export async function notifyDirector(entry, record, orcaExecutable) {
+export async function notifyDirector(
+  entry,
+  record,
+  orcaExecutable,
+  execute = run,
+) {
   const handle = entry.director?.terminalHandle;
   if (!handle) return { notified: false };
-  const argv = [
+  return notifyTerminal(
     orcaExecutable ?? "orca",
-    "terminal",
-    "send",
-    "--terminal",
     handle,
-    "--text",
     `[omt] ${record.kind} from ${record.worktreeId}: ${record.text}`,
-    "--enter",
-  ];
-  try {
-    const result = await run(argv, { timeoutMs: 10000 });
-    if (result.code !== 0) {
-      return {
-        notified: false,
-        notifyError: result.stderr.trim() || `exit ${result.code}`,
-      };
-    }
-    return { notified: true };
-  } catch (error) {
-    return { notified: false, notifyError: error.message };
-  }
+    execute,
+  );
 }
 
 /**
@@ -247,7 +257,8 @@ export function listInbox(orgFile) {
  * @param {string} [request.orcaExecutable] - Orca binary for PM notification.
  * @param {Function} [request.listTerminals] - Injectable async lister returning
  *   Orca terminal records (`handle`, `title`, `worktreePath`), for tests.
- * @returns {Promise<{replied: boolean, record: object, notified: boolean, notifyError?: string, pmTerminal?: string}>}
+ * @param {Function} [request.execute] - Injectable command runner for the PM notification.
+ * @returns {Promise<{replied: boolean, record: object, notified: boolean, notifyError?: string, pmTerminal?: string, delivery?: object}>}
  * @throws {Error} When the signal is not found or is not in pending status.
  */
 export async function replySignal(orgFile, request) {
@@ -280,6 +291,7 @@ export async function replySignal(orgFile, request) {
   // reads through director-inbox, and is reported as notified: false.
   let notified = false;
   let notifyError;
+  let delivery;
   let pmTerminal;
   try {
     const { kickoffs } = listKickoffs(orgFile, updated.worktreeId);
@@ -294,22 +306,15 @@ export async function replySignal(orgFile, request) {
           })
         : undefined);
     if (pmTerminal) {
-      const argv = [
+      const sent = await notifyTerminal(
         orcaExec,
-        "terminal",
-        "send",
-        "--terminal",
         pmTerminal,
-        "--text",
         `[omt reply] ${updated.reply}`,
-        "--enter",
-      ];
-      const result = await run(argv, { timeoutMs: 10000 });
-      if (result.code === 0) {
-        notified = true;
-      } else {
-        notifyError = result.stderr.trim() || `exit ${result.code}`;
-      }
+        request.execute ?? run,
+      );
+      notified = sent.notified;
+      notifyError = sent.notifyError;
+      delivery = sent.delivery;
     } else {
       notifyError = "no-pm-terminal-found";
     }
@@ -323,6 +328,7 @@ export async function replySignal(orgFile, request) {
     notified,
     ...(pmTerminal ? { pmTerminal } : {}),
     ...(notifyError ? { notifyError } : {}),
+    ...(delivery ? { delivery } : {}),
   };
 }
 

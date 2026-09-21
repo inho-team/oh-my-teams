@@ -8,6 +8,7 @@ import path from "node:path";
 import { writeJSON, readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   findPmTerminal,
+  notifyDirector,
   sendSignal,
   listInbox,
   replySignal,
@@ -913,4 +914,165 @@ test("signals sent within one millisecond keep their order through a sequence", 
   assert.equal(first.record.sentAt, second.record.sentAt);
   assert.ok(second.record.seq > first.record.seq);
   assert.equal(findCloseReadySignal(orgFile, worktreeId).id, second.id);
+});
+
+// ─── Terminal notifications keep acceptance and submission apart ────────────
+
+const RULE = "─".repeat(60);
+const NOTE = { kind: "progress", worktreeId: "wt-1", text: "tests are green" };
+const NOTE_TEXT = "[omt] progress from wt-1: tests are green";
+
+// Plays `orca terminal send` and `read`; `answers` is consumed in order and
+// the last one repeats. An answer is a stage list, or { code, stderr } for a
+// failed call.
+function orcaNotify(answers, screen = []) {
+  const calls = [];
+  const queue = [...answers];
+  const execute = async (argv) => {
+    const args = argv.slice(1, -1);
+    calls.push(args);
+    if (args[1] === "read") {
+      const tail = typeof screen === "function" ? screen(calls) : screen;
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          result: { terminal: { tail, source: "screen" } },
+        }),
+      };
+    }
+    if (args[args.indexOf("--text") + 1] === "") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          result: { send: { accepted: true } },
+        }),
+      };
+    }
+    const answer = queue.length > 1 ? queue.shift() : queue[0];
+    if (!Array.isArray(answer))
+      return { code: answer.code, stdout: "", stderr: answer.stderr };
+    return {
+      code: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        result: {
+          send: {
+            accepted: true,
+            prompt: { requestId: "req-7", stages: answer, provider: "claude" },
+          },
+          mutation: {
+            requestId: "req-7",
+            replayed: args.includes("--retry-request"),
+          },
+        },
+      }),
+    };
+  };
+  const textSends = () =>
+    calls.filter(
+      (call) =>
+        call[1] === "send" &&
+        call.includes(NOTE_TEXT) &&
+        !call.includes("--retry-request"),
+    );
+  const enters = () =>
+    calls.filter(
+      (call) => call[1] === "send" && call[call.indexOf("--text") + 1] === "",
+    );
+  return { calls, execute, textSends, enters };
+}
+
+const withDirector = { director: { terminalHandle: "term_director" } };
+
+test("notifyDirector reports a delivery only once the turn started", async () => {
+  const orca = orcaNotify([["input_accepted", "turn_started"]]);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, true);
+  assert.equal(result.notifyError, undefined);
+  assert.equal(result.delivery.outcome, "submitted");
+  assert.deepEqual(result.delivery.stages, ["input_accepted", "turn_started"]);
+  assert.equal(result.delivery.requestId, "req-7");
+  assert.deepEqual(orca.textSends()[0].slice(-2), ["--wait-submit", "5"]);
+  assert.equal(orca.textSends().length, 1);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirector does not call an accepted but unproven input delivered", async () => {
+  // Nothing on the screen decides it: not delivered, request ID kept, no resend.
+  const orca = orcaNotify([["input_accepted"]], []);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.delivery.outcome, "unclear");
+  assert.deepEqual(result.delivery.stages, ["input_accepted"]);
+  assert.equal(result.delivery.requestId, "req-7");
+  assert.equal(result.notifyError, "no-input-box-on-screen");
+  assert.equal(orca.textSends().length, 1);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirector sends one Enter for a notification left in the input box", async () => {
+  const held = [RULE, `❯ ${NOTE_TEXT}`, RULE, "  ⏵⏵ bypass permissions on"];
+  const gone = [
+    `❯ ${NOTE_TEXT}`,
+    "✻ Working…",
+    RULE,
+    "❯",
+    RULE,
+    "  ⏵⏵ bypass permissions on",
+  ];
+  const orca = orcaNotify(
+    [["input_accepted"], ["input_accepted", "turn_started"]],
+    (calls) =>
+      calls.some((call) => call[call.indexOf("--text") + 1] === "")
+        ? gone
+        : held,
+  );
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, true);
+  assert.equal(result.delivery.outcome, "submitted");
+  assert.equal(result.delivery.enterSent, true);
+  assert.equal(orca.enters().length, 1);
+  assert.equal(orca.textSends().length, 1);
+});
+
+test("notifyDirector keeps Orca's failure text and does not resend", async () => {
+  const orca = orcaNotify([
+    { code: 1, stderr: "terminal_not_writable: pane is closed" },
+  ]);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.match(result.notifyError, /terminal_not_writable: pane is closed/);
+  assert.equal(result.delivery.outcome, "failed");
+  assert.equal(result.delivery.requestId, null);
+  assert.equal(orca.calls.length, 1);
+  assert.deepEqual(await notifyDirector({}, NOTE, "orca", orca.execute), {
+    notified: false,
+  });
+});
+
+test("replySignal reports how far the PM notification got", async (t) => {
+  const { orgFile, worktreeId, dir } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+  const { id } = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "?",
+  });
+  const orca = orcaNotify([["input_accepted"]], []);
+  const result = await replySignal(orgFile, {
+    signalId: id,
+    text: "go",
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: orca.execute,
+  });
+  assert.equal(result.replied, true);
+  assert.equal(result.pmTerminal, "term_pm");
+  assert.equal(result.notified, false);
+  assert.equal(result.delivery.outcome, "unclear");
+  assert.equal(result.delivery.requestId, "req-7");
+  assert.equal(result.record.reply, "go");
+  assert.equal(orca.enters().length, 0);
 });

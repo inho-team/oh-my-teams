@@ -156,10 +156,22 @@ function applyEvidenceWarning(candidate) {
   return {
     ...candidate,
     reason: ["unverified-terminal-evidence", ...candidate.reason],
-    nextAction:
+    nextAction: [
+      candidate.nextAction,
       "검증 기록이 부족합니다. 실행 후 준비 상태와 모델을 확인하세요.",
+    ]
+      .filter(Boolean)
+      .join(" "),
   };
 }
+
+/**
+ * 신뢰 기록이 없는 조합의 다음 행동. 질문에 답하는 주체는 사람이 아니라 감독자입니다.
+ *
+ * @type {string}
+ */
+const SUPERVISED_TRUST_ACTION =
+  "폴더 신뢰 질문이 나오면 감독자가 prompt-answer 명령으로 답한 뒤 terminal-idle-check로 되돌아갑니다.";
 
 /**
  * 표의 규칙 배열. 위에서 아래로 순서대로 평가하며, 처음 조건이 맞는 행이 적용됩니다.
@@ -167,7 +179,7 @@ function applyEvidenceWarning(candidate) {
  * 각 규칙은 `{ match(params): boolean, result: MatrixResult }` 형태입니다.
  *
  * 설계 3절의 표 순서를 그대로 따릅니다:
- * 복합 명령 Windows Agy → 신뢰 없음(Agy) → 신뢰 없음(Codex) →
+ * 복합 명령 Windows Agy → 신뢰 없음(Agy, 감독자가 답함) → 신뢰 없음(Codex, 감독자가 답함) →
  * Claude skipPrompt=false → Claude win32 skipPrompt=true → Agy claude 계열 →
  * Agy gemini win32/powershell → Agy win32/powershell(다른 계열) →
  * Agy gemini/gpt-oss POSIX → Claude POSIX skipPrompt=true →
@@ -196,27 +208,30 @@ const MATRIX_RULES = [
       evidence: "source-derived",
     },
   },
-  // 3. Agy / - / 신뢰 기록 없음
+  // 3. Agy / - / 신뢰 기록 없음 → supervised-terminal
+  // 폴더 신뢰 질문은 터미널이 열린 뒤에 화면에 나타나며, 감독자(PM 또는 그 역할을 시작한 PL)가
+  // prompt-answer 명령으로 분류기를 거쳐 한 번 답합니다. 사람이 그 터미널에서 답하는 경로가 아닙니다.
   {
     match: ({ runner, trustRecordExists }) =>
       runner === "agy" && !trustRecordExists,
     result: {
-      path: "blocked",
+      path: "supervised-terminal",
       reason: ["agent-trust-workspace"],
-      nextOwner: "user",
-      nextAction: "폴더 신뢰 질문에 답하세요.",
-      evidence: "verified",
+      nextOwner: "pm",
+      nextAction: SUPERVISED_TRUST_ACTION,
+      evidence: "source-derived",
     },
   },
-  // 4. Codex / - / 신뢰 기록 없음 (codexTrustRecordExists가 true가 아닌 경우)
+  // 4. Codex / - / 신뢰 기록 없음 (codexTrustRecordExists가 true가 아닌 경우) → supervised-terminal
+  // Codex 폴더 신뢰 응답은 아직 실측하지 않았으므로 근거 등급을 verified로 올리지 않습니다.
   {
     match: ({ runner, codexTrustRecordExists }) =>
       runner === "codex" && codexTrustRecordExists !== true,
     result: {
-      path: "blocked",
+      path: "supervised-terminal",
       reason: ["codex-trust-workspace"],
-      nextOwner: "user",
-      nextAction: "폴더 신뢰 질문에 답하세요.",
+      nextOwner: "pm",
+      nextAction: SUPERVISED_TRUST_ACTION,
       evidence: "source-derived",
     },
   },
@@ -364,7 +379,7 @@ const MATRIX_RULES = [
  * @param {'powershell'|'posix'} params.shell - 셸 종류.
  * @param {boolean} params.trustRecordExists - 워크트리 신뢰 기록 유무 (Agy용).
  * @param {boolean|string} [params.codexTrustRecordExists="unknown"] - Codex 신뢰 기록 유무.
- *   true일 때만 4행(codex-trust-workspace) 차단을 건너뜁니다.
+ *   true가 아니면 4행(codex-trust-workspace)이 적용되어 터미널은 열리고 질문은 감독자가 답합니다.
  * @param {boolean} params.skipDangerousModePermissionPrompt - 첫 실행 확인 질문 설정 우회 여부.
  * @param {string} params.orcaVersion - Orca 버전.
  * @param {string} params.cliVersion - Antigravity CLI 버전.

@@ -1,0 +1,12 @@
+{
+  "cli": "agy",
+  "version": "1.2.7",
+  "kind": "unsubmitted-input",
+  "selected": null,
+  "capturedAt": "2026-09-21T15:21:25.322Z",
+  "command": "agy --dangerously-skip-permissions",
+  "lines": [
+    "jinsungkim@김진성 님의 MacBookPro-KDF6WKC7L7 spa-capture % cd /private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/t",
+    "mp.6Kiqw25mrE && agy --dangerously-skip-permissions"
+  ]
+}
