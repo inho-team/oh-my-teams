@@ -85,7 +85,7 @@
 | F-12 | 확인 필요 | W1의 Claude 키체인 메타데이터 변경 원인이 확인되지 않았습니다. |
 | F-13 | 낮음 | 설치 후 상태 확인이 만든 `health-home`과 `health-codex-home`가 활성 런타임 트리에 남고 정리 명령이 없습니다. |
 
-`accept-w3-review.json`은 F-6, F-4, F-1, F-13, Claude 귀속의 사람 로그인 확인, PR CI와 최신 `origin/main` 통합을 후속 항목으로 적었고, "고쳐졌다고 주장하지 않는다"고 명시했습니다. 또한 `reviews/w3-review-independent-review-2.json`이 남긴 비차단 참고로, F-4가 인용한 `response.ok`의 위치는 345행이 아니라 346행입니다.
+`accept-w3-review.json`은 F-6, F-4, F-1, F-13, Claude 귀속의 사람 로그인 확인, PR CI와 최신 `origin/main` 통합을 후속 항목으로 적었고, 이 항목들이 수정되었다고 주장하지 않는다는 뜻으로 원문에 `not claimed as fixed`라고 명시했습니다. 또한 `reviews/w3-review-independent-review-2.json`이 남긴 비차단 참고로, F-4가 인용한 `response.ok`의 위치는 345행이 아니라 346행입니다.
 
 w3-review 문서가 "통합 단계에서 확인할 사항"으로 넘긴 다섯 항목 가운데 이 통합이 처리한 것은 다음과 같습니다.
 
@@ -108,14 +108,14 @@ w3-review 문서가 "통합 단계에서 확인할 사항"으로 넘긴 다섯 �
 `reviews/w3-guide-independent-review-4.json`은 승인하면서 finding이 아닌 비차단 참고를 남겼고, `accept-w3-guide.json`은 그중 두 건을 통합 단계에서 다루도록 남겼습니다. 이 통합에서는 문서를 고치지 않았습니다.
 
 1. `README.md:48-49`는 Claude Code와 Codex CLI를 필수 의존성 표의 별도 행으로 적었는데 `README.md:112`는 "Codex CLI 또는 Claude Code"라고 적었습니다. 설치 인자 없이 `install.sh`를 실행하면 host가 `both`이고 `runtime-doctor`가 `ready`에 Codex를 요구하기 때문에 방어할 수 있는 표현이지만, 한쪽 호스트만 설치하는 독자는 이를 AND 조건으로 읽을 수 있습니다.
-2. `README.md:60`은 PowerShell 명령을 Windows 미측정 단서 없이 보여 줍니다. 그 단서는 `docs/OPENCODEX_RUNTIME.md:298`에 있고, README는 102행과 117행에서 이 안내서를 링크합니다.
+2. `README.md:60`은 PowerShell 명령을 Windows 미측정 단서 없이 보여 줍니다. 그 단서는 `docs/OPENCODEX_RUNTIME.md:298`에 있고, README는 103행과 118행에서 이 안내서를 링크합니다.
 
 같은 검토 파일은 이 밖에도 `docs/OPENCODEX_RUNTIME.md:84`가 지문이 환경마다 다르다고 적었지만 실제로는 `package.json`과 `package-lock.json`의 해시라는 점, 246행이 `API_KEY or API-KEY`만 나열하지만 코드는 `APIKEY`도 막는다는 점을 비차단 참고로 적었습니다.
 
 ### npm test 간헐 실패 보고와 재현 결과
 
 - 보고: `reviews/w3-platform-proof-independent-review-3.json`에 따르면 구현자가 `npm test`를 5회 실행하는 동안 1회 실패했다고 보고했습니다. 실패한 테스트 이름은 검토 파일에 없습니다.
-- 검토자의 재현: 같은 검토자가 이 워크트리에서 `npm test`를 순차로 8회, 4개 동시 실행으로 2회(8회분) 실행했고 16회 모두 통과했습니다(526개, 실패 0, 회당 약 16초). 그 diff는 테스트나 구현 파일을 건드리지 않아서 원인은 그 task의 파일로 귀속되지 않고, 원인은 알 수 없다고 적었습니다. `accept-w3-platform-proof.json`도 이를 "재현되지 않은 npm test 실패 1건(검토자 재실행 0/16)"으로 남겼습니다.
+- 검토자의 재현: 같은 검토자가 이 워크트리에서 `npm test`를 순차로 8회, 4개 동시 실행으로 2회(8회분) 실행했고 16회 모두 통과했습니다(526개, 실패 0, 회당 약 16초). 그 diff는 테스트나 구현 파일을 건드리지 않아서 원인은 그 task의 파일로 귀속되지 않고, 원인은 알 수 없다고 적었습니다. `accept-w3-platform-proof.json`도 재현되지 않은 npm test 실패가 1건 있고 검토자 재실행에서는 16회 중 0회 실패했다고 남겼습니다(원문은 `one unreproduced npm test failure (0/16 on reviewer reruns)`입니다).
 - 이 통합의 결과: 병합 HEAD에서 `npm test`를 3회 실행했고 3회 모두 526개 중 526개가 통과했습니다. 실패는 재현되지 않았으며 원인은 여전히 알 수 없습니다.
 
 ## PR CI에서 확인할 사항
