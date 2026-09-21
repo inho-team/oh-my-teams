@@ -1,0 +1,11 @@
+{
+  "name": "omt-isolated-install-probe",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "node lifecycle.cjs"
+  },
+  "dependencies": {
+    "is-odd": "3.0.1"
+  }
+}

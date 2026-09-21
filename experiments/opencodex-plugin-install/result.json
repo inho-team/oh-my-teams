@@ -1,0 +1,133 @@
+{
+  "versions": [
+    {
+      "command": ["claude", "--version"],
+      "exit": 0,
+      "stdout": "2.1.278 (Claude Code)\n",
+      "stderr": ""
+    },
+    {
+      "command": ["codex", "--version"],
+      "exit": 0,
+      "stdout": "codex-cli 0.155.1\n",
+      "stderr": ""
+    },
+    {
+      "command": ["npm", "--version"],
+      "exit": 0,
+      "stdout": "11.19.0\n",
+      "stderr": ""
+    },
+    {
+      "command": ["bun", "--version"],
+      "exit": 0,
+      "stdout": "1.2.19\n",
+      "stderr": ""
+    }
+  ],
+  "isolation": {
+    "home": "/tmp/omt-host-probe-20iqh606/home",
+    "codex_home": "/tmp/omt-host-probe-20iqh606/codex",
+    "original_home_not_read": true,
+    "credentials_copied": false
+  },
+  "checks": [
+    {
+      "name": "claude_validate",
+      "command": [
+        "claude",
+        "--bare",
+        "plugin",
+        "validate",
+        "/tmp/omt-host-probe-20iqh606/plugin"
+      ],
+      "exit": 0,
+      "stdout": "Validating plugin manifest: /tmp/omt-host-probe-20iqh606/plugin/.claude-plugin/plugin.json\n\n\u26a0 Found 2 warnings:\n\n  \u276f version: No version specified. Consider adding a version following semver (e.g., \"1.0.0\")\n  \u276f author: No author information provided. Consider adding author details for plugin attribution\n\n\u2714 Validation passed with warnings\n",
+      "stderr": ""
+    },
+    {
+      "name": "npm_ci_ignore_scripts",
+      "command": ["npm", "ci", "--ignore-scripts"],
+      "exit": 0,
+      "stdout": "\nadded 2 packages, and audited 3 packages in 296ms\n\nfound 0 vulnerabilities\n",
+      "stderr": "npm notice\nnpm notice New major version of npm available! 11.19.0 -> 12.0.2\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2\nnpm notice To update run: npm install -g npm@12.0.2\nnpm notice\n",
+      "marker_exists": false,
+      "node_modules_exists": true
+    },
+    {
+      "name": "npm_install_lifecycle",
+      "command": ["npm", "install"],
+      "exit": 0,
+      "stdout": "\n> omt-isolated-install-probe@1.0.0 postinstall\n> node lifecycle.cjs\n\n\nup to date, audited 3 packages in 343ms\n\nfound 0 vulnerabilities\n",
+      "stderr": "",
+      "marker_exists": true,
+      "marker_lines": ["2026-09-21T05:42:48.644Z postinstall"]
+    },
+    {
+      "name": "npm_ci_repeat_ignore_scripts",
+      "command": ["npm", "ci", "--ignore-scripts"],
+      "exit": 0,
+      "stdout": "\nadded 2 packages, and audited 3 packages in 316ms\n\nfound 0 vulnerabilities\n",
+      "stderr": "",
+      "marker_lines": ["2026-09-21T05:42:48.644Z postinstall"]
+    },
+    {
+      "name": "codex_marketplace_add",
+      "command": [
+        "codex",
+        "plugin",
+        "marketplace",
+        "add",
+        "/tmp/omt-host-probe-20iqh606/marketplace",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"marketplaceName\": \"omt-isolated-probe\",\n  \"installedRoot\": \"/private/tmp/omt-host-probe-20iqh606/marketplace\",\n  \"alreadyAdded\": false\n}\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "codex",
+        "plugin",
+        "add",
+        "install-probe@omt-isolated-probe",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"pluginId\": \"install-probe@omt-isolated-probe\",\n  \"name\": \"install-probe\",\n  \"marketplaceName\": \"omt-isolated-probe\",\n  \"version\": \"1.0.0\",\n  \"installedPath\": \"/private/tmp/omt-host-probe-20iqh606/codex/plugins/cache/omt-isolated-probe/install-probe/1.0.0\",\n  \"authPolicy\": \"ON_INSTALL\"\n}\n",
+      "stderr": "",
+      "name": "codex_plugin_add",
+      "cache_has_node_modules": false,
+      "marker_lines": ["2026-09-21T05:42:48.644Z postinstall"]
+    },
+    {
+      "command": [
+        "codex",
+        "plugin",
+        "add",
+        "install-probe@omt-isolated-probe",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"pluginId\": \"install-probe@omt-isolated-probe\",\n  \"name\": \"install-probe\",\n  \"marketplaceName\": \"omt-isolated-probe\",\n  \"version\": \"1.0.0\",\n  \"installedPath\": \"/private/tmp/omt-host-probe-20iqh606/codex/plugins/cache/omt-isolated-probe/install-probe/1.0.0\",\n  \"authPolicy\": \"ON_INSTALL\"\n}\n",
+      "stderr": "",
+      "name": "codex_plugin_add_repeat",
+      "cache_has_node_modules": false,
+      "marker_lines": ["2026-09-21T05:42:48.644Z postinstall"]
+    }
+  ],
+  "codex_cache_entries": [
+    "config.toml",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/.claude-plugin/plugin.json",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/.codex-plugin/plugin.json",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/lifecycle.cjs",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/package-lock.json",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/package.json",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/skills/probe/SKILL.md"
+  ],
+  "lifecycle_marker_lines": ["2026-09-21T05:42:48.644Z postinstall"],
+  "ocx_2_59_0": {
+    "status": "not_run",
+    "reason": "ocx is not on PATH; no OpenCodex 2.59.0 executable was available."
+  }
+}

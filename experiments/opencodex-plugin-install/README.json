@@ -1,0 +1,4 @@
+{
+  "purpose": "Isolated plugin-host installation probe fixture",
+  "safety": "The lifecycle fixture writes only to OMT_MARKER and has no network or model invocation."
+}
