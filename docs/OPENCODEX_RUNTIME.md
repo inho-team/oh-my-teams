@@ -125,7 +125,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 1. 먼저 `runtime-doctor`와 같은 진단을 합니다. 런타임이 이미 정상(`runtimeHealthy`)이면 아무것도 바꾸지 않고 결과에 `reused: true`를 담아 돌려줍니다. 카탈로그의 다른 검사가 실패했더라도 정상 런타임은 다시 설치하지 않습니다.
 2. 정상이 아니면 `~/.omt/runtime/opencodex/locks/<지문>.lock`을 잡고 `staging/<지문>-<임의 ID>` 디렉터리에 `package.json`과 `package-lock.json`을 복사한 뒤 `npm ci`를 실행합니다(제한 시간 180초).
-3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다.
+3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다. 임시 홈은 `~/.omt/runtime/opencodex/health-<uuid>/` 아래에 만들어지며, 성공과 실패 모두에서 정리됩니다. HOME, USERPROFILE, HOMEDRIVE, HOMEPATH(Windows 전용)는 모두 임시 경로로 격리되어 상태 확인이 실제 사용자 디렉터리에 영향을 주지 않습니다.
 4. 모두 통과하면 `staging`을 `runtimes/<지문>`으로 옮기고, 활성 포인터 `active.json`을 임시 파일 교체 방식으로 갱신한 뒤 다시 진단한 결과에 `installed: true`를 담아 돌려줍니다.
 5. 성공과 실패에 관계없이 이번 실행의 `staging` 디렉터리는 마지막에 삭제합니다.
 
@@ -181,9 +181,31 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair \
   --state .omt
 ```
 
-`runtime-repair`는 `runtime-install`과 같은 함수를 `command` 이름만 바꿔 호출합니다. 따라서 정상 런타임은 그대로 재사용하고(`reused: true`), 정상이 아닐 때만 위 설치 절차를 다시 실행합니다. 수리 과정에서 보관하는 대상은 하나뿐입니다. 같은 지문의 `runtimes/<지문>` 디렉터리가 이미 있으면 새 설치가 검증을 통과한 뒤 그 디렉터리를 `runtimes/<지문>.failed-<밀리초 타임스탬프>`로 이름을 바꿔 남깁니다. 중단되거나 부분적인 설치는 보관하지 않으며, 이번 실행의 `staging` 디렉터리는 항상 삭제합니다. 이전 실행이 남긴 `staging`이나 `.failed-*` 디렉터리를 정리하는 동작은 없습니다.
+`runtime-repair`는 `runtime-install`과 같은 함수를 `command` 이름만 바꿔 호출합니다. 따라서 정상 런타임은 그대로 재사용하고(`reused: true`), 정상이 아닐 때만 위 설치 절차를 다시 실행합니다. 수리 과정에서 보관하는 대상은 하나뿐입니다. 같은 지문의 `runtimes/<지문>` 디렉터리가 이미 있으면 새 설치가 검증을 통과한 뒤 그 디렉터리를 `runtimes/<지문>.failed-<밀리초 타임스탬프>`로 이름을 바꿔 남깁니다. 중단되거나 부분적인 설치는 보관하지 않으며, 이번 실행의 `staging` 디렉터리는 항상 삭제합니다.
 
 `--dry-run`은 `runtime-install`과 같이 진단 결과에 `"dryRun": true`를 덧붙일 뿐이며, `command`는 `runtime-repair`로 표시됩니다.
+
+### runtime-prune
+
+```sh
+node plugins/oh-my-teams/scripts/teams-org.mjs runtime-prune \
+  --org .omt/organization.json \
+  --state .omt
+```
+
+`runtime-prune`은 이전 설치와 수리 과정에서 남긴 잔여물을 정리합니다. 정리 대상은 다음과 같습니다:
+
+- `runtimes/<지문>.failed-<밀리초 타임스탬프>` 형태의 실패한 런타임 디렉터리
+- `staging/` 디렉터리 내의 이전 설치 과정 임시 파일들
+
+다음 항목은 보호되어 정리 대상에서 제외됩니다:
+
+- 활성 포인터가 가리키는 현재 런타임
+- 다른 프로세스가 잠금을 보유한 staging 디렉터리
+- 소유 접두사(`~/.omt/runtime/opencodex/`) 밖의 경로
+- 심볼릭 링크로 접두사 밖을 가리키는 경로
+
+`--dry-run`은 지울 대상을 출력하기만 하고 실제로 삭제하지 않습니다.
 
 ## 고정 계정 runner 설정
 

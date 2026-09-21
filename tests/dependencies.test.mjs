@@ -9,6 +9,8 @@ import { main as installMain } from "../scripts/install.mjs";
 import {
   doctor,
   installRuntime,
+  isolatedHealthEnvironment,
+  pruneRuntimes,
   runtimeIdentity,
   runtimePaths,
   supportedNode,
@@ -243,3 +245,76 @@ test(
     assert.equal(plan.clients.claude.newCurrent, true);
   },
 );
+
+test("isolated health environment includes HOME and Windows home variables", async (t) => {
+  const tmpHome = path.join(os.tmpdir(), "fake-home");
+  fs.mkdirSync(tmpHome, { recursive: true });
+  t.after(() => fs.rmSync(tmpHome, { recursive: true, force: true }));
+
+  const saved = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    HOMEDRIVE: process.env.HOMEDRIVE,
+    HOMEPATH: process.env.HOMEPATH,
+  };
+  t.after(() => {
+    Object.assign(process.env, saved);
+  });
+
+  process.env.HOME = "/old/home";
+  process.env.USERPROFILE = "C:\\Users\\Old";
+  process.env.HOMEDRIVE = "C:";
+  process.env.HOMEPATH = "\\Users\\Old";
+
+  const isolatedEnv = isolatedHealthEnvironment(tmpHome, tmpHome);
+
+  assert.equal(isolatedEnv.HOME, tmpHome);
+  assert.equal(isolatedEnv.USERPROFILE, tmpHome);
+  if (process.platform === "win32") {
+    assert.equal(isolatedEnv.HOMEDRIVE, path.parse(tmpHome).root);
+  }
+  assert.ok(isolatedEnv.OPENCODEX_HOME === tmpHome);
+  assert.ok(isolatedEnv.CODEX_HOME === tmpHome);
+});
+
+test("prune removes failed runtimes and stale staging dirs", async (t) => {
+  const box = healthyRuntime(t);
+  const runtimesDir = path.join(box.paths.base, "runtimes");
+
+  const failedDir = `${box.paths.runtime}.failed-${Date.now()}`;
+  fs.mkdirSync(failedDir, { recursive: true });
+
+  const stagingDir = path.join(box.paths.base, "staging");
+  const staleStaging = path.join(stagingDir, "stale-staging");
+  fs.mkdirSync(staleStaging, { recursive: true });
+
+  const result = await pruneRuntimes(box.root, { dryRun: false });
+  assert.equal(result.command, "runtime-prune");
+  assert.equal(result.dryRun, false);
+  assert.equal(
+    fs.existsSync(failedDir),
+    false,
+    "failed runtime should be removed",
+  );
+  assert.equal(
+    fs.existsSync(staleStaging),
+    false,
+    "stale staging should be removed",
+  );
+  assert.equal(
+    fs.existsSync(box.paths.runtime),
+    true,
+    "active runtime should be preserved",
+  );
+});
+
+test("prune --dry-run does not delete anything", async (t) => {
+  const box = healthyRuntime(t);
+  const failedDir = `${box.paths.runtime}.failed-${Date.now()}`;
+  fs.mkdirSync(failedDir, { recursive: true });
+
+  const result = await pruneRuntimes(box.root, { dryRun: true });
+  assert.equal(result.dryRun, true);
+  assert.equal(result.deleted.length, 1);
+  assert.equal(fs.existsSync(failedDir), true, "dry-run should not delete");
+});
