@@ -1,0 +1,12 @@
+{
+  "name": "omt-isolated-probe",
+  "owner": { "name": "OMT probe" },
+  "plugins": [
+    {
+      "name": "install-probe",
+      "source": "./plugin",
+      "description": "No-op isolated installation probe",
+      "category": "Testing"
+    }
+  ]
+}

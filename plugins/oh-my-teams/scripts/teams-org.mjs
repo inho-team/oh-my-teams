@@ -92,6 +92,11 @@ import {
 } from "./kickoff-registry.mjs";
 import { recordLaunch } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
+import {
+  defaultRuntimeRoot,
+  doctor as runtimeDoctor,
+  installRuntime,
+} from "./dependencies.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
@@ -121,6 +126,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                    --receipt FILE --runtime FILE --state DIR --name NAME
                    [--orca EXECUTABLE]
   runtime-discover [--orca EXECUTABLE]
+  runtime-doctor --org FILE --state DIR [--format json]
+  runtime-install --org FILE --state DIR [--dry-run]
+  runtime-repair --org FILE --state DIR [--dry-run]
   worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
                --terminal HANDLE [--worktree SELECTOR] [--run ID]
                [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
@@ -231,6 +239,9 @@ export const ALLOWED_OPTIONS = {
     "orca",
   ],
   "runtime-discover": ["orca"],
+  "runtime-doctor": ["org", "state", "format"],
+  "runtime-install": ["org", "state", "dry-run"],
+  "runtime-repair": ["org", "state", "dry-run"],
   "role-spec": ["org", "role", "spec", "workflow-id", "state", "text"],
   "terminal-idle-check": ["terminal", "orca", "org", "role"],
   "headless-start": [
@@ -350,6 +361,9 @@ export const REQUIRED_OPTIONS = {
     "name",
   ],
   "runtime-discover": [],
+  "runtime-doctor": ["org", "state"],
+  "runtime-install": ["org", "state"],
+  "runtime-repair": ["org", "state"],
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
   "terminal-idle-check": ["terminal"],
@@ -411,7 +425,7 @@ export function parseArgs(argv) {
     const option = key.slice(2);
     // `--text` is a flag only for role-spec; headless-answer takes a value.
     if (
-      ["json", "apply", "force", "all", "write"].includes(option) ||
+      ["json", "apply", "force", "all", "write", "dry-run"].includes(option) ||
       (option === "text" && command === "role-spec")
     ) {
       args[option] = true;
@@ -689,6 +703,7 @@ function startHeadlessRole(args) {
     binary: [command.argv[0]],
     model: command.modelRequested,
     effort: command.effortRequested,
+    runner: command.runner ?? null,
     cwd,
     prompt: `${roleSpec(org, command.role, args.spec, run)}
 ${HEADLESS_PROTOCOL}
@@ -978,6 +993,20 @@ async function executeCommand(args) {
       return attachExistingWorkspace(args);
     case "runtime-discover":
       return discoverOrcaRuntime(args.orca);
+    case "runtime-doctor":
+      validateOrg(readJSON(args.org));
+      return runtimeDoctor(defaultRuntimeRoot());
+    case "runtime-install":
+      validateOrg(readJSON(args.org));
+      return installRuntime(defaultRuntimeRoot(), {
+        dryRun: Boolean(args["dry-run"]),
+      });
+    case "runtime-repair":
+      validateOrg(readJSON(args.org));
+      return installRuntime(defaultRuntimeRoot(), {
+        dryRun: Boolean(args["dry-run"]),
+        repair: true,
+      });
     case "worker-start":
       return startSupervisedWorker(args);
     case "headless-start":
@@ -1060,6 +1089,10 @@ async function executeCommand(args) {
     case "role-terminal": {
       const { org, run: runCtx } = launchContext(args);
       const command = roleCommand(org, args.role, runCtx);
+      assert(
+        !command.runner,
+        "An explicit OpenCodex runner is supported by headless-start only; role-terminal cannot run it as native Codex",
+      );
       const target = selectedWorktreePath(args.worktree, process.cwd());
       if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
       const launchedAt = new Date().toISOString();

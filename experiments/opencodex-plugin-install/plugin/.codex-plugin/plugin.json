@@ -1,0 +1,6 @@
+{
+  "name": "install-probe",
+  "version": "1.0.0",
+  "description": "No-op isolated installation probe",
+  "skills": ["./skills/probe/SKILL.md"]
+}

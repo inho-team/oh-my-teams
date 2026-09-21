@@ -156,10 +156,12 @@ function launchableProfile(role, profileId, profile) {
   // An Orca agent id names a binary, not an account. A profile that selects an
   // account through extra arguments or environment references would silently
   // run as whoever is logged in.
+  const openCodex = profile.runner?.kind === "opencodex";
   assert(
-    profile.account === "current" &&
+    (profile.account === "current" &&
       !profile.env &&
-      profile.command.length === 1,
+      profile.command.length === 1) ||
+      openCodex,
     `Role ${role} profile ${profileId} does not use the current account with a plain command; ` +
       "Orca cannot launch it (references/orca-runtime.md)",
   );
@@ -349,6 +351,19 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
         : ["--effort", profile.effort]),
     );
   }
+  const runner = profile.runner
+    ? {
+        kind: profile.runner.kind,
+        mode: profile.runner.mode,
+        logicalProvider: profile.provider,
+        logicalAccount: profile.account,
+        model: profile.model,
+        effort: profile.effort ?? null,
+        accountHomeRef: profile.runner.accountHomeRef,
+        runtimeFingerprint: profile.runner.runtimeFingerprint,
+        actualRunner: "codex",
+      }
+    : null;
   return {
     role,
     profile: profileId,
@@ -358,6 +373,7 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
     permissionBypass: bypass ?? null,
     modelRequested: profile.model,
     effortRequested: profile.effort ?? null,
+    ...(runner ? { runner } : {}),
   };
 }
 

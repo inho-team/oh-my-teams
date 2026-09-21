@@ -558,6 +558,34 @@ test("headless-start keeps the role checks of a terminal launch", async (t) => {
     run("junior", box.cwd, ["--workflow-id", "wf-1"]),
     /Workflow|no such file|ENOENT/i,
   );
+  org.profiles["ocx"] = {
+    provider: "codex",
+    command: ["codex"],
+    account: "fixed-account",
+    subscription: "Fixed subscription",
+    model: "gpt-6-astra",
+    effort: "medium",
+    runner: {
+      kind: "opencodex",
+      mode: "fixed-account",
+      accountHomeRef: "fixed-account",
+      runtimeFingerprint: `sha256:${"a".repeat(64)}`,
+    },
+  };
+  org.roles.junior.profile = "ocx";
+  writeJSON(orgFile, org);
+  await assert.rejects(
+    main([
+      "role-terminal",
+      "--org",
+      orgFile,
+      "--role",
+      "junior",
+      "--worktree",
+      "current",
+    ]),
+    /headless-start only/,
+  );
   assert.deepEqual(listHeadless(box.state), []);
 });
 

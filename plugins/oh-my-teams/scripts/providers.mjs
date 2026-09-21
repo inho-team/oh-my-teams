@@ -13,8 +13,19 @@ import {
   agentCliResetHint,
   classifyAgentCliFailure,
   decodeAgentCli,
+  parseJsonLines,
   tryParseJson,
 } from "./providers/shared.mjs";
+import { defaultRuntimeRoot, doctor, runtimePaths } from "./dependencies.mjs";
+import {
+  openCodexCommand,
+  openCodexHistoryBoundary,
+  openCodexEnvironment,
+  isolatedOpenCodexEnvironment,
+  readOpenCodexObservation,
+  resolveOpenCodexBinding,
+  startOpenCodexProxy,
+} from "./opencodex.mjs";
 
 /**
  * Returns the effort a profile asks for after re-checking provider support.
@@ -78,6 +89,10 @@ export function providerRequest(profile, cwd, prompt, timeoutMs = 300000) {
  * @throws {Error} When the provider is unsupported or is not process-backed.
  */
 export function providerCommand(profile, cwd, prompt, timeoutMs = 300000) {
+  assert(
+    !profile.runner,
+    "opencodex-headless-unverified: use the fixed-account provider invocation",
+  );
   const { argv, input, transport } = providerRequest(
     profile,
     cwd,
@@ -190,6 +205,94 @@ export async function invoke(
   execute = run,
   request = httpRun,
 ) {
+  if (profile.runner?.kind === "opencodex") {
+    const root = defaultRuntimeRoot();
+    const diagnosed = await doctor(root);
+    assert(
+      diagnosed.status === "ready",
+      "opencodex-action-required: run runtime-install first",
+    );
+    const paths = runtimePaths(root);
+    const binding = {
+      ...resolveOpenCodexBinding(profile, diagnosed.runtime),
+      runtimePrefix: paths.runtime,
+    };
+    const profileEnvironment = profileEnv(profile);
+    const proxyEnvironment = openCodexEnvironment({
+      ...binding,
+      env: profile.env ?? {},
+    });
+    const proxy = await startOpenCodexProxy({
+      ...binding,
+    });
+    try {
+      const historyBoundary = await openCodexHistoryBoundary({
+        ...binding,
+        port: proxy.port,
+      });
+      const argv = openCodexCommand({
+        cwd,
+        port: proxy.port,
+        model: profile.model,
+        effort: profile.effort,
+      });
+      const result = await execute(argv, {
+        cwd,
+        input: prompt,
+        timeoutMs,
+        env: isolatedOpenCodexEnvironment(profileEnvironment, proxyEnvironment),
+      });
+      const decoded = adapterFor({ ...profile, provider: "codex" }).decode(
+        result.stdout,
+        { profile, cwd, transport: "process" },
+      );
+      const observed = await readOpenCodexObservation({
+        ...binding,
+        port: proxy.port,
+        provider: profile.provider,
+        model: profile.model,
+        historyBoundary,
+      });
+      const bindingResult = modelBinding(profile, {
+        ...decoded,
+        effectiveModel: observed.model,
+      });
+      assert(
+        bindingResult.status === "matched",
+        "opencodex-model-unproven-or-mismatched",
+      );
+      const events = parseJsonLines(result.stdout);
+      const hasEvent = (type) => events.some((event) => event?.type === type);
+      const exitObserved = result.exitObserved === true;
+      return {
+        ...result,
+        ...decoded,
+        modelBinding: bindingResult,
+        effectiveModel: observed.model,
+        usage: decoded.usage ?? observed.usage ?? null,
+        failureClass: classifyAgentCliFailure(result, decoded),
+        exhausted: false,
+        observed,
+        lifecycle: {
+          inputAccepted: hasEvent("turn.started") || null,
+          turnStarted: hasEvent("turn.started") || null,
+          upstreamRequestStarted: observed.requestId ? true : null,
+          completed: hasEvent("turn.completed") || null,
+          exitObserved: exitObserved || null,
+          cancelRequested: false,
+          termination:
+            exitObserved &&
+            !result.timedOut &&
+            !result.overflow &&
+            result.code === 0
+              ? "exited"
+              : "unverifiable",
+        },
+      };
+    } finally {
+      await proxy.stop();
+    }
+  }
   const adapter = adapterFor(profile);
   const spec = providerRequest(profile, cwd, prompt, timeoutMs);
   const result =

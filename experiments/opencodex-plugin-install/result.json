@@ -1,0 +1,226 @@
+{
+  "versions": [
+    {
+      "command": ["claude", "--version"],
+      "exit": 0,
+      "stdout": "2.1.278 (Claude Code)\n",
+      "stderr": ""
+    },
+    {
+      "command": ["codex", "--version"],
+      "exit": 0,
+      "stdout": "codex-cli 0.155.1\n",
+      "stderr": ""
+    },
+    {
+      "command": ["npm", "--version"],
+      "exit": 0,
+      "stdout": "11.19.0\n",
+      "stderr": ""
+    },
+    {
+      "command": ["bun", "--version"],
+      "exit": 0,
+      "stdout": "1.2.19\n",
+      "stderr": ""
+    }
+  ],
+  "isolation": {
+    "home": "/tmp/omt-host-probe-egf0y4ps/home",
+    "codex_home": "/tmp/omt-host-probe-egf0y4ps/codex",
+    "credentials_copied": false,
+    "global_home_state": "unverified"
+  },
+  "checks": [
+    {
+      "name": "claude_validate",
+      "command": [
+        "claude",
+        "--bare",
+        "plugin",
+        "validate",
+        "/tmp/omt-host-probe-egf0y4ps/plugin"
+      ],
+      "exit": 0,
+      "stdout": "Validating plugin manifest: /tmp/omt-host-probe-egf0y4ps/plugin/.claude-plugin/plugin.json\n\n\u26a0 Found 2 warnings:\n\n  \u276f version: No version specified. Consider adding a version following semver (e.g., \"1.0.0\")\n  \u276f author: No author information provided. Consider adding author details for plugin attribution\n\n\u2714 Validation passed with warnings\n",
+      "stderr": ""
+    },
+    {
+      "name": "claude_marketplace_add",
+      "command": [
+        "claude",
+        "--bare",
+        "plugin",
+        "marketplace",
+        "add",
+        "/tmp/omt-host-probe-egf0y4ps/claude-marketplace",
+        "--scope",
+        "local"
+      ],
+      "exit": 0,
+      "stdout": "Adding marketplace\u2026\u2714 Successfully added marketplace: omt-isolated-probe (declared in local settings)\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "claude",
+        "--bare",
+        "plugin",
+        "install",
+        "install-probe@omt-isolated-probe",
+        "--scope",
+        "local",
+        "--yes",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "{\"command\":\"install\",\"outcome\":\"ok\",\"plugin\":\"install-probe@omt-isolated-probe\",\"pluginId\":\"install-probe@omt-isolated-probe\",\"scope\":\"local\",\"message\":\"Successfully installed plugin: install-probe@omt-isolated-probe (scope: local)\"}\n",
+      "stderr": "",
+      "name": "claude_plugin_install",
+      "marker_lines": []
+    },
+    {
+      "name": "claude_plugin_install_repeat",
+      "command": [
+        "claude",
+        "--bare",
+        "plugin",
+        "install",
+        "install-probe@omt-isolated-probe",
+        "--scope",
+        "local",
+        "--yes",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "{\"command\":\"install\",\"outcome\":\"ok\",\"plugin\":\"install-probe@omt-isolated-probe\",\"pluginId\":\"install-probe@omt-isolated-probe\",\"scope\":\"local\",\"message\":\"Plugin \\\"install-probe@omt-isolated-probe\\\" is already installed (scope: local) \u2014 it loads in place from /tmp/omt-host-probe-egf0y4ps/claude-marketplace/plugin, so edits there take effect at the next session start or /reload-plugins\",\"installedVersion\":\"unknown\"}\n",
+      "stderr": "",
+      "marker_lines": []
+    },
+    {
+      "name": "npm_ci_ignore_scripts",
+      "command": ["npm", "ci", "--ignore-scripts"],
+      "exit": 0,
+      "stdout": "\nadded 2 packages, and audited 3 packages in 304ms\n\nfound 0 vulnerabilities\n",
+      "stderr": "",
+      "marker_exists": false,
+      "node_modules_exists": true
+    },
+    {
+      "name": "npm_install_lifecycle",
+      "command": ["npm", "install"],
+      "exit": 0,
+      "stdout": "\n> omt-isolated-install-probe@1.0.0 postinstall\n> node lifecycle.cjs\n\n\nup to date, audited 3 packages in 344ms\n\nfound 0 vulnerabilities\n",
+      "stderr": "",
+      "marker_exists": true,
+      "marker_lines": ["2026-09-21T05:53:40.114Z postinstall"]
+    },
+    {
+      "name": "npm_ci_repeat_ignore_scripts",
+      "command": ["npm", "ci", "--ignore-scripts"],
+      "exit": 0,
+      "stdout": "\nadded 2 packages, and audited 3 packages in 289ms\n\nfound 0 vulnerabilities\n",
+      "stderr": "",
+      "marker_lines": ["2026-09-21T05:53:40.114Z postinstall"]
+    },
+    {
+      "name": "codex_marketplace_add",
+      "command": [
+        "codex",
+        "plugin",
+        "marketplace",
+        "add",
+        "/tmp/omt-host-probe-egf0y4ps/marketplace",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"marketplaceName\": \"omt-isolated-probe\",\n  \"installedRoot\": \"/private/tmp/omt-host-probe-egf0y4ps/marketplace\",\n  \"alreadyAdded\": false\n}\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "codex",
+        "plugin",
+        "add",
+        "install-probe@omt-isolated-probe",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"pluginId\": \"install-probe@omt-isolated-probe\",\n  \"name\": \"install-probe\",\n  \"marketplaceName\": \"omt-isolated-probe\",\n  \"version\": \"1.0.0\",\n  \"installedPath\": \"/private/tmp/omt-host-probe-egf0y4ps/codex/plugins/cache/omt-isolated-probe/install-probe/1.0.0\",\n  \"authPolicy\": \"ON_INSTALL\"\n}\n",
+      "stderr": "",
+      "name": "codex_plugin_add",
+      "cache_has_node_modules": false,
+      "marker_before_host_install": ["2026-09-21T05:53:40.114Z postinstall"],
+      "marker_lines": ["2026-09-21T05:53:40.114Z postinstall"]
+    },
+    {
+      "command": [
+        "codex",
+        "plugin",
+        "add",
+        "install-probe@omt-isolated-probe",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "{\n  \"pluginId\": \"install-probe@omt-isolated-probe\",\n  \"name\": \"install-probe\",\n  \"marketplaceName\": \"omt-isolated-probe\",\n  \"version\": \"1.0.0\",\n  \"installedPath\": \"/private/tmp/omt-host-probe-egf0y4ps/codex/plugins/cache/omt-isolated-probe/install-probe/1.0.0\",\n  \"authPolicy\": \"ON_INSTALL\"\n}\n",
+      "stderr": "",
+      "name": "codex_plugin_add_repeat",
+      "cache_has_node_modules": false,
+      "marker_before_host_install": ["2026-09-21T05:53:40.114Z postinstall"],
+      "marker_lines": ["2026-09-21T05:53:40.114Z postinstall"]
+    }
+  ],
+  "codex_cache_entries": [
+    "config.toml",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/.claude-plugin/plugin.json",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/.codex-plugin/plugin.json",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/lifecycle.cjs",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/package-lock.json",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/package.json",
+    "plugins/cache/omt-isolated-probe/install-probe/1.0.0/skills/probe/SKILL.md"
+  ],
+  "lifecycle_marker_lines": ["2026-09-21T05:53:40.114Z postinstall"],
+  "ocx_2_59_0": {
+    "path": "/tmp/omt-opencodex-probe.dAKX3U/install/node_modules/.bin/ocx",
+    "version": {
+      "command": [
+        "/tmp/omt-opencodex-probe.dAKX3U/install/node_modules/.bin/ocx",
+        "--version"
+      ],
+      "exit": 0,
+      "stdout": "opencodex 2.59.0\n",
+      "stderr": ""
+    },
+    "health": {
+      "command": [
+        "/tmp/omt-opencodex-probe.dAKX3U/install/node_modules/.bin/ocx",
+        "health",
+        "--json"
+      ],
+      "exit": 1,
+      "stdout": "{\"ok\":false,\"pid\":null,\"port\":null}\n",
+      "stderr": ""
+    },
+    "ready": {
+      "command": [
+        "/tmp/omt-opencodex-probe.dAKX3U/install/node_modules/.bin/ocx",
+        "ready",
+        "--json"
+      ],
+      "exit": 1,
+      "stdout": "{\"ready\":false,\"status\":\"unreachable\",\"pid\":null,\"port\":null}\n",
+      "stderr": ""
+    },
+    "capabilities": {
+      "command": [
+        "/tmp/omt-opencodex-probe.dAKX3U/install/node_modules/.bin/ocx",
+        "capabilities",
+        "--json"
+      ],
+      "exit": 0,
+      "stdout": "/aside/profiles/{profileId}/journal\"\n        },\n        {\n          \"method\": \"POST\",\n          \"path\": \"/api/client-integrations/aside/profiles/{profileId}/restore\"\n        }\n      ],\n      \"flags\": [\n        {\n          \"name\": \"--client\",\n          \"value\": \"string\",\n          \"summary\": \"Select the file integration; use aside for profile controls.\"\n        },\n        {\n          \"name\": \"--profile\",\n          \"value\": \"number\",\n          \"summary\": \"Select one registered Aside account; omitted toggles affect all profiles.\"\n        },\n        {\n          \"name\": \"--op\",\n          \"value\": \"string\",\n          \"summary\": \"Operation ID for restore.\"\n        },\n        {\n          \"name\": \"--confirm-drift\",\n          \"value\": \"boolean\",\n          \"summary\": \"Explicitly allow restore to replace subsequent edits.\"\n        },\n        {\n          \"name\": \"--overwrite-conflict\",\n          \"value\": \"boolean\",\n          \"summary\": \"Explicitly allow enable to replace a conflicting provider block.\"\n        },\n        {\n          \"name\": \"--json\",\n          \"value\": \"boolean\",\n          \"summary\": \"Emit the profile state, history, or mutation result as JSON.\"\n        }\n      ],\n      \"mutates\": true,\n      \"json\": \"payload\",\n      \"details\": [\n        \"Use status/show/list, history/journal, enable/disable, or restore after integration client.\",\n        \"These declarations cover the dedicated Aside profile paths; existing generic client routes retain their separate parity inventory.\"\n      ]\n    },\n    {\n      \"command\": [\n        \"sync\"\n      ],\n      \"invocation\": \"ocx sync\",\n      \"summary\": \"Synchronize client catalogs, including Aside profiles through the running server's mutation owner.\",\n      \"routes\": [\n        {\n          \"method\": \"POST\",\n          \"path\": \"/api/client-integrations/aside/sync\"\n        }\n      ],\n      \"flags\": [\n        {\n          \"name\": \"--restart-codex\",\n          \"value\": \"boolean\",\n          \"summary\": \"Restart the Codex app-servers and fully quit and relaunch the Codex desktop app after a catalog or cache write, on macOS, Linux and Windows.\"\n        },\n        {\n          \"name\": \"--restart-app-server-only\",\n          \"value\": \"boolean\",\n          \"summary\": \"Restart only the Codex app-servers and leave the desktop app running; wins over --restart-codex when both are given.\"\n        },\n        {\n          \"name\": \"--restart-desktop-app\",\n          \"value\": \"boolean\",\n          \"summary\": \"Deprecated alias of --restart-codex.\"\n        }\n      ],\n      \"mutates\": true,\n      \"json\": \"none\",\n      \"details\": [\n        \"The Aside refresh uses the live server; other catalog synchronization also performs local work.\"\n      ]\n    },\n    {\n      \"command\": [\n        \"agent\",\n        \"request-user-input\"\n      ],\n      \"invocation\": \"ocx agent request-user-input\",\n      \"summary\": \"Show or set whether default mode may ask the operator a question mid-task.\",\n      \"routes\": [\n        {\n          \"method\": \"GET\",\n          \"path\": \"/api/codex-auth/features/default-mode-request-user-input\"\n        },\n        {\n          \"method\": \"PUT\",\n          \"path\": \"/api/codex-auth/features/default-mode-request-user-input\"\n        }\n      ],\n      \"flags\": [\n        {\n          \"name\": \"--json\",\n          \"value\": \"boolean\",\n          \"summary\": \"Emit the feature state as JSON.\"\n        }\n      ],\n      \"mutates\": true,\n      \"json\": \"payload\",\n      \"details\": [\n        \"A bare invocation reads and never writes.\"\n      ]\n    }\n  ],\n  \"headCapabilities\": [\n    {\n      \"invocations\": [\n        \"--version\",\n        \"-v\",\n        \"version\"\n      ],\n      \"summary\": \"Print the CLI version and exit.\",\n      \"bannerLine\": \"ocx --version | -v          Print version\"\n    },\n    {\n      \"invocations\": [\n        \"help\",\n        \"--help\",\n        \"-h\"\n      ],\n      \"summary\": \"Print the command list, or one command's usage with `ocx help <command>`.\",\n      \"bannerLine\": \"ocx help [command]          Show help for a command\"\n    }\n  ]\n}\n",
+      "stderr": ""
+    },
+    "isolated_home": "/tmp/omt-host-probe-egf0y4ps/ocx-home"
+  }
+}

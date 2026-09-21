@@ -585,15 +585,18 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
   const turnDir = path.join(dir, "turns", String(number));
   fs.mkdirSync(turnDir, { recursive: true });
   const resolvedTimeoutMs = timeoutMs ?? worker.timeoutMs;
-  const { argv, stdin } = headlessCommand({
-    provider: worker.provider,
-    binary: worker.binary,
-    model: worker.modelRequested,
-    effort: worker.effortRequested,
-    prompt,
-    session,
-    timeoutMs: resolvedTimeoutMs,
-  });
+  const command = worker.runner
+    ? { argv: [], stdin: prompt }
+    : headlessCommand({
+        provider: worker.provider,
+        binary: worker.binary,
+        model: worker.modelRequested,
+        effort: worker.effortRequested,
+        prompt,
+        session,
+        timeoutMs: resolvedTimeoutMs,
+      });
+  const { argv, stdin } = command;
   fs.writeFileSync(path.join(turnDir, "prompt.txt"), prompt);
   if (stdin !== null) fs.writeFileSync(path.join(turnDir, "stdin.txt"), stdin);
   writeJSON(path.join(turnDir, "turn.json"), {
@@ -604,6 +607,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
     session: session ?? null,
     timeoutMs: resolvedTimeoutMs,
     startedAt: new Date().toISOString(),
+    runner: worker.runner ?? null,
   });
   const runner = spawn(process.execPath, [RUNNER, turnDir], {
     cwd: worker.cwd,
@@ -631,6 +635,7 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
  * @param {string} options.cwd - Worktree the worker runs in.
  * @param {string} options.prompt - Full instruction, protocol included.
  * @param {number} [options.timeoutMs=1800000] - Per-turn time limit.
+ * @param {object | null} [options.runner] - Secret-free explicit runner metadata.
  * @returns {object} The worker record, the turn it started, and a headless receipt draft.
  *   The draft's `runId` and `worktreeId` are `null`; the caller must fill them with the
  *   actual Orca Run ID and the Orca worktree ID (`<repo-id>::<path>`) before passing the
@@ -650,6 +655,7 @@ export function startHeadlessWorker({
   cwd,
   prompt,
   timeoutMs = 30 * 60 * 1000,
+  runner = null,
 }) {
   assert(PROVIDERS[provider], `Provider ${provider} has no headless runtime`);
   assert(fs.existsSync(cwd), `Worktree does not exist: ${cwd}`);
@@ -667,6 +673,7 @@ export function startHeadlessWorker({
     effortRequested: effort ?? null,
     cwd: path.resolve(cwd),
     timeoutMs,
+    runner,
     createdAt: new Date().toISOString(),
   };
   writeJSON(path.join(dir, "worker.json"), worker);
@@ -697,14 +704,18 @@ function readTurn(worker, turnDir, options) {
   const exit = fs.existsSync(file("exit.json"))
     ? readJSON(file("exit.json"))
     : null;
+  const observationFile = file("opencodex.json");
+  const observation = fs.existsSync(observationFile)
+    ? readJSON(observationFile)
+    : null;
   return {
     number: Number(path.basename(turnDir)),
     startedAt: turn.startedAt ?? null,
     endedAt: exit?.endedAt ?? null,
     exited: Boolean(exit),
     session: stream.session,
-    model: stream.model,
-    usage: stream.usage,
+    model: observation?.model ?? stream.model,
+    usage: stream.usage ?? observation?.usage ?? null,
     costUsd: stream.costUsd,
     numTurns: stream.numTurns,
   };
@@ -760,6 +771,17 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   });
   const streamFile = path.join(turnDir, "stream.jsonl");
   const stream = readHeadlessStreamFile(worker.provider, streamFile, options);
+  const observationFile = path.join(turnDir, "opencodex.json");
+  const observation = fs.existsSync(observationFile)
+    ? readJSON(observationFile)
+    : null;
+  const lifecycleFile = path.join(turnDir, "lifecycle.json");
+  const lifecycle = fs.existsSync(lifecycleFile)
+    ? readJSON(lifecycleFile)
+    : null;
+  const turn = fs.existsSync(path.join(turnDir, "turn.json"))
+    ? readJSON(path.join(turnDir, "turn.json"))
+    : {};
   // Resuming needs the session of the latest turn that reported one.
   let session = stream.session;
   for (const earlier of turns.slice(0, -1).reverse()) {
@@ -771,7 +793,20 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   if (exit) {
     if (exit.stopped) outcome = "stopped";
     else if (exit.timedOut) outcome = "timed-out";
-    else if (exit.code !== 0 || stream.providerError) outcome = "exit-error";
+    else if (exit.code !== 0 || exit.error || stream.providerError)
+      outcome = "exit-error";
+    else if (
+      turn.runner &&
+      (!observation ||
+        !lifecycle ||
+        lifecycle.inputAccepted !== true ||
+        lifecycle.turnStarted !== true ||
+        lifecycle.upstreamRequestStarted !== true ||
+        lifecycle.completed !== true ||
+        lifecycle.exitObserved !== true ||
+        lifecycle.termination !== "exited")
+    )
+      outcome = "unverifiable";
     else outcome = stream.marker?.kind ?? "no-marker";
   }
   return {
@@ -785,10 +820,14 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     outcome,
     marker: stream.marker,
     exit,
+    lifecycle,
     session,
     modelRequested: worker.modelRequested,
-    modelReported: stream.model,
-    modelProof: modelVerdict(worker.modelRequested, stream.model),
+    modelReported: observation?.model ?? stream.model,
+    modelProof: modelVerdict(
+      worker.modelRequested,
+      observation?.model ?? stream.model,
+    ),
     providerError: stream.providerError,
     rateLimited: stream.rateLimited,
     ...headlessUsageSummary(worker, turns, options),

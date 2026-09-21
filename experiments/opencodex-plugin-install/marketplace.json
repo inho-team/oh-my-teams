@@ -1,0 +1,12 @@
+{
+  "name": "omt-isolated-probe",
+  "interface": { "displayName": "OMT isolated probe" },
+  "plugins": [
+    {
+      "name": "install-probe",
+      "source": { "source": "local", "path": "./plugin" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Testing"
+    }
+  ]
+}

@@ -260,6 +260,23 @@ function recordProviderCall(
     code: response.code,
     failureClass: response.failureClass ?? null,
     exhausted: response.exhausted,
+    logicalBinding: response.observed
+      ? {
+          provider: profile.provider,
+          accountRef: profile.account,
+          modelRequested: profile.model,
+          effortRequested: profile.effort ?? null,
+          pool: profile.pool ?? null,
+        }
+      : null,
+    runner: profile.runner
+      ? {
+          kind: profile.runner.kind,
+          runtimeFingerprint: profile.runner.runtimeFingerprint,
+        }
+      : null,
+    observed: response.observed ?? null,
+    lifecycle: response.lifecycle ?? null,
     log,
   });
   return binding;

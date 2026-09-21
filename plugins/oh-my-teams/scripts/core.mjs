@@ -544,7 +544,7 @@ export function run(
     // Track accumulated byte length to avoid re-computing on every chunk.
     let totalBytes = 0;
 
-    const finish = (code, error) => {
+    const finish = (code, error, exitObserved = false) => {
       if (finished) return;
       finished = true;
       clearTimeout(timeoutTimer);
@@ -555,6 +555,7 @@ export function run(
         stderr: stderr + (error ? String(error.message) : ""),
         timedOut,
         overflow,
+        exitObserved,
         pid: child.pid ?? null,
         elapsedMs: Date.now() - startedAt,
       });
@@ -591,7 +592,7 @@ export function run(
     }
 
     child.on("error", (error) => finish(-1, error));
-    child.on("close", (code) => finish(code));
+    child.on("close", (code) => finish(code, undefined, true));
     child.stdin.on("error", () => {});
     child.stdin.end(input);
   });
@@ -657,6 +658,18 @@ function validateProfile(id, profile, pools) {
     profile.pool === undefined || Object.hasOwn(pools, profile.pool),
     `Unknown pool for profile: ${id}`,
   );
+  if (profile.runner !== undefined) {
+    assert(
+      profile.runner &&
+        profile.runner.kind === "opencodex" &&
+        profile.runner.mode === "fixed-account" &&
+        profile.runner.accountHomeRef === profile.account &&
+        /^sha256:[a-f0-9]{64}$/.test(profile.runner.runtimeFingerprint) &&
+        profile.account !== "current" &&
+        profile.model !== null,
+      `Invalid OpenCodex runner binding: ${id}`,
+    );
+  }
   assert(
     !profile.env ||
       Object.entries(profile.env).every(
@@ -669,7 +682,8 @@ function validateProfile(id, profile, pools) {
   if (profile.account !== "current") {
     assert(
       (profile.env && Object.keys(profile.env).length > 0) ||
-        (transport === "process" && profile.command.length > 1),
+        (transport === "process" && profile.command.length > 1) ||
+        profile.runner?.kind === "opencodex",
       `Named account ${id} needs an actual command/profile or environment binding`,
     );
   }
