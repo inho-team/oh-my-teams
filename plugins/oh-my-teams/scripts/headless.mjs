@@ -742,6 +742,39 @@ export function headlessTurns(stateDir, workerId, options = {}) {
 }
 
 /**
+ * Decides whether an explicit-runner turn proved every lifecycle stage.
+ *
+ * A zero exit code and a completion marker are not proof: the turn also needs
+ * an observed upstream request set, and a lifecycle record that names that same
+ * set and shows input, start, completion, exit and process-tree termination.
+ * Anything absent or unequal is unverifiable, never success.
+ *
+ * @param {object | null} observation - The turn's `opencodex.json`, or null when it was not written.
+ * @param {object | null} lifecycle - The turn's `lifecycle.json`, or null when it was not written.
+ * @returns {boolean} True only when every stage is proven and correlated to the observed requests.
+ */
+export function runnerTurnProven(observation, lifecycle) {
+  if (!observation || !lifecycle) return false;
+  const observed = observation.requestIds;
+  const recorded = lifecycle.requestIds;
+  return (
+    Array.isArray(observed) &&
+    observed.length > 0 &&
+    Array.isArray(recorded) &&
+    recorded.length === observed.length &&
+    observed.every((id) => recorded.includes(id)) &&
+    lifecycle.inputAccepted === true &&
+    lifecycle.turnStarted === true &&
+    lifecycle.upstreamRequestStarted === true &&
+    lifecycle.completed === true &&
+    lifecycle.exitObserved === true &&
+    lifecycle.descendantsExited === true &&
+    lifecycle.proxyExited === true &&
+    lifecycle.termination === "exited"
+  );
+}
+
+/**
  * Reports a headless worker's state from its files.
  *
  * @param {string} stateDir - PM worktree state directory.
@@ -795,17 +828,7 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     else if (exit.timedOut) outcome = "timed-out";
     else if (exit.code !== 0 || exit.error || stream.providerError)
       outcome = "exit-error";
-    else if (
-      turn.runner &&
-      (!observation ||
-        !lifecycle ||
-        lifecycle.inputAccepted !== true ||
-        lifecycle.turnStarted !== true ||
-        lifecycle.upstreamRequestStarted !== true ||
-        lifecycle.completed !== true ||
-        lifecycle.exitObserved !== true ||
-        lifecycle.termination !== "exited")
-    )
+    else if (turn.runner && !runnerTurnProven(observation, lifecycle))
       outcome = "unverifiable";
     else outcome = stream.marker?.kind ?? "no-marker";
   }

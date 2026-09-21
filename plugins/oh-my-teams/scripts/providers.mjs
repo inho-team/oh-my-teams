@@ -22,6 +22,7 @@ import {
   openCodexHistoryBoundary,
   openCodexEnvironment,
   isolatedOpenCodexEnvironment,
+  processGroupMembers,
   readOpenCodexObservation,
   resolveOpenCodexBinding,
   startOpenCodexProxy,
@@ -225,6 +226,7 @@ export async function invoke(
     const proxy = await startOpenCodexProxy({
       ...binding,
     });
+    let failure = null;
     try {
       const historyBoundary = await openCodexHistoryBoundary({
         ...binding,
@@ -241,7 +243,27 @@ export async function invoke(
         input: prompt,
         timeoutMs,
         env: isolatedOpenCodexEnvironment(profileEnvironment, proxyEnvironment),
+        detached: true,
       });
+      // Descendants that outlive the provider are owned by this call: they are
+      // ended before the request history is read. The tree counts as gone only
+      // when its own process group is seen empty; a result without a group id
+      // proves nothing.
+      let descendantsExited = false;
+      if (result.pid) {
+        if (processGroupMembers(result.pid)?.length) {
+          try {
+            process.kill(-result.pid, "SIGKILL");
+          } catch {}
+          for (
+            let i = 0;
+            i < 40 && processGroupMembers(result.pid)?.length !== 0;
+            i += 1
+          )
+            await new Promise((done) => setTimeout(done, 50));
+        }
+        descendantsExited = processGroupMembers(result.pid)?.length === 0;
+      }
       const decoded = adapterFor({ ...profile, provider: "codex" }).decode(
         result.stdout,
         { profile, cwd, transport: "process" },
@@ -264,6 +286,12 @@ export async function invoke(
       const events = parseJsonLines(result.stdout);
       const hasEvent = (type) => events.some((event) => event?.type === type);
       const exitObserved = result.exitObserved === true;
+      const proxyStopped = await proxy.stop();
+      const cleanExit =
+        exitObserved &&
+        !result.timedOut &&
+        !result.overflow &&
+        result.code === 0;
       return {
         ...result,
         ...decoded,
@@ -274,23 +302,33 @@ export async function invoke(
         exhausted: false,
         observed,
         lifecycle: {
-          inputAccepted: hasEvent("turn.started") || null,
+          // Each stage rests on its own evidence; a later event never
+          // implies an earlier stage. Unproven stages stay null.
+          inputAccepted: result.inputAccepted === true || null,
           turnStarted: hasEvent("turn.started") || null,
           upstreamRequestStarted: observed.requestId ? true : null,
           completed: hasEvent("turn.completed") || null,
           exitObserved: exitObserved || null,
           cancelRequested: false,
           termination:
-            exitObserved &&
-            !result.timedOut &&
-            !result.overflow &&
-            result.code === 0
+            cleanExit &&
+            descendantsExited &&
+            proxyStopped?.descendantsExited === true
               ? "exited"
               : "unverifiable",
         },
       };
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      await proxy.stop();
+      try {
+        await proxy.stop();
+      } catch (stopError) {
+        // Report an unproven proxy exit even when the turn itself failed.
+        if (!failure) throw stopError;
+        failure.message += `; ${stopError.message}`;
+      }
     }
   }
   const adapter = adapterFor(profile);

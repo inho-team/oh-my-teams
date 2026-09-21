@@ -14,13 +14,17 @@ import {
   listHeadless,
   modelVerdict,
   readHeadlessStream,
+  runnerTurnProven,
   startHeadlessWorker,
   stopHeadless,
   turnLiveness,
   waitHeadless,
 } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import { main, parseArgs } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { killTree } from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
+import {
+  killTree,
+  runTurn,
+} from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
 
 const FAKE = path.resolve("tests/fake-agent.mjs");
 
@@ -969,4 +973,290 @@ test("F-05: killTree — pid가 null이면 즉시 null을 반환한다", () => {
   assert.equal(killTree(null), null);
   assert.equal(killTree(undefined), null);
   assert.equal(killTree(0), null);
+});
+
+// An explicit OpenCodex turn on a hand-built state directory. `deps` replace
+// only what needs a real runtime and account: the owned proxy, the request
+// history and the process-group listing. The provider process is real.
+const CODEX_TURN = [
+  "const emit = (e) => process.stdout.write(JSON.stringify(e) + '\\n');",
+  "process.stdin.resume().on('end', () => {",
+  "  emit({ type: 'turn.started' });",
+  "  emit({ type: 'item.completed', item: { type: 'agent_message', text: 'DONE: wrote it' } });",
+  "  emit({ type: 'turn.completed', usage: {} });",
+  "});",
+].join("\n");
+
+async function runnerTurn(
+  t,
+  deps = {},
+  { command = [process.execPath, "-e", CODEX_TURN], stopAfterMs = 0 } = {},
+) {
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), "omt-runner-turn-"));
+  t.after(() => fs.rmSync(state, { recursive: true, force: true }));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "omt-runner-cwd-"));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const runner = {
+    kind: "opencodex",
+    logicalProvider: "codex",
+    model: "gpt-fake",
+  };
+  const dir = path.join(state, "headless", "w1");
+  const turnDir = path.join(dir, "turns", "1");
+  fs.mkdirSync(turnDir, { recursive: true });
+  writeJSON(path.join(dir, "worker.json"), {
+    id: "w1",
+    provider: "codex",
+    modelRequested: "gpt-fake",
+    runner,
+  });
+  fs.writeFileSync(path.join(turnDir, "stdin.txt"), "do the work");
+  writeJSON(path.join(turnDir, "turn.json"), {
+    number: 1,
+    argv: [],
+    stdinFile: "stdin.txt",
+    cwd,
+    timeoutMs: 20000,
+    runner,
+  });
+  if (stopAfterMs)
+    setTimeout(
+      () => fs.writeFileSync(path.join(turnDir, "stop.request"), ""),
+      stopAfterMs,
+    );
+  const proxy = {
+    port: 1,
+    stop: async () => ({ termination: "exited", descendantsExited: true }),
+  };
+  const record = await runTurn(turnDir, {
+    prepare: async () => ({
+      proxy,
+      binding: {},
+      historyBoundary: new Set(),
+      command,
+      environment: process.env,
+    }),
+    observe: async () => ({
+      requestIds: ["req-1", "req-2"],
+      model: "gpt-fake",
+    }),
+    groupMembers: () => [],
+    ...deps,
+  });
+  const read = (name) => {
+    const file = path.join(turnDir, name);
+    return fs.existsSync(file)
+      ? JSON.parse(fs.readFileSync(file, "utf8"))
+      : null;
+  };
+  return { record, read, status: headlessStatus(state, "w1") };
+}
+
+const posix = {
+  skip:
+    process.platform === "win32" &&
+    "descendant proof needs POSIX process groups",
+};
+
+test(
+  "an OpenCodex turn with every stage proven is reported done with its request set",
+  posix,
+  async (t) => {
+    const { record, read, status } = await runnerTurn(t);
+    assert.equal(record.error, null);
+    const lifecycle = read("lifecycle.json");
+    assert.deepEqual(
+      {
+        inputAccepted: lifecycle.inputAccepted,
+        turnStarted: lifecycle.turnStarted,
+        upstreamRequestStarted: lifecycle.upstreamRequestStarted,
+        completed: lifecycle.completed,
+        exitObserved: lifecycle.exitObserved,
+        cancelRequested: lifecycle.cancelRequested,
+        descendantsExited: lifecycle.descendantsExited,
+        proxyExited: lifecycle.proxyExited,
+        termination: lifecycle.termination,
+      },
+      {
+        inputAccepted: true,
+        turnStarted: true,
+        upstreamRequestStarted: true,
+        completed: true,
+        exitObserved: true,
+        cancelRequested: false,
+        descendantsExited: true,
+        proxyExited: true,
+        termination: "exited",
+      },
+    );
+    // The record belongs to this turn and to exactly the requests observed.
+    assert.equal(lifecycle.attemptId, "w1:1");
+    assert.deepEqual(lifecycle.requestIds, ["req-1", "req-2"]);
+    assert.equal(status.outcome, "done");
+  },
+);
+
+test("a zero exit and a DONE line do not survive a failed request-history observation", async (t) => {
+  const { record, read, status } = await runnerTurn(t, {
+    observe: async () => {
+      throw new Error("opencodex-binding-unverified");
+    },
+  });
+  assert.equal(record.code, 0);
+  assert.match(record.error, /opencodex-binding-unverified/);
+  const lifecycle = read("lifecycle.json");
+  // The provider really finished, so the stream and the exit are still recorded,
+  // but no upstream request was proven and nothing is promoted from the output.
+  assert.equal(lifecycle.turnStarted, true);
+  assert.equal(lifecycle.completed, true);
+  assert.equal(lifecycle.upstreamRequestStarted, false);
+  assert.deepEqual(lifecycle.requestIds, []);
+  assert.equal(read("opencodex.json"), null);
+  assert.equal(status.marker.kind, "done");
+  assert.notEqual(status.outcome, "done");
+  assert.equal(status.outcome, "exit-error");
+});
+
+test("a proxy whose exit cannot be proven still writes the exit record and is not done", async (t) => {
+  const { record, read, status } = await runnerTurn(t, {
+    prepare: async () => ({
+      proxy: {
+        port: 1,
+        stop: async () => {
+          throw new Error("opencodex-proxy-exit-unverifiable");
+        },
+      },
+      binding: {},
+      historyBoundary: new Set(),
+      command: [process.execPath, "-e", CODEX_TURN],
+      environment: process.env,
+    }),
+  });
+  assert.match(record.error, /opencodex-proxy-exit-unverifiable/);
+  const lifecycle = read("lifecycle.json");
+  assert.equal(lifecycle.proxyExited, false);
+  assert.equal(lifecycle.termination, "unverifiable");
+  assert.equal(status.outcome, "exit-error");
+});
+
+test(
+  "a descendant that outlives the provider makes the turn unverifiable, not done",
+  posix,
+  async (t) => {
+    const { record, read, status } = await runnerTurn(t, {
+      groupMembers: () => [4242],
+    });
+    assert.equal(record.error, null);
+    const lifecycle = read("lifecycle.json");
+    assert.equal(lifecycle.exitObserved, true);
+    assert.equal(lifecycle.descendantsExited, false);
+    assert.equal(lifecycle.orphansTerminated, 1);
+    assert.equal(lifecycle.termination, "unverifiable");
+    assert.equal(status.marker.kind, "done");
+    assert.equal(status.outcome, "unverifiable");
+  },
+);
+
+test("a turn that never started the provider records an unproven lifecycle and no success", async (t) => {
+  const { record, read, status } = await runnerTurn(t, {
+    prepare: async () => {
+      throw new Error("opencodex-action-required: run runtime-install first");
+    },
+  });
+  assert.match(record.error, /opencodex-action-required/);
+  const lifecycle = read("lifecycle.json");
+  for (const stage of [
+    "inputAccepted",
+    "turnStarted",
+    "upstreamRequestStarted",
+    "completed",
+    "exitObserved",
+    "descendantsExited",
+    "proxyExited",
+  ]) {
+    assert.equal(lifecycle[stage], false, stage);
+  }
+  assert.equal(lifecycle.termination, "unverifiable");
+  assert.equal(status.outcome, "exit-error");
+});
+
+test(
+  "a stop request is recorded as a cancel request and never as a completed turn",
+  posix,
+  async (t) => {
+    const { record, read, status } = await runnerTurn(
+      t,
+      {},
+      {
+        command: [
+          process.execPath,
+          "-e",
+          "process.stdin.resume();setInterval(()=>{},1000)",
+        ],
+        stopAfterMs: 300,
+      },
+    );
+    assert.equal(record.stopped, true);
+    const lifecycle = read("lifecycle.json");
+    assert.equal(lifecycle.cancelRequested, true);
+    assert.equal(lifecycle.completed, false);
+    assert.equal(status.outcome, "stopped");
+  },
+);
+
+test("runnerTurnProven demands every stage and the same request set in both records", () => {
+  const observation = { requestIds: ["a", "b"] };
+  const lifecycle = {
+    inputAccepted: true,
+    turnStarted: true,
+    upstreamRequestStarted: true,
+    completed: true,
+    exitObserved: true,
+    descendantsExited: true,
+    proxyExited: true,
+    termination: "exited",
+    requestIds: ["b", "a"],
+  };
+  assert.equal(runnerTurnProven(observation, lifecycle), true);
+  assert.equal(runnerTurnProven(null, lifecycle), false);
+  assert.equal(runnerTurnProven(observation, null), false);
+  assert.equal(
+    runnerTurnProven({ requestIds: [] }, { ...lifecycle, requestIds: [] }),
+    false,
+  );
+  assert.equal(
+    runnerTurnProven(observation, { ...lifecycle, requestIds: ["a"] }),
+    false,
+  );
+  assert.equal(
+    runnerTurnProven(observation, { ...lifecycle, requestIds: ["a", "c"] }),
+    false,
+  );
+  for (const stage of [
+    "inputAccepted",
+    "turnStarted",
+    "upstreamRequestStarted",
+    "completed",
+    "exitObserved",
+    "descendantsExited",
+    "proxyExited",
+  ]) {
+    assert.equal(
+      runnerTurnProven(observation, { ...lifecycle, [stage]: false }),
+      false,
+      stage,
+    );
+    assert.equal(
+      runnerTurnProven(observation, { ...lifecycle, [stage]: null }),
+      false,
+      stage,
+    );
+  }
+  assert.equal(
+    runnerTurnProven(observation, {
+      ...lifecycle,
+      termination: "unverifiable",
+    }),
+    false,
+  );
 });

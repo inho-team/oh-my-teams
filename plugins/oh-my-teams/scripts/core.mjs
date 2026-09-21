@@ -503,7 +503,8 @@ export function resolveCommand(argv, env = process.env) {
  * @param {number} [options.timeoutMs=300000] - Time before requesting termination.
  * @param {NodeJS.ProcessEnv} [options.env=process.env] - Child environment.
  * @param {number} [options.maxBytes=8388608] - Combined output safety limit.
- * @returns {Promise<object>} Exit code, output, timeout, overflow, PID, and timing.
+ * @param {boolean} [options.detached=false] - Start the child as its own POSIX process group leader, so its `pid` names a group whose emptiness can be checked.
+ * @returns {Promise<object>} Exit code, output, timeout, overflow, exit observation, stdin acceptance, PID, and timing.
  * @throws {Error} When `argv` is not a non-empty string array.
  */
 export function run(
@@ -514,6 +515,7 @@ export function run(
     timeoutMs = 300000,
     env = process.env,
     maxBytes = 8 * 1024 * 1024,
+    detached = false,
   } = {},
 ) {
   assert(
@@ -533,6 +535,7 @@ export function run(
       env,
       windowsHide: true,
       shell: false,
+      detached: detached && process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -540,6 +543,8 @@ export function run(
     let timedOut = false;
     let overflow = false;
     let finished = false;
+    // True only after the whole input was flushed to the child's stdin.
+    let inputAccepted = false;
     let fallbackTimer;
     // Track accumulated byte length to avoid re-computing on every chunk.
     let totalBytes = 0;
@@ -556,6 +561,7 @@ export function run(
         timedOut,
         overflow,
         exitObserved,
+        inputAccepted,
         pid: child.pid ?? null,
         elapsedMs: Date.now() - startedAt,
       });
@@ -594,7 +600,9 @@ export function run(
     child.on("error", (error) => finish(-1, error));
     child.on("close", (code) => finish(code, undefined, true));
     child.stdin.on("error", () => {});
-    child.stdin.end(input);
+    child.stdin.end(input, (error) => {
+      if (!error) inputAccepted = true;
+    });
   });
 }
 

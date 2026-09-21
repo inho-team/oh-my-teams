@@ -127,7 +127,12 @@ async function unusedPort() {
   return port;
 }
 
-function processGroupMembers(group) {
+/**
+ * Lists the live members of a POSIX process group.
+ * @param {number} group - Process group id, which is the pid of a detached leader.
+ * @returns {number[] | null} Member pids, or null when the platform or `ps` cannot answer.
+ */
+export function processGroupMembers(group) {
   if (process.platform === "win32") return null;
   const listed = spawnSync("ps", ["-axo", "pid=,pgid="], { encoding: "utf8" });
   if (listed.status !== 0) return null;
@@ -138,23 +143,24 @@ function processGroupMembers(group) {
     .map(([pid]) => pid);
 }
 
-function listenerOwnedByGroup(port, group) {
-  if (process.platform === "win32") return false;
+// The one process listening on the port, when it belongs to the owned group.
+// Any other listener, an absent one, or a failing lsof proves nothing.
+function ownedListenerPid(port, group) {
+  if (process.platform === "win32") return null;
   const listeners = spawnSync(
     "lsof",
     ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
-    {
-      encoding: "utf8",
-    },
+    { encoding: "utf8" },
   );
-  if (listeners.status !== 0) return false;
+  if (listeners.status !== 0) return null;
   const members = processGroupMembers(group);
-  if (!members) return false;
+  if (!members) return null;
+  // Blank lines are not pids: Number("") is 0 and would count as a listener.
   const pids = listeners.stdout
     .split("\n")
-    .map(Number)
-    .filter(Number.isInteger);
-  return pids.length === 1 && members.includes(pids[0]);
+    .filter((line) => /^\d+$/.test(line.trim()))
+    .map(Number);
+  return pids.length === 1 && members.includes(pids[0]) ? pids[0] : null;
 }
 
 /**
@@ -182,48 +188,56 @@ export function acquireOpenCodexLease(accountHome) {
   };
 }
 
-function processAlive(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === "EPERM";
+async function waitForEmptyGroup(group, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (processGroupMembers(group)?.length === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
-async function stopOwnedProxy(child) {
-  if (!child.pid || child.exitCode !== null) return;
-  try {
-    if (process.platform === "win32") child.kill("SIGTERM");
-    else process.kill(-child.pid, "SIGTERM");
-  } catch {}
-  await Promise.race([
-    new Promise((resolve) => child.once("close", resolve)),
-    new Promise((resolve) => setTimeout(resolve, 3000)),
-  ]);
-  if (processAlive(child.pid)) {
+// Ends every member of the owned group, not only its leader. A launcher that
+// exited while a descendant kept running is still a live owned tree, so this
+// never trusts the leader's exit; it passes only when the group is observed empty.
+async function stopOwnedProxy(child, graceMs) {
+  const group = child.pid;
+  assert(group, "opencodex-proxy-exit-unverifiable");
+  for (const signal of ["SIGTERM", "SIGKILL"]) {
+    if (processGroupMembers(group)?.length === 0) break;
     try {
-      if (process.platform === "win32") child.kill("SIGKILL");
-      else process.kill(-child.pid, "SIGKILL");
+      process.kill(-group, signal);
     } catch {}
-    await Promise.race([
-      new Promise((resolve) => child.once("close", resolve)),
-      new Promise((resolve) => setTimeout(resolve, 3000)),
-    ]);
+    await waitForEmptyGroup(group, graceMs);
   }
-  const members = processGroupMembers(child.pid);
   assert(
-    !processAlive(child.pid) && members?.length === 0,
+    processGroupMembers(group)?.length === 0,
     "opencodex-proxy-exit-unverifiable",
   );
+  return { termination: "exited", descendantsExited: true };
+}
+
+async function healthProvesPort(port) {
+  const response = await fetch(`http://127.0.0.1:${port}/healthz`);
+  if (!response.ok) return false;
+  const body = await response.json().catch(() => null);
+  return body?.status === "ok" && Number(body?.port) === port;
 }
 
 /**
  * Starts an owned loopback OpenCodex process and waits for its health endpoint.
  * This never invokes a login command and only terminates the child it started.
+ *
+ * The port is chosen before the child binds it, so a healthy response alone
+ * proves nothing. The proxy is accepted only when its health body names the
+ * port and the sole listener on that port is a member of the process group
+ * this call created. Any other listener, or a listener that cannot be
+ * inspected, is refused. Stopping succeeds only after the whole group is
+ * observed gone; otherwise it throws `opencodex-proxy-exit-unverifiable` and
+ * the account-home lease stays held, so no later turn reuses that home.
  * @param {object} binding - Runtime prefix and isolated fixed-account homes.
- * @returns {Promise<{port: number, pid: number | null, env: Record<string, string>, stop: () => Promise<void>}>} Owned proxy receipt.
+ * @returns {Promise<object>} Receipt with `port`, `pid`, `env`, `ownership` (listener pid and group) and `stop()`, which resolves to the exit proof.
+ * @throws {Error} `opencodex-proxy-not-ready` when ownership or health is not proven,
+ *   or `opencodex-proxy-exit-unverifiable` when the owned tree cannot be shown to have exited.
  */
 export async function startOpenCodexProxy(binding) {
   const env = openCodexEnvironment(binding);
@@ -237,14 +251,14 @@ export async function startOpenCodexProxy(binding) {
     binding.runtimePrefix,
     "node_modules",
     ".bin",
-    process.platform === "win32" ? "ocx.cmd" : "ocx",
+    "ocx",
   );
   const child = spawn(binary, ["start", "--port", String(port)], {
     cwd: binding.runtimePrefix,
     env: isolatedOpenCodexEnvironment(process.env, env),
     stdio: "ignore",
     shell: false,
-    detached: process.platform !== "win32",
+    detached: true,
   });
   let exited = false;
   let spawnError = null;
@@ -254,35 +268,43 @@ export async function startOpenCodexProxy(binding) {
   child.once("close", () => {
     exited = true;
   });
+  // The lease is released only once the owned group is proven gone.
+  let stopping = null;
+  const stop = () => {
+    stopping ??= (async () => {
+      const receipt = child.pid
+        ? await stopOwnedProxy(child, binding.stopGraceMs ?? 3000)
+        : { termination: "exited", descendantsExited: true };
+      lease.release();
+      return receipt;
+    })();
+    return stopping;
+  };
   const deadline = Date.now() + (binding.readyTimeoutMs ?? 15000);
   while (Date.now() < deadline) {
     if (spawnError || exited) break;
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/healthz`);
-      if (response.ok && child.pid && !exited) {
-        if (!listenerOwnedByGroup(port, child.pid)) break;
+      if (await healthProvesPort(port)) {
+        const listenerPid = child.pid
+          ? ownedListenerPid(port, child.pid)
+          : null;
+        if (!listenerPid || exited) break;
         return {
           port,
           pid: child.pid ?? null,
           env,
-          stop: async () => {
-            try {
-              if (child.exitCode === null && !exited)
-                await stopOwnedProxy(child);
-            } finally {
-              lease.release();
-            }
+          ownership: {
+            method: "sole-listener-in-owned-process-group",
+            listenerPid,
+            group: child.pid,
           },
+          stop,
         };
       }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  try {
-    if (child.exitCode === null && !exited) await stopOwnedProxy(child);
-  } finally {
-    lease.release();
-  }
+  await stop();
   throw new Error("opencodex-proxy-not-ready");
 }
 
@@ -383,36 +405,93 @@ async function readOpenCodexHistory(input, fetcher) {
 
 /**
  * Captures the request IDs that existed before a caller-owned invocation.
+ * The set also records when it was taken, so a later row can be required to
+ * postdate it.
  * @param {object} input - Loopback proxy and account directory.
  * @param {typeof fetch} [fetcher=fetch] - Injectable loopback fetch implementation.
- * @returns {Promise<Set<string>>} Existing request IDs.
+ * @returns {Promise<Set<string> & {capturedAt: number}>} Existing request IDs and capture time.
  */
 export async function openCodexHistoryBoundary(input, fetcher = fetch) {
   const entries = await readOpenCodexHistory(input, fetcher);
-  return new Set(entries.map((entry) => entry?.requestId).filter(Boolean));
+  const boundary = new Set(
+    entries.map((entry) => entry?.requestId).filter(Boolean),
+  );
+  boundary.capturedAt = Date.now();
+  return boundary;
+}
+
+function rowTime(entry) {
+  const time =
+    typeof entry?.timestamp === "number"
+      ? entry.timestamp
+      : Date.parse(entry?.timestamp);
+  return Number.isFinite(time) ? time : null;
+}
+
+// Every attempt of a request must itself be a single, first-try success on the
+// fixed account. A recovery, a resend or a failed attempt inside a request that
+// ended 2xx would hide an account or provider transition this adapter cannot
+// prove, so any of them makes the request unowned by the fixed binding.
+function attemptsProveFixedAccount(entry, expectedProvider, input) {
+  const attempts = entry?.attempts;
+  return (
+    Array.isArray(attempts) &&
+    attempts.length > 0 &&
+    attempts.every(
+      (attempt, index) =>
+        attempt?.ordinal === index + 1 &&
+        attempt.accountLogLabel === input.accountLogLabel &&
+        attempt.provider === expectedProvider &&
+        attempt.model === input.model &&
+        Number.isInteger(attempt.status) &&
+        attempt.status >= 200 &&
+        attempt.status < 300 &&
+        attempt.sendCount === 1 &&
+        Array.isArray(attempt.recoveryKinds) &&
+        attempt.recoveryKinds.length === 0,
+    )
+  );
+}
+
+async function ownedHistoryRows(input, fetcher) {
+  const entries = await readOpenCodexHistory(input, fetcher);
+  const before = input.historyBoundary ?? new Set();
+  return entries.filter((entry) => !before.has(entry?.requestId));
 }
 
 /**
  * Reads the caller-owned request-history observation after a boundary.
  * The management token is sent only to loopback and is never returned.
+ *
+ * A Codex turn may send several upstream requests, so the observation is the
+ * whole set of rows created after the boundary. That set is attributed to the
+ * caller only because the account home is leased, the proxy is the one this
+ * caller started, and every row postdates the boundary read. The set must also
+ * be identical on a second read, so a row still being recorded cannot be
+ * missed. Each row and each of its attempts must prove the fixed account,
+ * provider, model and a 2xx status; any unowned, incomplete, duplicate or
+ * unstable row rejects the observation instead of shrinking it.
  * @param {object} input - Loopback proxy and requested binding data.
  * @param {typeof fetch} [fetcher=fetch] - Injectable loopback fetch implementation.
- * @returns {Promise<{provider: string, accountLogLabel: string, model: string, usage: object | null}>}
+ * @returns {Promise<object>} `requestId`, every `requestIds`, `provider`, `accountLogLabel`, `model`, `usage`, and every owned request and attempt.
+ * @throws {Error} `opencodex-binding-unverified` when ownership or any row is not proven.
  */
 export async function readOpenCodexObservation(input, fetcher = fetch) {
-  const entries = await readOpenCodexHistory(input, fetcher);
-  const before = input.historyBoundary ?? new Set();
-  const created = entries.filter((entry) => !before.has(entry?.requestId));
+  const capturedAt = input.historyBoundary?.capturedAt;
+  assert(Number.isFinite(capturedAt), "opencodex-binding-unverified");
+  const created = await ownedHistoryRows(input, fetcher);
   assert(created.length > 0, "opencodex-binding-unverified");
   const expectedProvider = openCodexProvider(
     input.provider,
     input.accountLogLabel,
   );
   const valid = (entry) => {
-    const attempts = entry?.attempts;
     const model = entry?.resolvedModel ?? entry?.model;
+    const startedAt = rowTime(entry);
     return (
       typeof entry?.requestId === "string" &&
+      startedAt !== null &&
+      startedAt >= capturedAt &&
       entry.requestedModel === input.model &&
       model === input.model &&
       entry.provider === expectedProvider &&
@@ -420,20 +499,23 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
       entry.status >= 200 &&
       entry.status < 300 &&
       entry.terminalStatus === "completed" &&
-      Array.isArray(attempts) &&
-      attempts.length > 0 &&
-      attempts.every(
-        (attempt) =>
-          attempt?.accountLogLabel === input.accountLogLabel &&
-          attempt?.provider === expectedProvider &&
-          attempt?.model === input.model,
-      )
+      attemptsProveFixedAccount(entry, expectedProvider, input)
     );
   };
   assert(created.every(valid), "opencodex-binding-unverified");
+  const ids = created.map((entry) => entry.requestId);
+  assert(new Set(ids).size === ids.length, "opencodex-binding-unverified");
+  await new Promise((resolve) => setTimeout(resolve, input.settleMs ?? 250));
+  const settled = (await ownedHistoryRows(input, fetcher)).map(
+    (entry) => entry?.requestId,
+  );
+  assert(
+    settled.length === ids.length && ids.every((id) => settled.includes(id)),
+    "opencodex-binding-unverified",
+  );
   return {
     requestId: created[0].requestId,
-    requestIds: created.map((entry) => entry.requestId),
+    requestIds: ids,
     provider: expectedProvider,
     accountLogLabel: input.accountLogLabel,
     model: input.model,
