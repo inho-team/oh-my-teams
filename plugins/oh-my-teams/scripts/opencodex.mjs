@@ -229,22 +229,22 @@ async function terminateGroup(group, graceMs) {
 
 const LEASE_FILE = ".omt-opencodex-turn.lock";
 
-function readLease(file) {
+function readRecord(file) {
   try {
-    const lease = JSON.parse(fs.readFileSync(file, "utf8"));
-    return Number.isInteger(lease?.pid) && typeof lease.token === "string"
-      ? lease
+    const record = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Number.isInteger(record?.pid) && typeof record.token === "string"
+      ? record
       : null;
   } catch {
     return null;
   }
 }
 
-// Writes the lease through a private file and publishes it with a link, so a
+// Writes a record through a private file and publishes it with a link, so a
 // reader never sees a half-written record and only one writer can create it.
-function publishLease(file, lease) {
-  const pending = `${file}.${process.pid}.${lease.token}`;
-  fs.writeFileSync(pending, JSON.stringify(lease), { mode: 0o600 });
+function publishRecord(file, record) {
+  const pending = `${file}.${process.pid}.${record.token}`;
+  fs.writeFileSync(pending, JSON.stringify(record), { mode: 0o600 });
   try {
     fs.linkSync(pending, file);
   } finally {
@@ -252,77 +252,144 @@ function publishLease(file, lease) {
   }
 }
 
-// Decides what an existing lease means. A live owner keeps the home. A dead
-// owner's proxy group is ended with the same emptiness proof a stop needs, and
-// only then is the lease removed; anything unprovable keeps the lease.
-async function reclaimStaleLease(file, graceMs) {
-  const lease = readLease(file);
-  if (!lease)
-    throw new Error("opencodex-lease-unverifiable: unreadable owner record");
-  const ownerStart = processStartTime(lease.pid);
-  const ownerLive =
-    processAlive(lease.pid) &&
-    (lease.processStart === null ||
-      ownerStart === null ||
-      ownerStart === lease.processStart);
-  if (ownerLive)
-    throw new Error(
-      `opencodex-lease-held: pid ${lease.pid} owns this account home`,
-    );
-  const group = lease.proxy?.group ?? null;
-  let terminated = false;
-  if (group) {
-    // A live leader with another start time means the group id was reused, so
-    // the recorded group is already empty; anything else in it is not ours.
-    const leaderStart = processAlive(group) ? processStartTime(group) : null;
-    const reused =
-      processAlive(group) &&
-      lease.proxy.processStart !== null &&
-      leaderStart !== null &&
-      leaderStart !== lease.proxy.processStart;
-    if (!reused && processGroupMembers(group)?.length !== 0) {
-      try {
-        await terminateGroup(group, graceMs);
-      } catch {
-        throw new Error(
-          `opencodex-lease-unverifiable: proxy group ${group} of dead owner ${lease.pid} is not proven gone`,
-        );
-      }
-      terminated = true;
-    }
-  }
-  // Remove only the record that was inspected; a moved-aside record that turns
-  // out to be someone else's live lease is put back.
-  const aside = `${file}.stale.${process.pid}.${Date.now()}`;
-  try {
-    fs.renameSync(file, aside);
-  } catch {
-    return { recovered: { owner: lease.pid, group, terminated } };
-  }
-  if (readLease(aside)?.token !== lease.token) {
+// Whether the process that wrote a record is still the one that wrote it. A
+// missing start time on either side cannot show a reused pid, so a live pid
+// then counts as the owner.
+function recordOwnerLive(record) {
+  if (!processAlive(record.pid)) return false;
+  const started = processStartTime(record.pid);
+  return (
+    record.processStart === null ||
+    started === null ||
+    started === record.processStart
+  );
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// The proxy group is recorded beside the lease under the lease's own token, so
+// the lease file itself is never rewritten after it is published.
+const proxyFile = (file, token) => `${file}.proxy.${token}`;
+const reclaimFile = (file, token) => `${file}.reclaim.${token}`;
+
+// One reclaimer at a time may take over a given stale lease. The mutex is named
+// after that lease's token, so a mutex left behind by a dead reclaimer can only
+// ever block that same lease, never a later one. It is never broken
+// automatically: two breakers cannot be told apart from a live holder, and a
+// wrongly broken mutex would let two reclaimers both take the home.
+async function takeReclaimMutex(file, token, waitMs) {
+  const mutex = reclaimFile(file, token);
+  const record = {
+    token: crypto.randomUUID(),
+    pid: process.pid,
+    processStart: processStartTime(process.pid),
+  };
+  const deadline = Date.now() + waitMs;
+  for (;;) {
     try {
-      fs.linkSync(aside, file);
-    } catch {}
-    fs.rmSync(aside, { force: true });
-    throw new Error(
-      "opencodex-lease-held: the lease changed owner during recovery",
-    );
+      publishRecord(mutex, record);
+      return () => {
+        if (readRecord(mutex)?.token === record.token)
+          fs.rmSync(mutex, { force: true });
+      };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    const holder = readRecord(mutex);
+    // The holder may have released between the failed link and this read.
+    if (!holder && !fs.existsSync(mutex)) continue;
+    if (!holder || !recordOwnerLive(holder)) {
+      throw new Error(
+        `opencodex-lease-reclaim-stuck: a reclaimer that is gone left ${mutex}; ` +
+          "remove it by hand once no process is reclaiming this home",
+      );
+    }
+    if (Date.now() >= deadline)
+      throw new Error(
+        `opencodex-lease-held: pid ${holder.pid} is reclaiming this account home`,
+      );
+    await sleep(25);
   }
-  fs.rmSync(aside, { force: true });
-  return { recovered: { owner: lease.pid, group, terminated } };
+}
+
+// Decides what an existing lease means and, when its owner is dead, takes it
+// over. A live owner keeps the home. The dead owner's proxy group is ended with
+// the same emptiness proof a stop needs, and only then is the lease removed;
+// anything unprovable keeps it. The lease is read again under the reclaim
+// mutex and removed only if it is still the record that was judged stale.
+async function reclaimStaleLease(file, options) {
+  const seen = readRecord(file);
+  if (!seen) {
+    // Absent means someone finished first; unreadable proves nothing.
+    if (!fs.existsSync(file)) return { recovered: null };
+    throw new Error("opencodex-lease-unverifiable: unreadable owner record");
+  }
+  if (recordOwnerLive(seen))
+    throw new Error(
+      `opencodex-lease-held: pid ${seen.pid} owns this account home`,
+    );
+  const release = await takeReclaimMutex(
+    file,
+    seen.token,
+    options.reclaimWaitMs ?? 5000,
+  );
+  try {
+    const lease = readRecord(file);
+    // Gone or replaced while waiting: the caller judges what is there now.
+    if (lease?.token !== seen.token) return { recovered: null };
+    if (recordOwnerLive(lease))
+      throw new Error(
+        `opencodex-lease-held: pid ${lease.pid} owns this account home`,
+      );
+    const proxy = readRecord(proxyFile(file, lease.token));
+    const group = proxy?.group ?? null;
+    let terminated = false;
+    if (group) {
+      // A live leader with another start time means the group id was reused,
+      // so the recorded group is already empty; anything else in it is not ours.
+      const leaderStart = processAlive(group) ? processStartTime(group) : null;
+      const reused =
+        processAlive(group) &&
+        proxy.processStart !== null &&
+        leaderStart !== null &&
+        leaderStart !== proxy.processStart;
+      if (!reused && processGroupMembers(group)?.length !== 0) {
+        try {
+          await terminateGroup(group, options.stopGraceMs ?? 3000);
+        } catch {
+          throw new Error(
+            `opencodex-lease-unverifiable: proxy group ${group} of dead owner ${lease.pid} is not proven gone`,
+          );
+        }
+        terminated = true;
+      }
+    }
+    if (readRecord(file)?.token === lease.token)
+      fs.rmSync(file, { force: true });
+    fs.rmSync(proxyFile(file, lease.token), { force: true });
+    return { recovered: { owner: lease.pid, group, terminated } };
+  } finally {
+    release();
+  }
 }
 
 /**
  * Acquires the account-home lease that makes a request-history boundary exclusive.
  *
- * The lease records its owner's pid and start time and, once the proxy is
- * spawned, the proxy's process group. A lease whose owner is gone is stale:
- * its group is ended with the same emptiness proof a stop needs and the lease
- * is taken over. A live owner and an unprovable state are different failures.
+ * The lease records its owner's pid and start time and is never rewritten;
+ * once the proxy is spawned its process group is recorded in a file named by
+ * the lease's token. A lease whose owner is gone is stale. One reclaimer at a
+ * time, holding a mutex keyed to that lease, ends its group with the same
+ * emptiness proof a stop needs and takes the home over. The lease is only ever
+ * created with a link and removed by its owner or by that reclaimer, so two
+ * owners can never hold one home. A live owner, a reclaim in progress, a
+ * reclaimer that died, and an unprovable state are different failures.
  * @param {string} accountHome - Fixed-account OpenCodex home.
- * @param {{stopGraceMs?: number}} [options] - Grace period for ending a dead owner's group.
+ * @param {{stopGraceMs?: number, reclaimWaitMs?: number}} [options] - Grace period for ending a dead owner's group and how long to wait for another reclaimer.
  * @returns {Promise<{release: () => void, setProxy: (group: number) => void, recovered: object | null}>} Lease receipt.
- * @throws {Error} `opencodex-lease-held` for a live owner, or `opencodex-lease-unverifiable` when a dead owner's state cannot be proven clean.
+ * @throws {Error} `opencodex-lease-held` for a live owner or a reclaim in progress.
+ * @throws {Error} `opencodex-lease-reclaim-stuck` when a dead reclaimer left its mutex.
+ * @throws {Error} `opencodex-lease-unverifiable` when a dead owner's state cannot be proven clean.
  */
 export async function acquireOpenCodexLease(accountHome, options = {}) {
   const file = path.join(accountHome, LEASE_FILE);
@@ -331,39 +398,44 @@ export async function acquireOpenCodexLease(accountHome, options = {}) {
     pid: process.pid,
     processStart: processStartTime(process.pid),
     acquiredAt: new Date().toISOString(),
-    proxy: null,
   };
   let recovered = null;
   for (let attempt = 0; ; attempt += 1) {
     try {
-      publishLease(file, lease);
+      publishRecord(file, lease);
       break;
     } catch (error) {
-      if (error.code !== "EEXIST" || attempt >= 2)
-        throw error.code === "EEXIST"
-          ? new Error("opencodex-lease-held: lease kept changing hands")
-          : error;
-      ({ recovered } = await reclaimStaleLease(
-        file,
-        options.stopGraceMs ?? 3000,
-      ));
+      if (error.code !== "EEXIST") throw error;
+      if (attempt >= 5)
+        throw new Error("opencodex-lease-held: lease kept changing hands");
+      const result = await reclaimStaleLease(file, options);
+      recovered = result.recovered ?? recovered;
     }
   }
   let released = false;
   return {
     recovered,
     setProxy(group) {
-      lease.proxy = { group, processStart: processStartTime(group) };
-      const pending = `${file}.${process.pid}.${lease.token}`;
-      fs.writeFileSync(pending, JSON.stringify(lease), { mode: 0o600 });
-      fs.renameSync(pending, file);
+      const pending = `${proxyFile(file, lease.token)}.pending`;
+      fs.writeFileSync(
+        pending,
+        JSON.stringify({
+          token: lease.token,
+          pid: process.pid,
+          group,
+          processStart: processStartTime(group),
+        }),
+        { mode: 0o600 },
+      );
+      fs.renameSync(pending, proxyFile(file, lease.token));
     },
     release() {
       if (released) return;
       released = true;
       // Never remove a lease another owner has since taken over.
-      if (readLease(file)?.token === lease.token)
+      if (readRecord(file)?.token === lease.token)
         fs.rmSync(file, { force: true });
+      fs.rmSync(proxyFile(file, lease.token), { force: true });
     },
   };
 }
@@ -401,6 +473,7 @@ export async function startOpenCodexProxy(binding) {
   );
   const lease = await acquireOpenCodexLease(binding.accountHome, {
     stopGraceMs: binding.stopGraceMs,
+    reclaimWaitMs: binding.reclaimWaitMs,
   });
   let port;
   let child;

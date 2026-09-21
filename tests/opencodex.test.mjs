@@ -750,11 +750,17 @@ function leaseFixture(t) {
     spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
       encoding: "utf8",
     }).stdout.trim();
-  const write = (record) =>
-    fs.writeFileSync(
-      file,
-      typeof record === "string" ? record : JSON.stringify(record),
-    );
+  // A lease file, plus the proxy record kept beside it under the lease's token.
+  const write = (record) => {
+    if (typeof record === "string") return fs.writeFileSync(file, record);
+    const { proxy, ...lease } = record;
+    fs.writeFileSync(file, JSON.stringify(lease));
+    if (proxy)
+      fs.writeFileSync(
+        `${file}.proxy.${lease.token}`,
+        JSON.stringify({ token: lease.token, pid: lease.pid, ...proxy }),
+      );
+  };
   // A pid that certainly no longer exists.
   const deadPid = () => {
     const done = spawnSync(process.execPath, ["-e", "0"]);
@@ -772,14 +778,19 @@ test(
     const first = JSON.parse(fs.readFileSync(box.file, "utf8"));
     assert.equal(first.pid, process.pid);
     assert.equal(first.processStart, box.startOf(process.pid));
-    assert.equal(first.proxy, null);
+    assert.equal(fs.existsSync(`${box.file}.proxy.${first.token}`), false);
     const group = box.sleeper();
     lease.setProxy(group);
-    const second = JSON.parse(fs.readFileSync(box.file, "utf8"));
-    assert.equal(second.token, first.token);
-    assert.equal(second.proxy.group, group);
+    // The lease itself is never rewritten; the proxy is recorded beside it.
+    assert.deepEqual(JSON.parse(fs.readFileSync(box.file, "utf8")), first);
+    const proxy = JSON.parse(
+      fs.readFileSync(`${box.file}.proxy.${first.token}`, "utf8"),
+    );
+    assert.equal(proxy.group, group);
+    assert.equal(proxy.processStart, box.startOf(group));
     lease.release();
     assert.equal(fs.existsSync(box.file), false);
+    assert.equal(fs.existsSync(`${box.file}.proxy.${first.token}`), false);
   },
 );
 
@@ -934,5 +945,228 @@ test(
     } finally {
       await proxy.stop();
     }
+  },
+);
+
+// Replays the review's interleaving on the real module: while a reclaimer works
+// on a dead owner's lease, live owners appear at each syscall it makes on the
+// lease path. Whatever they publish must survive.
+test(
+  "a live owner that appears during a reclaim is never displaced",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    const dead = { token: "dead", pid: box.deadPid(), processStart: null };
+    box.write(dead);
+    const live = (token) => ({
+      token,
+      pid: process.pid,
+      processStart: box.startOf(process.pid),
+    });
+    const { renameSync, linkSync } = fs;
+    const renamedFromLease = [];
+    let injected = 0;
+    fs.renameSync = (from, to) => {
+      if (from === box.file) renamedFromLease.push(String(to));
+      return renameSync(from, to);
+    };
+    fs.linkSync = (from, to) => {
+      // Just before the reclaimer publishes its own lease, another owner does.
+      if (to === box.file && injected === 0 && !fs.existsSync(box.file)) {
+        injected += 1;
+        fs.writeFileSync(`${box.file}.injected`, JSON.stringify(live("L1")));
+        linkSync(`${box.file}.injected`, box.file);
+      }
+      return linkSync(from, to);
+    };
+    try {
+      await assert.rejects(
+        () => acquireOpenCodexLease(box.accountHome),
+        /opencodex-lease-held/,
+      );
+    } finally {
+      fs.renameSync = renameSync;
+      fs.linkSync = linkSync;
+    }
+    assert.equal(injected, 1);
+    // The injected owner's lease is intact, and no lease was ever moved aside.
+    assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "L1");
+    assert.deepEqual(renamedFromLease, []);
+    assert.equal(
+      fs
+        .readdirSync(box.accountHome)
+        .some((name) => name.includes(".reclaim.")),
+      false,
+      "the reclaim mutex is released",
+    );
+  },
+);
+
+test(
+  "a reclaimer that finds the lease replaced while it waited leaves the new owner alone",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    box.write({ token: "stale", pid: box.deadPid(), processStart: null });
+    const mutex = `${box.file}.reclaim.stale`;
+    // Another reclaimer holds the mutex, then takes the home over and leaves.
+    fs.writeFileSync(
+      mutex,
+      JSON.stringify({
+        token: "m",
+        pid: process.pid,
+        processStart: box.startOf(process.pid),
+      }),
+    );
+    const pending = acquireOpenCodexLease(box.accountHome, {
+      reclaimWaitMs: 5000,
+    });
+    const outcome = pending.then(
+      () => "acquired",
+      (error) => error.message,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    fs.rmSync(box.file);
+    fs.writeFileSync(
+      box.file,
+      JSON.stringify({
+        token: "L2",
+        pid: process.pid,
+        processStart: box.startOf(process.pid),
+      }),
+    );
+    fs.rmSync(mutex);
+    assert.match(await outcome, /opencodex-lease-held/);
+    assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "L2");
+  },
+);
+
+// Several processes race to take over one dead owner's lease. Whoever wins
+// stays alive holding it, so at any moment at most one may report success.
+const RACER = `
+const [moduleUrl, home, go] = process.argv.slice(1);
+import(moduleUrl).then(async (m) => {
+  while (!require("node:fs").existsSync(go)) await new Promise((r) => setTimeout(r, 2));
+  try {
+    const lease = await m.acquireOpenCodexLease(home, { reclaimWaitMs: 8000 });
+    console.log("acquired " + process.pid + " " + Boolean(lease.recovered));
+    setInterval(() => {}, 1000);
+  } catch (error) {
+    console.log("refused " + process.pid + " " + error.message.split(":")[0]);
+    process.exit(0);
+  }
+});
+`;
+
+test(
+  "many acquirers racing for a dead owner's lease leave exactly one holder",
+  posixOnly,
+  async (t) => {
+    const moduleUrl = new URL(
+      "../plugins/oh-my-teams/scripts/opencodex.mjs",
+      import.meta.url,
+    ).href;
+    for (let round = 0; round < 4; round += 1) {
+      const box = leaseFixture(t);
+      box.write({
+        token: `dead-${round}`,
+        pid: box.deadPid(),
+        processStart: null,
+      });
+      const go = path.join(box.accountHome, "go");
+      const racers = Array.from({ length: 6 }, () => {
+        const child = spawn(
+          process.execPath,
+          ["-e", RACER, moduleUrl, box.accountHome, go],
+          {
+            stdio: ["ignore", "pipe", "inherit"],
+          },
+        );
+        const lines = [];
+        child.stdout.on("data", (chunk) => lines.push(String(chunk)));
+        const done = new Promise((resolve) => {
+          const timer = setInterval(() => {
+            if (lines.join("").includes("\n") || child.exitCode !== null) {
+              clearInterval(timer);
+              resolve(lines.join("").trim());
+            }
+          }, 10);
+        });
+        t.after(() => child.kill("SIGKILL"));
+        return { child, done };
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      fs.writeFileSync(go, "");
+      const results = await Promise.all(racers.map((racer) => racer.done));
+      const winners = results.filter((line) => line.startsWith("acquired"));
+      assert.equal(winners.length, 1, `round ${round}: ${results.join(" | ")}`);
+      for (const line of results.filter((line) => line.startsWith("refused"))) {
+        assert.match(line, /opencodex-lease-held/);
+      }
+      // The lease belongs to the one winner, and the reclaim left no mutex.
+      const winnerPid = Number(winners[0].split(" ")[1]);
+      assert.equal(
+        JSON.parse(fs.readFileSync(box.file, "utf8")).pid,
+        winnerPid,
+      );
+      assert.equal(
+        fs
+          .readdirSync(box.accountHome)
+          .some((name) => name.includes(".reclaim.")),
+        false,
+      );
+      for (const racer of racers) racer.child.kill("SIGKILL");
+    }
+  },
+);
+
+test(
+  "a reclaim mutex left by a dead reclaimer blocks only that lease and is reported as stuck",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    box.write({ token: "stale", pid: box.deadPid(), processStart: null });
+    const mutex = `${box.file}.reclaim.stale`;
+    fs.writeFileSync(
+      mutex,
+      JSON.stringify({ token: "m", pid: box.deadPid(), processStart: null }),
+    );
+    await assert.rejects(
+      () => acquireOpenCodexLease(box.accountHome),
+      /opencodex-lease-reclaim-stuck/,
+    );
+    // Nothing was taken over and nothing was broken automatically.
+    assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "stale");
+    assert.equal(fs.existsSync(mutex), true);
+    // A different stale lease is not affected by that leftover mutex.
+    box.write({ token: "other", pid: box.deadPid(), processStart: null });
+    const lease = await acquireOpenCodexLease(box.accountHome);
+    assert.equal(lease.recovered.owner > 0, true);
+    lease.release();
+  },
+);
+
+test(
+  "a reclaim in progress by a live process is waited for, then reported as held",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    box.write({ token: "stale", pid: box.deadPid(), processStart: null });
+    const mutex = `${box.file}.reclaim.stale`;
+    fs.writeFileSync(
+      mutex,
+      JSON.stringify({
+        token: "m",
+        pid: process.pid,
+        processStart: box.startOf(process.pid),
+      }),
+    );
+    const started = Date.now();
+    await assert.rejects(
+      () => acquireOpenCodexLease(box.accountHome, { reclaimWaitMs: 300 }),
+      /opencodex-lease-held: pid \d+ is reclaiming/,
+    );
+    assert.equal(Date.now() - started >= 250, true);
+    assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "stale");
   },
 );
