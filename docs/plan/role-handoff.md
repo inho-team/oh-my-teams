@@ -79,9 +79,11 @@ worker 브리프 머리글(`scripts/role-launch.mjs:488`)에 체크포인트 규
 
 ### 3.3 한도 감지
 
-- **터미널 경로:** `worker-limit-check --terminal <handle> --provider <provider>`를 추가한다. 이 명령은 `worker-read`로 화면을 읽고 provider별 한도 문구와 대조한다. 감독 판정이 `inspect`나 `escalate`를 고를 때 PM이 이 명령을 먼저 실행하도록 `references/orca-runtime.md`의 감독 절차를 고친다.
-- **headless 경로:** 이미 판정한 `rateLimited`를 outcome에 반영해, 한도로 끝난 turn을 일반 실패와 구분한다.
-- **provider별 문구는 실측으로 정한다.** Claude, Codex, Agy가 한도에 걸렸을 때 화면에 실제로 출력하는 문구를 먼저 수집하고, 그 원문을 테스트 고정 자료로 저장한다. 수집하지 못한 provider는 감지 대상에서 빼고 문서에 그 사실을 적는다.
+0단계 실측(8절) 결과에 따라, 화면 문구보다 provider CLI가 남기는 **세션 기록의 구조화된 오류 필드**를 우선 근거로 삼는다.
+
+- **터미널 경로:** `worker-limit-check --worktree <path> --provider <provider>`를 추가한다. 이 명령은 그 worktree에서 가장 최근에 시작된 provider 세션 기록을 찾아, 마지막 turn이 한도 오류로 끝났는지 오류 필드만 읽고 판정한다. 역할 worker는 worktree를 공유하지 않으므로(`scripts/teams-org.mjs:669-674`) worktree 경로로 세션을 특정할 수 있다. 세션 기록을 찾지 못하면 화면(`worker-read`)을 보조 근거로 읽는다. 감독 판정이 `inspect`나 `escalate`를 고를 때 PM이 이 명령을 먼저 실행하도록 `references/orca-runtime.md`의 감독 절차를 고친다.
+- **headless 경로:** 이미 판정한 `rateLimited`를 outcome에 반영해, 한도로 끝난 turn을 일반 실패와 구분한다. 다만 판정 범위를 오류 필드와 실패 상태로 좁힌다. 응답 본문 전체에 정규식을 적용하면, worker가 본문에서 "rate limit"이라는 낱말을 쓰기만 해도 한도로 판정되는 오탐이 이미 기록되어 있다(`.omt/history/audit-wave1-close/state/lessons_in/rate-limited-false-positive.json`).
+- **사용 한도와 용량 부족을 구분한다.** 사용 한도(`usage-limit`)는 갱신 시각까지 그 구독을 쓸 수 없으므로 handoff 대상이다. 용량 부족(`capacity`, 예: Codex `server_overloaded`, Agy `UNAVAILABLE (code 503)`)은 잠시 뒤 같은 프로필로 다시 시도하면 풀릴 수 있으므로, 같은 turn에서 곧바로 handoff하지 않고 재시도 대상으로 먼저 분류한다.
 
 ### 3.4 실패 분류
 
@@ -113,7 +115,7 @@ worker 브리프 머리글(`scripts/role-launch.mjs:488`)에 체크포인트 규
 
 | 단계                 | 내용                                                                                                 | 완료 기준                                                                                                                      |
 | -------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| 0. 실측              | Claude, Codex, Agy의 한도 화면 문구와 headless 출력을 수집한다.                                      | provider별 원문 고정 자료가 저장되고, 수집하지 못한 provider가 목록으로 남는다.                                                |
+| 0. 실측 (완료)       | Claude, Codex, Agy의 한도 화면 문구와 headless 출력을 수집한다.                                      | provider별 원문 고정 자료가 저장되고, 수집하지 못한 provider가 목록으로 남는다. 결과는 8절에 있다.                             |
 | 1. 문서와 체크포인트 | `handoff-checkpoint`, 문서 형식 검증, 브리프 머리글의 체크포인트 규칙을 만든다.                      | worker가 커밋할 때 체크포인트를 갱신하는 것을 실제 Orca 터미널에서 확인한다. 이 단계만으로도 사람이 수동으로 이어받을 수 있다. |
 | 2. 감지와 분류       | `worker-limit-check`, headless outcome 반영, `rate-limited` 신호, `capacity-handoff` 경로를 만든다.  | 고정 자료로 감지와 분류를 검사하는 테스트가 통과한다.                                                                          |
 | 3. 전이와 실행       | `workflow-handoff`, `--profile`, snapshot 생성, 실행 기록 필드를 만든다.                             | 한도 상황을 흉내 낸 workflow에서 fallback 프로필이 같은 worktree에서 task를 끝내고 검토를 통과한다.                            |
@@ -136,3 +138,29 @@ worker 브리프 머리글(`scripts/role-launch.mjs:488`)에 체크포인트 규
 ## 7. 남은 결정
 
 - **역할별 fallback:** 현재 조직 파일의 각 역할(`pm`, `pl`, `senior`, `junior`)에 어떤 Codex 또는 Agy 프로필을 fallback으로 둘지는 아직 정하지 않았다. 3단계에서 실제 handoff를 확인하기 전까지 사용자가 정한다.
+
+## 8. 0단계 실측 결과
+
+2026-09-22에 이 머신의 provider CLI 기록과 Orca 터미널에서 실제 한도 오류를 수집했다. 식별자와 시각만 지우고 문구는 그대로 `tests/fixtures/provider-limit-events.json`에 저장했다.
+
+### 8.1 provider별로 확인한 기록
+
+| provider    | 기록 위치                                                                           | 한도 오류의 형태                                                                                                                                                                                                               | 작업 디렉터리 기록                                               |
+| ----------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| Codex       | `~/.codex/sessions/**/rollout-*.jsonl`                                              | `event_msg`의 `task_complete` 이벤트에 `error.codex_error_info`가 붙는다. 사용 한도는 `usage_limit_exceeded`, 용량 부족은 `server_overloaded`이다.                                                                             | 첫 줄 `session_meta`의 `cwd`                                     |
+| Claude Code | `~/.claude/projects/<cwd 변환>/*.jsonl`                                             | `isApiErrorMessage: true`, `error: "rate_limit"`인 assistant 메시지가 남는다. 모델 값은 `<synthetic>`이다.                                                                                                                     | 디렉터리 이름과 각 줄의 `cwd`                                    |
+| Agy         | `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl` | `source: "SYSTEM"`, `type: "ERROR_MESSAGE"`인 항목의 `error`에 `RESOURCE_EXHAUSTED (code 429): Individual quota reached ... Resets in <시간>`이 들어간다. 용량 부족은 `UNAVAILABLE (code 503): No capacity available ...`이다. | 구조화된 필드는 없다. 첫 입력에 Orca가 넣은 task ID가 들어 있다. |
+
+Codex는 한도에 걸린 상태의 계정으로 Orca 터미널에서 직접 요청을 보내 확인했다. 화면에 오류가 표시되는 것과 동시에 같은 문구가 세션 기록에 `usage_limit_exceeded`로 남았고, 그 기록의 `cwd`는 터미널의 worktree와 같았다. Claude와 Agy는 과거 기록에서만 수집했다.
+
+### 8.2 설계에 반영한 사실
+
+- **화면 문구는 근거로 약하다.** Codex 화면에서는 오류 문장이 터미널 폭에 맞춰 문장 중간에서 줄바꿈되었고, 진행 표시 문자가 같은 줄에 섞였다. 게다가 문구에는 곧은 따옴표(`You've`)와 굽은 따옴표(`You’ve`)가 모두 나타났고, 모델별 한도 문구(`You've hit your usage limit for GPT-5.3-Codex-Spark`)처럼 형태도 여러 가지였다. 반면 세션 기록의 오류 필드는 값이 고정되어 있다.
+- **갱신 시각의 형식이 provider마다 다르다.** Codex는 `try again at 4:54 AM`이나 `try again at Sep 26th, 2026 6:11 AM`처럼 절대 시각을, Agy는 `Resets in 1h11m42s`처럼 남은 시간을 준다. Claude 기록에는 갱신 시각이 없었다.
+- **Agy는 내부에서 재시도한다.** 같은 turn 안에서 `API error (attempt 1)`부터 `(attempt 8)`까지 이어진 기록이 있다. 따라서 첫 오류를 보자마자 handoff하지 않고 turn이 끝났는지 확인해야 한다.
+
+### 8.3 수집하지 못한 것
+
+- **Claude의 5시간·주간 사용 한도 문구:** 이 머신의 기록에는 Fable 사용 크레딧 소진(`You're out of usage credits`) 한 가지만 있었다. 구독의 5시간·주간 한도에 걸렸을 때도 같은 `error: "rate_limit"` 필드가 남는지는 확인하지 못했다. 2단계에서 필드 값만으로 판정하되, 실제 한도에 처음 걸렸을 때 이 가정을 검증하고 고정 자료에 추가한다.
+- **Claude와 Agy의 터미널 화면 문구:** 두 provider는 지금 한도에 걸려 있지 않아 화면을 재현하지 못했다. 한도에 걸리지 않은 계정으로 한도를 일부러 소진하는 실측은 하지 않았다.
+- **Agy 세션과 worktree의 연결:** Agy 기록에는 `cwd` 필드가 없다. 첫 입력에 들어 있는 Orca task ID로 세션을 찾는 방법을 2단계에서 검증한다.
