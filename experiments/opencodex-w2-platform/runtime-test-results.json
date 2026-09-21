@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "repository": {
-    "head": "b47b1a36cd9f52a44f63109322189919a174efed",
+    "head": "f6ba7876b0040500babd61d38ef75108cc7d4568",
     "dirty": false,
     "status_porcelain": [],
     "plugin_tree": "d9ba65eaea0e9cbb4a9e14d1e48b2acb25613cab",
@@ -18,7 +18,7 @@
     },
     "machine": "arm64"
   },
-  "started_utc": "2026-09-21T12:30:54Z",
+  "started_utc": "2026-09-21T12:59:34Z",
   "tests": {
     "doctor-before": {
       "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
@@ -32,7 +32,7 @@
         "command": "runtime-doctor",
         "status": "needs-install",
         "runtimeHealthy": false,
-        "checkedAt": "2026-09-21T12:30:54.794Z",
+        "checkedAt": "2026-09-21T12:59:34.385Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -51,6 +51,72 @@
           }
         ],
         "nextAction": "Run runtime-install; authentication is never automated."
+      },
+      "watched_directories": [
+        "home",
+        "state",
+        "cache",
+        "config",
+        "data",
+        "work"
+      ],
+      "listing_before": {
+        "home": {
+          "kind": "dir"
+        },
+        "home/.codex": {
+          "kind": "dir"
+        },
+        "home/.opencodex": {
+          "kind": "dir"
+        },
+        "state": {
+          "kind": "dir"
+        },
+        "cache": {
+          "kind": "dir"
+        },
+        "config": {
+          "kind": "dir"
+        },
+        "data": {
+          "kind": "dir"
+        },
+        "work": {
+          "kind": "dir"
+        }
+      },
+      "listing_after": {
+        "home": {
+          "kind": "dir"
+        },
+        "home/.codex": {
+          "kind": "dir"
+        },
+        "home/.opencodex": {
+          "kind": "dir"
+        },
+        "state": {
+          "kind": "dir"
+        },
+        "cache": {
+          "kind": "dir"
+        },
+        "config": {
+          "kind": "dir"
+        },
+        "data": {
+          "kind": "dir"
+        },
+        "work": {
+          "kind": "dir"
+        }
+      },
+      "listing_diff": {
+        "added": [],
+        "removed": [],
+        "changed": [],
+        "identical": true
       }
     },
     "install-dryrun": {
@@ -65,7 +131,7 @@
         "command": "runtime-install",
         "status": "needs-install",
         "runtimeHealthy": false,
-        "checkedAt": "2026-09-21T12:30:54.871Z",
+        "checkedAt": "2026-09-21T12:59:34.467Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -86,12 +152,78 @@
         "nextAction": "Run runtime-install; authentication is never automated.",
         "dryRun": true
       },
+      "watched_directories": [
+        "home",
+        "state",
+        "cache",
+        "config",
+        "data",
+        "work"
+      ],
+      "listing_before": {
+        "home": {
+          "kind": "dir"
+        },
+        "home/.codex": {
+          "kind": "dir"
+        },
+        "home/.opencodex": {
+          "kind": "dir"
+        },
+        "state": {
+          "kind": "dir"
+        },
+        "cache": {
+          "kind": "dir"
+        },
+        "config": {
+          "kind": "dir"
+        },
+        "data": {
+          "kind": "dir"
+        },
+        "work": {
+          "kind": "dir"
+        }
+      },
+      "listing_after": {
+        "home": {
+          "kind": "dir"
+        },
+        "home/.codex": {
+          "kind": "dir"
+        },
+        "home/.opencodex": {
+          "kind": "dir"
+        },
+        "state": {
+          "kind": "dir"
+        },
+        "cache": {
+          "kind": "dir"
+        },
+        "config": {
+          "kind": "dir"
+        },
+        "data": {
+          "kind": "dir"
+        },
+        "work": {
+          "kind": "dir"
+        }
+      },
+      "listing_diff": {
+        "added": [],
+        "removed": [],
+        "changed": [],
+        "identical": true
+      },
       "omt_directory_created": false
     },
     "install-actual": {
       "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install --org <org> --state <temp>",
       "code": 0,
-      "seconds": 6.78,
+      "seconds": 7.08,
       "stderr_head": "",
       "npm_calls": [
         {
@@ -105,7 +237,7 @@
         "command": "runtime-install",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:30:59.922Z",
+        "checkedAt": "2026-09-21T12:59:39.900Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -212,7 +344,7 @@
         "files": 5294,
         "symlinks": 5,
         "dirs": 685,
-        "sha256": "3123a1a145dd9dc9d935dcfbf807c9f9e6eb68f86db1de1d0de31f2526984475"
+        "sha256": "9817cc13b291b7fc9996f5aedb76727218fe5dfff6d56dbb409535c7168c6a53"
       },
       "active_json": {
         "fingerprint": "sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f",
@@ -223,7 +355,7 @@
     "doctor-after": {
       "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
       "code": 0,
-      "seconds": 1.25,
+      "seconds": 1.21,
       "stderr_head": "",
       "npm_calls": [],
       "npm_ci_calls": 0,
@@ -232,7 +364,7 @@
         "command": "runtime-doctor",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:31:03.371Z",
+        "checkedAt": "2026-09-21T12:59:43.713Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -346,7 +478,7 @@
         "command": "runtime-install",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:31:04.632Z",
+        "checkedAt": "2026-09-21T12:59:44.969Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -453,7 +585,7 @@
         "files": 5294,
         "symlinks": 5,
         "dirs": 685,
-        "sha256": "3123a1a145dd9dc9d935dcfbf807c9f9e6eb68f86db1de1d0de31f2526984475"
+        "sha256": "9817cc13b291b7fc9996f5aedb76727218fe5dfff6d56dbb409535c7168c6a53"
       },
       "tree_hash_equal": true
     },
@@ -469,7 +601,7 @@
         "command": "runtime-doctor",
         "status": "needs-install",
         "runtimeHealthy": false,
-        "checkedAt": "2026-09-21T12:31:05.148Z",
+        "checkedAt": "2026-09-21T12:59:45.499Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -493,7 +625,7 @@
     "repair-real-npm": {
       "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair --org <org> --state <temp>",
       "code": 0,
-      "seconds": 5.45,
+      "seconds": 5.54,
       "stderr_head": "",
       "npm_calls": [
         {
@@ -507,7 +639,7 @@
         "command": "runtime-repair",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:31:08.816Z",
+        "checkedAt": "2026-09-21T12:59:49.339Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -613,7 +745,7 @@
     "doctor-repaired": {
       "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
       "code": 0,
-      "seconds": 1.29,
+      "seconds": 1.3,
       "stderr_head": "",
       "npm_calls": [],
       "npm_ci_calls": 0,
@@ -622,7 +754,7 @@
         "command": "runtime-doctor",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:31:11.886Z",
+        "checkedAt": "2026-09-21T12:59:52.340Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -751,7 +883,7 @@
           "files": 5294,
           "symlinks": 5,
           "dirs": 685,
-          "sha256": "a2a00ff16c3893423a49ddfeab1d078961453547f44fc9a8996791256a8be763"
+          "sha256": "86b2f3b256cc8faaebc858348b7c882ea955db76a01ca9734e9fc3f03a60bfe0"
         },
         "runtimes_entries": [
           "fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f",
@@ -766,7 +898,7 @@
           "files": 5294,
           "symlinks": 5,
           "dirs": 685,
-          "sha256": "a2a00ff16c3893423a49ddfeab1d078961453547f44fc9a8996791256a8be763"
+          "sha256": "86b2f3b256cc8faaebc858348b7c882ea955db76a01ca9734e9fc3f03a60bfe0"
         },
         "runtimes_entries": [
           "fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f",
@@ -781,7 +913,7 @@
     "repair-after-failure": {
       "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair --org <org> --state <temp>",
       "code": 0,
-      "seconds": 5.41,
+      "seconds": 6.07,
       "stderr_head": "",
       "npm_calls": [
         {
@@ -795,7 +927,7 @@
         "command": "runtime-repair",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:31:16.723Z",
+        "checkedAt": "2026-09-21T12:59:57.857Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -901,7 +1033,7 @@
     "doctor-recovered": {
       "command": "node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor --org <org> --state <temp> --format json",
       "code": 0,
-      "seconds": 1.31,
+      "seconds": 1.33,
       "stderr_head": "",
       "npm_calls": [],
       "npm_ci_calls": 0,
@@ -910,7 +1042,7 @@
         "command": "runtime-doctor",
         "status": "ready",
         "runtimeHealthy": true,
-        "checkedAt": "2026-09-21T12:31:19.820Z",
+        "checkedAt": "2026-09-21T13:00:00.963Z",
         "runtime": {
           "id": "opencodex",
           "version": "2.59.0",
@@ -1015,8 +1147,10 @@
   },
   "isolation": {
     "guard_control": {
+      "probe_attempts": 3,
       "write_below_real_home_denied": true,
-      "denial_logged": true
+      "denials_logged": 0,
+      "denial_logged": false
     },
     "env_overrides": [
       "CODEX_HOME",
@@ -1033,12 +1167,15 @@
     "isolated_home_top_level": [".codex", ".npm", ".omt", ".opencodex"],
     "sandbox_denials_excluding_control": {
       "log_exit_code": 0,
-      "denials": []
+      "denials": [],
+      "reliable": false,
+      "note": "the kernel log did not record the control probes, so an empty list proves nothing"
     }
   },
   "expectations": {
     "doctor-before reports needs-install": true,
-    "dry-run creates no ~/.omt in the isolated home": true,
+    "doctor-before leaves the isolated home and the state, cache, config, data and work directories identical": true,
+    "dry-run leaves the isolated home and the state, cache, config, data and work directories identical, creates no ~/.omt": true,
     "first install runs npm ci exactly once and installs": true,
     "doctor-after reports a healthy runtime": true,
     "second install reuses without npm ci and leaves the tree equal": true,
@@ -1047,10 +1184,9 @@
     "failing npm: exit code non-zero, one npm ci, error names the failed install": true,
     "failing npm: active.json, runtime tree and runtimes listing unchanged, no staging left": true,
     "repair after the failure restores a healthy runtime": true,
-    "the write guard refuses a probe write below the real home and logs the denial": true,
-    "no other write was denied while the experiment ran": true
+    "the write guard refuses every probe write below the real home": true
   },
-  "finished_utc": "2026-09-21T12:31:25Z",
+  "finished_utc": "2026-09-21T13:00:06Z",
   "real_user_state": {
     "compared": "files an OpenCodex run could change, listed under before/after",
     "not_attributable": "everything else under ~/.codex and ~/.claude (session logs, databases) is written by live sessions and is not compared",
@@ -1064,9 +1200,9 @@
         },
         "~/.claude/settings.json": {
           "exists": true,
-          "size": 50640,
-          "mtime_ns": 1789982583962994809,
-          "sha256_prefix": "1b7edfef92d5"
+          "size": 50671,
+          "mtime_ns": 1789994910445904642,
+          "sha256_prefix": "a8e812415a75"
         },
         "~/.claude/settings.local.json": {
           "exists": true,
@@ -1155,9 +1291,9 @@
         },
         "~/.claude/settings.json": {
           "exists": true,
-          "size": 50640,
-          "mtime_ns": 1789982583962994809,
-          "sha256_prefix": "1b7edfef92d5"
+          "size": 50671,
+          "mtime_ns": 1789994910445904642,
+          "sha256_prefix": "a8e812415a75"
         },
         "~/.claude/settings.local.json": {
           "exists": true,
