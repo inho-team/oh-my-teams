@@ -93,7 +93,7 @@ const validRequest = () => ({
   id: "safety-request",
   goal: "Ship it",
   repo: ".",
-  tasks: [{ file: "alpha.json", role: "intern" }],
+  tasks: [{ file: "alpha.json", role: "junior" }],
   policy: { maxRunning: 1, maxReviewPending: 1 },
   budget: { maxAttempts: 1, maxCalls: 1 },
 });
@@ -193,8 +193,8 @@ test("a workflow request is rejected field by field before any file is read", ()
     [{ goal: "" }, /goal required/],
     [{ repo: "   " }, /repository required/],
     [{ tasks: [] }, /tasks required/],
-    [{ tasks: [{ file: "a.json", role: "director" }] }, /file and role/],
-    [{ tasks: [{ file: "", role: "intern" }] }, /file and role/],
+    [{ tasks: [{ file: "a.json", role: "director" }] }, /file and a role/],
+    [{ tasks: [{ file: "", role: "junior" }] }, /file and a role/],
     [{ policy: { maxRunning: 0, maxReviewPending: 1 } }, /maxRunning required/],
     [
       { policy: { maxRunning: 1, maxReviewPending: 0 } },

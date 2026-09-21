@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import {
+  adviceBudget,
   assert,
   foldRole,
   hash,
   inside,
+  migrateLegacyOrg,
   ownerHasExited,
   profileEnv,
   resolveRole,
@@ -29,6 +31,12 @@ const MAX_FILE_BYTES = 48000;
 const MAX_EDIT_BYTES = 96000;
 const MAX_PROMPT_BYTES = 96000;
 const FAILURE_CONTEXT_CHARS = 4000;
+const ADVICE_KINDS = ["plan", "design", "review", "unblock"];
+const ADVICE_DECISIONS = ["proceed", "revise", "stop", "escalate"];
+const ADVICE_ID = /^[a-z0-9][a-z0-9-]*$/;
+const MAX_ADVICE_QUESTION_CHARS = 2000;
+const MAX_ADVICE_SUMMARY_BYTES = 12000;
+const MAX_ADVICE_FILES = 8;
 
 /**
  * Failure classes that disqualify a profile outright instead of one attempt.
@@ -317,7 +325,7 @@ export async function work(
   org,
   task,
   {
-    role: requestedRole = "intern",
+    role: requestedRole = "junior",
     stateDir,
     call = invoke,
     workflowId,
@@ -326,6 +334,10 @@ export async function work(
     selectionReason = "role-primary",
   } = {},
 ) {
+  // A snapshot frozen before 2.6.0 may still bind intern. It runs on the
+  // migrated ladder, but its hash stays the frozen one the workflow recorded.
+  const frozenHash = hash(org);
+  org = migrateLegacyOrg(org);
   validateOrg(org);
   validateTask(task);
   assert(stateDir, "Shared PM state directory required");
@@ -370,6 +382,7 @@ export async function work(
   writeJSON(path.join(runDir, "organization.json"), org);
   writeJSON(path.join(runDir, "task.json"), task);
   const report = createRunReport(task, org, role, runId, runDir);
+  report.organizationHash = frozenHash;
   report.modelPolicy = org.modelPolicy ?? null;
   report.workflow = workflowId ? { id: workflowId, attemptId } : null;
   report.slot = { id: lease.slot, reclaimed: lease.reclaimed };
@@ -542,7 +555,7 @@ export async function work(
  * Requests citation/checklist observations without granting pass/fail authority.
  *
  * @param {string} repo - Workspace containing the allowed task files.
- * @param {object} org - Organization snapshot selecting the Intern profile.
+ * @param {object} org - Organization snapshot selecting the Junior profile.
  * @param {object} task - Task contract used as read-only context.
  * @param {object} [options] - Draft kind and injectable provider call.
  * @returns {Promise<object>} Verified citations plus usage and timing.
@@ -577,7 +590,7 @@ export async function draft(
     '"quote":"exact full source line","why":"observation"}]}. ' +
     `Do not edit or use tools. Provide at most 12 source citations for ${kind}. ` +
     `Make no pass/fail judgment.\n${context}`;
-  const profile = org.profiles[org.roles[resolveRole(org, "intern")].profile];
+  const profile = org.profiles[org.roles[resolveRole(org, "junior")].profile];
   const response = await call(profile, repo, prompt, org.policy.timeoutMs);
   assert(
     response.code === 0 && !response.providerError && !response.timedOut,
@@ -702,6 +715,205 @@ export async function assist(
   const reportPath = path.resolve(stateDir, "assists", `${report.id}.json`);
   const logPath = path.resolve(stateDir, "assists", `${report.id}.log`);
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const rawOutput = `${response.stdout ?? ""}\n${response.stderr ?? ""}`;
+  fs.writeFileSync(logPath, rawOutput);
+  report.reportPath = reportPath;
+  report.log = logPath;
+  report.logHash = hash(rawOutput);
+  writeJSON(reportPath, report);
+  return report;
+}
+
+/**
+ * Checks an advice brief: one question, a short summary, and cited files.
+ *
+ * The summary cap is the point of the contract. An advisor runs the costliest
+ * model, and handing it a caller's whole transcript would re-send the context
+ * the cheaper caller exists to hold, so an oversized brief is refused instead
+ * of trimmed.
+ *
+ * @param {object} brief - Advice request written by the calling role.
+ * @returns {object} The same brief with `files` and `options` defaulted.
+ * @throws {Error} When a field is missing, oversized, or not a relative file.
+ */
+export function validateBrief(brief) {
+  assert(brief?.schemaVersion === 1, "Brief schemaVersion=1 required");
+  assert(
+    typeof brief.id === "string" && ADVICE_ID.test(brief.id),
+    "Brief id must be lowercase letters, digits, and hyphens",
+  );
+  assert(
+    typeof brief.question === "string" &&
+      brief.question.trim() &&
+      brief.question.length <= MAX_ADVICE_QUESTION_CHARS,
+    `Brief question required, at most ${MAX_ADVICE_QUESTION_CHARS} characters`,
+  );
+  assert(
+    typeof brief.summary === "string" && brief.summary.trim(),
+    "Brief summary required",
+  );
+  assert(
+    Buffer.byteLength(brief.summary) <= MAX_ADVICE_SUMMARY_BYTES,
+    `Brief summary exceeds ${MAX_ADVICE_SUMMARY_BYTES} bytes; ` +
+      "summarize the decision instead of pasting the conversation",
+  );
+  const files = brief.files ?? [];
+  assert(
+    Array.isArray(files) &&
+      files.length <= MAX_ADVICE_FILES &&
+      new Set(files).size === files.length &&
+      files.every((file) => typeof file === "string" && file.trim()),
+    `Brief files must be at most ${MAX_ADVICE_FILES} distinct relative paths`,
+  );
+  const options = brief.options ?? [];
+  assert(
+    Array.isArray(options) &&
+      options.every((option) => typeof option === "string" && option.trim()),
+    "Brief options must be strings",
+  );
+  return { ...brief, files, options };
+}
+
+// A slot is claimed before the call and kept whatever the outcome, because a
+// failed advisor call has already spent the quota the budget protects. `wx`
+// makes the claim atomic, so parallel callers cannot both take the last slot.
+function claimAdviceSlot(stateDir, budget) {
+  const directory = path.resolve(stateDir, "advice");
+  fs.mkdirSync(directory, { recursive: true });
+  for (let slot = 1; slot <= budget; slot += 1) {
+    try {
+      fs.closeSync(fs.openSync(path.join(directory, `.slot-${slot}`), "wx"));
+      return slot;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error(
+    `Advice budget exhausted: ${budget} advisor calls already spent in this state; ` +
+      "decide with the evidence at hand or escalate",
+  );
+}
+
+/**
+ * Asks a role-authorized advisor profile for a recommendation at a decision gate.
+ *
+ * The advisor receives only the brief and the files it names, never the
+ * caller's conversation, and its answer is a recommendation: the calling role
+ * still owns the decision, and acceptance gates never read advice as approval.
+ * Every call, successful or not, spends one slot of the state's advice budget.
+ *
+ * @param {string} repo - Workspace the brief's files are read from.
+ * @param {object} org - Organization with per-role advisor allowlists.
+ * @param {object} brief - Question, summary, optional files and options.
+ * @param {object} options - Caller role, advice kind, state, profile, and call adapter.
+ * @returns {Promise<object>} Persisted advice report.
+ * @throws {Error} For unauthorized profiles, an exhausted budget, or provider failure.
+ */
+export async function advise(
+  repo,
+  org,
+  brief,
+  { role: callerRole, kind, stateDir, profileId, call = invoke },
+) {
+  validateOrg(org);
+  const request = validateBrief(brief);
+  const role = resolveRole(org, callerRole);
+  const allowed = org.advisors?.[role] ?? [];
+  const selected = profileId ?? allowed[0];
+  assert(
+    selected && allowed.includes(selected),
+    `Advisor profile not allowed: ${role}`,
+  );
+  assert(
+    ADVICE_KINDS.includes(kind),
+    `Advice kind must be ${ADVICE_KINDS.join(", ")}`,
+  );
+  assert(stateDir, "Shared PM state directory required");
+  const profile = org.profiles[selected];
+  const files = readTaskFiles(repo, request);
+  const prompt = [
+    'Return only JSON {"decision":"proceed|revise|stop|escalate",',
+    '"recommendation":"what the caller should do","rationale":"why",',
+    '"risks":["risk the caller must check"],',
+    '"citations":[{"file":"relative path","line":1,"quote":"exact full source line","why":"relevance"}]}. ',
+    "You are an advisor. Do not edit files or use tools. Your answer is a recommendation, ",
+    "not an approval; the caller decides. Cite only the files given. ",
+    `Advice kind: ${kind}. Caller role: ${role}. Question: ${request.question} `,
+    `Summary: ${request.summary} `,
+    request.options.length
+      ? `Options: ${JSON.stringify(request.options)} `
+      : "",
+    `Files: ${JSON.stringify(files)}`,
+  ].join("");
+  assert(
+    Buffer.byteLength(prompt) <= MAX_PROMPT_BYTES,
+    "Brief context too large; cite fewer files",
+  );
+  const slot = claimAdviceSlot(stateDir, adviceBudget(org));
+  const response = await call(profile, repo, prompt, org.policy.timeoutMs);
+  assert(
+    response.code === 0 &&
+      !response.providerError &&
+      !response.timedOut &&
+      !response.overflow,
+    "Advisor provider failed",
+  );
+  const payload = parseModelJSON(response.text);
+  assert(
+    ADVICE_DECISIONS.includes(payload.decision),
+    `Advisor decision must be ${ADVICE_DECISIONS.join(", ")}`,
+  );
+  assert(
+    typeof payload.recommendation === "string" && payload.recommendation.trim(),
+    "Advisor recommendation required",
+  );
+  const binding = response.modelBinding ?? modelBinding(profile, response);
+  assert(
+    binding.status !== "mismatched",
+    `Advisor answered from ${binding.effective} while ` +
+      `${binding.requested} was requested`,
+  );
+  const citations = checkCitations(repo, payload.citations ?? []);
+  // With no files there is nothing to ground against, so only a brief that
+  // names files demands citations; any citation given must still resolve.
+  const grounding = request.files.length
+    ? assertGroundedCitations(citations, "Advisor")
+    : null;
+  assert(
+    citations.every((citation) => citation.verified),
+    "Advisor cited lines that do not exist in this workspace",
+  );
+  const report = {
+    schemaVersion: 1,
+    id: `${request.id}-${crypto.randomUUID()}`,
+    briefId: request.id,
+    briefHash: hash(request),
+    organizationRevision: org.revision,
+    organizationHash: hash(org),
+    callerRole: role,
+    kind,
+    slot,
+    profile: selected,
+    requestedModel: profile.model,
+    requestedEffort: profile.effort ?? null,
+    effectiveModel: response.effectiveModel ?? null,
+    sessionId: response.sessionId ?? null,
+    modelProof: binding.status,
+    workspace: await workspaceBinding(repo),
+    decision: payload.decision,
+    recommendation: payload.recommendation,
+    rationale: typeof payload.rationale === "string" ? payload.rationale : "",
+    risks: Array.isArray(payload.risks) ? payload.risks : [],
+    citations,
+    grounding,
+    usage: response.usage ?? null,
+    costUsd: response.costUsd ?? null,
+    elapsedMs: response.elapsedMs,
+    createdAt: new Date().toISOString(),
+    responsibility: `${role} owns this decision; advice is not approval`,
+  };
+  const reportPath = path.resolve(stateDir, "advice", `${report.id}.json`);
+  const logPath = path.resolve(stateDir, "advice", `${report.id}.log`);
   const rawOutput = `${response.stdout ?? ""}\n${response.stderr ?? ""}`;
   fs.writeFileSync(logPath, rawOutput);
   report.reportPath = reportPath;

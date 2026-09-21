@@ -1,6 +1,6 @@
 {
   "name": "oh-my-teams",
-  "version": "2.4.2+codex.20260920013850",
+  "version": "2.6.1+codex.20260921104257",
   "description": "oh my teams: an agent organization with role subscriptions and reusable evidence, running on Orca.",
   "author": {
     "name": "inho-team"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "oh my teams",
     "shortDescription": "Run an agent organization on Orca.",
-    "longDescription": "Configure PM/PL/Senior/Junior/Intern roles once, then run isolated Orca workers with reusable verification evidence.",
+    "longDescription": "Configure PM/PL/Senior/Junior roles once, then run isolated Orca workers with reusable verification evidence.",
     "developerName": "inho-team",
     "category": "Productivity",
     "capabilities": [],

@@ -7,7 +7,7 @@ description: oh my teams 조직 작업의 분할·의존성·Orca worktree 배�
 
 조직 스냅샷과 작업 범위를 읽는다. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery 절차로 현재 `orca-cli`, `orchestration`을 사용한다. 확장된 실행 인수가 필요하면 현재 가이드가 가리키는 관련 참조만 읽는다.
 
-PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분석하고, 중단기 실행 계획·의존성·작업 파동을 결정한다. 구체적인 구현 방법은 Senior에게, 기능 구현은 Junior에게, 제한된 실무는 Intern에게 배정한다. PL이 만드는 결과물은 계획과 통합·검증 기록이며, 작업의 최종 산출물은 배정받은 역할이 만든다. 보조 도구는 조사와 점검 목록 초안에 쓰되 계획과 통합 결과는 직접 검증한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
+PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분석하고, 중단기 실행 계획·의존성·작업 파동을 결정한다. 구체적인 구현 방법과 상위 등급 구현은 Senior에게, 닫힌 범위의 구현과 제한된 실무는 Junior에게 배정한다. 등급 기준과 Senior 구현의 검토 규칙은 [pm](../pm/SKILL.md)의 「구현 등급」을 따른다. PL이 만드는 결과물은 계획과 통합·검증 기록이며, 작업의 최종 산출물은 배정받은 역할이 만든다. 보조 도구는 조사와 점검 목록 초안에 쓰되 계획과 통합 결과는 직접 검증한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다. 조직이 PL에게 자문자를 허용했으면 파동과 의존성을 확정하기 전에만 자문을 구하며, 그 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
 
 ## 권한·책임·한계
 
@@ -16,11 +16,12 @@ PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분�
 ### 권한
 
 - 맡은 목표를 작업 단위로 나누고, 의존성·작업 파동·파일 소유권과 각 작업의 검사를 정한다.
-- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 PM에게 보고한다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
+- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior를 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 PM에게 보고한다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
 - Orca의 `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`와 `supervision-next`로 하위 worker를 감독하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
-- `prepare`, `prepare-input`, `attach-workspace`, `work`로 Intern 하네스를 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
+- `prepare`, `prepare-input`, `attach-workspace`, `work`로 제한 편집 하네스를 Junior 역할로 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
 - 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. kickoff 워크트리 사이의 병합은 게이트를 통과시킨 뒤 별도 허가 없이 진행하고, 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않는다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 조사와 점검 목록 초안에 쓴다.
+- 조직이 PL에게 자문자를 허용했으면 분할 계획을 확정하기 전에 자기 역할로 `advise`를 호출할 수 있다.
 
 ### 책임
 
@@ -35,7 +36,7 @@ PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌
 - 목표·수용 기준·비목표를 바꾸지 않으며 `accept`를 기록하지 않는다. 최종 수용은 PM의 권한이다.
 - 자신이 작성한 계획이나 통합을 스스로 승인하지 않고, 의미 검토는 Senior에게 맡긴다.
 - PM이 보낸 진행 요청에는 현재 단계, 남은 작업, 장애물을 구체적으로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다.
-- Senior·Junior·Intern 가운데 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없는 역할의 일은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 받은 지시문 머리글의 `이번 실행에 없어 이어받는 역할` 줄에서 확인한다. 머리글이 없으면 workflow의 `roles`, 그것도 없으면 조직 파일의 `roles`를 본다. 셋 모두 없을 때에만 PL이 산출물을 직접 만든다.
+- Senior·Junior 가운데 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없는 역할의 일은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 받은 지시문 머리글의 `이번 실행에 없어 이어받는 역할` 줄에서 확인한다. 머리글이 없으면 workflow의 `roles`, 그것도 없으면 조직 파일의 `roles`를 본다. 셋 모두 없을 때에만 PL이 산출물을 직접 만든다.
 - 작업 분할 시 [불필요한 변경을 줄이는 규율](../../references/minimal-change.md)을 적용한다. task의 `files`를 목표에 필요한 최소 집합으로 정하고, 새 코드를 배정하기 전에 기존 helper·패턴 재사용 여부를 확인하며, 버그 수정은 증상 경로가 아니라 호출자들이 공유하는 원인 위치에 배정한다.
 
 ## 하위 역할 배정
@@ -56,7 +57,7 @@ node <runtime> worker-start --org <organization.json> --role senior --repo <pl-w
 <orca> orchestration check --wait --types "worker_done,escalation,question" --timeout-ms <progressCheckMs> --json
 ```
 
-Senior는 PL의 워크트리(`current`)나 새 워크트리에서 실행하고, Junior나 Intern의 워크트리에 띄우지 않는다. 검토할 결과는 경로와 커밋으로 넘긴다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
+Senior는 PL의 워크트리(`current`)나 새 워크트리에서 실행하고, Junior의 워크트리에 띄우지 않는다. 검토할 결과는 경로와 커밋으로 넘긴다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
 
 `worker-start`가 `nested_worker_depth_exceeded`나 다른 코드로 거부되면 한계 절에 적힌 대로 계획과 거부 원문을 PM에게 보내고 `worker_done --outcome failed`로 끝낸다. PM은 그 계획의 작업을 자기 Run에서 같은 래퍼로 배정한다.
 
@@ -65,8 +66,8 @@ Senior는 PL의 워크트리(`current`)나 새 워크트리에서 실행하고, 
 **제한된 편집:** 현재 스킬 기준 `../../scripts/teams-org.mjs`를 사용한다.
 
 ```text
-node <runtime> prepare --org <organization.json> --task <task.json> --repo <project> --name intern-<task>
-node <runtime> work --org <returned-org> --task <returned-task> --repo <returned-worktree-path> --state <returned-state> --role intern
+node <runtime> prepare --org <organization.json> --task <task.json> --repo <project> --name junior-<task>
+node <runtime> work --org <returned-org> --task <returned-task> --repo <returned-worktree-path> --state <returned-state> --role junior
 ```
 
 `prepare`는 이전 호출용 호환 진입점이다. 새 연동은 `prepare-input`으로 계약과 base를 먼저 고정하고, 공통 discovery에서 확인한 Orca 기능으로 worktree를 만든 뒤 실제 receipt를 `attach-workspace`에 전달한다. `attach-workspace`는 `--receipt`와 함께 `--runtime`을 요구하며, 그 파일은 `runtime-discover`의 출력을 저장해 만든다. 연결 단계는 receipt 경로·Git root·HEAD·parent의 base를 대조한다. `work`는 Agy/Claude/Codex/Ollama의 제한된 응답을 받아 명시된 파일에만 적용하고, 선택한 검사와 호출 한도를 관리한다. 보고서는 공유 state의 runs 아래에 남는다. 실행 실패 시 편집 내용을 보존한다. 이 하네스는 비대화 명령이며 자체적으로 감독 Dispatch나 `worker_done`을 만들지 않는다. 감독된 Junior가 실행했다면 하네스 결과를 확인한 뒤 자신의 실제 Dispatch에 보고한다.

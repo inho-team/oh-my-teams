@@ -59,7 +59,7 @@ const task = (id) => ({
   risk: "low",
 });
 
-async function workflow(t, { depth, org = full(), roles = ["intern"] } = {}) {
+async function workflow(t, { depth, org = full(), roles = ["pl"] } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "run-depth-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   for (const args of [
@@ -126,21 +126,21 @@ function attach(stateDir, id, taskId) {
 test("a run uses the roles its depth selects, and every role when none is given", async (t) => {
   const three = await workflow(t, { depth: 3 });
   assert.deepEqual(three.state.roles, [...DEPTH_ROLES[3]]);
-  assert.equal(three.state.tasks.a.role, "junior");
-  assert.equal(three.state.tasks.a.requestedRole, "intern");
+  assert.equal(three.state.tasks.a.role, "pm");
+  assert.equal(three.state.tasks.a.requestedRole, "pl");
 
   // A workflow request written before depth existed keeps the whole ladder, so
   // nothing that already runs changes meaning.
   const unset = await workflow(t);
-  assert.equal(unset.state.depth, 5);
-  assert.deepEqual(unset.state.roles, [...DEPTH_ROLES[5]]);
-  assert.equal(unset.state.tasks.a.role, "intern");
+  assert.equal(unset.state.depth, 4);
+  assert.deepEqual(unset.state.roles, [...DEPTH_ROLES[4]]);
+  assert.equal(unset.state.tasks.a.role, "pl");
 });
 
 test("a depth never adds a role the organization does not declare", async (t) => {
   // adjust can remove a role for good, for example a subscription the user
   // does not have. A depth selects within that ladder and cannot restore it.
-  const { state } = await workflow(t, { depth: 5, org: reduced() });
+  const { state } = await workflow(t, { depth: 4, org: reduced() });
   assert.deepEqual(state.roles, ["pm", "junior"]);
 });
 
@@ -150,14 +150,14 @@ test("raising the depth folds pending work back onto the role it was written for
     stateDir,
     id,
     state.revision,
-    change("deeper", 4, "many narrow edits"),
+    change("deeper", 4, "several parallel waves"),
   );
   assert.equal(raised.depth, 4);
-  assert.equal(raised.tasks.a.role, "intern");
+  assert.equal(raised.tasks.a.role, "pl");
   assert.equal(raised.tasks.a.requestedRole, undefined);
   assert.deepEqual(
     raised.depthHistory.map(({ from, to, reason }) => [from, to, reason]),
-    [[3, 4, "many narrow edits"]],
+    [[3, 4, "several parallel waves"]],
   );
 
   // Replaying the same event is a no-op rather than a second change.
@@ -174,17 +174,17 @@ test("raising the depth folds pending work back onto the role it was written for
 test("lowering the depth waits until the removed roles hold no live work", async (t) => {
   const { stateDir, id } = await workflow(t, {
     depth: 4,
-    roles: ["intern", "intern"],
+    roles: ["pl", "pl"],
   });
   attach(stateDir, id, "a");
 
-  // The intern attempt may still be running, including a worker whose exit
+  // The PL attempt may still be running, including a worker whose exit
   // was never confirmed; removing its role would strand that work.
   let { state } = readWorkflow(stateDir, id);
   assert.throws(
     () =>
       setWorkflowDepth(stateDir, id, state.revision, change("shallower", 3)),
-    /Cannot lower depth while a \(intern\) holds reserved or running work/,
+    /Cannot lower depth while a \(pl\) holds reserved or running work/,
   );
 
   state = recordSettlement(stateDir, id, state.revision, {
@@ -203,9 +203,9 @@ test("lowering the depth waits until the removed roles hold no live work", async
     change("shallower", 3, "remaining edit is local"),
   );
   // Only pending work moves. The settled task keeps the role that ran it.
-  assert.equal(lowered.tasks.a.role, "intern");
-  assert.equal(lowered.tasks.b.role, "junior");
-  assert.equal(lowered.tasks.b.requestedRole, "intern");
+  assert.equal(lowered.tasks.a.role, "pl");
+  assert.equal(lowered.tasks.b.role, "pm");
+  assert.equal(lowered.tasks.b.requestedRole, "pl");
 });
 
 test("a depth change needs a new depth, a reason, and the current revision", async (t) => {
@@ -227,13 +227,13 @@ test("a depth change needs a new depth, a reason, and the current revision", asy
     /Workflow changed/,
   );
   assert.throws(
-    () => setWorkflowDepth(stateDir, id, state.revision, change("deep", 6)),
-    /Depth must be 1\.\.5/,
+    () => setWorkflowDepth(stateDir, id, state.revision, change("deep", 5)),
+    /Depth must be 1\.\.4/,
   );
 });
 
 test("failure routing folds onto the run's roles, not the organization's", async (t) => {
-  const { stateDir, id } = await workflow(t, { depth: 2 });
+  const { stateDir, id } = await workflow(t, { depth: 2, roles: ["junior"] });
   attach(stateDir, id, "a");
   const { state } = readWorkflow(stateDir, id);
   const settled = recordSettlement(stateDir, id, state.revision, {
@@ -263,10 +263,10 @@ test("work bound to a workflow runs as the role the run's depth gives it", async
   attach(stateDir, id, "a");
   const frozen = readWorkflow(stateDir, id).tasks.a;
 
-  // The organization declares Intern, so folding onto the organization would
-  // run the Intern profile the PM took out of this run.
+  // The organization declares PL, so folding onto the organization would run
+  // the PL profile the PM took out of this run.
   const report = await work(dir, structuredClone(org), frozen, {
-    role: "intern",
+    role: "pl",
     stateDir,
     workflowId: id,
     attemptId: "attempt-a",
@@ -278,7 +278,7 @@ test("work bound to a workflow runs as the role the run's depth gives it", async
       elapsedMs: 1,
     }),
   });
-  assert.equal(report.role, "junior");
+  assert.equal(report.role, "pm");
 });
 
 test("the CLI changes depth from a change file", async (t) => {

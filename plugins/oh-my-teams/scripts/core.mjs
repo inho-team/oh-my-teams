@@ -24,7 +24,26 @@ import {
  * responsibility addressed to an absent role folds upward along this array
  * until it reaches a role the organization actually declares.
  */
-export const ROLES = ["pm", "pl", "senior", "junior", "intern"];
+export const ROLES = ["pm", "pl", "senior", "junior"];
+
+/**
+ * Role names that no longer exist, mapped to the role that took over their work.
+ *
+ * Intern was removed in 2.6.0 and its narrow edits went to Junior. Workflow
+ * snapshots, failure records, and review requirements saved before then still
+ * name it, and running kickoffs may still ask for it, so those names are read
+ * as the successor instead of failing. An organization file may not declare a
+ * removed role; `validateOrg` refuses it with the way to migrate.
+ */
+export const LEGACY_ROLE_ALIASES = Object.freeze({ intern: "junior" });
+
+/**
+ * Maps a role name, current or removed, to the role that holds it now.
+ *
+ * @param {string} role - Role name as written by a caller or a saved record.
+ * @returns {string} Current role name; unknown names are returned unchanged.
+ */
+export const canonicalRole = (role) => LEGACY_ROLE_ALIASES[role] ?? role;
 
 /**
  * The top-level role that sits above PM in the full seniority ladder.
@@ -55,20 +74,23 @@ export const ROOT_ROLE = "pm";
  *
  * Roles join in the order a team misses them most. Implementation comes first,
  * because a PM alone has nobody to hand work to; independent review comes next;
- * a cheap depth for narrow edits after that; and PL last, since splitting and
- * integrating parallel waves only pays off once there are several of them.
+ * and PL last, since splitting and integrating parallel waves only pays off
+ * once there are several of them.
  * A role left out of a depth has its work folded upward by `foldRole`.
  */
 export const DEPTH_ROLES = Object.freeze({
   1: Object.freeze(["pm"]),
   2: Object.freeze(["pm", "junior"]),
   3: Object.freeze(["pm", "senior", "junior"]),
-  4: Object.freeze(["pm", "senior", "junior", "intern"]),
-  5: Object.freeze([...ROLES]),
+  4: Object.freeze([...ROLES]),
 });
 
 /** Depth that uses every role an organization declares. */
-export const FULL_DEPTH = 5;
+export const FULL_DEPTH = 4;
+
+// Depth 5 meant the full ladder while Intern existed. Saved workflows keep that
+// number, and the full ladder is now depth 4, so it is read as the full depth.
+const LEGACY_FULL_DEPTH = 5;
 
 /**
  * Lists the roles a run of one depth uses within an organization's ladder.
@@ -78,13 +100,13 @@ export const FULL_DEPTH = 5;
  * PM is always among them because every organization declares it.
  *
  * @param {string[]} declared - Roles the organization declares.
- * @param {number} depth - Run depth from 1 to 5.
+ * @param {number} depth - Run depth from 1 to 4; a saved depth 5 reads as 4.
  * @returns {string[]} Active roles in ladder order.
- * @throws {Error} When the depth is outside 1..5.
+ * @throws {Error} When the depth is outside 1..4.
  */
 export function depthRoles(declared, depth) {
-  const roles = DEPTH_ROLES[depth];
-  assert(roles, "Depth must be 1..5");
+  const roles = DEPTH_ROLES[depth === LEGACY_FULL_DEPTH ? FULL_DEPTH : depth];
+  assert(roles, `Depth must be 1..${FULL_DEPTH}`);
   const present = new Set(declared);
   return roles.filter((role) => present.has(role));
 }
@@ -100,6 +122,8 @@ export const MODEL_POLICY_PRESETS = [
   "opus-first",
   "balanced",
   "single-subscription",
+  "advisor-codex",
+  "advisor-claude",
 ];
 
 /**
@@ -130,9 +154,9 @@ export const definedRoles = (org) =>
  * @throws {Error} When the name is not a known role or nothing declares it.
  */
 export function foldRole(declared, role) {
-  const rank = ROLES.indexOf(role);
+  const rank = ROLES.indexOf(canonicalRole(role));
   assert(rank >= 0, `Unknown role: ${role}`);
-  const present = new Set(declared ?? []);
+  const present = new Set((declared ?? []).map(canonicalRole));
   for (let index = rank; index >= 0; index -= 1) {
     if (present.has(ROLES[index])) return ROLES[index];
   }
@@ -769,6 +793,13 @@ export function validateOrg(org) {
   // An organization may run a reduced ladder, so only PM is mandatory. Role
   // names stay fixed because routing, skills, and reports address them by name;
   // a reduced team omits a role rather than inventing one.
+  for (const [removed, successor] of Object.entries(LEGACY_ROLE_ALIASES)) {
+    assert(
+      !Object.hasOwn(org.roles, removed),
+      `Role ${removed} was removed in 2.6.0; move its profile to ${successor} ` +
+        `and delete ${removed} with the adjust skill`,
+    );
+  }
   assert(
     Object.keys(org.roles).every((role) => ROLES.includes(role)),
     `Roles must be named from ${ROLES.join("/")}`,
@@ -798,6 +829,19 @@ export function validateOrg(org) {
     }
   }
 
+  if (org.advisors) {
+    for (const [role, profiles] of Object.entries(org.advisors)) {
+      assert(Object.hasOwn(org.roles, role), `Unknown advisor role: ${role}`);
+      assert(
+        Array.isArray(profiles) &&
+          profiles.length > 0 &&
+          new Set(profiles).size === profiles.length &&
+          profiles.every((profile) => Object.hasOwn(org.profiles, profile)),
+        `Invalid advisor profiles: ${role}`,
+      );
+    }
+  }
+
   assert(
     ["stop", "fallback"].includes(org.policy.onExhaustion),
     "onExhaustion must be stop or fallback",
@@ -820,7 +864,33 @@ export function validateOrg(org) {
     "repeatFailureLimit required",
   );
   validateSupervision(org.policy.supervision);
+  assert(
+    org.policy.adviceBudget === undefined ||
+      (Number.isInteger(org.policy.adviceBudget) &&
+        org.policy.adviceBudget >= 1 &&
+        org.policy.adviceBudget <= 50),
+    "adviceBudget must be 1..50",
+  );
   return org;
+}
+
+/**
+ * Advisor calls one shared state directory may spend when the policy sets none.
+ *
+ * An advisor is the most expensive model an organization runs, so its calls are
+ * counted per kickoff state rather than per task: a run that keeps asking is a
+ * run whose plan needs a person, not another opinion.
+ */
+export const ADVICE_BUDGET_DEFAULT = 6;
+
+/**
+ * Reads how many advisor calls one shared state directory may spend.
+ *
+ * @param {object} org - Validated organization.
+ * @returns {number} Effective advice budget.
+ */
+export function adviceBudget(org) {
+  return org.policy?.adviceBudget ?? ADVICE_BUDGET_DEFAULT;
 }
 
 /**
@@ -875,6 +945,43 @@ export function supervisionPolicy(org) {
 }
 
 /**
+ * Rewrites a snapshot saved before a role was removed so the current runtime reads it.
+ *
+ * Only snapshots go through this: a kickoff that started before 2.6.0 must be
+ * able to finish on the organization it froze. A removed role's binding is
+ * dropped when its successor is declared, or renamed to the successor when not,
+ * and allowlists and parents that named it follow. A live organization file is
+ * never migrated silently; `validateOrg` refuses it instead.
+ *
+ * @param {object} org - Organization snapshot, possibly from before 2.6.0.
+ * @returns {object} A migrated copy, or the same object when nothing changed.
+ */
+export function migrateLegacyOrg(org) {
+  if (!org?.roles) return org;
+  const removed = Object.keys(LEGACY_ROLE_ALIASES).filter((role) =>
+    Object.hasOwn(org.roles, role),
+  );
+  if (!removed.length) return org;
+  const migrated = structuredClone(org);
+  for (const role of removed) {
+    const successor = LEGACY_ROLE_ALIASES[role];
+    if (!Object.hasOwn(migrated.roles, successor)) {
+      migrated.roles[successor] = migrated.roles[role];
+    }
+    delete migrated.roles[role];
+    for (const binding of Object.values(migrated.roles)) {
+      if (binding.parent === role) binding.parent = successor;
+    }
+    for (const key of ["assistants", "advisors"]) {
+      if (!migrated[key]?.[role]) continue;
+      migrated[key][successor] ??= migrated[key][role];
+      delete migrated[key][role];
+    }
+  }
+  return migrated;
+}
+
+/**
  * Creates or revision-updates an organization under an exclusive file lock.
  *
  * Existing configurations are returned unchanged unless `update` is explicit.
@@ -893,9 +1000,16 @@ export function saveOrg(file, org, { update = false, expectedRevision } = {}) {
     `${file}.lock`,
     () => {
       let previous;
+      let previousRaw;
       if (fs.existsSync(file)) {
-        previous = validateOrg(readJSON(file));
-        if (!update) return { created: false, organization: previous };
+        previousRaw = readJSON(file);
+        if (!update) {
+          return { created: false, organization: validateOrg(previousRaw) };
+        }
+        // An edit is how a file still declaring a removed role gets repaired,
+        // so the file being replaced is read through the migration; the new
+        // content is validated strictly and the original is archived as-is.
+        previous = validateOrg(migrateLegacyOrg(previousRaw));
         assert(
           expectedRevision === previous.revision,
           "Organization changed; read it again before editing",
@@ -915,7 +1029,7 @@ export function saveOrg(file, org, { update = false, expectedRevision } = {}) {
             "history",
             `org-${previous.revision}.json`,
           ),
-          previous,
+          previousRaw,
         );
       }
       writeJSON(file, next);
@@ -952,6 +1066,12 @@ export function chart(org) {
   }
 
   visit(ROOT_ROLE, 0);
+  for (const [role, profiles] of Object.entries(org.advisors ?? {})) {
+    const models = profiles.map(
+      (id) => `${id} (${org.profiles[id].model ?? "host-default"})`,
+    );
+    lines.push(`ADVISOR for ${role.toUpperCase()}: ${models.join(", ")}`);
+  }
   return lines.join("\n");
 }
 

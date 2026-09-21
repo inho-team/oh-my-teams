@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  canonicalRole,
   assert,
   definedRoles,
   DIRECTOR_ROLE,
@@ -58,14 +59,13 @@ export const PERMISSION_BYPASS = Object.freeze({
  * Roles each role may start as supervised workers, before folding.
  *
  * Only PM and PL create Dispatches. Senior hands its implementation scope back
- * instead, and Junior reaches Intern through the non-interactive `work` harness.
+ * instead, and Junior implements what it is given without delegating further.
  */
 export const DISPATCH_AUTHORITY = Object.freeze({
-  pm: ["pl", "senior", "junior", "intern"],
-  pl: ["senior", "junior", "intern"],
+  pm: ["pl", "senior", "junior"],
+  pl: ["senior", "junior"],
   senior: [],
   junior: [],
-  intern: [],
 });
 
 /**
@@ -140,7 +140,6 @@ const ROLE_NAMES = {
   pl: "PL",
   senior: "Senior",
   junior: "Junior",
-  intern: "Intern",
 };
 const skillsDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -178,13 +177,15 @@ function launchableProfile(role, profileId, profile) {
 function activeRoles(org, roles) {
   const declared = definedRoles(org);
   if (roles === undefined) return declared;
+  // A workflow saved before 2.6.0 may list intern; it reads as its successor.
+  const run = Array.isArray(roles) ? roles.map(canonicalRole) : roles;
   assert(
-    Array.isArray(roles) &&
-      roles.includes(ROOT_ROLE) &&
-      roles.every((role) => declared.includes(role)),
+    Array.isArray(run) &&
+      run.includes(ROOT_ROLE) &&
+      run.every((role) => declared.includes(role)),
     "Run roles must include pm and name only declared roles",
   );
-  return ROLES.filter((role) => roles.includes(role));
+  return ROLES.filter((role) => run.includes(role));
 }
 
 // Says why a role landed elsewhere: a role the organization never declared and

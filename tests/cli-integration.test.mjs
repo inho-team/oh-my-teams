@@ -65,8 +65,8 @@ process.stdout.write(JSON.stringify({ result: JSON.stringify(payload), model: "f
 
   const org = structuredClone(exampleOrg);
   org.profiles["claude-current"].command = [process.execPath, provider];
-  org.roles.intern.profile = "claude-current";
-  org.roles.intern.fallbacks = [];
+  org.roles.junior.profile = "claude-current";
+  org.roles.junior.fallbacks = [];
   org.policy.timeoutMs = 120000;
   const orgFile = path.join(repo, "org.json");
   writeJson(orgFile, org);
@@ -289,8 +289,8 @@ test("CLI newer changes-requested review with no findings revokes prior approval
   );
   const org = structuredClone(exampleOrg);
   org.profiles["claude-current"].command = [process.execPath, provider];
-  org.roles.intern.profile = "claude-current";
-  org.roles.intern.fallbacks = [];
+  org.roles.junior.profile = "claude-current";
+  org.roles.junior.fallbacks = [];
   const orgFile = path.join(repo, "org.json");
   writeJson(orgFile, org);
   const task = {

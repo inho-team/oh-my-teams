@@ -366,8 +366,10 @@ test("role titles lead with the role tag and name the worktree", () => {
     roleTitle("junior", "[Junior] already tagged"),
     "[Junior] already tagged",
   );
-  assert.equal(roleTitle("intern", null), "[Intern]");
+  assert.equal(roleTitle("senior", null), "[Senior]");
   assert.throws(() => roleTitle("owner", "x"), /No title tag/);
+  // Intern was removed in 2.6.0; no terminal is opened for it.
+  assert.throws(() => roleTitle("intern", "x"), /No title tag/);
   assert.equal(
     worktreeLabel("id:repo-1::/Users/me/orca/workspaces/app/feat-a"),
     "feat-a",

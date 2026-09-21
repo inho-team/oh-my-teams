@@ -1,13 +1,13 @@
 # oh my teams
 
-Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior / Intern의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 내부 실행기는 **Claude, Codex, Agy, Ollama**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
+Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 내부 실행기는 **Claude, Codex, Agy, Ollama**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
 
 ## 시작
 
 | 스킬 | 동작 |
 |---|---|
 | `help` | 설치된 생애주기·역할·지원 스킬과 사용 시점을 표로 안내 |
-| `form` | 다섯 역할의 모델만 골라 상설 조직을 결성하고, 나머지는 비용이 늘지 않는 기본값으로 저장 |
+| `form` | 네 역할의 모델만 골라 상설 조직을 결성하고, 나머지는 비용이 늘지 않는 기본값으로 저장 |
 | `kickoff` | 하나의 개발 Goal을 시작하거나 재개하고, PM이 난이도에 맞춘 실행 깊이로 완료 조건까지 지속 감독 |
 | `status` | 상설 조직과 현재 Goal·실행 팀·워크트리·검증 상태를 구분하여 표시 |
 | `adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존. 추론 강도·대체 순서·인원·보조 도구·별도 계정은 여기서 정함 |
@@ -18,6 +18,10 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 
 구독·모델·승인처럼 사용자가 정해야 하는 항목은 [사용자 선택 질문 계약](plugins/oh-my-teams/references/user-choice.md)을 따른다. 호스트가 구조화된 선택 도구를 제공하면 그것으로 묻고(Claude Code에서는 `AskUserQuestion`), 제공하지 않으면 번호를 매긴 선택지를 한 번에 제시한다. Codex CLI 0.154.0에는 이 용도로 확인된 도구가 없으므로 후자를 쓴다.
 
+**2.6.1 변경:** 구현 task의 담당을 추론 강도로 정한다. 설계와 구현이 한 번에 필요한 상위 등급 구현은 Senior가 직접 맡고, 닫힌 범위의 구현은 Junior가 맡는다. Senior가 구현한 task는 다른 Senior 실행이나 PL·PM이 검토한다. 기준은 [pm](plugins/oh-my-teams/skills/pm/SKILL.md)의 「구현 등급」에 있다.
+
+**2.6.0 변경:** Intern 역할을 삭제했다. 좁은 편집·인용 수집·반복 실무는 Junior가 직접 맡으며, 실행 깊이는 1~4가 된다. `intern`을 선언한 조직 파일은 런타임이 거부하므로, Intern 프로필이 필요하면 Junior로 옮기고 `intern` 역할과 허용 목록 항목을 지운 뒤 `adjust`로 저장한다. 2.6.0 이전에 시작한 kickoff의 workflow 스냅샷과 기록은 `intern`을 `junior`로, 깊이 5를 깊이 4로 읽으므로 그대로 이어서 진행할 수 있다.
+
 **2.0.0 비호환 변경:** 생애주기 스킬 이름에서 `team-` 접두어를 제거했다. `team-form`은 `form`, `team-kickoff`는 `kickoff`가 되었으며 `status`, `adjust`, `close`, `disband`, `help`도 같다. 이전 호환 별칭 `team-setup`, `team-show`, `team-edit`, `org-setup`, `org-show`, `org-edit`과 `director`는 모두 삭제했으므로 그 이름으로는 스킬을 찾을 수 없다. 조직 파일 형식과 런타임 명령은 바뀌지 않았으므로 기존 `.omt/` 설정은 그대로 쓴다.
 
 `kickoff`는 호스트의 네이티브 Goal을 유일한 지속 실행 권한으로 사용한다. 같은 세션에서 Ralph, autopilot 또는 다른 Goal 루프를 함께 실행하지 않는다. 매 실행 주기에는 확인 가능한 진전을 남기며, 완료 조건과 최신 검증이 모두 충족된 뒤 `close`로 전달과 자원 정리를 마쳐야 Goal을 완료한다.
@@ -25,12 +29,11 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 ```text
 PM       분석·중장기 계획·최종 결과
 └─ PL    분석·중단기 계획·분할·통합
-   └─ Senior  구체적인 구현 방법·중요 변경 검토
-      └─ Junior  기능 구현·Intern 통합
-         └─ Intern  제한된 편집·테스트·반복 실무
+   └─ Senior  구체적인 구현 방법·상위 등급 구현·중요 변경 검토
+      └─ Junior  기능 구현·제한된 편집·반복 실무
 ```
 
-작은 작업에 다섯 세션을 모두 만들지 않는다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`, 웹 검증에는 `orca-browser-use`, 외부 앱에는 `computer-use` 스킬을 필요할 때 사용한다.
+작은 작업에 네 세션을 모두 만들지 않는다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`, 웹 검증에는 `orca-browser-use`, 외부 앱에는 `computer-use` 스킬을 필요할 때 사용한다.
 
 ## 설치
 
@@ -54,19 +57,19 @@ sh install.sh both   # claude | codex | both
 
 Codex 계정의 모델 카탈로그는 계정과 CLI 버전에 따라 달라진다. codex-cli 0.154.0(2026-09-16)의 `codex debug models`에는 `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`가 선택 가능한 모델로 들어 있었고, `config.toml`에 `model`이 없으면 이 가운데 첫 항목이 실행된다. 설치 때 `agy models`와 Codex 카탈로그로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
 
-기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`, Intern=`claude-sonnet-4-6`으로 배정한다. 여기에 더해 `gpt-5.6-luna`와 `gpt-5.6-terra` 프로필을 미리 정의해 두므로, 역할의 `profile`만 바꾸면 다른 Codex 모델로 옮길 수 있다. 역할이 실제로 참조하는 프로필에는 강도를 적지 않았다. 강도 표기 예시는 어떤 역할도 참조하지 않는 `codex-terra`에만 두었으므로, 이 예제로 실행하는 호출의 추론 깊이는 이전과 같다. 공유 풀 소진 이후 모든 역할의 동시 실행 슬롯은 1로 고정했다. 조직의 `assistants`에 허용된 역할은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있다. 기본 예제에서는 Intern을 포함한 모든 역할이 허용되어 있으며, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
+기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`으로 배정한다. 여기에 더해 `gpt-5.6-luna`와 `gpt-5.6-terra` 프로필을 미리 정의해 두므로, 역할의 `profile`만 바꾸면 다른 Codex 모델로 옮길 수 있다. 역할이 실제로 참조하는 프로필에는 강도를 적지 않았다. 강도 표기 예시는 어떤 역할도 참조하지 않는 `codex-terra`에만 두었으므로, 이 예제로 실행하는 호출의 추론 깊이는 이전과 같다. 공유 풀 소진 이후 모든 역할의 동시 실행 슬롯은 1로 고정했다. 조직의 `assistants`에 허용된 역할은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있다. 기본 예제에서는 모든 역할이 허용되어 있으며, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
 
 Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
 
 ### 결성 질문과 기본값
 
-`form`은 다섯 역할(PM·PL·Senior·Junior·Intern)이 각각 어떤 모델을 쓸지만 묻고, 질문은 두 번으로 끝난다. 첫 번째에 PM·PL·Senior·Junior의 모델을, 두 번째에 Intern의 모델을 묻는다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 다섯 역할을 두고, 몇 개를 쓸지는 kickoff마다 PM이 실행 깊이로 정한다. 역할별 선택지는 PM에 Claude Fable·Opus·Codex Astra·Agy Gemini Pro, PL에 Claude Opus·Codex Sol·Agy Gemini Pro·Claude Sonnet·Codex Terra(5개), Senior에 Claude Sonnet·Codex Terra·Agy Gemini Pro·Agy Claude Opus, Junior에 Claude Haiku·Codex Luna·Agy Flash·Agy Claude Sonnet, Intern에 Claude Haiku·Codex Luna·Agy GPT-OSS-120B가 있으며, 그 밖의 모델은 자유 입력으로 받는다. Codex의 개별 모델 ID는 설치된 CLI의 `codex debug models`에서 읽어 질문 본문에 안내하며, 자유 입력 `codex:<id>`로 고른다.
+`form`은 네 역할(PM·PL·Senior·Junior)이 각각 어떤 모델을 쓸지만 묻고, 질문은 한 번으로 끝난다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 네 역할을 두고, 몇 개를 쓸지는 kickoff마다 PM이 실행 깊이로 정한다. 역할별 선택지는 PM에 Claude Fable·Opus·Codex Astra·Agy Gemini Pro, PL에 Claude Opus·Codex Sol·Agy Gemini Pro·Claude Sonnet·Codex Terra(5개), Senior에 Claude Sonnet·Codex Terra·Agy Gemini Pro·Agy Claude Opus, Junior에 Claude Haiku·Codex Luna·Agy Flash·Agy Claude Sonnet이 있으며, 그 밖의 모델은 자유 입력으로 받는다. Codex의 개별 모델 ID는 설치된 CLI의 `codex debug models`에서 읽어 질문 본문에 안내하며, 자유 입력 `codex:<id>`로 고른다.
 
 묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번이 쓰는 provider 호출 수와 workflow attempt 하나에 배정되는 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓴다. 다만 Agy는 Gemini 모델에 기본 강도를 두지 않고 강도 없이 부르면 거부하므로, Gemini는 결성 때 Flash 3.8을 `medium`, Pro 3.1을 `high`로 정하고 결성 보고에 적는다. 보조 도구 호출은 허용하지 않는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
 
 ### 실행 깊이
 
-한 번의 kickoff가 쓰는 역할 수는 PM이 과제의 난이도를 보고 정한다. 깊이 1은 PM만, 2는 PM·Junior, 3은 여기에 Senior, 4는 Intern, 5는 PL까지 다섯 역할을 모두 쓴다. 역할은 구현, 독립 검토, 좁은 실무, 병렬 분할·통합의 순서로 더해진다. 이번 실행에서 쓰지 않는 역할 앞으로 온 일은 서열을 따라 위로 올라가 포함된 가장 가까운 역할이 맡는다. 역할은 작업을 배정받을 때만 모델을 호출하므로, 쓰지 않는 역할은 비용이 들지 않는다.
+한 번의 kickoff가 쓰는 역할 수는 PM이 과제의 난이도를 보고 정한다. 깊이 1은 PM만, 2는 PM·Junior, 3은 여기에 Senior, 4는 PL까지 네 역할을 모두 쓴다. 역할은 구현, 독립 검토, 병렬 분할·통합의 순서로 더해진다. 이번 실행에서 쓰지 않는 역할 앞으로 온 일은 서열을 따라 위로 올라가 포함된 가장 가까운 역할이 맡는다. 역할은 작업을 배정받을 때만 모델을 호출하므로, 쓰지 않는 역할은 비용이 들지 않는다.
 
 깊이는 사용자에게 묻지 않고 PM이 정해 사유와 함께 알리며, 사용자가 다른 깊이를 말하면 따른다. 처음 깊이는 workflow 요청의 `depth`에 기록되고, 실행 중에는 `workflow-depth` 명령으로 바꾼다. 올리기는 언제든 가능하다. 내리기는 빠지는 역할에 예약되었거나 실행 중인 작업이 없을 때만 런타임이 허용하며, 종료를 확인하지 못한 워커도 정산 전까지는 실행 중으로 본다. 대기 중인 작업은 원래 요청된 역할을 기준으로 다시 배정되고, 이미 실행을 마친 작업은 실행한 역할을 유지한다. 모든 변경은 사유·근거와 함께 `depthHistory`에 남는다.
 
@@ -101,9 +104,11 @@ Agy는 `gemini-3.8-flash-high`처럼 모델 ID 자체에 강도를 담는다. �
 
 역할마다 계정을 나눌 필요는 없다. 같은 구독으로 만든 프로필을 모델만 다르게 여러 개 두고 역할별로 배정하면, 구독 하나로 역할별 모델 티어를 구분할 수 있다. 이때 그 프로필들을 하나의 `pool`로 묶어야 한다. 런타임은 소진이 확인된 pool에 속한 프로필을 남은 대체 순서에서 건너뛰므로, pool이 없으면 이미 소진된 같은 계정으로 계속 시도하다가 호출 예산만 소모한다. `single-subscription` 프리셋은 모델을 바꾸지 않고, 선언된 모든 역할의 동시 인원을 1로 낮추며 같은 할당량을 쓰는 대체만 제거한다.
 
-역할도 다섯 개를 모두 둘 필요가 없다. PM만 필수이고 나머지 네 역할은 생략할 수 있으며, 남긴 역할의 상위 역할은 반드시 조직이 선언한 역할이어야 한다. 생략한 역할이 맡던 일은 `pm > pl > senior > junior > intern` 서열을 따라 위로 올라가 선언된 가장 가까운 역할이 이어받는다. PM과 Junior만 둔 조직에서는 Intern 앞으로 배정된 작업을 Junior가 실행하고, Senior가 맡던 검토와 PL이 맡던 실패 처리를 PM이 수행한다. 검토 요구사항은 요구된 역할보다 같거나 상위인 역할이 수행하면 충족되며, 구현과 다른 실행 주체여야 한다는 독립성 조건은 그대로 적용된다. 역할 이름 자체는 바꿀 수 없고, 다섯 역할로 작성한 기존 조직과 작업 계약은 수정 없이 그대로 동작한다. 구조는 [축소 조직 예제](plugins/oh-my-teams/examples/organization.single-subscription.json)에서 확인한다.
+`advisor-codex` 프리셋은 PM을 `gpt-5.6-sol`, PL·Senior를 `gpt-5.6-terra`, Junior를 `gpt-5.6-luna`로 옮기고 `gpt-6-astra`를 PM·PL·Senior의 자문자로 둔다. `advisor-claude` 프리셋은 같은 구조로 PM을 `opus`, PL·Senior를 `sonnet`, Junior를 `haiku`로 옮기고 `fable`을 자문자로 둔다. 두 프리셋 모두 이미 그 실행기에서 돌던 역할만 옮기고, 다른 실행기에 배정된 역할은 다른 할당량을 쓰므로 그대로 둔다. 조직에 없는 모델은 같은 실행기의 기존 프로필을 복사해 추가하므로 새 계정을 만들지 않는다.
 
-`opus-first`는 Agy 역할을 Opus로 시작하는 평가 기준선이고, `balanced`는 Senior=Opus, Junior=Sonnet, Intern=GPT-OSS로 나눈다. [6유형 실측](experiments/ROUTING_REPORT.md)에서는 balanced가 6/6을 통과하며 Opus-first보다 토큰 9.7%, 모델 시간 16.0%를 줄여 잠정 권고가 됐다. 1회 배치이므로 기존 조직에는 자동 적용하지 않으며 `preset` 명령은 변경되는 역할만 먼저 보여준다. GPT-OSS 권고는 좁은 편집·인용으로 제한한다. 같은 공유 풀의 소진이 구조적으로 확인되면 그 풀의 다른 모델을 연쇄 호출하지 않는다. 구독의 실제 할당량 차감·가격은 토큰 수와 구분한다.
+역할도 네 개를 모두 둘 필요가 없다. PM만 필수이고 나머지 세 역할은 생략할 수 있으며, 남긴 역할의 상위 역할은 반드시 조직이 선언한 역할이어야 한다. 생략한 역할이 맡던 일은 `pm > pl > senior > junior` 서열을 따라 위로 올라가 선언된 가장 가까운 역할이 이어받는다. PM과 Junior만 둔 조직에서는 Senior가 맡던 검토와 PL이 맡던 실패 처리를 PM이 수행한다. 검토 요구사항은 요구된 역할보다 같거나 상위인 역할이 수행하면 충족되며, 구현과 다른 실행 주체여야 한다는 독립성 조건은 그대로 적용된다. 역할 이름 자체는 바꿀 수 없다. 구조는 [축소 조직 예제](plugins/oh-my-teams/examples/organization.single-subscription.json)에서 확인한다.
+
+`opus-first`는 Agy 역할을 Opus로 시작하는 평가 기준선이고, `balanced`는 Senior=Opus, Junior=Sonnet으로 나눈다. [6유형 실측](experiments/ROUTING_REPORT.md)에서는 balanced(당시에는 Intern=GPT-OSS를 포함한 구성)가 6/6을 통과하며 Opus-first보다 토큰 9.7%, 모델 시간 16.0%를 줄여 잠정 권고가 됐다. 1회 배치이므로 기존 조직에는 자동 적용하지 않으며 `preset` 명령은 변경되는 역할만 먼저 보여준다. 같은 공유 풀의 소진이 구조적으로 확인되면 그 풀의 다른 모델을 연쇄 호출하지 않는다. 구독의 실제 할당량 차감·가격은 토큰 수와 구분한다.
 
 ### 실행기 어댑터와 로컬 Ollama
 
@@ -133,6 +138,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs --help
 node plugins/oh-my-teams/scripts/teams-org.mjs validate --org plugins/oh-my-teams/examples/organization.json
 node plugins/oh-my-teams/scripts/teams-org.mjs show --org plugins/oh-my-teams/examples/organization.json
 node plugins/oh-my-teams/scripts/teams-org.mjs assist --org .omt/organization.json --task <task.json> --repo <worktree> --state .omt --role junior --kind research
+node plugins/oh-my-teams/scripts/teams-org.mjs advise --org .omt/organization.json --brief <brief.json> --repo <worktree> --state .omt --role pm --kind plan
 node plugins/oh-my-teams/scripts/teams-org.mjs preset --org <project>/.omt/organization.json --name balanced --revision <revision>
 node plugins/oh-my-teams/scripts/teams-org.mjs gate-check --task <task-v2.json> --report <report.json> --repo <worktree> --state <pm-state>
 node plugins/oh-my-teams/scripts/teams-org.mjs workflow-status --id <workflow-id> --state <pm-state>
@@ -153,6 +159,8 @@ npm run lint
 감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows에서 모델이 `gemini`로 시작하는 Agy 역할은 Orca가 그 터미널의 대기를 보고하지 않으므로 `headless-start`로 실행하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
 
 `assist`는 조직의 `assistants.<role>` 허용 목록에서 GPT-OSS-120B 프로필을 선택한다. `research`와 `checklist`는 파일을 수정하지 않고 검증된 인용과 감사 기록을 남긴다. `edit`는 호출자의 기본 모델을 바꾸지 않은 채 GPT-OSS를 한 번 호출하고, 기존 `work`와 동일한 파일 해시·허용 범위·검사·보고 관문을 적용한다. 비서 결과의 판단과 통합 책임은 호출한 역할에 남는다.
+
+`advise`는 방향이 반대인 호출이다. 조직의 `advisors.<role>` 허용 목록에 있는 비싼 모델에게 결정할 질문 하나와 12000바이트 이하의 요약, 최대 8개의 파일만 보내고 `proceed`·`revise`·`stop`·`escalate` 중 하나의 권고를 받는다. 대화 전문을 보내지 않으므로 프론티어 모델을 긴 감독 세션에 두지 않고 결정 관문에서만 쓸 수 있다. 호출은 kickoff 상태 하나당 `policy.adviceBudget`(기본값 6)회로 제한되고, 실패한 호출도 한 번으로 센다. 권고는 승인이 아니며 결정은 호출한 역할이 내린다. 계약은 [자문 호출 참조](plugins/oh-my-teams/references/advise.md)에 있다.
 
 - 파일과 직전 실패만 모델에 전달하고, JSON 편집을 경로·원본 해시 대조 후 하네스가 적용한다.
 - 검사 명령은 argv 배열이다. 호출과 재시도에 한도가 있고 실패를 통과로 바꾸지 않는다. 실패 편집은 보존한다.

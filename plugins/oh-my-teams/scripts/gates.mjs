@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   ROLES,
   assert,
+  canonicalRole,
   readJsonDirectory,
   writeJSON,
   withAsyncFileLock,
@@ -37,8 +38,8 @@ const gateFile = (stateDir, taskId) =>
 // junior one still cannot. Reviewer independence is a separate check on
 // execution identity, so this never weakens it.
 function seniorEnoughToReview(reviewerRole, requiredRole) {
-  const required = ROLES.indexOf(requiredRole);
-  const reviewer = ROLES.indexOf(reviewerRole);
+  const required = ROLES.indexOf(canonicalRole(requiredRole));
+  const reviewer = ROLES.indexOf(canonicalRole(reviewerRole));
   return required >= 0 && reviewer >= 0 && reviewer <= required;
 }
 

@@ -16,9 +16,10 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 - 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 이사에게 결정을 요청한다.
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
 - `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
-- 이번 실행의 PL·Senior·Junior·Intern을 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. Agy 터미널이고 이사가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
+- 이번 실행의 PL·Senior·Junior를 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. Agy 터미널이고 이사가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
+- 조직이 PM에게 자문자를 허용했으면 계획 확정, 최종 수용, 반복 실패 같은 결정 관문에서만 자기 역할로 `advise`를 호출한다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행한다.
 - 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다.
 - 무거운 작업(테스트·빌드·무거운 worker) 전에 자원 슬롯을 확보하고 작업이 끝나면 해제한다. 슬롯을 얻는 명령은 이사 스킬의 권한 절을 참조한다.
@@ -30,7 +31,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 ### 한계
 
 - 이번 실행에 하위 역할이 하나라도 있으면 PM은 최종 산출물(코드, 문서, 조사 보고서)을 직접 작성하지 않는다. 산출물은 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할에게 배정한다.
-- PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고, 산출물 자체를 만들라는 지시를 보내지 않는다. 나눌 필요가 없는 일은 PL을 거치지 않고 Junior나 Intern에게, 설계와 의미 검토는 Senior에게 직접 배정한다.
+- PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고, 산출물 자체를 만들라는 지시를 보내지 않는다. 나눌 필요가 없는 일은 PL을 거치지 않고 아래 「구현 등급」에 따라 Junior나 Senior에게, 설계와 의미 검토는 Senior에게 직접 배정한다.
 - Orca는 기본적으로 중첩 worker를 한 단계만 허용한다(`NESTED_WORKER_MAX_DEPTH` 기본값 1). 이 설정에서 PM이 띄운 PL은 하위 worker를 시작할 수 없으므로, 사용자가 Orca 설정의 Nested worker depth를 올렸다고 확인하지 않은 한 PL에게는 분할 계획과 통합 검증만 받고 계획의 작업은 PM이 자기 Run에서 평평하게 배정한다.
 - 원시 `orca orchestration worker-start`나 `orca worktree create --agent`로 역할을 띄우지 않는다. 저장된 모델과 권한 우회 플래그가 빠지기 때문이다.
 - 모델·계정·구독을 바꾸거나 이사에게 없는 모델로 전환하지 않는다. 바꿔야 하면 `adjust`를 이사에게 보고해 사용자 결정을 받도록 한다.
@@ -45,12 +46,13 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 
 계획 단계에서 [불필요한 변경을 줄이는 규율](../../references/minimal-change.md)을 적용한다. "이 변경이 목표에 필요한가"와 "코드베이스에 이미 있는 것을 재사용할 수 있는가"를 확인하고, 건드리지 않을 범위를 비목표나 수용 기준으로 task에 명시한다.
 
-- PM은 사용자 요청과 사업·제품 맥락을 분석하고 중장기 목표, 우선순위, 수용 기준과 비목표를 결정한다. 상세 저장소 분석과 대안 조사가 필요하면 PL에게는 그 조사를 어떤 작업으로 나누고 누구에게 배정할지 계획하게 하고, 조사 자체는 Senior·Junior·Intern이 수행한다. 범위와 최종 판단의 책임은 PM에게 남는다.
+- PM은 사용자 요청과 사업·제품 맥락을 분석하고 중장기 목표, 우선순위, 수용 기준과 비목표를 결정한다. 상세 저장소 분석과 대안 조사가 필요하면 PL에게는 그 조사를 어떤 작업으로 나누고 누구에게 배정할지 계획하게 하고, 조사 자체는 Senior·Junior가 수행한다. 범위와 최종 판단의 책임은 PM에게 남는다.
 - 전체 요청을 목표·수용 기준·비목표·제약과 파일 소유권이 분명한 task v2로 나눈다. 작은 저위험 변경은 한 task로 유지한다. 독립 편집 작업마다 **Orca child worktree**를 사용한다. 기준 커밋을 명시하고 실제 반환된 전체 worktree ID를 보관한다. 다른 역할의 task가 작업하는 워크트리에 역할을 띄우지 않으며, 검토자는 검토 대상을 경로와 커밋으로 읽게 한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
-- 다섯 역할을 모두 상시 실행하지 않는다. 이번 실행에서 쓰는 역할은 아래 「실행 깊이」로 정하며, 깊이에 포함된 역할 사이에서는 제한된 실무를 PL·Senior·Junior를 모두 거치지 않고 Intern에게 직접 배정할 수 있다.
+- 네 역할을 모두 상시 실행하지 않는다. 이번 실행에서 쓰는 역할은 아래 「실행 깊이」로 정하며, 깊이에 포함된 역할 사이에서는 제한된 실무를 PL·Senior를 거치지 않고 Junior에게 직접 배정할 수 있다.
 - 역할별 모델·계정·동시 인원과 fallback을 조직 파일에서 읽는다. 조직도는 보고 구조이며 모든 작업이 모든 단계를 통과해야 한다는 뜻이 아니다. Orca 중첩 깊이 제한에 걸리면 PM/PL이 평평한 작업 파동으로 배정한다.
 - 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다.
 - PM은 자료 정리와 반론 수집을 보조 도구에 맡길 수 있으나 목표·우선순위·수용 결정은 위임하지 않는다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
+- 자문자는 PM보다 비싼 모델이므로 감독이나 보고 취합에는 부르지 않는다. 대화 전문 대신 결정할 질문과 요약만 브리프로 보내고, 자문을 따르든 따르지 않든 결정은 PM이 내린다. 호출 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
 
 제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용한다. 일반적인 탐색·설계·복잡한 구현은 감독 worker로 배정한다. 여러 작업으로 나누고 통합해야 하면 PL에게 분할 계획과 통합을 맡기고, 나눌 필요가 없으면 수행할 역할에게 직접 배정한다. 부모 대화 전문 대신 작업 조건·파일·근거 위치만 주고, [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 완료 조건부터 쓴다.
 
@@ -67,17 +69,29 @@ node <runtime> role-spec --org <project>/.omt/organization.json --role senior --
 
 `role-spec`은 `task-create`로 먼저 만든 Task를 `--task`로 시작할 때 쓴다. 이 경우 래퍼가 머리글을 붙일 수 없으므로 Task 설명을 `role-spec --text`의 출력으로 만든다. `--text` 없이 실행하면 JSON이 출력되고, 그대로 `task-create --spec`에 넣으면 이스케이프된 JSON이 지시문이 된다. 시작 결과의 `binding.modelProof` 확인, 화면의 모델 대조, 거부 사유는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다.
 
+## 구현 등급
+
+구현 task의 담당은 직급이 아니라 그 일에 필요한 추론 강도로 정한다. Senior는 상위 등급, Junior는 하위 등급 모델로 배정하는 것을 전제로 한다(예: terra·luna, sonnet·haiku, Gemini Pro·Flash).
+
+| 등급 | 담당 | 알맞은 구현 |
+|---|---|---|
+| 상위 | Senior | 설계와 구현이 한 번에 필요한 일, 여러 모듈에 걸치는 변경, 공개 인터페이스·보안·데이터 형식 변경, Junior가 반복해서 실패한 일 |
+| 하위 | Junior | 파일과 완료 조건이 닫힌 수정, 정해진 반복 편집, 인용 수집처럼 결정적으로 검증할 수 있는 일 |
+
+Senior에게 구현을 맡길 때에는 workflow task의 `role`을 `senior`로 적는다. 그 task의 필수 검토는 구현한 실행과 다른 Senior 실행이나 PL·PM이 맡으며, 같은 실행이 검토하면 런타임이 거부한다. 판단이 애매하면 하위 등급으로 시작하고, 실패하면 상위 등급으로 올린다.
+
 ## 실행 깊이
 
-조직은 다섯 역할을 모두 두지만, 한 번의 kickoff가 쓰는 역할 수는 과제의 난이도에 맞춰 PM이 정한다. 역할을 적게 쓰는 실행에서 빠진 역할 앞으로 온 일은 서열을 따라 위로 올라가 이번 실행에 포함된 가장 가까운 역할이 맡는다. 깊이는 사용자에게 묻지 않고 PM이 정하되, 정한 깊이와 그 사유를 첫 진행 보고에 적는다. 사용자가 다른 깊이를 말하면 그대로 따른다.
+조직은 네 역할을 모두 두지만, 한 번의 kickoff가 쓰는 역할 수는 과제의 난이도에 맞춰 PM이 정한다. 역할을 적게 쓰는 실행에서 빠진 역할 앞으로 온 일은 서열을 따라 위로 올라가 이번 실행에 포함된 가장 가까운 역할이 맡는다. 깊이는 사용자에게 묻지 않고 PM이 정하되, 정한 깊이와 그 사유를 첫 진행 보고에 적는다. 사용자가 다른 깊이를 말하면 그대로 따른다.
 
 | 깊이 | 쓰는 역할 | 알맞은 과제 |
 |---|---|---|
 | 1 | PM | 코드 변경이 없거나 한 줄 수준인 확인·문서 작업. PM이 구현과 검토를 모두 맡으므로 코드 변경에는 쓰지 않는다. |
 | 2 | PM → Junior | 파일 한두 개에 닫힌 국소 수정. |
 | 3 | PM → Senior → Junior | 여러 모듈에 걸치거나, 공개 인터페이스·보안·데이터 형식처럼 독립 검토가 필요한 변경. |
-| 4 | PM → Senior → Junior → Intern | 3단계 과제에 더해, 인용 수집·반복 수정처럼 좁고 검증이 쉬운 일이 많은 경우. |
-| 5 | PM → PL → Senior → Junior → Intern | 의존성이 있는 병렬 작업 파동이 여럿이라 분할과 통합을 따로 맡겨야 하는 경우. |
+| 4 | PM → PL → Senior → Junior | 의존성이 있는 병렬 작업 파동이 여럿이라 분할과 통합을 따로 맡겨야 하는 경우. |
+
+2.6.0 이전의 깊이 5(Intern 포함 전체 역할)로 저장된 workflow는 깊이 4로 읽는다.
 
 처음 깊이는 workflow 요청의 `depth`에 적는다. 적지 않으면 조직이 선언한 모든 역할을 쓴다. `adjust`로 조직에서 뺀 역할은 깊이를 올려도 돌아오지 않는다. 조직에서 역할을 빼는 것은 구독이 없는 것 같은 영구적인 제약을 위한 것이고, 난이도는 깊이로 다룬다.
 

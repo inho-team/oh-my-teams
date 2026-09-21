@@ -69,8 +69,7 @@
     "pm": ["agy-oss"],
     "pl": ["agy-oss"],
     "senior": ["agy-oss"],
-    "junior": ["agy-oss"],
-    "intern": ["agy-oss"]
+    "junior": ["agy-oss"]
   },
   "roles": {
     "pm": {
@@ -100,13 +99,6 @@
       "concurrency": 1,
       "attempts": 2,
       "fallbacks": ["agy-sonnet"]
-    },
-    "intern": {
-      "parent": "junior",
-      "profile": "ollama-gptoss-cli",
-      "concurrency": 1,
-      "attempts": 2,
-      "fallbacks": ["ollama-qwen-http", "agy-sonnet"]
     }
   },
   "policy": {

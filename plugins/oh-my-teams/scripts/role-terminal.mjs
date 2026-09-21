@@ -266,7 +266,6 @@ export const ROLE_TITLE_TAGS = Object.freeze({
   pl: "[PL]",
   senior: "[Senior]",
   junior: "[Junior]",
-  intern: "[Intern]",
 });
 
 /**
