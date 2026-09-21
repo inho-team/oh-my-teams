@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 역할 선택 | `plugins/oh-my-teams/scripts/delegation.mjs` | 명시 역할이 없을 때 구조화된 risk·delegation 메타데이터로 Intern·Junior·Senior를 보수적으로 선택한다. |
 | 계약 검증 | task·workflow·organization schema와 예시 | delegation의 `scope`, `verification`, `authority`, `design`을 검증하고, 신규 조직의 `intern-first` 기본 정책과 role 생략 예시를 제공한다. |
-| 실행 provenance | workflow state, 실행 report, usage 집계 | `selection.source`, `reason`, `requestedRole`, `selectedRole`을 보존하고, depth 접힘·Intern 부재·상위 승격을 재현할 수 있게 한다. |
+| 실행 provenance | workflow state, 실행 report, usage 집계 | `selection.source`, `reason`, `requestedRole`, `selectedRole`, `foldReason`을 보존한다. `reason`은 적격성·승격, `foldReason`은 depth 제외·조직 역할 부재를 구분한다. |
 | 역할 지침 | PM·PL·Junior·Senior·Intern·kickoff·form 지침 | 닫힌 실무의 묶음 배정, 파일 소유권, 결정적 검사, 차분 보고, 상위 승격과 독립 검토의 책임을 일관되게 안내한다. |
 | 경제성 보고 | `docs/plan/delegation-economics.md`와 수용된 익명 집계 | 실제 Intern 실무 비중과 상위 검토·반려·재작업·지연을 분리하고, provider 단위와 미측정 비용을 보존한다. |
 
@@ -19,11 +19,11 @@
 1. 명시 역할이 없고 `risk=low`, `scope=closed`, `verification=deterministic`, `authority=standard`, `design=routine`인 task는 Intern을 요청한다.
 2. high risk, elevated authority, significant design 또는 independent review task는 Senior로 승격하며 그 이유가 저장된다. 메타데이터가 없거나 보수적 조합이면 Junior가 선택된다.
 3. 사용자가 명시한 역할은 자동 선택보다 우선한다. workflow 생성 뒤 실행 role이 저장된 계약과 다르면 실행을 거부한다.
-4. Intern이 없는 조직, depth로 Intern을 제외한 workflow, 이전 snapshot은 호환되게 상위 역할로 접히며, 실제 선택과 이유를 확인할 수 있다.
+4. Intern이 없는 조직, depth로 Intern을 제외한 workflow, 이전 snapshot은 호환되게 상위 역할로 접히며, 실제 선택·정책 이유·접힘 이유를 확인할 수 있다.
 5. 결정적 회귀 검사는 Intern 우선, 상위 승격, 사용자 역할 우선, 축소 조직 호환, 선택 provenance와 실행 receipt를 함께 검증한다.
 6. 동일한 완료 조건에서 현재 배치와 이사 Astra·PM Sol·PL Terra 평가안을 비교한다. 품질, 완료 시간, 검토·재작업, 상태 조회, 컨텍스트 재전송, 세션 재개와 미측정 비용을 함께 기록한다.
 7. provider별 calls·turns·캐시 의미를 분리하고, `costUsd=null`은 미측정으로 보존한다. API 환산이나 비캐시 합계를 구독 차감 또는 실제 청구로 주장하지 않는다.
-8. 독립 검토와 실제 완료 확인을 없애지 않는다. 수용된 support workflow 집계가 없으면 경제성 수치·절감률 결론을 보류한다.
+8. 독립 검토와 실제 완료 확인을 없애지 않는다. support workflow 집계 `19382fb`은 수용되었지만, 동일 작업·시간창 비교가 없으면 경제성 절감률 결론을 보류한다.
 
 ## 비목표
 

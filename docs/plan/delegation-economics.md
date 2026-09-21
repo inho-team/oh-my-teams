@@ -4,17 +4,29 @@
 
 현재 제품은 새 workflow에서 명시 역할이 없을 때, 저위험·닫힌 범위·결정적 검증·표준 권한·일상 설계의 조합을 Intern에 우선 배정하도록 구현되어 있다. 이 정책은 역할 이름만 바꾸는 방식이 아니라 task 메타데이터, 역할 선택 사유, 실행 report와 workflow state의 `selection`을 연결하므로, Intern 미사용과 상위 승격을 사후에 확인할 수 있게 한다.
 
-그러나 이 사실만으로 비용 절감이나 50% 절감을 주장할 수는 없다. 이 kickoff의 사용량 집계는 입력 경로와 PM 귀속 근거를 보완하는 지원 workflow에서 검토 중이며, 완료한 Intern 실무 비중과 역할별 비용은 그 수용 결과로만 확정할 수 있다. 호출 횟수 증가도 절감의 증거가 아니다. 총량에는 상위의 계획·계약 작성·컨텍스트 전달, 하위 실행, 결정적 검사, 독립 검토, 반려 후 수정, 대기와 세션 재개가 함께 들어간다.
+그러나 이 사실만으로 비용 절감이나 50% 절감을 주장할 수는 없다. 지원 workflow의 집계 `19382fb`은 수용되었지만, 역할별 비용은 여전히 미측정이다. 호출 횟수 증가도 절감의 증거가 아니다. 총량에는 상위의 계획·계약 작성·컨텍스트 전달, 하위 실행, 결정적 검사, 독립 검토, 반려 후 수정, 대기와 세션 재개가 함께 들어간다.
 
 권고하는 운영 구조는 좁고 동질적인 저위험 작업을 Intern에게 묶어 배정하고 Junior가 통합하며, Senior가 중요한 설계·권한 경계를 독립 검토하는 방식이다. 이사 Astra, PM Sol, PL Terra 배치안은 이 구조와 같은 완료 조건에서만 평가할 후보이며, 현재 조직 revision 3 또는 실행 모델을 바꾸는 승인으로 해석하지 않는다.
 
 ## 확인된 구조적 문제와 이번 실행의 상태
 
-이전 구조에서는 조직에 Intern이 있어도 depth 또는 역할 접기에 따라 Intern 책임이 상위 역할로 접힐 수 있었다. 특히 역할 접기는 선언된 역할 중 가장 가까운 상위 역할로 책임을 옮기므로, 조직도에 Intern이 있다는 사실만으로 실제 Intern 실행을 보장하지 않는다. 새 런타임은 선택 이유와 접힌 실제 역할을 state에 남겨 이 차이를 확인할 수 있게 보완했다.
+이전 구조에서는 조직에 Intern이 있어도 depth 또는 역할 접기에 따라 Intern 책임이 상위 역할로 접힐 수 있었다. 특히 역할 접기는 선언된 역할 중 가장 가까운 상위 역할로 책임을 옮기므로, 조직도에 Intern이 있다는 사실만으로 실제 Intern 실행을 보장하지 않는다. 수용 runtime `57519bb`는 정책 적격성·승격 근거를 `selection.reason`에, 실제 접힘의 원인을 `selection.foldReason`에 분리하여 남긴다. 후자는 `run-depth-excluded` 또는 `organization-role-unavailable`이며, 역할이 실제로 바뀔 때만 기록된다.
 
-이번 kickoff에서는 Intern Luna가 역할 지침의 좁은 편집을 수행했고, Junior Terra가 런타임과 이 보고서의 통합을 맡았으며, Senior Terra가 독립 검토를 맡았다. 문서 작업의 첫 실행은 검토에서 반려되어 한 차례 수정되었다. 코드 작업의 첫 실행도 CLI 역할 우회와 회귀 검사 누락으로 반려되었고, 현재 수정본이 검토 대상이다. 따라서 이 사례를 "Intern 호출이 곧바로 절감됐다"고 쓰지 않으며, 상위 검토·재작업·지연을 Intern 작업량과 별도 항목으로 기록한다.
+이번 kickoff에서는 Intern Luna가 역할 지침의 좁은 편집을 수행했고, Junior Terra가 런타임과 이 보고서를 맡았으며, Senior Terra가 독립 검토를 맡았다. runtime은 두 차례 반려되어 CLI 역할 우회·회귀 누락과 접힘 사유 기록을 수정한 뒤 수용되었다. guidance는 한 차례 반려 후 수용되었고, 이 보고서는 첫 Senior 검토에서 반려되어 현재 수정·재검토 전이다.
 
-집계는 입력 경로와 귀속 provenance의 누락을 수정 중이다. PM Codex 세션은 집계에서 `unattributed`로 남을 수 있으며, 이는 PM 사용량이 0이라는 뜻이 아니다. 운영 기록으로 수동 연결 근거가 있더라도 집계 정본을 임의로 덮어쓰지 않고, 수용된 결과에서 연결 방식과 한계를 함께 확인해야 한다. 실제 Intern 업무 비중은 이 kickoff에서 명시된 완료 task를 분모로 하고, 문서 반려·수정과 코드 반려·수정, 독립 검토를 별도 항목으로 기록해 계산한다. 토큰 점유율이나 호출 비중을 업무 비중으로 대체하지 않는다.
+### 실제 task 기준 Intern 비중
+
+기준 시각은 2026-09-21T06:17:37Z의 r3 rework 기록이다. r3와 support-r3의 서로 다른 산출물 5개만 분모로 삼았고, r2의 `collect-code-map`과 `aggregate-usage`은 Agy 할당량·검증 계약 실패 뒤 r3/support-r3로 이관된 같은 논리 산출물이므로 중복 제외했다. 제출은 receipt가 붙어 settled 또는 running인 상태, 완료는 `acceptedResult`가 있는 상태로 정의한다.
+
+| workflow | task | 역할 | 제출 상태 | 수용 상태 | 반려·수정·독립 검토 |
+| --- | --- | --- | --- | --- | --- |
+| intern-first-r3 | intern-first-runtime | Junior | 제출됨 | 수용 | 반려 2회, 수정 2회, Senior 승인 1회 |
+| intern-first-r3 | intern-first-guidance | Intern | 제출됨 | 수용 | 반려 1회, 수정 1회, Senior 승인 1회 |
+| intern-first-r3 | intern-first-report | Junior | 제출됨 | 미수용 | 반려 1회, 현재 수정본 재검토 전 |
+| intern-first-support-r3 | intern-first-schema | Intern | 제출됨 | 수용 | 반려 1회, 수정 1회, Senior 승인 1회 |
+| intern-first-support-r3 | intern-first-evidence | Intern | 제출됨 | 수용 | 반려 2회, 수정 2회, Senior 승인 1회 |
+
+따라서 제출 기준 Intern 비중은 3/5(60%)이고, 수용 완료 task 기준 Intern 비중은 3/4(75%)이다. 이 보고서와 최종 integration task가 아직 수용 전이므로 전체 kickoff 완료율이나 최종 Intern 비중으로 확대하지 않는다. 이 비중은 task 개수 기준일 뿐 sessions·calls·tokens·금전 비용과 결합하지 않는다.
 
 ## 근거: 규칙과 실제 실행의 구분
 
@@ -31,6 +43,16 @@
 | 예산·검토·실패 | 호출 한도, attempts, concurrency, review gate와 failure routing은 역할 선택과 별개로 유지된다. | 결정적 검사를 통과하는 좁은 산출물만 다음 단계로 전달한다. | 검토 반려는 Junior의 수정 책임으로 돌아가며, 범위 과대는 PL의 분할 판단으로 돌아간다. | 코드 맵 항목 15~21 |
 
 이 구현은 신규 workflow에 적용되는 제품 정책이며, 역할 스킬에 권장 문구만 더한 변경이 아니다. 기존 organization에 정책 필드가 없어도 Intern 우선 기본값을 적용하지만, 이미 저장한 workflow snapshot의 역할 의미는 바꾸지 않는다.
+
+### 과거 snapshot의 Intern 부재와 실행 경로
+
+두 과거 usage snapshot의 `byRole`에는 Intern 키와 session이 없다. 이는 관측 사실이다. 당시 기록은 PM·Junior·Senior 중심이며, audit-wave1의 실제 state와 기본 depth 선택이 Intern을 실행 역할에 넣지 않은 경우에는 `foldRole`이 책임을 상위 선언 역할로 접을 수 있다는 코드 경로와 일치한다. 다만 snapshot만으로 모든 미배정 원인을 확정할 수는 없으므로, 닫힌 작은 task 부족이나 상위의 준비·검토 비용은 추정으로 남긴다.
+
+r1에서는 Agy Intern 두 건이 `RESOURCE_EXHAUSTED` 429로 도구 단계 전 종료했고, 이 오류는 gpt-oss 경로에 한정된 보존 사실이다. r2는 Intern 산출물을 재시도했지만 기존 null 검증 계약 결함으로 aggregate가 실패했고, r3은 Codex 전용 revision 3과 depth 4로 이관했다. `headless-start`·`role-terminal`·`worker-start`는 역할 실행을 여는 경로이고, fallback·`onExhaustion` 순회는 `work` 하네스에만 있다. 따라서 r1의 fallback 연결 부재와 r2/r3의 전환을 비용 절감 또는 모든 provider의 할당량 소진으로 일반화하지 않는다.
+
+### OpenCodex 공통 실행 전환의 경계
+
+현재 수용 runtime은 고정 OMT 경로의 headless, work, role-terminal, worker-start와 workflow selection을 검증한 제품 구현이다. OpenCodex 공통 실행 전환은 별도 kickoff의 미래 통합 후보이므로 이 PR의 완료 기능이나 배포 완료로 쓰지 않는다. 전환이 실제로 수용되면 provider 실행 경로·설치·liveness 기록의 중복을 줄일 가능성은 있으나, 계정 귀속, 취소, Windows 실측, 실제 비용·지연 효과는 아직 미측정이다.
 
 ### 사용량 단위와 측정 한계
 
@@ -66,7 +88,7 @@ provider별 `calls`, `turns`, 캐시 토큰은 같은 측정 단위가 아니다
 ## 권고하는 배정·감독 설계
 
 1. PM은 task를 작은 완료 조건으로 나누되, 같은 종류의 닫힌 작업은 한 Intern 배정으로 묶습니다. 각 계약에는 파일 소유권, 입력, 출력, 결정적 검사, 종료 조건과 Intern을 쓰지 않은 이유를 적습니다.
-2. 자동 선택은 구조화된 delegation 메타데이터를 사용합니다. 명시 사용자 역할은 우선하며, Intern 부재·depth 접힘·Senior 승격은 `selection.reason`으로 남깁니다.
+2. 자동 선택은 구조화된 delegation 메타데이터를 사용합니다. 명시 사용자 역할은 우선하며, 적격성·승격은 `selection.reason`, Intern 부재·depth 접힘은 `selection.foldReason`으로 남깁니다.
 3. Junior는 Intern 산출물을 기계적으로 재독하지 않고, 결정적 검사와 차분 요약을 먼저 확인합니다. 실패한 좁은 범위만 수정·재실행하고 통합 책임을 유지합니다.
 4. Senior는 설계, 권한, 고위험 변경과 독립 검토에 집중합니다. 비용을 줄이기 위해 독립 검토나 실제 완료 확인을 제거하지 않습니다.
 5. 상태 조회는 이벤트 중심으로 바꿉니다. 완료·검토 요청·실패·예산 임계치 이벤트만 상위에 올리고, 반복 polling은 결정적 상태 집계로 대체합니다.
@@ -85,7 +107,7 @@ provider별 `calls`, `turns`, 캐시 토큰은 같은 측정 단위가 아니다
 
 ## 후속 변경, 지표와 도입·중단 기준
 
-후속 변경의 세부 파일과 수용 기준은 [후속 구현 브리프](delegation-economics-followup.md)에 정리한다. 런타임 구현 `8e47414`는 역할 자동 선택과 provenance 기록을 이미 제공하지만, 이 보고서의 경제성 결론은 지원 workflow가 수용한 집계에 연결한 뒤 확정한다.
+후속 변경의 세부 파일과 수용 기준은 [후속 구현 브리프](delegation-economics-followup.md)에 정리한다. 수용 runtime `57519bb`는 역할 자동 선택과 `reason`·`foldReason` provenance를 제공하며, evidence `19382fb`은 수용된 집계이다. 둘은 제품 구현과 근거 산출물의 수용 상태일 뿐, 이 PR의 최종 integration 또는 제품 배포 완료를 뜻하지 않는다.
 
 도입 전후에는 다음 지표를 같은 시간창과 정의로 기록한다.
 
