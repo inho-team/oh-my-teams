@@ -36,6 +36,23 @@ const RENAMED_KEYS = [
   ["selfCoordinator", "selfPm"],
 ];
 
+// Keys a kickoff-claim request may carry. `schemaVersion` and `createdAt` belong
+// to stored entries but appear in claims copied from one, so they are not
+// reported as mistakes. Any other key is dropped when the entry is written.
+const CLAIM_KEYS = [
+  "goal",
+  "pm",
+  "organizationRevision",
+  "brief",
+  "delivery",
+  "selfPm",
+  "director",
+  "runId",
+  "schemaVersion",
+  "createdAt",
+];
+const DIRECTOR_KEYS = ["terminalHandle", "checkoutPath"];
+
 function text(value) {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
@@ -177,6 +194,23 @@ export function validateEntry(stored) {
     entry.selfPm === undefined || text(entry.selfPm),
     "Kickoff selfPm must state why no handoff was possible",
   );
+  // director is optional: entries registered before director support was added
+  // are valid without it, and close/disband still work for them (with a warning).
+  if (entry.director !== undefined) {
+    assert(
+      entry.director && typeof entry.director === "object",
+      "Kickoff director must be an object when present",
+    );
+    assert(
+      text(entry.director.terminalHandle) ||
+        entry.director.terminalHandle === undefined,
+      "Kickoff director.terminalHandle must be a non-empty string when present",
+    );
+    assert(
+      text(entry.director.checkoutPath),
+      "Kickoff director.checkoutPath required when director is present",
+    );
+  }
   // Entries registered before delivery was recorded carry neither field.
   if (entry.delivery !== undefined) validateDelivery(entry.delivery);
   assert(
@@ -246,7 +280,8 @@ export function listKickoffs(orgFile, worktreeId) {
  * @param {string} orgFile - Organization JSON path.
  * @param {object} request - Goal, pm, brief path, and organizationRevision. The
  *   pre-rename keys `coordinator` and `selfCoordinator` are also accepted.
- * @returns {{claimed: boolean, file: string, entry: object}} Stored entry.
+ * @returns {{claimed: boolean, file: string, entry: object, warnings?: string[]}}
+ *   Stored entry, and the claim keys that were ignored when there were any.
  * @throws {Error} When the worktree already holds a kickoff or the claim is invalid.
  */
 export function registerKickoff(orgFile, request) {
@@ -287,6 +322,27 @@ export function registerKickoff(orgFile, request) {
       claim.organizationRevision === revision,
       `Organization is at revision ${revision}; read it again before registering`,
     );
+    // A director object without a checkout path would otherwise resolve to the
+    // caller's working directory and pass every later authority check from there.
+    assert(
+      claim.director === undefined || text(claim.director?.checkoutPath),
+      "Claim director.checkoutPath required when director is present " +
+        "(form: director: {terminalHandle, checkoutPath})",
+    );
+    // Unknown keys are dropped when the entry is written. Renamed director
+    // fields would then register no director and later authority checks would
+    // warn and proceed, so the claim's sender is told which keys were ignored.
+    const ignored = [
+      ...Object.keys(claim).filter((key) => !CLAIM_KEYS.includes(key)),
+      ...Object.keys(claim.director ?? {})
+        .filter((key) => !DIRECTOR_KEYS.includes(key))
+        .map((key) => `director.${key}`),
+    ];
+    const warnings = ignored.map(
+      (key) =>
+        `Claim key "${key}" is not part of the claim format and was ignored`,
+    );
+    for (const warning of warnings) console.warn(`[omt] Warning: ${warning}`);
     const entry = validateEntry({
       schemaVersion: 1,
       goal: claim.goal,
@@ -305,10 +361,29 @@ export function registerKickoff(orgFile, request) {
           : { branch: claim.delivery.branch }),
       },
       ...(claim.selfPm === undefined ? {} : { selfPm: claim.selfPm }),
+      // Director identifier is optional. When present, checkoutPath is required
+      // and is resolved to an absolute path so callers can compare it to cwd().
+      ...(claim.director === undefined
+        ? {}
+        : {
+            director: {
+              ...(text(claim.director?.terminalHandle)
+                ? { terminalHandle: claim.director.terminalHandle }
+                : {}),
+              checkoutPath: path.resolve(
+                text(claim.director?.checkoutPath) ?? "",
+              ),
+            },
+          }),
       createdAt: new Date().toISOString(),
     });
     writeJSON(file, entry);
-    return { claimed: true, file, entry };
+    return {
+      claimed: true,
+      file,
+      entry,
+      ...(warnings.length === 0 ? {} : { warnings }),
+    };
   });
 }
 
@@ -335,91 +410,6 @@ export function bindKickoffRun(orgFile, { worktreeId, runId }) {
     const bound = validateEntry({ ...entry, runId });
     writeJSON(file, bound);
     return { bound: true, file, entry: bound };
-  });
-}
-
-/**
- * Records that a kickoff's result was merged into the owning project.
- *
- * @param {string} orgFile - Organization JSON path.
- * @param {{worktreeId: string, head: string, mergeCommit: string}} delivery -
- *   PM worktree, the delivered head, and the merge commit on the owner branch.
- * @returns {{recorded: boolean, entry: object}} Updated entry.
- * @throws {Error} When the worktree holds no kickoff or another head was delivered.
- */
-export function recordDelivery(orgFile, { worktreeId, head, mergeCommit }) {
-  return withRegistry(orgFile, () => {
-    const file = locateEntry(orgFile, worktreeId);
-    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
-    const entry = validateEntry(readJSON(file));
-    assert(
-      !entry.delivered || entry.delivered.head === head,
-      `Kickoff already delivered ${entry.delivered?.head}`,
-    );
-    const updated = validateEntry({
-      ...entry,
-      delivered: entry.delivered ?? {
-        head,
-        mergeCommit,
-        at: new Date().toISOString(),
-      },
-    });
-    writeJSON(file, updated);
-    return { recorded: true, entry: updated };
-  });
-}
-
-/**
- * Ends a registered kickoff and archives its entry.
- *
- * Other kickoffs are untouched. Ending one whose PM cannot be reached
- * is recorded as `taken-over`, which needs explicit authorization, so a failed
- * liveness query never retires a kickoff that may still be running.
- *
- * @param {string} orgFile - Organization JSON path.
- * @param {object} request - Release request.
- * @param {string} request.worktreeId - PM worktree whose kickoff ends.
- * @param {string} request.reason - One of `RELEASE_REASONS`.
- * @param {boolean} [request.force=false] - Whether a takeover is authorized.
- * @returns {{released: boolean, reason: string, archived: string, entry: object}} Result.
- * @throws {Error} When the worktree holds no kickoff, the reason is unknown, or
- *   a takeover is requested without authorization.
- */
-export function releaseKickoff(orgFile, { worktreeId, reason, force = false }) {
-  return withRegistry(orgFile, () => {
-    const file = locateEntry(orgFile, worktreeId);
-    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
-    const entry = validateEntry(readJSON(file));
-    assert(
-      RELEASE_REASONS.includes(reason),
-      `Release reason must be one of: ${RELEASE_REASONS.join(", ")}`,
-    );
-    assert(
-      reason !== "taken-over" || force,
-      "A takeover needs explicit authorization; confirm it with the user first",
-    );
-    // A kickoff whose brief asked for a merge into the project is not complete
-    // until that merge is recorded, or `status` would show the goal delivered.
-    assert(
-      reason !== "completed" ||
-        entry.delivery?.mode !== "local-merge" ||
-        entry.delivered ||
-        force,
-      `Kickoff was to merge into ${entry.delivery?.branch}, which deliver has not recorded; ` +
-        "run deliver first, or pass --force with the user's decision",
-    );
-    const archived = path.join(
-      path.dirname(registryDirectory(orgFile)),
-      "history",
-      `kickoff-${entryName(worktreeId)}-${entry.createdAt.replace(/[:.]/g, "-")}.json`,
-    );
-    writeJSON(archived, {
-      ...entry,
-      releasedAt: new Date().toISOString(),
-      releaseReason: reason,
-    });
-    fs.unlinkSync(file);
-    return { released: true, reason, archived, entry };
   });
 }
 
@@ -450,6 +440,186 @@ function isAncestor(repoDir, tipRef, baseRef) {
   return result !== null;
 }
 
+// Resolves a commit id to the full object name, or null when it names no commit.
+// Only hexadecimal ids are accepted, so an option-like value never reaches git.
+function resolveCommit(repoDir, id) {
+  if (typeof id !== "string" || !/^[0-9a-fA-F]{7,64}$/.test(id)) return null;
+  return tryGit(repoDir, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${id}^{commit}`,
+  ]);
+}
+
+/**
+ * Confirms in the owner checkout that a recorded merge really delivered a head.
+ *
+ * The merge commit must exist, must be reachable from the delivery branch (the
+ * local branch, or `<remote>/<branch>` after a PR merged on the remote), and
+ * must contain the delivered head. `kickoff-branch-cleanup` trusts the recorded
+ * merge commit, so a value that fails here must never be stored.
+ *
+ * @param {string} projectDir - Owner project checkout holding the repository.
+ * @param {{branch: string, head: string, mergeCommit: string, remoteName?: string}} delivery -
+ *   Delivery branch and the two commits being recorded.
+ * @returns {{head: string, mergeCommit: string}} Both commits as full object names.
+ * @throws {Error} When a commit is unknown, unreachable from the branch, or the
+ *   head is not contained in the merge commit.
+ */
+export function verifyDeliveredCommits(
+  projectDir,
+  { branch, head, mergeCommit, remoteName = "origin" },
+) {
+  const mergeFull = resolveCommit(projectDir, mergeCommit);
+  assert(
+    mergeFull,
+    `Merge commit ${mergeCommit} is not a commit in ${projectDir}; fetch the merge first`,
+  );
+  const headFull = resolveCommit(projectDir, head);
+  assert(headFull, `Delivered head ${head} is not a commit in ${projectDir}`);
+  const refs = [`refs/heads/${branch}`];
+  if (remoteName) refs.push(`refs/remotes/${remoteName}/${branch}`);
+  assert(
+    refs.some(
+      (ref) =>
+        tryGit(projectDir, ["rev-parse", "--verify", "--quiet", ref]) !==
+          null && isAncestor(projectDir, mergeFull, ref),
+    ),
+    `Merge commit ${mergeFull} is not reachable from ${refs.join(" or ")}; ` +
+      "it was not merged into the delivery branch, or the checkout has not fetched the merge yet",
+  );
+  assert(
+    isAncestor(projectDir, headFull, mergeFull),
+    `Delivered head ${headFull} is not contained in merge commit ${mergeFull}`,
+  );
+  return { head: headFull, mergeCommit: mergeFull };
+}
+
+/**
+ * Records that a kickoff's result was merged into the owning project.
+ *
+ * The commits are checked against the owner checkout's git before anything is
+ * written, and the full object names are stored.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {{worktreeId: string, head: string, mergeCommit: string, remoteName?: string}} delivery -
+ *   PM worktree, the delivered head, the merge commit on the owner branch, and
+ *   the remote whose branch may hold a merge made elsewhere (default `origin`).
+ * @returns {{recorded: boolean, entry: object}} Updated entry.
+ * @throws {Error} When the worktree holds no kickoff or delivers to no branch,
+ *   another head was delivered, or the commits fail verification.
+ */
+export function recordDelivery(
+  orgFile,
+  { worktreeId, head, mergeCommit, remoteName = "origin" },
+) {
+  return withRegistry(orgFile, () => {
+    const file = locateEntry(orgFile, worktreeId);
+    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
+    const entry = validateEntry(readJSON(file));
+    assert(
+      text(entry.delivery?.branch),
+      "Kickoff records no delivery branch to verify a merge against",
+    );
+    const verified = verifyDeliveredCommits(ownerProject(orgFile), {
+      branch: entry.delivery.branch,
+      head,
+      mergeCommit,
+      remoteName,
+    });
+    assert(
+      !entry.delivered || entry.delivered.head === verified.head,
+      `Kickoff already delivered ${entry.delivered?.head}`,
+    );
+    const updated = validateEntry({
+      ...entry,
+      delivered: entry.delivered ?? {
+        head: verified.head,
+        mergeCommit: verified.mergeCommit,
+        at: new Date().toISOString(),
+      },
+    });
+    writeJSON(file, updated);
+    return { recorded: true, entry: updated };
+  });
+}
+
+/**
+ * Ends a registered kickoff and archives its entry.
+ *
+ * Other kickoffs are untouched. Ending one whose PM cannot be reached
+ * is recorded as `taken-over`, which needs explicit authorization, so a failed
+ * liveness query never retires a kickoff that may still be running.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} request - Release request.
+ * @param {string} request.worktreeId - PM worktree whose kickoff ends.
+ * @param {string} request.reason - One of `RELEASE_REASONS`.
+ * @param {boolean} [request.force=false] - Whether a takeover is authorized.
+ * @param {string} [request.callerCwd] - Caller's working directory for director check.
+ * @returns {{released: boolean, reason: string, archived: string, entry: object}} Result.
+ * @throws {Error} When the worktree holds no kickoff, the reason is unknown, or
+ *   a takeover is requested without authorization.
+ */
+export function releaseKickoff(
+  orgFile,
+  { worktreeId, reason, force = false, callerCwd = process.cwd() },
+) {
+  return withRegistry(orgFile, () => {
+    const file = locateEntry(orgFile, worktreeId);
+    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
+    const entry = validateEntry(readJSON(file));
+    assert(
+      RELEASE_REASONS.includes(reason),
+      `Release reason must be one of: ${RELEASE_REASONS.join(", ")}`,
+    );
+    assert(
+      reason !== "taken-over" || force,
+      "A takeover needs explicit authorization; confirm it with the user first",
+    );
+    // Director authority: only the session at the registered checkout path may
+    // release a kickoff. Legacy entries without a director field are allowed
+    // through with a warning to keep existing kickoffs closable.
+    if (!entry.director) {
+      console.warn(
+        "[omt] Warning: kickoff has no director record; kickoff-release proceeds without director verification.",
+      );
+    } else if (!force) {
+      const expected = path.resolve(entry.director.checkoutPath);
+      const actual = path.resolve(callerCwd);
+      assert(
+        actual === expected,
+        `kickoff-release must be run from the director's checkout at ${expected}; ` +
+          `current directory is ${actual}. ` +
+          "Run from the owner project checkout, or pass --force with the director's explicit authorization.",
+      );
+    }
+    // A kickoff whose brief asked for a merge into the project is not complete
+    // until that merge is recorded, or `status` would show the goal delivered.
+    assert(
+      reason !== "completed" ||
+        entry.delivery?.mode !== "local-merge" ||
+        entry.delivered ||
+        force,
+      `Kickoff was to merge into ${entry.delivery?.branch}, which deliver has not recorded; ` +
+        "run deliver first, or pass --force with the user's decision",
+    );
+    const archived = path.join(
+      path.dirname(registryDirectory(orgFile)),
+      "history",
+      `kickoff-${entryName(worktreeId)}-${entry.createdAt.replace(/[:.]/g, "-")}.json`,
+    );
+    writeJSON(archived, {
+      ...entry,
+      releasedAt: new Date().toISOString(),
+      releaseReason: reason,
+    });
+    fs.unlinkSync(file);
+    return { released: true, reason, archived, entry };
+  });
+}
+
 /**
  * Deletes the kickoff's working branches after verifying delivery.
  *
@@ -475,6 +645,8 @@ export function cleanupKickoffBranches({
   entry,
   branches,
   remoteName = "origin",
+  callerCwd = process.cwd(),
+  force = false,
 }) {
   assert(
     typeof projectDir === "string" && projectDir,
@@ -482,6 +654,23 @@ export function cleanupKickoffBranches({
   );
   assert(entry && typeof entry === "object", "registry entry required");
   assert(Array.isArray(branches), "branches must be an array");
+
+  // Authority check: same policy as releaseKickoff.
+  // Entries without a director record predate this feature; allowed with warning.
+  if (!entry.director) {
+    console.warn(
+      "[omt] Warning: kickoff has no director record; kickoff-branch-cleanup proceeds without director verification.",
+    );
+  } else if (!force) {
+    const expected = path.resolve(entry.director.checkoutPath);
+    const actual = path.resolve(callerCwd);
+    assert(
+      actual === expected,
+      `kickoff-branch-cleanup must be run from the director's checkout at ${expected}; ` +
+        `current directory is ${actual}. ` +
+        "Run from the owner project checkout, or pass --force with the director's explicit authorization.",
+    );
+  }
 
   const deleted = [];
   const skipped = [];

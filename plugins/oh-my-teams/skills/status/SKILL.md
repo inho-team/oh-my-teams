@@ -16,6 +16,8 @@ node <runtime> show --org <project>/.omt/organization.json --state <pm-state>
 
 `kickoff-show`가 돌려준 각 항목의 `pm.stateDir`이 두 번째 명령의 `--state` 인자다. `active: false`이면 진행 중인 kickoff가 없다고 알리고 다른 워크트리를 뒤져 실행 상태를 추측하지 않는다. 같은 구독을 쓰는 kickoff가 둘 이상이면 함께 할당량을 소모하고 있다는 점도 표시한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
+이사 보기를 원하면 `director-watch`로 kickoff별 신호·슬롯 점유·여유 메모리·PM liveness를 한 번에 조회한다. `status`는 개별 kickoff 상태를 조회만 하고, `director-watch`는 여러 kickoff를 한 화면에 요약한다.
+
 조직도에는 선언된 역할만 나타난다. 네 역할을 모두 두지 않은 조직에서 생략된 역할을 누락으로 보고하지 않고, 그 역할의 일을 이어받은 역할이 무엇인지 함께 알린다. 설정된 조직도와 실제 실행 상태를 구분해 전달한다. 로컬 하네스 보고서가 없으면 실행 상태는 `unsettled`이며 종료 증거가 아니다. 감독 작업의 실시간 상태는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery로 kickoff가 기록한 실행 파일을 그대로 사용해 해당 Run의 `worker-list`에서 확인한다. 이 세션에서 discovery를 이미 마쳤으면 기록된 실행 파일로 조회만 하고 가이드를 다시 읽지 않는다. `live / unverifiable / exited`를 그대로 보존한다.
 
 workflow가 있으면 `workflow-status`가 돌려주는 현재 `depth`와 이번 실행이 쓰는 `roles`, 그리고 `depthHistory`의 변경 사유를 함께 표시한다. 조직도에 있지만 이번 실행 깊이에 포함되지 않은 역할은 누락이 아니라 이번 실행에서 쓰지 않는 역할로 표시한다.
