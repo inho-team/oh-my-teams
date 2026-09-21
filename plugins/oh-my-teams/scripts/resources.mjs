@@ -7,6 +7,7 @@
  * threshold, and reclaims slots whose owner process has exited.
  */
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +30,64 @@ export const RESOURCE_KINDS = Object.freeze(["test", "worker", "build"]);
  * Overridable via the organization `policy.minFreeMemoryBytes` field.
  */
 export const DEFAULT_MIN_FREE_MEMORY_BYTES = 512 * 1024 * 1024; // 512 MiB
+
+/**
+ * Reads reclaimable pages from `vm_stat` output as bytes.
+ *
+ * macOS keeps otherwise idle memory as file cache, so `os.freemem()` reports
+ * only the free pages and stays far below what a new process can get. Free,
+ * inactive and speculative pages are all handed out without swapping.
+ *
+ * @param {string} text - `vm_stat` output.
+ * @returns {number | null} Available bytes, or null when the text is not vm_stat.
+ */
+export function parseVmStat(text) {
+  const pageSize = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
+  if (!pageSize) return null;
+  let pages = 0;
+  for (const label of ["free", "inactive", "speculative"]) {
+    const match = new RegExp(`^Pages ${label}:\\s+(\\d+)\\.`, "m").exec(text);
+    if (!match) return null;
+    pages += Number(match[1]);
+  }
+  return pages * pageSize;
+}
+
+/**
+ * Reads `MemAvailable` from `/proc/meminfo` output as bytes.
+ *
+ * @param {string} text - `/proc/meminfo` contents.
+ * @returns {number | null} Available bytes, or null when the field is absent.
+ */
+export function parseMeminfo(text) {
+  const kib = /^MemAvailable:\s+(\d+) kB/m.exec(text)?.[1];
+  return kib ? Number(kib) * 1024 : null;
+}
+
+/**
+ * Reports memory a new process can obtain without swapping, in bytes.
+ *
+ * Uses `vm_stat` on macOS and `MemAvailable` on Linux, and falls back to
+ * `os.freemem()` when neither can be read, as on Windows where it is accurate.
+ *
+ * @returns {number} Available bytes.
+ */
+export function availableMemory() {
+  try {
+    if (process.platform === "darwin") {
+      const bytes = parseVmStat(
+        execFileSync("vm_stat", { encoding: "utf8", timeout: 5000 }),
+      );
+      if (bytes !== null) return bytes;
+    } else if (process.platform === "linux") {
+      const bytes = parseMeminfo(fs.readFileSync("/proc/meminfo", "utf8"));
+      if (bytes !== null) return bytes;
+    }
+  } catch {
+    // Fall through to the portable figure.
+  }
+  return os.freemem();
+}
 
 // Directory that holds one JSON file per acquired resource slot.
 function slotsDir(orgFile) {
@@ -97,7 +156,7 @@ export function acquireResource(orgFile, request) {
     `Worktree ${request.worktreeId} is not registered in the kickoff registry`,
   );
 
-  const checkFreeMemory = request.freeMemory ?? (() => os.freemem());
+  const checkFreeMemory = request.freeMemory ?? availableMemory;
   const checkLiveness = request.liveness ?? processLiveness;
   const threshold = minFreeMemory(orgFile);
 
@@ -249,7 +308,7 @@ export async function queryPmLiveness(entry, orcaExecutable, execute = run) {
  * @returns {Promise<object>} Watch report with signals, slots, memory, and kickoffs.
  */
 export async function directorWatch(orgFile, options = {}) {
-  const checkFreeMemory = options.freeMemory ?? (() => os.freemem());
+  const checkFreeMemory = options.freeMemory ?? availableMemory;
   const freeBytes = checkFreeMemory();
   const { signals } = listInbox(orgFile);
   const slots = readSlots(orgFile);

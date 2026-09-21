@@ -20,6 +20,7 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
+import { readLaunches } from "./usage-ledger.mjs";
 
 /** Signal kinds PM may send to the Director. */
 export const SIGNAL_KINDS = Object.freeze([
@@ -173,7 +174,9 @@ export function listInbox(orgFile) {
  * @param {string} request.signalId - Signal ID to reply to.
  * @param {string} request.text - Director's decision text.
  * @param {string} [request.orcaExecutable] - Orca binary for PM notification.
- * @returns {Promise<{replied: boolean, record: object, notified: boolean, notifyError?: string}>}
+ * @param {Function} [request.listTerminals] - Injectable async lister returning
+ *   Orca terminal records (`handle`, `title`, `worktreePath`), for tests.
+ * @returns {Promise<{replied: boolean, record: object, notified: boolean, notifyError?: string, pmTerminal?: string}>}
  * @throws {Error} When the signal is not found or is not in pending status.
  */
 export async function replySignal(orgFile, request) {
@@ -198,26 +201,34 @@ export async function replySignal(orgFile, request) {
     writeJSON(file, updated);
   });
 
-  // PM terminal notification: look up the kickoff entry for this signal's
-  // worktree and attempt delivery if a PM terminal handle is recorded.
-  // The kickoff registry does not store the PM's terminal handle, so delivery
-  // falls back to leaving the reply text in the signal record itself, which
-  // the PM reads through director-inbox. This is reported as notified: false
-  // with a clear reason so callers can distinguish skip from error.
+  // PM terminal notification. The kickoff registry does not store the PM's
+  // terminal handle, because a PM can be relaunched in a new terminal. The
+  // handle comes from the latest PM launch that role-terminal recorded for the
+  // PM worktree, and is used only while Orca still lists that terminal in the
+  // same worktree. A miss leaves the reply in the signal record, which the PM
+  // reads through director-inbox, and is reported as notified: false.
   let notified = false;
   let notifyError;
+  let pmTerminal;
   try {
     const { kickoffs } = listKickoffs(orgFile, updated.worktreeId);
     const entry = kickoffs[0];
-    if (entry?.pm?.terminalHandle) {
-      // PM terminal handle is present; attempt delivery via terminal send.
-      const orcaExec = request.orcaExecutable ?? "orca";
+    const orcaExec = request.orcaExecutable ?? "orca";
+    pmTerminal =
+      entry?.pm?.terminalHandle ??
+      (entry?.pm?.path
+        ? await findPmTerminal(orgFile, entry.pm.path, {
+            orcaExecutable: orcaExec,
+            listTerminals: request.listTerminals,
+          })
+        : undefined);
+    if (pmTerminal) {
       const argv = [
         orcaExec,
         "terminal",
         "send",
         "--terminal",
-        entry.pm.terminalHandle,
+        pmTerminal,
         "--text",
         `[omt reply] ${updated.reply}`,
         "--enter",
@@ -229,8 +240,7 @@ export async function replySignal(orgFile, request) {
         notifyError = result.stderr.trim() || `exit ${result.code}`;
       }
     } else {
-      // No PM terminal handle in registry; PM reads reply via director-inbox.
-      notifyError = "no-pm-terminal-handle";
+      notifyError = "no-pm-terminal-found";
     }
   } catch (error) {
     notifyError = error.message;
@@ -240,8 +250,58 @@ export async function replySignal(orgFile, request) {
     replied: true,
     record: updated,
     notified,
+    ...(pmTerminal ? { pmTerminal } : {}),
     ...(notifyError ? { notifyError } : {}),
   };
+}
+
+// Lists Orca terminals as plain records; any failure yields an empty list so
+// that a missing Orca only skips notification.
+async function orcaTerminals(orcaExecutable) {
+  const result = await run([orcaExecutable, "terminal", "list", "--json"], {
+    timeoutMs: 10000,
+  });
+  if (result.code !== 0) return [];
+  const payload = JSON.parse(result.stdout);
+  const listed = payload?.result?.terminals ?? payload?.terminals ?? payload;
+  return Array.isArray(listed) ? listed : [];
+}
+
+/**
+ * Finds the Orca terminal currently running the PM of a PM worktree.
+ *
+ * The agent inside a terminal rewrites its title, so the `[PM]` tag is not a
+ * reliable marker; the launch ledger records which terminal role-terminal
+ * opened for the PM. The latest such launch wins, and it counts only while
+ * Orca still lists that terminal in the same worktree.
+ *
+ * @param {string} orgFile - Organization JSON path whose ledger is read.
+ * @param {string} pmPath - PM worktree path recorded in the kickoff registry.
+ * @param {object} [options] - `orcaExecutable`, or an injectable `listTerminals`.
+ * @returns {Promise<string | undefined>} The terminal handle, or undefined.
+ */
+export async function findPmTerminal(orgFile, pmPath, options = {}) {
+  const target = path.resolve(pmPath);
+  const launch = readLaunches(orgFile)
+    .filter(
+      (record) =>
+        record.role === "pm" &&
+        typeof record.terminal === "string" &&
+        typeof record.worktreePath === "string" &&
+        path.resolve(record.worktreePath) === target,
+    )
+    .at(-1);
+  if (!launch) return undefined;
+  const list =
+    options.listTerminals ??
+    (() => orcaTerminals(options.orcaExecutable ?? "orca"));
+  const live = (await list()).some(
+    (terminal) =>
+      terminal?.handle === launch.terminal &&
+      typeof terminal.worktreePath === "string" &&
+      path.resolve(terminal.worktreePath) === target,
+  );
+  return live ? launch.terminal : undefined;
 }
 
 /**
