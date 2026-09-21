@@ -144,6 +144,11 @@ export function judgeDelivery({ receipt, screen, text }) {
   return verdict("foreign-input", "box-holds-other-text");
 }
 
+// Only a rendered screen may earn an Enter. When Orca cannot render one it
+// answers with `source: "screen-unavailable"` and returns accumulated output,
+// where repainted lines pile up as fragments; a host that predates the field
+// leaves `source` out. Neither shows what the input box holds, so both count
+// as an empty screen and the judgement falls to `unclear`.
 async function readScreen(orca, terminal, execute) {
   try {
     const read = await runOrcaJson(
@@ -151,7 +156,8 @@ async function readScreen(orca, terminal, execute) {
       ["terminal", "read", "--terminal", terminal, "--screen"],
       { execute },
     );
-    return read.result?.terminal?.tail ?? [];
+    const { source, tail } = read.result?.terminal ?? {};
+    return source === "screen" ? (tail ?? []) : [];
   } catch {
     // An unreadable screen decides nothing; the judgement falls to `unclear`.
     return [];

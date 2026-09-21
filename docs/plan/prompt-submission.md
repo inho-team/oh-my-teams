@@ -56,4 +56,5 @@
 - 화면으로 입력 상자를 볼 수 없는 agent 터미널에서는 `unsubmitted`를 판정할 수 없다(실험 10). 그 경우는 `unclear`가 되어 `--retry-request`로만 확인하고 Enter를 보내지 않는다. Enter가 실제로 삼켜졌다면 사람이 확인해야 한다.
 - 입력이 입력 상자에서 사라졌고 같은 문장이 기록에 이미 있으면, 이전에 보낸 같은 문장과 구별하지 못하고 `already-started`로 판정할 수 있다.
 - Enter를 보낸 뒤 `--retry-request` 재관측이 그 Enter로 시작된 턴을 `turn_started`로 잡는지는 관측하지 못했다. 화면 판정이 함께 쓰이므로 입력이 사라지면 `already-started`로 결정된다.
+- `terminal read --screen`이 `source: "screen-unavailable"`로 누적 출력을 돌려주는 경우는 이 환경에서 재현하지 못했다. `--help`의 설명(반복해 그린 줄이 조각으로 쌓인다)을 근거로, `source`가 `screen`이 아니거나 응답에 없으면 화면을 비어 있는 것으로 취급하고 `unclear`로 판정해 Enter를 보내지 않는다. `role-terminal`의 화면 읽기는 이 확인을 아직 하지 않는다.
 - `clearRoleTerminal`의 `/clear` 전송은 이번에 바꾸지 않았다.

@@ -171,7 +171,7 @@ workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 
 `<orca> terminal create --command`를 직접 호출해 역할 터미널을 열지 않는다. Orca는 명령을 새 셸의 프롬프트에 입력만 하고 실행하지 않는 경우가 잦으며, 이 상태에서 보낸 브리프나 작업은 agent가 아니라 셸에 입력된다. `role-terminal`은 다음을 한 번에 수행한다.
 
 1. `role-command`와 같은 명령으로 터미널을 만든다. `scripts/launch-matrix.mjs`의 호환성 표가 `supervised-terminal`을 돌려주는 Agy 역할 중 POSIX 셸에서는 `stty cols 44`를 앞에 붙인다. Windows에서는 폭 조정을 생략한다(`role-terminal.mjs`의 폭 조정 조건; `docs/plan/agy-terminal-path.md`의 「설계」 7절).
-2. 짧게 `tui-idle`을 기다린 뒤 화면을 읽고, 마지막 줄에 명령 전체가 프롬프트에 입력된 채 남아 있으면 Enter를 한 번 보낸다. 셸이 명령을 아직 조금씩 에코하는 중이어서 화면에 명령의 앞부분만 보이면 에코가 끝나기를 기다리고, 잘린 줄에는 Enter를 보내지 않는다. 결과의 `submission`은 Orca가 스스로 실행했으면 `orca`, Enter를 보냈으면 `enter-sent`다. 시작된 agent에 입력이 들어가지 않도록 Enter는 두 번 보내지 않는다.
+2. 짧게 `tui-idle`을 기다린 뒤 화면을 읽고, 마지막 줄에 명령 전체가 프롬프트에 입력된 채 남아 있으면 Enter를 한 번 보낸다. 화면에 명령의 앞부분만 보이면 셸이 아직 에코하는 중일 수 있으므로 에코가 끝나기를 기다리고, 잘린 줄에는 Enter를 보내지 않는다. 결과의 `submission`은 Orca가 스스로 실행했으면 `orca`, Enter를 보냈으면 `enter-sent`다. 시작된 agent에 입력이 들어가지 않도록 Enter는 두 번 보내지 않는다.
 3. agent가 명령 아래에 자기 화면을 그릴 때까지 화면을 다시 읽는다. Orca의 `tui-idle`은 명령을 붙든 채 멈춘 셸에서도 충족되므로 준비 여부를 판단하는 근거로 쓰지 않는다. 화면 너비 때문에 명령이 여러 줄로 나뉘어도 같은 명령으로 인식한다. 명령의 앞부분만 에코된 화면은 시작된 agent로 보지 않는다. 이전 구현은 이런 화면을 시작으로 판정해서, 에코가 느린 셸에서는 명령이 입력줄에 남은 채 `ready: true`를 돌려줄 수 있었다(`docs/plan/prompt-submission.md`).
 4. Agy는 처음 여는 폴더마다 폴더 신뢰 질문("Do you trust the contents of this project?")을 띄우며, 권한 우회 플래그로도 건너뛰지 않는다. 역할의 워크트리는 사용자 저장소에서 이 실행을 위해 만든 것이고 역할은 이미 승인 없이 도구를 실행하므로, "Yes, I trust this folder"가 선택된 경우에만 Enter를 한 번 보내 신뢰한다. 결과의 `trust`는 질문이 없었으면 `not-asked`, 답했으면 `accepted`다. 신뢰한 폴더는 Agy 설정의 `trustedWorkspaces`에 남는다.
 5. 신뢰 질문에 답한 터미널은 버퍼에 질문 문구가 남는다. Orca의 시작 판정기는 이 문구를 찾아 `worker-start --terminal`을 `agent-trust-workspace`로 차단하므로, 답한 뒤 질문이 화면에서 사라졌으면 그 터미널을 `terminal close`로 닫고 같은 워크트리에서 같은 명령으로 한 번만 다시 연다. 이때 신뢰는 이미 기록되어 있으므로 새 터미널에는 질문이 나오지 않는다. 결과의 `terminal`은 다시 연 터미널이고, `trust`는 `accepted`를 유지하며, `reopened`에 닫은 터미널(`closedTerminal`)과 이유가 남는다. 다시 열지 않았으면 `reopened`는 `null`이다. 다시 연 터미널에서도 질문이 나오면 신뢰가 기록되지 않은 것이므로 답하지도, 또 닫지도 않고 차단으로 돌려준다. 첫 터미널을 닫지 못했으면 새 터미널을 열지 않고 `closeError`에 오류 원문을 담아 차단으로 돌려준다.
@@ -185,14 +185,14 @@ workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 
 `scripts/prompt-submission.mjs`의 `deliverPrompt`가 전달을 다음 순서로 확인하며, `director-signal`의 이사 알림과 `director-reply`의 PM 알림이 이를 쓴다. 손으로 보낼 때에도 같은 순서를 따른다.
 
 1. `--wait-submit <초>`를 붙여 텍스트를 한 번만 보낸다. `stages`에 `turn_started`가 있으면 제출된 것이다(`submitted`).
-2. 없으면 화면을 읽고 입력 상자를 본다. 입력 상자는 화면 맨 아래에서 `❯`, `›`, `>`로 시작하는 줄이다.
+2. 없으면 `terminal read --screen`으로 화면을 읽고 입력 상자를 본다. 입력 상자는 화면 맨 아래에서 `❯`, `›`, `>`로 시작하는 줄이다. 응답의 `source`가 `screen`일 때에만 그 화면을 믿는다. Orca가 화면을 그리지 못하면 `screen-unavailable`과 함께 누적 출력을 돌려주는데, 여기에는 반복해 그린 줄이 조각으로 쌓여 있어서 입력 상자의 내용을 알 수 없다. `source`가 `screen-unavailable`이거나 응답에 없으면 빈 화면으로 취급하고 `unclear`로 판정한다.
 
 | 영수증과 화면 | 판정 | 동작 |
 |---|---|---|
 | 입력 상자에 승인한 텍스트만 남아 있다 | `unsubmitted` | Enter를 한 번 보낸다 |
 | 입력 상자가 비었고 텍스트가 기록에 보인다 | `already-started` | 아무것도 보내지 않는다 |
 | 입력 상자에 다른 내용이 있다 | `foreign-input` | 아무것도 보내지 않는다. Enter가 그 내용을 제출하기 때문이다 |
-| 화면이 판정하지 못한다 | `unclear` | 아래 3번 |
+| 화면이 판정하지 못한다(입력 상자가 없거나, `source`가 `screen`이 아니다) | `unclear` | 아래 3번 |
 | Orca가 거부하거나 응답하지 않았다 | `failed` | 오류 원문을 남기고 다시 보내지 않는다 |
 
 3. `unclear`이면 같은 명령에 영수증의 `--retry-request <requestId>`를 붙여 한 번 다시 실행하고 판정한다. 같은 요청 ID는 관측만 다시 하고 텍스트를 다시 입력하지 않는다. 셸 터미널에서 실제 ID로 반복했을 때 `replayed: true`가 오고 화면에 명령이 한 번만 남는 것을 확인했다. Claude 터미널에서는 `input_accepted`로 끝난 요청을 이 방법으로 다시 관측하자 `turn_started`가 추가되었다. 그래도 결정되지 않으면 Enter 없이 `unclear`와 `requestId`를 보고한다.

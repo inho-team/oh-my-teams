@@ -935,7 +935,10 @@ function orcaNotify(answers, screen = []) {
       const tail = typeof screen === "function" ? screen(calls) : screen;
       return {
         code: 0,
-        stdout: JSON.stringify({ ok: true, result: { terminal: { tail } } }),
+        stdout: JSON.stringify({
+          ok: true,
+          result: { terminal: { tail, source: "screen" } },
+        }),
       };
     }
     if (args[args.indexOf("--text") + 1] === "") {

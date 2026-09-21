@@ -481,10 +481,13 @@ export function commandPending(lines, command) {
 /**
  * Reports whether a screen shows the launch command only partly echoed.
  *
- * Orca types the command into the shell, and a slow shell echoes it a piece at
- * a time. A cut-off line is neither a whole command waiting for Enter nor a
- * started agent: Enter now would run the fragment, and calling it started
- * returned `ready` while the rest of the command was still landing.
+ * A cut-off line is neither a whole command waiting for Enter nor a started
+ * agent: Enter now would run the fragment. The previous `agentStarted` judged
+ * such a line as started, which was confirmed by feeding it every prefix of a
+ * command (docs/plan/prompt-submission.md, experiment 11). Whether a shell
+ * really echoes a command in pieces, and whether that was the path behind the
+ * `ready: true` seen with the command still in the input line, was not
+ * reproduced: Orca wrote the command in one piece in every trial.
  *
  * @param {string[]} lines - Screen lines, oldest first.
  * @param {string} command - Shell command the terminal was created with.

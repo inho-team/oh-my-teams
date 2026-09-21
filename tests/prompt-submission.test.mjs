@@ -156,8 +156,15 @@ test("a send receipt is read without guessing missing fields", () => {
 
 // Plays Orca's send and read. `sends` and `screens` are consumed in order and
 // the last one repeats; a send that is a `--retry-request` replay is answered
-// from `replays`.
-function fakeOrca({ sends, replays = [], screens = [[]], failWith }) {
+// from `replays`. A read reports `source` like Orca does; `null` leaves the
+// field out, as a host that predates it would.
+function fakeOrca({
+  sends,
+  replays = [],
+  screens = [[]],
+  failWith,
+  source = "screen",
+}) {
   const calls = [];
   const queue = {
     sends: [...sends],
@@ -189,7 +196,12 @@ function fakeOrca({ sends, replays = [], screens = [[]], failWith }) {
         code: 0,
         stdout: JSON.stringify({
           ok: true,
-          result: { terminal: { tail: next(queue.screens) } },
+          result: {
+            terminal: {
+              tail: next(queue.screens),
+              ...(source === null ? {} : { source }),
+            },
+          },
         }),
       };
     }
@@ -348,4 +360,53 @@ test("an Orca failure keeps its own text and sends nothing more", async () => {
   assert.equal(result.delivered, false);
   assert.match(result.error, /terminal_not_writable: pane is closed/);
   assert.equal(orca.calls.length, 1);
+});
+
+test("a screen Orca could not render never earns an Enter", async () => {
+  // The tail looks exactly like an unsubmitted prompt, and would get an Enter
+  // from a rendered screen. Whatever else `source` says, it is not the screen.
+  for (const source of ["screen-unavailable", "stream", null]) {
+    const orca = fakeOrca({
+      sends: [["input_accepted"]],
+      replays: [["input_accepted"]],
+      screens: [boxScreen(TEXT)],
+      source,
+    });
+    const result = await deliver(orca);
+    assert.equal(result.outcome, "unclear", String(source));
+    assert.equal(result.reason, "no-input-box-on-screen", String(source));
+    assert.equal(result.delivered, false);
+    assert.equal(result.enterSent, false);
+    assert.equal(orca.enters().length, 0);
+    // The request is still observed again, and the text is typed only once.
+    assert.equal(orca.textSends().length, 1);
+    assert.equal(orca.replayed().length, 1);
+  }
+});
+
+test("accumulated output of an already submitted prompt gets no Enter", async () => {
+  // Repainted lines pile up: the box line that once held the text stays in the
+  // stream tail after the prompt left it and the turn began.
+  const orca = fakeOrca({
+    sends: [["input_accepted"]],
+    replays: [["input_accepted"]],
+    screens: [[`❯ ${TEXT}`, "✻ Working…"]],
+    source: "screen-unavailable",
+  });
+  const result = await deliver(orca);
+  assert.equal(result.outcome, "unclear");
+  assert.equal(orca.enters().length, 0);
+  assert.equal(orca.textSends().length, 1);
+});
+
+test("a rendered screen still decides an Enter", async () => {
+  const orca = fakeOrca({
+    sends: [["input_accepted"]],
+    replays: [["input_accepted", "turn_started"]],
+    screens: [boxScreen(TEXT), boxScreen(TEXT), boxScreen("")],
+    source: "screen",
+  });
+  const result = await deliver(orca);
+  assert.equal(result.enterSent, true);
+  assert.equal(orca.enters().length, 1);
 });

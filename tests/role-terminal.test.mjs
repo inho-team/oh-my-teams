@@ -214,9 +214,10 @@ test("a command left at the prompt is told apart from a started agent", () => {
 });
 
 test("a command still being echoed is neither pending nor a started agent", async () => {
-  // Observed on Orca 1.4.206: typing a command into a fresh shell one piece at a
-  // time made every cut-off line read as `started`, so a slow echo ended in
-  // ready: true while the whole command was still landing at the prompt.
+  // Confirmed against the previous code by feeding it every prefix of the
+  // command: each cut-off line read as `started`. Not confirmed: that a real
+  // shell echoes this way, or that it was the path of the incident where
+  // ready: true came back with the command still in the input line.
   const command =
     "claude --dangerously-skip-permissions --model opus[1m] --autocompact 250k";
   const cutOffs = [
