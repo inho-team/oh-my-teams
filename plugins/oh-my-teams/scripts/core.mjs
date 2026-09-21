@@ -26,6 +26,27 @@ import {
  */
 export const ROLES = ["pm", "pl", "senior", "junior", "intern"];
 
+/**
+ * The top-level role that sits above PM in the full seniority ladder.
+ *
+ * A director is the host session that declared the kickoff: the sole channel
+ * between the user and the team, the final authority for merges and close, and
+ * the supervisor of every PM. Director is never launched as a supervised worker
+ * or role terminal, so it does not appear in `ROLES` and is not bound in the
+ * organization's `roles` map.
+ */
+export const DIRECTOR_ROLE = "director";
+
+/**
+ * Full seniority ladder from most to least senior, including the director.
+ *
+ * `ROLES` lists only the roles an organization may bind and launch as workers.
+ * `ROLE_LADDER` adds the director so that authority checks and header
+ * generation can express "above PM" without mixing director into the folding
+ * or depth logic that `ROLES` drives.
+ */
+export const ROLE_LADDER = Object.freeze([DIRECTOR_ROLE, ...ROLES]);
+
 /** The one role every organization must declare, and the root of its graph. */
 export const ROOT_ROLE = "pm";
 

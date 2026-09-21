@@ -21,7 +21,7 @@ const FINDING_STATUSES = ["open", "resolved", "accepted-risk"];
 // instead of another role rewriting the review into this shape.
 const FINDING_FORMAT =
   "Each finding is {id: lowercase letters, digits and hyphens; status: open|resolved|accepted-risk; " +
-  "description}; a resolved finding adds resolution, an accepted-risk finding adds authority (pm|user) " +
+  "description}; a resolved finding adds resolution, an accepted-risk finding adds authority (pm|user|director) " +
   "and reason. See examples/review.json and examples/review.changes-requested.json.";
 
 const reviewFile = (stateDir, id) =>
@@ -65,10 +65,10 @@ function validateFinding(finding, index) {
   }
   if (finding.status === "accepted-risk") {
     check(
-      ["pm", "user"].includes(finding.authority) &&
+      ["pm", "user", "director"].includes(finding.authority) &&
         typeof finding.reason === "string" &&
         finding.reason.trim(),
-      `Accepted risk needs PM/user authority and reason: ${finding.id}`,
+      `Accepted risk needs PM/user/director authority and reason: ${finding.id}`,
     );
   }
 }

@@ -325,7 +325,7 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
           },
         ],
       },
-      /Accepted risk needs PM\/user authority/,
+      /Accepted risk needs PM\/user\/director authority/,
     ],
     [
       {

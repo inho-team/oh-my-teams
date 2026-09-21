@@ -22,7 +22,12 @@ import {
   roleSpec,
 } from "./role-launch.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
-import { assertNotKickoffOwner, deliverKickoff } from "./delivery.mjs";
+import {
+  assertNotKickoffOwner,
+  deliverKickoff,
+  assertDirectorAuthority,
+  checkCloseReady,
+} from "./delivery.mjs";
 import { startDashboard } from "./dashboard.mjs";
 import {
   answerHeadless,
@@ -87,11 +92,27 @@ import {
   cleanupKickoffBranches,
   listKickoffs,
   ownerProject,
+  recordDelivery,
   registerKickoff,
   releaseKickoff,
 } from "./kickoff-registry.mjs";
 import { recordLaunch } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
+import {
+  acknowledgeSignal,
+  listInbox,
+  notifyDirector,
+  readSignal,
+  replySignal,
+  sendSignal,
+  SIGNAL_KINDS,
+} from "./director.mjs";
+import {
+  acquireResource,
+  directorWatch,
+  releaseResource,
+  RESOURCE_KINDS,
+} from "./resources.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
@@ -110,10 +131,16 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                          --branches BRANCH[,BRANCH...] [--remote NAME]
                          (verifies delivery then deletes remote, local, and
                          reclaimed sub-worktree branches; close only, not disband)
+  kickoff-check-close-ready --org FILE --worktree ID --head SHA
+                         (checks that the PM's close-ready signal exists and
+                         matches HEAD; for pull-request kickoffs before PR merge)
+  kickoff-merge-record --org FILE --worktree ID --head SHA --merge-commit SHA
+                         (records a PR merge into the registry; director only;
+                         enables kickoff-branch-cleanup for pull-request kickoffs)
   deliver --org FILE --worktree ID --source DIR --head SHA
           --evidence FILE --task TRUSTED_TASK [--report FILE --state DIR]
           (merges a verified kickoff result into the branch its claim recorded;
-          run by the declaring session in close)
+          run by the director in close)
   prepare --org FILE --task FILE --repo DIR --name NAME [--orca EXECUTABLE]
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
@@ -186,6 +213,22 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   quota-record --snapshot FILE --state DIR
   quota-compare --before FILE --after FILE
   aggregate --expected id,id --report FILE [--report FILE ...]
+  director-signal --org FILE --worktree ID --kind decision|close-ready|blocked|progress
+                  --text TEXT [--head SHA --source DIR] [--orca EXECUTABLE]
+                  (writes a structured record to .omt/director/inbox/; notifies
+                  the director terminal when the registry entry names one)
+  director-inbox --org FILE
+                 (lists pending signals in the director's inbox)
+  director-reply --org FILE --signal ID --text TEXT [--orca EXECUTABLE]
+                 (records the director's decision and attempts PM notification)
+  director-ack --org FILE --signal ID
+               (marks a signal as acknowledged without a text reply)
+  resource-acquire --org FILE --worktree ID --kind test|worker|build [--note TEXT] [--owner-pid PID]
+                   (acquires a resource slot; --owner-pid sets the long-lived owner process, defaults to current PID)
+  resource-release --org FILE --slot ID
+                   (releases an acquired resource slot)
+  director-watch --org FILE [--orca EXECUTABLE]
+                 (shows pending signals, slot usage, free memory, and PM liveness per kickoff)
 
 Existing organizations are reused; init never asks for subscriptions again.
 No command automatically pushes, merges, deploys, publishes, or deletes.`;
@@ -202,7 +245,9 @@ export const ALLOWED_OPTIONS = {
   "kickoff-show": ["org", "worktree"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
-  "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote"],
+  "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
+  "kickoff-check-close-ready": ["org", "worktree", "head"],
+  "kickoff-merge-record": ["org", "worktree", "head", "merge-commit", "force"],
   deliver: [
     "org",
     "worktree",
@@ -316,6 +361,21 @@ export const ALLOWED_OPTIONS = {
   "incident-status": ["state"],
   "quota-record": ["snapshot", "state"],
   "quota-compare": ["before", "after"],
+  "director-signal": [
+    "org",
+    "worktree",
+    "kind",
+    "text",
+    "head",
+    "source",
+    "orca",
+  ],
+  "director-inbox": ["org"],
+  "director-reply": ["org", "signal", "text", "orca"],
+  "director-ack": ["org", "signal"],
+  "resource-acquire": ["org", "worktree", "kind", "note", "owner-pid"],
+  "resource-release": ["org", "slot"],
+  "director-watch": ["org", "orca"],
 };
 
 /** Options each subcommand must receive, keyed by command name. */
@@ -331,6 +391,8 @@ export const REQUIRED_OPTIONS = {
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
+  "kickoff-check-close-ready": ["org", "worktree", "head"],
+  "kickoff-merge-record": ["org", "worktree", "head", "merge-commit"],
   deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
   "prepare-input": ["org", "task", "repo", "output"],
@@ -387,6 +449,13 @@ export const REQUIRED_OPTIONS = {
   "incident-status": ["state"],
   "quota-record": ["snapshot", "state"],
   "quota-compare": ["before", "after"],
+  "director-signal": ["org", "worktree", "kind", "text"],
+  "director-inbox": ["org"],
+  "director-reply": ["org", "signal", "text"],
+  "director-ack": ["org", "signal"],
+  "resource-acquire": ["org", "worktree", "kind"],
+  "resource-release": ["org", "slot"],
+  "director-watch": ["org"],
 };
 
 /**
@@ -746,7 +815,7 @@ async function injectFallback(args, org, run, launch, refusal) {
   const approval = String(args["inject-fallback"]).trim();
   assert(
     approval.length >= 10,
-    "--inject-fallback takes the user's approval in words, e.g. who approved it and why",
+    "--inject-fallback takes the director's approval in words, e.g. who approved it and why",
   );
   const injected = await injectTask(path.resolve(args.repo), {
     task: args.task,
@@ -798,6 +867,20 @@ function launchContext(args) {
   );
   const stateDir = path.resolve(args.state);
   const snapshot = readWorkflow(stateDir, args["workflow-id"]);
+  // Read the kickoff registry to find the director identifier for this run.
+  // The PM worktree's stateDir matches pm.stateDir in the registry entry.
+  // A missing registry, an absent entry, or any read error is non-fatal:
+  // existing kickoffs without a director record must continue to work.
+  let director;
+  try {
+    const { kickoffs } = listKickoffs(path.resolve(args.org));
+    const entry = kickoffs.find(
+      (k) => path.resolve(k.pm.stateDir) === stateDir,
+    );
+    if (entry?.director) director = entry.director;
+  } catch {
+    // Registry unreadable: proceed without director (non-fatal).
+  }
   return {
     org: snapshot.organization,
     run: {
@@ -806,6 +889,7 @@ function launchContext(args) {
       workflowId: args["workflow-id"],
       stateDir,
       workflowState: snapshot.state,
+      ...(director ? { director } : {}),
     },
   };
 }
@@ -945,6 +1029,32 @@ async function executeCommand(args) {
           .map((b) => b.trim())
           .filter(Boolean),
         remoteName: args.remote ?? "origin",
+        callerCwd: process.cwd(),
+        force: args.force ?? false,
+      });
+    }
+    case "kickoff-check-close-ready":
+      return checkCloseReady({
+        orgFile: args.org,
+        worktreeId: args.worktree,
+        head: args.head,
+      });
+    case "kickoff-merge-record": {
+      const [entry] = listKickoffs(args.org, args.worktree).kickoffs;
+      assert(
+        entry,
+        `Worktree ${args.worktree} supervises no registered kickoff`,
+      );
+      assertDirectorAuthority(
+        entry,
+        process.cwd(),
+        "kickoff-merge-record",
+        Boolean(args.force),
+      );
+      return recordDelivery(args.org, {
+        worktreeId: args.worktree,
+        head: args.head,
+        mergeCommit: args["merge-commit"],
       });
     }
     case "prepare":
@@ -1297,6 +1407,38 @@ async function executeCommand(args) {
         })),
         args.expected.split(","),
       );
+    case "director-signal": {
+      const { signaled, id, entry, record } = sendSignal(args.org, {
+        worktreeId: args.worktree,
+        kind: args.kind,
+        text: args.text,
+        head: args.head,
+        source: args.source,
+      });
+      const notification = await notifyDirector(entry, record, args.orca);
+      return { signaled, id, ...notification };
+    }
+    case "director-inbox":
+      return listInbox(args.org);
+    case "director-reply":
+      return replySignal(args.org, {
+        signalId: args.signal,
+        text: args.text,
+        orcaExecutable: args.orca,
+      });
+    case "director-ack":
+      return acknowledgeSignal(args.org, args.signal);
+    case "resource-acquire":
+      return acquireResource(args.org, {
+        worktreeId: args.worktree,
+        kind: args.kind,
+        note: args.note,
+        ownerPid: args["owner-pid"] ? Number(args["owner-pid"]) : undefined,
+      });
+    case "resource-release":
+      return releaseResource(args.org, args.slot);
+    case "director-watch":
+      return directorWatch(args.org, { orcaExecutable: args.orca });
     default:
       throw new Error(`Unknown command: ${args.command}`);
   }
