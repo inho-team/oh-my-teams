@@ -104,6 +104,7 @@ export async function doctor(root) {
   }
   if (
     active.fingerprint !== paths.fingerprint ||
+    active.version !== paths.version ||
     !fs.existsSync(paths.runtime)
   ) {
     checks.push(
@@ -111,6 +112,32 @@ export async function doctor(root) {
         "runtime-install",
         "fail",
         "Active runtime does not match the manifest lock fingerprint",
+      ),
+    );
+    return runtimeResult("runtime-doctor", "needs-install", paths, checks);
+  }
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(paths.runtime, "manifest.json"), "utf8"),
+    );
+    if (
+      manifest.fingerprint !== paths.fingerprint ||
+      manifest.version !== paths.version ||
+      !fs
+        .readFileSync(path.join(paths.runtime, "package.json"))
+        .equals(paths.manifest) ||
+      !fs
+        .readFileSync(path.join(paths.runtime, "package-lock.json"))
+        .equals(paths.lockfile)
+    ) {
+      throw new Error("runtime artifacts do not match active identity");
+    }
+  } catch {
+    checks.push(
+      check(
+        "runtime-integrity",
+        "fail",
+        "Runtime manifest or lockfile does not match the active identity",
       ),
     );
     return runtimeResult("runtime-doctor", "needs-install", paths, checks);
