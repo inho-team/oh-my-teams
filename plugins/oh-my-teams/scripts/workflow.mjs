@@ -197,7 +197,9 @@ function createInitialState(request, org, tasks) {
   const selectionByTask = Object.fromEntries(
     request.tasks.map((item, index) => {
       const automatic = item.role === undefined;
-      const delegated = automatic ? selectDelegatedRole(tasks[index]) : null;
+      const delegated = automatic
+        ? selectDelegatedRole(tasks[index], org.policy.delegation)
+        : null;
       const selection = automatic
         ? {
             requestedRole: delegated.role,

@@ -1121,18 +1121,27 @@ async function executeCommand(args) {
         ...readJSON(args.observation),
         policy: supervisionPolicy(validateOrg(readJSON(args.org))),
       });
-    case "work":
-      return work(
-        path.resolve(args.repo),
-        readJSON(args.org),
-        readJSON(args.task),
-        {
-          role: args.role || "intern",
-          stateDir: path.resolve(args.state),
-          workflowId: args["workflow-id"],
-          attemptId: args["attempt-id"],
-        },
-      );
+    case "work": {
+      const task = readJSON(args.task);
+      const snapshot = args["workflow-id"]
+        ? readWorkflow(path.resolve(args.state), args["workflow-id"])
+        : null;
+      const selected = snapshot?.state.tasks[task.id];
+      if (snapshot) {
+        assert(selected, "Workflow does not contain this task");
+        assert(
+          !args.role || args.role === selected.role,
+          "--role conflicts with the workflow task's selected role",
+        );
+      }
+      return work(path.resolve(args.repo), readJSON(args.org), task, {
+        role: args.role ?? selected?.role ?? "intern",
+        stateDir: path.resolve(args.state),
+        workflowId: args["workflow-id"],
+        attemptId: args["attempt-id"],
+        selectionReason: selected?.selection?.reason,
+      });
+    }
     case "draft":
       return draft(
         path.resolve(args.repo),

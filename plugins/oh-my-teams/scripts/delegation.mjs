@@ -45,9 +45,17 @@ export function validateDelegationMetadata(task) {
  * bypasses this policy, so a user can always choose a role explicitly.
  *
  * @param {object} task - Validated task v2 contract.
+ * @param {object} [policy] - Organization delegation policy.
  * @returns {{role: string, reason: string}} Conservative requested role and durable reason.
  */
-export function selectDelegatedRole(task) {
+export function selectDelegatedRole(
+  task,
+  policy = { strategy: "intern-first" },
+) {
+  assert(
+    policy?.strategy === "intern-first",
+    "Delegation strategy must be intern-first",
+  );
   validateDelegationMetadata(task);
   const metadata = task.delegation;
   if (!metadata) return { role: "junior", reason: "metadata-missing" };

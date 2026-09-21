@@ -382,6 +382,12 @@ export async function work(
     runId,
     runDir,
   );
+  report.selection = persistedSelection ?? {
+    source: "direct",
+    reason: reportSelectionReason,
+    requestedRole,
+    selectedRole: role,
+  };
   report.modelPolicy = org.modelPolicy ?? null;
   report.workflow = workflowId ? { id: workflowId, attemptId } : null;
   report.slot = { id: lease.slot, reclaimed: lease.reclaimed };
