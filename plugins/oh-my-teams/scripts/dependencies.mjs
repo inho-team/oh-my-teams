@@ -6,7 +6,13 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { assert, run, withAsyncFileLock, writeJSON } from "./core.mjs";
+import {
+  assert,
+  ownerHasExited,
+  run,
+  withAsyncFileLock,
+  writeJSON,
+} from "./core.mjs";
 import { discoverOrcaRuntime } from "./orca-adapter.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -295,7 +301,19 @@ async function freePort() {
   return port;
 }
 
-function isolatedHealthEnvironment(home, codexHome) {
+/**
+ * Creates an isolated environment for health checks that removes API credentials
+ * and redirects home directories to temporary locations.
+ *
+ * On Windows, HOME is derived from HOMEDRIVE + HOMEPATH (e.g. C: + \Users\Alice).
+ * On macOS and Linux, HOME is standalone. Windows also uses USERPROFILE as the
+ * modern home directory variable. This function isolates all of them.
+ *
+ * @param {string} home - Temporary home directory for general use.
+ * @param {string} codexHome - Temporary Codex configuration directory.
+ * @returns {object} Environment object with isolated paths and removed credentials.
+ */
+export function isolatedHealthEnvironment(home, codexHome) {
   const environment = { ...process.env };
   for (const key of Object.keys(environment)) {
     if (
@@ -303,18 +321,46 @@ function isolatedHealthEnvironment(home, codexHome) {
         key,
       ) ||
       key === "OPENCODEX_HOME" ||
-      key === "CODEX_HOME"
+      key === "CODEX_HOME" ||
+      key === "HOME" ||
+      key === "USERPROFILE" ||
+      key === "HOMEDRIVE" ||
+      key === "HOMEPATH"
     ) {
       delete environment[key];
     }
   }
-  return { ...environment, OPENCODEX_HOME: home, CODEX_HOME: codexHome };
+  const isolated = {
+    ...environment,
+    OPENCODEX_HOME: home,
+    CODEX_HOME: codexHome,
+    HOME: home,
+    USERPROFILE: home,
+  };
+  if (process.platform === "win32") {
+    isolated.HOMEDRIVE = path.parse(home).root;
+    isolated.HOMEPATH = path.relative(isolated.HOMEDRIVE, home);
+  }
+  return isolated;
 }
 
-async function healthCheck(ocx, staging) {
+/**
+ * Spawns the runtime inside staging to verify it can start, health-check, and
+ * isolate its home directories outside the staging directory so they are not
+ * promoted to the active runtime tree.
+ *
+ * @param {string} ocx - Path to the ocx executable.
+ * @param {string} staging - Staging directory where npm packages are installed.
+ * @param {string} healthBase - Base directory for health check temporary homes.
+ */
+async function healthCheck(ocx, staging, healthBase) {
   const port = await freePort();
-  const home = path.join(staging, "health-home");
-  const codexHome = path.join(staging, "health-codex-home");
+  const healthDir = path.join(
+    healthBase,
+    `health-${crypto.randomUUID().slice(0, 8)}`,
+  );
+  const home = path.join(healthDir, "home");
+  const codexHome = path.join(healthDir, "codex");
   fs.mkdirSync(home, { recursive: true, mode: 0o700 });
   fs.mkdirSync(codexHome, { recursive: true, mode: 0o700 });
   fs.writeFileSync(
@@ -356,6 +402,7 @@ async function healthCheck(ocx, staging) {
         new Promise((resolve) => setTimeout(resolve, 3000)),
       ]);
     }
+    fs.rmSync(healthDir, { recursive: true, force: true });
   }
 }
 
@@ -419,7 +466,7 @@ export async function installRuntime(root, options = {}) {
           timeoutMs: 30000,
         });
         assert(bunVersion.code === 0, "runtime-bun-unavailable");
-        await healthCheck(ocx, staging);
+        await healthCheck(ocx, staging, paths.base);
         writeJSON(path.join(staging, "manifest.json"), {
           fingerprint: paths.fingerprint,
           version: paths.version,
@@ -452,6 +499,116 @@ export async function installRuntime(root, options = {}) {
     },
     "runtime-install-locked",
   );
+}
+
+/**
+ * Removes failed runtime directories and stale staging directories.
+ *
+ * Nothing is removed unless its real path, with every link followed, is a direct
+ * child of the real `runtimes` or `staging` directory inside the ownership
+ * prefix. The check runs when candidates are listed and again just before each
+ * removal, so a link can neither point a removal outside the prefix nor be
+ * swapped in between. The runtime an `active.json` points to, symbolic links,
+ * and staging directories whose install lock is held by a live process are kept
+ * and reported in `skipped`. `runtimes` and `staging` are handled independently,
+ * so a missing one never hides the other.
+ *
+ * @param {string} root - Owned runtime root.
+ * @param {{dryRun?: boolean}} [options] - Prune options; a dry run only lists.
+ * @returns {object} Prune result; `deleted` lists what was (or with `dryRun`, would be) removed.
+ */
+export async function pruneRuntimes(root, options = {}) {
+  const paths = runtimePaths(root);
+  const result = {
+    command: "runtime-prune",
+    dryRun: Boolean(options.dryRun),
+    deleted: [],
+    skipped: [],
+  };
+  const skip = (target, reason) =>
+    result.skipped.push({ path: target, reason });
+  let realBase;
+  try {
+    realBase = fs.realpathSync(paths.base);
+    const ownedBase = path.join(
+      fs.realpathSync(path.dirname(paths.base)),
+      path.basename(paths.base),
+    );
+    if (realBase !== ownedBase) {
+      skip(paths.base, "the ownership prefix is a link to another location");
+      return result;
+    }
+  } catch {
+    return result;
+  }
+  let activeName = null;
+  try {
+    const { fingerprint } = JSON.parse(fs.readFileSync(paths.active, "utf8"));
+    activeName = String(fingerprint).replace(/^sha256:/, "");
+  } catch {}
+  const lockHeld = (name) => {
+    const own = /^([a-f0-9]{64})-/.exec(name)?.[1];
+    const dir = path.dirname(paths.lock);
+    let locks = [];
+    try {
+      locks = fs.readdirSync(dir).filter((file) => file.endsWith(".lock"));
+    } catch {}
+    // A name that carries no fingerprint cannot be tied to one lock.
+    return locks
+      .filter((file) => !own || file === `${own}.lock`)
+      .some((file) => !ownerHasExited(path.join(dir, file)));
+  };
+  const candidates = [];
+  const scan = (folder, accept) => {
+    const dir = path.join(paths.base, folder);
+    let realDir;
+    try {
+      realDir = fs.realpathSync(dir);
+    } catch {
+      return;
+    }
+    if (realDir !== path.join(realBase, folder)) {
+      skip(dir, "not a real directory inside the ownership prefix");
+      return;
+    }
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const target = path.join(dir, entry.name);
+      const expected = path.join(realDir, entry.name);
+      if (entry.isSymbolicLink()) {
+        skip(target, "symbolic link");
+      } else if (entry.isDirectory()) {
+        const reason = accept(entry.name);
+        if (reason) skip(target, reason);
+        else if (reason === null) candidates.push({ target, expected });
+      }
+    }
+  };
+  scan("runtimes", (name) => {
+    if (!/\.failed-\d+$/.test(name)) return undefined;
+    return name === activeName ? "active runtime" : null;
+  });
+  scan("staging", (name) =>
+    lockHeld(name) ? "install lock held by another process" : null,
+  );
+  for (const { target, expected } of candidates) {
+    if (options.dryRun) {
+      result.deleted.push(target);
+      continue;
+    }
+    try {
+      // Re-resolved immediately before removal: a link swapped in since the
+      // listing no longer resolves to the direct child that was checked.
+      if (fs.realpathSync(target) !== expected) {
+        skip(target, "no longer a real directory inside the ownership prefix");
+        continue;
+      }
+      fs.rmSync(target, { recursive: true, force: true });
+      result.deleted.push(target);
+    } catch (error) {
+      skip(target, error.message);
+    }
+  }
+  return result;
 }
 
 /** @returns {string} Default owned runtime location outside plugin caches. */
