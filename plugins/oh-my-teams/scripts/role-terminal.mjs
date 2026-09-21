@@ -483,6 +483,38 @@ export function commandPending(lines, command) {
 }
 
 /**
+ * Reports whether a screen shows the launch command only partly echoed.
+ *
+ * A cut-off line is neither a whole command waiting for Enter nor a started
+ * agent: Enter now would run the fragment. The previous `agentStarted` judged
+ * such a line as started, which was confirmed by feeding it every prefix of a
+ * command (docs/plan/prompt-submission.md, experiment 11). Whether a shell
+ * really echoes a command in pieces, and whether that was the path behind the
+ * `ready: true` seen with the command still in the input line, was not
+ * reproduced: Orca wrote the command in one piece in every trial.
+ *
+ * @param {string[]} lines - Screen lines, oldest first.
+ * @param {string} command - Shell command the terminal was created with.
+ * @returns {boolean} Whether a proper prefix of the command ends the screen.
+ */
+export function commandTyping(lines, command) {
+  const rows = (lines ?? []).filter((line) => line.trim());
+  const target = squeeze(command);
+  // A wrapped fragment spans a row or two, so try the last rows as its start.
+  for (
+    let start = rows.length - 1;
+    start >= Math.max(0, rows.length - 3);
+    start -= 1
+  ) {
+    const match = /[%$#>❯]\s+(\S.*)$/.exec(rows[start]);
+    if (!match) continue;
+    const text = squeeze(match[1] + rows.slice(start + 1).join(""));
+    if (text.length < target.length && target.startsWith(text)) return true;
+  }
+  return false;
+}
+
+/**
  * Reports whether an agent has drawn its interface after the command.
  *
  * A screen whose last row is the same shell prompt again means the command ran
@@ -500,6 +532,8 @@ export function agentStarted(lines, command) {
   // Orca can expose a just-submitted shell command without the prompt prefix.
   // That text is input acceptance, not a rendered agent interface or turn proof.
   if (!found && squeeze(rows.join("")) === squeeze(command)) return false;
+  // A fragment of the command is the shell still echoing, not an interface.
+  if (!found && commandTyping(rows, command)) return false;
   if (!found) return !PROMPT_MARK.test(rows.at(-1));
   if (found.end === rows.length - 1) return false;
   return rows.at(-1).trim() !== found.prompt;
@@ -558,6 +592,7 @@ async function observe(orca, handle, command, execute) {
   return {
     screen,
     pending: commandPending(screen, command),
+    typing: commandTyping(screen, command),
     started: agentStarted(screen, command),
   };
 }
@@ -593,10 +628,10 @@ async function launchOnce({
   const handle = created.result?.terminal?.handle;
   assert(handle, "Orca created no terminal handle");
 
-  const until = async (budgetMs) => {
+  const until = async (budgetMs, done = (seen) => seen.started) => {
     const deadline = Date.now() + budgetMs;
     let seen = await observe(orca, handle, typed, execute);
-    while (!seen.started && Date.now() < deadline) {
+    while (!done(seen) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
       seen = await observe(orca, handle, typed, execute);
     }
@@ -605,6 +640,10 @@ async function launchOnce({
 
   let seen = await until(settleMs);
   let submission = "orca";
+  // Enter while the shell is still echoing would run a cut-off command.
+  if (!seen.started && seen.typing) {
+    seen = await until(settleMs, (now) => now.started || !now.typing);
+  }
   if (!seen.started && seen.pending) {
     await runOrcaJson(
       orca,

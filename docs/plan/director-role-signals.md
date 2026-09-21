@@ -46,7 +46,7 @@ PM과 이사가 화면 문자열 신호(`MAIN-DECISION:`, `CLOSE-READY:`)와 공
 
 ### 1.5 Orca 터미널 알림 실패 시 처리
 
-레코드 쓰기는 Orca 알림과 독립적으로 성공한다. Orca 알림이 실패해도 레코드는 inbox에 남아 `director-inbox`로 조회할 수 있다. 알림 실패 여부와 오류 메시지는 결과 JSON에 `notified: false, notifyError: "..."` 형태로 전달된다.
+레코드 쓰기는 Orca 알림과 독립적으로 성공한다. Orca 알림이 실패해도 레코드는 inbox에 남아 `director-inbox`로 조회할 수 있다. 알림 실패 여부와 오류 메시지는 결과 JSON에 `notified: false, notifyError: "..."` 형태로 전달된다. 알림은 `terminal send --wait-submit --json`으로 보내며, Orca가 입력만 수락하고 턴 시작을 증명하지 못한 경우는 `notified: true`가 아니다. `delivery`에 결과 분류(`outcome`)와 영수증 단계(`stages`), 요청 ID(`requestId`)가 남고, Orca의 오류 원문은 그대로 `notifyError`에 보존된다. 자세한 판정은 `references/orca-runtime.md`의 「프롬프트 전달과 제출 확인」에 있다.
 
 ### 1.6 close-ready 레코드와 close 입력
 
