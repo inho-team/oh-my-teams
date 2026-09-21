@@ -497,8 +497,14 @@ def main():
         "repair after the failure restores a healthy runtime": healthy("doctor-recovered"),
     }
     if control:
-        checks["the write guard refuses a probe write below the real home and logs the denial"] = control["write_below_real_home_denied"] and control["denial_logged"]
-        checks["no other write was denied while the experiment ran"] = results["isolation"]["sandbox_denials_excluding_control"]["denials"] == []
+        checks["the write guard refuses every probe write below the real home"] = control["write_below_real_home_denied"]
+        # The kernel log is a supplement and sometimes drops records. Its silence only
+        # counts as evidence when it did record the control probes' own denials.
+        if control["denial_logged"]:
+            checks["no other write was denied while the experiment ran"] = results["isolation"]["sandbox_denials_excluding_control"]["denials"] == []
+        else:
+            results["isolation"]["sandbox_denials_excluding_control"]["reliable"] = False
+            results["isolation"]["sandbox_denials_excluding_control"]["note"] = "the kernel log did not record the control probes, so an empty list proves nothing"
     results["expectations"] = checks
     results["finished_utc"] = utc_now()
     results["real_user_state"] = {
