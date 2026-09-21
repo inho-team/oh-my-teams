@@ -18,7 +18,7 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 
 구독·모델·승인처럼 사용자가 정해야 하는 항목은 [사용자 선택 질문 계약](plugins/oh-my-teams/references/user-choice.md)을 따른다. 호스트가 구조화된 선택 도구를 제공하면 그것으로 묻고(Claude Code에서는 `AskUserQuestion`), 제공하지 않으면 번호를 매긴 선택지를 한 번에 제시한다. Codex CLI 0.154.0에는 이 용도로 확인된 도구가 없으므로 후자를 쓴다.
 
-**2.8.0 변경:** 감독과 검토에 드는 토큰을 줄였다. Claude 역할 터미널은 `--autocompact 250k`로 열리며, 값은 조직의 `policy.claudeAutoCompact`로 바꿀 수 있다. 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 감독 역할은 heartbeat만 온 경우에는 깨어나지 않는 `supervision-wait`로 worker를 기다린다. Junior 구현은 첫 검토에서 반려되면 Senior에게 넘어가고, 검토자는 첫 검토에서 finding을 한 번에 모두 적으며 재검토에서는 수정 diff만 확인한다. 이사의 신호함에서는 `progress` 신호가 미처리 목록에 남지 않고, 새 `close-ready`가 이전 것을 대체하며, `kickoff-release`가 그 kickoff에 남은 신호를 정리한다.
+**2.8.0 변경:** 감독과 검토에 드는 토큰을 줄였다. Claude 역할 터미널은 `--autocompact 250k`로 열리며, 값은 조직의 `policy.claudeAutoCompact`로 바꿀 수 있다. 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 감독 역할은 heartbeat만 온 경우에는 깨어나지 않는 `supervision-wait`로 worker를 기다린다. Junior 구현은 첫 검토에서 반려되면 Senior에게 넘어가고, 검토자는 첫 검토에서 finding을 한 번에 모두 적으며 재검토에서는 수정 diff만 확인한다. 이사의 신호함에서는 `progress` 신호가 미처리 목록에 남지 않고, 새 `close-ready`가 이전 것을 대체하며, `kickoff-release`가 그 kickoff에 남은 신호를 정리한다. OpenCodex runner 프로필은 runner를 거치는 `headless-start`로만 실행하며, `role-command`와 `worker-start`는 runner 없이 실행하지 않도록 거부한다.
 
 **2.6.1 변경:** 구현 task의 담당을 추론 강도로 정한다. 설계와 구현이 한 번에 필요한 상위 등급 구현은 Senior가 직접 맡고, 닫힌 범위의 구현은 Junior가 맡는다. Senior가 구현한 task는 다른 Senior 실행이나 PL·PM이 검토한다. 기준은 [pm](plugins/oh-my-teams/skills/pm/SKILL.md)의 「구현 등급」에 있다.
 

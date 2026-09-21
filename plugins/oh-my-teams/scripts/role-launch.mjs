@@ -247,6 +247,14 @@ export function resolveRoleLaunch(
   const profileId = org.roles[role].profile;
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
+  // A runner profile reaches its fixed account only through the runner, which
+  // headless-start verifies. Handing it to an interactive terminal would run
+  // whatever Codex login that terminal has, and nothing would record it.
+  assert(
+    !profile.runner,
+    `Role ${role} profile ${profileId} runs through the ${profile.runner?.kind} runner; ` +
+      "worker-start cannot hand it to an interactive terminal, so start it with headless-start",
+  );
   const { agent, via } = ORCA_LAUNCH[profile.provider];
   assert(
     terminal,

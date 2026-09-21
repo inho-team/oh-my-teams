@@ -1275,10 +1275,17 @@ async function executeCommand(args) {
         role: args.role,
         spec: roleSpec(org, args.role, args.spec, run),
       }))(launchContext(args));
-    case "role-command":
-      return (({ org, run }) => roleCommand(org, args.role, run))(
-        launchContext(args),
+    case "role-command": {
+      const { org, run } = launchContext(args);
+      const command = roleCommand(org, args.role, run);
+      // The printed command is native Codex; a person opening a terminal with
+      // it would bypass the runner and its fixed account without a record.
+      assert(
+        !command.runner,
+        "An explicit OpenCodex runner is supported by headless-start only; role-command would print a native Codex command that bypasses it",
       );
+      return command;
+    }
     case "role-terminal": {
       const { org, run: runCtx } = launchContext(args);
       const command = roleCommand(org, args.role, runCtx);

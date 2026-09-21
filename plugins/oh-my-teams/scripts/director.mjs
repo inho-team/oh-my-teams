@@ -113,9 +113,13 @@ export function sendSignal(orgFile, request) {
 
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    // Signals sent within one millisecond share sentAt, so a sequence taken
+    // under the inbox lock orders them; records written before it count as 0.
+    const seq = Math.max(0, ...existing.map((r) => r.seq ?? 0)) + 1;
     const record = {
       schemaVersion: 1,
       id,
+      seq,
       worktreeId: request.worktreeId,
       kind: request.kind,
       text,
@@ -430,7 +434,11 @@ export function findCloseReadySignal(orgFile, worktreeId) {
       r.kind === "close-ready" &&
       r.status !== "superseded",
   );
-  candidates.sort((a, b) => (a.sentAt < b.sentAt ? 1 : -1));
+  candidates.sort(
+    (a, b) =>
+      (b.seq ?? 0) - (a.seq ?? 0) ||
+      String(b.sentAt).localeCompare(String(a.sentAt)),
+  );
   return candidates[0];
 }
 

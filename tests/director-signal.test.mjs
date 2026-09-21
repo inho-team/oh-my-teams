@@ -887,3 +887,30 @@ test("available memory counts reclaimable pages on macOS and MemAvailable on Lin
   );
   assert.equal(parseMeminfo("MemTotal: 1 kB\n"), null);
 });
+
+test("signals sent within one millisecond keep their order through a sequence", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  const realNow = Date.now;
+  Date.now = () => 1790000000000;
+  const realToISOString = Date.prototype.toISOString;
+  Date.prototype.toISOString = () => "2026-09-21T00:00:00.000Z";
+  t.after(() => {
+    Date.now = realNow;
+    Date.prototype.toISOString = realToISOString;
+  });
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "close-ready",
+    text: "ready",
+    head: "a".repeat(40),
+  });
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "close-ready",
+    text: "ready",
+    head: "b".repeat(40),
+  });
+  assert.equal(first.record.sentAt, second.record.sentAt);
+  assert.ok(second.record.seq > first.record.seq);
+  assert.equal(findCloseReadySignal(orgFile, worktreeId).id, second.id);
+});

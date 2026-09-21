@@ -194,6 +194,39 @@ test("a named account or a path command cannot be launched as a plain name", () 
   };
   org.roles.junior.profile = "ocx";
   assert.equal(roleCommand(org, "junior").runner.actualRunner, "codex");
+  // F-6: an interactive terminal would run the runner profile as whatever Codex
+  // login it has, so worker-start refuses it and points at headless-start.
+  assert.throws(
+    () => resolveRoleLaunch(org, "junior", {}, { terminal: "t1" }),
+    /runs through the opencodex runner; worker-start cannot hand it .* headless-start/,
+  );
+});
+
+test("role-command refuses to print a native command for a runner profile", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-runner-cmd-"));
+  // Exact test-owned directory, verified at creation; no user paths are removed.
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const org = example();
+  org.profiles["ocx"] = {
+    provider: "codex",
+    command: ["codex"],
+    account: "fixed-account",
+    subscription: "Fixed subscription",
+    model: "gpt-6-astra",
+    runner: {
+      kind: "opencodex",
+      mode: "fixed-account",
+      accountHomeRef: "fixed-account",
+      runtimeFingerprint: `sha256:${"a".repeat(64)}`,
+    },
+  };
+  org.roles.junior.profile = "ocx";
+  const orgFile = path.join(dir, "organization.json");
+  fs.writeFileSync(orgFile, JSON.stringify(org));
+  await assert.rejects(
+    () => main(["role-command", "--org", orgFile, "--role", "junior"]),
+    /headless-start only; role-command would print a native Codex command/,
+  );
 });
 
 test("PM is never started as a worker", () => {
