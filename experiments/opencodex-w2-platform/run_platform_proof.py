@@ -348,13 +348,19 @@ def main():
             deny = " ".join(f'(subpath "{path}")' for path in guarded)
             guard = [str(SANDBOX_EXEC), "-p", f"(version 1)(allow default)(deny file-write* {deny})"]
         # Positive control: a write below the real home must be refused, otherwise
-        # the guard proves nothing. The probe file is removed if it was created.
+        # the guard proves nothing. The kernel log can drop a record, so the probe is
+        # tried three times with distinct names. A probe file is removed if created.
         control = None
+        probes = []
         if guard:
-            probe = real_home / f".omt-guard-probe-{os.getpid()}"
-            attempt = run([*guard, "sh", "-c", f'touch "{probe}"'])
-            control = {"write_below_real_home_denied": attempt["code"] != 0 and not probe.exists()}
-            probe.unlink(missing_ok=True)
+            refused = []
+            for attempt_number in range(3):
+                probe = real_home / f".omt-guard-probe-{os.getpid()}-{attempt_number}"
+                attempt = run([*guard, "sh", "-c", f'touch "{probe}"'])
+                refused.append(attempt["code"] != 0 and not probe.exists())
+                probe.unlink(missing_ok=True)
+                probes.append(str(probe))
+            control = {"probe_attempts": len(probes), "write_below_real_home_denied": all(refused)}
         results["isolation"] = {
             "guard_control": control,
             "env_overrides": sorted(k for k in env if k in ("HOME", "CODEX_HOME", "OPENCODEX_HOME") or k.startswith("XDG_")),
@@ -468,8 +474,9 @@ def main():
         if guard:
             window = sandbox_denials(started.astimezone() - timedelta(seconds=2), finished.astimezone() + timedelta(seconds=2), guarded)
             # The control probe's own denial proves the log query sees denials; it is not a leak.
-            control["denial_logged"] = any(item["path"] == str(probe) for item in window["denials"])
-            window["denials"] = [item for item in window["denials"] if item["path"] != str(probe)]
+            control["denials_logged"] = sum(1 for item in window["denials"] if item["path"] in probes)
+            control["denial_logged"] = control["denials_logged"] > 0
+            window["denials"] = [item for item in window["denials"] if item["path"] not in probes]
             results["isolation"]["sandbox_denials_excluding_control"] = window
         else:
             results["isolation"]["sandbox_denials_excluding_control"] = "not measured"
