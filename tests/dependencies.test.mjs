@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { main as installMain } from "../scripts/install.mjs";
 import {
   doctor,
   installRuntime,
@@ -20,7 +22,10 @@ function fixture(t) {
 
 test("the exact package lock produces a stable owned runtime fingerprint", () => {
   const identity = runtimeIdentity();
-  assert.equal(identity.version, "2.59.0");
+  const manifest = JSON.parse(
+    fs.readFileSync("plugins/oh-my-teams/package.json", "utf8"),
+  );
+  assert.equal(identity.version, manifest.dependencies["@bitkyc08/opencodex"]);
   assert.match(identity.fingerprint, /^sha256:[a-f0-9]{64}$/);
   assert.equal(
     runtimePaths("/tmp/omt-runtime").runtime.includes(
@@ -45,3 +50,196 @@ test("missing and dry-run runtime checks do not write an active pointer", async 
   assert.equal(dryRun.dryRun, true);
   assert.equal(fs.existsSync(runtimePaths(root).active), false);
 });
+
+test("the pinned OpenCodex version lives only in package.json and its lockfile", () => {
+  const { version } = runtimeIdentity();
+  const source = fs.readFileSync(
+    fileURLToPath(
+      new URL(
+        "../plugins/oh-my-teams/scripts/dependencies.mjs",
+        import.meta.url,
+      ),
+    ),
+    "utf8",
+  );
+  assert.equal(source.includes(version), false);
+  assert.equal(source.includes(version.replaceAll(".", "\\.")), false);
+  const lock = JSON.parse(
+    fs.readFileSync("plugins/oh-my-teams/package-lock.json", "utf8"),
+  );
+  assert.equal(
+    lock.packages["node_modules/@bitkyc08/opencodex"].version,
+    version,
+  );
+});
+
+const posixOnly = {
+  skip: process.platform === "win32" && "the fake runtime uses POSIX scripts",
+};
+
+// A valid active runtime under a temp root, and a PATH holding only fakes.
+function healthyRuntime(t, { codexWorks = true } = {}) {
+  const root = fixture(t);
+  const paths = runtimePaths(root);
+  fs.mkdirSync(path.join(paths.runtime, "node_modules", ".bin"), {
+    recursive: true,
+  });
+  fs.writeFileSync(path.join(paths.runtime, "package.json"), paths.manifest);
+  fs.writeFileSync(
+    path.join(paths.runtime, "package-lock.json"),
+    paths.lockfile,
+  );
+  fs.writeFileSync(
+    path.join(paths.runtime, "manifest.json"),
+    JSON.stringify({ fingerprint: paths.fingerprint, version: paths.version }),
+  );
+  fs.writeFileSync(
+    path.join(paths.runtime, "node_modules", ".bin", "ocx"),
+    `#!${process.execPath}\nconsole.log("opencodex ${paths.version}");\n`,
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    paths.active,
+    JSON.stringify({
+      fingerprint: paths.fingerprint,
+      version: paths.version,
+    }),
+  );
+  const bin = path.join(root, "bin");
+  const log = path.join(root, "npm.log");
+  fs.mkdirSync(bin);
+  const fake = (name, body) =>
+    fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${body}\n`, {
+      mode: 0o755,
+    });
+  // Any npm call is recorded and fails, as with no network.
+  fake("npm", `echo "npm $@" >> "${log}"\nexit 1`);
+  fake("codex", codexWorks ? "exit 0" : "exit 1");
+  fake("git", "exit 0");
+  fake("node", `exec "${process.execPath}" "$@"`);
+  const before = process.env.PATH;
+  process.env.PATH = bin;
+  t.after(() => {
+    process.env.PATH = before;
+  });
+  const snapshot = () =>
+    JSON.stringify(
+      fs
+        .readdirSync(path.join(paths.base, "runtimes"), { recursive: true })
+        .sort(),
+    ) + fs.readFileSync(paths.active, "utf8");
+  return { root, paths, log, snapshot };
+}
+
+test(
+  "a healthy runtime is reused when only unrelated catalog checks fail",
+  posixOnly,
+  async (t) => {
+    const box = healthyRuntime(t);
+    const diagnosis = await doctor(box.root);
+    // gh is not on the fake PATH; it is not required for the OpenCodex backend.
+    const gh = diagnosis.checks.find((item) => item.id === "gh");
+    assert.equal(gh.status, "fail");
+    assert.equal(gh.requiredFor.includes("opencodex-backend"), false);
+    assert.equal(diagnosis.runtimeHealthy, true);
+    assert.equal(diagnosis.status, "ready");
+    const before = box.snapshot();
+    const receipt = await installRuntime(box.root);
+    assert.equal(receipt.reused, true);
+    assert.equal(receipt.status, "ready");
+    assert.equal(fs.existsSync(box.log), false, "no npm ci may run");
+    assert.equal(box.snapshot(), before, "no file may change");
+    const repaired = await installRuntime(box.root, { repair: true });
+    assert.equal(repaired.reused, true);
+    assert.equal(fs.existsSync(box.log), false);
+  },
+);
+
+test(
+  "a failing check the backend requires blocks turns but never replaces a healthy runtime",
+  posixOnly,
+  async (t) => {
+    const box = healthyRuntime(t, { codexWorks: false });
+    const diagnosis = await doctor(box.root);
+    const codex = diagnosis.checks.find((item) => item.id === "codex");
+    assert.equal(codex.status, "fail");
+    assert.equal(codex.requiredFor.includes("opencodex-backend"), true);
+    assert.equal(diagnosis.status, "action-required");
+    assert.equal(diagnosis.runtimeHealthy, true);
+    const before = box.snapshot();
+    const receipt = await installRuntime(box.root);
+    assert.equal(receipt.reused, true);
+    assert.equal(receipt.status, "action-required");
+    assert.equal(fs.existsSync(box.log), false);
+    assert.equal(box.snapshot(), before);
+  },
+);
+
+test("an unhealthy runtime is still reinstalled", posixOnly, async (t) => {
+  const box = healthyRuntime(t);
+  fs.writeFileSync(
+    path.join(box.paths.runtime, "node_modules", ".bin", "ocx"),
+    "#!/bin/sh\nexit 1\n",
+    { mode: 0o755 },
+  );
+  assert.equal((await doctor(box.root)).status, "needs-install");
+  await assert.rejects(
+    () => installRuntime(box.root),
+    /runtime-npm-install-failed/,
+  );
+  assert.match(fs.readFileSync(box.log, "utf8"), /npm ci/);
+});
+
+test(
+  "the installer reports the plan when the runtime install fails after the plugins",
+  posixOnly,
+  async (t) => {
+    const box = healthyRuntime(t);
+    fs.rmSync(box.paths.active);
+    const desired = JSON.parse(
+      fs.readFileSync("plugins/oh-my-teams/.claude-plugin/plugin.json", "utf8"),
+    ).version;
+    const codexVersion = JSON.parse(
+      fs.readFileSync("plugins/oh-my-teams/.codex-plugin/plugin.json", "utf8"),
+    ).version;
+    const installed = (id, version) => ({ id, version, enabled: true });
+    const commandRunner = async (argv) => ({
+      code: 0,
+      timedOut: false,
+      stderr: "",
+      stdout: JSON.stringify(
+        argv[0] === "claude"
+          ? [installed("oh-my-teams@oh-my-teams", desired)]
+          : {
+              installed: [
+                {
+                  pluginId: "oh-my-teams@oh-my-teams",
+                  version: codexVersion,
+                  enabled: true,
+                },
+              ],
+            },
+      ),
+    });
+    const lines = [];
+    const write = console.log;
+    console.log = (line) => lines.push(String(line));
+    try {
+      await assert.rejects(
+        () =>
+          installMain(["both"], {
+            root: path.resolve("."),
+            commandRunner,
+            runtimeRoot: box.root,
+          }),
+        /runtime-npm-install-failed/,
+      );
+    } finally {
+      console.log = write;
+    }
+    const plan = JSON.parse(lines.at(-1));
+    assert.equal(plan.runtime.status, "install-failed");
+    assert.match(plan.runtime.error, /runtime-npm-install-failed/);
+    assert.equal(plan.clients.claude.newCurrent, true);
+  },
+);

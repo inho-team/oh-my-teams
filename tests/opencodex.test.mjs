@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
+  acquireOpenCodexLease,
   isolatedOpenCodexEnvironment,
   openCodexCommand,
   openCodexEnvironment,
@@ -147,6 +148,8 @@ test("fixed OpenAI homes require the vendor-valid pin and disabled native integr
     activeCodexAccountPinned: "only",
     providers: { openai: { codexAccountMode: "pool" } },
     clientIntegrations: { codex: false },
+    runtimeRole: "hub",
+    claudeCode: { enabled: false, systemEnv: false, injectAgents: false },
   };
   fs.writeFileSync(
     path.join(accountHome, "config.json"),
@@ -171,6 +174,70 @@ test("fixed OpenAI homes require the vendor-valid pin and disabled native integr
     () => validateFixedOpenCodexAccountHome(accountHome, "fixed-account"),
     /opencodex-pool-unverified/,
   );
+});
+
+test("a fixed-account home must carry the same global-change guards as the health-check home", (t) => {
+  const accountHome = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ocx-guard-"));
+  t.after(() => fs.rmSync(accountHome, { recursive: true, force: true }));
+  const config = {
+    codexAccounts: [{ id: "only", logLabel: "fixed-account" }],
+    activeCodexAccountId: "only",
+    activeCodexAccountPinned: "only",
+    providers: { openai: { codexAccountMode: "pool" } },
+    clientIntegrations: { codex: false },
+    runtimeRole: "hub",
+    claudeCode: { enabled: false, systemEnv: false, injectAgents: false },
+  };
+  fs.writeFileSync(
+    path.join(accountHome, "codex-accounts.json"),
+    JSON.stringify({ only: {} }),
+  );
+  const check = (overrides) => {
+    fs.writeFileSync(
+      path.join(accountHome, "config.json"),
+      JSON.stringify({ ...config, ...overrides }),
+    );
+    return () =>
+      validateFixedOpenCodexAccountHome(accountHome, "fixed-account");
+  };
+  const blocked = /opencodex-global-change-blocked/;
+  // The review's reproduction: everything else valid, integrations enabled.
+  assert.throws(
+    check({
+      claudeCode: { enabled: true, systemEnv: true, injectAgents: true },
+      runtimeRole: "standalone",
+    }),
+    blocked,
+  );
+  assert.throws(check({ runtimeRole: "standalone" }), /runtimeRole/);
+  assert.throws(check({ runtimeRole: undefined }), blocked);
+  assert.throws(check({ claudeCode: undefined }), blocked);
+  assert.throws(check({ claudeCode: {} }), blocked);
+
+  assert.throws(
+    check({
+      claudeCode: { enabled: true, systemEnv: true, injectAgents: false },
+    }),
+    blocked,
+  );
+  assert.throws(
+    check({
+      claudeCode: { enabled: true, systemEnv: false, injectAgents: true },
+    }),
+    blocked,
+  );
+  // Either way the vendor documents for turning the integration off is enough.
+  assert.doesNotThrow(check({ claudeCode: { enabled: false } }));
+  // Turning both individual actions off is enough even while the feature is on.
+  assert.doesNotThrow(
+    check({
+      claudeCode: { enabled: true, systemEnv: false, injectAgents: false },
+    }),
+  );
+  assert.doesNotThrow(
+    check({ claudeCode: { systemEnv: false, injectAgents: false } }),
+  );
+  assert.doesNotThrow(check({}));
 });
 
 // A history endpoint that serves `pages` in order and repeats the last one.
@@ -433,6 +500,7 @@ const record = (name, pid) => fs.writeFileSync(pids + "/" + name, String(pid));
 const serve = "require('node:http').createServer((q,r)=>{r.setHeader('content-type','application/json');r.end(JSON.stringify({status:'ok',port:" + port + "}))}).listen(" + port + ",'127.0.0.1');process.on('SIGTERM',()=>{if(!process.env.STUBBORN)process.exit(0)});setInterval(()=>{},1000)";
 const mode = ${JSON.stringify(mode)};
 record("launcher", process.pid);
+fs.writeFileSync(pids + "/home", process.env.HOME || "");
 if (mode === "serve" || mode === "stubborn-descendant") {
   http.createServer((q, r) => {
     r.setHeader("content-type", "application/json");
@@ -461,6 +529,7 @@ if (mode === "serve" || mode === "stubborn-descendant") {
 `;
   const binary = path.join(prefix, "node_modules", ".bin", "ocx");
   fs.writeFileSync(binary, script, { mode: 0o755 });
+  const readText = (name) => fs.readFileSync(path.join(pids, name), "utf8");
   const read = (name) => {
     try {
       return Number(fs.readFileSync(path.join(pids, name), "utf8"));
@@ -481,6 +550,7 @@ if (mode === "serve" || mode === "stubborn-descendant") {
   });
   return {
     read,
+    readText,
     lease: path.join(accountHome, ".omt-opencodex-turn.lock"),
     binding: {
       accountHome,
@@ -596,7 +666,7 @@ test(
     // The lease stays, so a later turn on this home is refused rather than trusted.
     await assert.rejects(
       () => startOpenCodexProxy(runtime.binding),
-      /opencodex-binding-unverified/,
+      /opencodex-lease-held/,
     );
   },
 );
@@ -631,3 +701,238 @@ test("headless command construction cannot bypass an explicit OpenCodex runner",
     /opencodex-headless-unverified/,
   );
 });
+
+test(
+  "the proxy child runs with a private HOME, not the user's",
+  posixOnly,
+  async (t) => {
+    const runtime = fakeRuntime(t, "serve");
+    const proxy = await startOpenCodexProxy(runtime.binding);
+    try {
+      assert.equal(
+        runtime.readText("home"),
+        path.join(runtime.binding.accountHome, ".omt-proxy-home"),
+      );
+      assert.notEqual(runtime.readText("home"), os.homedir());
+    } finally {
+      await proxy.stop();
+    }
+  },
+);
+
+// ---- account lease: owner record and stale recovery ----
+
+function leaseFixture(t) {
+  const accountHome = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ocx-lease-"));
+  const file = path.join(accountHome, ".omt-opencodex-turn.lock");
+  const children = [];
+  t.after(() => {
+    for (const pid of children) {
+      for (const target of [-pid, pid]) {
+        try {
+          process.kill(target, "SIGKILL");
+        } catch {}
+      }
+    }
+    fs.rmSync(accountHome, { recursive: true, force: true });
+  });
+  // A sleeping process that leads its own group, as an orphaned proxy would.
+  const sleeper = () => {
+    const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    children.push(child.pid);
+    return child.pid;
+  };
+  const startOf = (pid) =>
+    spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+    }).stdout.trim();
+  const write = (record) =>
+    fs.writeFileSync(
+      file,
+      typeof record === "string" ? record : JSON.stringify(record),
+    );
+  // A pid that certainly no longer exists.
+  const deadPid = () => {
+    const done = spawnSync(process.execPath, ["-e", "0"]);
+    return done.pid;
+  };
+  return { accountHome, file, sleeper, startOf, write, deadPid };
+}
+
+test(
+  "a lease records its owner and, after spawn, the proxy group",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    const lease = await acquireOpenCodexLease(box.accountHome);
+    const first = JSON.parse(fs.readFileSync(box.file, "utf8"));
+    assert.equal(first.pid, process.pid);
+    assert.equal(first.processStart, box.startOf(process.pid));
+    assert.equal(first.proxy, null);
+    const group = box.sleeper();
+    lease.setProxy(group);
+    const second = JSON.parse(fs.readFileSync(box.file, "utf8"));
+    assert.equal(second.token, first.token);
+    assert.equal(second.proxy.group, group);
+    lease.release();
+    assert.equal(fs.existsSync(box.file), false);
+  },
+);
+
+test(
+  "a live owner keeps the home and is told apart from a dead one",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    const owner = box.sleeper();
+    box.write({
+      token: "t1",
+      pid: owner,
+      processStart: box.startOf(owner),
+      proxy: null,
+    });
+    await assert.rejects(
+      () => acquireOpenCodexLease(box.accountHome),
+      /opencodex-lease-held/,
+    );
+    assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "t1");
+  },
+);
+
+test(
+  "a dead owner's lease is taken over and its orphaned proxy group is ended",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    const orphan = box.sleeper();
+    box.write({
+      token: "t2",
+      pid: box.deadPid(),
+      processStart: "Mon Jan  1 00:00:00 2001",
+      proxy: { group: orphan, processStart: box.startOf(orphan) },
+    });
+    assert.equal(processGroupMembers(orphan).length > 0, true);
+    const lease = await acquireOpenCodexLease(box.accountHome, {
+      stopGraceMs: 600,
+    });
+    assert.equal(lease.recovered.terminated, true);
+    assert.equal(lease.recovered.group, orphan);
+    assert.equal(await gone(orphan), true);
+    assert.equal(
+      JSON.parse(fs.readFileSync(box.file, "utf8")).pid,
+      process.pid,
+    );
+    lease.release();
+  },
+);
+
+test(
+  "a reused owner pid does not count as a live owner",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    const stranger = box.sleeper();
+    box.write({
+      token: "t3",
+      pid: stranger,
+      processStart: "Mon Jan  1 00:00:00 2001",
+      proxy: null,
+    });
+    const lease = await acquireOpenCodexLease(box.accountHome);
+    assert.equal(lease.recovered.owner, stranger);
+    // The stranger is not the recorded owner's group and is left alone.
+    assert.equal(alive(stranger), true);
+    lease.release();
+  },
+);
+
+test("a reused proxy group id is not ended", posixOnly, async (t) => {
+  const box = leaseFixture(t);
+  const stranger = box.sleeper();
+  box.write({
+    token: "t4",
+    pid: box.deadPid(),
+    processStart: null,
+    proxy: { group: stranger, processStart: "Mon Jan  1 00:00:00 2001" },
+  });
+  const lease = await acquireOpenCodexLease(box.accountHome);
+  assert.equal(lease.recovered.terminated, false);
+  assert.equal(alive(stranger), true);
+  lease.release();
+});
+
+test(
+  "a lease whose state cannot be proven clean is kept and reported as unverifiable",
+  posixOnly,
+  async (t) => {
+    const box = leaseFixture(t);
+    box.write("not json");
+    await assert.rejects(
+      () => acquireOpenCodexLease(box.accountHome),
+      /opencodex-lease-unverifiable/,
+    );
+    assert.equal(fs.readFileSync(box.file, "utf8"), "not json");
+    // A dead owner whose group cannot be inspected is not assumed empty.
+    const orphan = box.sleeper();
+    box.write({
+      token: "t5",
+      pid: box.deadPid(),
+      processStart: null,
+      proxy: { group: orphan, processStart: null },
+    });
+    const path0 = process.env.PATH;
+    process.env.PATH = path.join(os.tmpdir(), "omt-no-such-bin");
+    try {
+      await assert.rejects(
+        () => acquireOpenCodexLease(box.accountHome, { stopGraceMs: 200 }),
+        /opencodex-lease-unverifiable/,
+      );
+    } finally {
+      process.env.PATH = path0;
+    }
+    assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "t5");
+  },
+);
+
+test(
+  "a turn killed with SIGKILL leaves a lease and proxy that the next turn cleans up",
+  posixOnly,
+  async (t) => {
+    const runtime = fakeRuntime(t, "serve");
+    const moduleUrl = new URL(
+      "../plugins/oh-my-teams/scripts/opencodex.mjs",
+      import.meta.url,
+    ).href;
+    const script = `import(${JSON.stringify(moduleUrl)}).then(async (m) => {
+    await m.startOpenCodexProxy(${JSON.stringify(runtime.binding)});
+    console.log("ready");
+    setInterval(() => {}, 1000);
+  });`;
+    const runner = spawn(process.execPath, ["-e", script], {
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    t.after(() => runner.kill("SIGKILL"));
+    await new Promise((resolve, reject) => {
+      runner.stdout.once("data", resolve);
+      runner.once("exit", () => reject(new Error("runner exited early")));
+    });
+    const orphan = runtime.read("launcher");
+    assert.equal(alive(orphan), true);
+    runner.kill("SIGKILL");
+    await new Promise((resolve) => runner.once("exit", resolve));
+    // The dead runner never ran its cleanup: the proxy and the lease remain.
+    assert.equal(alive(orphan), true);
+    assert.equal(fs.existsSync(runtime.lease), true);
+    const proxy = await startOpenCodexProxy(runtime.binding);
+    try {
+      assert.equal(await gone(orphan), true);
+      assert.notEqual(proxy.pid, orphan);
+    } finally {
+      await proxy.stop();
+    }
+  },
+);

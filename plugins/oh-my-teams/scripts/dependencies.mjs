@@ -19,6 +19,9 @@ const CATALOG = path.join(
   "runtime-dependencies.json",
 );
 const MINIMUM_NODE = [22, 13, 0];
+const OPENCODEX_PACKAGE = "@bitkyc08/opencodex";
+// The catalog capability that only checks tied to an OpenCodex turn may block.
+const BACKEND_CAPABILITY = "opencodex-backend";
 
 /**
  * Compares a Node version string with the catalog's minimum supported runtime.
@@ -43,14 +46,24 @@ export function supportedNode(version) {
   );
 }
 
-/** @returns {{version: string, fingerprint: string, manifest: Buffer, lockfile: Buffer}} OpenCodex package identity. */
+/**
+ * Reads the pinned OpenCodex identity from package.json and its lockfile, the only sources of the version.
+ * @returns {{version: string, fingerprint: string, manifest: Buffer, lockfile: Buffer}} OpenCodex package identity.
+ * @throws {Error} When the dependency is not an exact version or the lockfile resolves a different one.
+ */
 export function runtimeIdentity() {
   const manifest = fs.readFileSync(MANIFEST);
   const lockfile = fs.readFileSync(LOCKFILE);
-  const version = JSON.parse(manifest).dependencies?.["@bitkyc08/opencodex"];
+  const version = JSON.parse(manifest).dependencies?.[OPENCODEX_PACKAGE];
   assert(
-    /^2\.59\.0$/.test(version ?? ""),
+    /^\d+\.\d+\.\d+$/.test(version ?? ""),
     "OpenCodex dependency must be exactly pinned in package.json",
+  );
+  const locked = JSON.parse(lockfile).packages ?? {};
+  assert(
+    locked[""]?.dependencies?.[OPENCODEX_PACKAGE] === version &&
+      locked[`node_modules/${OPENCODEX_PACKAGE}`]?.version === version,
+    "OpenCodex version in package-lock.json does not match package.json",
   );
   return {
     version,
@@ -74,8 +87,10 @@ export function runtimePaths(root) {
   };
 }
 
-function check(id, status, evidence) {
-  return { id, status, evidence };
+function check(id, status, evidence, requiredFor) {
+  return requiredFor
+    ? { id, status, evidence, requiredFor }
+    : { id, status, evidence };
 }
 
 async function catalogChecks() {
@@ -88,6 +103,10 @@ async function catalogChecks() {
       dependency.id === "opencodex"
     )
       continue;
+    // Every result carries the capabilities its dependency is required for,
+    // so a failure only blocks what actually needs it.
+    const add = (item) =>
+      checks.push({ ...item, requiredFor: dependency.requiredFor ?? [] });
     const command = dependency.detect?.command?.argv;
     if (dependency.id === "orca-cli" || dependency.id === "orca-desktop") {
       try {
@@ -99,7 +118,7 @@ async function catalogChecks() {
         try {
           desktop = JSON.parse(status.stdout).result?.app?.running === true;
         } catch {}
-        checks.push(
+        add(
           check(
             dependency.id,
             dependency.id === "orca-desktop" && !desktop ? "fail" : "pass",
@@ -109,15 +128,13 @@ async function catalogChecks() {
           ),
         );
       } catch {
-        checks.push(
-          check(dependency.id, "fail", dependency.install?.[platform]),
-        );
+        add(check(dependency.id, "fail", dependency.install?.[platform]));
       }
       continue;
     }
     if (!command) continue;
     const result = await run(command, { timeoutMs: 10000 });
-    checks.push(
+    add(
       check(
         dependency.id,
         result.code === 0 && !result.timedOut ? "pass" : "fail",
@@ -129,7 +146,7 @@ async function catalogChecks() {
     );
     for (const feature of dependency.detect?.featureChecks ?? []) {
       const featureResult = await run(feature.argv, { timeoutMs: 10000 });
-      checks.push(
+      add(
         check(
           `${dependency.id}:${feature.argv.slice(1).join("-")}`,
           featureResult.code === 0 && !featureResult.timedOut ? "pass" : "fail",
@@ -227,22 +244,31 @@ export async function doctor(root) {
       passed ? probe.stdout.trim() : probe.stderr.trim(),
     ),
   );
+  // Unrelated catalog checks (gh, Orca desktop) describe other features. Only a
+  // failure of a check required for the OpenCodex backend holds back a turn,
+  // and none of them condemns a runtime whose own install, integrity and
+  // health checks passed.
   const catalog = await catalogChecks();
   checks.push(...catalog);
-  const catalogFailed = catalog.some((item) => item.status === "fail");
+  const blocked = catalog.some(
+    (item) =>
+      item.status === "fail" && item.requiredFor?.includes(BACKEND_CAPABILITY),
+  );
   return runtimeResult(
     "runtime-doctor",
-    passed ? (catalogFailed ? "action-required" : "ready") : "needs-install",
+    passed ? (blocked ? "action-required" : "ready") : "needs-install",
     paths,
     checks,
+    passed,
   );
 }
 
-function runtimeResult(command, status, paths, checks) {
+function runtimeResult(command, status, paths, checks, runtimeHealthy = false) {
   return {
     schemaVersion: 1,
     command,
     status,
+    runtimeHealthy,
     checkedAt: new Date().toISOString(),
     runtime: {
       id: "opencodex",
@@ -253,7 +279,9 @@ function runtimeResult(command, status, paths, checks) {
     nextAction:
       status === "needs-install"
         ? "Run runtime-install; authentication is never automated."
-        : null,
+        : status === "action-required"
+          ? "Resolve the failing checks required for opencodex-backend; the installed runtime is healthy and is kept."
+          : null,
   };
 }
 
@@ -340,18 +368,12 @@ async function healthCheck(ocx, staging) {
 export async function installRuntime(root, options = {}) {
   const paths = runtimePaths(root);
   const before = await doctor(root);
-  if (options.dryRun)
-    return {
-      ...before,
-      command: options.repair ? "runtime-repair" : "runtime-install",
-      dryRun: true,
-    };
-  if (before.status === "ready")
-    return {
-      ...before,
-      command: options.repair ? "runtime-repair" : "runtime-install",
-      reused: true,
-    };
+  const command = options.repair ? "runtime-repair" : "runtime-install";
+  if (options.dryRun) return { ...before, command, dryRun: true };
+  // A runtime whose install, integrity and health checks pass is reused as it
+  // is, whatever an unrelated catalog check says; replacing it would download
+  // and swap files that are not broken.
+  if (before.runtimeHealthy) return { ...before, command, reused: true };
   fs.mkdirSync(paths.base, { recursive: true, mode: 0o700 });
   return withAsyncFileLock(
     paths.lock,
@@ -418,12 +440,12 @@ export async function installRuntime(root, options = {}) {
           ocxVersion: verified.stdout.trim(),
         });
         fs.renameSync(pending, paths.active);
-        return runtimeResult(
-          options.repair ? "runtime-repair" : "runtime-install",
-          "ready",
-          paths,
-          [check("runtime-install", "pass", verified.stdout.trim())],
-        );
+        // The receipt reports what the checks now show, not a fixed "ready".
+        return {
+          ...(await doctor(root)),
+          command,
+          installed: true,
+        };
       } finally {
         fs.rmSync(staging, { recursive: true, force: true });
       }

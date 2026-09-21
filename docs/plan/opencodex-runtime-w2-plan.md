@@ -71,10 +71,10 @@ W2는 Claude·Codex host 각각에 임시 로컬 plugin을 설치하여 manifest
 | ID | 목표 | 역할 | dependencies |
 |---|---|---|---|
 | W2-01-contract | 실행·설치·전환 기록 계약과 미해결 사항의 해법을 확정합니다. | Senior가 설계합니다. | W1 결과를 PM이 확인해야 합니다. |
-| W2-02-host-probe | 두 plugin host의 실제 의존성 설치 동작을 검증합니다. | Intern이 제한된 실험을 수행합니다. | W2-01-contract |
-| W2-03-catalog | 공식 OS별 설치·탐지 정책을 데이터로 정리합니다. | Intern이 작성하고 Senior가 내용 검토를 맡습니다. | W2-01-contract |
+| W2-02-host-probe | 두 plugin host의 실제 의존성 설치 동작을 검증합니다. | Junior가 제한된 실험을 수행하고 Senior가 결과를 검토합니다. | W2-01-contract |
+| W2-03-catalog | 공식 OS별 설치·탐지 정책을 데이터로 정리합니다. | Junior가 작성하고 Senior가 내용 검토를 맡습니다. | W2-01-contract |
 | W2-04-implementation | 설치부터 공통 어댑터·증거·복구까지 구현합니다. | Junior가 구현합니다. | W2-01-contract, W2-02-host-probe, W2-03-catalog |
-| W2-05-guide | 검증된 설치·수리·계정 운용 절차를 문서화합니다. | Intern이 작성합니다. | W2-04-implementation |
+| W2-05-guide | 검증된 설치·수리·계정 운용 절차를 문서화합니다. | Junior가 작성합니다. | W2-04-implementation |
 | W2-06-platform-proof | macOS·Windows의 실제 통합·고장 복구 증거를 수집합니다. | 두 번째 Junior가 검증합니다. | W2-04-implementation |
 | W2-07-review | 구현과 실제 플랫폼 증거를 독립적으로 의미 검토합니다. | Senior가 검토합니다. | W2-04-implementation, W2-05-guide, W2-06-platform-proof |
 | W2-integration | 최신 base에서 통합하고 PM 수용 입력을 준비합니다. | PL이 통합하고 PM이 수용합니다. | 위 모든 task |

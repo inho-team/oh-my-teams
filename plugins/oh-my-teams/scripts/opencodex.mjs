@@ -1,4 +1,5 @@
 /** Fail-closed OpenCodex fixed-account runner binding validation. */
+import crypto from "node:crypto";
 import path from "node:path";
 import fs from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
@@ -114,6 +115,21 @@ export function validateFixedOpenCodexAccountHome(
       config.clientIntegrations?.codex === false,
     "opencodex-pool-unverified",
   );
+  // `ocx start` can otherwise set a global macOS environment variable, install
+  // a shell hook and rewrite the Claude agent roster. The runtime health-check
+  // home turns these off, so a fixed-account home must too, or it is refused.
+  const claudeCode = config.claudeCode;
+  const guards = {
+    runtimeRole: config.runtimeRole === "hub",
+    "claudeCode.integration":
+      claudeCode?.enabled === false ||
+      (claudeCode?.systemEnv === false && claudeCode?.injectAgents === false),
+  };
+  const missing = Object.keys(guards).filter((name) => !guards[name]);
+  assert(
+    missing.length === 0,
+    `opencodex-global-change-blocked: account home lacks ${missing.join(", ")}`,
+  );
   return { provider: "openai", accountLogLabel };
 }
 
@@ -163,29 +179,25 @@ function ownedListenerPid(port, group) {
   return pids.length === 1 && members.includes(pids[0]) ? pids[0] : null;
 }
 
-/**
- * Acquires the account-home lease that makes a request-history boundary exclusive.
- * @param {string} accountHome - Fixed-account OpenCodex home.
- * @returns {{release: () => void}} Lease receipt.
- */
-export function acquireOpenCodexLease(accountHome) {
-  const file = path.join(accountHome, ".omt-opencodex-turn.lock");
-  let fd;
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
-    fd = fs.openSync(file, "wx", 0o600);
-  } catch {
-    throw new Error("opencodex-binding-unverified");
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
   }
-  return {
-    release() {
-      if (fd === null) return;
-      fs.closeSync(fd);
-      fd = null;
-      try {
-        fs.unlinkSync(file);
-      } catch {}
-    },
-  };
+}
+
+// The kernel's start time of a process, which tells a reused pid from the
+// original. Null when it cannot be read.
+function processStartTime(pid) {
+  if (process.platform === "win32") return null;
+  const listed = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    encoding: "utf8",
+  });
+  const started = listed.status === 0 ? listed.stdout.trim() : "";
+  return started || null;
 }
 
 async function waitForEmptyGroup(group, timeoutMs) {
@@ -196,11 +208,10 @@ async function waitForEmptyGroup(group, timeoutMs) {
   }
 }
 
-// Ends every member of the owned group, not only its leader. A launcher that
-// exited while a descendant kept running is still a live owned tree, so this
-// never trusts the leader's exit; it passes only when the group is observed empty.
-async function stopOwnedProxy(child, graceMs) {
-  const group = child.pid;
+// Ends every member of a process group, not only its leader. A launcher that
+// exited while a descendant kept running is still a live tree, so this never
+// trusts the leader's exit; it passes only when the group is observed empty.
+async function terminateGroup(group, graceMs) {
   assert(group, "opencodex-proxy-exit-unverifiable");
   for (const signal of ["SIGTERM", "SIGKILL"]) {
     if (processGroupMembers(group)?.length === 0) break;
@@ -214,6 +225,147 @@ async function stopOwnedProxy(child, graceMs) {
     "opencodex-proxy-exit-unverifiable",
   );
   return { termination: "exited", descendantsExited: true };
+}
+
+const LEASE_FILE = ".omt-opencodex-turn.lock";
+
+function readLease(file) {
+  try {
+    const lease = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Number.isInteger(lease?.pid) && typeof lease.token === "string"
+      ? lease
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+// Writes the lease through a private file and publishes it with a link, so a
+// reader never sees a half-written record and only one writer can create it.
+function publishLease(file, lease) {
+  const pending = `${file}.${process.pid}.${lease.token}`;
+  fs.writeFileSync(pending, JSON.stringify(lease), { mode: 0o600 });
+  try {
+    fs.linkSync(pending, file);
+  } finally {
+    fs.rmSync(pending, { force: true });
+  }
+}
+
+// Decides what an existing lease means. A live owner keeps the home. A dead
+// owner's proxy group is ended with the same emptiness proof a stop needs, and
+// only then is the lease removed; anything unprovable keeps the lease.
+async function reclaimStaleLease(file, graceMs) {
+  const lease = readLease(file);
+  if (!lease)
+    throw new Error("opencodex-lease-unverifiable: unreadable owner record");
+  const ownerStart = processStartTime(lease.pid);
+  const ownerLive =
+    processAlive(lease.pid) &&
+    (lease.processStart === null ||
+      ownerStart === null ||
+      ownerStart === lease.processStart);
+  if (ownerLive)
+    throw new Error(
+      `opencodex-lease-held: pid ${lease.pid} owns this account home`,
+    );
+  const group = lease.proxy?.group ?? null;
+  let terminated = false;
+  if (group) {
+    // A live leader with another start time means the group id was reused, so
+    // the recorded group is already empty; anything else in it is not ours.
+    const leaderStart = processAlive(group) ? processStartTime(group) : null;
+    const reused =
+      processAlive(group) &&
+      lease.proxy.processStart !== null &&
+      leaderStart !== null &&
+      leaderStart !== lease.proxy.processStart;
+    if (!reused && processGroupMembers(group)?.length !== 0) {
+      try {
+        await terminateGroup(group, graceMs);
+      } catch {
+        throw new Error(
+          `opencodex-lease-unverifiable: proxy group ${group} of dead owner ${lease.pid} is not proven gone`,
+        );
+      }
+      terminated = true;
+    }
+  }
+  // Remove only the record that was inspected; a moved-aside record that turns
+  // out to be someone else's live lease is put back.
+  const aside = `${file}.stale.${process.pid}.${Date.now()}`;
+  try {
+    fs.renameSync(file, aside);
+  } catch {
+    return { recovered: { owner: lease.pid, group, terminated } };
+  }
+  if (readLease(aside)?.token !== lease.token) {
+    try {
+      fs.linkSync(aside, file);
+    } catch {}
+    fs.rmSync(aside, { force: true });
+    throw new Error(
+      "opencodex-lease-held: the lease changed owner during recovery",
+    );
+  }
+  fs.rmSync(aside, { force: true });
+  return { recovered: { owner: lease.pid, group, terminated } };
+}
+
+/**
+ * Acquires the account-home lease that makes a request-history boundary exclusive.
+ *
+ * The lease records its owner's pid and start time and, once the proxy is
+ * spawned, the proxy's process group. A lease whose owner is gone is stale:
+ * its group is ended with the same emptiness proof a stop needs and the lease
+ * is taken over. A live owner and an unprovable state are different failures.
+ * @param {string} accountHome - Fixed-account OpenCodex home.
+ * @param {{stopGraceMs?: number}} [options] - Grace period for ending a dead owner's group.
+ * @returns {Promise<{release: () => void, setProxy: (group: number) => void, recovered: object | null}>} Lease receipt.
+ * @throws {Error} `opencodex-lease-held` for a live owner, or `opencodex-lease-unverifiable` when a dead owner's state cannot be proven clean.
+ */
+export async function acquireOpenCodexLease(accountHome, options = {}) {
+  const file = path.join(accountHome, LEASE_FILE);
+  const lease = {
+    token: crypto.randomUUID(),
+    pid: process.pid,
+    processStart: processStartTime(process.pid),
+    acquiredAt: new Date().toISOString(),
+    proxy: null,
+  };
+  let recovered = null;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      publishLease(file, lease);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST" || attempt >= 2)
+        throw error.code === "EEXIST"
+          ? new Error("opencodex-lease-held: lease kept changing hands")
+          : error;
+      ({ recovered } = await reclaimStaleLease(
+        file,
+        options.stopGraceMs ?? 3000,
+      ));
+    }
+  }
+  let released = false;
+  return {
+    recovered,
+    setProxy(group) {
+      lease.proxy = { group, processStart: processStartTime(group) };
+      const pending = `${file}.${process.pid}.${lease.token}`;
+      fs.writeFileSync(pending, JSON.stringify(lease), { mode: 0o600 });
+      fs.renameSync(pending, file);
+    },
+    release() {
+      if (released) return;
+      released = true;
+      // Never remove a lease another owner has since taken over.
+      if (readLease(file)?.token === lease.token)
+        fs.rmSync(file, { force: true });
+    },
+  };
 }
 
 async function healthProvesPort(port) {
@@ -233,7 +385,9 @@ async function healthProvesPort(port) {
  * this call created. Any other listener, or a listener that cannot be
  * inspected, is refused. Stopping succeeds only after the whole group is
  * observed gone; otherwise it throws `opencodex-proxy-exit-unverifiable` and
- * the account-home lease stays held, so no later turn reuses that home.
+ * the account-home lease stays held. The lease names its owner and proxy
+ * group, so once that owner is dead a later turn ends the group with the same
+ * proof and takes the home over, while a live owner is refused.
  * @param {object} binding - Runtime prefix and isolated fixed-account homes.
  * @returns {Promise<object>} Receipt with `port`, `pid`, `env`, `ownership` (listener pid and group) and `stop()`, which resolves to the exit proof.
  * @throws {Error} `opencodex-proxy-not-ready` when ownership or health is not proven,
@@ -245,21 +399,37 @@ export async function startOpenCodexProxy(binding) {
     process.platform !== "win32",
     "opencodex-proxy-ownership-unverifiable",
   );
-  const lease = acquireOpenCodexLease(binding.accountHome);
-  const port = await unusedPort();
-  const binary = path.join(
-    binding.runtimePrefix,
-    "node_modules",
-    ".bin",
-    "ocx",
-  );
-  const child = spawn(binary, ["start", "--port", String(port)], {
-    cwd: binding.runtimePrefix,
-    env: isolatedOpenCodexEnvironment(process.env, env),
-    stdio: "ignore",
-    shell: false,
-    detached: true,
+  const lease = await acquireOpenCodexLease(binding.accountHome, {
+    stopGraceMs: binding.stopGraceMs,
   });
+  let port;
+  let child;
+  try {
+    port = await unusedPort();
+    // The proxy child gets a private HOME so a start-time hook or roster sync
+    // cannot reach the user's shell profile or ~/.claude even if a guard is
+    // missing; the account home already refuses configs that enable them.
+    const proxyHome = path.join(binding.accountHome, ".omt-proxy-home");
+    fs.mkdirSync(proxyHome, { recursive: true, mode: 0o700 });
+    child = spawn(
+      path.join(binding.runtimePrefix, "node_modules", ".bin", "ocx"),
+      ["start", "--port", String(port)],
+      {
+        cwd: binding.runtimePrefix,
+        env: {
+          ...isolatedOpenCodexEnvironment(process.env, env),
+          HOME: proxyHome,
+        },
+        stdio: "ignore",
+        shell: false,
+        detached: true,
+      },
+    );
+    if (child.pid) lease.setProxy(child.pid);
+  } catch (error) {
+    lease.release();
+    throw error;
+  }
   let exited = false;
   let spawnError = null;
   child.once("error", (error) => {
@@ -273,7 +443,7 @@ export async function startOpenCodexProxy(binding) {
   const stop = () => {
     stopping ??= (async () => {
       const receipt = child.pid
-        ? await stopOwnedProxy(child, binding.stopGraceMs ?? 3000)
+        ? await terminateGroup(child.pid, binding.stopGraceMs ?? 3000)
         : { termination: "exited", descendantsExited: true };
       lease.release();
       return receipt;
