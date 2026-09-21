@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { main as installMain } from "../scripts/install.mjs";
 import {
   doctor,
+  healthCheck,
   installRuntime,
   isolatedHealthEnvironment,
   pruneRuntimes,
@@ -16,6 +17,7 @@ import {
   runtimePaths,
   supportedNode,
 } from "../plugins/oh-my-teams/scripts/dependencies.mjs";
+import { killWindowsProcessTree } from "../plugins/oh-my-teams/scripts/opencodex.mjs";
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-dependencies-"));
@@ -76,9 +78,95 @@ test("the pinned OpenCodex version lives only in package.json and its lockfile",
   );
 });
 
+// Kept POSIX only: these fake a whole toolchain (`npm`, `codex`, `git`, `node`)
+// as `/bin/sh` scripts found through PATH, and a Windows PATH lookup finds
+// `.cmd` shims instead. The launcher and health-check tree cleanup that the
+// Windows install path depends on are covered by the health-check test below,
+// which runs on every platform.
 const posixOnly = {
   skip: process.platform === "win32" && "the fake runtime uses POSIX scripts",
 };
+
+const windowsOnly = {
+  skip:
+    process.platform !== "win32" &&
+    "POSIX health-check children are not ended as a tree",
+};
+
+const isAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+async function waitGone(pid, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && isAlive(pid))
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  return !isAlive(pid);
+}
+
+// A launcher that starts a child holding the port, then stays alive, as a
+// package launcher that delegates to another process would.
+function delegatingLauncher(t) {
+  const root = fixture(t);
+  const pids = path.join(root, "pids");
+  fs.mkdirSync(pids);
+  const script = path.join(root, "launcher.mjs");
+  fs.writeFileSync(
+    script,
+    `const { spawn } = process.getBuiltinModule("node:child_process");
+const fs = process.getBuiltinModule("node:fs");
+const port = process.argv[process.argv.indexOf("--port") + 1];
+const server = "require('node:http').createServer((q,r)=>r.end('ok')).listen(" + port + ",'127.0.0.1');setInterval(()=>{},1000)";
+const child = spawn(process.execPath, ["-e", server], { stdio: "ignore" });
+fs.writeFileSync(${JSON.stringify(path.join(pids, "server"))}, String(child.pid));
+fs.writeFileSync(${JSON.stringify(path.join(pids, "launcher"))}, String(process.pid));
+setInterval(() => {}, 1000);
+`,
+  );
+  const read = (name) => Number(fs.readFileSync(path.join(pids, name), "utf8"));
+  t.after(() => {
+    for (const name of ["server", "launcher"]) {
+      try {
+        if (process.platform === "win32") killWindowsProcessTree(read(name));
+        else process.kill(read(name), "SIGKILL");
+      } catch {}
+    }
+  });
+  return {
+    root,
+    read,
+    launch: { command: process.execPath, args: [script] },
+  };
+}
+
+test("a passing health check ends the launcher it started", async (t) => {
+  const box = delegatingLauncher(t);
+  const staging = fixture(t);
+  await healthCheck(box.launch, staging, box.root);
+  assert.equal(await waitGone(box.read("launcher")), true);
+  assert.deepEqual(
+    fs.readdirSync(box.root).filter((name) => name.startsWith("health-")),
+    [],
+  );
+});
+
+// POSIX only signals the launcher here, as before; Windows has no process group
+// to signal, so the check ends the whole tree with taskkill and this shows it.
+test(
+  "a health check on Windows ends the launcher's child, not only the launcher",
+  windowsOnly,
+  async (t) => {
+    const box = delegatingLauncher(t);
+    await healthCheck(box.launch, fixture(t), box.root);
+    assert.equal(await waitGone(box.read("launcher")), true);
+    assert.equal(await waitGone(box.read("server")), true);
+  },
+);
 
 // A valid active runtime under a temp root, and a PATH holding only fakes.
 function healthyRuntime(t, { codexWorks = true } = {}) {

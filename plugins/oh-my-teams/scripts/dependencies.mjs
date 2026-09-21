@@ -14,6 +14,7 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { discoverOrcaRuntime } from "./orca-adapter.mjs";
+import { killWindowsProcessTree, openCodexLaunch } from "./opencodex.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = path.resolve(HERE, "..");
@@ -237,11 +238,10 @@ export async function doctor(root) {
     );
     return runtimeResult("runtime-doctor", "needs-install", paths, checks);
   }
-  const ocx =
-    process.platform === "win32"
-      ? path.join(paths.runtime, "node_modules", ".bin", "ocx.cmd")
-      : path.join(paths.runtime, "node_modules", ".bin", "ocx");
-  const probe = await run([ocx, "--version"], { timeoutMs: 15000 });
+  const launch = openCodexLaunch(paths.runtime);
+  const probe = await run([launch.command, ...launch.args, "--version"], {
+    timeoutMs: 15000,
+  });
   const passed = probe.code === 0 && probe.stdout.includes(paths.version);
   checks.push(
     check(
@@ -349,11 +349,17 @@ export function isolatedHealthEnvironment(home, codexHome) {
  * isolate its home directories outside the staging directory so they are not
  * promoted to the active runtime tree.
  *
- * @param {string} ocx - Path to the ocx executable.
+ * On Windows the launcher and the runtime it starts are ended together with
+ * `taskkill /T /F`, because `child.kill` there only terminates the launcher and
+ * leaves the runtime holding the port.
+ *
+ * @param {{command: string, args: string[]}} launch - What to spawn, from `openCodexLaunch`.
  * @param {string} staging - Staging directory where npm packages are installed.
  * @param {string} healthBase - Base directory for health check temporary homes.
+ * @returns {Promise<void>} Resolves once the runtime answered its health endpoint and was stopped.
+ * @throws {Error} `runtime-health-check-failed` when it never answered.
  */
-async function healthCheck(ocx, staging, healthBase) {
+export async function healthCheck(launch, staging, healthBase) {
   const port = await freePort();
   const healthDir = path.join(
     healthBase,
@@ -374,12 +380,16 @@ async function healthCheck(ocx, staging, healthBase) {
       claudeCode: { enabled: false, systemEnv: false, injectAgents: false },
     }),
   );
-  const child = spawn(ocx, ["start", "--port", String(port)], {
-    cwd: staging,
-    env: isolatedHealthEnvironment(home, codexHome),
-    stdio: "ignore",
-    shell: false,
-  });
+  const child = spawn(
+    launch.command,
+    [...launch.args, "start", "--port", String(port)],
+    {
+      cwd: staging,
+      env: isolatedHealthEnvironment(home, codexHome),
+      stdio: "ignore",
+      shell: false,
+    },
+  );
   let exited = false;
   child.once("close", () => {
     exited = true;
@@ -395,7 +405,10 @@ async function healthCheck(ocx, staging, healthBase) {
     }
     throw new Error("runtime-health-check-failed");
   } finally {
-    if (child.exitCode === null && !exited) child.kill("SIGTERM");
+    if (child.exitCode === null && !exited) {
+      if (process.platform === "win32") killWindowsProcessTree(child.pid);
+      else child.kill("SIGTERM");
+    }
     if (child.exitCode === null && !exited) {
       await Promise.race([
         new Promise((resolve) => child.once("close", resolve)),
@@ -448,14 +461,14 @@ export async function installRuntime(root, options = {}) {
           installed.code === 0 && !installed.timedOut,
           `runtime-npm-install-failed: ${installed.stderr.trim()}`,
         );
-        const ocx =
-          process.platform === "win32"
-            ? path.join(staging, "node_modules", ".bin", "ocx.cmd")
-            : path.join(staging, "node_modules", ".bin", "ocx");
-        const verified = await run([ocx, "--version"], {
-          cwd: staging,
-          timeoutMs: 30000,
-        });
+        const launch = openCodexLaunch(staging);
+        const verified = await run(
+          [launch.command, ...launch.args, "--version"],
+          {
+            cwd: staging,
+            timeoutMs: 30000,
+          },
+        );
         assert(
           verified.code === 0 && verified.stdout.includes(paths.version),
           "runtime-version-mismatch",
@@ -466,7 +479,7 @@ export async function installRuntime(root, options = {}) {
           timeoutMs: 30000,
         });
         assert(bunVersion.code === 0, "runtime-bun-unavailable");
-        await healthCheck(ocx, staging, paths.base);
+        await healthCheck(launch, staging, paths.base);
         writeJSON(path.join(staging, "manifest.json"), {
           fingerprint: paths.fingerprint,
           version: paths.version,

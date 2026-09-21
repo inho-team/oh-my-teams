@@ -1052,6 +1052,10 @@ async function runnerTurn(
   return { record, read, status: headlessStatus(state, "w1") };
 }
 
+// Kept POSIX only: a turn counts as done only when the provider's process group
+// is seen empty, and Windows has no process group (the runner records
+// descendantsExited=false there, by design). The exited-snapshot test below runs
+// everywhere and shows that a Windows turn stays unverified.
 const posix = {
   skip:
     process.platform === "win32" &&
@@ -1157,6 +1161,36 @@ test(
   },
 );
 
+// A Windows proxy stop shows only that a snapshot of pids is gone, so the turn
+// must stay unverified there, and the same holds wherever that receipt appears.
+test("a proxy that proves only an exited snapshot leaves the turn unverified", async (t) => {
+  const { record, read, status } = await runnerTurn(t, {
+    prepare: async () => ({
+      proxy: {
+        port: 1,
+        stop: async () => ({
+          termination: "exited-snapshot",
+          descendantsExited: false,
+        }),
+      },
+      binding: {},
+      historyBoundary: new Set(),
+      command: [process.execPath, "-e", CODEX_TURN],
+      environment: process.env,
+    }),
+  });
+  assert.equal(record.error, null);
+  const lifecycle = read("lifecycle.json");
+  assert.equal(lifecycle.exitObserved, true);
+  assert.equal(lifecycle.proxyExited, false);
+  assert.equal(lifecycle.termination, "unverifiable");
+  assert.equal(
+    runnerTurnProven({ requestIds: ["req-1", "req-2"] }, lifecycle),
+    false,
+  );
+  assert.equal(status.outcome, "unverifiable");
+});
+
 test("a turn that never started the provider records an unproven lifecycle and no success", async (t) => {
   const { record, read, status } = await runnerTurn(t, {
     prepare: async () => {
@@ -1180,29 +1214,25 @@ test("a turn that never started the provider records an unproven lifecycle and n
   assert.equal(status.outcome, "exit-error");
 });
 
-test(
-  "a stop request is recorded as a cancel request and never as a completed turn",
-  posix,
-  async (t) => {
-    const { record, read, status } = await runnerTurn(
-      t,
-      {},
-      {
-        command: [
-          process.execPath,
-          "-e",
-          "process.stdin.resume();setInterval(()=>{},1000)",
-        ],
-        stopAfterMs: 300,
-      },
-    );
-    assert.equal(record.stopped, true);
-    const lifecycle = read("lifecycle.json");
-    assert.equal(lifecycle.cancelRequested, true);
-    assert.equal(lifecycle.completed, false);
-    assert.equal(status.outcome, "stopped");
-  },
-);
+test("a stop request is recorded as a cancel request and never as a completed turn", async (t) => {
+  const { record, read, status } = await runnerTurn(
+    t,
+    {},
+    {
+      command: [
+        process.execPath,
+        "-e",
+        "process.stdin.resume();setInterval(()=>{},1000)",
+      ],
+      stopAfterMs: 300,
+    },
+  );
+  assert.equal(record.stopped, true);
+  const lifecycle = read("lifecycle.json");
+  assert.equal(lifecycle.cancelRequested, true);
+  assert.equal(lifecycle.completed, false);
+  assert.equal(status.outcome, "stopped");
+});
 
 test("runnerTurnProven demands every stage and the same request set in both records", () => {
   const observation = { requestIds: ["a", "b"] };
