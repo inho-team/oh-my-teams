@@ -78,6 +78,8 @@ agy --model claude-opus-4-6-thinking ...
 
 ## worker-start 래퍼
 
+작업을 실행하기 전에 PM 또는 Junior는 경계가 닫힌 조사·인용·집계·반복 편집·작은 독립 구현을 같은 종류끼리 묶어 Intern 우선 후보로 분류한다. 실행 receipt에는 실제 역할, 입력 task, 결과와 결정적 검사, 상위 승격 또는 Intern 미사용 사유를 연결한다. 사용자가 지정한 역할은 우선하며, 조직이나 workflow에 Intern이 없으면 역할 해석 규칙에 따라 가장 가까운 상위 역할이 이어받는다. 이 기록은 기존 workflow의 state·hash·예산·필수 검토를 변경하지 않는다.
+
 감독 worker는 역할 이름과 조직 파일로만 시작한다. 원시 `orca orchestration worker-start`로 `--agent`와 `--model`을 손으로 적지 않는다. 손으로 적은 명령은 저장된 모델을 빠뜨려도 아무 오류 없이 계정 기본 모델로 실행되고, 보고서는 여전히 역할의 프로필을 적기 때문이다. kickoff 안에서는 항상 그 workflow를 함께 지정한다.
 
 ```text
@@ -236,6 +238,8 @@ Goal이 `blocked`이면 표현을 완화하지 않고 그대로 전달한다. �
 사용자에게 보고할 때에는 Goal 상태, `live` worker 수, 확인된 최근 코드 변경을 **서로 구분된 항목**으로 제시한다. 계획의 존재, 대기 중인 다음 단계, 완료된 변경, 현재 실행 중인 구현은 각각 다른 사실이다.
 
 ## 사용량 측정
+
+사용량과 경제성을 비교할 때에는 실제 역할별 실무 비중, 입력·출력·캐시, 준비·대기·검토·재작업을 함께 기록한다. Intern 호출 수나 모델 비용 추정만으로 절감을 주장하지 않으며, 관측되지 않은 비용은 미측정으로 보존한다. 기본 depth에서 Intern이 제외되었거나 task가 상위 역할로 승격되었으면 그 이유와 실제 receipt를 대조한다.
 
 `usage-report`는 kickoff의 역할별 턴·호출·토큰과 모델을 각 CLI가 이미 남긴 기록에서 읽는다. 읽기만 하며, `--write`를 줄 때만 `<project>/.omt/history/usage-<entry>-<createdAt>.json`에 스냅샷을 쓴다.
 
