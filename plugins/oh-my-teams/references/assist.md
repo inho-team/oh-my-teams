@@ -28,7 +28,6 @@ node <runtime> assist --org <organization.json> --task <task.json> --repo <workt
 | `pl` | `research`, `checklist` | 분할 근거 조사와 점검 목록 초안 |
 | `senior` | `research`, `checklist` | 위치 탐색과 검토 항목 초안 |
 | `junior` | `research`, `checklist`, `edit` | 위 항목과 좁은 범위의 편집 |
-| `intern` | `research`, `checklist`, `edit` | 위 항목과 좁은 범위의 편집 |
 
 `kind: edit`는 제한 편집 하네스를 그대로 거치므로 파일 해시, 허용 범위, 검사와 보고 관문이 `work`와 같다.
 

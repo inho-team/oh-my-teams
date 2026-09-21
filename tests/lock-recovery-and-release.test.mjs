@@ -175,9 +175,9 @@ test("releasing a lock never replaces the error the caller raised", (t) => {
 test("a slot held by an exited worker is reclaimed and the reclaim is recorded", async (t) => {
   const dir = await repo(t);
   const org = structuredClone(organization);
-  org.roles.intern.concurrency = 1;
+  org.roles.junior.concurrency = 1;
   const stateDir = path.join(dir, ".omt");
-  const lockFile = path.join(stateDir, "slots", "intern-0.lock");
+  const lockFile = path.join(stateDir, "slots", "junior-0.lock");
   fs.mkdirSync(path.dirname(lockFile), { recursive: true });
 
   const edit = async () => ({
@@ -217,8 +217,8 @@ test("a slot held by an exited worker is reclaimed and the reclaim is recorded",
     }),
   );
   const report = await work(dir, org, task, { stateDir, call: edit });
-  assert.deepEqual(report.slot, { id: "intern-0", reclaimed: true });
-  assert.ok(report.issues.some((issue) => /Reclaimed intern-0/.test(issue)));
+  assert.deepEqual(report.slot, { id: "junior-0", reclaimed: true });
+  assert.ok(report.issues.some((issue) => /Reclaimed junior-0/.test(issue)));
   assert.equal(fs.existsSync(lockFile), false, "the lease is released again");
 });
 
@@ -231,7 +231,7 @@ test("an unlaunched reservation returns its slot and calls but not its attempt",
     id: "release-reservation",
     goal: "Release an unlaunched reservation",
     repo: ".",
-    tasks: [{ file: "lease.json", role: "intern" }],
+    tasks: [{ file: "lease.json", role: "junior" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 3, maxCalls: 3 },
   };
@@ -333,7 +333,7 @@ test("a launch refused before it started returns its attempt with the reservatio
     id: "refused-launch",
     goal: "Return the attempt of a refused launch",
     repo: ".",
-    tasks: [{ file: "lease.json", role: "intern" }],
+    tasks: [{ file: "lease.json", role: "junior" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 1, maxCalls: 3 },
   };

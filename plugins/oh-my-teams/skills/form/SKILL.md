@@ -1,6 +1,6 @@
 ---
 name: form
-description: 최초 oh my teams 상설 조직을 다섯 역할의 모델만 물어 구성하고, 나머지는 비용이 늘지 않는 기본값으로 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
+description: 최초 oh my teams 상설 조직을 네 역할의 모델만 물어 구성하고, 나머지는 비용이 늘지 않는 기본값으로 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
 ---
 
 # 팀 결성
@@ -11,9 +11,9 @@ description: 최초 oh my teams 상설 조직을 다섯 역할의 모델만 물�
 
 ## 묻는 것
 
-조직이 없으면 **다섯 역할(PM·PL·Senior·Junior·Intern)이 각각 어떤 모델을 쓸지만** 묻는다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 다섯 역할을 모두 두고, 실제로 몇 개의 역할을 쓸지는 kickoff마다 PM이 과제의 난이도를 보고 실행 깊이로 정하기 때문이다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다.
+조직이 없으면 **네 역할(PM·PL·Senior·Junior)이 각각 어떤 모델을 쓸지만** 묻는다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 네 역할을 모두 두고, 실제로 몇 개의 역할을 쓸지는 kickoff마다 PM이 과제의 난이도를 보고 실행 깊이로 정하기 때문이다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다.
 
-묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 두 번으로 끝난다. 구조화된 선택 도구는 한 번에 질문 네 개까지 담을 수 있으므로 첫 번째에 PM·PL·Senior·Junior의 모델을, 두 번째에 Intern의 모델을 묻는다. 번호를 매긴 선택지로 묻는 호스트에서는 다섯 개를 한 번에 제시한다.
+묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 한 번으로 끝난다. 구조화된 선택 도구는 한 번에 질문 네 개까지 담을 수 있으므로 PM·PL·Senior·Junior의 모델을 한꺼번에 묻는다. 번호를 매긴 선택지로 묻는 호스트에서도 네 개를 한 번에 제시한다.
 
 구독이 부족해 특정 역할을 아예 둘 수 없는 조직은 결성 후 `adjust`에서 그 역할을 뺀다. 뺀 역할이 맡던 일은 서열을 따라 위로 올라가 남은 가장 가까운 역할이 이어받으며, 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 역할 이름은 바꿀 수 없다. 실패 라우팅, 검토 요구사항과 스킬이 이 이름으로 역할을 지목하기 때문이다.
 
@@ -25,7 +25,6 @@ description: 최초 oh my teams 상설 조직을 다섯 역할의 모델만 물�
 | PL | Claude Opus → `claude:opus`, Codex Sol → `codex:gpt-5.6-sol`, Agy Gemini Pro → `agy:gemini-3.1-pro-high`, Claude Sonnet → `claude:sonnet`, Codex Terra → `codex:gpt-5.6-terra` |
 | Senior | Claude Sonnet → `claude:sonnet`, Codex Terra → `codex:gpt-5.6-terra`, Agy Gemini Pro → `agy:gemini-3.1-pro-high`, Agy Claude Opus → `agy:claude-opus-4-6-thinking` |
 | Junior | Claude Haiku → `claude:haiku`, Codex Luna → `codex:gpt-5.6-luna`, Agy Flash → `agy:gemini-3.8-flash-medium`, Agy Claude Sonnet → `agy:claude-sonnet-4-6` |
-| Intern | Claude Haiku → `claude:haiku`, Codex Luna → `codex:gpt-5.6-luna`, Agy GPT-OSS-120B → `agy:gpt-oss-120b-medium` |
 
 이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 자유 입력으로 `provider:model` 형식의 값을 언제든 받는다.
 
@@ -72,7 +71,7 @@ Gemini는 다른 모델과 달리 강도를 비워 둘 수 없다. Agy에는 강
 현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 초안 파일은 새 경로에 쓰며, 이미 있는 파일에는 쓰지 않는다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
 
 ```text
-node <runtime> org-draft --name <project-dir-name> --models <pm>,<pl>,<senior>,<junior>,<intern> --output <draft.json>
+node <runtime> org-draft --name <project-dir-name> --models <pm>,<pl>,<senior>,<junior> --output <draft.json>
 node <runtime> init --org <project>/.omt/organization.json --from <draft.json>
 node <runtime> show --org <project>/.omt/organization.json
 ```

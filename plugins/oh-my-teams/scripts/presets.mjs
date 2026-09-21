@@ -19,26 +19,22 @@ export const PRESETS = {
     models: {
       senior: "claude-opus-4-6-thinking",
       junior: "claude-opus-4-6-thinking",
-      intern: "claude-opus-4-6-thinking",
     },
-    fallbacks: { senior: [], junior: [], intern: [] },
-    concurrency: { senior: 1, junior: 1, intern: 1 },
+    fallbacks: { senior: [], junior: [] },
+    concurrency: { senior: 1, junior: 1 },
   },
   balanced: {
     kind: "models",
-    description:
-      "Use Opus for judgment, Sonnet for implementation, and GPT-OSS for narrow edits.",
+    description: "Use Opus for judgment and Sonnet for implementation.",
     models: {
       senior: "claude-opus-4-6-thinking",
       junior: "claude-sonnet-4-6",
-      intern: "gpt-oss-120b-medium",
     },
     fallbacks: {
       senior: [],
       junior: ["claude-opus-4-6-thinking"],
-      intern: ["claude-sonnet-4-6"],
     },
-    concurrency: { senior: 1, junior: 1, intern: 1 },
+    concurrency: { senior: 1, junior: 1 },
   },
   "single-subscription": {
     kind: "policy",
@@ -49,13 +45,12 @@ export const PRESETS = {
     kind: "tiers",
     provider: "codex",
     description:
-      "Sol leads, Terra and Luna carry the volume, and Astra advises at decision gates.",
+      "Sol leads, Terra plans and reviews, Luna implements, and Astra advises at decision gates.",
     models: {
       pm: "gpt-5.6-sol",
       pl: "gpt-5.6-terra",
       senior: "gpt-5.6-terra",
       junior: "gpt-5.6-luna",
-      intern: "gpt-5.6-luna",
     },
     advisor: "gpt-6-astra",
   },
@@ -63,13 +58,12 @@ export const PRESETS = {
     kind: "tiers",
     provider: "claude",
     description:
-      "Opus leads, Sonnet and Haiku carry the volume, and Fable advises at decision gates.",
+      "Opus leads, Sonnet plans and reviews, Haiku implements, and Fable advises at decision gates.",
     models: {
       pm: "opus",
       pl: "sonnet",
       senior: "sonnet",
-      junior: "sonnet",
-      intern: "haiku",
+      junior: "haiku",
     },
     advisor: "fable",
   },

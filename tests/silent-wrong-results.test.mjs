@@ -176,7 +176,7 @@ test("a model answer about rate limits is not read as exhausted capacity", () =>
 test("a missing environment reference fails as configuration, not as budget", async (t) => {
   const dir = await repo(t);
   const org = structuredClone(organization);
-  org.profiles[org.roles.intern.profile].env = {
+  org.profiles[org.roles.junior.profile].env = {
     AUTH_TOKEN: "OMT_ABSENT_TEST_TOKEN",
   };
   const stateDir = path.join(dir, ".omt");
@@ -203,7 +203,7 @@ test("a missing environment reference fails as configuration, not as budget", as
   );
   assert.equal(called, false, "no provider call is made or charged");
   assert.equal(
-    fs.existsSync(path.join(stateDir, "slots", "intern-0.lock")),
+    fs.existsSync(path.join(stateDir, "slots", "junior-0.lock")),
     false,
     "the slot is released again",
   );
@@ -261,7 +261,7 @@ test("a retired attempt id cannot be reused to overwrite a settled attempt", asy
     id: "attempt-reuse",
     goal: "Reject a retired attempt id",
     repo: ".",
-    tasks: [{ file: "alpha.json", role: "intern" }],
+    tasks: [{ file: "alpha.json", role: "junior" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 3, maxCalls: 3 },
   };

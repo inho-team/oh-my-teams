@@ -139,9 +139,9 @@ test("an Agy role starts in a terminal opened with its model, never by agent id"
     model: "qwen3:8b",
     contextTokens: 32768,
   };
-  org.roles.intern.profile = "local";
+  org.roles.junior.profile = "local";
   assert.throws(
-    () => resolveRoleLaunch(org, "intern", {}, { terminal: "t1" }),
+    () => resolveRoleLaunch(org, "junior", {}, { terminal: "t1" }),
     /ollama.*work/s,
   );
 });
@@ -276,8 +276,13 @@ test("a spec handed to a subordinate opens with that role's charter", () => {
   const [header, task] = spec.split("\n# 작업\n");
   assert.match(header, /^# oh my teams 역할 지시\n역할: Junior/);
   assert.match(header, /보고 대상: Senior/);
-  // Intern is not declared in a three-tier team, so Junior carries its work.
-  assert.match(header, /이번 실행에 없어 이어받는 역할: Intern/);
+  // Nothing sits below Junior, so it carries no other role's work; PL is not
+  // declared in a three-tier team, so PM carries PL's.
+  assert.match(header, /이번 실행에 없어 이어받는 역할: 없음/);
+  assert.match(
+    roleSpec(org, "pm", "나눈다."),
+    /이번 실행에 없어 이어받는 역할: PL\n/,
+  );
   assert.match(header, /직접 배정할 수 있는 역할: 없음/);
   assert.ok(header.includes(readRoleCharter("junior")));
   assert.equal(task.trim(), "value.txt의 오타를 고친다.");
@@ -291,14 +296,18 @@ test("a spec handed to a subordinate opens with that role's charter", () => {
   assert.ok(bluf && path.isAbsolute(bluf) && fs.existsSync(bluf), bluf);
 
   const pl = roleSpec(example(), "pl", "분할한다.");
-  assert.match(pl, /직접 배정할 수 있는 역할: Senior, Junior, Intern/);
+  assert.match(pl, /직접 배정할 수 있는 역할: Senior, Junior\n/);
 
   // A run at a shallower depth folds with its own role list, not the ladder.
   const shallow = roleSpec(example(), "junior", "고친다.", {
     roles: ["pm", "junior"],
   });
   assert.match(shallow, /보고 대상: PM/);
-  assert.match(shallow, /이번 실행에 없어 이어받는 역할: Intern/);
+  assert.match(shallow, /이번 실행에 없어 이어받는 역할: 없음/);
+  assert.match(
+    roleSpec(example(), "pm", "나눈다.", { roles: ["pm", "junior"] }),
+    /이번 실행에 없어 이어받는 역할: PL, Senior\n/,
+  );
   assert.throws(
     () => resolveRoleLaunch(example(), "pl", {}, { roles: ["pm", "junior"] }),
     /folds to pm/,
@@ -316,11 +325,11 @@ test("a spec handed to a subordinate opens with that role's charter", () => {
     () =>
       resolveRoleLaunch(
         example(),
-        "intern",
+        "junior",
         {},
         { roles: ["pm", "pl"], terminal: "t1" },
       ),
-    /intern is not in this run's roles; its work folds to pl/,
+    /junior is not in this run's roles; its work folds to pl/,
   );
 });
 
@@ -405,8 +414,8 @@ test("worker-start requires the organization and role and refuses before Orca", 
 
 test("a terminal is opened and handed work only for a role the run holds", async (t) => {
   // role-command folded against the live file while worker-start folded
-  // against the run, so an Agy terminal built for Intern was accepted as the
-  // Codex Junior the run folded Intern onto.
+  // against the run, so a terminal built for a role the run left out was
+  // accepted as the worker of the role the run folded it onto.
   const org = example();
   org.profiles["codex-55"] = {
     provider: "codex",
@@ -416,15 +425,15 @@ test("a terminal is opened and handed work only for a role the run holds", async
     model: "gpt-5.5",
   };
   org.roles.junior.profile = "codex-55";
-  org.roles.intern.profile = "agy-oss";
-  const roles = ["pm", "senior", "junior"];
+  org.roles.senior.profile = "agy-oss";
+  const roles = ["pm", "junior"];
   assert.throws(
-    () => roleCommand(org, "intern", { roles }),
-    /intern is not in this run's roles.*junior/s,
+    () => roleCommand(org, "senior", { roles }),
+    /senior is not in this run's roles.*pm/s,
   );
   assert.throws(
-    () => resolveRoleLaunch(org, "intern", {}, { roles, terminal: "t1" }),
-    /intern is not in this run's roles.*junior/s,
+    () => resolveRoleLaunch(org, "senior", {}, { roles, terminal: "t1" }),
+    /senior is not in this run's roles.*pm/s,
   );
   assert.equal(
     resolveRoleLaunch(org, "junior", {}, { roles, terminal: "t1" }).role,
@@ -448,7 +457,7 @@ test("a terminal is opened and handed work only for a role the run holds", async
       id: "wf-2",
       goal: "Fix a typo",
       repo: ".",
-      depth: 3,
+      depth: 2,
       tasks: [{ file: "task-a.json", role: "junior" }],
       policy: { maxRunning: 1, maxReviewPending: 1 },
       budget: { maxAttempts: 1, maxCalls: 1 },
@@ -472,7 +481,7 @@ test("a terminal is opened and handed work only for a role the run holds", async
     "gpt-5.5",
   ]);
   await assert.rejects(
-    () => main(["role-command", "--role", "intern", ...common]),
+    () => main(["role-command", "--role", "senior", ...common]),
     /not in this run's roles/,
   );
 });
@@ -491,7 +500,7 @@ test("a role does not start in the worktree another role's task works in", async
         attempts: [{ receipt: { worktreeId: juniorId, role: "junior" } }],
       },
       split: { role: "pl", attempts: [{ receipt: { worktreeId: plId } }] },
-      waiting: { role: "intern", attempts: [{ id: "reserved" }] },
+      waiting: { role: "senior", attempts: [{ id: "reserved" }] },
     },
   };
   const pmWorktree = "/w/literacy-test/literacy-site-research-2";
@@ -548,7 +557,7 @@ test("a role does not start in the worktree another role's task works in", async
       id: "wf-share",
       goal: "Write a report",
       repo: ".",
-      depth: 5,
+      depth: 4,
       tasks: [{ file: "task-a.json", role: "junior" }],
       policy: { maxRunning: 1, maxReviewPending: 1 },
       budget: { maxAttempts: 1, maxCalls: 2 },

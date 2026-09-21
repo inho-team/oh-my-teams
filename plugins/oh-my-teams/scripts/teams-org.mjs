@@ -154,7 +154,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                (per-role turns and tokens from provider session records, read-only;
                --write stores the report in <project>/.omt/history)
   supervision-next --org FILE --observation FILE
-  work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role intern]
+  work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role junior]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
   assist --org FILE --task FILE --repo DIR --state DIR --role ROLE
@@ -1132,7 +1132,7 @@ async function executeCommand(args) {
         readJSON(args.org),
         readJSON(args.task),
         {
-          role: args.role || "intern",
+          role: args.role || "junior",
           stateDir: path.resolve(args.state),
           workflowId: args["workflow-id"],
           attemptId: args["attempt-id"],

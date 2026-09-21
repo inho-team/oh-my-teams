@@ -47,8 +47,7 @@
         "pm": { "$ref": "#/$defs/assistantProfiles" },
         "pl": { "$ref": "#/$defs/assistantProfiles" },
         "senior": { "$ref": "#/$defs/assistantProfiles" },
-        "junior": { "$ref": "#/$defs/assistantProfiles" },
-        "intern": { "$ref": "#/$defs/assistantProfiles" }
+        "junior": { "$ref": "#/$defs/assistantProfiles" }
       }
     },
     "advisors": {
@@ -59,8 +58,7 @@
         "pm": { "$ref": "#/$defs/assistantProfiles" },
         "pl": { "$ref": "#/$defs/assistantProfiles" },
         "senior": { "$ref": "#/$defs/assistantProfiles" },
-        "junior": { "$ref": "#/$defs/assistantProfiles" },
-        "intern": { "$ref": "#/$defs/assistantProfiles" }
+        "junior": { "$ref": "#/$defs/assistantProfiles" }
       }
     },
     "roles": {
@@ -72,8 +70,7 @@
         "pm": { "$ref": "#/$defs/role" },
         "pl": { "$ref": "#/$defs/role" },
         "senior": { "$ref": "#/$defs/role" },
-        "junior": { "$ref": "#/$defs/role" },
-        "intern": { "$ref": "#/$defs/role" }
+        "junior": { "$ref": "#/$defs/role" }
       }
     },
     "policy": {
@@ -168,7 +165,7 @@
       "type": "object",
       "required": ["parent", "profile", "concurrency", "attempts", "fallbacks"],
       "properties": {
-        "parent": { "enum": [null, "pm", "pl", "senior", "junior", "intern"] },
+        "parent": { "enum": [null, "pm", "pl", "senior", "junior"] },
         "profile": { "type": "string", "minLength": 1 },
         "concurrency": { "type": "integer", "minimum": 1, "maximum": 32 },
         "attempts": { "type": "integer", "minimum": 1, "maximum": 5 },

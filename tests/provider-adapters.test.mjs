@@ -371,9 +371,9 @@ test("an unusable profile yields its remaining attempts to the next profile", as
   );
 
   const org = structuredClone(localOrg);
-  org.roles.intern.profile = "ollama-qwen-http";
-  org.roles.intern.fallbacks = ["agy-sonnet"];
-  org.roles.intern.attempts = 3;
+  org.roles.junior.profile = "ollama-qwen-http";
+  org.roles.junior.fallbacks = ["agy-sonnet"];
+  org.roles.junior.attempts = 3;
   validateOrg(org);
 
   const calls = [];

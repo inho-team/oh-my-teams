@@ -208,12 +208,12 @@ test("first setup is idempotent; explicit edits archive and reject stale revisio
   );
 });
 test("graph validation accepts branches and rejects cycle/missing profile/second root", () => {
-  assert.ok(chart(validateOrg(clone())).includes("INTERN"));
+  assert.ok(chart(validateOrg(clone())).includes("JUNIOR"));
   const cycle = clone();
-  cycle.roles.pl.parent = "intern";
+  cycle.roles.pl.parent = "junior";
   assert.throws(() => validateOrg(cycle), /cycle/);
   const bad = clone();
-  bad.roles.intern.profile = "missing";
+  bad.roles.junior.profile = "missing";
   assert.throws(() => validateOrg(bad), /profile/);
   const root = clone();
   root.roles.senior.parent = null;
@@ -227,14 +227,12 @@ test("default organization uses the responsibility hierarchy and routing", () =>
   assert.equal(org.roles.pl.parent, "pm");
   assert.equal(org.roles.senior.parent, "pl");
   assert.equal(org.roles.junior.parent, "senior");
-  assert.equal(org.roles.intern.parent, "junior");
+  assert.deepEqual(Object.keys(org.roles), ["pm", "pl", "senior", "junior"]);
   assert.deepEqual(
-    ["pm", "pl", "senior", "junior", "intern"].map(
-      (role) => org.roles[role].concurrency,
-    ),
+    ["pm", "pl", "senior", "junior"].map((role) => org.roles[role].concurrency),
     // Every Agy role draws on one shared quota pool, so the shipped default
     // holds a single slot each and extra parallelism is opted into per team.
-    [1, 1, 1, 1, 1],
+    [1, 1, 1, 1],
   );
   assert.equal(org.profiles[org.roles.pl.profile].model, "gpt-5.6-sol");
   assert.equal(
@@ -245,16 +243,18 @@ test("default organization uses the responsibility hierarchy and routing", () =>
     org.profiles[org.roles.junior.profile].model,
     "claude-opus-4-6-thinking",
   );
-  assert.equal(
-    org.profiles[org.roles.intern.profile].model,
-    "claude-sonnet-4-6",
-  );
   assert.ok(
     Object.values(org.profiles).some(
       (profile) => profile.model === "gpt-oss-120b-medium",
     ),
   );
-  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+  assert.deepEqual(Object.keys(org.assistants), [
+    "pm",
+    "pl",
+    "senior",
+    "junior",
+  ]);
+  for (const role of ["pm", "pl", "senior", "junior"]) {
     assert.deepEqual(org.assistants[role], ["agy-oss"]);
   }
 });
@@ -268,7 +268,7 @@ test("every role can use the configured GPT-OSS research assistant with an audit
     files: ["source.txt"],
     checks: [[process.execPath, "--version"]],
   };
-  for (const role of ["pm", "pl", "senior", "junior", "intern"]) {
+  for (const role of ["pm", "pl", "senior", "junior"]) {
     const stateDir = path.join(dir, `.omt-${role}`);
     const report = await assist(dir, clone(), assistantTask, {
       role,
@@ -641,8 +641,8 @@ test("no bound profile in the example changes the effort the call used to run at
 test("failed OSS output promotes once to configured fallback and preserves org snapshot", async (t) => {
   const dir = await repo(t),
     org = clone();
-  org.roles.intern.profile = "agy-oss";
-  org.roles.intern.fallbacks = ["agy-sonnet"];
+  org.roles.junior.profile = "agy-oss";
+  org.roles.junior.fallbacks = ["agy-sonnet"];
   let calls = 0;
   const result = await work(dir, org, task, {
     stateDir: path.join(dir, ".omt"),
@@ -689,8 +689,8 @@ test("quota stop does not switch subscriptions; repeated failure never becomes s
   assert.equal(result.status, "failed");
   assert.equal(calls, 1);
   const retryOrg = clone();
-  retryOrg.roles.intern.profile = "agy-oss";
-  retryOrg.roles.intern.fallbacks = ["agy-sonnet"];
+  retryOrg.roles.junior.profile = "agy-oss";
+  retryOrg.roles.junior.fallbacks = ["agy-sonnet"];
   const failed = await work(dir, retryOrg, task, {
     stateDir: path.join(dir, ".omt"),
     call: async () => response({ edits: [] }),
@@ -718,10 +718,10 @@ test("provider editing workspace outside JSON protocol is blocked and preserved"
 test("concurrency locks block extra workers and are released after settlement", async (t) => {
   const dir = await repo(t),
     org = clone();
-  org.roles.intern.concurrency = 1;
+  org.roles.junior.concurrency = 1;
   const stateDir = path.join(dir, ".omt");
   fs.mkdirSync(path.join(stateDir, "slots"), { recursive: true });
-  fs.writeFileSync(path.join(stateDir, "slots", "intern-0.lock"), "owned");
+  fs.writeFileSync(path.join(stateDir, "slots", "junior-0.lock"), "owned");
   await assert.rejects(
     () => work(dir, org, task, { stateDir, call: async () => response({}) }),
     /occupied/,
@@ -730,7 +730,7 @@ test("concurrency locks block extra workers and are released after settlement", 
 test("timed-out provider retains the slot and does not start fallback", async (t) => {
   const dir = await repo(t),
     org = clone();
-  org.roles.intern.concurrency = 1;
+  org.roles.junior.concurrency = 1;
   const stateDir = path.join(dir, ".omt");
   const result = await work(dir, org, task, {
     stateDir,
@@ -738,7 +738,7 @@ test("timed-out provider retains the slot and does not start fallback", async (t
   });
   assert.equal(result.status, "failed");
   assert.equal(result.calls.length, 1);
-  assert.ok(fs.existsSync(path.join(stateDir, "slots", "intern-0.lock")));
+  assert.ok(fs.existsSync(path.join(stateDir, "slots", "junior-0.lock")));
 });
 test("base and check argv changes invalidate success even with identical source", async (t) => {
   const dir = await repo(t),
@@ -1019,18 +1019,19 @@ test("model presets preview only changed roles and never mutate an existing orga
   assert.equal(JSON.stringify(org), before);
   assert.deepEqual(
     balanced.changes.map((change) => change.role),
-    ["senior", "junior", "intern"],
+    ["senior", "junior"],
   );
   assert.equal(balanced.organization.roles.pm.profile, org.roles.pm.profile);
   assert.equal(balanced.organization.roles.pl.profile, org.roles.pl.profile);
   assert.equal(balanced.organization.roles.senior.profile, "agy-opus");
   assert.equal(balanced.organization.roles.junior.profile, "agy-sonnet");
 });
-test("presets pin one slot per shared-pool role and stop the intern chain before Opus", () => {
+test("presets pin one slot per shared-pool role and keep each fallback chain to what they name", () => {
   const org = clone();
   for (const name of ["balanced", "opus-first"]) {
     const preview = previewPreset(org, name);
-    for (const role of ["senior", "junior", "intern"]) {
+    assert.equal(preview.organization.roles.intern, undefined);
+    for (const role of ["senior", "junior"]) {
       assert.equal(
         preview.organization.roles[role].concurrency,
         1,
@@ -1038,9 +1039,14 @@ test("presets pin one slot per shared-pool role and stop the intern chain before
       );
     }
   }
-  const intern = previewPreset(org, "balanced").organization.roles.intern;
-  assert.deepEqual(intern.fallbacks, ["agy-sonnet"]);
-  assert.ok(!intern.fallbacks.includes("agy-opus"));
+  // Balanced escalates Sonnet implementation to Opus once and nothing further;
+  // Opus judgment and opus-first have no fallback to spend another quota on.
+  const balanced = previewPreset(org, "balanced").organization.roles;
+  assert.deepEqual(balanced.junior.fallbacks, ["agy-opus"]);
+  assert.deepEqual(balanced.senior.fallbacks, []);
+  const opusFirst = previewPreset(org, "opus-first").organization.roles;
+  assert.deepEqual(opusFirst.senior.fallbacks, []);
+  assert.deepEqual(opusFirst.junior.fallbacks, []);
 });
 test("provider print timeout expires before the runtime kills the call", () => {
   for (const timeoutMs of [60000, 300000, 600000]) {
@@ -1557,8 +1563,8 @@ test("workflow schedules only dependency-ready tasks and requires reconciliation
     goal: "Complete A then B",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "intern" },
-      { file: "b.json", role: "intern" },
+      { file: "a.json", role: "junior" },
+      { file: "b.json", role: "junior" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 6 },
@@ -1623,7 +1629,7 @@ test("workflow deduplicates settlements, ignores stale attempts, and enforces to
     id: "workflow-events",
     goal: "Exercise event safety",
     repo: ".",
-    tasks: [{ file: "task.json", role: "intern" }],
+    tasks: [{ file: "task.json", role: "junior" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 2 },
   };
@@ -1707,8 +1713,8 @@ test("workflow rejects dependency cycles and avoids parallel shared-contract con
     goal: "Serialize shared contract work",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "intern" },
-      { file: "b.json", role: "intern" },
+      { file: "a.json", role: "junior" },
+      { file: "b.json", role: "junior" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 5 },
@@ -1740,8 +1746,8 @@ test("workflow rejects dependency cycles and avoids parallel shared-contract con
     ...request,
     id: "workflow-cycle",
     tasks: [
-      { file: "ca.json", role: "intern" },
-      { file: "cb.json", role: "intern" },
+      { file: "ca.json", role: "junior" },
+      { file: "cb.json", role: "junior" },
     ],
   };
   await assert.rejects(
@@ -1789,16 +1795,16 @@ test("workflow offers independent tasks together within role and workflow limits
     goal: "Run independent tasks together",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "intern" },
-      { file: "b.json", role: "intern" },
+      { file: "a.json", role: "junior" },
+      { file: "b.json", role: "junior" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 2, maxCalls: 4 },
   };
   // Concurrent dispatch, not the shipped slot default, is under test, so this
-  // organization opts into the second intern slot explicitly.
+  // organization opts into the second junior slot explicitly.
   const parallelOrganization = clone();
-  parallelOrganization.roles.intern.concurrency = 2;
+  parallelOrganization.roles.junior.concurrency = 2;
   await createWorkflow(stateDir, request, parallelOrganization, dir);
   assert.deepEqual(
     resumeWorkflow(stateDir, request.id, 1).actions.map(
@@ -1869,7 +1875,7 @@ test("workflow retry preserves attempts and cumulative budget", async (t) => {
     id: "workflow-retry",
     goal: "Retry with preserved history",
     repo: ".",
-    tasks: [{ file: "task.json", role: "intern" }],
+    tasks: [{ file: "task.json", role: "junior" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 3 },
   };

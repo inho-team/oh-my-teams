@@ -45,7 +45,7 @@ function codexProfile(model) {
 }
 
 // The shape the grid and trading organizations were saved with: Astra as PM,
-// Sol as PL, Terra as Senior, and Luna for the two implementation roles.
+// Sol as PL, Terra as Senior, and Luna for the implementation role.
 function astraLedOrg() {
   const org = structuredClone(example);
   org.pools = { "codex-current": { label: "Codex current account" } };
@@ -60,7 +60,6 @@ function astraLedOrg() {
     pl: "codex-gpt-5-6-sol",
     senior: "codex-gpt-5-6-terra",
     junior: "codex-gpt-5-6-luna",
-    intern: "codex-gpt-5-6-luna",
   };
   for (const [role, profile] of Object.entries(profiles)) {
     org.roles[role] = { ...org.roles[role], profile, fallbacks: [] };
@@ -114,7 +113,7 @@ test("the Codex advisor preset moves Astra from PM to an advisor for the plannin
   assert.equal(model("pl"), "gpt-5.6-terra");
   assert.equal(model("senior"), "gpt-5.6-terra");
   assert.equal(model("junior"), "gpt-5.6-luna");
-  assert.equal(model("intern"), "gpt-5.6-luna");
+  assert.equal(roles.intern, undefined);
   assert.deepEqual(preview.organization.advisors, {
     pm: ["codex-gpt-6-astra"],
     pl: ["codex-gpt-6-astra"],
@@ -163,7 +162,10 @@ test("a tiers preset leaves roles on another provider and its quota alone", () =
   const preview = previewPreset(validateOrg(org), "advisor-codex");
   assert.equal(preview.organization.roles.junior.profile, "agy-flash");
   assert.ok(!preview.changes.some((change) => change.role === "junior"));
-  assert.equal(preview.organization.roles.intern.profile, "codex-gpt-5-6-luna");
+  assert.equal(
+    preview.organization.roles.senior.profile,
+    "codex-gpt-5-6-terra",
+  );
 });
 
 test("a tiers preset refuses a provider the organization has no account for", () => {

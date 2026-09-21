@@ -82,8 +82,7 @@
     "pm": ["agy-oss"],
     "pl": ["agy-oss"],
     "senior": ["agy-oss"],
-    "junior": ["agy-oss"],
-    "intern": ["agy-oss"]
+    "junior": ["agy-oss"]
   },
   "roles": {
     "pm": {
@@ -110,13 +109,6 @@
     "junior": {
       "parent": "senior",
       "profile": "agy-opus",
-      "concurrency": 1,
-      "attempts": 1,
-      "fallbacks": []
-    },
-    "intern": {
-      "parent": "junior",
-      "profile": "agy-sonnet",
       "concurrency": 1,
       "attempts": 1,
       "fallbacks": []
