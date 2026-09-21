@@ -2,15 +2,23 @@
 
 ## 통합 HEAD 구성
 
-이 문서가 설명하는 코드 기준 커밋은 345def2e021d93f80dab2b4a431e170803d9cf47입니다. 이 문서를 더하기 전의 통합 브랜치이며, 아래 실제 경로 검증에 쓴 워크트리도 이 커밋에서 만들었습니다. 최종 통합 HEAD는 이 문서를 반영한 병합 커밋이고, 그 커밋은 코드 기준 커밋에 이 문서만 더했으므로 코드 트리는 같습니다. 그래서 특정 최종 병합 커밋의 해시는 적지 않습니다.
+이 문서가 설명하는 코드 기준 커밋은 345def2e021d93f80dab2b4a431e170803d9cf47입니다. 이 문서를 더하기 전의 통합 브랜치이며, 아래 실제 경로 검증에 쓴 워크트리도 이 커밋에서 만들었습니다. 이 커밋의 코드는 수정 전 상태이고, 이후 c5feb62가 `prompt-supervision.mjs`, `orca-adapter.mjs` 등의 코드를 바꾸었습니다. 그래서 통합 브랜치의 HEAD는 코드 기준 커밋과 코드 트리가 같지 않습니다.
+
+통합 브랜치의 HEAD는 이 문서를 반영하는 병합과 코드 수정을 반영하는 병합을 거치며 바뀌었고, 이 문서를 다시 고친 커밋이 병합되면 한 번 더 바뀝니다. 그래서 최종 병합 커밋의 해시는 적지 않고, 커밋 사이의 관계와 각 시점의 검사 결과를 적습니다.
 
 코드 기준 커밋은 다음 변경사항을 포함하고 있습니다.
 
-**병합 이력 (코드 기준 커밋까지의 git log --first-parent)**
-- 345def2: merge: origin/main(b625b25) 반영
+**병합 이력 (git log --first-parent, 이 문서를 다시 고친 커밋의 병합 전까지)**
+- e09cb6b: merge: 통합 기록 검토 반영과 미인식 질문 화면 escalate 수정. 두 번째 부모인 c5feb62를 병합했고, 코드 트리는 c5feb62와 같습니다.
+- 8d11a83: merge: supervised-prompt-answers 통합 기록 반영. 345def2에 이 문서만 더했으므로 코드 트리는 345def2와 같습니다.
+- 345def2: merge: origin/main(2.8.2) 반영. 병합한 origin/main 커밋은 b625b25입니다.
 - a59022b: merge: supervised-prompt-answers task 결과 통합 (capture·submission·classifier·supervisor-path)
 
-이 문서를 반영한 병합 커밋은 위 목록의 맨 위에 더해집니다.
+**통합 기록 브랜치(dev-inho/spa-integration-doc)의 커밋**
+- a54bf6c, 9292034, 11aa6bc: 통합 기록의 작성과 수정입니다. 문서만 바꾸었고 8d11a83이 병합했습니다.
+- 244ec20: 통합 기록의 독립 검토 finding 4건을 반영했습니다. 문서만 바꾸었고 c5feb62를 거쳐 e09cb6b에 포함되었습니다.
+- c5feb62: 인식되지 않은 질문 화면에서 `prompt-answer`가 순환하지 않고 `escalate`로 끝나도록 코드를 수정했습니다. `orca-runtime.md`, PM·PL 스킬, 수치 문서와 회귀 테스트도 함께 바뀌었고, e09cb6b가 병합했습니다.
+- 이 문서를 다시 고친 커밋: 문서만 바꾸므로 코드 트리는 c5feb62와 같습니다. 이 커밋을 병합한 커밋이 최종 통합 HEAD가 됩니다.
 
 **수용된 task 결과 (네 개)**
 
@@ -25,16 +33,19 @@
 
 origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브랜치 쪽 내용을 받았습니다. 이 상태에서 npm run sync를 실행하여 다중 파일에 기재된 버전과 감사 수치를 다시 계산했습니다.
 
-## 코드 기준 커밋의 검사 결과
+## 시점별 검사 결과
 
-코드 기준 커밋과 최종 통합 HEAD는 코드 트리가 같고 차이는 이 문서뿐이므로, 아래 결과는 두 커밋의 코드에 모두 해당합니다.
+코드 트리가 같은 커밋은 검사 결과를 공유하므로, 코드 트리가 달라지는 시점을 기준으로 두 열로 나누어 적습니다.
 
-| 검사 | 결과 |
-|---|---|
-| npm run format | ✓ 통과 |
-| npm run sync | ✓ 통과 |
-| npm run lint | ✓ 통과 |
-| npm test | ✓ 618개 테스트 통과 |
+- 345def2와 8d11a83: 8d11a83은 345def2에 이 문서만 더했으므로 코드가 같습니다. 618개 결과는 8d11a83에서 실행한 검사(w1/verify-integration-1.json)이며, 두 커밋의 코드에 모두 해당합니다.
+- e09cb6b: c5feb62의 코드 수정을 포함합니다. 623개 결과는 e09cb6b에서 실행한 검사(w1/verify-integration-2.json)입니다. 테스트가 618개에서 623개로 늘었고, c5feb62에서 바뀐 테스트 파일은 `tests/prompt-supervision.test.mjs` 하나입니다.
+
+| 검사 | 345def2·8d11a83 (수정 전 코드) | e09cb6b (c5feb62 수정 반영) |
+|---|---|---|
+| npm run format | ✓ 통과 | ✓ 통과 |
+| npm run sync | ✓ 통과 | ✓ 통과 |
+| npm run lint | ✓ 통과 | ✓ 통과 |
+| npm test | ✓ 618개 테스트 통과 | ✓ 623개 테스트 통과 |
 
 ## 실제 경로 검증 (Claude)
 
@@ -93,7 +104,7 @@ origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브�
 
 **turnStart를 영수증으로 증명한 범위**
 
-turnStart: observed는 이 첫 시작에서만 관측했습니다. 같은 통합 단계에서 `--workflow-task` 없이 같은 터미널을 다시 시작한 worker-start 두 번(start-verify-claude-2, start-verify-claude-3)과 통합 검토 시작(start-review-integration-1)은 모두 turnStart: unsupported였습니다. 앞의 두 번은 영수증으로는 턴 시작을 증명하지 못해 화면으로 진행을 확인했고, 세 시작 모두 worker는 이후 작업을 수행하고 결과를 보고했습니다. 이 kickoff에서는 /clear가 없던 시작은 observed, /clear 뒤의 시작은 unsupported로 나오는 경향이 되풀이되었으나 원인은 확인하지 않았습니다.
+이 검증에서는 turnStart: observed를 첫 시작에서만 관측했습니다. 같은 통합 단계에서 `--workflow-task` 없이 같은 터미널을 다시 시작한 worker-start 두 번(start-verify-claude-2, start-verify-claude-3)과 통합 검토 시작(start-review-integration-1)은 모두 turnStart: unsupported였습니다. 앞의 두 번은 영수증으로는 턴 시작을 증명하지 못해 화면으로 진행을 확인했고, 세 시작 모두 worker는 이후 작업을 수행하고 결과를 보고했습니다. 이 kickoff 전체에서는 turnStart 값이 /clear 여부와 관계없이 observed와 unsupported로 섞여 나왔고, 원인은 확인하지 않았습니다. /clear가 없던 시작에도 observed(start-classifier-1, start-supervisor-path-1)와 unsupported(start-capture-1, start-submission-1, 같은 task 재작업인 start-classifier-fix-1)가 모두 있었고, /clear 뒤의 시작에도 observed(start-review-submission-2, start-integration-approval-fix-1)와 unsupported(start-review-capture-1, start-review-integration-1 등)가 모두 있었습니다.
 
 ## Agy와 Codex
 
@@ -139,7 +150,7 @@ worker-start 시 freshContext 필드의 cleared·reason 값으로 대화 초기�
 | 직전 시작이 검토였던 구현 시작(같은 task, purpose 없음) | true | purpose-changed | 새 대화로 시작 (/clear 전송) |
 | --workflow-task 없이 다시 시작 | true | task-unidentified | 새 대화로 시작 (/clear 전송) |
 
-purpose-changed는 task가 바뀌어서 나온 값이 아닙니다. 같은 터미널에서 submission 검토 뒤에 같은 submission 구현을 다시 시작했을 때, 직전 시작이 검토였고 이번에는 purpose가 없었으므로 나온 값입니다. task-unidentified는 통합 단계에서 `--workflow-task` 없이 같은 터미널에 지시를 다시 넘긴 두 번(start-verify-claude-2, start-verify-claude-3)에서 관측했으며, 두 번 모두 reason이 task-unidentified였고 /clear가 나갔습니다.
+purpose-changed는 task가 바뀌어서 나온 값이 아닙니다. 같은 터미널에서 submission 검토 뒤에 같은 submission 구현을 다시 시작했을 때, 직전 시작이 검토였고 이번에는 purpose가 없었으므로 나온 값입니다. task-unidentified는 통합 단계에서 `--workflow-task` 없이 같은 터미널에 지시를 다시 넘긴 네 번(start-verify-claude-2, start-verify-claude-3, start-integration-doc-fix-2, start-integration-approval-fix-1)에서 관측했으며, 네 번 모두 /clear가 나갔습니다. 이 네 번의 turnStart는 start-integration-approval-fix-1만 observed이고 나머지는 unsupported였습니다.
 
 특별히, 같은 task 검토를 두 번 실행하면 첫 번째·두 번째 모두 대화를 새로 시작합니다(previousLaunchAt 기록). 이는 문서의 "검토는 항상 새 대화로 시작한다"는 규칙과 일치합니다.
 
@@ -153,7 +164,7 @@ purpose-changed는 task가 바뀌어서 나온 값이 아닙니다. 같은 터�
 
 명령 범위를 판정하는 `judgeCommandScope`와 `decideApproval`은 `prompt-answers.mjs`에 구현되어 `tests/prompt-answers.test.mjs`에서 검증되지만, `prompt-answers.mjs` 밖의 런타임 코드에서는 호출되지 않습니다(저장소 전체에서 두 이름을 검색해 확인했습니다). 따라서 명령 승인 질문에 감독자가 대신 답하는 동작은 아직 작동하지 않습니다.
 
-분류기가 알아보지 못한 화면(`kind`가 `unknown`이고 CLI를 특정하지 못한 경우)의 처리는 이 통합 뒤에 고쳤습니다. 고치기 전에는 `prompt-supervision.mjs`가 이 화면을 키 없이 `no-question`과 `next: resume-precheck`로 기록했고, `terminal-idle-check`와 `worker-start`의 사전 점검은 같은 화면을 Orca의 `blockedReason`으로 거부하면서 `prompt-answer`를 실행하라고 안내했습니다. 그래서 캡처되지 않은 명령 승인이나 업데이트 안내에서는 "`prompt-answer`가 `no-question` → 점검 거부 → `prompt-answer`"가 되풀이되었고 문서에도 출구가 없었습니다.
+분류기가 알아보지 못한 화면(`kind`가 `unknown`이고 CLI를 특정하지 못한 경우)의 처리는 코드 기준 커밋(345def2) 뒤의 c5feb62에서 고쳤습니다. 고치기 전(345def2와 8d11a83)에는 `prompt-supervision.mjs`가 이 화면을 키 없이 `no-question`과 `next: resume-precheck`로 기록했고, `terminal-idle-check`와 `worker-start`의 사전 점검은 같은 화면을 Orca의 `blockedReason`으로 거부하면서 `prompt-answer`를 실행하라고 안내했습니다. 그래서 캡처되지 않은 명령 승인이나 업데이트 안내에서는 "`prompt-answer`가 `no-question` → 점검 거부 → `prompt-answer`"가 되풀이되었고 문서에도 출구가 없었습니다.
 
 지금은 `prompt-answer`가 그런 화면에서 사전 점검과 같은 `terminal wait --for tui-idle`을 3초 동안 실행해 Orca의 상태를 읽습니다(`probeTerminalBlock`, `orca-adapter.mjs`). Orca가 `blockedReason`을 보고하면 키와 지시를 보내지 않고 `escalate`와 `next: report-upstream`으로 끝내며, 그 `blockedReason`을 결과와 `prompt-answers.jsonl`에 남깁니다. Orca가 멈춤을 보고하지 않으면(`satisfied: true`, 이유 없는 `satisfied: false`, `timeout`) 예전처럼 `no-question`입니다. Orca의 응답을 얻지 못하거나 해석하지 못하면 `orca-state-unavailable`로 거부해서, 화면을 깨끗하다고 단정하지 않습니다. 같은 화면과 같은 `blockedReason`을 감독 루프가 다시 읽으면 기록에 줄을 더하지 않고 앞선 시도를 `repeated: true`로 돌려줍니다. 화면 내용은 기록하지 않고 행의 지문만 비교하므로, 화면이나 이유가 바뀌면 새 시도로 기록합니다. `orca-runtime.md`, 두 사전 점검의 거부 메시지, PM·PL 스킬은 이 동작에 맞췄고, 명령 승인 화면을 분류기가 알아보지 못한다는 서술은 유지했습니다. 회귀 테스트는 `tests/prompt-supervision.test.mjs`에 있습니다.
 
