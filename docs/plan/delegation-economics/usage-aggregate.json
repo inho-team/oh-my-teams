@@ -1,0 +1,392 @@
+{
+  "generatedAt": "2026-09-21T05:37:10.544Z",
+  "inputs": {
+    "usage": [
+      {
+        "file": "usage-60ce3c7b6850f14ce5e41e42f19ee89de333f178071e0cc9faa63182c5e5303e-2026-09-20T01-42-26-913Z.json",
+        "sha256": "8dcd4f413b60732a63f75627ca654b0fa044da837b36073f3945513c2df747a0"
+      },
+      {
+        "file": "usage-8c22d8f1ab800b8603fe07888eebbb7792d8892f3b1b60348a71ab5abe3e69bf-2026-09-20T07-47-21-923Z.json",
+        "sha256": "78ea8acfe0bb434070bf28f00e55d891f7aec47adef5caaf0f0af2952e8c9df1"
+      }
+    ],
+    "state": [".omt", ".omt"]
+  },
+  "kickoffs": [
+    {
+      "entry": "60ce3c7b6850",
+      "window": {
+        "from": "2026-09-20T01:42:26.913Z",
+        "to": "2026-09-20T03:29:28.073Z",
+        "minutes": 107.02
+      },
+      "byRole": {
+        "pm": {
+          "models": {
+            "requested": [],
+            "reported": ["claude-opus-5"]
+          },
+          "sources": ["claude-transcript"],
+          "sessions": 1,
+          "measuredSessions": 1,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 2,
+          "calls": 188,
+          "steps": null,
+          "promptTokens": 47944957,
+          "cachedInputTokens": 47584277,
+          "cacheCreationTokens": 360304,
+          "outputTokens": 164505,
+          "reasoningTokens": 38539,
+          "costUsd": null
+        },
+        "junior": {
+          "models": {
+            "requested": ["claude-sonnet-4-6"],
+            "reported": ["claude-sonnet-4-6"]
+          },
+          "sources": ["headless"],
+          "sessions": 8,
+          "measuredSessions": 8,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 8,
+          "calls": 8,
+          "steps": null,
+          "promptTokens": 1020148,
+          "cachedInputTokens": 20041497,
+          "cacheCreationTokens": null,
+          "outputTokens": 141461,
+          "reasoningTokens": 0,
+          "costUsd": null
+        },
+        "senior": {
+          "models": {
+            "requested": ["claude-opus-4-6-thinking"],
+            "reported": ["claude-opus-4-6-thinking"]
+          },
+          "sources": ["headless"],
+          "sessions": 7,
+          "measuredSessions": 7,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 9,
+          "calls": 11,
+          "steps": null,
+          "promptTokens": 504082,
+          "cachedInputTokens": 3372374,
+          "cacheCreationTokens": null,
+          "outputTokens": 74883,
+          "reasoningTokens": 0,
+          "costUsd": null
+        }
+      },
+      "sources": {
+        "headless": {
+          "sessions": 15,
+          "unavailable": null
+        },
+        "harness": {
+          "sessions": 0,
+          "unavailable": null
+        },
+        "claude-transcript": {
+          "sessions": 1,
+          "unavailable": null
+        },
+        "codex-rollout": {
+          "sessions": 0,
+          "unavailable": null
+        },
+        "agy-summary": {
+          "sessions": 0,
+          "unavailable": null
+        }
+      },
+      "share": {
+        "pm": 0.9651,
+        "junior": 0.0233,
+        "senior": 0.0116
+      },
+      "coverage": {
+        "measuredSessions": 16,
+        "totalSessions": 16,
+        "unmeasuredRoles": [],
+        "note": "Every attributed role has at least one measured session."
+      },
+      "byRoleMissing": ["intern"],
+      "sourceRows": [
+        {
+          "role": "pm",
+          "source": "claude-transcript",
+          "sessions": 1,
+          "measuredSessions": 1,
+          "turns": 2,
+          "calls": 188,
+          "promptTokens": 47944957,
+          "cachedInputTokens": 47584277,
+          "cacheCreationTokens": 360304,
+          "outputTokens": 164505,
+          "models": {
+            "requested": [],
+            "reported": ["claude-opus-5"]
+          }
+        },
+        {
+          "role": "junior",
+          "source": "headless",
+          "sessions": 8,
+          "measuredSessions": 8,
+          "turns": 8,
+          "calls": 8,
+          "promptTokens": 1020148,
+          "cachedInputTokens": 20041497,
+          "cacheCreationTokens": null,
+          "outputTokens": 141461,
+          "models": {
+            "requested": ["claude-sonnet-4-6"],
+            "reported": ["claude-sonnet-4-6"]
+          }
+        },
+        {
+          "role": "senior",
+          "source": "headless",
+          "sessions": 7,
+          "measuredSessions": 7,
+          "turns": 9,
+          "calls": 11,
+          "promptTokens": 504082,
+          "cachedInputTokens": 3372374,
+          "cacheCreationTokens": null,
+          "outputTokens": 74883,
+          "models": {
+            "requested": ["claude-opus-4-6-thinking"],
+            "reported": ["claude-opus-4-6-thinking"]
+          }
+        }
+      ]
+    },
+    {
+      "entry": "8c22d8f1ab80",
+      "window": {
+        "from": "2026-09-20T07:47:21.923Z",
+        "to": "2026-09-21T02:06:55.900Z",
+        "minutes": 1099.57
+      },
+      "byRole": {
+        "pm": {
+          "models": {
+            "requested": [],
+            "reported": ["claude-opus-5"]
+          },
+          "sources": ["claude-transcript"],
+          "sessions": 1,
+          "measuredSessions": 1,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 24,
+          "calls": 314,
+          "steps": null,
+          "promptTokens": 90672829,
+          "cachedInputTokens": 89856826,
+          "cacheCreationTokens": 815375,
+          "outputTokens": 222896,
+          "reasoningTokens": 61357,
+          "costUsd": null
+        },
+        "junior": {
+          "models": {
+            "requested": ["claude-sonnet-4-6"],
+            "reported": ["claude-sonnet-4-6"]
+          },
+          "sources": ["headless"],
+          "sessions": 9,
+          "measuredSessions": 9,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 11,
+          "calls": 14,
+          "steps": null,
+          "promptTokens": 3523305,
+          "cachedInputTokens": 84182795,
+          "cacheCreationTokens": null,
+          "outputTokens": 372826,
+          "reasoningTokens": 0,
+          "costUsd": null
+        },
+        "senior": {
+          "models": {
+            "requested": ["claude-opus-4-6-thinking"],
+            "reported": ["claude-opus-4-6-thinking"]
+          },
+          "sources": ["headless"],
+          "sessions": 7,
+          "measuredSessions": 7,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 10,
+          "calls": 14,
+          "steps": null,
+          "promptTokens": 1284777,
+          "cachedInputTokens": 18242243,
+          "cacheCreationTokens": null,
+          "outputTokens": 170698,
+          "reasoningTokens": 0,
+          "costUsd": null
+        },
+        "pl": {
+          "models": {
+            "requested": [],
+            "reported": ["gpt-6-astra"]
+          },
+          "sources": ["codex-rollout"],
+          "sessions": 1,
+          "measuredSessions": 1,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 1,
+          "calls": 20,
+          "steps": null,
+          "promptTokens": 1284449,
+          "cachedInputTokens": 1205248,
+          "cacheCreationTokens": 0,
+          "outputTokens": 8367,
+          "reasoningTokens": 233,
+          "costUsd": null
+        }
+      },
+      "sources": {
+        "headless": {
+          "sessions": 16,
+          "unavailable": null
+        },
+        "harness": {
+          "sessions": 0,
+          "unavailable": null
+        },
+        "claude-transcript": {
+          "sessions": 1,
+          "unavailable": null
+        },
+        "codex-rollout": {
+          "sessions": 1,
+          "unavailable": null
+        },
+        "agy-summary": {
+          "sessions": 0,
+          "unavailable": null
+        }
+      },
+      "share": {
+        "pm": 0.9319,
+        "junior": 0.0399,
+        "senior": 0.0149,
+        "pl": 0.0133
+      },
+      "coverage": {
+        "measuredSessions": 18,
+        "totalSessions": 18,
+        "unmeasuredRoles": [],
+        "note": "Every attributed role has at least one measured session."
+      },
+      "byRoleMissing": ["intern"],
+      "sourceRows": [
+        {
+          "role": "pm",
+          "source": "claude-transcript",
+          "sessions": 1,
+          "measuredSessions": 1,
+          "turns": 24,
+          "calls": 314,
+          "promptTokens": 90672829,
+          "cachedInputTokens": 89856826,
+          "cacheCreationTokens": 815375,
+          "outputTokens": 222896,
+          "models": {
+            "requested": [],
+            "reported": ["claude-opus-5"]
+          }
+        },
+        {
+          "role": "junior",
+          "source": "headless",
+          "sessions": 9,
+          "measuredSessions": 9,
+          "turns": 11,
+          "calls": 14,
+          "promptTokens": 3523305,
+          "cachedInputTokens": 84182795,
+          "cacheCreationTokens": null,
+          "outputTokens": 372826,
+          "models": {
+            "requested": ["claude-sonnet-4-6"],
+            "reported": ["claude-sonnet-4-6"]
+          }
+        },
+        {
+          "role": "senior",
+          "source": "headless",
+          "sessions": 7,
+          "measuredSessions": 7,
+          "turns": 10,
+          "calls": 14,
+          "promptTokens": 1284777,
+          "cachedInputTokens": 18242243,
+          "cacheCreationTokens": null,
+          "outputTokens": 170698,
+          "models": {
+            "requested": ["claude-opus-4-6-thinking"],
+            "reported": ["claude-opus-4-6-thinking"]
+          }
+        },
+        {
+          "role": "pl",
+          "source": "codex-rollout",
+          "sessions": 1,
+          "measuredSessions": 1,
+          "turns": 1,
+          "calls": 20,
+          "promptTokens": 1284449,
+          "cachedInputTokens": 1205248,
+          "cacheCreationTokens": 0,
+          "outputTokens": 8367,
+          "models": {
+            "requested": [],
+            "reported": ["gpt-6-astra"]
+          }
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "input": ".omt",
+      "unavailable": {
+        "value": null,
+        "reason": "state 디렉터리가 존재하지 않습니다."
+      }
+    },
+    {
+      "input": ".omt",
+      "unavailable": {
+        "value": null,
+        "reason": "state 디렉터리가 존재하지 않습니다."
+      }
+    }
+  ],
+  "notes": [
+    "junior의 cachedInputTokens가 promptTokens보다 큽니다(60ce3c7b6850).",
+    "senior의 cachedInputTokens가 promptTokens보다 큽니다(60ce3c7b6850).",
+    "junior의 cachedInputTokens가 promptTokens보다 큽니다(8c22d8f1ab80).",
+    "senior의 cachedInputTokens가 promptTokens보다 큽니다(8c22d8f1ab80)."
+  ]
+}

@@ -1,0 +1,680 @@
+{
+  "schemaVersion": 1,
+  "provenance": "user-provided Mac aggregate plus OMT read-only attribution evidence; not independently recomputed",
+  "userAggregate": {
+    "period": {
+      "timezone": "Asia/Seoul",
+      "start": "2026-09-21T00:00:00+09:00",
+      "end": "2026-09-21T14:23:45+09:00",
+      "partialWeek": true
+    },
+    "reportedSources": [
+      "~/.codex/state_5.sqlite",
+      "45 local sessions JSONL files"
+    ],
+    "reportedMethod": "Sum last_token_usage from token_count events after removing repeats of identical cumulative totals; prefer turn_context model.",
+    "scope": "All local Codex usage on this Mac, not OMT-only; excludes other devices and other runners.",
+    "models": [
+      {
+        "model": "gpt-6-astra",
+        "totalTokens": 387066523,
+        "cachedInputTokens": 378583936,
+        "outputTokens": 742736,
+        "totalMinusCachedInputTokens": 8482587
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "totalTokens": 50838667,
+        "cachedInputTokens": 48991872,
+        "outputTokens": 244605,
+        "totalMinusCachedInputTokens": 1846795
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "totalTokens": 19311805,
+        "cachedInputTokens": 17950592,
+        "outputTokens": 105330,
+        "totalMinusCachedInputTokens": 1361213
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "totalTokens": 3960843,
+        "cachedInputTokens": 3773184,
+        "outputTokens": 39620,
+        "totalMinusCachedInputTokens": 187659
+      }
+    ],
+    "notMeasures": [
+      "subscription quota deduction",
+      "actual billing",
+      "official weighted billable tokens",
+      "proof of role-level waste"
+    ],
+    "proposal": {
+      "director": "gpt-6-astra",
+      "pm": "gpt-5.6-sol",
+      "pl": "gpt-5.6-terra",
+      "status": "evaluation only; not authorized to replace current execution models"
+    }
+  },
+  "omtConnection": {
+    "workflow": {
+      "entry": "dbc764127a51",
+      "workflowId": "intern-first-r3",
+      "status": "active",
+      "organizationRevision": 1,
+      "window": {
+        "from": "2026-09-21T04:48:06.558Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "open": true
+      }
+    },
+    "sources": {
+      "headless": {
+        "sessions": 4,
+        "unavailable": null
+      },
+      "harness": {
+        "sessions": 0,
+        "unavailable": null
+      },
+      "claude-transcript": {
+        "sessions": 1,
+        "unavailable": null
+      },
+      "codex-rollout": {
+        "sessions": 4,
+        "unavailable": null
+      },
+      "agy-summary": {
+        "sessions": 0,
+        "unavailable": null
+      }
+    },
+    "recordedLaunches": 10,
+    "excludedDuplicates": 2,
+    "clippedEntries": 0,
+    "places": [
+      {
+        "role": "pm",
+        "profile": "claude-current",
+        "provider": "claude",
+        "modelRequested": null,
+        "workspace": "docs-delegation-economics",
+        "at": "2026-09-21T04:48:06.558Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "registry",
+        "via": null,
+        "measuredTokens": false
+      },
+      {
+        "role": "intern",
+        "profile": "agy-oss",
+        "provider": "agy",
+        "modelRequested": "gpt-oss-120b-medium",
+        "workspace": "de-intern-codemap",
+        "at": "2026-09-21T04:52:13.440Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "ledger",
+        "via": "headless-start",
+        "measuredTokens": false
+      },
+      {
+        "role": "intern",
+        "profile": "agy-oss",
+        "provider": "agy",
+        "modelRequested": "gpt-oss-120b-medium",
+        "workspace": "de-intern-usage",
+        "at": "2026-09-21T04:52:13.520Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "ledger",
+        "via": "headless-start",
+        "measuredTokens": false
+      },
+      {
+        "role": "intern",
+        "profile": "codex-luna",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-luna",
+        "workspace": "de-intern-codemap",
+        "at": "2026-09-21T05:09:52.132Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "ledger",
+        "via": "headless-start",
+        "measuredTokens": false
+      },
+      {
+        "role": "intern",
+        "profile": "codex-luna",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-luna",
+        "workspace": "de-intern-usage",
+        "at": "2026-09-21T05:09:52.409Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "ledger",
+        "via": "headless-start",
+        "measuredTokens": false
+      },
+      {
+        "role": "junior",
+        "profile": "codex-terra",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-runtime",
+        "at": "2026-09-21T05:16:56.229Z",
+        "to": "2026-09-21T05:17:42.221Z",
+        "source": "ledger",
+        "via": "role-terminal",
+        "measuredTokens": false
+      },
+      {
+        "role": "intern",
+        "profile": "codex-luna",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-luna",
+        "workspace": "intern-first-guidance",
+        "at": "2026-09-21T05:17:09.181Z",
+        "to": "2026-09-21T05:17:45.055Z",
+        "source": "ledger",
+        "via": "role-terminal",
+        "measuredTokens": false
+      },
+      {
+        "role": "junior",
+        "profile": "codex-terra",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-runtime",
+        "at": "2026-09-21T05:17:42.221Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "ledger",
+        "via": "worker-start",
+        "measuredTokens": false
+      },
+      {
+        "role": "intern",
+        "profile": "codex-luna",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-luna",
+        "workspace": "intern-first-guidance",
+        "at": "2026-09-21T05:17:45.055Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "ledger",
+        "via": "worker-start",
+        "measuredTokens": false
+      },
+      {
+        "role": "senior",
+        "profile": "codex-terra",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-review",
+        "at": "2026-09-21T05:21:30.743Z",
+        "to": "2026-09-21T05:22:26.937Z",
+        "source": "ledger",
+        "via": "role-terminal",
+        "measuredTokens": false
+      },
+      {
+        "role": "senior",
+        "profile": "codex-terra",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-review",
+        "at": "2026-09-21T05:22:26.937Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "ledger",
+        "via": "worker-start",
+        "measuredTokens": false
+      },
+      {
+        "role": "pm",
+        "profile": "claude-current",
+        "provider": "claude",
+        "modelRequested": null,
+        "workspace": "docs-delegation-economics",
+        "at": "2026-09-21T04:48:06.558Z",
+        "to": "2026-09-21T05:24:33.465Z",
+        "source": "manual",
+        "via": null,
+        "measuredTokens": false
+      }
+    ],
+    "records": [
+      {
+        "role": "pm",
+        "source": "claude-transcript",
+        "provider": "claude",
+        "model": ["claude-opus-5"],
+        "workspace": "docs-delegation-economics",
+        "firstAt": "2026-09-21T04:48:08.317Z",
+        "lastAt": "2026-09-21T05:13:55.369Z",
+        "turns": 5,
+        "calls": 80,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 11817168,
+          "cachedInput": 11646010,
+          "cacheCreation": 170996,
+          "output": 56076,
+          "nonCached": null
+        }
+      },
+      {
+        "role": "intern",
+        "source": "headless",
+        "provider": "agy",
+        "model": ["gpt-oss-120b-medium"],
+        "workspace": "de-intern-codemap",
+        "firstAt": "2026-09-21T04:52:13.443Z",
+        "lastAt": "2026-09-21T04:54:37.250Z",
+        "turns": 1,
+        "calls": 1,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 0,
+          "cachedInput": 0,
+          "cacheCreation": null,
+          "output": 0,
+          "nonCached": null
+        }
+      },
+      {
+        "role": "intern",
+        "source": "headless",
+        "provider": "agy",
+        "model": ["gpt-oss-120b-medium"],
+        "workspace": "de-intern-usage",
+        "firstAt": "2026-09-21T04:52:13.522Z",
+        "lastAt": "2026-09-21T04:54:49.917Z",
+        "turns": 1,
+        "calls": 1,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 0,
+          "cachedInput": 0,
+          "cacheCreation": null,
+          "output": 0,
+          "nonCached": null
+        }
+      },
+      {
+        "role": "intern",
+        "source": "headless",
+        "provider": "codex",
+        "model": ["gpt-5.6-luna"],
+        "workspace": "de-intern-codemap",
+        "firstAt": "2026-09-21T05:09:52.135Z",
+        "lastAt": "2026-09-21T05:13:49.753Z",
+        "turns": 1,
+        "calls": 1,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 1699700,
+          "cachedInput": 1605376,
+          "cacheCreation": 0,
+          "output": 9714,
+          "nonCached": null
+        }
+      },
+      {
+        "role": "intern",
+        "source": "headless",
+        "provider": "codex",
+        "model": ["gpt-5.6-luna"],
+        "workspace": "de-intern-usage",
+        "firstAt": "2026-09-21T05:09:52.410Z",
+        "lastAt": "2026-09-21T05:13:34.765Z",
+        "turns": 1,
+        "calls": 1,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 1420724,
+          "cachedInput": 1312512,
+          "cacheCreation": 0,
+          "output": 10046,
+          "nonCached": null
+        }
+      },
+      {
+        "role": "unattributed",
+        "source": "codex-rollout",
+        "provider": "codex",
+        "model": ["gpt-6-astra"],
+        "workspace": "docs-delegation-economics",
+        "firstAt": "2026-09-21T05:14:04.659Z",
+        "lastAt": "2026-09-21T05:24:32.202Z",
+        "turns": 1,
+        "calls": 37,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 3785559,
+          "cachedInput": 3549952,
+          "cacheCreation": 0,
+          "output": 15973,
+          "nonCached": null
+        }
+      },
+      {
+        "role": "junior",
+        "source": "codex-rollout",
+        "provider": "codex",
+        "model": ["gpt-5.6-terra"],
+        "workspace": "intern-first-runtime",
+        "firstAt": "2026-09-21T05:17:44.522Z",
+        "lastAt": "2026-09-21T05:23:55.772Z",
+        "turns": 1,
+        "calls": 18,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 860190,
+          "cachedInput": 771584,
+          "cacheCreation": 0,
+          "output": 8049,
+          "nonCached": null
+        }
+      },
+      {
+        "role": "intern",
+        "source": "codex-rollout",
+        "provider": "codex",
+        "model": ["gpt-5.6-luna"],
+        "workspace": "intern-first-guidance",
+        "firstAt": "2026-09-21T05:17:47.319Z",
+        "lastAt": "2026-09-21T05:20:52.096Z",
+        "turns": 1,
+        "calls": 20,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 1150597,
+          "cachedInput": 1072128,
+          "cacheCreation": 0,
+          "output": 8032,
+          "nonCached": null
+        }
+      },
+      {
+        "role": "senior",
+        "source": "codex-rollout",
+        "provider": "codex",
+        "model": ["gpt-5.6-terra"],
+        "workspace": "intern-first-review",
+        "firstAt": "2026-09-21T05:22:29.225Z",
+        "lastAt": "2026-09-21T05:24:26.902Z",
+        "turns": 1,
+        "calls": 5,
+        "measured": true,
+        "tokens": {
+          "totalWithCache": 183066,
+          "cachedInput": 150272,
+          "cacheCreation": 0,
+          "output": 1976,
+          "nonCached": null
+        }
+      }
+    ],
+    "byRole": {
+      "pm": {
+        "models": {
+          "requested": [],
+          "reported": ["claude-opus-5"]
+        },
+        "sources": ["claude-transcript"],
+        "sessions": 1,
+        "measuredSessions": 1,
+        "partialSessions": 0,
+        "unmeasuredSessions": 0,
+        "reasons": [],
+        "turns": 5,
+        "calls": 80,
+        "steps": null,
+        "promptTokens": 11817168,
+        "cachedInputTokens": 11646010,
+        "cacheCreationTokens": 170996,
+        "outputTokens": 56076,
+        "reasoningTokens": 11937,
+        "costUsd": null
+      },
+      "intern": {
+        "models": {
+          "requested": ["gpt-oss-120b-medium", "gpt-5.6-luna"],
+          "reported": ["gpt-oss-120b-medium", "gpt-5.6-luna"]
+        },
+        "sources": ["headless", "codex-rollout"],
+        "sessions": 5,
+        "measuredSessions": 5,
+        "partialSessions": 0,
+        "unmeasuredSessions": 0,
+        "reasons": [],
+        "turns": 5,
+        "calls": 24,
+        "steps": null,
+        "promptTokens": 4271021,
+        "cachedInputTokens": 3990016,
+        "cacheCreationTokens": 0,
+        "outputTokens": 27792,
+        "reasoningTokens": 5626,
+        "costUsd": null
+      },
+      "unattributed": {
+        "models": {
+          "requested": [],
+          "reported": ["gpt-6-astra"]
+        },
+        "sources": ["codex-rollout"],
+        "sessions": 1,
+        "measuredSessions": 1,
+        "partialSessions": 0,
+        "unmeasuredSessions": 0,
+        "reasons": [],
+        "turns": 1,
+        "calls": 37,
+        "steps": null,
+        "promptTokens": 3785559,
+        "cachedInputTokens": 3549952,
+        "cacheCreationTokens": 0,
+        "outputTokens": 15973,
+        "reasoningTokens": 1369,
+        "costUsd": null
+      },
+      "junior": {
+        "models": {
+          "requested": ["gpt-5.6-terra"],
+          "reported": ["gpt-5.6-terra"]
+        },
+        "sources": ["codex-rollout"],
+        "sessions": 1,
+        "measuredSessions": 1,
+        "partialSessions": 0,
+        "unmeasuredSessions": 0,
+        "reasons": [],
+        "turns": 1,
+        "calls": 18,
+        "steps": null,
+        "promptTokens": 860190,
+        "cachedInputTokens": 771584,
+        "cacheCreationTokens": 0,
+        "outputTokens": 8049,
+        "reasoningTokens": 2752,
+        "costUsd": null
+      },
+      "senior": {
+        "models": {
+          "requested": ["gpt-5.6-terra"],
+          "reported": ["gpt-5.6-terra"]
+        },
+        "sources": ["codex-rollout"],
+        "sessions": 1,
+        "measuredSessions": 1,
+        "partialSessions": 0,
+        "unmeasuredSessions": 0,
+        "reasons": [],
+        "turns": 1,
+        "calls": 5,
+        "steps": null,
+        "promptTokens": 183066,
+        "cachedInputTokens": 150272,
+        "cacheCreationTokens": 0,
+        "outputTokens": 1976,
+        "reasoningTokens": 405,
+        "costUsd": null
+      }
+    },
+    "share": {
+      "pm": 0.5647,
+      "intern": 0.2044,
+      "unattributed": 0.1808,
+      "junior": 0.0413,
+      "senior": 0.0088
+    },
+    "coverage": {
+      "measuredSessions": 9,
+      "totalSessions": 9,
+      "unmeasuredRoles": [],
+      "note": "Every attributed role has at least one measured session."
+    },
+    "unattributed": [
+      {
+        "provider": "codex",
+        "source": "codex-rollout",
+        "model": [],
+        "workspace": "docs-delegation-economics",
+        "reason": "no-place",
+        "tokens": "unallocated"
+      }
+    ]
+  },
+  "launchLedger": {
+    "workflow": "intern-first-r3",
+    "entries": [
+      {
+        "at": "2026-09-21T05:16:56.229Z",
+        "via": "role-terminal",
+        "role": "junior",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-runtime",
+        "terminalPresent": true,
+        "workerPresent": false
+      },
+      {
+        "at": "2026-09-21T05:17:09.181Z",
+        "via": "role-terminal",
+        "role": "intern",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-luna",
+        "workspace": "intern-first-guidance",
+        "terminalPresent": true,
+        "workerPresent": false
+      },
+      {
+        "at": "2026-09-21T05:17:42.221Z",
+        "via": "worker-start",
+        "role": "junior",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-runtime",
+        "terminalPresent": true,
+        "workerPresent": true
+      },
+      {
+        "at": "2026-09-21T05:17:45.055Z",
+        "via": "worker-start",
+        "role": "intern",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-luna",
+        "workspace": "intern-first-guidance",
+        "terminalPresent": true,
+        "workerPresent": true
+      },
+      {
+        "at": "2026-09-21T05:21:30.743Z",
+        "via": "role-terminal",
+        "role": "senior",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-review",
+        "terminalPresent": true,
+        "workerPresent": false
+      },
+      {
+        "at": "2026-09-21T05:22:26.937Z",
+        "via": "worker-start",
+        "role": "senior",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-review",
+        "terminalPresent": true,
+        "workerPresent": true
+      },
+      {
+        "at": "2026-09-21T05:26:34.775Z",
+        "via": "worker-start",
+        "role": "intern",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-luna",
+        "workspace": "intern-first-guidance",
+        "terminalPresent": true,
+        "workerPresent": true
+      },
+      {
+        "at": "2026-09-21T05:28:22.928Z",
+        "via": "role-terminal",
+        "role": "junior",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-report",
+        "terminalPresent": true,
+        "workerPresent": false
+      },
+      {
+        "at": "2026-09-21T05:31:40.477Z",
+        "via": "worker-start",
+        "role": "senior",
+        "provider": "codex",
+        "modelRequested": "gpt-5.6-terra",
+        "workspace": "intern-first-review",
+        "terminalPresent": true,
+        "workerPresent": true
+      }
+    ]
+  },
+  "astraClassification": {
+    "measuredRecords": 1,
+    "classifiedRecords": 0,
+    "unclassifiedRecords": 1,
+    "categories": {
+      "planningAssignmentAggregation": {
+        "records": 0,
+        "tokens": null
+      },
+      "repeatedStatusObservation": {
+        "records": 0,
+        "tokens": null
+      },
+      "importantDirectorJudgment": {
+        "records": 0,
+        "tokens": null
+      },
+      "directImplementation": {
+        "records": 0,
+        "tokens": null
+      },
+      "failureRecovery": {
+        "records": 0,
+        "tokens": null
+      },
+      "unclassified": {
+        "records": 1,
+        "tokens": null
+      }
+    },
+    "reason": "Astra record has no explicit role or task connection in the read-only usage evidence; model name alone is not used for role inference."
+  },
+  "measurementLimits": [
+    "User-provided Mac totals cover all local Codex usage, not OMT-only usage, and were not independently recomputed.",
+    "Calls, turns, cache-including totals, cached input, cache creation, output, and non-cached totals are separate signals; non-cached totals remain null when the source does not provide them.",
+    "Token allocation is unmeasured when a record cannot be connected to a verified OMT role and task.",
+    "No billing, quota deduction, currency conversion, or savings rate is inferred."
+  ]
+}
