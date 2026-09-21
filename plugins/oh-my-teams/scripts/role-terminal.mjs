@@ -21,7 +21,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assert, run } from "./core.mjs";
-import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+import {
+  checkTerminalIdle,
+  runOrcaJson,
+  selectOrcaExecutable,
+} from "./orca-adapter.mjs";
 import {
   predictLaunchPath,
   normalizeModelFamily,
@@ -805,4 +809,97 @@ export async function openRoleTerminal({
     screenCheck: "required",
     screen: seen.screen,
   };
+}
+
+/** Purposes a `worker-start` hand-over may declare with `--purpose`. */
+export const DISPATCH_PURPOSES = Object.freeze(["implement", "review"]);
+
+// What identifies the work a terminal was handed: the workflow task when the
+// caller named it, otherwise the Orca task it dispatched. A spec-only start
+// creates a new Orca task each time and names nothing stable.
+function taskIdentity(item) {
+  if (item.workflowTaskId) {
+    return `workflow:${item.workflowId ?? ""}#${item.workflowTaskId}`;
+  }
+  return item.orcaTaskId ? `orca:${item.orcaTaskId}` : null;
+}
+
+/**
+ * Decides whether a reused role terminal must start from a fresh context.
+ *
+ * One reviewer terminal carried eight different reviews in a single Claude
+ * session and re-sent up to 408k tokens per call. A terminal handed a
+ * different task therefore gets `/clear` first. The latest earlier
+ * `worker-start` launch on the same terminal is the previous task. A rework of
+ * the same task keeps the session; a review, or a change between review and
+ * implementation, always clears; a task that names no identity counts as
+ * different. Only Claude terminals are cleared.
+ *
+ * @param {object[]} launches - Launch ledger lines, oldest first.
+ * @param {object} request - The hand-over about to happen.
+ * @param {string} request.terminal - Terminal handle receiving the task.
+ * @param {string} request.provider - Provider of the role's profile.
+ * @param {string | null} [request.workflowId] - Workflow the task belongs to.
+ * @param {string | null} [request.workflowTaskId] - Workflow task id (`--workflow-task`).
+ * @param {string | null} [request.orcaTaskId] - Orca task passed with `--task`.
+ * @param {string | null} [request.purpose] - One of `DISPATCH_PURPOSES`; none means `implement`.
+ * @returns {{clear: boolean, reason: string, previousLaunchAt?: string}} Decision.
+ */
+export function freshContextDecision(launches, request) {
+  if (request.provider !== "claude")
+    return { clear: false, reason: "not-claude" };
+  const previous = launches.findLast(
+    (line) => line.via === "worker-start" && line.terminal === request.terminal,
+  );
+  if (!previous) return { clear: false, reason: "first-task" };
+  const at = { previousLaunchAt: previous.at };
+  if (request.purpose === "review")
+    return { clear: true, reason: "review", ...at };
+  // A start that declared no purpose is an implementation, as before --purpose.
+  if (previous.purpose === "review")
+    return { clear: true, reason: "purpose-changed", ...at };
+  const identity = taskIdentity(request);
+  if (identity && identity === taskIdentity(previous)) {
+    return { clear: false, reason: "same-task", ...at };
+  }
+  return {
+    clear: true,
+    reason: identity ? "different-task" : "task-unidentified",
+    ...at,
+  };
+}
+
+/**
+ * Clears a Claude role terminal's conversation before it is handed new work.
+ *
+ * The terminal must be idle first, since `/clear` typed into a busy session
+ * would wait behind its current turn. After `/clear` the same idle wait runs
+ * again, so the task is dispatched only once the cleared session is ready.
+ *
+ * @param {object} options - Clear options.
+ * @param {string} options.terminal - Terminal handle to clear.
+ * @param {string} [options.executable] - Orca executable.
+ * @param {string} [options.cwd] - Directory the Orca commands run from.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<{cleared: true, terminal: string}>} The cleared terminal.
+ * @throws {Error} Carrying the idle check's signal when the terminal is not idle.
+ */
+export async function clearRoleTerminal({
+  terminal,
+  executable,
+  cwd,
+  execute = run,
+}) {
+  const orca = selectOrcaExecutable(executable);
+  await checkTerminalIdle(terminal, { executable: orca, cwd, execute });
+  await runOrcaJson(
+    orca,
+    ["terminal", "send", "--terminal", terminal, "--text", "/clear", "--enter"],
+    {
+      cwd,
+      execute,
+    },
+  );
+  await checkTerminalIdle(terminal, { executable: orca, cwd, execute });
+  return { cleared: true, terminal };
 }

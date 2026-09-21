@@ -39,6 +39,9 @@ import {
   waitHeadless,
 } from "./headless.mjs";
 import {
+  clearRoleTerminal,
+  DISPATCH_PURPOSES,
+  freshContextDecision,
   openRoleTerminal,
   pinTerminalTitle,
   readLaunchEnvironment,
@@ -57,6 +60,7 @@ import {
   discoverOrcaRuntime,
   injectTask,
   startWorker,
+  waitForSupervisionMessage,
 } from "./orca-adapter.mjs";
 import { withRuntimeSignal } from "./adapters.mjs";
 import {
@@ -96,7 +100,7 @@ import {
   registerKickoff,
   releaseKickoff,
 } from "./kickoff-registry.mjs";
-import { recordLaunch } from "./usage-ledger.mjs";
+import { readLaunches, recordLaunch } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
 import {
   defaultRuntimeRoot,
@@ -132,6 +136,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   kickoff-bind --org FILE --worktree ID --run ID
   kickoff-release --org FILE --worktree ID
                   --reason completed|disbanded|taken-over [--force]
+                  (also closes that kickoff's pending director signals)
   kickoff-branch-cleanup --org FILE --worktree ID
                          --branches BRANCH[,BRANCH...] [--remote NAME]
                          (verifies delivery then deletes remote, local, and
@@ -162,11 +167,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
                --terminal HANDLE [--worktree SELECTOR] [--run ID]
                [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
+               [--workflow-task ID] [--purpose implement|review]
                [--inject-fallback "USER APPROVAL"]
                [--orca EXECUTABLE]
                (with --workflow-id, the workflow's organization snapshot is used;
                the terminal comes from role-terminal; the worker's tab title
-               starts with its role tag, e.g. [PL])
+               starts with its role tag, e.g. [PL]; a Claude terminal that
+               last received a different task, or any review, gets /clear first)
   headless-start --org FILE --role ROLE --cwd DIR --spec TEXT --state DIR
                  [--workflow-id ID] [--timeout-ms N] [--worker ID]
                  (runs the role as a non-interactive process, without Orca)
@@ -192,6 +199,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                (per-role turns and tokens from provider session records, read-only;
                --write stores the report in <project>/.omt/history)
   supervision-next --org FILE --observation FILE
+  supervision-wait --run ID (--org FILE | --timeout-ms N) [--ack DELIVERY]
+                   [--orca EXECUTABLE]
+                   (waits on the Run's coordinator mailbox until a message other
+                   than a heartbeat arrives; heartbeat-only deliveries are
+                   acknowledged here; the timeout defaults to the organization's
+                   policy.supervision.progressCheckMs; pass the returned
+                   deliveryId as --ack on the next wait)
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role junior]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
@@ -232,7 +246,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                   (writes a structured record to .omt/director/inbox/; notifies
                   the director terminal when the registry entry names one)
   director-inbox --org FILE
-                 (lists pending signals in the director's inbox)
+                 (lists pending signals; progress signals are stored
+                 acknowledged, and a newer close-ready supersedes an older one)
   director-reply --org FILE --signal ID --text TEXT [--orca EXECUTABLE]
                  (records the director's decision and attempts PM notification)
   director-ack --org FILE --signal ID
@@ -339,6 +354,7 @@ export const ALLOWED_OPTIONS = {
     "json",
   ],
   "supervision-next": ["org", "observation"],
+  "supervision-wait": ["run", "org", "timeout-ms", "ack", "orca"],
   "worker-start": [
     "org",
     "role",
@@ -355,6 +371,8 @@ export const ALLOWED_OPTIONS = {
     "title",
     "inject-fallback",
     "workflow-id",
+    "workflow-task",
+    "purpose",
     "state",
     "orca",
   ],
@@ -450,6 +468,7 @@ export const REQUIRED_OPTIONS = {
   "host-defaults": [],
   "usage-report": ["org"],
   "supervision-next": ["org", "observation"],
+  "supervision-wait": ["run"],
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
   assist: ["org", "task", "repo", "state", "role", "kind"],
@@ -653,6 +672,17 @@ async function startSupervisedWorker(args) {
     args.worktree ?? "current",
     args.repo,
   );
+  assert(
+    args.purpose === undefined || DISPATCH_PURPOSES.includes(args.purpose),
+    `--purpose must be one of: ${DISPATCH_PURPOSES.join(", ")}`,
+  );
+  const identity = {
+    workflowId: args["workflow-id"] ?? null,
+    workflowTaskId: args["workflow-task"] ?? null,
+    orcaTaskId: args.task ?? null,
+    purpose: args.purpose ?? null,
+  };
+  const freshContext = await freshenTerminal(args, launch, identity);
   const launchedAt = new Date().toISOString();
   // terminal이 있을 때만 matrixPrediction을 계산합니다.
   // startWorker → assertTerminalIdle 에서 사후 거부가 matrix-mismatch로 분류됩니다.
@@ -717,12 +747,14 @@ async function startSupervisedWorker(args) {
       worktreeSelector: args.worktree ?? "current",
       terminal: worker.handle,
       workerId: started.workerId ?? null,
-      workflowId: args["workflow-id"] ?? null,
+      ...identity,
+      orcaTaskId: started.taskId ?? identity.orcaTaskId,
       stateDir: args.state ?? null,
     });
     return {
       ...started,
       ...ledger,
+      freshContext,
       title,
       titlePinned,
       binding: { ...binding, roleHeader: Boolean(args.spec) },
@@ -743,6 +775,31 @@ async function startSupervisedWorker(args) {
     )}`;
     throw error;
   }
+}
+
+// A Claude terminal that last worked on something else starts the new task
+// from an empty conversation, so it does not resend the previous task's
+// history on every call. The decision reads the launch ledger; a ledger that
+// cannot be read clears nothing, as before this rule existed.
+async function freshenTerminal(args, launch, identity) {
+  let launches = [];
+  try {
+    launches = readLaunches(args.org);
+  } catch {
+    // No ledger to compare against.
+  }
+  const decision = freshContextDecision(launches, {
+    terminal: args.terminal,
+    provider: launch.provider,
+    ...identity,
+  });
+  if (!decision.clear) return { cleared: false, ...decision };
+  await clearRoleTerminal({
+    terminal: args.terminal,
+    executable: args.orca,
+    cwd: path.resolve(args.repo),
+  });
+  return { cleared: true, ...decision };
 }
 
 // A role run as a non-interactive process gets the same checks a terminal
@@ -988,6 +1045,21 @@ async function reportUsage(args) {
   return undefined;
 }
 
+// The wait is the progress-check interval: when it ends without a message the
+// supervisor runs the stall checks in references/orca-runtime.md.
+function supervisionWaitTimeout(args) {
+  if (args["timeout-ms"] !== undefined) {
+    const value = Number(args["timeout-ms"]);
+    assert(
+      Number.isInteger(value) && value > 0,
+      "--timeout-ms must be a positive integer",
+    );
+    return value;
+  }
+  assert(args.org, "--org or --timeout-ms required");
+  return supervisionPolicy(validateOrg(readJSON(args.org))).progressCheckMs;
+}
+
 function writeDraft(args) {
   const output = path.resolve(args.output);
   // A draft path that already holds a file may be the live organization, and
@@ -1203,10 +1275,17 @@ async function executeCommand(args) {
         role: args.role,
         spec: roleSpec(org, args.role, args.spec, run),
       }))(launchContext(args));
-    case "role-command":
-      return (({ org, run }) => roleCommand(org, args.role, run))(
-        launchContext(args),
+    case "role-command": {
+      const { org, run } = launchContext(args);
+      const command = roleCommand(org, args.role, run);
+      // The printed command is native Codex; a person opening a terminal with
+      // it would bypass the runner and its fixed account without a record.
+      assert(
+        !command.runner,
+        "An explicit OpenCodex runner is supported by headless-start only; role-command would print a native Codex command that bypasses it",
       );
+      return command;
+    }
     case "role-terminal": {
       const { org, run: runCtx } = launchContext(args);
       const command = roleCommand(org, args.role, runCtx);
@@ -1279,6 +1358,14 @@ async function executeCommand(args) {
       return nextSupervisionAction({
         ...readJSON(args.observation),
         policy: supervisionPolicy(validateOrg(readJSON(args.org))),
+      });
+    case "supervision-wait":
+      return waitForSupervisionMessage({
+        runId: args.run,
+        timeoutMs: supervisionWaitTimeout(args),
+        ack: args.ack,
+        executable: args.orca,
+        cwd: process.cwd(),
       });
     case "work":
       return work(

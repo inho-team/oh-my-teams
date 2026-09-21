@@ -92,6 +92,13 @@
           "maximum": 50,
           "$comment": "Advisor calls one shared state directory may spend; core.mjs reads 6 when omitted."
         },
+        "claudeAutoCompact": {
+          "oneOf": [
+            { "const": "auto" },
+            { "type": "integer", "minimum": 100000, "maximum": 1000000 }
+          ],
+          "$comment": "Tokens after which a Claude role session compacts (--autocompact). core.mjs reads 250000 when omitted; \"auto\" leaves the flag off."
+        },
         "supervision": {
           "type": "object",
           "$comment": "Omitted in organizations saved before this policy; core.mjs reads the defaults 900000 and 2.",

@@ -61,7 +61,11 @@ function readInbox(orgFile) {
  *
  * The record is written atomically inside the inbox lock. A duplicate is
  * rejected when a pending signal with the same kind, text, and worktreeId
- * already exists in the inbox.
+ * already exists in the inbox; a `close-ready` counts as a duplicate only
+ * when its head and source match too. A `progress` signal is informational
+ * and is stored already acknowledged (`autoAcknowledged: true`), so it never
+ * waits in the pending list. A new `close-ready` supersedes every older
+ * pending `close-ready` from the same worktree.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {object} request - Signal request.
@@ -70,7 +74,7 @@ function readInbox(orgFile) {
  * @param {string} request.text - Human-readable signal body.
  * @param {string} [request.head] - HEAD SHA for close-ready signals.
  * @param {string} [request.source] - Integration worktree path for close-ready.
- * @returns {{signaled: boolean, id: string, entry: object, record: object}} Result.
+ * @returns {{signaled: boolean, id: string, entry: object, record: object, superseded: string[]}} Result.
  * @throws {Error} When the kind is invalid, the worktree is unknown, or a
  *   duplicate pending signal exists.
  */
@@ -84,13 +88,23 @@ export function sendSignal(orgFile, request) {
   assert(text, "Signal text is required");
 
   return withFileLock(inboxLock(orgFile), () => {
+    const head = request.head !== undefined ? String(request.head) : undefined;
+    const source =
+      request.source !== undefined ? String(request.source) : undefined;
     const existing = readInbox(orgFile);
-    const duplicate = existing.some(
+    const pendingSame = existing.filter(
       (r) =>
         r.status === "pending" &&
         r.kind === request.kind &&
-        r.text === text &&
         r.worktreeId === request.worktreeId,
+    );
+    // A close-ready for a new integration HEAD may repeat the same text; it
+    // replaces the older one below instead of being refused.
+    const duplicate = pendingSame.some(
+      (r) =>
+        r.text === text &&
+        (request.kind !== "close-ready" ||
+          (r.head === head && r.source === source)),
     );
     assert(
       !duplicate,
@@ -98,22 +112,76 @@ export function sendSignal(orgFile, request) {
     );
 
     const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    // Signals sent within one millisecond share sentAt, so a sequence taken
+    // under the inbox lock orders them; records written before it count as 0.
+    const seq = Math.max(0, ...existing.map((r) => r.seq ?? 0)) + 1;
     const record = {
       schemaVersion: 1,
       id,
+      seq,
       worktreeId: request.worktreeId,
       kind: request.kind,
       text,
-      status: "pending",
-      sentAt: new Date().toISOString(),
-      ...(request.head !== undefined ? { head: String(request.head) } : {}),
-      ...(request.source !== undefined
-        ? { source: String(request.source) }
-        : {}),
+      ...(request.kind === "progress"
+        ? {
+            status: "acknowledged",
+            autoAcknowledged: true,
+            acknowledgedAt: now,
+          }
+        : { status: "pending" }),
+      sentAt: now,
+      ...(head !== undefined ? { head } : {}),
+      ...(source !== undefined ? { source } : {}),
     };
 
     writeJSON(path.join(inboxDir(orgFile), `${id}.json`), record);
-    return { signaled: true, id, entry, record };
+    const superseded = [];
+    if (request.kind === "close-ready") {
+      for (const older of pendingSame) {
+        writeJSON(path.join(inboxDir(orgFile), `${older.id}.json`), {
+          ...older,
+          status: "superseded",
+          supersededBy: id,
+          supersededAt: now,
+        });
+        superseded.push(older.id);
+      }
+    }
+    return { signaled: true, id, entry, record, superseded };
+  });
+}
+
+/**
+ * Closes the pending signals of a kickoff that has been released.
+ *
+ * A released kickoff has no PM left to answer, so its pending signals would
+ * otherwise stay in the inbox forever. Signals of other kickoffs are untouched.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} worktreeId - PM worktree of the released kickoff.
+ * @param {string} reason - Release reason recorded on each closed signal.
+ * @returns {{closed: string[]}} IDs of the signals that were closed.
+ */
+export function closeKickoffSignals(orgFile, worktreeId, reason) {
+  if (!fs.existsSync(inboxDir(orgFile))) return { closed: [] };
+  return withFileLock(inboxLock(orgFile), () => {
+    const closedAt = new Date().toISOString();
+    const closed = [];
+    for (const record of readInbox(orgFile)) {
+      if (record.status !== "pending" || record.worktreeId !== worktreeId) {
+        continue;
+      }
+      writeJSON(path.join(inboxDir(orgFile), `${record.id}.json`), {
+        ...record,
+        status: "closed",
+        closedBy: "kickoff-release",
+        closedReason: reason,
+        closedAt,
+      });
+      closed.push(record.id);
+    }
+    return { closed };
   });
 }
 
@@ -157,6 +225,9 @@ export async function notifyDirector(entry, record, orcaExecutable) {
 
 /**
  * Lists pending (unprocessed) signals in the Director's inbox.
+ *
+ * `progress` signals are stored acknowledged and superseded or closed signals
+ * are settled, so none of them appear here.
  *
  * @param {string} orgFile - Organization JSON path.
  * @returns {{signals: object[]}} Pending signal records in filename order.
@@ -347,8 +418,9 @@ export function readSignal(orgFile, signalId) {
 /**
  * Returns the most recent close-ready signal for a PM worktree.
  *
- * Used by close to obtain the integration worktree path and HEAD SHA. Returns
- * `undefined` when no close-ready signal exists for the given worktree.
+ * Used by close to obtain the integration worktree path and HEAD SHA. A
+ * signal superseded by a newer close-ready is ignored. Returns `undefined`
+ * when no close-ready signal exists for the given worktree.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree whose close-ready record to find.
@@ -357,9 +429,16 @@ export function readSignal(orgFile, signalId) {
 export function findCloseReadySignal(orgFile, worktreeId) {
   const all = readInbox(orgFile);
   const candidates = all.filter(
-    (r) => r.worktreeId === worktreeId && r.kind === "close-ready",
+    (r) =>
+      r.worktreeId === worktreeId &&
+      r.kind === "close-ready" &&
+      r.status !== "superseded",
   );
-  candidates.sort((a, b) => (a.sentAt < b.sentAt ? 1 : -1));
+  candidates.sort(
+    (a, b) =>
+      (b.seq ?? 0) - (a.seq ?? 0) ||
+      String(b.sentAt).localeCompare(String(a.sentAt)),
+  );
   return candidates[0];
 }
 

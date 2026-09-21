@@ -8,6 +8,11 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { nextSupervisionAction } from "../plugins/oh-my-teams/scripts/status.mjs";
 import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { waitForSupervisionMessage } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import {
+  ALLOWED_OPTIONS,
+  REQUIRED_OPTIONS,
+} from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const policy = { progressCheckMs: 900000, unansweredLimit: 2 };
 const now = "2026-09-16T10:30:00.000Z";
@@ -242,4 +247,208 @@ test("no observation ever yields an automatic retry or stop", () => {
     ["ask-progress", "escalate", "inspect", "wait"].sort(),
   );
   assert.throws(() => next({ liveness: "running" }), /liveness/);
+});
+
+// Plays `orca orchestration check` from a script of results; each call
+// consumes the next one, and the clock advances by what the step spends.
+function scriptedCheck(steps, clock = { t: 0 }) {
+  const calls = [];
+  const execute = async (argv, options) => {
+    calls.push({ argv, options });
+    const step = steps.shift();
+    assert.ok(step, `unexpected check: ${argv.join(" ")}`);
+    clock.t += step.spend ?? 0;
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout: JSON.stringify({ ok: true, result: step.result }),
+    };
+  };
+  return { calls, execute, now: () => clock.t };
+}
+
+const heartbeat = (id, dispatchId, at) => ({
+  id,
+  type: "heartbeat",
+  subject: "alive",
+  body: "",
+  from_handle: "term_w",
+  payload: JSON.stringify({ taskId: "task_1", dispatchId, phase: "working" }),
+  created_at: at,
+});
+
+test("supervision-wait acknowledges heartbeat-only deliveries and returns the first real message", async () => {
+  const done = {
+    id: "msg_done",
+    type: "worker_done",
+    subject: "done",
+    payload: null,
+  };
+  const { calls, execute, now } = scriptedCheck([
+    {
+      spend: 1000,
+      result: {
+        deliveryId: "delivery_1",
+        messages: [heartbeat("h1", "ctx_a", "2026-09-21T10:00:00Z")],
+        count: 1,
+      },
+    },
+    {
+      spend: 1000,
+      result: {
+        deliveryId: "delivery_2",
+        messages: [
+          heartbeat("h2", "ctx_a", "2026-09-21T10:05:00Z"),
+          heartbeat("h3", "ctx_b", "2026-09-21T10:04:00Z"),
+        ],
+        count: 2,
+      },
+    },
+    {
+      spend: 1000,
+      result: {
+        deliveryId: "delivery_3",
+        messages: [heartbeat("h4", "ctx_b", "2026-09-21T10:06:00Z"), done],
+        count: 2,
+      },
+    },
+  ]);
+  const result = await waitForSupervisionMessage({
+    runId: "run_1",
+    timeoutMs: 900000,
+    ack: "delivery_0",
+    executable: "orca",
+    execute,
+    now,
+  });
+  assert.equal(result.timedOut, false);
+  assert.equal(result.deliveryId, "delivery_3");
+  assert.deepEqual(result.messages, [done]);
+  assert.equal(result.heartbeats, 4);
+  assert.deepEqual(result.lastHeartbeats, {
+    ctx_a: "2026-09-21T10:05:00Z",
+    ctx_b: "2026-09-21T10:06:00Z",
+  });
+
+  // No --types: a waiter with a type filter lets Orca push every other type,
+  // heartbeats included, into the coordinator session.
+  assert.deepEqual(calls[0].argv, [
+    "orca",
+    "orchestration",
+    "check",
+    "--run",
+    "run_1",
+    "--ack",
+    "delivery_0",
+    "--wait",
+    "--timeout-ms",
+    "900000",
+    "--json",
+  ]);
+  assert.ok(calls.every(({ argv }) => !argv.includes("--types")));
+  // Each heartbeat-only Delivery is acknowledged by the next check, and the
+  // remaining time shrinks with the time spent.
+  assert.deepEqual(calls[1].argv.slice(5, 10), [
+    "--ack",
+    "delivery_1",
+    "--wait",
+    "--timeout-ms",
+    "899000",
+  ]);
+  assert.deepEqual(calls[2].argv.slice(5, 10), [
+    "--ack",
+    "delivery_2",
+    "--wait",
+    "--timeout-ms",
+    "898000",
+  ]);
+});
+
+test("supervision-wait reports a timeout with the heartbeats it consumed", async () => {
+  const { calls, execute, now } = scriptedCheck([
+    {
+      spend: 400,
+      result: {
+        deliveryId: "delivery_1",
+        messages: [heartbeat("h1", "ctx_a", "2026-09-21T10:00:00Z")],
+        count: 1,
+      },
+    },
+    {
+      spend: 600,
+      result: { deliveryId: null, messages: [], count: 0, timedOut: true },
+    },
+  ]);
+  const result = await waitForSupervisionMessage({
+    runId: "run_1",
+    timeoutMs: 1000,
+    executable: "orca",
+    execute,
+    now,
+  });
+  assert.deepEqual(result, {
+    timedOut: true,
+    runId: "run_1",
+    deliveryId: null,
+    heartbeats: 1,
+    lastHeartbeats: { ctx_a: "2026-09-21T10:00:00Z" },
+  });
+  assert.equal(calls.length, 2);
+  assert.ok(!calls[0].argv.includes("--ack"));
+  assert.deepEqual(calls[1].argv.slice(5, 7), ["--ack", "delivery_1"]);
+
+  // A heartbeat Delivery that lands exactly at the deadline is handed back for the next --ack.
+  const late = scriptedCheck([
+    {
+      spend: 1000,
+      result: {
+        deliveryId: "delivery_9",
+        messages: [heartbeat("h9", "ctx_a", "2026-09-21T10:09:00Z")],
+        count: 1,
+      },
+    },
+  ]);
+  const handed = await waitForSupervisionMessage({
+    runId: "run_1",
+    timeoutMs: 1000,
+    executable: "orca",
+    ...late,
+  });
+  assert.equal(handed.timedOut, true);
+  assert.equal(handed.deliveryId, "delivery_9");
+  assert.equal(late.calls.length, 1);
+});
+
+test("supervision-wait passes Orca refusals through and requires a run", async () => {
+  const execute = async () => ({
+    code: 0,
+    stderr: "",
+    timedOut: false,
+    stdout: JSON.stringify({
+      ok: false,
+      error: {
+        code: "waiter_exists",
+        message: "Run run_1 already has an active actionable waiter.",
+      },
+    }),
+  });
+  await assert.rejects(
+    () =>
+      waitForSupervisionMessage({
+        runId: "run_1",
+        timeoutMs: 1000,
+        executable: "orca",
+        execute,
+      }),
+    /waiter_exists/,
+  );
+  await assert.rejects(
+    () => waitForSupervisionMessage({ timeoutMs: 1000, execute }),
+    /Run id/,
+  );
+  assert.deepEqual(REQUIRED_OPTIONS["supervision-wait"], ["run"]);
+  for (const option of ["org", "timeout-ms", "ack", "orca"]) {
+    assert.ok(ALLOWED_OPTIONS["supervision-wait"].includes(option), option);
+  }
 });
