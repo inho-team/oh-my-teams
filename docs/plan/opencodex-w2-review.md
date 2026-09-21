@@ -11,7 +11,7 @@
 | 대상 | 기준 위치 | 확인 방법 |
 |---|---|---|
 | 구현 | 브랜치 `dev-inho/opencodex-w3-review`의 HEAD `6db7efc` (`git diff fbf2d63..6db7efc`, 50개 파일, 삽입 8579행, 삭제 39행) | 코드를 직접 읽고 `npm ci`, `npm test`를 실행했습니다. |
-| 가이드 | 커밋 `8e006b5`의 `README.md`, `docs/OPENCODEX_RUNTIME.md` | 문서를 읽었습니다. 이 가이드는 현재 독립 재검토를 받는 중이므로, 아래 판정에서 가이드의 서술만으로는 충족 근거로 삼지 않았습니다. |
+| 가이드 | 커밋 `8e006b5`의 `README.md`, `docs/OPENCODEX_RUNTIME.md` | 문서를 읽었습니다. 이 가이드는 독립 검토 4차(`w3-guide-independent-review-4.json`)에서 approved되어 수용되었습니다. 그래도 기준 3과 4의 판정 근거는 코드와 실측 JSON에 두었고, 가이드의 서술만으로는 충족 근거로 삼지 않았습니다. |
 | 플랫폼 실측 | 커밋 `b9b5e7c`의 `docs/plan/opencodex-w2-platform-proof.md`, `experiments/opencodex-w2-platform/runtime-test-results.json` | 측정 JSON의 필드를 직접 읽었습니다. |
 | 계획·계약 | `docs/plan/opencodex-runtime.md`(W1), `opencodex-runtime-w2-plan.md`, `opencodex-w2-contract.md` | 읽었습니다. |
 | 검토 기록 | `w3-mainline-independent-review-1~3`, `w3-platform-proof-independent-review-1~4`, `w3-guide-independent-review-1~4` | finding의 `status`와 결론만 근거로 삼았습니다. |
@@ -26,6 +26,7 @@
 
 - 근거: W1이 ChatGPT, Claude, 추가 Antigravity 두 계정의 동일 픽스처 성공을 기록했습니다(`docs/plan/opencodex-runtime.md:3`, `experiments/opencodex/evidence.json`). 선언된 풀의 전환도 한 건 관측했습니다(같은 문서 94행).
 - 한계: 공유 계정 `e4a44806…`의 고정 비교는 실행하지 않았습니다(같은 문서 94, 187행). 이 비교를 성공으로 바꾸지 않았습니다. 풀 전환은 예외 승인된 요청 한 건이며, 동시 요청의 전환 기록은 완전하지 않다고 W1이 밝혔습니다(171행). 어느 실행도 W2가 만든 OMT runner 경로(`headless-runner.mjs`)를 실제 구독으로 통과한 것이 아닙니다. 사용자가 2026-09-21 05:10Z에 Claude와 Agy 추론을 더 하지 않기로 결정했기 때문입니다. OpenCodex 로그인이나 구독 모델 호출은 이번 판정에서도 하지 않았습니다.
+- 귀속의 한계: W1은 Claude Max 구독 귀속이 사람의 로그인 확인에 기댄다고 기록했습니다. 프록시의 요청 기록에서 제공자는 `anthropic`, 계정은 OAuth 단일 계정으로 관측되었지만 API의 plan은 null이어서 Max 구독이라는 근거는 사람의 확인입니다(`docs/plan/opencodex-runtime.md:91`, 100). Claude 귀속은 자동으로 증명되지 않았습니다. Agy 구독 등급도 API로 확인하지 못했고 사용자가 구독 계정이라고 확인했습니다(같은 문서 84행).
 - 미실행으로 남는 항목: Claude 구독 OAuth를 OMT runner로 통과하는 실행, Antigravity의 OMT runner 실행, e4a4 고정 비교.
 
 ### 기준 2: 지원 버전 고정, 재현 가능한 설치, 전역 초기화 금지
@@ -35,7 +36,7 @@
 - 충족하는 부분: 버전은 `plugins/oh-my-teams/package.json`과 `package-lock.json`으로 2.59.0에 고정되었고, 설치 위치의 식별자는 두 파일의 sha256입니다(`dependencies.mjs:54-74`). 실측 JSON은 이 식별자를 `sha256:fb0b1f1a…5326f`로 기록했고, 이 문서를 쓰는 중 같은 함수를 실행해 같은 값을 얻었습니다. 전역 초기화 명령(`ocx init`, `ocx service`, Codex 설정 자동 주입)은 스크립트 어디에도 없습니다(`grep`으로 확인). 설치는 `npm ci`를 스테이징에서 실행하고 `ocx --version`, bun, 상태 확인을 통과한 뒤 활성 포인터를 원자적으로 바꿉니다(`dependencies.mjs:368-455`). 실측에서 `real_user_state.diff`의 `~/.codex/config.toml`, `~/.claude/settings*.json`, `~/.omt`, `~/.opencodex`, shell 프로필, `launchctl` 변수가 모두 `unchanged`였습니다.
 - 부분인 이유 1: W1 최종 비교에서 기존 Claude 키체인 항목의 메타데이터가 바뀌었고 변경 주체를 확인하지 못했습니다(`opencodex-runtime.md:3`). 전역 상태가 바뀌지 않았다는 증명은 W1에 대해서는 성립하지 않습니다.
 - 부분인 이유 2: 플랫폼 실측의 커널 거부 로그는 대조군 탐침조차 기록하지 못해 신뢰할 수 없다고 측정 JSON이 스스로 표시했습니다(`isolation.sandbox_denials_excluding_control.reliable: false`). 파일 비교는 `~/.codex`, `~/.claude`의 세션 로그와 DB를 비교하지 않았습니다(`real_user_state.not_attributable`).
-- 부분인 이유 3: 측정은 Node v26.7.0에서 수행했습니다(`environment.node`). 지원 기준이 Node 22라면 그 버전에서의 실측은 없습니다.
+- 부분인 이유 3: Node 하한은 코드에 `MINIMUM_NODE = [22, 13, 0]`으로 고정되어 있고(`dependencies.mjs:21`, 판정 함수 `supportedNode`는 31행), 하한 미만을 거부하는 테스트가 있습니다(`tests/dependencies.test.mjs:38`). CI는 Node 22를 씁니다(`.github/workflows/ci.yml:30`). 그러나 플랫폼 실측은 Node v26.7.0에서만 수행했습니다(`environment.node`). 하한인 22.13.0과 CI의 Node 22에서의 실측 설치 결과는 없습니다.
 
 ### 기준 3: 필수 런타임 의존성 선언과 설치 진입점, 첫 실행 점검, 수리 명령 연결
 
@@ -51,7 +52,7 @@
 - 충족하는 부분: `resources/runtime-dependencies.json`이 node, git, codex, opencodex, orca-cli, orca-desktop, gh를 `requiredFor`와 platforms(macos, windows)로 구분하고 안내 문구를 갖습니다. doctor(`dependencies.mjs:165-264`)는 탐지, PATH, 버전, 실패 이유를 보고하고, dry-run은 파일을 만들지 않으며(`install-dryrun`의 `listing_diff.identical: true`), 재실행은 멱등입니다(`install-second`).
 - 부분인 이유 1: 자동 설치는 OpenCodex만 합니다. 다른 의존성은 안내만 합니다. GUI 설치와 OAuth 로그인을 사람에게 넘기는 것은 기준이 허용하는 범위입니다.
 - 부분인 이유 2: doctor가 Codex와 gh의 로그인 상태를 점검하지 않습니다. 기능별 필수 구분은 있으나, 로그인이 필요하다는 사실은 안내 문구에만 있습니다.
-- 부분인 이유 3: Windows에서의 동작은 측정하지 않았습니다(기준 7 참고). Linux는 카탈로그상 macOS 항목으로 처리됩니다(`dependencies.mjs:97`, F-8).
+- 부분인 이유 3: Windows에서의 동작은 측정하지 않았습니다(기준 7 참고). Linux는 카탈로그상 macOS 항목으로 처리됩니다(`dependencies.mjs:98`, F-8).
 
 ### 기준 5: 역할 프로필 보존, runner 어댑터, 자동 전환 금지, 기록, 호환성
 
@@ -60,7 +61,7 @@
 - 충족하는 부분(보존): `provider`, `account`, `subscription`, `model`, `effort`, `pool`은 논리 바인딩으로 그대로 남고, `runner`는 선택 항목입니다(`schemas/organization.schema.json` +14행). runner가 있는 프로필은 `openCodexCommand`가 모델과 effort를 필수로 요구합니다(`opencodex.mjs:559-594`). 모델이나 effort가 null이면 `opencodex-model-unproven-or-mismatched` 등으로 닫힙니다.
 - 충족하는 부분(자동 전환 금지): 고정 계정 모드에서 홈의 계정 수와 `logLabel`을 검증하고(`opencodex.mjs:90-134`), 풀이 필요한 프로필은 `opencodex-pool-unverified`로 막습니다. API 키 환경 변수는 제거하며(`opencodex.mjs:38-81`), 과금 대체는 `api-key-fallback-blocked`입니다. 요청 이력의 경계와 시도 증명으로 요청 모델, 관측 모델, 라우팅 계정을 기록합니다(`opencodex.mjs:722-769`, 리뷰 finding `request-history-unattributed-attempts` resolved).
 - 충족하는 부분(호환성): `runner`가 없는 프로필, 작업자, 턴은 기존 경로를 탑니다. 제거된 옛 역할 이름은 `core.mjs:38`의 `LEGACY_ROLE_ALIASES`로 `junior`로 읽히고, 저장된 깊이 5는 `core.mjs:91-108`에서 4로 읽힙니다. 이 호환 처리에 새 코드를 추가한 흔적은 W2·W3 diff에 없습니다(`grep`으로 확인).
-- 부분인 이유: runner가 실제로 지원하는 계정은 OpenAI(ChatGPT) 고정 계정 하나입니다. Claude 구독과 Antigravity 구독의 홈은 거부됩니다(F-1). "같은 Claude 모델의 Claude 구독과 Antigravity 구독의 구분"은 논리 바인딩 수준에서만 유지되고 runner로는 실행되지 않습니다.
+- 부분인 이유: runner가 실제로 지원하는 계정은 OpenAI(ChatGPT) 고정 계정 하나입니다. Claude 구독과 Antigravity 구독의 홈은 프로필 검증이 아니라 실행 시점의 계정 홈 검증에서 거부됩니다(F-1). "같은 Claude 모델의 Claude 구독과 Antigravity 구독의 구분"은 논리 바인딩 수준에서만 유지되고 runner로는 실행되지 않습니다.
 
 ### 기준 6: OMT 고유 기능 집중, 중복 코드 제거 보고, 수명주기 실제 확인
 
@@ -75,8 +76,8 @@
 **부분 충족**
 
 - 충족하는 부분: 이 워크트리에서 `npm ci` 후 `npm test`가 526개 중 526개 통과, 실패 0(16.1초)이었습니다. 검토 기록은 세 갈래 모두 마지막 판이 `approved`입니다(mainline 3, platform-proof 4, guide 4). 각 finding의 최종 `status`는 전부 `resolved`입니다. 고장 복구는 실측 시나리오 `doctor-damaged`, `repair-real-npm`, `failed-staging`, `repair-after-failure`, `doctor-recovered`가 증명합니다. 설치 실패 시 종료 코드 1은 `failed-staging`에서만 나타났습니다.
-- 부분인 이유 1: macOS만 실측했습니다(macOS 15.7.4, arm64). Windows는 실측하지 않았고, `tests/dependencies.test.mjs:76`, `tests/opencodex.test.mjs:459`의 `posixOnly` 때문에 Windows에서는 일부 테스트가 건너뛰어집니다. 또한 OpenCodex 프록시 시작은 Windows에서 명시적으로 거부됩니다(`opencodex.mjs:471`). Windows 설치·실행 경로가 결정적 테스트로 검증되었다고 쓸 수 없습니다.
-- 부분인 이유 2: `tests/dependencies.test.mjs`의 가짜 `npm`은 항상 실패하도록 만들어져(`healthyRuntime`, 같은 파일 96행 부근) 새 설치가 성공하는 경로를 결정적 테스트가 덮지 않습니다. 이 경로는 실측 JSON(`install-actual`, `repair-real-npm`)으로만 확인됩니다.
+- 부분인 이유 1: 실측은 macOS 15.7.4, arm64에서만 했습니다. Windows는 실측하지 않았습니다. 결정적 테스트는 CI가 `ubuntu-latest`, `macos-latest`, `windows-latest`의 세 운영체제에서 Node 22로 `npm test`를 실행하도록 구성되어 있습니다(`.github/workflows/ci.yml:21-30`, `Tests` 단계는 38-40행). 다만 `posixOnly` 테스트는 Windows에서 건너뜁니다. `tests/dependencies.test.mjs:76-78`은 Windows에서 4개 테스트를, `tests/opencodex.test.mjs:459-465`는 Windows이거나 `lsof`가 없는 환경에서 19개 테스트를 건너뜁니다. 그래서 Windows에서 실제로 실행되는 결정적 테스트에는 OpenCodex 프록시 소유권 증명, 종료 증명, 가짜 런타임을 쓰는 설치 재사용 검사가 들어 있지 않습니다. 또한 OpenCodex 프록시 시작은 Windows에서 명시적으로 거부됩니다(`opencodex.mjs:471`). 이 구성은 파일에서 읽은 것이며, 세 운영체제의 PR CI 실행 결과는 아직 확인하지 않았으므로 성공으로 쓰지 않습니다. 통합 단계에서 확인할 사항입니다.
+- 부분인 이유 2: `tests/dependencies.test.mjs`의 가짜 `npm`은 항상 실패하도록 만들어져(`healthyRuntime`, 같은 파일 116행) 새 설치가 성공하는 경로를 결정적 테스트가 덮지 않습니다. 이 경로는 실측 JSON(`install-actual`, `repair-real-npm`)으로만 확인됩니다.
 - 이 문서를 추가한 뒤의 `npm run format`, `npm run sync`, `npm run lint`, `npm test` 결과는 문서 끝의 "커밋 전 검사"에 적었습니다. PR CI와 관련 eval의 PR 단계 실행은 아직 없으므로 통합 단계에서 확인할 사항입니다.
 
 ### 기준 8: 최신 origin/main 기준 검증·검토·수용 증거와 통합 HEAD
@@ -90,7 +91,7 @@
 
 ### 설치 안전성
 
-설치는 `~/.omt/runtime/opencodex/` 아래의 소유 접두사에서만 일어나고, 스테이징에서 `npm ci`와 검증을 마친 뒤 활성 포인터를 바꿉니다. 잠금(`runtime-install-locked`)과 원자적 교체가 있고, 실측에서 실제 사용자 상태는 바뀌지 않았습니다. 이 결론은 격리된 HOME으로 실행한 측정에만 해당합니다. 실제 HOME에서 상태 확인을 실행하는 경로는 측정되지 않았습니다(F-4).
+설치는 `~/.omt/runtime/opencodex/` 아래의 소유 접두사에서만 일어나고, 스테이징에서 `npm ci`와 검증을 마친 뒤 활성 포인터를 바꿉니다. 잠금(`runtime-install-locked`)과 원자적 교체가 있고, 실측에서 실제 사용자 상태는 바뀌지 않았습니다. 플랫폼 실측 JSON은 격리된 HOME으로 실행한 측정입니다. 이 검토에서는 가짜 HOME으로 설치 전체를 다시 실행해 HOME 쓰기를 확인했으나, 사용자의 실제 HOME에서 실행한 결과는 아직 없습니다(F-4). 설치가 끝난 활성 런타임 트리에는 상태 확인이 만든 임시 디렉터리가 남습니다(F-13).
 
 ### 구독 계약
 
@@ -114,7 +115,7 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 
 **발견함.**
 
-- F-1 (중간): runner는 OpenAI 고정 계정만 지원합니다. `validateOpenCodexRunner`(`opencodex.mjs:15-31`)와 계정 홈 검증(`opencodex.mjs:90-134`)이 Claude와 Agy 홈을 거부합니다. 브리프의 세 구독 중 두 구독이 OMT runner로 전환되지 않았습니다.
+- F-1 (중간): runner는 OpenAI 고정 계정만 지원하고, Claude와 Agy 구독은 OMT runner로 전환되지 않았습니다. 거부는 두 계층으로 나뉩니다. 프로필 검증은 provider를 제한하지 않습니다. `validateOpenCodexRunner`(`opencodex.mjs:15-31`)는 `kind`, `mode`, `accountHomeRef`, `runtimeFingerprint`, `model`만 확인하고 `validateProfile`도 같습니다. 그래서 provider가 `claude`인 프로필에 runner 블록을 붙여도 `validate`는 `valid: true`를 반환하고, `role-command`는 claude 실행 인수를 내면서 `runner.actualRunner`를 `"codex"`로 적습니다(`role-launch.mjs:375`에 고정값으로 쓰여 있습니다). 거부는 실행 시점에 계정 홈 검증(`validateFixedOpenCodexAccountHome`, `opencodex.mjs:90-134`)에서 일어납니다. 이 함수는 반환 provider를 `"openai"`로 고정하고 `codexAccounts` 한 개, 고정된 활성 계정, `runtimeRole=hub`를 요구하며, 호출 경로는 `resolveOpenCodexBinding`(`opencodex.mjs:778-800`)을 거치는 `headless-runner.mjs:163`과 `providers.mjs:218`입니다. Claude 형태의 홈(`codexAccounts` 없음)으로 이 함수를 호출하면 `opencodex-binding-unverified`로 거부되는 것을 임시 디렉터리에서 확인했습니다. 명시적인 provider 검사가 아니라 OpenAI 계정 구조를 요구하는 방식이므로, 거부 시점은 프로필 검증이 아니라 turn을 준비하는 시점입니다.
 - F-2 (중간): 수용 기준 6이 요구한 중복 코드 제거와 코드 감소 보고가 없습니다. 삭제 28행이 전부이며 실행기 코드 제거는 없습니다.
 - F-3 (낮음): W1 판정은 전면 전환 보류였는데 OpenCodex는 카탈로그에 선언되어 있습니다. 실행은 runner 블록이 있는 프로필로만 일어나므로 강제 전환은 아닙니다.
 
@@ -127,16 +128,18 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 
 ### 전역 주입
 
-**발견함(미검증 경로, 낮음).**
+**발견함(낮음).**
 
 - 스크립트에서 `ocx init`, `ocx service`, Codex·Claude 설정 파일 쓰기는 발견하지 못했습니다. `grep`으로 `init`, `service`, `config.toml`, `settings.json` 쓰기를 찾았습니다.
-- F-4: 설치 중 상태 확인(`dependencies.mjs:314-360`)은 `OPENCODEX_HOME`과 `CODEX_HOME`만 격리하고 `HOME`은 실제 값을 유지합니다. 임시 설정으로 `clientIntegrations.codex`와 Claude 통합을 끄지만, 실제 HOME에서 `ocx start`가 어떤 파일을 쓰는지는 측정되지 않았습니다. 플랫폼 실측은 HOME까지 임시 디렉터리로 바꿨기 때문에 이 경로를 덮지 못합니다. 또한 종료는 리더 프로세스에만 `SIGTERM`을 보내며(`dependencies.mjs:352` 부근), 어떤 응답이든 `/healthz`의 `response.ok`면 통과합니다(`dependencies.mjs:345`).
+- F-4: 설치 중 상태 확인(`dependencies.mjs:314-360`)은 `OPENCODEX_HOME`과 `CODEX_HOME`만 격리하고 `HOME`은 실제 값을 유지합니다(`isolatedHealthEnvironment`, 같은 파일 298-312행). 임시 설정으로 `clientIntegrations.codex`와 Claude 통합을 끕니다. 이 경로가 HOME에 무엇을 쓰는지 가짜 HOME으로 재현했습니다(작업 디렉터리 밖, 실제 npm 설치를 사용, OpenCodex 로그인과 모델 호출은 없음). `installRuntime` 전체를 가짜 HOME에서 실행하자 상태 확인은 `ready`였고, HOME에는 `.npm`(npm 캐시와 로그), `Library/Caches/bun`, `.codex/tmp/arg0`, `.local/state/gh/device-id`만 생겼으며 셸 프로필이나 Codex·Claude 설정 파일은 생기지 않았습니다. 같은 설정으로 `ocx start`만 따로 실행하자 `/healthz`가 200을 반환했고 HOME에는 `Library/Caches/bun` 아래에만 쓰기가 생겼습니다. 나머지 세 곳은 설치의 다른 단계에서 생겼으며 단계별 귀속은 확인하지 않았습니다. 이 결과는 가짜 HOME 기준이고 사용자의 실제 HOME에서 실행한 결과는 아닙니다. 실제 HOME에서의 실행은 여전히 측정하지 않았고 플랫폼 실측 JSON도 HOME을 임시 디렉터리로 바꿨기 때문에 이 경로를 덮지 못합니다. 사용자 설정을 쓰지 않고 통합을 끈 임시 설정을 쓰므로 전역 주입에는 해당하지 않습니다. 또한 종료는 리더 프로세스에만 `SIGTERM`을 보내며(`dependencies.mjs:352` 부근), 어떤 응답이든 `/healthz`의 `response.ok`면 통과합니다(`dependencies.mjs:345`).
 
 ### 묵시적 모델·계정 교체
 
-**발견함(낮음, 차단급 아님).**
+**발견함(F-6은 중간, 릴리스 차단급 아님).**
 
-- F-6: `role-command`는 runner 블록이 있는 프로필에 대해서도 일반 `codex` 실행 인수를 반환합니다. 임시 조직 파일로 재현했습니다(`runner.accountHomeRef: codex-chatgpt`, 프로필 `gpt-5.6-sol`). 출력은 `codex --dangerously-bypass-approvals-and-sandbox --model gpt-5.6-sol --config model_reasoning_effort=high`이며 `runner.actualRunner`는 `"codex"`로 표시됩니다. `role-terminal`은 `teams-org.mjs:1213-1216`의 단언으로 이를 막지만 `role-command`에는 같은 단언이 없습니다. `worker-start --terminal`은 runner 프로필의 이름 있는 계정을 허용하도록 완화되어 있어(`role-launch.mjs:151-160`) 사람이 손으로 연 터미널이면 통과할 수 있습니다. 이 경로로 실행되면 활성 Codex 로그인이 프로필의 계정과 다른 계정일 수 있고 OMT는 이를 검증하지 않습니다. 다만 출력 메타데이터가 `actualRunner: "codex"`를 명시하므로 조용한 교체는 아니고, OMT 자동 경로에서는 발생하지 않습니다.
+- F-6 (중간): runner가 지정된 프로필이 runner 없이 실행될 수 있고, 그 사실이 기록되지 않습니다. `launchableProfile`은 openCodex runner 프로필이면 "current 계정과 단순 command" 요건을 면제하고(`role-launch.mjs:160-166`), `roleCommand`(`role-launch.mjs:346`)와 `resolveRoleLaunch`(`role-launch.mjs:248`)가 모두 이 함수를 거칩니다. `roleCommand`는 runner 블록을 덧붙이면서도 runner에 대한 단언 없이 일반 실행 인수를 반환합니다. 임시 조직 파일로 재현했습니다(`runner.accountHomeRef: codex-chatgpt`, 모델 `gpt-5.6-sol`). 출력은 `codex --dangerously-bypass-approvals-and-sandbox --model gpt-5.6-sol --config model_reasoning_effort=high`이고 `runner.actualRunner`는 `"codex"`입니다. `worker-start --terminal`은 터미널을 직접 열지 않고 이미 열린 터미널을 받으며, 사람이 `role-command`의 출력으로 연 터미널이면 통과합니다. 이때 `launchBinding`(`role-launch.mjs:288-302`)은 provider, 모델, 요청 effort와 `modelProof: "unproven"`만 기록하고 runner와 계정은 기록하지 않습니다. 반면 `role-terminal`(`teams-org.mjs:1213-1216`)은 단언으로 막고, runner가 실제로 통과하는 `headless-start`는 `resolveOpenCodexBinding`이 fail-closed로 검증합니다.
+- F-6의 판단 근거: 이 경로는 사용자가 저장한 모델을 그대로 쓰는 일반 실행입니다. 다른 구독, 계정, 모델이나 API 과금으로 자동 전환하지 않고 전역 설정도 주입하지 않으므로 브리프가 금지한 묵시적 교체나 전역 주입에는 해당하지 않아 릴리스 차단급은 아닙니다. 다만 실행되는 계정은 그 터미널에서 활성화된 Codex 로그인이며 OMT는 프로필의 계정과 같은지 검증하지 않습니다. runner가 없이 실행되었다는 사실이 기록에 남지 않으므로 심각도를 낮음에서 중간으로 올립니다.
+- F-6의 후속 수정: `role-command`와 `worker-start`(`resolveRoleLaunch`)에 runner 단언 또는 명시적 거부를 추가해야 합니다. 이번 kickoff에서는 구현 파일을 고치지 않았고 통합 단계의 수정 항목으로 등재했습니다.
 - F-7 (낮음): runner 헤드리스 실행은 항상 승인 우회 플래그를 씁니다(`headless-runner.mjs:182`, `writable: true`). 이는 기존 프로필의 우회 플래그 관례와 같습니다.
 - 자동으로 다른 구독·계정·모델·API 과금으로 넘어가는 코드 경로는 발견하지 못했습니다. 확인 방법은 `opencodex.mjs`의 고정 계정 검증, `api-key-fallback-blocked`, 풀 차단 코드를 읽고 관련 테스트가 통과함을 확인한 것입니다.
 
@@ -152,10 +155,11 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 
 ### 그 밖의 finding
 
-- F-8 (낮음): Linux가 카탈로그의 macOS 항목으로 조용히 매핑됩니다(`dependencies.mjs:97`). 지원 플랫폼 표현과 어긋날 수 있습니다.
+- F-8 (낮음): Linux가 카탈로그의 macOS 항목으로 조용히 매핑됩니다(`dependencies.mjs:98`). 지원 플랫폼 표현과 어긋날 수 있습니다.
 - F-10 (낮음): 플랫폼 실측은 Node v26.7.0, 커널 거부 로그 신뢰 불가, `~/.codex`와 `~/.claude` 전체 비교 없음이라는 한계를 스스로 밝혔습니다. 이 한계를 이 문서에서 해소하지 않았습니다.
-- F-11 (낮음): 가이드 `8e006b5`는 리뷰 4에서 approved였으나 지금 독립 재검토 중입니다. 재검토 결과가 나오면 이 문서의 기준 3, 4 판정을 다시 확인해야 합니다.
+- F-11 (해소): 가이드 `8e006b5`는 독립 검토 4차(`w3-guide-independent-review-4.json`)에서 approved되어 수용되었습니다. 이 문서의 기준 3과 4 판정은 가이드 서술이 아니라 코드와 실측에 근거하므로 판정이 달라지지 않습니다.
 - F-12: W1의 Claude 키체인 메타데이터 변경 원인이 확인되지 않았습니다(`opencodex-runtime.md:3`).
+- F-13 (낮음): 설치 후 상태 확인은 `health-home`과 `health-codex-home` 디렉터리를 스테이징에 만들고, 스테이징 전체가 활성 런타임 경로로 이동하므로 두 디렉터리가 활성 런타임 트리 안에 남습니다(`dependencies.mjs:316-317, 435`). 가짜 HOME 설치에서 `runtimes/<fingerprint>/health-home`과 `health-codex-home`가 남는 것을 확인했습니다. 소유 접두사 안이라 접두사 밖 쓰기는 아닙니다. 그러나 설치와 수리 코드에는 이 디렉터리를 지우는 동작이 없고, 수리 때 기존 런타임은 삭제되지 않고 `<경로>.failed-<시각>`으로 이름만 바뀌어 남습니다(`dependencies.mjs:432-434`). 정리 명령은 없습니다.
 
 ## 실행한 검증
 
@@ -163,6 +167,7 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 - `npm test`: 526개 중 526개 통과, 실패 0(16.1초). 문서 추가 전 기준선입니다.
 - `runtimeIdentity()` 실행: `sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f`, 실측 JSON과 일치했습니다.
 - 임시 조직 파일(작업 디렉터리 밖)로 `validate`, `role-command`를 실행했습니다(F-6).
+- 독립 검토 `w3-review-independent-review-1`의 finding 8건을 재현해 확인했습니다. 임시 조직 파일로 claude provider 프로필의 `validate`와 `role-command`(F-1), Claude 형태 홈의 `validateFixedOpenCodexAccountHome` 거부(F-1), 가짜 HOME에서 `installRuntime` 전체 실행과 `ocx start` 단독 실행(F-4, F-13)을 모두 작업 디렉터리 밖에서 실행했습니다. 사용자 HOME은 바꾸지 않았고 OpenCodex 로그인과 구독 모델 호출은 하지 않았습니다.
 - 문서 추가 후 `npm run format`, `npm run sync`, `npm run lint`, `npm test` 결과는 아래 "커밋 전 검사"에 적었습니다.
 
 ## 남은 한계
@@ -172,9 +177,13 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 3. 입력 수락 이후의 제출, `turn_started`, 상위 요청 중 취소는 실제 터미널에서 확인되지 않았습니다.
 4. Windows 설치와 실행은 실측하지 않았고 프록시 시작이 거부됩니다.
 5. 실측은 macOS 15.7.4, arm64, Node v26.7.0 한 환경입니다.
-6. 실제 HOME에서의 상태 확인 실행은 측정되지 않았습니다.
+6. 사용자의 실제 HOME에서 상태 확인을 실행한 결과는 없습니다. 가짜 HOME에서는 Bun 캐시와 도구 상태 외의 쓰기를 관찰하지 못했습니다(F-4).
 7. 중복 코드 제거와 코드 감소 보고가 없습니다.
 8. W1의 키체인 메타데이터 변경 주체를 확인하지 못했습니다.
+9. Claude 구독과 Agy 구독의 귀속은 사람의 로그인 확인에 기댑니다(기준 1).
+10. Node 22.13.0 하한과 CI의 Node 22에서의 실측이 없고, `posixOnly` 테스트 23개는 Windows에서 건너뜁니다(기준 7).
+11. 활성 런타임 트리에 상태 확인 잔존 디렉터리가 남고 정리 명령이 없습니다(F-13).
+12. runner 프로필이 `role-command`와 `worker-start`를 통해 runner 없이 실행될 수 있습니다(F-6).
 
 ## 통합 단계에서 확인할 사항
 
@@ -183,7 +192,8 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 1. 기준 7의 PR CI(`CI` 워크플로 실행 결과)와 관련 eval의 PR 단계 통과.
 2. 기준 8의 실제 최신 `origin/main`에 대한 통합 HEAD, 그 HEAD에서의 `npm ci`, `npm run sync`, `npm run lint`, `npm test`, 검토, 수용 증거.
 3. 통합 HEAD에서 플랫폼 실측의 `plugin_tree` 일치 재확인.
-4. 가이드 `8e006b5`의 재검토 결과 반영.
+4. 가이드 `8e006b5`는 `6db7efc`의 조상이 아니므로, 통합 HEAD에 이 커밋의 `README.md`와 `docs/OPENCODEX_RUNTIME.md`가 포함되었는지 확인합니다.
+5. F-6의 후속 수정(`role-command`와 `worker-start`의 runner 단언 또는 명시적 거부)을 통합 단계의 수정 항목으로 등재하고, 수정 후 해당 회귀 테스트를 확인합니다.
 
 ## 이사에게 보고할 사항
 
@@ -191,9 +201,9 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 2. Claude 구독과 Antigravity 구독은 runner 경로가 없습니다. 이번 범위에서 제외할지, 후속 작업으로 둘지 결정이 필요합니다(F-1).
 3. 중복 코드 제거와 코드 감소 보고가 이루어지지 않았습니다. 후속으로 둘지 기준 6을 조정할지 결정이 필요합니다(F-2).
 4. Windows는 실측이 없으므로 지원을 선언하지 않는 표현을 유지해야 합니다(F-9).
-5. `role-command`가 runner 프로필에 일반 Codex 실행 인수를 반환합니다. 결함 수정은 이 작업의 범위 밖이어서 고치지 않았습니다(F-6).
-6. 실제 HOME에서의 상태 확인과 W1 키체인 변경은 사용자의 관찰이 필요할 수 있습니다(F-4, F-12).
-7. 통합 단계 확인 사항 4가지를 담당할 역할을 정해야 합니다.
+5. `role-command`와 `worker-start`는 runner 프로필을 runner 없이 실행할 수 있게 두고 그 사실을 기록하지 않습니다. 중간 심각도이며 릴리스 차단급은 아닙니다. 구현 파일을 고치지 않는 범위여서 후속 수정 항목으로 등재했으므로 수정 담당과 시점을 정해야 합니다(F-6).
+6. 사용자의 실제 HOME에서의 상태 확인 실행과 W1 키체인 변경은 사용자의 관찰이 필요할 수 있습니다(F-4, F-12).
+7. 통합 단계 확인 사항 5가지를 담당할 역할을 정해야 합니다.
 
 ## 커밋 전 검사
 
