@@ -115,7 +115,7 @@ import {
 } from "./resources.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
-  org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
+  org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-4]
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
   preset --org FILE --name opus-first|balanced|single-subscription|advisor-codex|advisor-claude --revision N

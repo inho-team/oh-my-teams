@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { writeJSON, readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
+  findPmTerminal,
   sendSignal,
   listInbox,
   replySignal,
@@ -18,6 +19,8 @@ import {
 } from "../plugins/oh-my-teams/scripts/director.mjs";
 import {
   acquireResource,
+  parseMeminfo,
+  parseVmStat,
   queryPmLiveness,
   releaseResource,
   RESOURCE_KINDS,
@@ -634,4 +637,86 @@ test("queryPmLiveness asks Orca for worker-list with the given executable", asyn
     "--json",
   ]);
   assert.ok(calls[0].options.timeoutMs > 0);
+});
+
+// ─── PM terminal discovery and available memory ─────────────────────────────
+
+function recordPmLaunch(orgFile, worktreePath, terminal) {
+  const file = path.join(path.dirname(orgFile), "usage", "launches.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(
+    file,
+    `${JSON.stringify({ schemaVersion: 1, via: "role-terminal", role: "pm", worktreePath, terminal })}\n`,
+  );
+}
+
+test("findPmTerminal takes the latest PM launch only while Orca still lists it", async (t) => {
+  const { orgFile, dir } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_old");
+  recordPmLaunch(orgFile, pmPath, "term_new");
+  // The agent rewrites its title, so the title plays no part in the match.
+  const listed = [
+    { handle: "term_new", worktreePath: pmPath, title: "✳ agent-set title" },
+    { handle: "term_old", worktreePath: pmPath, title: "[PM] stale" },
+  ];
+  assert.equal(
+    await findPmTerminal(orgFile, pmPath, {
+      listTerminals: async () => listed,
+    }),
+    "term_new",
+  );
+  assert.equal(
+    await findPmTerminal(orgFile, pmPath, {
+      listTerminals: async () => [listed[1]],
+    }),
+    undefined,
+    "a closed latest PM terminal is not replaced by an older one",
+  );
+  assert.equal(
+    await findPmTerminal(orgFile, pmPath, {
+      listTerminals: async () => [
+        { handle: "term_new", worktreePath: path.join(dir, "elsewhere") },
+      ],
+    }),
+    undefined,
+  );
+});
+
+test("replySignal reports that no PM terminal was found instead of claiming delivery", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  const { id } = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "?",
+  });
+  const result = await replySignal(orgFile, {
+    signalId: id,
+    text: "go",
+    listTerminals: async () => [],
+  });
+  assert.equal(result.notified, false);
+  assert.equal(result.notifyError, "no-pm-terminal-found");
+  assert.equal(result.record.reply, "go");
+});
+
+test("available memory counts reclaimable pages on macOS and MemAvailable on Linux", () => {
+  const vmStat = [
+    "Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+    "Pages free:                               11000.",
+    "Pages active:                            900000.",
+    "Pages inactive:                          600000.",
+    "Pages speculative:                         5000.",
+    "Pages purgeable:                          40000.",
+  ].join("\n");
+  // free + inactive + speculative, not free alone as os.freemem() reports.
+  assert.equal(parseVmStat(vmStat), (11000 + 600000 + 5000) * 16384);
+  assert.equal(parseVmStat("not vm_stat"), null);
+  assert.equal(
+    parseMeminfo(
+      "MemTotal:  16000000 kB\nMemFree:  300000 kB\nMemAvailable:  9000000 kB\n",
+    ),
+    9000000 * 1024,
+  );
+  assert.equal(parseMeminfo("MemTotal: 1 kB\n"), null);
 });
