@@ -67,7 +67,7 @@ sh install.sh both   # claude | codex | both
 
 - 현재 저장소를 호스트(Claude 또는 Codex)의 로컬 마켓으로 등록합니다.
 - 기존 설치 상태를 확인하고 레거시 플러그인 마이그레이션 계획을 만듭니다.
-- OpenCodex 공통 실행 경로를 `.omt/opencodex/` 아래에 설치합니다.
+- OpenCodex 런타임을 `~/.omt/runtime/opencodex/` 아래에 설치합니다.
 
 `--dry-run`을 추가하면 실제 변경 없이 계획만 표시합니다. `--remove-legacy`를 함께 사용하면 레거시 플러그인을 제거합니다.
 
@@ -111,7 +111,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 | Codex CLI 또는 Claude Code | ✓ | 구독별 에이전트 실행(Codex) 또는 기본 실행기(Claude) |
 | Orca CLI | ✓ | workflow 감독, orchestration, 상태 관리 |
 | Orca Desktop | 선택 | GUI 기반 작업 모니터링 |
-| OpenCodex | ✓ | 공통 실행 경로, 다구독 통합 |
+| OpenCodex | ✓ | 고정 계정 실행(선택): 조직 파일에서 runner 필드를 설정한 프로필만 사용 |
 | gh (GitHub CLI) | 선택 | pull request 생성 및 관리 |
 
 각 항목의 설치 및 문제 해결 방법은 [OpenCodex 런타임 설치 안내](docs/OPENCODEX_RUNTIME.md)를 참고하십시오.
