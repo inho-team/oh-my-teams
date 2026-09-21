@@ -15,9 +15,12 @@ import {
   decodeAgentCli,
   tryParseJson,
 } from "./providers/shared.mjs";
-import { doctor, runtimePaths } from "./dependencies.mjs";
+import { defaultRuntimeRoot, doctor, runtimePaths } from "./dependencies.mjs";
 import {
   openCodexCommand,
+  openCodexEnvironment,
+  isolatedOpenCodexEnvironment,
+  readOpenCodexObservation,
   resolveOpenCodexBinding,
   startOpenCodexProxy,
 } from "./opencodex.mjs";
@@ -197,8 +200,7 @@ export async function invoke(
   request = httpRun,
 ) {
   if (profile.runner?.kind === "opencodex") {
-    const root = process.env.OMT_RUNTIME_ROOT;
-    assert(root, "opencodex-action-required: configure OMT_RUNTIME_ROOT");
+    const root = defaultRuntimeRoot();
     const diagnosed = await doctor(root);
     assert(
       diagnosed.status === "ready",
@@ -206,11 +208,17 @@ export async function invoke(
     );
     const paths = runtimePaths(root);
     const binding = resolveOpenCodexBinding(profile, diagnosed.runtime);
+    const profileEnvironment = profileEnv(profile);
+    const proxyEnvironment = openCodexEnvironment({
+      ...binding,
+      env: profileEnvironment,
+    });
     const proxy = await startOpenCodexProxy({
       ...binding,
       runtimePrefix: paths.runtime,
     });
     try {
+      const startedAt = Date.now();
       const argv = openCodexCommand({
         cwd,
         port: proxy.port,
@@ -221,13 +229,23 @@ export async function invoke(
         cwd,
         input: prompt,
         timeoutMs,
-        env: { ...profileEnv(profile), ...proxy.env },
+        env: isolatedOpenCodexEnvironment(profileEnvironment, proxyEnvironment),
       });
       const decoded = adapterFor({ ...profile, provider: "codex" }).decode(
         result.stdout,
         { profile, cwd, transport: "process" },
       );
-      const bindingResult = modelBinding(profile, decoded);
+      const observed = await readOpenCodexObservation({
+        ...binding,
+        port: proxy.port,
+        provider: profile.provider,
+        model: profile.model,
+        startedAt,
+      });
+      const bindingResult = modelBinding(profile, {
+        ...decoded,
+        effectiveModel: observed.model,
+      });
       assert(
         bindingResult.status === "matched",
         "opencodex-model-unproven-or-mismatched",
@@ -236,11 +254,19 @@ export async function invoke(
         ...result,
         ...decoded,
         modelBinding: bindingResult,
+        effectiveModel: observed.model,
+        usage: decoded.usage ?? observed.usage ?? null,
         failureClass: classifyAgentCliFailure(result, decoded),
         exhausted: false,
-        observed: {
-          accountLogLabel: binding.accountLogLabel,
-          model: decoded.effectiveModel ?? null,
+        observed,
+        lifecycle: {
+          inputAccepted: result.code === 0 || Boolean(result.stdout),
+          turnStarted: /"type":"turn\.started"/.test(result.stdout),
+          upstreamRequestStarted: true,
+          completed: /"type":"turn\.completed"/.test(result.stdout),
+          exitObserved: result.code !== undefined,
+          cancelRequested: false,
+          termination: result.code === 0 ? "exited" : "unverifiable",
         },
       };
     } finally {

@@ -9,6 +9,7 @@ import {
   installRuntime,
   runtimeIdentity,
   runtimePaths,
+  supportedNode,
 } from "../plugins/oh-my-teams/scripts/dependencies.mjs";
 
 function fixture(t) {
@@ -27,6 +28,13 @@ test("the exact package lock produces a stable owned runtime fingerprint", () =>
     ),
     true,
   );
+});
+
+test("runtime diagnosis rejects Node versions below the accepted catalog floor", () => {
+  assert.equal(supportedNode("v22.12.9"), false);
+  assert.equal(supportedNode("v22.13.0"), true);
+  assert.equal(supportedNode("v23.0.0"), true);
+  assert.equal(supportedNode("invalid"), false);
 });
 
 test("missing and dry-run runtime checks do not write an active pointer", async (t) => {

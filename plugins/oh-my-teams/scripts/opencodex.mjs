@@ -1,5 +1,6 @@
 /** Fail-closed OpenCodex fixed-account runner binding validation. */
 import path from "node:path";
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import net from "node:net";
 import { assert } from "./core.mjs";
@@ -56,6 +57,28 @@ export function openCodexEnvironment(binding) {
   };
 }
 
+/**
+ * Keeps an OpenCodex child from inheriting an API-key or another OpenCodex home.
+ * @param {NodeJS.ProcessEnv} environment - Parent process environment.
+ * @param {Record<string, string>} homes - Verified turn homes.
+ * @returns {NodeJS.ProcessEnv} Isolated child environment.
+ */
+export function isolatedOpenCodexEnvironment(environment, homes) {
+  const safe = { ...environment };
+  for (const key of Object.keys(safe)) {
+    if (
+      /(?:^|_)(?:OPENAI|ANTHROPIC|GOOGLE|GEMINI|API)[A-Z_]*(?:KEY|TOKEN)(?:$|_)/i.test(
+        key,
+      ) ||
+      key === "OPENCODEX_HOME" ||
+      key === "CODEX_HOME"
+    ) {
+      delete safe[key];
+    }
+  }
+  return { ...safe, ...homes };
+}
+
 async function unusedPort() {
   const server = net.createServer();
   await new Promise((resolve, reject) =>
@@ -83,12 +106,21 @@ export async function startOpenCodexProxy(binding) {
   );
   const child = spawn(binary, ["start", "--port", String(port)], {
     cwd: binding.runtimePrefix,
-    env: { ...process.env, ...env },
+    env: isolatedOpenCodexEnvironment(process.env, env),
     stdio: "ignore",
     shell: false,
   });
+  let exited = false;
+  let spawnError = null;
+  child.once("error", (error) => {
+    spawnError = error;
+  });
+  child.once("close", () => {
+    exited = true;
+  });
   const deadline = Date.now() + (binding.readyTimeoutMs ?? 15000);
   while (Date.now() < deadline) {
+    if (spawnError || exited) break;
     try {
       const response = await fetch(`http://127.0.0.1:${port}/healthz`);
       if (response.ok) {
@@ -97,15 +129,19 @@ export async function startOpenCodexProxy(binding) {
           pid: child.pid ?? null,
           env,
           stop: async () => {
-            if (!child.killed) child.kill("SIGTERM");
-            await new Promise((resolve) => child.once("close", resolve));
+            if (child.exitCode !== null || exited) return;
+            child.kill("SIGTERM");
+            await Promise.race([
+              new Promise((resolve) => child.once("close", resolve)),
+              new Promise((resolve) => setTimeout(resolve, 3000)),
+            ]);
           },
         };
       }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (!child.killed) child.kill("SIGTERM");
+  if (child.exitCode === null && !exited) child.kill("SIGTERM");
   throw new Error("opencodex-proxy-not-ready");
 }
 
@@ -129,9 +165,80 @@ export function openCodexCommand(request) {
     "--config",
     `model_reasoning_effort=${request.effort}`,
     "--config",
-    `openai_base_url=http://127.0.0.1:${request.port}/v1`,
+    "model_provider=omt-opencodex",
+    "--config",
+    'model_providers.omt-opencodex.name="OpenCodex OMT proxy"',
+    "--config",
+    `model_providers.omt-opencodex.base_url="http://127.0.0.1:${request.port}/v1"`,
+    "--config",
+    'model_providers.omt-opencodex.wire_api="responses"',
+    "--config",
+    "model_providers.omt-opencodex.requires_openai_auth=false",
+    "--config",
+    "model_providers.omt-opencodex.request_max_retries=0",
+    "--config",
+    "model_providers.omt-opencodex.stream_max_retries=0",
     "-",
   ];
+}
+
+/**
+ * Returns the provider name recorded by OpenCodex for an OMT logical provider.
+ * @param {string} provider - OMT logical provider identifier.
+ * @returns {string} OpenCodex request-history provider identifier.
+ */
+export function openCodexProvider(provider) {
+  return (
+    { codex: "openai", claude: "anthropic", agy: "google-antigravity" }[
+      provider
+    ] ?? provider
+  );
+}
+
+/**
+ * Reads the one request-history observation created after a caller's boundary.
+ * The management token is sent only to loopback and is never returned.
+ * @param {object} input - Loopback proxy and requested binding data.
+ * @param {typeof fetch} [fetcher=fetch] - Injectable loopback fetch implementation.
+ * @returns {Promise<{provider: string, accountLogLabel: string, model: string, usage: object | null}>}
+ */
+export async function readOpenCodexObservation(input, fetcher = fetch) {
+  const tokenFile = path.join(input.accountHome, "admin-api-token");
+  assert(fs.existsSync(tokenFile), "opencodex-binding-unverified");
+  const token = fs.readFileSync(tokenFile, "utf8").trim();
+  assert(token, "opencodex-binding-unverified");
+  const response = await fetcher(
+    `http://127.0.0.1:${input.port}/api/request-history?limit=20`,
+    { headers: { "X-OpenCodex-API-Key": token } },
+  );
+  assert(response.ok, "opencodex-binding-unverified");
+  const history = await response.json();
+  const entries = Array.isArray(history.entries) ? history.entries : [];
+  const entry = entries.find(
+    (candidate) =>
+      candidate.timestamp &&
+      Date.parse(candidate.timestamp) >= input.startedAt &&
+      candidate.requestedModel === input.model &&
+      candidate.provider === openCodexProvider(input.provider),
+  );
+  const attempt = entry?.attempts?.at(-1);
+  assert(
+    entry &&
+      attempt?.accountLogLabel === input.accountLogLabel &&
+      attempt.provider === openCodexProvider(input.provider),
+    "opencodex-binding-unverified",
+  );
+  const model = entry.resolvedModel ?? entry.model ?? null;
+  assert(
+    typeof model === "string" && model,
+    "opencodex-model-unproven-or-mismatched",
+  );
+  return {
+    provider: attempt.provider,
+    accountLogLabel: attempt.accountLogLabel,
+    model,
+    usage: entry.usage ?? null,
+  };
 }
 
 /**

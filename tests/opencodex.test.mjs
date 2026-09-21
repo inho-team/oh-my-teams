@@ -1,9 +1,14 @@
 /** Fixed-account OpenCodex binding and command boundary coverage. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
+  isolatedOpenCodexEnvironment,
   openCodexCommand,
   openCodexEnvironment,
+  readOpenCodexObservation,
   validateOpenCodexRunner,
 } from "../plugins/oh-my-teams/scripts/opencodex.mjs";
 import { invoke } from "../plugins/oh-my-teams/scripts/providers.mjs";
@@ -85,7 +90,74 @@ test("the OpenCodex runner invokes actual Codex JSONL with explicit proxy and mo
     "--cd",
     "/tmp/work",
   ]);
-  assert.ok(argv.includes("openai_base_url=http://127.0.0.1:43123/v1"));
+  assert.ok(argv.includes("model_provider=omt-opencodex"));
+  assert.ok(
+    argv.includes(
+      'model_providers.omt-opencodex.base_url="http://127.0.0.1:43123/v1"',
+    ),
+  );
+  assert.ok(
+    argv.includes("model_providers.omt-opencodex.requires_openai_auth=false"),
+  );
+});
+
+test("the isolated runner strips inherited API credentials", () => {
+  const environment = isolatedOpenCodexEnvironment(
+    {
+      PATH: "/bin",
+      OPENAI_API_KEY: "must-not-reach-child",
+      ANTHROPIC_API_KEY: "must-not-reach-child",
+      OPENCODEX_HOME: "/wrong/home",
+    },
+    { OPENCODEX_HOME: "/account", CODEX_HOME: "/session" },
+  );
+  assert.equal(environment.OPENAI_API_KEY, undefined);
+  assert.equal(environment.ANTHROPIC_API_KEY, undefined);
+  assert.equal(environment.OPENCODEX_HOME, "/account");
+});
+
+test("proxy request history, not CLI JSONL, proves the fixed account and model", async (t) => {
+  const accountHome = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-ocx-account-"),
+  );
+  t.after(() => fs.rmSync(accountHome, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(accountHome, "admin-api-token"), "test-token");
+  const observed = await readOpenCodexObservation(
+    {
+      accountHome,
+      port: 43123,
+      startedAt: 0,
+      provider: "codex",
+      model: "gpt-6-astra",
+      accountLogLabel: "fixed-account",
+    },
+    async (_url, init) => {
+      assert.equal(init.headers["X-OpenCodex-API-Key"], "test-token");
+      return {
+        ok: true,
+        json: async () => ({
+          entries: [
+            {
+              timestamp: "2026-09-21T00:00:00.000Z",
+              requestedModel: "gpt-6-astra",
+              resolvedModel: "gpt-6-astra",
+              provider: "openai",
+              usage: { input_tokens: 3 },
+              attempts: [
+                { provider: "openai", accountLogLabel: "fixed-account" },
+              ],
+            },
+          ],
+        }),
+      };
+    },
+  );
+  assert.deepEqual(observed, {
+    provider: "openai",
+    accountLogLabel: "fixed-account",
+    model: "gpt-6-astra",
+    usage: { input_tokens: 3 },
+  });
 });
 
 test("the public provider entrypoint refuses an unconfigured explicit runner without fallback", async () => {

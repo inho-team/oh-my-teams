@@ -12,6 +12,30 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = path.resolve(HERE, "..");
 const MANIFEST = path.join(PACKAGE_DIR, "package.json");
 const LOCKFILE = path.join(PACKAGE_DIR, "package-lock.json");
+const MINIMUM_NODE = [22, 13, 0];
+
+/**
+ * Compares a Node version string with the catalog's minimum supported runtime.
+ * @param {string} version - Node `--version` output.
+ * @returns {boolean} Whether the version meets Node 22.13.0.
+ */
+export function supportedNode(version) {
+  const found = String(version)
+    .trim()
+    .match(/^v?(\d+)\.(\d+)\.(\d+)$/);
+  if (!found) return false;
+  const actual = found.slice(1).map(Number);
+  return (
+    actual.some(
+      (part, index) =>
+        part !== MINIMUM_NODE[index] &&
+        actual
+          .slice(0, index)
+          .every((prior, priorIndex) => prior === MINIMUM_NODE[priorIndex]) &&
+        part > MINIMUM_NODE[index],
+    ) || actual.every((part, index) => part === MINIMUM_NODE[index])
+  );
+}
 
 /** @returns {{version: string, fingerprint: string, manifest: Buffer, lockfile: Buffer}} OpenCodex package identity. */
 export function runtimeIdentity() {
@@ -53,9 +77,18 @@ export async function doctor(root) {
   const paths = runtimePaths(root);
   const checks = [];
   const node = await run([process.execPath, "--version"], { timeoutMs: 5000 });
+  const nodeSupported = node.code === 0 && supportedNode(node.stdout);
   checks.push(
-    check("node", node.code === 0 ? "pass" : "fail", node.stdout.trim()),
+    check(
+      "node",
+      nodeSupported ? "pass" : "fail",
+      nodeSupported
+        ? node.stdout.trim()
+        : `${node.stdout.trim() || "Node unavailable"}; requires >=22.13.0`,
+    ),
   );
+  if (!nodeSupported)
+    return runtimeResult("runtime-doctor", "blocked", paths, checks);
   if (!fs.existsSync(paths.active)) {
     checks.push(check("runtime-install", "fail", "No active runtime pointer"));
     return runtimeResult("runtime-doctor", "needs-install", paths, checks);
@@ -132,6 +165,22 @@ async function freePort() {
   return port;
 }
 
+function isolatedHealthEnvironment(home, codexHome) {
+  const environment = { ...process.env };
+  for (const key of Object.keys(environment)) {
+    if (
+      /(?:^|_)(?:OPENAI|ANTHROPIC|GOOGLE|GEMINI|API)[A-Z_]*(?:KEY|TOKEN)(?:$|_)/i.test(
+        key,
+      ) ||
+      key === "OPENCODEX_HOME" ||
+      key === "CODEX_HOME"
+    ) {
+      delete environment[key];
+    }
+  }
+  return { ...environment, OPENCODEX_HOME: home, CODEX_HOME: codexHome };
+}
+
 async function healthCheck(ocx, staging) {
   const port = await freePort();
   const home = path.join(staging, "health-home");
@@ -151,9 +200,13 @@ async function healthCheck(ocx, staging) {
   );
   const child = spawn(ocx, ["start", "--port", String(port)], {
     cwd: staging,
-    env: { ...process.env, OPENCODEX_HOME: home, CODEX_HOME: codexHome },
+    env: isolatedHealthEnvironment(home, codexHome),
     stdio: "ignore",
     shell: false,
+  });
+  let exited = false;
+  child.once("close", () => {
+    exited = true;
   });
   try {
     const deadline = Date.now() + 15000;
@@ -166,8 +219,13 @@ async function healthCheck(ocx, staging) {
     }
     throw new Error("runtime-health-check-failed");
   } finally {
-    if (!child.killed) child.kill("SIGTERM");
-    await new Promise((resolve) => child.once("close", resolve));
+    if (child.exitCode === null && !exited) child.kill("SIGTERM");
+    if (child.exitCode === null && !exited) {
+      await Promise.race([
+        new Promise((resolve) => child.once("close", resolve)),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    }
   }
 }
 

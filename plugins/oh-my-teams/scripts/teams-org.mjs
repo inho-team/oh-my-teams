@@ -92,7 +92,11 @@ import {
 } from "./kickoff-registry.mjs";
 import { recordLaunch } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
-import { doctor as runtimeDoctor, installRuntime } from "./dependencies.mjs";
+import {
+  defaultRuntimeRoot,
+  doctor as runtimeDoctor,
+  installRuntime,
+} from "./dependencies.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-5]
@@ -985,15 +989,15 @@ async function executeCommand(args) {
       return discoverOrcaRuntime(args.orca);
     case "runtime-doctor":
       validateOrg(readJSON(args.org));
-      return runtimeDoctor(path.join(path.resolve(args.state), "runtime"));
+      return runtimeDoctor(defaultRuntimeRoot());
     case "runtime-install":
       validateOrg(readJSON(args.org));
-      return installRuntime(path.join(path.resolve(args.state), "runtime"), {
+      return installRuntime(defaultRuntimeRoot(), {
         dryRun: Boolean(args["dry-run"]),
       });
     case "runtime-repair":
       validateOrg(readJSON(args.org));
-      return installRuntime(path.join(path.resolve(args.state), "runtime"), {
+      return installRuntime(defaultRuntimeRoot(), {
         dryRun: Boolean(args["dry-run"]),
         repair: true,
       });
