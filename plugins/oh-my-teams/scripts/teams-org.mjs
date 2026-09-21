@@ -28,6 +28,7 @@ import {
   assertDirectorAuthority,
   checkCloseReady,
 } from "./delivery.mjs";
+import { assertDistinctOpenCodexHomes } from "./opencodex.mjs";
 import { startDashboard } from "./dashboard.mjs";
 import {
   answerHeadless,
@@ -831,6 +832,15 @@ function startHeadlessRole(args) {
     `Role ${command.role} uses ${command.provider}, which has no headless runtime; ` +
       `supported: ${HEADLESS_PROVIDERS.join(", ")}`,
   );
+  // One run's runner accounts must not share a session home or use an account
+  // home as one; the run's other roles are checked with this one.
+  if (command.runner) {
+    assertDistinctOpenCodexHomes(
+      (run.roles ?? Object.keys(org.roles)).map(
+        (name) => org.profiles[org.roles[name]?.profile],
+      ),
+    );
+  }
   const cwd = path.resolve(args.cwd);
   assertNotKickoffOwner(cwd, `starting ${command.role}`);
   assertWorktreeUnshared(run.workflowState, command.role, `path:${cwd}`, cwd);
