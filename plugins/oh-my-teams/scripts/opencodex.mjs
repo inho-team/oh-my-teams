@@ -79,6 +79,44 @@ export function isolatedOpenCodexEnvironment(environment, homes) {
   return { ...safe, ...homes };
 }
 
+/**
+ * Verifies that an OpenAI account home cannot select a second account or native path.
+ * Credential contents are not returned or persisted.
+ * @param {string} accountHome - Isolated OpenCodex account directory.
+ * @param {string} accountLogLabel - Expected secret-free account label.
+ * @returns {{provider: string, accountLogLabel: string}} Fixed account proof.
+ */
+export function validateFixedOpenCodexAccountHome(
+  accountHome,
+  accountLogLabel,
+) {
+  const configFile = path.join(accountHome, "config.json");
+  const storeFile = path.join(accountHome, "codex-accounts.json");
+  assert(
+    fs.existsSync(configFile) && fs.existsSync(storeFile),
+    "opencodex-binding-unverified",
+  );
+  const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+  const credentials = JSON.parse(fs.readFileSync(storeFile, "utf8"));
+  const accounts = config.codexAccounts;
+  assert(
+    Array.isArray(accounts) &&
+      accounts.length === 1 &&
+      Object.keys(credentials).length === 1 &&
+      accounts[0]?.id === config.activeCodexAccountId &&
+      accounts[0]?.id in credentials &&
+      accounts[0]?.logLabel === accountLogLabel,
+    "opencodex-binding-unverified",
+  );
+  assert(
+    config.activeCodexAccountPinned === true &&
+      config.providers?.openai?.codexAccountMode === "single" &&
+      config.clientIntegrations?.codex?.enabled !== true,
+    "opencodex-pool-unverified",
+  );
+  return { provider: "openai", accountLogLabel };
+}
+
 async function unusedPort() {
   const server = net.createServer();
   await new Promise((resolve, reject) =>
@@ -263,6 +301,7 @@ export function resolveOpenCodexBinding(
     accountHome && accountLogLabel && sessionHome,
     "opencodex-action-required: configure named account home, label and session home",
   );
+  validateFixedOpenCodexAccountHome(accountHome, accountLogLabel);
   return {
     accountHome,
     accountLogLabel,

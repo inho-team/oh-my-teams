@@ -9,6 +9,7 @@ import {
   openCodexCommand,
   openCodexEnvironment,
   readOpenCodexObservation,
+  validateFixedOpenCodexAccountHome,
   validateOpenCodexRunner,
 } from "../plugins/oh-my-teams/scripts/opencodex.mjs";
 import {
@@ -117,6 +118,41 @@ test("the isolated runner strips inherited API credentials", () => {
   assert.equal(environment.OPENAI_API_KEY, undefined);
   assert.equal(environment.ANTHROPIC_API_KEY, undefined);
   assert.equal(environment.OPENCODEX_HOME, "/account");
+});
+
+test("fixed OpenAI homes reject unpinned pools before a proxy can start", (t) => {
+  const accountHome = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ocx-home-"));
+  t.after(() => fs.rmSync(accountHome, { recursive: true, force: true }));
+  const config = {
+    codexAccounts: [{ id: "only", logLabel: "fixed-account" }],
+    activeCodexAccountId: "only",
+    activeCodexAccountPinned: true,
+    providers: { openai: { codexAccountMode: "single" } },
+    clientIntegrations: { codex: { enabled: false } },
+  };
+  fs.writeFileSync(
+    path.join(accountHome, "config.json"),
+    JSON.stringify(config),
+  );
+  fs.writeFileSync(
+    path.join(accountHome, "codex-accounts.json"),
+    JSON.stringify({ only: {} }),
+  );
+  assert.deepEqual(
+    validateFixedOpenCodexAccountHome(accountHome, "fixed-account"),
+    {
+      provider: "openai",
+      accountLogLabel: "fixed-account",
+    },
+  );
+  fs.writeFileSync(
+    path.join(accountHome, "config.json"),
+    JSON.stringify({ ...config, activeCodexAccountPinned: false }),
+  );
+  assert.throws(
+    () => validateFixedOpenCodexAccountHome(accountHome, "fixed-account"),
+    /opencodex-pool-unverified/,
+  );
 });
 
 test("proxy request history, not CLI JSONL, proves the fixed account and model", async (t) => {
