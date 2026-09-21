@@ -7,11 +7,17 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, run, withAsyncFileLock, writeJSON } from "./core.mjs";
+import { discoverOrcaRuntime } from "./orca-adapter.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = path.resolve(HERE, "..");
 const MANIFEST = path.join(PACKAGE_DIR, "package.json");
 const LOCKFILE = path.join(PACKAGE_DIR, "package-lock.json");
+const CATALOG = path.join(
+  PACKAGE_DIR,
+  "resources",
+  "runtime-dependencies.json",
+);
 const MINIMUM_NODE = [22, 13, 0];
 
 /**
@@ -70,6 +76,72 @@ export function runtimePaths(root) {
 
 function check(id, status, evidence) {
   return { id, status, evidence };
+}
+
+async function catalogChecks() {
+  const catalog = JSON.parse(fs.readFileSync(CATALOG, "utf8")).dependencies;
+  const platform = process.platform === "win32" ? "windows" : "macos";
+  const checks = [];
+  for (const dependency of catalog) {
+    if (
+      !dependency.platforms?.includes(platform) ||
+      dependency.id === "opencodex"
+    )
+      continue;
+    const command = dependency.detect?.command?.argv;
+    if (dependency.id === "orca-cli" || dependency.id === "orca-desktop") {
+      try {
+        const runtime = await discoverOrcaRuntime();
+        const status = await run([runtime.executable, "status", "--json"], {
+          timeoutMs: 10000,
+        });
+        let desktop = false;
+        try {
+          desktop = JSON.parse(status.stdout).result?.app?.running === true;
+        } catch {}
+        checks.push(
+          check(
+            dependency.id,
+            dependency.id === "orca-desktop" && !desktop ? "fail" : "pass",
+            dependency.id === "orca-desktop" && !desktop
+              ? dependency.install?.[platform]
+              : runtime.executable,
+          ),
+        );
+      } catch {
+        checks.push(
+          check(dependency.id, "fail", dependency.install?.[platform]),
+        );
+      }
+      continue;
+    }
+    if (!command) continue;
+    const result = await run(command, { timeoutMs: 10000 });
+    checks.push(
+      check(
+        dependency.id,
+        result.code === 0 && !result.timedOut ? "pass" : "fail",
+        result.code === 0 && !result.timedOut
+          ? result.stdout.trim()
+          : (dependency.install?.[platform] ??
+              "See the catalog repair guidance."),
+      ),
+    );
+    for (const feature of dependency.detect?.featureChecks ?? []) {
+      const featureResult = await run(feature.argv, { timeoutMs: 10000 });
+      checks.push(
+        check(
+          `${dependency.id}:${feature.argv.slice(1).join("-")}`,
+          featureResult.code === 0 && !featureResult.timedOut ? "pass" : "fail",
+          featureResult.code === 0 && !featureResult.timedOut
+            ? feature.description
+            : (dependency.install?.repair ??
+                "See the catalog repair guidance."),
+        ),
+      );
+    }
+  }
+  return checks;
 }
 
 /** @param {string} root - Owned runtime root. @returns {object} Read-only runtime diagnosis. */
@@ -155,9 +227,12 @@ export async function doctor(root) {
       passed ? probe.stdout.trim() : probe.stderr.trim(),
     ),
   );
+  const catalog = await catalogChecks();
+  checks.push(...catalog);
+  const catalogFailed = catalog.some((item) => item.status === "fail");
   return runtimeResult(
     "runtime-doctor",
-    passed ? "ready" : "needs-install",
+    passed ? (catalogFailed ? "action-required" : "ready") : "needs-install",
     paths,
     checks,
   );

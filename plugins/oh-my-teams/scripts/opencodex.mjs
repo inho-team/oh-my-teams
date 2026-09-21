@@ -1,7 +1,7 @@
 /** Fail-closed OpenCodex fixed-account runner binding validation. */
 import path from "node:path";
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import { assert } from "./core.mjs";
 
@@ -127,6 +127,61 @@ async function unusedPort() {
   return port;
 }
 
+function processGroupMembers(group) {
+  if (process.platform === "win32") return null;
+  const listed = spawnSync("ps", ["-axo", "pid=,pgid="], { encoding: "utf8" });
+  if (listed.status !== 0) return null;
+  return listed.stdout
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter(([pid, pgid]) => Number.isInteger(pid) && pgid === group)
+    .map(([pid]) => pid);
+}
+
+function listenerOwnedByGroup(port, group) {
+  if (process.platform === "win32") return false;
+  const listeners = spawnSync(
+    "lsof",
+    ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"],
+    {
+      encoding: "utf8",
+    },
+  );
+  if (listeners.status !== 0) return false;
+  const members = processGroupMembers(group);
+  if (!members) return false;
+  const pids = listeners.stdout
+    .split("\n")
+    .map(Number)
+    .filter(Number.isInteger);
+  return pids.length === 1 && members.includes(pids[0]);
+}
+
+/**
+ * Acquires the account-home lease that makes a request-history boundary exclusive.
+ * @param {string} accountHome - Fixed-account OpenCodex home.
+ * @returns {{release: () => void}} Lease receipt.
+ */
+export function acquireOpenCodexLease(accountHome) {
+  const file = path.join(accountHome, ".omt-opencodex-turn.lock");
+  let fd;
+  try {
+    fd = fs.openSync(file, "wx", 0o600);
+  } catch {
+    throw new Error("opencodex-binding-unverified");
+  }
+  return {
+    release() {
+      if (fd === null) return;
+      fs.closeSync(fd);
+      fd = null;
+      try {
+        fs.unlinkSync(file);
+      } catch {}
+    },
+  };
+}
+
 function processAlive(pid) {
   if (!pid) return false;
   try {
@@ -157,7 +212,11 @@ async function stopOwnedProxy(child) {
       new Promise((resolve) => setTimeout(resolve, 3000)),
     ]);
   }
-  assert(!processAlive(child.pid), "opencodex-proxy-exit-unverifiable");
+  const members = processGroupMembers(child.pid);
+  assert(
+    !processAlive(child.pid) && members?.length === 0,
+    "opencodex-proxy-exit-unverifiable",
+  );
 }
 
 /**
@@ -168,6 +227,11 @@ async function stopOwnedProxy(child) {
  */
 export async function startOpenCodexProxy(binding) {
   const env = openCodexEnvironment(binding);
+  assert(
+    process.platform !== "win32",
+    "opencodex-proxy-ownership-unverifiable",
+  );
+  const lease = acquireOpenCodexLease(binding.accountHome);
   const port = await unusedPort();
   const binary = path.join(
     binding.runtimePrefix,
@@ -196,20 +260,29 @@ export async function startOpenCodexProxy(binding) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/healthz`);
       if (response.ok && child.pid && !exited) {
+        if (!listenerOwnedByGroup(port, child.pid)) break;
         return {
           port,
           pid: child.pid ?? null,
           env,
           stop: async () => {
-            if (child.exitCode !== null || exited) return;
-            await stopOwnedProxy(child);
+            try {
+              if (child.exitCode === null && !exited)
+                await stopOwnedProxy(child);
+            } finally {
+              lease.release();
+            }
           },
         };
       }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (child.exitCode === null && !exited) await stopOwnedProxy(child);
+  try {
+    if (child.exitCode === null && !exited) await stopOwnedProxy(child);
+  } finally {
+    lease.release();
+  }
   throw new Error("opencodex-proxy-not-ready");
 }
 
@@ -282,6 +355,7 @@ async function readOpenCodexHistory(input, fetcher) {
   assert(token, "opencodex-binding-unverified");
   const entries = [];
   let cursor = null;
+  const cursors = new Set();
   do {
     const url = new URL(`http://127.0.0.1:${input.port}/api/request-history`);
     url.searchParams.set("limit", "100");
@@ -297,6 +371,12 @@ async function readOpenCodexHistory(input, fetcher) {
       typeof page.nextCursor === "string" && page.nextCursor
         ? page.nextCursor
         : null;
+    assert(
+      page.hasMore !== true || Boolean(cursor),
+      "opencodex-binding-unverified",
+    );
+    assert(!cursor || !cursors.has(cursor), "opencodex-binding-unverified");
+    if (cursor) cursors.add(cursor);
   } while (cursor);
   return entries;
 }
@@ -323,14 +403,19 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
   const entries = await readOpenCodexHistory(input, fetcher);
   const before = input.historyBoundary ?? new Set();
   const created = entries.filter((entry) => !before.has(entry?.requestId));
-  assert(created.length === 1, "opencodex-binding-unverified");
-  const entry = created[0];
-  const attempts = entry?.attempts;
-  assert(
-    typeof entry?.requestId === "string" &&
+  assert(created.length > 0, "opencodex-binding-unverified");
+  const expectedProvider = openCodexProvider(
+    input.provider,
+    input.accountLogLabel,
+  );
+  const valid = (entry) => {
+    const attempts = entry?.attempts;
+    const model = entry?.resolvedModel ?? entry?.model;
+    return (
+      typeof entry?.requestId === "string" &&
       entry.requestedModel === input.model &&
-      entry.provider ===
-        openCodexProvider(input.provider, input.accountLogLabel) &&
+      model === input.model &&
+      entry.provider === expectedProvider &&
       Number.isInteger(entry.status) &&
       entry.status >= 200 &&
       entry.status < 300 &&
@@ -340,24 +425,21 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
       attempts.every(
         (attempt) =>
           attempt?.accountLogLabel === input.accountLogLabel &&
-          typeof attempt.provider === "string" &&
-          attempt.provider ===
-            openCodexProvider(input.provider, input.accountLogLabel),
-      ),
-    "opencodex-binding-unverified",
-  );
-  const model = entry.resolvedModel ?? entry.model ?? null;
-  assert(
-    typeof model === "string" && model,
-    "opencodex-model-unproven-or-mismatched",
-  );
+          attempt?.provider === expectedProvider &&
+          attempt?.model === input.model,
+      )
+    );
+  };
+  assert(created.every(valid), "opencodex-binding-unverified");
   return {
-    requestId: entry.requestId,
-    provider: entry.provider,
+    requestId: created[0].requestId,
+    requestIds: created.map((entry) => entry.requestId),
+    provider: expectedProvider,
     accountLogLabel: input.accountLogLabel,
-    model,
-    usage: entry.usage ?? null,
-    attempts,
+    model: input.model,
+    usage: created.length === 1 ? (created[0].usage ?? null) : null,
+    attempts: created.flatMap((entry) => entry.attempts),
+    requests: created,
   };
 }
 

@@ -775,6 +775,13 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   const observation = fs.existsSync(observationFile)
     ? readJSON(observationFile)
     : null;
+  const lifecycleFile = path.join(turnDir, "lifecycle.json");
+  const lifecycle = fs.existsSync(lifecycleFile)
+    ? readJSON(lifecycleFile)
+    : null;
+  const turn = fs.existsSync(path.join(turnDir, "turn.json"))
+    ? readJSON(path.join(turnDir, "turn.json"))
+    : {};
   // Resuming needs the session of the latest turn that reported one.
   let session = stream.session;
   for (const earlier of turns.slice(0, -1).reverse()) {
@@ -786,7 +793,20 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   if (exit) {
     if (exit.stopped) outcome = "stopped";
     else if (exit.timedOut) outcome = "timed-out";
-    else if (exit.code !== 0 || stream.providerError) outcome = "exit-error";
+    else if (exit.code !== 0 || exit.error || stream.providerError)
+      outcome = "exit-error";
+    else if (
+      turn.runner &&
+      (!observation ||
+        !lifecycle ||
+        lifecycle.inputAccepted !== true ||
+        lifecycle.turnStarted !== true ||
+        lifecycle.upstreamRequestStarted !== true ||
+        lifecycle.completed !== true ||
+        lifecycle.exitObserved !== true ||
+        lifecycle.termination !== "exited")
+    )
+      outcome = "unverifiable";
     else outcome = stream.marker?.kind ?? "no-marker";
   }
   return {
@@ -800,6 +820,7 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     outcome,
     marker: stream.marker,
     exit,
+    lifecycle,
     session,
     modelRequested: worker.modelRequested,
     modelReported: observation?.model ?? stream.model,

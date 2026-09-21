@@ -28,6 +28,33 @@ import {
 const POLL_MS = 500;
 const KILL_GRACE_MS = 5000;
 
+function lifecycleFromStream(turnDir, observed, inputAccepted, exitObserved) {
+  let events = [];
+  try {
+    events = fs
+      .readFileSync(path.join(turnDir, "stream.jsonl"), "utf8")
+      .split("\n")
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line)];
+        } catch {
+          return [];
+        }
+      });
+  } catch {}
+  const has = (type) => events.some((event) => event?.type === type);
+  return {
+    inputAccepted,
+    turnStarted: has("turn.started"),
+    upstreamRequestStarted: Boolean(observed?.requestIds?.length),
+    completed: has("turn.completed"),
+    exitObserved,
+    cancelRequested: false,
+    termination: exitObserved ? "exited" : "unverifiable",
+    requestIds: observed?.requestIds ?? [],
+  };
+}
+
 /**
  * Terminates a process tree rooted at the given pid.
  *
@@ -138,6 +165,16 @@ export async function runTurn(turnDir) {
       durationMs: 0,
     };
     writeJSON(path.join(turnDir, "exit.json"), record);
+    writeJSON(path.join(turnDir, "lifecycle.json"), {
+      inputAccepted: false,
+      turnStarted: false,
+      upstreamRequestStarted: false,
+      completed: false,
+      exitObserved: false,
+      cancelRequested: false,
+      termination: "unverifiable",
+      requestIds: [],
+    });
     return record;
   }
   const child = spawn(command[0], command.slice(1), {
@@ -155,6 +192,10 @@ export async function runTurn(turnDir) {
     child: child.pid ?? null,
   });
   child.stdin.on("error", () => {});
+  let inputAccepted = true;
+  child.stdin.once("error", () => {
+    inputAccepted = false;
+  });
   child.stdin.end(input);
 
   return new Promise((resolve) => {
@@ -194,10 +235,11 @@ export async function runTurn(turnDir) {
         endedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAt,
       };
+      let observed = null;
       Promise.resolve()
         .then(async () => {
           if (proxy && binding && historyBoundary) {
-            const observed = await readOpenCodexObservation({
+            observed = await readOpenCodexObservation({
               ...binding,
               port: proxy.port,
               provider: turn.runner.logicalProvider,
@@ -212,6 +254,17 @@ export async function runTurn(turnDir) {
         })
         .then(async () => {
           if (proxy) await proxy.stop();
+          if (turn.runner) {
+            writeJSON(
+              path.join(turnDir, "lifecycle.json"),
+              lifecycleFromStream(
+                turnDir,
+                observed,
+                inputAccepted,
+                record.error === null,
+              ),
+            );
+          }
           writeJSON(path.join(turnDir, "exit.json"), record);
           resolve(record);
         });

@@ -169,7 +169,7 @@ test("fixed OpenAI homes require the vendor-valid pin and disabled native integr
   );
 });
 
-test("proxy request history requires one new successful fixed-account row", async (t) => {
+test("proxy request history retains every successful fixed-account row in one leased turn", async (t) => {
   const accountHome = fs.mkdtempSync(
     path.join(os.tmpdir(), "omt-ocx-account-"),
   );
@@ -206,6 +206,7 @@ test("proxy request history requires one new successful fixed-account row", asyn
                     {
                       provider: "openai-fixed-account",
                       accountLogLabel: "fixed-account",
+                      model: "gpt-6-astra",
                     },
                   ],
                 },
@@ -220,12 +221,36 @@ test("proxy request history requires one new successful fixed-account row", asyn
   );
   assert.deepEqual(observed, {
     requestId: "caller-owned-request",
+    requestIds: ["caller-owned-request"],
     provider: "openai-fixed-account",
     accountLogLabel: "fixed-account",
     model: "gpt-6-astra",
     usage: { input_tokens: 3 },
     attempts: [
-      { provider: "openai-fixed-account", accountLogLabel: "fixed-account" },
+      {
+        provider: "openai-fixed-account",
+        accountLogLabel: "fixed-account",
+        model: "gpt-6-astra",
+      },
+    ],
+    requests: [
+      {
+        requestId: "caller-owned-request",
+        timestamp: 1789963102082,
+        requestedModel: "gpt-6-astra",
+        resolvedModel: "gpt-6-astra",
+        provider: "openai-fixed-account",
+        status: 200,
+        terminalStatus: "completed",
+        usage: { input_tokens: 3 },
+        attempts: [
+          {
+            provider: "openai-fixed-account",
+            accountLogLabel: "fixed-account",
+            model: "gpt-6-astra",
+          },
+        ],
+      },
     ],
   });
 });
