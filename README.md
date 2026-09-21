@@ -53,7 +53,7 @@ PM       분석·중장기 계획·최종 결과
 
 ### 플러그인 설치
 
-설치기를 실행하면 플러그인을 로컬 마켓으로 등록하고 OpenCodex 2.59.0을 준비합니다.
+설치기를 실행하면 호스트에 플러그인을 설치하고, `plugins/oh-my-teams/package.json`에 정확한 버전으로 고정된 OpenCodex 런타임을 준비합니다.
 
 ```powershell
 ./install.ps1 -HostName both
@@ -65,11 +65,11 @@ sh install.sh both   # claude | codex | both
 
 설치기는 다음을 수행합니다.
 
-- 현재 저장소를 호스트(Claude 또는 Codex)의 로컬 마켓으로 등록합니다.
-- 기존 설치 상태를 확인하고 레거시 플러그인 마이그레이션 계획을 만듭니다.
-- OpenCodex 런타임을 `~/.omt/runtime/opencodex/` 아래에 설치합니다.
+- 현재 저장소를 호스트(Claude 또는 Codex)의 로컬 마켓으로 등록하고 플러그인을 설치하거나 갱신합니다. 이 과정에서 호스트가 저장하는 플러그인 상태가 바뀝니다.
+- 기존 설치 상태를 확인하고 레거시 플러그인 `orca@orca-skills`의 처리 계획을 만듭니다. Claude에서는 레거시를 비활성화하고, `--remove-legacy`를 주면 제거합니다.
+- 마지막으로 OpenCodex 런타임을 `~/.omt/runtime/opencodex/` 아래에 설치합니다. 이 단계가 실패하면 플러그인은 이미 설치된 상태에서 계획의 `runtime.status`가 `install-failed`로 표시되고 종료 코드가 0이 아니며, 원인을 고친 뒤 `runtime-repair`를 실행합니다.
 
-`--dry-run`을 추가하면 실제 변경 없이 계획만 표시합니다. `--remove-legacy`를 함께 사용하면 레거시 플러그인을 제거합니다.
+`--dry-run`을 추가하면 호스트 플러그인과 런타임을 바꾸지 않고 계획을 JSON으로 출력합니다. 이때도 호스트의 플러그인 목록은 읽습니다. `--remove-legacy`를 함께 사용하면 계획에 레거시 제거가 포함됩니다.
 
 ```sh
 sh install.sh both --dry-run --remove-legacy
@@ -89,9 +89,9 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor \
   --state .omt
 ```
 
-이 명령은 Node.js, Git, Codex, OpenCodex, Orca, GitHub CLI 등의 의존성을 확인합니다. 모든 검사가 `pass`로 표시되면 설치가 완료된 것입니다.
+이 명령은 Node.js, OpenCodex 런타임, Git, Codex, Orca, GitHub CLI를 확인하고 결과를 JSON으로 출력합니다. `status`가 `ready`이면 OpenCodex 런타임이 정상이고 `opencodex-backend`에 필요한 검사가 실패하지 않은 것입니다. `gh`처럼 그 검사에 필요하지 않은 항목이 실패해도 `ready`일 수 있으므로, 모든 검사가 `pass`라는 뜻은 아닙니다.
 
-의존성이 부족하면 다음 명령으로 자동 설치를 시도합니다.
+`status`가 `needs-install`이면 활성 런타임이 없거나 어긋난 것입니다. 다음 명령은 잠금 파일로 고정된 OpenCodex 런타임만 설치하며, Node.js, Git, Codex, Orca, `gh`는 설치하지 않습니다.
 
 ```sh
 node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
@@ -111,7 +111,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 | Codex CLI 또는 Claude Code | ✓ | 구독별 에이전트 실행(Codex) 또는 기본 실행기(Claude) |
 | Orca CLI | ✓ | workflow 감독, orchestration, 상태 관리 |
 | Orca Desktop | 선택 | GUI 기반 작업 모니터링 |
-| OpenCodex | ✓ | 고정 계정 실행(선택): 조직 파일에서 runner 필드를 설정한 프로필만 사용 |
+| OpenCodex 런타임 | 선택(설치기가 준비) | 고정 계정 실행: 조직 파일에서 `runner` 필드를 설정한 프로필만 사용 |
 | gh (GitHub CLI) | 선택 | pull request 생성 및 관리 |
 
 각 항목의 설치 및 문제 해결 방법은 [OpenCodex 런타임 설치 안내](docs/OPENCODEX_RUNTIME.md)를 참고하십시오.
