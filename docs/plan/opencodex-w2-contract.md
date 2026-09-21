@@ -16,7 +16,7 @@
 | 취소 | 미수용 | local turn 시작 직후 SIGINT와 최종 프로세스 소멸을 한 번 관측했습니다. | 상위 streaming 요청이 시작된 뒤의 취소, 자손 종료, 재개는 미검증입니다. 불명확한 종료 뒤 대체 실행을 만들지 않습니다. |
 | 폴더 신뢰와 제출 | 미수용 | 권한 우회 인수에도 Codex의 trust 화면이 남는 것을 관측했습니다. | trust 화면의 Enter를 일반 프롬프트 제출로 처리하지 않으며, 명시적 사용자 승인이 없는 자동 응답을 금지합니다. |
 | 전역 상태와 키체인 | 미수용 | 초기 제한 비교는 통과했지만, 실행 기간 중 `Claude Code-credentials` 메타데이터가 변경됐고 원인을 특정하지 못했습니다. | 변경 전후 상태 검사를 필수화하되, 무변경을 주장하거나 항목을 복구하지 않습니다. |
-| Windows | 미실행 | W1은 macOS에서만 실행되었습니다. | Windows 지원·기본 활성화·실측 완료로 표시하지 않습니다. 결정적 단위 검사는 추가하되 W2-06의 실제 증거가 필요합니다. |
+| Windows | 미실행 | W1은 macOS에서만 실행되었습니다. | Windows의 fixed-account runner 실행 capability는 지원·기본 활성화·실측 완료로 표시하지 않습니다. 설치·doctor·repair의 결정적 검사는 추가하되, 이 runner 실행 capability에는 W2-06의 실제 증거가 필요합니다. |
 
 ## 공개 CLI와 결과 계약
 
@@ -109,7 +109,7 @@ OpenCodex 2.59.0 runner의 허용 조건은 다음과 같습니다.
 - 요청 모델·transport 모델·관측 모델은 각각 기록합니다. 요청한 모델의 관측값이 없으면 `unproven`, 다르면 `mismatched`이며 `matched`가 아닙니다. `model: null`은 host-default 관측을 통한 별도 확인 전에는 common runner에 연결하지 않습니다.
 - effort는 현재 provider adapter가 검증한 값만 전달하며, null 또는 누락은 provider default라는 관측값으로 대체하지 않습니다.
 
-raw 다계정 OpenCodex home, `pool`이 지정된 profile, `account: current`, 관측하지 못한 provider/model/effort 조합은 `opencodex-pool-unverified` 또는 `opencodex-binding-unverified`로 fail closed합니다. 해당 profile은 기존 runner가 있으면 그 경로를 유지하고, 새 runner만 명시한 profile은 시작하지 않습니다. 이 제한은 같은 Claude 모델의 Claude와 Agy 구독 경로를 하나의 Codex provider로 합치지 않도록 보장합니다.
+raw 다계정 OpenCodex home 또는 검증하지 않은 account failover, `account: current`, 관측하지 못한 provider/model/effort 조합은 `opencodex-pool-unverified` 또는 `opencodex-binding-unverified`로 fail closed합니다. `profile.pool`은 quota 귀속 메타데이터로 보존하며, 그것만으로 fixed-account runner를 차단하지 않습니다. `runner` 필드가 없는 기존 profile만 legacy 경로를 유지합니다. 명시적 runner의 검증이 실패하면 해당 요청은 `blocked`로 종료하며, 다른 provider·account·model·runner 또는 API billing 경로로 이동하거나 재시도하지 않습니다. 이 제한은 같은 Claude 모델의 Claude와 Agy 구독 경로를 하나의 Codex provider로 합치지 않도록 보장합니다.
 
 ## 호출, 상태, 계측 계약
 
@@ -165,7 +165,7 @@ W2-04는 다음의 결정적 검사와 기존 회귀 검사를 추가해야 합�
 | 실행 | fixed-account runner의 home 분리, 한 계정 검증, API key 차단, provider/account/model/effort 보존, observed model 누락, model 불일치, null model 차단을 검사합니다. |
 | 상태 | input accepted, turn started, upstream request, complete, exit, trust 질문, 취소와 자손 잔존을 각각 입력하여 상호 추론하지 않음을 검사합니다. |
 | 호환성 | runner 없는 기존 organization과 진행 중 workflow snapshot을 변경 없이 읽고 실행하며, 기존 provider adapter·usage·quota·failure 분류를 보존함을 검사합니다. |
-| 이식성 | macOS·Windows 경로와 npm shim을 결정적으로 검사합니다. 실제 Windows 설치·첫 실행·repair는 W2-06의 host 증거가 생길 때까지 `not-applicable`로 남깁니다. |
+| 이식성 | macOS·Windows 경로와 npm shim, 설치·doctor·repair를 결정적으로 검사합니다. 실제 Windows fixed-account runner의 첫 실행과 그 실행 capability 복구는 W2-06의 host 증거가 생길 때까지 `not-applicable`로 남깁니다. |
 
 기본 활성화는 다음 조건을 모두 만족할 때만 PM이 별도로 결정할 수 있습니다: W2-02의 두 host lifecycle 증거, W2-03의 공식 설치 catalog, exact implementation HEAD의 설치·실행·복구 검사, W2-06의 실제 macOS와 Windows 증거, 별도 Senior의 독립 review, 그리고 raw pool의 완전한 attempt 기록 또는 명시적 계속 차단입니다. 이 계약 자체는 기본 활성화나 W1 수용을 승인하지 않습니다.
 
