@@ -421,10 +421,14 @@ def main():
         time.sleep(3)
         finished = datetime.now(timezone.utc)
         results["isolation"]["isolated_home_top_level"] = sorted(p.name for p in home.iterdir())
-        results["isolation"]["sandbox_denials"] = (
-            sandbox_denials(started.astimezone() - timedelta(seconds=2), finished.astimezone() + timedelta(seconds=2), guarded)
-            if guard else "not measured"
-        )
+        if guard:
+            window = sandbox_denials(started.astimezone() - timedelta(seconds=2), finished.astimezone() + timedelta(seconds=2), guarded)
+            # The control probe's own denial proves the log query sees denials; it is not a leak.
+            control["denial_logged"] = any(item["path"] == str(probe) for item in window["denials"])
+            window["denials"] = [item for item in window["denials"] if item["path"] != str(probe)]
+            results["isolation"]["sandbox_denials_excluding_control"] = window
+        else:
+            results["isolation"]["sandbox_denials_excluding_control"] = "not measured"
 
     tests = results["tests"]
     healthy = lambda name: tests[name]["result"].get("runtimeHealthy") is True
@@ -441,7 +445,8 @@ def main():
         "repair after the failure restores a healthy runtime": healthy("doctor-recovered"),
     }
     if control:
-        checks["the write guard refuses a probe write below the real home"] = control["write_below_real_home_denied"]
+        checks["the write guard refuses a probe write below the real home and logs the denial"] = control["write_below_real_home_denied"] and control["denial_logged"]
+        checks["no other write was denied while the experiment ran"] = results["isolation"]["sandbox_denials_excluding_control"]["denials"] == []
     results["expectations"] = checks
     results["finished_utc"] = utc_now()
     results["real_user_state"] = {
@@ -462,7 +467,7 @@ def main():
     print("real user state diff:")
     for key, value in results["real_user_state"]["diff"].items():
         print(f"  {key}: {'unchanged' if value == 'unchanged' else json.dumps(value)}")
-    print("sandbox denials:", json.dumps(results["isolation"]["sandbox_denials"]))
+    print("sandbox denials:", json.dumps(results["isolation"]["sandbox_denials_excluding_control"]))
     print(f"Results: {output}")
     return 0 if all(checks.values()) else 1
 
