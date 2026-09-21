@@ -376,13 +376,14 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
     ? {
         kind: profile.runner.kind,
         mode: profile.runner.mode,
+        profileId,
         logicalProvider: profile.provider,
         logicalAccount: profile.account,
         model: profile.model,
         effort: profile.effort ?? null,
         accountHomeRef: profile.runner.accountHomeRef,
         runtimeFingerprint: profile.runner.runtimeFingerprint,
-        actualRunner: profile.provider,
+        actualRunner: path.basename(argv[0]).replace(/\.(exe|cmd)$/i, ""),
       }
     : null;
   // Claude Code 2.1.221 and later compact a session at this window instead of
