@@ -227,7 +227,9 @@ export function openCodexCommand(request) {
     "exec",
     ...(request.session ? ["resume", request.session] : []),
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
+    ...(request.writable
+      ? ["--dangerously-bypass-approvals-and-sandbox"]
+      : ["--sandbox", "read-only", "--ephemeral"]),
     "--cd",
     request.cwd,
     "--model",
@@ -268,39 +270,80 @@ export function openCodexProvider(provider, accountLogLabel) {
 }
 
 /**
- * Reads the one request-history observation created after a caller's boundary.
+ * Reads every page of request history using the endpoint's opaque cursor.
+ * @param {object} input - Loopback proxy and account directory.
+ * @param {typeof fetch} fetcher - Injectable loopback fetch implementation.
+ * @returns {Promise<object[]>} Complete history, newest first.
+ */
+async function readOpenCodexHistory(input, fetcher) {
+  const tokenFile = path.join(input.accountHome, "admin-api-token");
+  assert(fs.existsSync(tokenFile), "opencodex-binding-unverified");
+  const token = fs.readFileSync(tokenFile, "utf8").trim();
+  assert(token, "opencodex-binding-unverified");
+  const entries = [];
+  let cursor = null;
+  do {
+    const url = new URL(`http://127.0.0.1:${input.port}/api/request-history`);
+    url.searchParams.set("limit", "100");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    const response = await fetcher(url, {
+      headers: { "X-OpenCodex-API-Key": token },
+    });
+    assert(response.ok, "opencodex-binding-unverified");
+    const page = await response.json();
+    assert(Array.isArray(page.entries), "opencodex-binding-unverified");
+    entries.push(...page.entries);
+    cursor =
+      typeof page.nextCursor === "string" && page.nextCursor
+        ? page.nextCursor
+        : null;
+  } while (cursor);
+  return entries;
+}
+
+/**
+ * Captures the request IDs that existed before a caller-owned invocation.
+ * @param {object} input - Loopback proxy and account directory.
+ * @param {typeof fetch} [fetcher=fetch] - Injectable loopback fetch implementation.
+ * @returns {Promise<Set<string>>} Existing request IDs.
+ */
+export async function openCodexHistoryBoundary(input, fetcher = fetch) {
+  const entries = await readOpenCodexHistory(input, fetcher);
+  return new Set(entries.map((entry) => entry?.requestId).filter(Boolean));
+}
+
+/**
+ * Reads the caller-owned request-history observation after a boundary.
  * The management token is sent only to loopback and is never returned.
  * @param {object} input - Loopback proxy and requested binding data.
  * @param {typeof fetch} [fetcher=fetch] - Injectable loopback fetch implementation.
  * @returns {Promise<{provider: string, accountLogLabel: string, model: string, usage: object | null}>}
  */
 export async function readOpenCodexObservation(input, fetcher = fetch) {
-  const tokenFile = path.join(input.accountHome, "admin-api-token");
-  assert(fs.existsSync(tokenFile), "opencodex-binding-unverified");
-  const token = fs.readFileSync(tokenFile, "utf8").trim();
-  assert(token, "opencodex-binding-unverified");
-  const response = await fetcher(
-    `http://127.0.0.1:${input.port}/api/request-history?limit=20`,
-    { headers: { "X-OpenCodex-API-Key": token } },
-  );
-  assert(response.ok, "opencodex-binding-unverified");
-  const history = await response.json();
-  const entries = Array.isArray(history.entries) ? history.entries : [];
-  const entry = entries.find(
-    (candidate) =>
-      candidate.timestamp &&
-      (typeof candidate.timestamp === "number"
-        ? candidate.timestamp
-        : Date.parse(candidate.timestamp)) >= input.startedAt &&
-      candidate.requestedModel === input.model &&
-      candidate.provider ===
-        openCodexProvider(input.provider, input.accountLogLabel),
-  );
-  const attempt = entry?.attempts?.at(-1);
+  const entries = await readOpenCodexHistory(input, fetcher);
+  const before = input.historyBoundary ?? new Set();
+  const created = entries.filter((entry) => !before.has(entry?.requestId));
+  assert(created.length === 1, "opencodex-binding-unverified");
+  const entry = created[0];
+  const attempts = entry?.attempts;
   assert(
-    entry &&
-      attempt?.accountLogLabel === input.accountLogLabel &&
-      typeof attempt.provider === "string",
+    typeof entry?.requestId === "string" &&
+      entry.requestedModel === input.model &&
+      entry.provider ===
+        openCodexProvider(input.provider, input.accountLogLabel) &&
+      Number.isInteger(entry.status) &&
+      entry.status >= 200 &&
+      entry.status < 300 &&
+      entry.terminalStatus === "completed" &&
+      Array.isArray(attempts) &&
+      attempts.length > 0 &&
+      attempts.every(
+        (attempt) =>
+          attempt?.accountLogLabel === input.accountLogLabel &&
+          typeof attempt.provider === "string" &&
+          attempt.provider ===
+            openCodexProvider(input.provider, input.accountLogLabel),
+      ),
     "opencodex-binding-unverified",
   );
   const model = entry.resolvedModel ?? entry.model ?? null;
@@ -309,10 +352,12 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
     "opencodex-model-unproven-or-mismatched",
   );
   return {
-    provider: attempt.provider,
-    accountLogLabel: attempt.accountLogLabel,
+    requestId: entry.requestId,
+    provider: entry.provider,
+    accountLogLabel: input.accountLogLabel,
     model,
     usage: entry.usage ?? null,
+    attempts,
   };
 }
 

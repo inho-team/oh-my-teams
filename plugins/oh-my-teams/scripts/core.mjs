@@ -520,7 +520,7 @@ export function run(
     // Track accumulated byte length to avoid re-computing on every chunk.
     let totalBytes = 0;
 
-    const finish = (code, error) => {
+    const finish = (code, error, exitObserved = false) => {
       if (finished) return;
       finished = true;
       clearTimeout(timeoutTimer);
@@ -531,6 +531,7 @@ export function run(
         stderr: stderr + (error ? String(error.message) : ""),
         timedOut,
         overflow,
+        exitObserved,
         pid: child.pid ?? null,
         elapsedMs: Date.now() - startedAt,
       });
@@ -567,7 +568,7 @@ export function run(
     }
 
     child.on("error", (error) => finish(-1, error));
-    child.on("close", (code) => finish(code));
+    child.on("close", (code) => finish(code, undefined, true));
     child.stdin.on("error", () => {});
     child.stdin.end(input);
   });

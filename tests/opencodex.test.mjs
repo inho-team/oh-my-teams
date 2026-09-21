@@ -8,6 +8,7 @@ import {
   isolatedOpenCodexEnvironment,
   openCodexCommand,
   openCodexEnvironment,
+  openCodexHistoryBoundary,
   readOpenCodexObservation,
   validateFixedOpenCodexAccountHome,
   validateOpenCodexRunner,
@@ -80,29 +81,41 @@ test("runtime homes remain isolated and API-key fallback is blocked", () => {
   );
 });
 
-test("the OpenCodex runner invokes actual Codex JSONL with explicit proxy and model", () => {
-  const argv = openCodexCommand({
+test("read-only public invocation and writable headless invocation keep different argv", () => {
+  const readonly = openCodexCommand({
     cwd: "/tmp/work",
     port: 43123,
     model: "gpt-6-astra",
     effort: "medium",
   });
-  assert.deepEqual(argv.slice(0, 6), [
+  const writable = openCodexCommand({
+    cwd: "/tmp/work",
+    port: 43123,
+    model: "gpt-6-astra",
+    effort: "medium",
+    writable: true,
+  });
+  assert.deepEqual(readonly.slice(0, 7), [
     "codex",
     "exec",
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
+    "--sandbox",
+    "read-only",
+    "--ephemeral",
     "--cd",
-    "/tmp/work",
   ]);
-  assert.ok(argv.includes("model_provider=omt-opencodex"));
+  assert.ok(!readonly.includes("--dangerously-bypass-approvals-and-sandbox"));
+  assert.ok(writable.includes("--dangerously-bypass-approvals-and-sandbox"));
+  assert.ok(readonly.includes("model_provider=omt-opencodex"));
   assert.ok(
-    argv.includes(
+    readonly.includes(
       'model_providers.omt-opencodex.base_url="http://127.0.0.1:43123/v1"',
     ),
   );
   assert.ok(
-    argv.includes("model_providers.omt-opencodex.requires_openai_auth=false"),
+    readonly.includes(
+      "model_providers.omt-opencodex.requires_openai_auth=false",
+    ),
   );
 });
 
@@ -156,48 +169,104 @@ test("fixed OpenAI homes require the vendor-valid pin and disabled native integr
   );
 });
 
-test("proxy request history, not CLI JSONL, proves the fixed account and model", async (t) => {
+test("proxy request history requires one new successful fixed-account row", async (t) => {
   const accountHome = fs.mkdtempSync(
     path.join(os.tmpdir(), "omt-ocx-account-"),
   );
   t.after(() => fs.rmSync(accountHome, { recursive: true, force: true }));
   fs.writeFileSync(path.join(accountHome, "admin-api-token"), "test-token");
-  const observed = await readOpenCodexObservation(
-    {
-      accountHome,
-      port: 43123,
-      startedAt: 0,
-      provider: "codex",
-      model: "gpt-6-astra",
-      accountLogLabel: "fixed-account",
-    },
-    async (_url, init) => {
-      assert.equal(init.headers["X-OpenCodex-API-Key"], "test-token");
-      return {
-        ok: true,
-        json: async () => ({
-          entries: [
-            {
-              timestamp: 1789963102082,
-              requestedModel: "gpt-6-astra",
-              resolvedModel: "gpt-6-astra",
-              provider: "openai-fixed-account",
-              usage: { input_tokens: 3 },
-              attempts: [
-                { provider: "openai", accountLogLabel: "fixed-account" },
+  const input = {
+    accountHome,
+    port: 43123,
+    provider: "codex",
+    model: "gpt-6-astra",
+    accountLogLabel: "fixed-account",
+  };
+  let reads = 0;
+  const fetcher = async (_url, init) => {
+    assert.equal(init.headers["X-OpenCodex-API-Key"], "test-token");
+    reads += 1;
+    return {
+      ok: true,
+      json: async () => ({
+        entries:
+          reads === 1
+            ? []
+            : [
+                {
+                  requestId: "caller-owned-request",
+                  timestamp: 1789963102082,
+                  requestedModel: "gpt-6-astra",
+                  resolvedModel: "gpt-6-astra",
+                  provider: "openai-fixed-account",
+                  status: 200,
+                  terminalStatus: "completed",
+                  usage: { input_tokens: 3 },
+                  attempts: [
+                    {
+                      provider: "openai-fixed-account",
+                      accountLogLabel: "fixed-account",
+                    },
+                  ],
+                },
               ],
-            },
-          ],
-        }),
-      };
-    },
+      }),
+    };
+  };
+  const historyBoundary = await openCodexHistoryBoundary(input, fetcher);
+  const observed = await readOpenCodexObservation(
+    { ...input, historyBoundary },
+    fetcher,
   );
   assert.deepEqual(observed, {
-    provider: "openai",
+    requestId: "caller-owned-request",
+    provider: "openai-fixed-account",
     accountLogLabel: "fixed-account",
     model: "gpt-6-astra",
     usage: { input_tokens: 3 },
+    attempts: [
+      { provider: "openai-fixed-account", accountLogLabel: "fixed-account" },
+    ],
   });
+});
+
+test("request-history pagination and an unrelated concurrent row fail closed", async (t) => {
+  const accountHome = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-ocx-account-"),
+  );
+  t.after(() => fs.rmSync(accountHome, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(accountHome, "admin-api-token"), "test-token");
+  const input = {
+    accountHome,
+    port: 43123,
+    provider: "codex",
+    model: "gpt-6-astra",
+    accountLogLabel: "fixed-account",
+  };
+  let page = 0;
+  const fetcher = async (url) => {
+    page += 1;
+    assert.equal(new URL(url).searchParams.get("limit"), "100");
+    return {
+      ok: true,
+      json: async () =>
+        page === 1
+          ? { entries: [{ requestId: "old" }], nextCursor: "next" }
+          : page === 2
+            ? { entries: [] }
+            : {
+                entries: [
+                  { requestId: "other" },
+                  { requestId: "caller-owned-request" },
+                ],
+              },
+    };
+  };
+  const historyBoundary = await openCodexHistoryBoundary(input, fetcher);
+  await assert.rejects(
+    () => readOpenCodexObservation({ ...input, historyBoundary }, fetcher),
+    /opencodex-binding-unverified/,
+  );
 });
 
 test("the public provider entrypoint refuses an unconfigured explicit runner without fallback", async () => {

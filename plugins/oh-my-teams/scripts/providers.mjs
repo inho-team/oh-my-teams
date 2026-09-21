@@ -13,11 +13,13 @@ import {
   agentCliResetHint,
   classifyAgentCliFailure,
   decodeAgentCli,
+  parseJsonLines,
   tryParseJson,
 } from "./providers/shared.mjs";
 import { defaultRuntimeRoot, doctor, runtimePaths } from "./dependencies.mjs";
 import {
   openCodexCommand,
+  openCodexHistoryBoundary,
   openCodexEnvironment,
   isolatedOpenCodexEnvironment,
   readOpenCodexObservation,
@@ -224,7 +226,10 @@ export async function invoke(
       ...binding,
     });
     try {
-      const startedAt = Date.now();
+      const historyBoundary = await openCodexHistoryBoundary({
+        ...binding,
+        port: proxy.port,
+      });
       const argv = openCodexCommand({
         cwd,
         port: proxy.port,
@@ -246,7 +251,7 @@ export async function invoke(
         port: proxy.port,
         provider: profile.provider,
         model: profile.model,
-        startedAt,
+        historyBoundary,
       });
       const bindingResult = modelBinding(profile, {
         ...decoded,
@@ -256,6 +261,9 @@ export async function invoke(
         bindingResult.status === "matched",
         "opencodex-model-unproven-or-mismatched",
       );
+      const events = parseJsonLines(result.stdout);
+      const hasEvent = (type) => events.some((event) => event?.type === type);
+      const exitObserved = result.exitObserved === true;
       return {
         ...result,
         ...decoded,
@@ -266,13 +274,19 @@ export async function invoke(
         exhausted: false,
         observed,
         lifecycle: {
-          inputAccepted: result.code === 0 || Boolean(result.stdout),
-          turnStarted: /"type":"turn\.started"/.test(result.stdout),
-          upstreamRequestStarted: true,
-          completed: /"type":"turn\.completed"/.test(result.stdout),
-          exitObserved: result.code !== undefined,
+          inputAccepted: hasEvent("turn.started") || null,
+          turnStarted: hasEvent("turn.started") || null,
+          upstreamRequestStarted: observed.requestId ? true : null,
+          completed: hasEvent("turn.completed") || null,
+          exitObserved: exitObserved || null,
           cancelRequested: false,
-          termination: result.code === 0 ? "exited" : "unverifiable",
+          termination:
+            exitObserved &&
+            !result.timedOut &&
+            !result.overflow &&
+            result.code === 0
+              ? "exited"
+              : "unverifiable",
         },
       };
     } finally {

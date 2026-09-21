@@ -18,6 +18,7 @@ import { defaultRuntimeRoot, doctor, runtimePaths } from "./dependencies.mjs";
 import {
   isolatedOpenCodexEnvironment,
   openCodexCommand,
+  openCodexHistoryBoundary,
   openCodexEnvironment,
   readOpenCodexObservation,
   resolveOpenCodexBinding,
@@ -79,7 +80,7 @@ export async function runTurn(turnDir) {
   let binding = null;
   let command;
   let environment = process.env;
-  let startedAt = null;
+  let historyBoundary = null;
   try {
     if (turn.runner) {
       if (turn.runner.kind !== "opencodex")
@@ -104,13 +105,17 @@ export async function runTurn(turnDir) {
         runtimePrefix: runtimePaths(defaultRuntimeRoot()).runtime,
       };
       proxy = await startOpenCodexProxy(binding);
-      startedAt = Date.now();
+      historyBoundary = await openCodexHistoryBoundary({
+        ...binding,
+        port: proxy.port,
+      });
       command = openCodexCommand({
         cwd: turn.cwd,
         port: proxy.port,
         model: turn.runner.model,
         effort: turn.runner.effort,
         session: turn.session,
+        writable: true,
       });
       environment = isolatedOpenCodexEnvironment(
         process.env,
@@ -191,13 +196,13 @@ export async function runTurn(turnDir) {
       };
       Promise.resolve()
         .then(async () => {
-          if (proxy && binding && startedAt) {
+          if (proxy && binding && historyBoundary) {
             const observed = await readOpenCodexObservation({
               ...binding,
               port: proxy.port,
               provider: turn.runner.logicalProvider,
               model: turn.runner.model,
-              startedAt,
+              historyBoundary,
             });
             writeJSON(path.join(turnDir, "opencodex.json"), observed);
           }
