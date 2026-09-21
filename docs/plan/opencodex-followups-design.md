@@ -92,7 +92,22 @@ OMT 쪽 변경 사항은 다음과 같습니다.
 **모델**
 
 - W1 실측은 `anthropic/claude-sonnet-4-6`과 `google-antigravity/claude-sonnet-4-6`을 Codex CLI의 `--model`로 요청했을 때 접두사가 붙은 값이 프록시까지 전달되고 프록시가 접두사를 뗀 `claude-sonnet-4-6`으로 라우팅했음을 확인했습니다(W1:91-93). `evidence.json`의 요청 이력에서 이 값들은 `requestedModel = <provider>/claude-sonnet-4-6`, `model`, `resolvedModel`, `attempts[0].model = claude-sonnet-4-6`이었습니다. 이것으로 접두사 형태의 프로필 모델이 API 키 경로를 피하고 대상 provider로 가는 방식은 확인된 사실입니다(라우팅 근거는 `PKG/src/router.ts:697-745`).
-- 그러므로 기대값은 `requestedModel`이 프로필 모델 전체 문자열과 같고 `model`, `resolvedModel`, `attempt.model`이 접두사를 뗀 값과 같은 것입니다. 현재 `readOpenCodexObservation`은 `requestedModel === model`과 `model === input.model`을 요구하므로(`opencodex.mjs:727-774`) 접두사 정규화가 필요합니다. 이 변경은 실측으로 이미 확인한 값에 맞추는 것입니다.
+- 이 절에서 프로필 모델을 `M`, 접두사를 뗀 값을 `strip(M)`이라 씁니다. 프로필의 논리 provider가 `claude`이면 접두사는 `anthropic/`, `agy`이면 `google-antigravity/`이며, `M`이 그 접두사로 시작하면 `strip(M)`은 접두사 뒤의 나머지이고 아니면 `M` 그대로입니다. 프로필의 provider와 다른 provider의 접두사가 붙은 `M`(예: `claude` 프로필에 `google-antigravity/...`)은 turn 전에 프로필 검증에서 거부합니다. 논리 provider가 `codex`인 OpenAI 프로필에는 이 규칙을 적용하지 않으므로 `strip(M) = M`이고 기존 비교는 바뀌지 않습니다.
+- W1 실측이 확인한 이력 값과 맞추면 기대값은 `requestedModel = M`, `model`, `resolvedModel`, `attempt.model = strip(M)`입니다. 현재 `readOpenCodexObservation`은 `requestedModel`, `model`, `attempt.model`이 모두 `input.model`과 같다고 요구하므로(`opencodex.mjs:727-774`, `:683-702`) 접두사 프로필에서는 `strip(M)`을 비교 대상으로 나누어야 합니다. 이 함수가 반환하는 `model`은 지금처럼 프로필 모델 `M`으로 두고, 이력에서 관측해 `strip(M)`과 일치함을 확인한 값은 새 필드 `resolvedModel`로 함께 반환합니다. 반환 시점은 모든 이력 행이 검사를 통과한 뒤이므로, 지금 OpenAI 프로필에서 `model: input.model`이 하는 역할(이력과 일치가 확인된 뒤에만 존재하는 값)이 그대로 유지되고 증명의 강도는 약해지지 않습니다. 소비하는 두 경로는 이 `model`을 그대로 받아 비교하므로 소비 쪽 코드의 비교식은 바꾸지 않아도 됩니다.
+
+접두사가 붙은 프로필 모델에서 각 지점이 어떤 값끼리 비교하는지는 다음과 같이 정합니다.
+
+| # | 지점 | 위치 | 왼쪽 값 | 오른쪽 값 | 접두사 프로필의 판정 | OpenAI 프로필 | 불일치 시 |
+|---|---|---|---|---|---|---|---|
+| 1 | 관측: 이력 행의 요청 모델 | `opencodex.mjs:727-774` | 행의 `requestedModel` | `M` | 같아야 통과 | 변경 없음(`M`) | 관측이 `opencodex-binding-unverified`로 실패하고 turn을 증명하지 못합니다. |
+| 2 | 관측: 이력 행의 실행 모델 | `opencodex.mjs:727-774` | 행의 `resolvedModel ?? model` | `strip(M)` | 같아야 통과 | `strip(M) = M`이라 변경 없음 | 위와 같습니다. |
+| 3 | 관측: attempt의 모델 | `opencodex.mjs:683-702` | 각 attempt의 `model` | `strip(M)` | 모든 attempt가 같아야 통과 | 변경 없음 | 위와 같습니다. |
+| 4 | 관측: 반환값 | `opencodex.mjs:727-774` | 해당 없음 | 해당 없음 | `model = M`, `resolvedModel = strip(M)`를 반환하고 이는 1~3번 통과 뒤에만 존재합니다. | `model = M`이고 `resolvedModel`은 같은 값 | 반환하지 않고 실패합니다. |
+| 5 | headless-start: worker 기록의 모델 판정 | `headless.mjs:517-529`, `:849-852` | `observation.model`(4번의 `M`) | `worker.modelRequested`(`startHeadlessWorker`가 받은 프로필 모델 `M`, `headless.mjs:672`) | 문자열이 같으므로 `matched` | 변경 없음 | 값이 다르면 `mismatched`, 관측 파일이 없으면 스트림의 값으로 대체되며 이때는 `runnerTurnProven`이 실패합니다(`headless.mjs:756`). |
+| 6 | work: `modelBinding` | `providers.mjs:132-146`, `:278-285` | `profile.model`(`M`) | `effectiveModel`(4번의 `observed.model`, 곧 `M`) | 같으므로 `matched` | 변경 없음 | 관측이 이미 실패했으면 `modelBinding`에 닿기 전에 예외로 끝나고, 값이 다르면 `opencodex-model-unproven-or-mismatched`로 거부합니다. |
+
+- 1~3번이 이력에서 관측한 값과 대조하는 유일한 증명 지점이며, 5번과 6번은 그 증명을 통과한 `M`이 프로필 모델과 같은지 다시 확인하는 정합 검사입니다. 정규화 구현자가 4번에서 `strip(M)`을 `model`로 반환하면 6번이 모든 turn을 거부하므로 `model`은 `M`으로 유지해야 하며, 이 조건을 claude-agy-runner의 테스트로 고정합니다.
+- 접두사 프로필의 1~3번은 W1이 관측한 값에 맞추는 것이고, OMT 경로에서 재현되는지는 A5의 5번이 확인합니다.
 
 **증명할 수 없는 것**
 
@@ -139,6 +154,8 @@ runner를 가진 프로필이 지원되려면 `OPENCODEX_RUNNER_PROVIDERS`(`open
 **환경을 정리하지 않으면 생기는 문제**
 
 - `ocx` 런처는 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`이 있는지 기록합니다(`PKG/bin/ocx.mjs:787`). 이 값이 있으면 구독 OAuth와 다른 결제 경로가 섞일 수 있습니다.
+- 같은 런처의 주석은 Node 런처가 프로젝트 `.env`와 `.env.local`을 읽지 않고, 실제로 실행되는 Bun 자식이 작업 디렉터리의 dotenv를 먼저 읽는다고 설명합니다. 그 값이 구독 OAuth를 API 과금으로 옮기거나 OAuth bearer를 다른 목적지로 보낼 수 있다는 점도 적혀 있습니다(`PKG/bin/ocx.mjs:774-787`). 이 경로는 셸 환경 변수 검사로 보이지 않으므로 절차의 작업 디렉터리를 빈 격리 디렉터리로 고정합니다. OMT 자신의 프록시 spawn도 작업 디렉터리를 런타임 접두사로 고정합니다(`opencodex.mjs:492-505`). 프록시가 이 값을 실제로 소비하는지는 확인하지 못했지만, 절차가 그 가능성을 막지 않는 상태를 허용하지 않습니다.
+- 로그인 URL은 기본적으로 프록시가 OS 기본 브라우저에서 자동으로 엽니다. 서버 라우트는 `shouldOpenBrowserForLogin`이 참이면 `openUrl(authUrl)`을 호출하고(`PKG/src/server/management/oauth-account-routes.ts:211-214`), 그 함수는 요청의 `openBrowser`가 없을 때 `config.oauthOpenBrowser`가 명시적 `false`가 아니면 참을 돌려줍니다(`PKG/src/oauth/open-browser-choice.ts:22-25`, 키 타입은 `PKG/src/types/config.ts:422`). `ocx account login`의 요청 본문에는 `openBrowser`가 없으므로(`PKG/src/cli/account-auth.ts:196`) 설정값이 그대로 적용됩니다. 라우트의 주석은 이 설정이 기본 브라우저가 아닌 프로필에서 로그인을 끝내는 유일한 방법이라고 적습니다(`oauth-account-routes.ts:203-209`). 그래서 이 절차는 `oauthOpenBrowser: false`를 가드 config에 넣습니다.
 - 로컬 Claude 자격 증명 탐색은 `CLAUDE_CONFIG_DIR`을 읽고 macOS에서는 키체인을 읽습니다(`PKG/src/oauth/local-token-detect.ts:73-78`). W1도 `CLAUDE_CONFIG_DIR`만 바꿔서는 키체인 읽기가 없어지지 않는다고 기록했습니다(W1:62).
 - OMT 런타임은 `OPENAI`, `ANTHROPIC`, `GOOGLE`, `GEMINI`, `API` 계열 `KEY`·`TOKEN` 변수와 `OPENCODEX_HOME`, `CODEX_HOME`을 지웁니다(`opencodex.mjs:67-80`). 사람 절차도 같은 수준으로 정리해야 하므로 `env -i`로 새 환경을 만듭니다.
 
@@ -165,10 +182,10 @@ test -x "$OCX"; "$OCX" --version
 case "$ACC" in "$PWD"/*|"$HOME"/.opencodex*|"$HOME"/.omt/runtime/*) echo "허용되지 않는 위치"; exit 1;; esac
 test ! -e "$ACC"                                   # 이미 있으면 여기서 중단합니다. 재사용하지 않습니다.
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then echo "포트 사용 중"; exit 1; fi
-mkdir -p -m 700 "$ACC" "$ACC/home" "$ACC/codex-home" "$ACC/proxy-home"
+mkdir -p -m 700 "$ACC" "$ACC/home" "$ACC/codex-home" "$ACC/proxy-home" "$ACC/empty-cwd"
 PROVIDER="$PROVIDER" PORT="$PORT" ACC="$ACC" node -e '
 const fs=require("fs");
-const config={runtimeRole:"hub",clientIntegrations:{codex:false},claudeCode:{enabled:false},port:Number(process.env.PORT)};
+const config={runtimeRole:"hub",clientIntegrations:{codex:false},claudeCode:{enabled:false},oauthOpenBrowser:false,port:Number(process.env.PORT)};
 if(process.env.PROVIDER==="anthropic")config.anthropicAccountPool={enabled:true};
 fs.writeFileSync(process.env.ACC+"/home/config.json",JSON.stringify(config,null,2),{mode:0o600});
 '
@@ -176,22 +193,27 @@ echo PREPARED
 )
 ```
 
+- `oauthOpenBrowser: false`는 프록시가 로그인 URL을 기본 브라우저에서 자동으로 열지 않게 하는 소스의 설정입니다(위 "환경을 정리하지 않으면 생기는 문제"의 세 번째 항목). `empty-cwd`는 3단계 이후 모든 명령의 작업 디렉터리이며 계속 비어 있어야 합니다.
 - `config.json`의 `port`는 `ocx account ...`가 프록시를 찾지 못했을 때 되돌아가는 조회 포트입니다. 기록이 없으면 `config.port ?? 10100`을 조회하므로(`PKG/src/server/proxy-liveness.ts:281-283`) 이 값을 격리 포트로 미리 정해 사용자가 실제로 쓰는 프록시(기본 10100)에 계정이 추가되는 경로를 막습니다.
-- 가드 항목 이름은 `opencodex.mjs:120-133`의 검증기가 읽는 이름과 같습니다. 이 파일을 미리 써 두어도 시작 동기화가 그 값을 유지하는지와 `anthropicAccountPool`의 정확한 구조는 미확인입니다 [U10]. 로그인 뒤 검증 단계가 파일을 다시 읽습니다.
+- 가드 항목 이름은 `opencodex.mjs:120-133`의 검증기가 읽는 이름과 같습니다. 이 파일을 미리 써 두어도 시작 동기화가 그 값을 유지하는지, `oauthOpenBrowser`가 프록시 시작과 로그인 뒤에도 그대로 남는지, `anthropicAccountPool`의 정확한 구조는 미확인입니다 [U10]. 그래서 5단계가 로그인 전에, 8단계가 로그인 뒤에 파일을 다시 읽습니다.
 
 **3단계: 격리 셸 열기 (터미널 A와 터미널 B 모두)**
 
+터미널 A와 B는 이 절차 전용으로 새로 연 터미널이어야 합니다. 작업 디렉터리를 저장소가 아니라 2단계에서 만든 빈 디렉터리로 옮긴 뒤 새 셸을 엽니다.
+
 ```sh
-env -i PATH="$PATH" TERM="$TERM" LANG="${LANG:-en_US.UTF-8}" \
+cd "$ACC/empty-cwd" && env -i PATH="$PATH" TERM="$TERM" LANG="${LANG:-en_US.UTF-8}" \
   HOME="$ACC/proxy-home" OPENCODEX_HOME="$ACC/home" CODEX_HOME="$ACC/codex-home" \
   PROVIDER="$PROVIDER" PORT="$PORT" OCX="$OCX" ACC="$ACC" \
   bash --noprofile --norc
 ```
 
-새 셸에서 다음을 실행해 환경이 정리되었는지 확인합니다. `중단`이 출력되면 그 셸을 닫고 다시 시작합니다.
+새 셸에서 다음을 실행해 환경과 작업 디렉터리가 정리되었는지 확인합니다. `중단`이 출력되면 그 셸을 닫고 다시 시작합니다.
 
 ```sh
 env | cut -d= -f1 | grep -Ei 'anthropic|claude|openai|google|gemini|api|token|key' && echo 중단
+test "$(pwd -P)" = "$(cd "$ACC/empty-cwd" && pwd -P)" || echo 중단   # 작업 디렉터리가 격리 디렉터리인지
+test -z "$(ls -A)" || echo 중단                                      # .env 계열을 포함해 아무 파일도 없어야 함
 ```
 
 **4단계: 프록시 시작 (터미널 A, 로그인이 끝날 때까지 유지)**
@@ -208,9 +230,11 @@ env | cut -d= -f1 | grep -Ei 'anthropic|claude|openai|google|gemini|api|token|ke
 curl -fsS "http://127.0.0.1:$PORT/healthz"   # port 가 $PORT 이고 service 가 opencodex 인지 확인하고 pid 를 기록합니다.
 cat "$OPENCODEX_HOME/ocx.pid"                # healthz 의 pid 와 같아야 합니다.
 cat "$OPENCODEX_HOME/runtime-port.json"      # port 가 $PORT 여야 합니다.
+node -e 'console.log("oauth-open-browser:",JSON.parse(require("fs").readFileSync(process.env.OPENCODEX_HOME+"/config.json","utf8")).oauthOpenBrowser)'   # false 여야 합니다.
+test -z "$(ls -A)" || echo 중단              # 작업 디렉터리가 여전히 비어 있어야 합니다.
 ```
 
-healthz가 `pid`와 `port`를 돌려주는 것은 소스로 확인했습니다(`PKG/src/server/index/serve-options.ts:526-545`). 세 값이 하나라도 다르거나 파일이 없으면 로그인하지 않고 중단합니다. 다른 리스너가 10100 등에서 실행 중이면 그 프록시에는 이 명령이 닿지 않아야 하므로, 위 확인이 통과하지 못하는 한 로그인 명령을 실행하지 않습니다.
+healthz가 `pid`와 `port`를 돌려주는 것은 소스로 확인했습니다(`PKG/src/server/index/serve-options.ts:526-545`). 세 값이 하나라도 다르거나 파일이 없거나, `oauth-open-browser`가 `false`가 아니거나(프록시 시작이 값을 바꾸거나 지웠을 수 있습니다 [U10]), 작업 디렉터리가 비어 있지 않으면 로그인하지 않고 중단합니다. 다른 리스너가 10100 등에서 실행 중이면 그 프록시에는 이 명령이 닿지 않아야 하므로, 위 확인이 통과하지 못하는 한 로그인 명령을 실행하지 않습니다.
 
 **6단계: 로그인 (터미널 B)**
 
@@ -222,7 +246,7 @@ healthz가 `pid`와 `port`를 돌려주는 것은 소스로 확인했습니다(`
 
 - anthropic: `ocx account login`은 `addAccount: true`를 보내고(`PKG/src/cli/account-auth.ts:196`), 서버가 이를 `forceLogin`으로 바꾸며(`PKG/src/server/management/oauth-account-routes.ts:190-192`), anthropic의 `importLocal`은 `forceLogin`이면 `"off"`, 아니면 `"fallback"`입니다(`PKG/src/oauth/index.ts:254`). 따라서 `account login`은 로컬 Claude 자격 증명을 가져오지 않고 `ocx login anthropic`은 가져올 수 있습니다. W1도 이 경로를 확인했습니다(W1:62-63).
 - google-antigravity: 계정 추가일 때 `prompt: "consent select_account"`를 보내 계정 선택 화면이 뜹니다(`PKG/src/oauth/google-antigravity.ts:188-189`). 사람이 이 화면에서 OMT 전용으로 승인된 Google 계정을 골라야 합니다.
-- 명령은 로그인 URL을 출력합니다(`PKG/src/cli/account-auth.ts:198-204`). 이 URL은 기본 브라우저가 아니라 **전용 브라우저 프로필**에서 엽니다. 브라우저는 그 프로필의 claude.ai 또는 Google 세션에 승인을 붙이므로, 승인 전에 화면에 보이는 계정이 OMT 전용으로 승인된 계정인지 사람이 직접 확인합니다. 다른 창이 자동으로 열렸다면 그 창에서는 승인하지 않고 닫습니다.
+- 명령은 로그인 URL을 출력합니다(`PKG/src/cli/account-auth.ts:198-204`). 소스의 기본 동작은 프록시가 이 URL을 OS 기본 브라우저에서 자동으로 여는 것이지만, 2단계의 `oauthOpenBrowser: false`와 5단계의 재확인 때문에 이 절차에서는 열리지 않아야 합니다. 사람은 출력된 URL을 복사해 **전용 브라우저 프로필**에서 엽니다. 브라우저는 그 프로필의 claude.ai 또는 Google 세션에 승인을 붙이므로, 승인 전에 화면에 보이는 계정이 OMT 전용으로 승인된 계정인지 사람이 직접 확인합니다. 그래도 기본 브라우저 창이 자동으로 열렸다면 그 창에서는 승인하지 않고 닫은 뒤 로그인을 중단하고 PM에게 알립니다. 설정이 로그인 시점에 실제로 적용되는지는 실측 전이므로 이 지시를 유지합니다 [U10].
 - 이 머신에 브라우저가 없으면 `--no-wait`로 시작하고 `ocx account code <provider> --flow <flow-id>`로 코드를 stdin에 넣습니다(`PKG/src/cli/account-auth.ts:36-37`, `:110`). agy에서 같은 수동 입력이 동작하는지는 미확인입니다 [U12]. `ocx account import-orca`는 이 절차에서 쓰지 않으며 동작은 미확인입니다 [U5].
 
 **7단계: 계정 하나만 남기고 고정 (터미널 B)**
@@ -252,12 +276,13 @@ console.log("other-auth-providers:",Object.keys(auth).filter(k=>k!==provider&&(a
 console.log("config-providers:",Object.keys(cfg.providers??{}).join(","),"defaultProvider:",cfg.defaultProvider);
 console.log("guards:",cfg.runtimeRole,cfg.clientIntegrations?.codex,JSON.stringify(cfg.claudeCode),"port:",cfg.port);
 console.log("pool-keys:",Object.keys(cfg.anthropicAccountPool??{}).join(","));
+console.log("oauth-open-browser:",cfg.oauthOpenBrowser,"cwd-entries:",fs.readdirSync(".").length);
 const h=(s)=>crypto.createHash("sha256").update(s).digest("hex").slice(0,6);
 console.log(provider==="google-antigravity"?"label: o"+h("google-antigravity\0"+id):"provider-suffix: anthropic-p"+h(id));
 '
 ```
 
-이 스크립트는 계정 id 원문을 출력하지 않고 개수, 일치 여부, 출처, provider 이름 목록, 해시 라벨만 출력합니다. 다음이 모두 맞아야 등록합니다. `accounts: 1 active-matches: true`, `source: oauth`, `needsReauth: false`, `other-auth-providers: 0`, `defaultProvider`가 대상 provider, `config-providers`에 대상 외의 활성 항목이 없음, 가드가 로그인 뒤에도 유지됨, anthropic이면 `pool-keys`가 `enabled` 하나. 하나라도 다르면 손으로 고치지 않고 등록을 중단해 PM에게 결과를 알립니다. `auth.json`의 필드 이름은 `PKG/src/oauth/types.ts:79-96`에서 읽었지만 로그인 뒤의 실제 파일로는 확인하지 못했습니다 [U2, U17].
+이 스크립트는 계정 id 원문을 출력하지 않고 개수, 일치 여부, 출처, provider 이름 목록, 해시 라벨만 출력합니다. 다음이 모두 맞아야 등록합니다. `accounts: 1 active-matches: true`, `source: oauth`, `needsReauth: false`, `other-auth-providers: 0`, `defaultProvider`가 대상 provider, `config-providers`에 대상 외의 활성 항목이 없음, 가드가 로그인 뒤에도 유지됨, anthropic이면 `pool-keys`가 `enabled` 하나, `oauth-open-browser: false`(로그인 뒤에도 설정이 유지됨), `cwd-entries: 0`(작업 디렉터리에 `.env` 계열을 포함한 파일이 생기지 않음). 하나라도 다르면 손으로 고치지 않고 등록을 중단해 PM에게 결과를 알립니다. `auth.json`의 필드 이름은 `PKG/src/oauth/types.ts:79-96`에서 읽었지만 로그인 뒤의 실제 파일로는 확인하지 못했습니다 [U2, U17].
 
 **OMT에 넘길 환경 변수**
 
@@ -277,7 +302,7 @@ console.log(provider==="google-antigravity"?"label: o"+h("google-antigravity\0"+
 4. 로그인을 수행할 머신과 브라우저를 정합니다. 브라우저가 없으면 `--no-wait` 경로를 쓸지 정합니다.
 5. Claude 로그인은 전용 브라우저 프로필에서 하고, 승인 화면에 보이는 claude.ai 계정이 OMT 전용으로 승인된 계정인지 사람이 직접 확인합니다.
 6. Google 계정 선택 화면에서 승인된 계정을 고르는지 사람이 직접 확인합니다.
-7. 사용자가 실제로 쓰는 OpenCodex 프록시(기본 포트 10100 등)와 실제 홈(`~/.opencodex`)에는 이 절차가 아무 변경도 하지 않아야 한다는 점을 확인하고, 5단계의 대상 프록시 확인이 통과하지 않으면 로그인하지 않는다는 데 동의합니다.
+7. 사용자가 실제로 쓰는 OpenCodex 프록시(기본 포트 10100 등)와 실제 홈(`~/.opencodex`)에는 이 절차가 아무 변경도 하지 않아야 한다는 점을 확인하고, 5단계의 대상 프록시 확인(작업 디렉터리가 비어 있고 `oauthOpenBrowser`가 `false`라는 확인 포함)이 통과하지 않으면 로그인하지 않는다는 데 동의합니다.
 8. 계정 홈 디렉터리의 `auth.json`을 공유하거나 백업하지 않는다는 데 동의합니다.
 9. 이 설계와 실측은 Codex 주간 한도가 리셋되는 2026-09-26 06:11 KST 전에 OpenAI 계정으로 모델을 호출하지 않는다는 점을 확인합니다.
 
@@ -434,7 +459,11 @@ POSIX 증명은 "헬스 바디의 port가 일치하고, 소유 프로세스 그�
 
 ## C. 미확인 목록
 
-W1 실측(`docs/plan/opencodex-runtime.md`, `experiments/opencodex/evidence.json`)이 이미 답한 사실은 이 목록에 넣지 않고 본문에서 줄 번호로 인용했습니다. 첫 판의 U1(접두사가 붙은 `--model`의 통과), U17(실제 `resolvedModel` 값), U3(usage 공급)은 W1:91-93, W1:98에서 확인된 사실이므로 삭제했고, 설계 과정에서 U17(빈 홈의 자동 기록)을 새로 추가했습니다. 결과는 17개이며 첫 판보다 2개 줄었습니다.
+W1 실측(`docs/plan/opencodex-runtime.md`, `experiments/opencodex/evidence.json`)이 이미 답한 사실은 이 목록에 넣지 않고 본문에서 줄 번호로 인용했습니다. 첫 판(`b8213e9`)은 19개였고 이번 판은 17개이며, 목록 전체에 번호를 다시 매겼으므로 같은 번호가 첫 판과 다른 항목을 가리킵니다. 첫 판 번호는 이 문서 밖의 보고에만 남아 있고, 이 문서의 본문과 표는 모두 아래 새 번호를 씁니다.
+
+- 삭제한 3개(내용으로 적습니다): 접두사가 붙은 `--model`이 그대로 프록시에 전달되는지, 요청 이력의 실제 `resolvedModel` 값, 어댑터의 usage를 Codex CLI 스트림에 공급하는지. 이 셋은 W1:91-93, W1:98에서 확인된 사실입니다. 첫 판의 번호는 순서대로 U1, U17, U3이었습니다.
+- 새로 더한 1개: 빈 계정 홈에서 `ocx start`나 로그인이 provider 항목과 `defaultProvider`를 자동으로 기록하는지(새 U17).
+- 남은 항목의 번호 대응(첫 판 → 이번 판): U2→U1, U4→U2, U5→U3, U6→U4, U7→U5, U8→U6, U9→U7, U10→U8, U11→U9, U12→U10, U13→U11, U14→U12, U15→U13, U16→U14, U18→U15, U19→U16.
 
 | 번호 | 미확인 내용 | 관련 절 |
 |---|---|---|
@@ -447,7 +476,7 @@ W1 실측(`docs/plan/opencodex-runtime.md`, `experiments/opencodex/evidence.json
 | U7 | shell 없이 `.cmd` shim을 spawn할 때 Node 22에서 `EINVAL`이 나는지, `process.execPath`로 `bin/ocx.mjs`를 직접 실행하는 방식이 shim과 같은 동작을 하는지 | B1, B2, B4, B5 |
 | U8 | Windows에서 실제 bun 명령줄 형태와 `bun.exe` 존재 여부 | B1, B2, B5 |
 | U9 | `taskkill /F` 뒤 pid 파일과 포트 파일이 남는지 | B2, B5 |
-| U10 | 시작 동기화를 끄는 `config.json` 항목을 사전 설정으로 유지할 수 있는지, `anthropicAccountPool`의 정확한 구조 | A1, A4 |
+| U10 | 시작 동기화를 끄는 `config.json` 항목과 `oauthOpenBrowser: false`를 사전 설정으로 두었을 때 프록시 시작과 로그인 뒤에도 유지되는지, 로그인 시점에 자동 열기가 실제로 꺼지는지, `anthropicAccountPool`의 정확한 구조 | A1, A4 |
 | U11 | `buildDesktop3pRegistry`의 Windows 동작 | B1 |
 | U12 | agy에서 `--no-wait`와 수동 코드 입력 경로가 동작하는지 | A4 |
 | U13 | agy·claude에서 `model_reasoning_effort`가 실제로 어떤 값으로 변환되는지 | A3 |
