@@ -7,8 +7,10 @@
  * own worktree. Every answer goes through the same steps.
  *
  * 1. The caller is proven to supervise the role (its Orca Run, the launch
- *    ledger and the workflow record), and the terminal is proven to sit in the
- *    worktree this kickoff launched that role in.
+ *    ledger and the workflow record), and the terminal is proven to sit in a
+ *    worktree Orca records as created under the kickoff's PM worktree (its
+ *    repository and its explicit parent lineage, read with `orca worktree
+ *    show`), the one the ledger names for that role.
  * 2. The screen is read, and `classifyPromptScreen` decides. Only `send-key`
  *    sends a key, `redirect` sends the worker a message without any key, and
  *    everything else goes back to the caller as a report for the level above.
@@ -16,6 +18,14 @@
  *    question that is still there is never answered a second time.
  * 4. Every attempt, including one that sent nothing, is appended to
  *    `<state>/prompt-answers.jsonl`.
+ *
+ * Limits. The caller is identified by the `ORCA_TERMINAL_HANDLE` environment
+ * variable, and nothing here can prove that value: a process that knows the
+ * handle of a supervising terminal and sets the variable passes as that
+ * supervisor. The checks therefore protect against a call by a terminal with no
+ * supervising relation to the role, made by mistake. They are not a defence
+ * against a hostile process on the same machine. The record keeps only the rows
+ * of a recognized question, and none of a screen that shows no question.
  *
  * Esc is never sent, and no user configuration file is read or written.
  */
@@ -48,6 +58,7 @@ export const PROMPT_ANSWER_REFUSALS = Object.freeze([
   "worktree-mismatch",
   "worktree-not-role-owned",
   "worktree-shared",
+  "worktree-lineage-unproven",
   "screen-unavailable",
   "key-not-allowed",
   "already-answered",
@@ -180,9 +191,41 @@ export function promptAnswerSummary(stateDir) {
   };
 }
 
-function excerptOf(lines) {
-  return (lines ?? [])
-    .map((line) => String(line ?? "").trimEnd())
+// Rows of the screen are compared without the selection mark and spacing the
+// CLI draws before a choice.
+const squeezeRow = (line) =>
+  String(line ?? "")
+    .replace(/^[\s>›❯▶*]+/, "")
+    .trim();
+
+// The record keeps only what identifies the question: the rows the classifier
+// matched, or the question text it extracted. A screen with no recognized
+// question is ordinary work output, which may hold a secret or a user's
+// settings, so nothing of it is kept.
+function excerptOf(lines, classification) {
+  if (
+    !classification ||
+    (classification.kind === "unknown" && classification.cli === null)
+  )
+    return [];
+  const own = Array.isArray(classification.excerpt)
+    ? classification.excerpt
+    : null;
+  const matched = (classification.evidence?.matched ?? [])
+    .map(squeezeRow)
+    .filter((row) => row.length >= 4);
+  const rows = own
+    ? own.map((line) => String(line ?? "").trimEnd())
+    : (lines ?? [])
+        .map((line) => String(line ?? "").trimEnd())
+        .filter((line) => {
+          const row = squeezeRow(line);
+          return (
+            row.length >= 4 &&
+            matched.some((one) => row.includes(one) || one.includes(row))
+          );
+        });
+  return rows
     .filter((line) => line.trim())
     .slice(-EXCERPT_ROWS)
     .map((line) => line.slice(0, ROW_LIMIT));
@@ -241,6 +284,11 @@ async function readTerminalScreen(orca, terminal, execute) {
  * be a PL that the launch ledger shows started this role from its own worktree.
  * The kickoff is the one the terminal's launch was recorded under, so a
  * terminal from another kickoff, or one nobody launched, is refused.
+ *
+ * The caller's handle comes from the `ORCA_TERMINAL_HANDLE` environment
+ * variable and is not itself proven: a process that sets it to the handle of a
+ * supervising terminal passes. This check guards against a call by a terminal
+ * that supervises nothing, made by mistake, and not against a malicious process.
  *
  * @param {object} options - What is known about the terminal and the caller.
  * @param {string} options.orgFile - Organization JSON path.
@@ -364,7 +412,7 @@ async function reconfirm({
       continue;
     }
     const after = classifyPromptScreen(read.lines, context);
-    const excerpt = excerptOf(read.lines);
+    const excerpt = excerptOf(read.lines, after);
     if (after.kind === "unknown" && after.cli === null) {
       return { result: "resolved", kind: after.kind, excerpt };
     }
@@ -460,7 +508,7 @@ export async function answerTerminalPrompt({
     action: found.action,
     reason: found.reason,
     evidence: found.evidence,
-    excerpt: excerptOf(screen.lines),
+    excerpt: excerptOf(screen.lines, found),
   };
   if (found.kind === "unknown" && found.cli === null)
     return finish({
@@ -472,22 +520,71 @@ export async function answerTerminalPrompt({
     });
   const fingerprint = screenFingerprint(terminal, found);
   if (found.action === "redirect") {
-    const sent = await redirectWorker({
-      orca,
-      terminal,
-      found,
-      supervisor,
-      execute,
-    });
-    return finish({
-      ...description,
-      fingerprint,
-      status: sent.sent ? "redirected" : "unresolved",
-      sent: false,
-      key: null,
-      redirect: sent,
-      next: sent.sent ? "await-worker" : "report-upstream",
-    });
+    // The worker is told once per screen state, under the same lock as a key,
+    // so a supervision loop that reads the same question again does not pile
+    // the same instruction onto the worker.
+    const redirectLock = `${promptAnswerFile(stateDir)}.lock`;
+    try {
+      return await withAsyncFileLock(
+        redirectLock,
+        async () => {
+          const told = readPromptAnswers(stateDir).find(
+            (record) =>
+              record.fingerprint === fingerprint &&
+              record.action === "redirect" &&
+              (record.redirect?.sent === true || record.status === "sending"),
+          );
+          if (told)
+            return finish({
+              ...description,
+              fingerprint,
+              status: "refused",
+              refusal: "already-answered",
+              sent: false,
+              key: null,
+              reason: `The worker was already told about this screen state by attempt ${told.id}; it is not told again`,
+              next: "await-worker",
+            });
+          const reservation = {
+            ...base,
+            ...description,
+            fingerprint,
+            status: "sending",
+            sent: false,
+            key: null,
+          };
+          appendRecord(stateDir, reservation);
+          const sent = await redirectWorker({
+            orca,
+            terminal,
+            found,
+            supervisor,
+            execute,
+          });
+          const record = {
+            ...reservation,
+            status: sent.sent ? "redirected" : "unresolved",
+            redirect: sent,
+            next: sent.sent ? "await-worker" : "report-upstream",
+          };
+          appendRecord(stateDir, record);
+          return record;
+        },
+        "Prompt answer in progress",
+      );
+    } catch (error) {
+      if (error.message !== "Prompt answer in progress") throw error;
+      return finish({
+        ...description,
+        fingerprint,
+        status: "refused",
+        refusal: "answer-in-progress",
+        sent: false,
+        key: null,
+        reason: "Another answer for this record is running",
+        next: "report-upstream",
+      });
+    }
   }
   if (found.action !== "send-key")
     return finish({
@@ -682,8 +779,65 @@ export function recordRefusal(stateDir, fields, refusal, message) {
   return record;
 }
 
-// The terminal's worktree must be the one this kickoff opened the role in,
-// and no other role may work there.
+// Orca records where a worktree came from, independently of whoever launches a
+// terminal in it: the repository it belongs to, the worktree it was created
+// under, and how that parent was captured. A worktree counts as this kickoff's
+// only when following those parents reaches the kickoff's PM worktree, through
+// worktrees of the same repository, each created by an explicit `--parent-worktree`
+// CLI call. Anything Orca does not report, or reports differently, is unproven.
+const MAX_LINEAGE_HOPS = 8;
+
+async function assertKickoffLineage({ actual, kickoff, orca, execute }) {
+  const pmId = kickoff.pm.worktreeId;
+  const separator = pmId.indexOf("::");
+  const unproven = (why) =>
+    new Refusal(
+      "worktree-lineage-unproven",
+      `Orca does not show ${actual} as a worktree created under this kickoff's PM worktree (${why}), so no key is sent there`,
+    );
+  if (separator <= 0)
+    throw unproven("the kickoff's PM worktree id names no repository");
+  const repoId = pmId.slice(0, separator);
+  const visited = new Set();
+  let id = `${repoId}::${actual}`;
+  for (let hop = 0; hop < MAX_LINEAGE_HOPS; hop += 1) {
+    if (visited.has(id)) throw unproven("its lineage loops");
+    visited.add(id);
+    let worktree;
+    try {
+      const shown = await runOrcaJson(
+        orca,
+        ["worktree", "show", "--worktree", `id:${id}`],
+        { execute },
+      );
+      worktree = shown.result?.worktree;
+    } catch (error) {
+      throw unproven(`orca worktree show failed: ${error.message}`);
+    }
+    if (worktree?.id !== id || worktree.repoId !== repoId)
+      throw unproven(`${id} is not a worktree of the kickoff's repository`);
+    const parent = worktree.parentWorktreeId;
+    const lineage = worktree.lineage;
+    if (typeof parent !== "string" || !parent)
+      throw unproven(`${id} has no parent worktree`);
+    if (
+      lineage?.worktreeId !== id ||
+      lineage.parentWorktreeId !== parent ||
+      lineage.origin !== "cli" ||
+      lineage.capture?.confidence !== "explicit"
+    )
+      throw unproven(
+        `the lineage of ${id} is not an explicit CLI-created parent record`,
+      );
+    if (parent === pmId) return;
+    id = parent;
+  }
+  throw unproven("its lineage is longer than a kickoff creates");
+}
+
+// The terminal's worktree must be the one the ledger names for the role,
+// Orca must show it as created under the kickoff's PM worktree, and no other
+// role may work there.
 async function assertRoleWorktree({
   terminal,
   role,
@@ -709,13 +863,14 @@ async function assertRoleWorktree({
   if (kickoffOwner(actual) || samePath(actual, kickoff.pm.path))
     throw new Refusal(
       "worktree-not-role-owned",
-      `${actual} is the owner checkout or the PM's worktree, not a worktree this kickoff created for ${role}`,
+      `${actual} is the owner checkout or the PM's worktree, not a worktree created under this kickoff's PM worktree for ${role}`,
     );
   try {
     assertWorktreeUnshared(workflowState, role, `path:${actual}`, actual);
   } catch (error) {
     throw new Refusal("worktree-shared", error.message);
   }
+  await assertKickoffLineage({ actual, kickoff, orca, execute });
   return actual;
 }
 
@@ -726,7 +881,8 @@ async function assertRoleWorktree({
  * comes from the state directory and the caller's directory instead of a
  * ledger line. The same supervisor and worktree checks as `prompt-answer` then
  * apply, so the trust question of a new terminal is answered by the role's
- * supervisor only, and only in the worktree this kickoff opened for the role.
+ * supervisor only, and only in a worktree Orca records under the kickoff's PM
+ * worktree, so the folder the launcher chose is not taken on its word.
  *
  * @param {object} options - What the launch knows.
  * @param {string} options.orgFile - Organization JSON path.

@@ -59,7 +59,7 @@ node <runtime> supervision-wait --run <pl-run-id> --org <organization.json> [--a
 
 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 같은 task의 수정은 같은 `--workflow-task`를 넘겨 대화를 유지한다. 규칙은 [pm](../pm/SKILL.md)의 「작업 배정」과 같다.
 
-질문 때문에 점검이 거부되면 `node <runtime> prompt-answer --org <organization.json> --terminal <senior-handle> --workflow-id <workflowId> --state <pm-state>`로 답한 뒤 위 `terminal-idle-check`부터 다시 실행한다. `prompt-answer`는 PL이 자신이 시작한 역할의 터미널에만 쓸 수 있고, 다른 PL의 하위 역할이나 PM의 워크트리 터미널에는 거부된다. 결과가 `escalate`나 `unresolved`이거나 거부되면 화면과 `prompt-answers.jsonl`의 기록을 증거로 PM에게 보고하며, 사람이 정해야 하는 질문은 PM이 `director-signal`로 이사에게 알린다. 절차는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「프롬프트 질문 답하기」 절을 따른다.
+질문 때문에 점검이 거부되면 `node <runtime> prompt-answer --org <organization.json> --terminal <senior-handle> --workflow-id <workflowId> --state <pm-state>`로 답한 뒤 위 `terminal-idle-check`부터 다시 실행한다. `prompt-answer`는 PL이 자신이 시작한 역할의 터미널에만 쓸 수 있고, 다른 PL의 하위 역할이나 PM의 워크트리 터미널, Orca가 kickoff의 PM 워크트리 아래에 만든 것으로 기록하지 않는 워크트리의 터미널에는 거부된다. 호출자는 환경 변수로만 식별되므로 이 확인은 감독 관계가 없는 터미널의 실수 호출을 막을 뿐 악의적인 프로세스를 막지는 못한다. 결과가 `escalate`나 `unresolved`이거나 거부되면 화면과 `prompt-answers.jsonl`의 기록을 증거로 PM에게 보고하며, 사람이 정해야 하는 질문은 PM이 `director-signal`로 이사에게 알린다. 절차는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「프롬프트 질문 답하기」 절을 따른다.
 
 Senior는 PL의 워크트리(`current`)나 새 워크트리에서 실행하고, Junior의 워크트리에 띄우지 않는다. 검토할 결과는 경로와 커밋으로 넘긴다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
 

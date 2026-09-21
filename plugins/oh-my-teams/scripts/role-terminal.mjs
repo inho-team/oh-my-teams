@@ -610,7 +610,7 @@ const MAX_TRUST_ANSWERS = 3;
 
 // Answers the folder trust question of a new terminal through the supervisor
 // path: the caller must supervise this role and the terminal must sit in the
-// worktree this kickoff opened for it, and each screen state gets one key. A
+// worktree Orca records under this kickoff's PM worktree, and each screen state gets one key. A
 // terminal opened without a supervision context is left at its question.
 async function answerTrustQuestion({
   orca,
@@ -798,8 +798,8 @@ async function launchOnce({
  *
  * A folder trust question of Agy, Codex or Claude is answered only through the
  * supervisor path (`prompt-supervision.mjs`): the caller must supervise this
- * role, the terminal must sit in the worktree this kickoff opened for it, and
- * each screen state gets one key. Without `supervision` the question is left
+ * role, the terminal must sit in a worktree Orca records under this kickoff's PM
+ * worktree, and each screen state gets one key. Without `supervision` the question is left
  * unanswered and the terminal is reported blocked.
  *
  * Answering a folder trust question leaves the question in the terminal

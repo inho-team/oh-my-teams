@@ -70,6 +70,28 @@ async function git(dir, ...args) {
   assert.equal((await run(["git", ...args], { cwd: dir })).code, 0);
 }
 
+// Orca id of the PM worktree of the kickoff a test built last. Orca reports a
+// role worktree as its child unless a test says otherwise.
+let currentPm = null;
+
+// What `orca worktree show` returns for a worktree Orca created under `parent`.
+function worktreeRecord(id, parent, lineage = {}) {
+  const [repoId, ...rest] = id.split("::");
+  return {
+    id,
+    repoId,
+    path: rest.join("::"),
+    parentWorktreeId: parent,
+    lineage: {
+      worktreeId: id,
+      parentWorktreeId: parent,
+      origin: "cli",
+      capture: { source: "explicit-cli-flag", confidence: "explicit" },
+      ...lineage,
+    },
+  };
+}
+
 // One running kickoff: a PM bound to a Run, a workflow, a PL and a Senior
 // launched in the captured worktree, all in the launch ledger.
 async function kickoff(
@@ -143,6 +165,7 @@ async function kickoff(
     budget: { maxAttempts: 2, maxCalls: 2 },
   };
   await createWorkflow(stateDir, request, structuredClone(org), pmPath);
+  currentPm = worktreeId;
   const plPath = path.join(dir, "pl-worktree");
   const launch = (fields) =>
     recordLaunch(orgFile, {
@@ -176,6 +199,7 @@ function fakeOrca({
   terminals = {},
   advance = {},
   creates = [],
+  worktrees = {},
 }) {
   const calls = [];
   const opened = [...creates];
@@ -201,6 +225,22 @@ function fakeOrca({
     }
     if (noun === "orchestration" && verb === "send")
       return reply({ message: {} });
+    if (noun === "worktree" && verb === "show") {
+      const id = flag("--worktree").replace(/^id:/, "");
+      // A test names a worktree Orca does not know with null, or replaces the
+      // record; every other one was created under the kickoff's PM worktree.
+      const known =
+        id in worktrees ? worktrees[id] : worktreeRecord(id, currentPm);
+      if (!known)
+        return {
+          code: 1,
+          stdout: JSON.stringify({
+            ok: false,
+            error: { code: "selector_not_found", message: `no worktree ${id}` },
+          }),
+        };
+      return reply({ worktree: known });
+    }
     if (verb === "create") {
       const next = opened.shift();
       assert.ok(next, "no terminal left to create");
@@ -766,11 +806,13 @@ test("role-terminal answers Claude's trust question with Down, then Enter, and r
 
 test("role-terminal sends no key without a supervisor context, for a caller that supervises nothing, or in another worktree", async (t) => {
   const fixture = await kickoff(t);
-  const asks = (worktreePath) =>
+  const asks = (worktreePath, worktrees) =>
     fakeOrca({
       runs: { [PM]: RUN, term_other: "run_other" },
       creates: [{ handle: "term_a", screen: CODEX_ASKS, worktreePath }],
+      worktrees,
     });
+  const unrelated = `repo::${ROLE_WORKTREE}`;
   const cases = [
     ["unsupervised", asks(), { supervision: null }, null],
     [
@@ -794,6 +836,12 @@ test("role-terminal sends no key without a supervisor context, for a caller that
       {},
       "worktree-mismatch",
     ],
+    [
+      "refused",
+      asks(undefined, { [unrelated]: worktreeRecord(unrelated, null, null) }),
+      {},
+      "worktree-lineage-unproven",
+    ],
   ];
   for (const [trust, orca, overrides, refusal] of cases) {
     const { opened } = await openSenior(
@@ -812,4 +860,175 @@ test("role-terminal sends no key without a supervisor context, for a caller that
     if (refusal)
       assert.equal(readPromptAnswers(fixture.stateDir).at(-1).refusal, refusal);
   }
+});
+
+// The folder the ledger names for a role is whatever the launcher chose, so
+// Orca's own record of where the worktree came from decides.
+test("a worktree Orca does not show under the kickoff's PM worktree gets no key", async (t) => {
+  const fixture = await kickoff(t);
+  const id = `repo::${ROLE_WORKTREE}`;
+  const foreign = "other-repo::/somewhere/else";
+  const lineage = (overrides) =>
+    worktreeRecord(id, fixture.worktreeId, overrides);
+  const cases = {
+    // Orca has no such worktree: an arbitrary folder the launcher picked.
+    unknown: null,
+    // Created under some other worktree, not this kickoff's PM worktree.
+    "other parent": worktreeRecord(id, `repo::${fixture.dir}/elsewhere`),
+    // A worktree with no parent at all, such as the project's own checkout.
+    "no parent": worktreeRecord(id, null, null),
+    // The repository differs from the kickoff's.
+    "other repository": { ...lineage(), repoId: "other-repo" },
+    // The parent was inferred, or not created by the CLI.
+    inferred: lineage({ capture: { source: "guess", confidence: "inferred" } }),
+    "not from the cli": lineage({ origin: "ui" }),
+    // The lineage record disagrees with the worktree's own parent field.
+    "parent mismatch": lineage({ parentWorktreeId: foreign }),
+    "lineage of another worktree": lineage({ worktreeId: foreign }),
+  };
+  for (const [label, record] of Object.entries(cases)) {
+    const orca = fakeOrca({
+      terminals: { [SENIOR]: at(ROLE_WORKTREE, CODEX_ASKS) },
+      worktrees: { [id]: record, [`repo::${fixture.dir}/elsewhere`]: null },
+    });
+    const refused = await answer(fixture, orca);
+    assert.equal(refused.status, "refused", label);
+    assert.equal(refused.refusal, "worktree-lineage-unproven", label);
+    assert.equal(orca.keys().length, 0, `${label}: no key`);
+    assert.equal(
+      orca.calls.filter((call) => call[1] === "read").length,
+      0,
+      `${label}: the screen is not read`,
+    );
+  }
+});
+
+test("a worktree under a PL's worktree that Orca shows under the PM is accepted, and a loop or a dead end is not", async (t) => {
+  const fixture = await kickoff(t, { seniorFrom: "pl" });
+  const id = `repo::${ROLE_WORKTREE}`;
+  const plId = `repo::${fixture.plPath}`;
+  const run = async (worktrees) => {
+    const orca = fakeOrca({
+      runs: { [PM]: RUN, [PL]: "run_pl" },
+      terminals: { [SENIOR]: at(ROLE_WORKTREE, CODEX_ASKS) },
+      advance: { [SENIOR]: [CODEX_DONE] },
+      worktrees,
+    });
+    const record = await answerPrompt({
+      orgFile: fixture.orgFile,
+      terminal: SENIOR,
+      workflowId: "wf",
+      stateDir: fixture.stateDir,
+      env: { ORCA_TERMINAL_HANDLE: PL },
+      execute: orca.execute,
+      ...fast,
+    });
+    return { record, orca };
+  };
+  const grandchild = await run({
+    [id]: worktreeRecord(id, plId),
+    [plId]: worktreeRecord(plId, fixture.worktreeId),
+  });
+  assert.equal(grandchild.record.status, "resolved");
+  assert.equal(grandchild.orca.keys().length, 1);
+  const loop = await run({
+    [id]: worktreeRecord(id, plId),
+    [plId]: worktreeRecord(plId, id),
+  });
+  assert.equal(loop.record.refusal, "worktree-lineage-unproven");
+  assert.equal(loop.orca.keys().length, 0);
+  const deadEnd = await run({
+    [id]: worktreeRecord(id, plId),
+    [plId]: worktreeRecord(plId, null, null),
+  });
+  assert.equal(deadEnd.record.refusal, "worktree-lineage-unproven");
+  assert.equal(deadEnd.orca.keys().length, 0);
+});
+
+test("the record keeps the rows of a recognized question and nothing of a screen that shows none", async (t) => {
+  const fixture = await kickoff(t);
+  const secret = "export API_TOKEN=sk-live-0123456789abcdef";
+  const work = ["me@host project % ls", secret, "build finished", "❯"];
+  const quiet = fakeOrca({ terminals: { [SENIOR]: at(ROLE_WORKTREE, work) } });
+  const none = await answer(fixture, quiet);
+  assert.equal(none.status, "no-question");
+  assert.deepEqual(none.excerpt, []);
+  // The screen read after the key is the role's working screen.
+  const orca = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, CODEX_ASKS) },
+    advance: { [SENIOR]: [work] },
+  });
+  const asked = await answer(fixture, orca);
+  assert.equal(asked.status, "resolved");
+  assert.ok(asked.excerpt.length > 0);
+  assert.deepEqual(asked.verification.excerpt, []);
+  // Nothing in the file, either, holds the secret or a row the classifier did
+  // not match.
+  const text = fs.readFileSync(promptAnswerFile(fixture.stateDir), "utf8");
+  assert.doesNotMatch(text, /sk-live/);
+  assert.doesNotMatch(text, /build finished/);
+  // A screen that only partly resembles a question keeps the matched rows.
+  const held = fakeOrca({
+    terminals: {
+      [SENIOR]: at(ROLE_WORKTREE, [
+        secret,
+        ...screens["codex-0.155.1-folder-trust-changed"],
+      ]),
+    },
+  });
+  const escalated = await answer(fixture, held);
+  assert.equal(escalated.status, "escalate");
+  assert.ok(!escalated.excerpt.some((row) => row.includes("sk-live")));
+});
+
+test("the same user question screen is redirected once, however often it is read", async (t) => {
+  const fixture = await kickoff(t, { seniorProvider: "claude" });
+  const orca = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, CLAUDE_ASKUSER) },
+  });
+  const first = await answer(fixture, orca);
+  assert.equal(first.status, "redirected");
+  const again = await answer(fixture, orca);
+  const third = await answer(fixture, orca);
+  for (const repeat of [again, third]) {
+    assert.equal(repeat.status, "refused");
+    assert.equal(repeat.refusal, "already-answered");
+    assert.equal(repeat.next, "await-worker");
+  }
+  assert.equal(orca.messages().length, 1);
+  assert.equal(orca.keys().length, 0);
+  // Two callers at once tell the worker once.
+  const race = await kickoff(t, { seniorProvider: "claude" });
+  const both = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, CLAUDE_ASKUSER) },
+  });
+  const results = await Promise.all([answer(race, both), answer(race, both)]);
+  assert.equal(both.messages().length, 1);
+  assert.deepEqual(results.map((record) => record.status).sort(), [
+    "redirected",
+    "refused",
+  ]);
+  // A message that did not go out is not counted as told.
+  const failing = await kickoff(t, { seniorProvider: "claude" });
+  const flaky = fakeOrca({
+    terminals: { [SENIOR]: at(ROLE_WORKTREE, CLAUDE_ASKUSER) },
+  });
+  let failNext = true;
+  const execute = async (argv) => {
+    if (argv.includes("orchestration") && argv.includes("send") && failNext) {
+      failNext = false;
+      return {
+        code: 1,
+        stdout: JSON.stringify({
+          ok: false,
+          error: { code: "x", message: "down" },
+        }),
+      };
+    }
+    return flaky.execute(argv);
+  };
+  const lost = await answer(failing, flaky, { execute });
+  assert.equal(lost.status, "unresolved");
+  const retried = await answer(failing, flaky, { execute });
+  assert.equal(retried.status, "redirected");
 });

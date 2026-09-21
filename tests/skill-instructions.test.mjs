@@ -798,6 +798,17 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     assert.ok(runtime.includes(`\`${code}\``), `거부 코드 ${code}`);
   }
   assert.match(runtime, /`waiting-on-human-prompt`이면 사람을 기다리지 않고/);
+  // The worktree is proven by Orca's own lineage, not by the launcher's word,
+  // and the caller's identity is documented as unproven.
+  assert.match(runtime, /\*\*워크트리 확인\.\*\*/);
+  assert.match(runtime, /orca worktree show --worktree id:<repoId>::<경로>/);
+  assert.match(runtime, /`parentWorktreeId`/);
+  assert.match(runtime, /\*\*호출자 식별의 한계\.\*\*/);
+  assert.match(runtime, /감독 관계가 없는 터미널의 실수 호출/);
+  assert.match(runtime, /「사람이 필요한 경우」를 따른다/);
+  for (const name of ["pm", "pl"]) {
+    assert.match(readSkill(name), /악의적인 프로세스를 막지는 못한다/);
+  }
   assert.doesNotMatch(runtime, /명령이 agent 이름 하나뿐일 때만 붙이므로/);
   assert.match(runtime, /`satisfied: false`와 `blockedReason`/);
   assert.match(
@@ -1185,9 +1196,6 @@ test("pm, pl and status skills route a stopped role's question through the super
     assert.match(text, /「프롬프트 질문 답하기」/);
   }
   assert.match(readSkill("pm"), /`director-signal`로 이사에게 알린다/);
-  assert.match(
-    readSkill("pl"),
-    /다른 PL의 하위 역할이나 PM의 워크트리 터미널에는 거부된다/,
-  );
+  assert.match(readSkill("pl"), /다른 PL의 하위 역할이나 PM의 워크트리 터미널/);
   assert.match(readSkill("status"), /`promptAnswers`/);
 });
