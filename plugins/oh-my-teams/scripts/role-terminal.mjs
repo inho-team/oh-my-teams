@@ -21,6 +21,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assert, run } from "./core.mjs";
+import { classifyPromptScreen } from "./prompt-answers.mjs";
 import {
   checkTerminalIdle,
   runOrcaJson,
@@ -503,21 +504,19 @@ export function agentStarted(lines, command) {
 
 // Agy asks once per folder whether to trust it, and every child worktree is a
 // new folder. The bypass flag does not skip this question.
-const TRUST_QUESTION =
-  /Do you trust the contents of this (project|folder|directory)\?/;
-const TRUST_SELECTED = /^\s*[>❯]\s*Yes, I trust this folder\s*$/;
 
 /**
- * Reports whether a screen shows a folder trust question with "trust" selected.
+ * Reports whether a screen shows Agy's folder trust question with "trust" selected.
  *
  * @param {string[]} lines - Screen lines, oldest first.
  * @returns {boolean} Whether one Enter would trust the folder and continue.
  */
 export function trustQuestion(lines) {
-  const rows = lines ?? [];
+  const answer = classifyPromptScreen(lines, { cli: "agy" });
   return (
-    rows.some((line) => TRUST_QUESTION.test(line)) &&
-    rows.some((line) => TRUST_SELECTED.test(line))
+    answer.kind === "trust" &&
+    answer.action === "send-key" &&
+    answer.key?.name === "Enter"
   );
 }
 
