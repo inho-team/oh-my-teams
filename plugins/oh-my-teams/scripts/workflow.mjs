@@ -15,6 +15,7 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { taskHash, validateTask } from "./contracts.mjs";
+import { selectDelegatedRole } from "./delegation.mjs";
 import { git } from "./evidence.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { assertFailureSignal } from "./execution.mjs";
@@ -64,9 +65,9 @@ export function validateWorkflowRequest(request) {
         item &&
         typeof item.file === "string" &&
         item.file.trim() &&
-        ROLES.includes(item.role),
+        (item.role === undefined || ROLES.includes(item.role)),
     ),
-    "Each workflow task needs a file and role",
+    "Each workflow task needs a file and role when explicitly assigned",
   );
   assert(
     request.depth === undefined ||
@@ -155,12 +156,28 @@ async function freezeTasks(request, baseDir, repo) {
 // which role the work was written for and which one ran it. The invariant that
 // an absent requestedRole means the role itself was requested is what lets a
 // depth change fold the work again from the original request.
-function assignRole(item, roles, requestedRole) {
+function assignRole(item, roles, selection) {
+  const { requestedRole, source, reason } = selection;
   item.role = foldRole(roles, requestedRole);
   item.requestedRole = requestedRole === item.role ? undefined : requestedRole;
+  item.selection = {
+    source,
+    reason,
+    requestedRole,
+    selectedRole: item.role,
+  };
 }
 
-function createTaskState(task, requestedRole, roles) {
+function itemSelection(item) {
+  return {
+    requestedRole:
+      item.selection?.requestedRole ?? item.requestedRole ?? item.role,
+    source: item.selection?.source ?? "legacy",
+    reason: item.selection?.reason ?? "legacy-role",
+  };
+}
+
+function createTaskState(task, selection, roles) {
   const item = {
     revision: task.revision,
     taskHash: taskHash(task),
@@ -171,14 +188,29 @@ function createTaskState(task, requestedRole, roles) {
     attempts: [],
     rework: [],
   };
-  assignRole(item, roles, requestedRole);
+  assignRole(item, roles, selection);
   return item;
 }
 
 function createInitialState(request, org, tasks) {
   const createdAt = new Date().toISOString();
-  const roleByTask = Object.fromEntries(
-    request.tasks.map((item, index) => [tasks[index].id, item.role]),
+  const selectionByTask = Object.fromEntries(
+    request.tasks.map((item, index) => {
+      const automatic = item.role === undefined;
+      const delegated = automatic ? selectDelegatedRole(tasks[index]) : null;
+      const selection = automatic
+        ? {
+            requestedRole: delegated.role,
+            reason: delegated.reason,
+            source: "automatic",
+          }
+        : {
+            requestedRole: item.role,
+            source: "explicit",
+            reason: "role-explicit",
+          };
+      return [tasks[index].id, selection];
+    }),
   );
   const depth = request.depth ?? FULL_DEPTH;
   const roles = depthRoles(definedRoles(org), depth);
@@ -206,7 +238,7 @@ function createInitialState(request, org, tasks) {
     tasks: Object.fromEntries(
       tasks.map((task) => [
         task.id,
-        createTaskState(task, roleByTask[task.id], roles),
+        createTaskState(task, selectionByTask[task.id], roles),
       ]),
     ),
     eventIds: [],
@@ -1388,7 +1420,7 @@ export function retryTask(stateDir, id, expectedRevision, input) {
     item.failure = null;
     // The depth may have changed since this task was dispatched; the retry runs
     // on whichever role the current depth gives its original request.
-    assignRole(item, state.roles ?? ROLES, item.requestedRole ?? item.role);
+    assignRole(item, state.roles ?? ROLES, itemSelection(item));
     appendWorkflowEvent(dir, state, {
       id: input.eventId,
       type: "task-retry-ready",
@@ -1477,7 +1509,7 @@ export function setWorkflowDepth(stateDir, id, expectedRevision, input) {
 
     for (const item of Object.values(state.tasks)) {
       if (item.state === "pending")
-        assignRole(item, roles, item.requestedRole ?? item.role);
+        assignRole(item, roles, itemSelection(item));
     }
     const change = {
       from,

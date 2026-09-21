@@ -193,7 +193,7 @@ function acquireSlot(stateDir, org, role) {
   );
 }
 
-function createRunReport(task, org, role, runId, runDir) {
+function createRunReport(task, org, role, selectionReason, runId, runDir) {
   return {
     schemaVersion: 1,
     taskId: task.id,
@@ -204,6 +204,7 @@ function createRunReport(task, org, role, runId, runDir) {
     organizationRevision: org.revision,
     organizationHash: hash(org),
     role,
+    selectionReason,
     status: "failed",
     implementation: { status: "pending" },
     gates: null,
@@ -339,12 +340,16 @@ export async function work(
   // onto the roles that run uses at its current depth: folding onto the
   // organization instead would run a role the PM had taken out of the run.
   // A workflow recorded before roles were stored folds onto the organization.
-  const runRoles = workflowId
-    ? readWorkflow(stateDir, workflowId).state.roles
-    : undefined;
+  const workflow = workflowId ? readWorkflow(stateDir, workflowId) : undefined;
+  const runRoles = workflow?.state.roles;
   const role = runRoles
     ? foldRole(runRoles, requestedRole)
     : resolveRole(org, requestedRole);
+  const persistedSelection = workflow?.state.tasks[task.id]?.selection;
+  const reportSelectionReason =
+    selectionReason === "role-primary"
+      ? (persistedSelection?.reason ?? selectionReason)
+      : selectionReason;
   task.files.forEach((file) => inside(repo, file));
 
   const binding = org.roles[role];
@@ -369,7 +374,14 @@ export async function work(
   fs.mkdirSync(runDir, { recursive: true });
   writeJSON(path.join(runDir, "organization.json"), org);
   writeJSON(path.join(runDir, "task.json"), task);
-  const report = createRunReport(task, org, role, runId, runDir);
+  const report = createRunReport(
+    task,
+    org,
+    role,
+    reportSelectionReason,
+    runId,
+    runDir,
+  );
   report.modelPolicy = org.modelPolicy ?? null;
   report.workflow = workflowId ? { id: workflowId, attemptId } : null;
   report.slot = { id: lease.slot, reclaimed: lease.reclaimed };
@@ -424,7 +436,7 @@ export async function work(
           response,
           prompt,
           failure,
-          selectionReason,
+          reportSelectionReason,
         );
         if (binding.status === "mismatched") {
           failure =
