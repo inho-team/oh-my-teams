@@ -1,0 +1,16 @@
+{
+  "cli": "codex",
+  "version": "0.155.1",
+  "kind": "folder-trust-changed",
+  "selected": 2,
+  "capturedAt": "2026-09-22T00:00:00Z",
+  "command": "codex --dangerously-bypass-approvals-and-sandbox",
+  "lines": [
+    "> You are in /private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp.6Kiqw25mrE",
+    "  Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt",
+    "  injection. Trusting the directory allows project-local config, hooks, and exec policies to load.",
+    "  1. Yes, continue",
+    "› 2. No, quit",
+    "  Press enter to continue"
+  ]
+}

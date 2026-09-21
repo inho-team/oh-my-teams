@@ -1,0 +1,12 @@
+{
+  "cli": "codex",
+  "version": "0.155.1",
+  "kind": "unsubmitted-input",
+  "selected": null,
+  "capturedAt": "2026-09-22T00:00:00Z",
+  "command": "codex --dangerously-bypass-approvals-and-sandbox",
+  "lines": [
+    "jinsungkim@김진성 님의 MacBookPro-KDF6WKC7L7 spa-capture % cd /private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/t",
+    "mp.6Kiqw25mrE && codex --dangerously-bypass-approvals-and-sandbox"
+  ]
+}
