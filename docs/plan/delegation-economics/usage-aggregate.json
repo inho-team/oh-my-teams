@@ -1,0 +1,2989 @@
+{
+  "generatedAt": "2026-09-21T05:55:59.786Z",
+  "inputs": {
+    "usage": [
+      {
+        "file": "usage-60ce3c7b6850f14ce5e41e42f19ee89de333f178071e0cc9faa63182c5e5303e-2026-09-20T01-42-26-913Z.json",
+        "sha256": "8dcd4f413b60732a63f75627ca654b0fa044da837b36073f3945513c2df747a0"
+      },
+      {
+        "file": "usage-8c22d8f1ab800b8603fe07888eebbb7792d8892f3b1b60348a71ab5abe3e69bf-2026-09-20T07-47-21-923Z.json",
+        "sha256": "78ea8acfe0bb434070bf28f00e55d891f7aec47adef5caaf0f0af2952e8c9df1"
+      }
+    ],
+    "state": ["state", ".omt"]
+  },
+  "kickoffs": [
+    {
+      "entry": "60ce3c7b6850",
+      "window": {
+        "from": "2026-09-20T01:42:26.913Z",
+        "to": "2026-09-20T03:29:28.073Z",
+        "minutes": 107.02
+      },
+      "byRole": {
+        "pm": {
+          "models": {
+            "requested": [],
+            "reported": ["claude-opus-5"]
+          },
+          "sources": ["claude-transcript"],
+          "sessions": 1,
+          "measuredSessions": 1,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 2,
+          "calls": 188,
+          "steps": null,
+          "promptTokens": 47944957,
+          "cachedInputTokens": 47584277,
+          "cacheCreationTokens": 360304,
+          "outputTokens": 164505,
+          "reasoningTokens": 38539,
+          "costUsd": null
+        },
+        "junior": {
+          "models": {
+            "requested": ["claude-sonnet-4-6"],
+            "reported": ["claude-sonnet-4-6"]
+          },
+          "sources": ["headless"],
+          "sessions": 8,
+          "measuredSessions": 8,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 8,
+          "calls": 8,
+          "steps": null,
+          "promptTokens": 1020148,
+          "cachedInputTokens": 20041497,
+          "cacheCreationTokens": null,
+          "outputTokens": 141461,
+          "reasoningTokens": 0,
+          "costUsd": null
+        },
+        "senior": {
+          "models": {
+            "requested": ["claude-opus-4-6-thinking"],
+            "reported": ["claude-opus-4-6-thinking"]
+          },
+          "sources": ["headless"],
+          "sessions": 7,
+          "measuredSessions": 7,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 9,
+          "calls": 11,
+          "steps": null,
+          "promptTokens": 504082,
+          "cachedInputTokens": 3372374,
+          "cacheCreationTokens": null,
+          "outputTokens": 74883,
+          "reasoningTokens": 0,
+          "costUsd": null
+        }
+      },
+      "sources": {
+        "headless": {
+          "sessions": 15,
+          "unavailable": null
+        },
+        "harness": {
+          "sessions": 0,
+          "unavailable": null
+        },
+        "claude-transcript": {
+          "sessions": 1,
+          "unavailable": null
+        },
+        "codex-rollout": {
+          "sessions": 0,
+          "unavailable": null
+        },
+        "agy-summary": {
+          "sessions": 0,
+          "unavailable": null
+        }
+      },
+      "share": {
+        "pm": 0.9651,
+        "junior": 0.0233,
+        "senior": 0.0116
+      },
+      "coverage": {
+        "measuredSessions": 16,
+        "totalSessions": 16,
+        "unmeasuredRoles": [],
+        "note": "Every attributed role has at least one measured session."
+      },
+      "byRoleMissing": ["intern"],
+      "sourceRows": [
+        {
+          "role": "pm",
+          "source": "claude-transcript",
+          "sessions": 1,
+          "measuredSessions": 1,
+          "turns": 2,
+          "calls": 188,
+          "promptTokens": 47944957,
+          "cachedInputTokens": 47584277,
+          "cacheCreationTokens": 360304,
+          "outputTokens": 164505,
+          "models": {
+            "requested": [],
+            "reported": ["claude-opus-5"]
+          }
+        },
+        {
+          "role": "junior",
+          "source": "headless",
+          "sessions": 8,
+          "measuredSessions": 8,
+          "turns": 8,
+          "calls": 8,
+          "promptTokens": 1020148,
+          "cachedInputTokens": 20041497,
+          "cacheCreationTokens": null,
+          "outputTokens": 141461,
+          "models": {
+            "requested": ["claude-sonnet-4-6"],
+            "reported": ["claude-sonnet-4-6"]
+          }
+        },
+        {
+          "role": "senior",
+          "source": "headless",
+          "sessions": 7,
+          "measuredSessions": 7,
+          "turns": 9,
+          "calls": 11,
+          "promptTokens": 504082,
+          "cachedInputTokens": 3372374,
+          "cacheCreationTokens": null,
+          "outputTokens": 74883,
+          "models": {
+            "requested": ["claude-opus-4-6-thinking"],
+            "reported": ["claude-opus-4-6-thinking"]
+          }
+        }
+      ]
+    },
+    {
+      "entry": "8c22d8f1ab80",
+      "window": {
+        "from": "2026-09-20T07:47:21.923Z",
+        "to": "2026-09-21T02:06:55.900Z",
+        "minutes": 1099.57
+      },
+      "byRole": {
+        "pm": {
+          "models": {
+            "requested": [],
+            "reported": ["claude-opus-5"]
+          },
+          "sources": ["claude-transcript"],
+          "sessions": 1,
+          "measuredSessions": 1,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 24,
+          "calls": 314,
+          "steps": null,
+          "promptTokens": 90672829,
+          "cachedInputTokens": 89856826,
+          "cacheCreationTokens": 815375,
+          "outputTokens": 222896,
+          "reasoningTokens": 61357,
+          "costUsd": null
+        },
+        "junior": {
+          "models": {
+            "requested": ["claude-sonnet-4-6"],
+            "reported": ["claude-sonnet-4-6"]
+          },
+          "sources": ["headless"],
+          "sessions": 9,
+          "measuredSessions": 9,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 11,
+          "calls": 14,
+          "steps": null,
+          "promptTokens": 3523305,
+          "cachedInputTokens": 84182795,
+          "cacheCreationTokens": null,
+          "outputTokens": 372826,
+          "reasoningTokens": 0,
+          "costUsd": null
+        },
+        "senior": {
+          "models": {
+            "requested": ["claude-opus-4-6-thinking"],
+            "reported": ["claude-opus-4-6-thinking"]
+          },
+          "sources": ["headless"],
+          "sessions": 7,
+          "measuredSessions": 7,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 10,
+          "calls": 14,
+          "steps": null,
+          "promptTokens": 1284777,
+          "cachedInputTokens": 18242243,
+          "cacheCreationTokens": null,
+          "outputTokens": 170698,
+          "reasoningTokens": 0,
+          "costUsd": null
+        },
+        "pl": {
+          "models": {
+            "requested": [],
+            "reported": ["gpt-6-astra"]
+          },
+          "sources": ["codex-rollout"],
+          "sessions": 1,
+          "measuredSessions": 1,
+          "partialSessions": 0,
+          "unmeasuredSessions": 0,
+          "reasons": [],
+          "turns": 1,
+          "calls": 20,
+          "steps": null,
+          "promptTokens": 1284449,
+          "cachedInputTokens": 1205248,
+          "cacheCreationTokens": 0,
+          "outputTokens": 8367,
+          "reasoningTokens": 233,
+          "costUsd": null
+        }
+      },
+      "sources": {
+        "headless": {
+          "sessions": 16,
+          "unavailable": null
+        },
+        "harness": {
+          "sessions": 0,
+          "unavailable": null
+        },
+        "claude-transcript": {
+          "sessions": 1,
+          "unavailable": null
+        },
+        "codex-rollout": {
+          "sessions": 1,
+          "unavailable": null
+        },
+        "agy-summary": {
+          "sessions": 0,
+          "unavailable": null
+        }
+      },
+      "share": {
+        "pm": 0.9319,
+        "junior": 0.0399,
+        "senior": 0.0149,
+        "pl": 0.0133
+      },
+      "coverage": {
+        "measuredSessions": 18,
+        "totalSessions": 18,
+        "unmeasuredRoles": [],
+        "note": "Every attributed role has at least one measured session."
+      },
+      "byRoleMissing": ["intern"],
+      "sourceRows": [
+        {
+          "role": "pm",
+          "source": "claude-transcript",
+          "sessions": 1,
+          "measuredSessions": 1,
+          "turns": 24,
+          "calls": 314,
+          "promptTokens": 90672829,
+          "cachedInputTokens": 89856826,
+          "cacheCreationTokens": 815375,
+          "outputTokens": 222896,
+          "models": {
+            "requested": [],
+            "reported": ["claude-opus-5"]
+          }
+        },
+        {
+          "role": "junior",
+          "source": "headless",
+          "sessions": 9,
+          "measuredSessions": 9,
+          "turns": 11,
+          "calls": 14,
+          "promptTokens": 3523305,
+          "cachedInputTokens": 84182795,
+          "cacheCreationTokens": null,
+          "outputTokens": 372826,
+          "models": {
+            "requested": ["claude-sonnet-4-6"],
+            "reported": ["claude-sonnet-4-6"]
+          }
+        },
+        {
+          "role": "senior",
+          "source": "headless",
+          "sessions": 7,
+          "measuredSessions": 7,
+          "turns": 10,
+          "calls": 14,
+          "promptTokens": 1284777,
+          "cachedInputTokens": 18242243,
+          "cacheCreationTokens": null,
+          "outputTokens": 170698,
+          "models": {
+            "requested": ["claude-opus-4-6-thinking"],
+            "reported": ["claude-opus-4-6-thinking"]
+          }
+        },
+        {
+          "role": "pl",
+          "source": "codex-rollout",
+          "sessions": 1,
+          "measuredSessions": 1,
+          "turns": 1,
+          "calls": 20,
+          "promptTokens": 1284449,
+          "cachedInputTokens": 1205248,
+          "cacheCreationTokens": 0,
+          "outputTokens": 8367,
+          "models": {
+            "requested": [],
+            "reported": ["gpt-6-astra"]
+          }
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "input": "audit-wave1-close-state",
+      "collectedAt": "2026-09-21T05:55:59.786Z",
+      "sourceEvidence": [
+        {
+          "area": "workflows",
+          "file": "workflows/a3f18ac97ab9fb61.json",
+          "sha256": "a3f18ac97ab9fb61cc0a3aa40701ff28e71bc79c7ecbd4978061de0185b8980f",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/2daf384170df9464.json",
+          "sha256": "2daf384170df946445879bc24244e00f820d39ceed3811055df78a43dfe19332",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/507958ff68ed39b7.json",
+          "sha256": "507958ff68ed39b79c9f31a05ee2718dc191a2119b405e90651775ab2fac90e6",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/a080664c8722b7b1.json",
+          "sha256": "a080664c8722b7b10da74cd4e044252b02e2082a1be8d6d03c855e5bdeb7b3af",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/b2e21f91292dc294.json",
+          "sha256": "b2e21f91292dc294db7ebc72c669203cfac388ab70b9b7eafe7f81ed1658e8f0",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/acdfbe38f50424b3.json",
+          "sha256": "acdfbe38f50424b3c8d6894fffdf0bd341f05410203601cd52ce416100f08d78",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/9b4a31932af0a1bd.json",
+          "sha256": "9b4a31932af0a1bd32104367d5fde246e7005f919cce2247a979c6c17147edc6",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/3ffb8c8094ed9063.json",
+          "sha256": "3ffb8c8094ed9063778cdd2ae81cdc9bea7195e965497848a6f2ef9c19cac97d",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/a71a01e412d04a8b.json",
+          "sha256": "a71a01e412d04a8bb3fb2cf9ed5bb22fc5e6b57de47f20f926d08ff2743ff63a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/aea6125fb8d2856c.json",
+          "sha256": "aea6125fb8d2856c7bd99462b215387e9e8a2f69c21361e06fdf41f3ff6e6a9e",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/55a25e9bd527313e.json",
+          "sha256": "55a25e9bd527313e16d3852d6866f06451e7d1ab2a3319db9db7f6a4e7110c9d",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/b1f7848c3c7d64c7.json",
+          "sha256": "b1f7848c3c7d64c7f19fe917647bc67a9776a4a0bc2be1b74838ca94e3245d7a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/d124ce5b9d1c33ae.json",
+          "sha256": "d124ce5b9d1c33ae7fa780e3c6410779e6f467af8a96204ba4a2971ec03341c6",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/98531c1def7ef12a.json",
+          "sha256": "98531c1def7ef12a09a0785954f82203ee3987cd066fe07d08f28c78e82c223a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/cc9f957778cd97c1.json",
+          "sha256": "cc9f957778cd97c1a39242125a58afe6d90a5d905b4471e2d1602a2731fa8d97",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/2edd775ff1407125.json",
+          "sha256": "2edd775ff14071250a4bfd8b1757711b67ec897e5618ba7dbffb79fff56e9838",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/229a8be89341010d.json",
+          "sha256": "229a8be89341010d69bba61904a289b5321c29501cdaf7942a61b114ee66d406",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/2b847c394f6aaec6.json",
+          "sha256": "2b847c394f6aaec6e3aa2b04ebdb98e7a56721146df04ad6a02fff5b66f17038",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/5f7e4afe3734b804.json",
+          "sha256": "5f7e4afe3734b804b0b284922e0726e4c0f424eb7c578874985fb55f6efc3feb",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/1721a969047415cb.json",
+          "sha256": "1721a969047415cb321b0cbc606b06c1bd9d564e321e4f4a4022415a09fc38fb",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/a7c61d9dae5f8246.json",
+          "sha256": "a7c61d9dae5f82464c0d644558fb4ae5ca1fad5f957287f6377055eaf7c2aa5c",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/8c97a13c38c3902c.json",
+          "sha256": "8c97a13c38c3902c1594fcfcc0004c601bd2768126515d67a4374bb17b4953cb",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/5e907b4284a0b4a5.json",
+          "sha256": "5e907b4284a0b4a501787701c28ed00971ea3372342ca299bb4ec9981e60ab75",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/4ed13d60158c86ff.json",
+          "sha256": "4ed13d60158c86ffad3219338766681c98072f309eedad4837414ef12108ebcc",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/9e37263df521aac6.json",
+          "sha256": "9e37263df521aac61bbd99246f0f5bbc05c2f897128c6b6a3fdb0736460537ad",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/26e9e7f6fb724938.json",
+          "sha256": "26e9e7f6fb7249386e695d725118176cc24c419da48088a8cfd88001c32303c8",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/8af42a4b1f753ec7.json",
+          "sha256": "8af42a4b1f753ec75edb90597c19dd8cb418f4e13934c446e33f8b8ebf6a05df",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/4608f1cac50eecfb.json",
+          "sha256": "4608f1cac50eecfb473a235c75ae02db3b50914d2feab466d6ccf1887ee09311",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/f21d4538ecc027b9.json",
+          "sha256": "f21d4538ecc027b90018058f8e73a29f3a30e668443f1c24f5ddd76f376f4d25",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/8d7f630242db7bd0.json",
+          "sha256": "8d7f630242db7bd064a9169bd316916a76d4dbea64a1efa4b9359b77e9adef50",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/ec15607548cce51f.json",
+          "sha256": "ec15607548cce51f4ee9e5add9c4465a33cc388318ab0e22373a1c7df8d9fb9a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/bd359f3122768ec9.json",
+          "sha256": "bd359f3122768ec943d3c9d84aca320858b78e54ba91457a1c356caf2a4e87a2",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/bf4089507cb0e46a.json",
+          "sha256": "bf4089507cb0e46a50f1e91d3ad027832d9049611dac1881c98cb05daeae0ae5",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/6f9924494ce02679.json",
+          "sha256": "6f9924494ce02679bf15675c55a0abc09a66dd1ddd1788b7112af3a09bac9665",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/3a2f9cbdd0688e98.json",
+          "sha256": "3a2f9cbdd0688e98a528ef2a71aa52b2e05ad6ce7c2e6e8d2378df1aac5236bd",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/26c055e6129855fd.json",
+          "sha256": "26c055e6129855fdb0a750d31564a77d59547bc44b0aea3213c20e62714c7e1d",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/1adcb02b20435300.json",
+          "sha256": "1adcb02b20435300d146ce915f8d2697baacd87b9d975e3a02c36203d8adb37a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/6cc0f1aa4f55c797.json",
+          "sha256": "6cc0f1aa4f55c797d7d5524406dad4a82e88e12a439a0f74495fd6b56349eeb7",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/b2fe85c0c88084a3.json",
+          "sha256": "b2fe85c0c88084a3a81b196aba2a526c8779d6b7a7c234e8d39a1f61781e6d05",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/028c83d4a49ca9f4.json",
+          "sha256": "028c83d4a49ca9f45f2a09a527f224d46df608ac4c9f1c1ed46cc4e52919da45",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/23e4b2b2c3cecb50.json",
+          "sha256": "23e4b2b2c3cecb50d20ada089a1115f781f7edaa0a083cb15244b6ab16fb6419",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/20424051f47169a8.json",
+          "sha256": "20424051f47169a8a0b2fd5f447c4c468bffc6cded7390ad2f1d18b112d60c0a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/bd4f4b135dac4999.json",
+          "sha256": "bd4f4b135dac49991bc97fa840f0df6c9ad689fd13a43c304e602672ad924c3e",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/49e42d73c60283bb.json",
+          "sha256": "49e42d73c60283bb9116d5ba8ff7d147bfa364794b2e1ccb9c52d4856d6c0b4f",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/bee7767f9da168b0.json",
+          "sha256": "bee7767f9da168b002001a3defeeb34a4be59bfd80b3006fc031eb90adbafb1a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/632012baf310c9a0.json",
+          "sha256": "632012baf310c9a0c090b2f6ee50f97803c922ac2e4cc4e121b2c9980dada5cf",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/eac533a88098937f.json",
+          "sha256": "eac533a88098937fc84f36da7e19e31341bb3c15060d789da415a60cd4c6fa61",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a1cdfa6332fdb8c3.json",
+          "sha256": "a1cdfa6332fdb8c3239334336d95835b54a1374e326c28c9216cde7a3ac69823",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a99967883ba7193c.json",
+          "sha256": "a99967883ba7193c73dde1e3d8dbce398151815bec3b3cad6e68cf94207d2888",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/d44da4c222bbc4f5.json",
+          "sha256": "d44da4c222bbc4f59f8b6c984a801cbfee9fd7bef3668e38ebfa89f748c9476e",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/510f590c766c7a9e.json",
+          "sha256": "510f590c766c7a9e19e3d7456bbd1039af0c7dbe933f518b4e9665cd52269c7a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/67b5d2357edd45d4.json",
+          "sha256": "67b5d2357edd45d434d97577f4549d19b14de1487c32f1da2b42953ba4761e71",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/07ad94b439f394d9.json",
+          "sha256": "07ad94b439f394d9e1b533667f2a85a92905c9f82e9f73458faf7c73b8cab132",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/b3d31e21e3568ef8.json",
+          "sha256": "b3d31e21e3568ef8ef4660b3904ae7a74a5b2b2179085bc8e9af1b8ae465787a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/4bc0331305a0f2a4.json",
+          "sha256": "4bc0331305a0f2a475a4217d6b3aec44da179aaf680a470fda4c57a6d1c31b21",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/e5d38491c0705df5.json",
+          "sha256": "e5d38491c0705df5e4cdf2d1de06d3ab539ad6d8021ff1ddbec3f37f103ec6bd",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/183420dbc71b7d6e.json",
+          "sha256": "183420dbc71b7d6ed29ad3842ee69866af5dcc1c328b65674638f5e9a3d4632d",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/41e7c65e5ac1e781.json",
+          "sha256": "41e7c65e5ac1e781ffbd47389e0b9caecd81db9c66a6c94717dab4900dcf641b",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a1498098a6766c67.json",
+          "sha256": "a1498098a6766c6738c9b598c9f7da476fca4794a8de2fa61ebdc62c04b1c845",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/552890f97d45550a.json",
+          "sha256": "552890f97d45550ab618ad57a44e01370829c49165f51ee02f7a1ed47db01dfb",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/d2e2318273649a36.json",
+          "sha256": "d2e2318273649a366510f9987be97c43e8a049492cc2d4d7005c3f30e07d84e7",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/cbd5fd978e33ee23.json",
+          "sha256": "cbd5fd978e33ee23884a0c494826efff63286ee07d8a266dbc431b145e0740f8",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/56917d2b827df63e.json",
+          "sha256": "56917d2b827df63e0a0125a6e1c34b14cc1c152fbc86da11f421b8e4c228f5ac",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/7f71685f9af2d736.json",
+          "sha256": "7f71685f9af2d736c3e0776bb118912d0714e0fede79ddc1894d494800fb3200",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/18699a3e5ed36337.json",
+          "sha256": "18699a3e5ed36337e7fcf63cbb2fab84fae6c805a6b6d3a3bbfa7b3cc77e5668",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a346c6ff9a8791d1.json",
+          "sha256": "a346c6ff9a8791d1dbc7009cc1b4d0b58c8e0650b009b08081125b1b52b05f35",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f55245c11f88ca32.json",
+          "sha256": "f55245c11f88ca32d7ed2b5fa9d6aaff14d055255400c1b089e065027fc87555",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/c2e4d6ce9b4510ec.json",
+          "sha256": "c2e4d6ce9b4510ec559dc47dbaf5a3ad3cbbf9a62789e4b8d1386ddef92dfc01",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/9b5415071b65e57f.json",
+          "sha256": "9b5415071b65e57f416890ccc4af000ea040eedc63f743e97ec0c19fa6bb219c",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/2f6ecbf607b76756.json",
+          "sha256": "2f6ecbf607b767562578a150b44a47b7909855a6bc67699088169beaebc61ee3",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a214907bd0727f9c.json",
+          "sha256": "a214907bd0727f9c317b5b1e2699b7b8a2946a3aa065e1b5467e4e917bac02a1",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/80aa0d458634a771.json",
+          "sha256": "80aa0d458634a771a3f546e4f31df9825bef283d0242bf65e866a2500c51b2a7",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/c5dcfc37f3873237.json",
+          "sha256": "c5dcfc37f38732372059e33e36d5703cad6f9159e358c0a0bfb2dd740471f2bf",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/306e41ba9ab5dc5b.json",
+          "sha256": "306e41ba9ab5dc5b6536f251462736f48b5a871143f4d174bd43e5f5d763754d",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/ceacc46c739861fb.json",
+          "sha256": "ceacc46c739861fb95f0ea1143a5cf67dbaa99c4bed71b5d4644b1917b576802",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/38a2803d71287353.json",
+          "sha256": "38a2803d71287353c9038b849b9a722e1a252da9de0ecd6d82f8c478f1af1d21",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8235c9cfc77f3625.json",
+          "sha256": "8235c9cfc77f3625228c2054069558da3900189c593c32e92eb1e970b9491a06",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/9fc15794f23bece9.json",
+          "sha256": "9fc15794f23bece9a51dd97b692303341d2425dc8f23cee8216c2c17db895f29",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/58dfdb63f5ccca0d.json",
+          "sha256": "58dfdb63f5ccca0d22353cfc6e32a785df93e6b2554439a9b6756ff1b98ce651",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f87e0afc1aab4f0d.json",
+          "sha256": "f87e0afc1aab4f0d8aba9f312e56d129f8c9c52e1ef82a0e86b11abb4ada838c",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/cb89892170183ac4.json",
+          "sha256": "cb89892170183ac45102e3a30c108923df3195029c811497a13f3aa47fdbd8ed",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/3860c5f7cb5028ba.json",
+          "sha256": "3860c5f7cb5028ba21ba37806c50ac0f175e68080216b79d888d2e643d7b7cc7",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/285d9bf7ce7c3a84.json",
+          "sha256": "285d9bf7ce7c3a84c7a0b87f36740512c0e9ebfec1637ad59f50039c7fbb4eab",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/d515d8635599914b.json",
+          "sha256": "d515d8635599914b5ee315abc639d8f7a198c186f4a2b3a842ed5ddae53f66d7",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/dca52d28e2b1749d.json",
+          "sha256": "dca52d28e2b1749d4bcf6089096030c638d3009302543e4db0690025f0d4a7bc",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/7e72204399d78549.json",
+          "sha256": "7e72204399d785494dc117b30d8f167b44b8984a2844a6fba39f6433771e6e86",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/ad4bce840fe6727c.json",
+          "sha256": "ad4bce840fe6727c296deb6161afd7b849c8b8ae7ce2c5ba4c25243df3fe47f2",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8b6b08bb3b956f7f.json",
+          "sha256": "8b6b08bb3b956f7f9d58a19e75525ad6bc42e19ed561ee264653893b73fb80ef",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/ee3a0318dccbedbb.json",
+          "sha256": "ee3a0318dccbedbba1fda28759dfcd3b75dab3ad576691260d68bf9b149581d2",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/e16468b079719944.json",
+          "sha256": "e16468b0797199445aaf57c3be504c73d73b3ae546b30181ee52c771ee6f088e",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/1ad7eae5171af13e.json",
+          "sha256": "1ad7eae5171af13ebdd6dcddd7a4a23ce50e28dfd68e8a7a2c93d02275f96311",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/b0f30d15410578d8.json",
+          "sha256": "b0f30d15410578d88da74ff38a478dc9e93ee407492c3500a856b988eefcd4b1",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/9b09ddd104be9747.json",
+          "sha256": "9b09ddd104be9747b12a44618d60530802b5a1e8e47f9bb73e5a9e9ff3fb4c07",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/5eafa7be48032bbf.json",
+          "sha256": "5eafa7be48032bbf1a8958658da7fc21b6bf29c8a018742e9be2fb028c486974",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/623813871a343d8f.json",
+          "sha256": "623813871a343d8fff53cf924d81c996838a6f7192076d96859c56c337c6e2ae",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/12c753ad776118b9.json",
+          "sha256": "12c753ad776118b996b2e5ddd5460cbea462c94c26494fb48177b2378ff12d52",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/501df91394f0ec55.json",
+          "sha256": "501df91394f0ec55db4ce507a451837456f6d7506656750fee9d51fb8d6ee6b4",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/605d7d95ad62e986.json",
+          "sha256": "605d7d95ad62e9868e25b88a3ede57c4e3014ea81b6f6dca72319ab405bf1ee7",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a358e92fca1d9410.json",
+          "sha256": "a358e92fca1d9410e7734e9ef3c8cebb32223bb45bd0d25dd7edd569de8ab2c7",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/1a597dc4f73a55d6.json",
+          "sha256": "1a597dc4f73a55d63d629fcd7b6cb82c16ffb5aa95eb87ab50c5b51104f0f3db",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/98e31a64a2983fb5.json",
+          "sha256": "98e31a64a2983fb594c312645e5a3c9611567658a8fb3e0e4cfbc867b02b79f4",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/5d0a4f917756f0ea.json",
+          "sha256": "5d0a4f917756f0eaa9acc213f8205f228a22fdd7558e13f7821227d6bda18aea",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/e342c48a6598fd7b.json",
+          "sha256": "e342c48a6598fd7b348a782c36c4a30ae76d58f19640a6de361cee00083759a5",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/bef4d2df506f9fd5.json",
+          "sha256": "bef4d2df506f9fd597be87066c30ec2f39544e9427b64b9a6e0cfd318818e9e7",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/16aaa8990962ad15.json",
+          "sha256": "16aaa8990962ad15a9065b1ff38e1c0481bb157b0f78461a5ab52c7b01d748c4",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/077e920b4fff6587.json",
+          "sha256": "077e920b4fff65875ae13320ea89e6a293331c27d5bee7b5e5dd802af52e8f56",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/fa78ecbc6667d832.json",
+          "sha256": "fa78ecbc6667d832f60c56a54d9b1bbe4598fe38c164cf284f8433eec17dec1a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f1e69eb2f90f4f34.json",
+          "sha256": "f1e69eb2f90f4f343b550737338e933e3661a98f5319b77dfaed08a0182dd4af",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/6f8e86187d23cc1d.json",
+          "sha256": "6f8e86187d23cc1d581baceaf50ce1cfb58d460455ddd8ecc9b98fef39292fdf",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/6fce029e609dc15d.json",
+          "sha256": "6fce029e609dc15d69ad01f1cadb0d4eccdb0733b16d9f4be98616d38da43cbf",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/7ccbfc68b7744692.json",
+          "sha256": "7ccbfc68b77446922acd384e18c6c4f2b9d5c4812f8a7a29f5f89daa0049b109",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/4c71e64f4f72b754.json",
+          "sha256": "4c71e64f4f72b7544c0a0455fd276c9927890edf29005bdbe0b27da2658b740d",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8782478208d45f7c.json",
+          "sha256": "8782478208d45f7cf9248df1adc7efdb3791d8e20685187e3b597c4a9466318e",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/ef5a1e8ade71a9e4.json",
+          "sha256": "ef5a1e8ade71a9e48f48b5dd69a7ca154150a109d0b6df0e3e57274c04ed3eec",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/eef1cef200ba0ce4.json",
+          "sha256": "eef1cef200ba0ce43f6c81915b5156b2696d08a0575588dd5fe4f165bb576172",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/982e4e807448c5c0.json",
+          "sha256": "982e4e807448c5c018ff3f7fbd7a779c67699f3a7636dc84d67bf3df24232c6c",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/7309b955b1b9b349.json",
+          "sha256": "7309b955b1b9b3499e7f7ef1dbf6bfd32d080216ff04e1acc4eaf45bc6a20e9c",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/a847dfbf5f43587e.json",
+          "sha256": "a847dfbf5f43587e64ef76e31d9c4d3f35b6fee8dc4f15b638539c2b3aa8419e",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/40efa7a38ab2bc4a.json",
+          "sha256": "40efa7a38ab2bc4a64aec1d4eb180af236b0eddee98dff227824354265095e26",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/b634974af9e97178.json",
+          "sha256": "b634974af9e97178378966752e6ceab69d5b007b49a68c0041025a2109740140",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/a683c37c71721c07.json",
+          "sha256": "a683c37c71721c07d6983f1f208941a08938f9c3bf59038be8c0906a6d428234",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/87398fcdca8fb823.json",
+          "sha256": "87398fcdca8fb823200862753acf9075284a4fa384b32f66dd3ce25b81a4b37a",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/b9705344285521b5.json",
+          "sha256": "b9705344285521b5b39a279b1baac444b86b151c9eddf1eeb6564d0e9f43da34",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/4c4c52e6aad30e18.json",
+          "sha256": "4c4c52e6aad30e189034d5d0181b6ff076f12c0b308ac13727500398d352a909",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/c2f25c7dbdbd4886.json",
+          "sha256": "c2f25c7dbdbd488625a4786bc89b29f81775017e2d0cb130aafe69d1983eb4e1",
+          "collectedAt": "2026-09-21T05:55:59.786Z"
+        }
+      ],
+      "workflows": [
+        {
+          "workflow": "audit-wave1",
+          "depth": 3,
+          "tasks": [
+            {
+              "file": "fix-headless-stream-read.json",
+              "role": "junior"
+            },
+            {
+              "file": "fix-usage-sources-stream.json",
+              "role": "junior"
+            },
+            {
+              "file": "fix-process-tree-stop.json",
+              "role": "junior"
+            },
+            {
+              "file": "fix-state-eventids-set.json",
+              "role": "junior"
+            },
+            {
+              "file": "fix-close-branch-cleanup.json",
+              "role": "junior"
+            },
+            {
+              "file": "update-audit-report.json",
+              "role": "junior"
+            }
+          ],
+          "budget": {
+            "maxAttempts": 14,
+            "maxCalls": 90,
+            "attemptsUsed": 6,
+            "callsUsed": 8
+          },
+          "workers": [
+            {
+              "id": "junior-mu95w1co",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T01:52:48.600Z",
+              "endedAt": "2026-09-20T02:02:31.492Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "junior-t1-rework",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T02:10:17.837Z",
+              "endedAt": "2026-09-20T02:14:17.853Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "junior-t2",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T02:19:24.152Z",
+              "endedAt": "2026-09-20T02:25:53.459Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "junior-t3",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T02:31:04.829Z",
+              "endedAt": "2026-09-20T02:43:12.010Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "junior-t4",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T02:48:19.396Z",
+              "endedAt": "2026-09-20T02:55:13.977Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "junior-t5",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T02:59:05.179Z",
+              "endedAt": "2026-09-20T03:07:58.837Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "junior-t5-rework",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T03:11:56.029Z",
+              "endedAt": "2026-09-20T03:12:41.568Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "junior-t6",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T03:15:19.395Z",
+              "endedAt": "2026-09-20T03:22:56.687Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "senior-t1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T02:05:36.481Z",
+              "endedAt": "2026-09-20T02:08:24.420Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "senior-t1-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T02:15:15.701Z",
+              "endedAt": "2026-09-20T02:17:03.733Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "senior-t2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T02:26:46.946Z",
+              "endedAt": "2026-09-20T02:28:47.273Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "senior-t3",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T02:44:17.310Z",
+              "endedAt": "2026-09-20T02:47:22.620Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "senior-t4",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T02:55:53.839Z",
+              "endedAt": "2026-09-20T02:58:03.353Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "senior-t5",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T03:08:39.118Z",
+              "endedAt": "2026-09-20T03:11:34.569Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "senior-t6",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T03:23:30.489Z",
+              "endedAt": "2026-09-20T03:27:15.325Z",
+              "status": "completed",
+              "costUsd": null
+            }
+          ],
+          "reviews": {
+            "conclusions": {
+              "changes-requested": 2,
+              "approved": 6
+            },
+            "findingCount": 5
+          },
+          "events": {
+            "rework": 2,
+            "retry": 0
+          },
+          "timing": {
+            "preparationMinutes": 0,
+            "preparationEvidence": "workflow-created→first event",
+            "completionMinutes": 97.83,
+            "completionEvidence": "workflow-created→last event"
+          }
+        }
+      ]
+    },
+    {
+      "input": "feat-director-role-.omt",
+      "collectedAt": "2026-09-21T05:55:59.799Z",
+      "sourceEvidence": [
+        {
+          "area": "workflows",
+          "file": "workflows/737cf396d7ade45a.json",
+          "sha256": "737cf396d7ade45a4b8cba3d8389908afeeb4da17bce0bc628dfb17fd30dcb9e",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/22e71674d1f908ad.json",
+          "sha256": "22e71674d1f908adeb090b7388ea6aec3b3a81c36e4eb9f0aaf5d51d14b5687f",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/26a9735f741ad3ad.json",
+          "sha256": "26a9735f741ad3ad94a7b39ab6a5a7491dd721370ab1cd8549b377a86fc13e9b",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/43f67e2ac3ef13a4.json",
+          "sha256": "43f67e2ac3ef13a4afe826334b18be1e60dc43fffa70bedd65e2fa51247a7858",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/732221376fab599e.json",
+          "sha256": "732221376fab599ecceb13ac8aa0360b66e48a07fbb2244ece1642400677c9ce",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/9a9f7a6eb673ad7d.json",
+          "sha256": "9a9f7a6eb673ad7d257b7b4fe81be3b7f45d6ec335ba6fa1012eccc872b4e593",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/841b12821de92d1a.json",
+          "sha256": "841b12821de92d1a7350f57c1a203f5d6f6e21431416bbcd281866810a606f1b",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/30d583242516aa88.json",
+          "sha256": "30d583242516aa88358540e91a5bd5aa1f952a86a41584f54198dcc359616641",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/46510a7da673dee6.json",
+          "sha256": "46510a7da673dee60a4a15da5d854fd3bb43097379cd0abe0e278195f5827a9f",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/26e9e7f6fb724938.json",
+          "sha256": "26e9e7f6fb7249386e695d725118176cc24c419da48088a8cfd88001c32303c8",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/cfc3e615e5f81fa1.json",
+          "sha256": "cfc3e615e5f81fa1f831d451a4e14b683823bab758a644b7868091b252a0cafd",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/d6394cfd08b79895.json",
+          "sha256": "d6394cfd08b7989509a85c6b39c9ec421568d60515da526479bd10bbbe91f7bf",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/cd462a2575d69178.json",
+          "sha256": "cd462a2575d69178726b70d3c9af31852e545cd8c4ac5b6439e8c0885fee1b0a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/3087bbe46fe81ff8.json",
+          "sha256": "3087bbe46fe81ff88507a906ab3c94936521580e92b327e3c1ca393a3065626a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/0836de3719373cf0.json",
+          "sha256": "0836de3719373cf0f16495fa52ace8a07ff64bcdcca12cc6ead7d35e17764ac9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/724af44047d91e7d.json",
+          "sha256": "724af44047d91e7da4fa89664545dbacbe898ae1ea760f34793e877c361361b0",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/e6ded1763a94f110.json",
+          "sha256": "e6ded1763a94f110f5123b6ceb5597e2507f8acb3443f51c2d67591f3d2e4947",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/125439202743f756.json",
+          "sha256": "125439202743f7562501bd894e3fcaaeda8977158cac1ec2ec50fa8ec31e67ab",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/7c6713359e416e4f.json",
+          "sha256": "7c6713359e416e4f6d569d448eb8c38d0b5883eed05122deb123b060b82b5feb",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/26e9e7f6fb724938.json",
+          "sha256": "26e9e7f6fb7249386e695d725118176cc24c419da48088a8cfd88001c32303c8",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/f5ebb84540bbe7f0.json",
+          "sha256": "f5ebb84540bbe7f09f207c18bb2b77ec85ae2066b8e45adea523d5c61015d2b2",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/e55bfad3a2836757.json",
+          "sha256": "e55bfad3a28367570f7f3f7ae409ea7e421bd5813808afa3648c02e45bbebc92",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/ebc6ac252025fc4e.json",
+          "sha256": "ebc6ac252025fc4e5dd7988b8444cc433f2df5d4511fcb25cea4ebc433999d60",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/6af22bd502650767.json",
+          "sha256": "6af22bd502650767d143c1d13c544e5ea0f7cae90e6c7d1e50882b8f2caeaa2a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/6cbec462dc5a950f.json",
+          "sha256": "6cbec462dc5a950ff3c73a129082e698ff5144c58dc9fb69d4c1820ce99f6a46",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/7500eac4c5846a7c.json",
+          "sha256": "7500eac4c5846a7cdd2994e992200aeb818bb8b30031e7e20271300e233a3f7f",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/f57cd84b87669c04.json",
+          "sha256": "f57cd84b87669c045b5d1ce3741d169d76df0fc38910ef442f57e247af6e1cd4",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/87afebf92719e42d.json",
+          "sha256": "87afebf92719e42d9b75c292decd69d911e3a5f2c6a1f7f50b79681c5232023f",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/44965f96b013880d.json",
+          "sha256": "44965f96b013880db72fcf0946e47cd2e9eae8686862b560542a0f7d461c048c",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/21d987b129188e49.json",
+          "sha256": "21d987b129188e49aa1390a5507f48f484e58cefd9eac1885711bdfdc2be6e9d",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/f29500e73c5eb86f.json",
+          "sha256": "f29500e73c5eb86fef2a849af00389010e1092300e53ac05c3c066a813edaff9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/acb0fcfffbed26d0.json",
+          "sha256": "acb0fcfffbed26d0626cdd8c540806cc7516242a298400a6ece080da0f4eacb7",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/4289687226ad7e1a.json",
+          "sha256": "4289687226ad7e1ace9d6602e4b958127a0fca7fdbd49d5fbd92ab2c0753f635",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/803a19ffe752c261.json",
+          "sha256": "803a19ffe752c261079df95b30e3bd10d661bc6d37708c0e1d9a3d6f455bea12",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/ac408aecdc5ea4c8.json",
+          "sha256": "ac408aecdc5ea4c86d05dfd9db7b1eebe94df023f1ef6584baf4f3db06668b62",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/26e9e7f6fb724938.json",
+          "sha256": "26e9e7f6fb7249386e695d725118176cc24c419da48088a8cfd88001c32303c8",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/d1c5ae0b4df912f1.json",
+          "sha256": "d1c5ae0b4df912f109b8b92c642e95c77fdad053c73761928f7cf3549000e541",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/36019cdcec914786.json",
+          "sha256": "36019cdcec914786e215cce6cfab8812a14c06b66291b0b6f6880d355deef250",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/8d9dae9c38cbe731.json",
+          "sha256": "8d9dae9c38cbe731ab8e3837d167fd0f096b3cd33a669bd42f59e44c6f19895a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/adbac13a2084bd91.json",
+          "sha256": "adbac13a2084bd91201bce61b722a336980261ec9867b9ad273211eee09de5df",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "workflows",
+          "file": "workflows/dfc66df41853df72.json",
+          "sha256": "dfc66df41853df72d7bf8e731f5cf9a8b48c03cd958bd072c9002b9188e125d4",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a30c5dfb1088ae43.json",
+          "sha256": "a30c5dfb1088ae43a86c83d8a8f6ea98fccb4885a0c9c35fc45a0d7dd58f2d29",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f124b785ce8d1b00.json",
+          "sha256": "f124b785ce8d1b00b501e644555611c459c30f716f1a505342cbff8285b8995b",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/7d49db4abef81e3e.json",
+          "sha256": "7d49db4abef81e3e1dcd5771d04dc9d4d16d51f305b6bf91425d95e6d9fc2894",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/698143c7c49d19f1.json",
+          "sha256": "698143c7c49d19f1c4b3023d5db68ae7311ff15be86a7d1e119b3f4cf385535c",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/bbb5466460d5cb6b.json",
+          "sha256": "bbb5466460d5cb6bf90230bb66dadca35d992836faf2ef4ca3fda1f37a2b6089",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f7472d81c6055bbe.json",
+          "sha256": "f7472d81c6055bbe76eab36def450eba614257a7df62b057724d165f1eb8ace0",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8c161f80d6beec41.json",
+          "sha256": "8c161f80d6beec41f2e6bc6ff9542eb70237a17188a1a9f407e37be53dcfe8f8",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/dc0baf738183f10b.json",
+          "sha256": "dc0baf738183f10b63d1e5bc0f2c06da5c5cd75d0e5ef31b2181dd2e415ace6d",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f4713c6ffe45f7c6.json",
+          "sha256": "f4713c6ffe45f7c6c7d3a65bbb8a95e14a4ca573cf6bee5b5d0022e01904f23e",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/5f376d92b206b312.json",
+          "sha256": "5f376d92b206b3123e92c3ef1c3bc22bbe6135ffdec39f63ceb93bbc33acbc71",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8b8ba977670061a5.json",
+          "sha256": "8b8ba977670061a56e8f7bc3fef2923c925b81d5b004faf3651d8a9a8ba8910a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/7aa08fc49161ea2c.json",
+          "sha256": "7aa08fc49161ea2c6ac12321737414c797740b1660db265bf27d64ecf030a5dd",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/d57013b4bc586d1a.json",
+          "sha256": "d57013b4bc586d1ac4ae659f39127b29888349d63d4b35ce624730866365e3c7",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/5318460b23223e80.json",
+          "sha256": "5318460b23223e801a6aabcff63def5514d337cb2b7dfef59b5e27dc1154f550",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/da6ad0f5bb0fb4a2.json",
+          "sha256": "da6ad0f5bb0fb4a2dd727b12cb1a388d75926a66bad1e46522d434244ec34b55",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/820d820b2ee99ce7.json",
+          "sha256": "820d820b2ee99ce7d50b8fa87667b67640048d09c98f3a51203b59b03a9627c0",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/46aa82ffd6be40f3.json",
+          "sha256": "46aa82ffd6be40f3e6da2f44e16ce3958b93c476c5e19cd1b6775666be3025ea",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/2625b78d038d73b0.json",
+          "sha256": "2625b78d038d73b0eb46d210523e5be32f0ca2dbca6fde8b47a87a59206f52d3",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/20eeb4b283e6fd7b.json",
+          "sha256": "20eeb4b283e6fd7b40cc78bf58f52d012044f3778461722fcf98c39864d44d8d",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/dd28da8407e6824c.json",
+          "sha256": "dd28da8407e6824c58e766115b3f20c218ad07dd71c2e3667687b7541b203846",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/b1806ee4dcb95adb.json",
+          "sha256": "b1806ee4dcb95adbc6e9e1737d47f84f3f2f8ce93de4e007c8b8cd9a1948f423",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/e0ec2dafe01fe759.json",
+          "sha256": "e0ec2dafe01fe75913ec604715b8bbbcbee6335bedf058fbf957d97260dc4854",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/9b345feee0c78ee7.json",
+          "sha256": "9b345feee0c78ee7716881f5b5dc73dfe6218ac262965932899e44f1e91c99dd",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/18214b546ef15c9f.json",
+          "sha256": "18214b546ef15c9fc7b6f7c1b2baa6ed7d923288de0c39ad15c967881b812502",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/3cf8c3a0c98559fe.json",
+          "sha256": "3cf8c3a0c98559fedfa53ef504d6af309d24e122ec21e1024515e2641abb9106",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/07a4d9d8c0b79d86.json",
+          "sha256": "07a4d9d8c0b79d86964e384d02623070577fe847d80ce7565441103bff467193",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/6af4505ac98f35bf.json",
+          "sha256": "6af4505ac98f35bf966589069be2c230d79678bf48dbe487f77854230e61eb35",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/315dec6e7075e26c.json",
+          "sha256": "315dec6e7075e26c1893a67b70603fb4657b6b1284ca4d8c5bb25a82b17747fa",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/5b44d6f837dd4d6a.json",
+          "sha256": "5b44d6f837dd4d6ab6b36faeb4ad72a692a0c32bd2e42911428287b7321ac3a5",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/bc255b1a7402e09d.json",
+          "sha256": "bc255b1a7402e09d8f3f436446625be2b0255af0beb3d6e8a261afce6edfbaf0",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/1fb6905d9afcbd80.json",
+          "sha256": "1fb6905d9afcbd8026d5a15142fe3906d4a7b099304bdae5ca47d1c9a4dfad43",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/905671a76a0b528c.json",
+          "sha256": "905671a76a0b528c7928a34495a61ce2f89560480ee579dfebaed1a103e0df21",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0a14df26cd0e1131.json",
+          "sha256": "0a14df26cd0e113121892e71f224336b42cd05227d86b94237661916ebe1c745",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/336784a1df225b8e.json",
+          "sha256": "336784a1df225b8ef053777b05773e53a88af9c80d8903947c3dcea176736100",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0e77ea2b3c86a887.json",
+          "sha256": "0e77ea2b3c86a887f23374b3273450d193d4d2d6fccf6122e876bb91617947b3",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/9888a7a5580aab44.json",
+          "sha256": "9888a7a5580aab4439f71c468225dd9d18e501e534c4d6405d92d6f4f969c61e",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/c3f57ba3a5cc3042.json",
+          "sha256": "c3f57ba3a5cc3042be4899900eb605a4b8e78854f24369145a9d329f0a3146fc",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0efe1bc64daa368e.json",
+          "sha256": "0efe1bc64daa368ebae18065eeec9a0498ee018371abb212a0bd9c34556b3d4b",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/76602d6265401c0a.json",
+          "sha256": "76602d6265401c0a07be10eaa083e82a16b5b520e7833274dc3c2cc1e61dce59",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0eab3a46b10ec686.json",
+          "sha256": "0eab3a46b10ec686983d17451faff5863dd4cf16d092089277260f00050355c2",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/3ac61407c64f4dcb.json",
+          "sha256": "3ac61407c64f4dcbbff343f703ee3c6b5c5e3a53b2acc95d3f9822f9405b37c8",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0376c1497e6ca312.json",
+          "sha256": "0376c1497e6ca3126effbcd993dc6f9a432372e49c89f1c622eb71616c77329e",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a583ea7b1478dbe1.json",
+          "sha256": "a583ea7b1478dbe1d338e82d07b197b235443b2db87aa664fafb433b7caafb95",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/eb25de7d0a84f518.json",
+          "sha256": "eb25de7d0a84f51890ca7db7ee73b7fcacf657564bc2e3f3c05a57c181020ce5",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8a59265b1e4228d4.json",
+          "sha256": "8a59265b1e4228d427e3c6422a185019b418a23e4700b62aeb5f643db262bb56",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/48bd740f3c4d4a32.json",
+          "sha256": "48bd740f3c4d4a32a1219f4c4f3985d7e9a8a4fc6d1ebf48c6c2b34ebc2b6ac0",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/99502f618960f2ac.json",
+          "sha256": "99502f618960f2ac5f9ac9ecbd5ffc24571274ea4f7638802d23f56075b64d22",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/e4b73ffa8815275b.json",
+          "sha256": "e4b73ffa8815275be81b35f4f5c11eab79189c1ad1992de84330879a0478c5c1",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/9a1de7a9a56b59b1.json",
+          "sha256": "9a1de7a9a56b59b16c21c91009c32d2739db27af00dd98c439d7d57c6155fb2e",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/dbeb130f8da8e4c3.json",
+          "sha256": "dbeb130f8da8e4c3dedce880547d4cb46cb89aba5d1b8c2263c000a3ca64afe9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f5b2220f342e47a9.json",
+          "sha256": "f5b2220f342e47a9f6496efe4d2ac3cee7178e387a1714f28ba9af29bf1a00b6",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/13e38eebed2adeae.json",
+          "sha256": "13e38eebed2adeae4a56d23355d51a19d2258a78a74bd367974a1e85197ce658",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0e9cb5a535c52309.json",
+          "sha256": "0e9cb5a535c5230992d0b6afb4d0aa143297dcd20301c2c73e917594b565eb45",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/c5baa586747726bb.json",
+          "sha256": "c5baa586747726bb2067697719d465740a57e7c3f463cb25db6687e9bdeed491",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8268cc89ceb08177.json",
+          "sha256": "8268cc89ceb08177d666ac2e4f7d67ecaecf807717cd692d956f46214319e72c",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/263a7c84368db094.json",
+          "sha256": "263a7c84368db094e14bd160b2f4fc1e07579c36994c51c4b8602532a838a42c",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/af7c85365519f4ba.json",
+          "sha256": "af7c85365519f4baad88a4c3f5192c3c59f49be84dd02361abf187ef98a43bb5",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/45714e62cfea329b.json",
+          "sha256": "45714e62cfea329bcaf016fc118287194d851210b145c696eb7954f8c377f217",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/ca26bec01e409243.json",
+          "sha256": "ca26bec01e409243386e1c5e6e6fe649027ecc13fe8c8cdfec5e60adb9d664a9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0960c1db850b0b17.json",
+          "sha256": "0960c1db850b0b17f28e91e1f12b067357d711329118a9b418abc8ee4ff59fcf",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/dfda4ef32af2391d.json",
+          "sha256": "dfda4ef32af2391d70c2f4e45322da1742a650da2327fec5ccc687468637f841",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/d65cd9b9c88bb348.json",
+          "sha256": "d65cd9b9c88bb348954aa105af6884b8713cf98de5468ab9ae6a9cf8d716a0bf",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/66e9baca398cd45b.json",
+          "sha256": "66e9baca398cd45be98db91afa0e87080e673dc5c3d9016b869879468ef5c8fd",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/ecc9478633861d83.json",
+          "sha256": "ecc9478633861d83e5f399455fff09dd1f988dfb9ac6c0a7e03e8338c53519e2",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/d70da39a9ea67cd3.json",
+          "sha256": "d70da39a9ea67cd3496daf52d33615356bc5df57b4165b99e0b62f34fb6e8ad5",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/56c9766076cad44a.json",
+          "sha256": "56c9766076cad44af627843c4a27c3acf98c7a56261256b7d0c30de25ea2ea8a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/d1a74649d13e477a.json",
+          "sha256": "d1a74649d13e477a2ef7516ec7795254e07ea673c73c5fc8fbc97d80978412c9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/3219cd259daa4dfb.json",
+          "sha256": "3219cd259daa4dfb4f2475873d9a61a2c0d16085c96eba5f2f0c5b33816ca08a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8bdef7c5f2766981.json",
+          "sha256": "8bdef7c5f27669810b8a17d4cd44b20a9ee23f1db34a50d2a81740ca6f860532",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0cde98b1cb5bd8d3.json",
+          "sha256": "0cde98b1cb5bd8d3990c23748637509eb166b22e75fae2c5be45e3eeb39e15ec",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/6f373850888eaa73.json",
+          "sha256": "6f373850888eaa735291d614e6a025e55ff693072cb45593607026be1474d172",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/543b1669279fddc2.json",
+          "sha256": "543b1669279fddc2ac026d3239cbe6fd00bdb7a3a88eca01218581959c0e50ca",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/6603463318f7048f.json",
+          "sha256": "6603463318f7048ffc7f1b90c2bfdb3dfe8570d6290b104090f136a9d0d002d1",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/990d875c818c3f11.json",
+          "sha256": "990d875c818c3f111c2fc7d25013f41acfbb642d650b76b23874e99487fc6dc9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/e76d3200e8be4399.json",
+          "sha256": "e76d3200e8be43992e33fe70059f20df2b1c69d35db5ac63939f271c77112465",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/6aefeaefbadbf0c1.json",
+          "sha256": "6aefeaefbadbf0c1ac214ec61c50ad3a5cb249e87f3deb8384410f9cc41f57d2",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/7a45f716e842e906.json",
+          "sha256": "7a45f716e842e906945f8395ca2653422056bcc985199ec92256aff54e2932ab",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/ee3a7e1acb14f321.json",
+          "sha256": "ee3a7e1acb14f32126b369a38d047117f619b984b12f9520dda9e29438d9d536",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/c146fe4ebd777e7d.json",
+          "sha256": "c146fe4ebd777e7df049c969265d1d7048c4cdc5a512b2afe4b6eff126be5901",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/b922c41c59d22e72.json",
+          "sha256": "b922c41c59d22e7280ae95bca5badb8378d4c70bf165cacc1532aae7eda1fda8",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/72ecf5149ac10a43.json",
+          "sha256": "72ecf5149ac10a43ee206f55ea7fe776640587f7b020e2a5afd063417f8b8a88",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8a66036eed57e336.json",
+          "sha256": "8a66036eed57e3363b18f46ce45808c7fa22fb1134d2395dbf301ed020c2f8f7",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a59342051410ec60.json",
+          "sha256": "a59342051410ec609cde2e309651a7d43f192b2bfa6b1860ae97b8afc3c8ecd9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/0763c8cd66cf1050.json",
+          "sha256": "0763c8cd66cf105054b864568ce1ee0ef8f89a064ba3869ea98722fa35c5268f",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/386633ef21b02880.json",
+          "sha256": "386633ef21b02880e399afc64d73ec44e0bc075ed1062803886fc6dcd38dd5d9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/fe8878cce21117b8.json",
+          "sha256": "fe8878cce21117b87d011cb9eae06a2c0b27abf83c5d83c46663c1a03de4904b",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/714b689e5d29de3d.json",
+          "sha256": "714b689e5d29de3dd82863f87eee76460b1f05a20113cc6193e96c23c9a1d2a5",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/a2388cef4023496f.json",
+          "sha256": "a2388cef4023496fed3ad778e0bd640ff9807f28fda3f9cef35f6cc55c91824c",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/24a2179115499dd1.json",
+          "sha256": "24a2179115499dd1996af4307601ea08aec9cdecc3e89d8052277d61c19751d0",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/4535014b3536092c.json",
+          "sha256": "4535014b3536092c4ca0ef7125ed776a1928e6250f9a3e6400d60c293ae41d26",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/e6a6038d83033472.json",
+          "sha256": "e6a6038d83033472adb704f99ade29b362a08ed062019c64b5baa1aefc27d1da",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f5c06082267584af.json",
+          "sha256": "f5c06082267584af7b723ccc3045d7292ad1a32bfb86dcbb3971907925ebc004",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/492530075c16fd77.json",
+          "sha256": "492530075c16fd77bc58a88f449295de9596baafb0301255ba4992245cc62358",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/d75d17f7f035cc2d.json",
+          "sha256": "d75d17f7f035cc2d689321c58109dbfe3d0e24a774734c1c8250e360849070b3",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/bce735b333f1242f.json",
+          "sha256": "bce735b333f1242f3db532d928b6702ea67a9c5b5999c1081dcd8987823e254a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/ce28ca859fef2b57.json",
+          "sha256": "ce28ca859fef2b57d7300fc40d3954d063bde6f585bd2d9806ee83c337ff5686",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/c12035ea7994f964.json",
+          "sha256": "c12035ea7994f964b8c39bce4f3d1c07952316f73b70600e6de964ec978c63ea",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/35527b14dd0b62d0.json",
+          "sha256": "35527b14dd0b62d0d757b7ed1dc7ce00e795afbdd2507025e462042440e43204",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/36274370e4f20464.json",
+          "sha256": "36274370e4f20464594c9c2efc68154b5cbf957552b732d6e0f960885a121f67",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/4303df9e24da68d2.json",
+          "sha256": "4303df9e24da68d24437a01926bb16416b57bd90aee9d3ff92c93e99f652b32f",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/06d2bf77b8657fcc.json",
+          "sha256": "06d2bf77b8657fccf5bf4b7c62f5462469c598f107ae922d28039abfd58ab15d",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/857fb375ce16ec16.json",
+          "sha256": "857fb375ce16ec16f442de401e58b089efa2ad90e456d6a4371b483dff0f4356",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/6a87c10c2c864e85.json",
+          "sha256": "6a87c10c2c864e853c92261cbb2f6eaa56a920e98ae980f204aebecc7cef02fa",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/9ff8b1002685b5fc.json",
+          "sha256": "9ff8b1002685b5fcd39790050a6498613f91fad0dffc6d3e06bb16f14a7110e2",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/bdfd0825e873f60f.json",
+          "sha256": "bdfd0825e873f60f53777887ed832b0d5f5a09745220624a9d1ffb811e5f5cc6",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/fb36d18ce10a82a7.json",
+          "sha256": "fb36d18ce10a82a7d706f49f21f24e4e441e23cf41425c5bee7491a429041b68",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/682b3166277cb365.json",
+          "sha256": "682b3166277cb365d7e6bcbfcdfe8f9ca865a4b68f90f6ea1a33c28a4563bdaa",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/75bab2600bcb9a8a.json",
+          "sha256": "75bab2600bcb9a8a32ed0fa6e46930664452cd788ba8f4eb9246c991f8d9138a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/baa335edf6f6812e.json",
+          "sha256": "baa335edf6f6812eec311551b712b0526e03ae5c1383ae1a154d664ee4ff53d9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/2667d97af203f055.json",
+          "sha256": "2667d97af203f055affbec57599700bd89bb796066a044efe964dc20a37e1c71",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/9c7a286634c52dda.json",
+          "sha256": "9c7a286634c52dda2a3252b0250db0f8e69691dfa9ef6a3c66df849448dcd11c",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/db34fb51c4234eea.json",
+          "sha256": "db34fb51c4234eea5e660428680b9ca58ac140fd17262905a718e737698dc4ee",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/f53a03bc88b569b3.json",
+          "sha256": "f53a03bc88b569b3a9edfc39e53e8ab7d26bfee9f3dd3cce0af8b1c4bd3bf0e0",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "headless",
+          "file": "headless/8bfef7fe9c553712.json",
+          "sha256": "8bfef7fe9c55371228e4065afaddae22ba86aaa61aa86da0230a1bf1c513adb1",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/02dc377eb02b45cd.json",
+          "sha256": "02dc377eb02b45cd1d447624b8c1d87957b7c6aa16c5b62e5fab01b6918488d0",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/caa655a27312d769.json",
+          "sha256": "caa655a27312d769d8b5154f0be1432da7c95676aa50ba7818590ccaf40cce62",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/04ebb7003576dce8.json",
+          "sha256": "04ebb7003576dce8e9c096c8557f0a128ade1aff37d7ad351a4043cbdc3a7340",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/eb5063d1072e7afb.json",
+          "sha256": "eb5063d1072e7afb359c493967c8bfcb01f94cb2b551b940a814294bea8bfa52",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/bf958a69f510ff18.json",
+          "sha256": "bf958a69f510ff18795f56f4a6840009bd74c437452f48214836152a744048b5",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/e76dc33302383796.json",
+          "sha256": "e76dc33302383796ea01ee33a4250774dba3aa04a3ce8ca19dab29d8a1d4db31",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/bdfb72c8191e3923.json",
+          "sha256": "bdfb72c8191e3923cce9d5bb029116dd9df827d1ca9239032ef441088bf2cffc",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/4649b17897143ef9.json",
+          "sha256": "4649b17897143ef9a29319abd9c133669e3c7ae34c1a9db0b4ae1460abe9c478",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews",
+          "file": "reviews/c28f8beeab9ad8ed.json",
+          "sha256": "c28f8beeab9ad8ed7cdae4ee66adf61afef671bbede4d5ee975655d5927b9268",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/8d4b7f04881ea592.json",
+          "sha256": "8d4b7f04881ea592dce1be5567a1054f8d1ac2231307d43a60d12ab455a7182a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/fe5db694aec96998.json",
+          "sha256": "fe5db694aec96998773b3e2089a3c54621de48f3ff7b6e51dd7f54a30fa04a2b",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/37aa33dd67872461.json",
+          "sha256": "37aa33dd678724615ab02f568cf2aea551705b11b1cce0fb5eb40dd93da99aef",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/82be8663d4aef1cb.json",
+          "sha256": "82be8663d4aef1cbe6d96429ec0b94de177139604d99393645752cf19ec03322",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/3f241136f63a7644.json",
+          "sha256": "3f241136f63a764485ebb1ef954812d97f29008d5f0e98b660215f4865b53b1f",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/a64bc6bb9f47133d.json",
+          "sha256": "a64bc6bb9f47133de46368ddc55f0792719920d159d54559e5b18897b316d6da",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/9c44abf76f679c24.json",
+          "sha256": "9c44abf76f679c24ff957445733bb5834a908a8d4e333415cb5215372b3cf743",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/e1fe0da196d7e0c7.json",
+          "sha256": "e1fe0da196d7e0c79c25d3c9f3b5e6529daac3e1ceb145364191b29296a4778a",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/363d50aba81198a2.json",
+          "sha256": "363d50aba81198a2450f2121e4c12364662f8d715e5f59b721d86d56dbced5c4",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/76b93c55d5876980.json",
+          "sha256": "76b93c55d5876980ddcb5d6c8582df4eaf224c135dbc8f451f84b2468fd8b784",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/8deac0d3f7974fc3.json",
+          "sha256": "8deac0d3f7974fc3e9324cd19399dbf4bc9d506fe7fd460e99b8431fa50c977f",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        },
+        {
+          "area": "reviews-inbox",
+          "file": "reviews-inbox/f3718755ae970b91.json",
+          "sha256": "f3718755ae970b91ae5e3bdf9a4e89401b9202c2191727436ba6060db0bcdec9",
+          "collectedAt": "2026-09-21T05:55:59.799Z"
+        }
+      ],
+      "workflows": [
+        {
+          "workflow": "director-role",
+          "depth": 3,
+          "tasks": [
+            {
+              "file": "director-core-role.json",
+              "role": "junior"
+            },
+            {
+              "file": "director-signal-resource.json",
+              "role": "junior"
+            },
+            {
+              "file": "director-skills-docs.json",
+              "role": "junior"
+            }
+          ],
+          "budget": {
+            "maxAttempts": 2,
+            "maxCalls": 40,
+            "attemptsUsed": 2,
+            "callsUsed": 6
+          },
+          "workers": [
+            {
+              "id": "close-path-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-21T02:12:14.090Z",
+              "endedAt": "2026-09-21T02:24:29.677Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T07:55:45.943Z",
+              "endedAt": "2026-09-20T08:08:54.095Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-fix-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:18:59.683Z",
+              "endedAt": "2026-09-20T08:19:50.259Z",
+              "status": "failed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-fix-2",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:21:45.469Z",
+              "endedAt": "2026-09-20T08:29:35.419Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "fix13-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-21T01:03:55.860Z",
+              "endedAt": "2026-09-21T01:29:42.039Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "merge-w1-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:40:46.138Z",
+              "endedAt": "2026-09-20T08:43:21.020Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-close-path-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T02:25:54.572Z",
+              "endedAt": "2026-09-21T02:26:54.374Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-core-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:12:38.852Z",
+              "endedAt": "2026-09-20T08:17:58.296Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-core-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:32:22.682Z",
+              "endedAt": "2026-09-20T08:35:23.134Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-docs-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:22:28.431Z",
+              "endedAt": "2026-09-20T08:29:26.807Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-docs-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:36:51.553Z",
+              "endedAt": "2026-09-20T08:39:52.961Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-final-w2-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T01:44:21.879Z",
+              "endedAt": "2026-09-21T01:54:16.580Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-signal-w2-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:57:23.686Z",
+              "endedAt": "2026-09-20T09:05:53.786Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-signal-w2-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T01:18:10.123Z",
+              "endedAt": "2026-09-21T01:24:01.620Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "signal-w2-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:44:33.619Z",
+              "endedAt": "2026-09-20T08:56:08.915Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T07:56:17.479Z",
+              "endedAt": "2026-09-20T08:16:00.989Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-fix-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:31:18.332Z",
+              "endedAt": "2026-09-20T08:31:34.172Z",
+              "status": "failed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-fix-2",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:31:56.189Z",
+              "endedAt": "2026-09-20T08:35:26.510Z",
+              "status": "completed",
+              "costUsd": null
+            }
+          ],
+          "reviews": {
+            "conclusions": {
+              "changes-requested": 10,
+              "approved": 11
+            },
+            "findingCount": 109
+          },
+          "events": {
+            "rework": 2,
+            "retry": 0
+          },
+          "timing": {
+            "preparationMinutes": 0,
+            "preparationEvidence": "workflow-created→first event",
+            "completionMinutes": 42.58,
+            "completionEvidence": "workflow-created→last event"
+          }
+        },
+        {
+          "workflow": "director-role-w2",
+          "depth": 5,
+          "tasks": [
+            {
+              "file": "w2-director-signal-resource.json",
+              "role": "junior"
+            }
+          ],
+          "budget": {
+            "maxAttempts": 6,
+            "maxCalls": 60,
+            "attemptsUsed": 1,
+            "callsUsed": 3
+          },
+          "workers": [
+            {
+              "id": "close-path-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-21T02:12:14.090Z",
+              "endedAt": "2026-09-21T02:24:29.677Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T07:55:45.943Z",
+              "endedAt": "2026-09-20T08:08:54.095Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-fix-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:18:59.683Z",
+              "endedAt": "2026-09-20T08:19:50.259Z",
+              "status": "failed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-fix-2",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:21:45.469Z",
+              "endedAt": "2026-09-20T08:29:35.419Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "fix13-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-21T01:03:55.860Z",
+              "endedAt": "2026-09-21T01:29:42.039Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "merge-w1-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:40:46.138Z",
+              "endedAt": "2026-09-20T08:43:21.020Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-close-path-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T02:25:54.572Z",
+              "endedAt": "2026-09-21T02:26:54.374Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-core-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:12:38.852Z",
+              "endedAt": "2026-09-20T08:17:58.296Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-core-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:32:22.682Z",
+              "endedAt": "2026-09-20T08:35:23.134Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-docs-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:22:28.431Z",
+              "endedAt": "2026-09-20T08:29:26.807Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-docs-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:36:51.553Z",
+              "endedAt": "2026-09-20T08:39:52.961Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-final-w2-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T01:44:21.879Z",
+              "endedAt": "2026-09-21T01:54:16.580Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-signal-w2-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:57:23.686Z",
+              "endedAt": "2026-09-20T09:05:53.786Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-signal-w2-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T01:18:10.123Z",
+              "endedAt": "2026-09-21T01:24:01.620Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "signal-w2-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:44:33.619Z",
+              "endedAt": "2026-09-20T08:56:08.915Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T07:56:17.479Z",
+              "endedAt": "2026-09-20T08:16:00.989Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-fix-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:31:18.332Z",
+              "endedAt": "2026-09-20T08:31:34.172Z",
+              "status": "failed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-fix-2",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:31:56.189Z",
+              "endedAt": "2026-09-20T08:35:26.510Z",
+              "status": "completed",
+              "costUsd": null
+            }
+          ],
+          "reviews": {
+            "conclusions": {
+              "changes-requested": 10,
+              "approved": 11
+            },
+            "findingCount": 109
+          },
+          "events": {
+            "rework": 1,
+            "retry": 0
+          },
+          "timing": {
+            "preparationMinutes": 0,
+            "preparationEvidence": "workflow-created→first event",
+            "completionMinutes": 1042.36,
+            "completionEvidence": "workflow-created→last event"
+          }
+        },
+        {
+          "workflow": "director-role-w3",
+          "depth": 5,
+          "tasks": [
+            {
+              "file": "w3-director-close-path.json",
+              "role": "junior"
+            }
+          ],
+          "budget": {
+            "maxAttempts": 6,
+            "maxCalls": 60,
+            "attemptsUsed": 1,
+            "callsUsed": 1
+          },
+          "workers": [
+            {
+              "id": "close-path-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-21T02:12:14.090Z",
+              "endedAt": "2026-09-21T02:24:29.677Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T07:55:45.943Z",
+              "endedAt": "2026-09-20T08:08:54.095Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-fix-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:18:59.683Z",
+              "endedAt": "2026-09-20T08:19:50.259Z",
+              "status": "failed",
+              "costUsd": null
+            },
+            {
+              "id": "core-role-fix-2",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:21:45.469Z",
+              "endedAt": "2026-09-20T08:29:35.419Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "fix13-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-21T01:03:55.860Z",
+              "endedAt": "2026-09-21T01:29:42.039Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "merge-w1-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:40:46.138Z",
+              "endedAt": "2026-09-20T08:43:21.020Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-close-path-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T02:25:54.572Z",
+              "endedAt": "2026-09-21T02:26:54.374Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-core-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:12:38.852Z",
+              "endedAt": "2026-09-20T08:17:58.296Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-core-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:32:22.682Z",
+              "endedAt": "2026-09-20T08:35:23.134Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-docs-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:22:28.431Z",
+              "endedAt": "2026-09-20T08:29:26.807Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-docs-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:36:51.553Z",
+              "endedAt": "2026-09-20T08:39:52.961Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-final-w2-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T01:44:21.879Z",
+              "endedAt": "2026-09-21T01:54:16.580Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-signal-w2-1",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-20T08:57:23.686Z",
+              "endedAt": "2026-09-20T09:05:53.786Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "review-signal-w2-2",
+              "role": "senior",
+              "modelRequested": "claude-opus-4-6-thinking",
+              "startedAt": "2026-09-21T01:18:10.123Z",
+              "endedAt": "2026-09-21T01:24:01.620Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "signal-w2-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:44:33.619Z",
+              "endedAt": "2026-09-20T08:56:08.915Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T07:56:17.479Z",
+              "endedAt": "2026-09-20T08:16:00.989Z",
+              "status": "completed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-fix-1",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:31:18.332Z",
+              "endedAt": "2026-09-20T08:31:34.172Z",
+              "status": "failed",
+              "costUsd": null
+            },
+            {
+              "id": "skills-docs-fix-2",
+              "role": "junior",
+              "modelRequested": "claude-sonnet-4-6",
+              "startedAt": "2026-09-20T08:31:56.189Z",
+              "endedAt": "2026-09-20T08:35:26.510Z",
+              "status": "completed",
+              "costUsd": null
+            }
+          ],
+          "reviews": {
+            "conclusions": {
+              "changes-requested": 10,
+              "approved": 11
+            },
+            "findingCount": 109
+          },
+          "events": {
+            "rework": 0,
+            "retry": 0
+          },
+          "timing": {
+            "preparationMinutes": 0,
+            "preparationEvidence": "workflow-created→first event",
+            "completionMinutes": 20.04,
+            "completionEvidence": "workflow-created→last event"
+          }
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "junior의 cachedInputTokens가 promptTokens보다 큽니다(60ce3c7b6850).",
+    "senior의 cachedInputTokens가 promptTokens보다 큽니다(60ce3c7b6850).",
+    "junior의 cachedInputTokens가 promptTokens보다 큽니다(8c22d8f1ab80).",
+    "senior의 cachedInputTokens가 promptTokens보다 큽니다(8c22d8f1ab80)."
+  ]
+}
