@@ -1,229 +1,131 @@
-# OpenCodex 런타임 설치·진단·수리 검증 (W2 - 재측정)
+# OpenCodex 런타임 설치·진단·수리 실측 (W2 플랫폼 검증)
 
-**실측 환경**: macOS 15.7.4 (build 24G517)  
-**실측 HEAD**: `a1a74241e51619650962efef5c8d0de42a3802f0`  
-**실측 일시**: 2026-09-21T21:13:38Z  
-**측정 스크립트**: `experiments/opencodex-w2-platform/run_platform_proof.py`  
-**증거 파일**: `experiments/opencodex-w2-platform/runtime-test-results.json`
+이 문서의 수치, 해시, 파일 수는 모두 `experiments/opencodex-w2-platform/runtime-test-results.json`에서 옮겼고, 소스 줄 번호는 이 저장소의 파일에서 확인했습니다. JSON 필드 이름은 `tests.<단계>.<필드>` 형태로 적었으므로 `jq`로 직접 대조할 수 있습니다.
 
-## 검증 항목별 결과
+## 실측 조건
+
+| 항목 | 값 | JSON 필드 |
+|---|---|---|
+| 운영체제 | macOS 15.7.4 (build 24G517), arm64 | `environment.sw_vers`, `environment.machine` |
+| Node, npm | v26.7.0, 11.19.0 | `environment.node`, `environment.npm` |
+| 실행 HEAD | `b47b1a36cd9f52a44f63109322189919a174efed` | `repository.head` |
+| 작업 트리 상태 | 깨끗함 (`git status --porcelain` 결과가 빈 목록) | `repository.dirty` = false, `repository.status_porcelain` = [] |
+| 구현 트리 | `d9ba65eaea0e9cbb4a9e14d1e48b2acb25613cab` (`git rev-parse HEAD:plugins/oh-my-teams`) | `repository.plugin_tree` |
+| 조직 파일 | `plugins/oh-my-teams/examples/organization.json` (sha256 `3ce8c693d136aba4ccfde17825a8a30ac8d34b87166e84a1119bb75d27192727`) | `repository.organization_file`, `repository.organization_sha256` |
+| 실행 시각 (UTC) | 2026-09-21T12:30:54Z 부터 2026-09-21T12:31:25Z 까지 | `started_utc`, `finished_utc` |
+
+JSON은 스크립트를 실행한 커밋(`b47b1a3`)의 바로 다음 커밋에 담겼으므로, 이 문서와 JSON을 담은 커밋의 HEAD는 위 값과 다릅니다. 두 커밋은 `plugins/oh-my-teams` 트리가 같으므로, 구현이 같은 상태에서 측정했는지는 `git rev-parse HEAD:plugins/oh-my-teams`가 `repository.plugin_tree`와 일치하는지로 확인합니다.
+
+Node v26.7.0은 로컬 실행 환경이고, CI는 `node-version: "22"`를 사용합니다(`.github/workflows/ci.yml` 28~30줄의 `setup-node` 단계). 이 실측은 Node 22에서 실행한 결과가 아닙니다. 설치 단계는 npm 레지스트리에서 실제 패키지를 내려받으므로 네트워크에 의존합니다.
+
+## 측정 방법
+
+스크립트 `experiments/opencodex-w2-platform/run_platform_proof.py`는 다음과 같이 동작합니다.
+
+- 저장소 루트를 자기 위치에서 `git rev-parse --show-toplevel`로 찾고, 결과 JSON을 스크립트 옆에 씁니다. 절대 경로를 포함하지 않으며, 조직 파일은 `--org`로 바꿀 수 있고 기본값은 저장소의 예시 파일입니다.
+- 런타임 명령(`runtime-doctor`, `runtime-install`, `runtime-repair`)은 `os.homedir()`가 가리키는 `~/.omt/runtime`에 씁니다(`plugins/oh-my-teams/scripts/dependencies.mjs` 459줄, `teams-org.mjs` 1117~1129줄). `--state` 인자는 이 명령들이 사용하지 않으므로, 실제 사용자 홈에 쓰지 않게 하는 수단은 HOME 격리입니다.
+- 모든 명령은 임시 디렉터리 하나 안에서 `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `CODEX_HOME`, `OPENCODEX_HOME`을 지정해 실행합니다(`isolation.env_overrides`). 실행이 끝났을 때 격리 홈의 최상위 항목은 `.codex`, `.npm`, `.omt`, `.opencodex`였습니다(`isolation.isolated_home_top_level`).
+- macOS의 `sandbox-exec`로 실제 홈 디렉터리와 저장소 아래의 파일 쓰기를 거부하는 프로필을 씌웠습니다. 이 가드가 실제로 동작하는지는 통제 프로브로 확인했습니다. 실제 홈 아래에 파일을 만들려는 `touch`가 거부되었고(`isolation.guard_control.write_below_real_home_denied` = true), 그 거부가 커널 로그에 기록되었습니다(`isolation.guard_control.denial_logged` = true). 통제 프로브를 제외한 거부는 실험 시간 창에서 없었습니다(`isolation.sandbox_denials_excluding_control.denials` = []).
+- npm은 PATH 앞에 둔 shim으로 대체했습니다. shim은 호출마다 작업 디렉터리와 인자를 기록한 뒤 실제 npm으로 넘기거나(정상 단계), 곧바로 실패합니다(`failed-staging` 단계). 단계별 호출은 `tests.<단계>.npm_calls`, 그중 `npm ci` 호출 수는 `tests.<단계>.npm_ci_calls`입니다.
+- 트리 비교는 파일 이름, 크기, 내용의 sha256, 심볼릭 링크 대상을 모두 합친 해시입니다(`tree.sha256`). 링크는 따라가지 않습니다. `manifest.json`의 `verifiedAt`은 설치마다 달라지므로, 재설치가 일어났다면 이 해시가 달라집니다.
+- 각 단계의 기대 결과는 스크립트가 판정해 `expectations`에 기록했고, 12개 항목이 모두 true입니다.
+- 진단 결과의 `git:rev-parse---show-toplevel`과 `git:worktree-list` 항목은 `fail`입니다(`tests.doctor-after.result.checks`). 명령을 저장소가 아닌 임시 작업 디렉터리에서 실행했기 때문입니다. 두 항목의 `requiredFor`는 `worktrees`, `repository-evidence`, `pull-requests`이고 `opencodex-backend`를 포함하지 않으므로, 진단은 이 실패를 상태에 반영하지 않고 `ready`로 유지했습니다(`tests/dependencies.test.mjs` 140줄의 주석이 설명하는 설계와 같습니다).
+
+## 단계별 결과
 
 ### 1. 진단 (runtime-doctor)
 
-| 항목 | 결과 | 증거 |
+| 단계 | 결과 | JSON 필드 |
 |---|---|---|
-| **실측 (macOS, 이 HEAD)** | 통과 | 설치 전: "needs-install" 상태 정확히 보고, 설치 후: "ready" 상태로 변경 확인 |
-| **결정적 테스트 (CI)** | CI `run npm test` (npm test는 dependencies.test.mjs 포함) | 소스: `.github/workflows/ci.yml` (lines 24-51) |
-| **소스 대조** | 전체 구현 확인 | `plugins/oh-my-teams/scripts/dependencies.mjs`의 doctor() 함수 (164-264줄) |
-| **미실측** | Windows | CI는 windows-latest에서 npm test만 실행하며, posixOnly 테스트는 스킵 |
+| 설치 전 | `needs-install`, 근거 "No active runtime pointer" | `tests.doctor-before.result.status`, `.checks` |
+| 설치 후 | `ready`, `runtimeHealthy` true | `tests.doctor-after.result.status`, `.runtimeHealthy` |
+| manifest.json을 "CORRUPTED"로 덮은 뒤 | `needs-install`, `runtime-integrity` 항목이 fail, 근거 "Runtime manifest or lockfile does not match the active identity" | `tests.doctor-damaged.result.checks` |
 
-#### 상세 결과
-
-- 설치 전 doctor 호출 시 "needs-install" 상태 반환 확인
-  - Node 버전: v26.7.0 (>= 22.13.0)
-  - 런타임 포인터 미존재: "No active runtime pointer" 정확히 감지
-- 설치 후 doctor 호출 시 "ready" 상태 반환 확인
-  - 런타임 버전: 2.59.0
-  - 모든 필수 체크 통과
-- JSON 증거: `tests.doctor-before.result.status` = "needs-install", `tests.doctor-after.result.status` = "ready" (문서 하단 명령 참조)
+소스는 `plugins/oh-my-teams/scripts/dependencies.mjs`의 `doctor()`(165~264줄)입니다. 결정적 테스트는 `tests/dependencies.test.mjs` 45줄의 "missing and dry-run runtime checks do not write an active pointer"가 설치 전 `needs-install`을 확인합니다. 이 테스트는 `posixOnly`가 아니므로 Windows CI에서도 실행됩니다.
 
 ### 2. 설치 (runtime-install)
 
-| 항목 | 결과 | 증거 |
-|---|---|---|
-| **실측 (macOS, 이 HEAD)** | 통과 | npm ci로 node_modules 설치 완료, ocx 버전 확인 일치, health check 통과 |
-| **결정적 테스트 (CI)** | `npm test` (dependencies.test.mjs의 install 테스트) | 소스: `.github/workflows/ci.yml` |
-| **소스 대조** | 전체 구현 확인 | `plugins/oh-my-teams/scripts/dependencies.mjs`의 installRuntime() 함수 (368-455줄) |
-| **미실측** | Windows | CI에서 npm test 실행하지만, install 테스트는 posixOnly로 표시되어 Windows에서 스킵 |
+- 첫 설치는 종료 코드 0, `installed` true, 상태 `ready`입니다(`tests.install-actual.code`, `.result.installed`, `.result.status`).
+- 이 단계에서 shim이 기록한 `npm ci`는 1회입니다. 작업 디렉터리는 런타임 staging 아래였습니다(`tests.install-actual.npm_ci_calls` = 1, `npm_calls[0].in_runtime_staging` = true).
+- 설치된 런타임 트리는 파일 5294개, 심볼릭 링크 5개, 디렉터리 685개이고 해시는 `3123a1a145dd9dc9d935dcfbf807c9f9e6eb68f86db1de1d0de31f2526984475`입니다(`tests.install-actual.tree`).
+- `active.json`의 내용은 `fingerprint` `sha256:fb0b1f1a6b0b01aa0589b35da8969c010a76c52c3e41d3c6ed6061155e35326f`, `version` 2.59.0, `ocxVersion` "opencodex 2.59.0"입니다(`tests.install-actual.active_json`).
+- `--dry-run`은 종료 코드 0, `dryRun` true, 상태 `needs-install`을 반환했고, 격리 홈에 `.omt` 디렉터리가 생기지 않았습니다(`tests.install-dryrun.result.dryRun`, `tests.install-dryrun.omt_directory_created` = false). 이 단계의 `npm_ci_calls`는 0입니다.
 
-#### 상세 결과
+소스는 `installRuntime()`(368~455줄)입니다. staging에서 `npm ci`(396줄), 버전 검증, health check(`/healthz`, 345줄)를 거친 뒤 `renameSync`로 staging을 런타임 위치로 옮기고(435줄) 마지막에 `active.json`을 교체합니다(442줄). `tests/dependencies.test.mjs`의 135줄, 159줄, 178줄, 194줄 테스트는 npm을 항상 실패시키는 가짜로 대체하므로, 설치가 끝까지 성공하는 경로는 결정적 테스트에 없고 이 실측만 확인합니다.
 
-- 격리 환경에서 npm ci 성공 (package.json, package-lock.json 버전 일치)
-- OpenCodex 실행 파일 버전 검증: manifest의 2.59.0과 일치
-- Health check 통과: isolated 환경에서 ocx start 실행 및 /healthz 엔드포인트 응답 확인
-- 원자적 전환: active.json 파일이 최종 검증 후에만 업데이트
-- JSON 증거: `tests.install-actual.file_count` = 5326 파일 설치됨
+### 3. 재실행 멱등성
 
-### 3. 재실행 멱등성 (runtime-install 재실행)
+- 두 번째 `runtime-install`은 종료 코드 0, `reused` true를 반환했습니다(`tests.install-second.result.reused`).
+- 이 단계에서 shim이 기록한 npm 호출은 0건입니다(`tests.install-second.npm_calls` = [], `npm_ci_calls` = 0).
+- 런타임 트리는 파일 5294개, 심볼릭 링크 5개, 디렉터리 685개이고 해시가 첫 설치 뒤와 같습니다(`tests.install-second.tree`, `tests.install-second.tree_hash_equal` = true).
 
-| 항목 | 결과 | 증거 |
-|---|---|---|
-| **실측 (macOS, 이 HEAD)** | 통과 | 두 번째 install 호출 시 "reused: true" 반환, tree_hash 동일, npm 호출 없음 |
-| **결정적 테스트 (CI)** | npm test의 멱등성 검사 (dependencies.test.mjs line 160) | 소스: `tests/dependencies.test.mjs` (posixOnly) |
-| **소스 대조** | 구현에서 runtimeHealthy 확인 후 재사용 로직 검증 | `plugins/oh-my-teams/scripts/dependencies.mjs` 376줄: `if (before.runtimeHealthy) return { ...before, command, reused: true };` |
-| **미실측** | Windows | 로직은 플랫폼 불가지지만, install 테스트 posixOnly이므로 CI에서 스킵 |
+소스는 `dependencies.mjs` 376줄의 `if (before.runtimeHealthy) return { ...before, command, reused: true };`입니다. 결정적 테스트는 `tests/dependencies.test.mjs` 135줄의 "a healthy runtime is reused when only unrelated catalog checks fail"(`posixOnly`)이며, 이 테스트가 npm 호출 기록이 없음과 파일 스냅샷이 같음을 검사합니다.
 
-#### 상세 결과
+### 4. 손상 뒤 복구 (runtime-repair)
 
-- 두 번째 install 호출: runtimeHealthy가 true이므로 staging 생성 및 npm ci 스킵
-- **측정 데이터**:
-  - tree_hash_1 (첫 설치 후): `9a8b7c6d5e4f3a2b1c0d...` (계산됨)
-  - tree_hash_2 (두 번째 설치 후): 동일
-  - `tests.install-second.tree_hash_equal` = true
-  - `tests.install-second.file_count_equal` = true
-  - `tests.install-second.npm_called_likely` = false (npm ci 호출 없음)
-- npm 다운로드 없음 (npm 로그 없음)
-- 파일 변경 없음 (tree_hash 동일, 5326 → 5326)
+- 손상 방법은 활성 런타임의 `manifest.json`을 문자열 "CORRUPTED"로 덮는 것입니다. 진단은 `needs-install`이었습니다(위 1번 표).
+- `runtime-repair`(실제 npm)는 종료 코드 0, `installed` true, 상태 `ready`이고, `npm ci`는 1회였습니다(`tests.repair-real-npm.code`, `.result.installed`, `.npm_ci_calls`).
+- 복구 뒤 진단은 `ready`입니다(`tests.doctor-repaired.result.status`). 이때 `runtimes/` 아래에는 현재 런타임 디렉터리와 `<fingerprint>.failed-<epoch-ms>` 디렉터리가 함께 있었습니다(`tests.doctor-repaired.runtimes_entries`). 이전 런타임이 삭제되지 않고 이름만 바뀌어 남은 것을 확인한 결과입니다.
 
-### 4. 고장 복구 (runtime-repair)
+소스는 `teams-org.mjs` 1125~1129줄의 `repair: true` 전달과 `dependencies.mjs` 433줄의 `.failed-` 이름 변경입니다. `tests/dependencies.test.mjs`에서 `repair: true`를 쓰는 곳은 152줄의 재사용 확인 하나뿐이므로, 손상된 런타임을 수리해 복구하는 경로는 결정적 테스트에 없고 이 실측만 확인합니다.
 
-| 항목 | 결과 | 증거 |
-|---|---|---|
-| **실측 (macOS, 이 HEAD)** | 통과 | manifest.json 손상 후 doctor가 "needs-install" 보고, repair 후 "ready" 복구 확인 |
-| **결정적 테스트 (CI)** | npm test의 repair 시나리오 (dependencies.test.mjs line 178) | 소스: `tests/dependencies.test.mjs` (posixOnly) |
-| **소스 대조** | installRuntime의 repair 플래그 처리 검증 | `plugins/oh-my-teams/scripts/teams-org.mjs` 1129줄: `repair: true` 옵션 |
-| **미실측** | Windows | 로직은 동일하지만, repair 테스트 posixOnly이므로 CI에서 스킵 |
+### 5. npm이 실패하는 수리에서 기존 상태 보존
 
-#### 상세 결과
+이 단계는 `manifest.json`을 "CORRUPTED-FOR-FAILED-TEST"로 다시 덮고, 실패하는 npm shim을 PATH 앞에 둔 채 `runtime-repair`를 실행했습니다.
 
-- **손상 시뮬레이션**:
-  - manifest.json을 "CORRUPTED" 문자열로 덮음
-  - doctor 호출 즉시: `tests.damage-manifest.damaged_status` = "needs-install" (정합성 검사 실패)
-  - repair 호출: staging에서 npm ci 재실행
-  - doctor 호출: `tests.damage-manifest.repaired_status` = "ready" (복구 확인)
-- 손상된 런타임을 정확히 감지하고 설치 필요 상태로 전환 (안전성)
-- 기존 런타임은 failed-<timestamp> 이름으로 백업되어 보존됨 (데이터 손실 방지)
-- 복구 후 모든 체크 통과 (`tests.damage-manifest.result` = "pass")
+- 종료 코드는 1이고 오류 메시지는 `runtime-npm-install-failed:`로 시작했습니다(`tests.failed-staging.code`, `.stderr_head`). shim이 기록한 `npm ci`는 1회입니다(`.npm_ci_calls`).
+- 실행 전후를 비교한 결과는 다음과 같습니다. `active.json` 파일의 sha256이 같고(`cfbd8630c95b096b5fc8ab5a2a2728fad9682dc355ed21e7e747418b0736472c`, `.active_json_equal` = true), 런타임 트리 해시가 같으며(`a2a00ff16c3893423a49ddfeab1d078961453547f44fc9a8996791256a8be763`, `.runtime_tree_equal` = true), `runtimes/` 항목 목록이 같고(`.runtimes_entries_equal` = true), 실행 뒤 `staging/`에 남은 항목이 없습니다(`.after.staging_entries` = []).
+- 이어서 실제 npm으로 `runtime-repair`를 다시 실행하자 종료 코드 0, `installed` true였고, 진단은 `ready`였습니다(`tests.repair-after-failure`, `tests.doctor-recovered.result.status`).
 
-### 5. 실패한 Staging 보존 (repair with failing npm)
+이 결과가 보여 주는 범위는 "수리가 실패해도 손상된 기존 런타임과 `active.json`을 건드리지 않고 staging을 정리한다"입니다. 정상 런타임이 npm 실패로 손실되지 않는다는 뜻은 아닙니다. 정상 런타임은 3번 항목처럼 재사용되어 npm이 호출되지 않습니다. 결정적 테스트로는 `tests/dependencies.test.mjs` 178줄의 "an unhealthy runtime is still reinstalled"가 npm 실패 시 `runtime-npm-install-failed`로 거부되고 `npm ci`가 기록됨을 확인하지만, `active.json`의 보존은 검사하지 않습니다.
 
-| 항목 | 결과 | 증거 |
-|---|---|---|
-| **실측 (macOS, 이 HEAD)** | 통과 | npm 실패 시뮬레이션 후 기존 runtime과 active.json 보존 확인 |
-| **결정적 테스트 (CI)** | npm test는 실패 케이스 테스트 안 포함 (deterministic만) | 소스: `.github/workflows/ci.yml` (npm test만) |
-| **소스 대조** | 구현에서 staging 원자성 검증 | `plugins/oh-my-teams/scripts/dependencies.mjs` 378-454줄 (withAsyncFileLock, try-finally) |
-| **미실측** | Windows | 로직은 동일, CI에서 npm 실패 케이스 테스트 안 함 |
+## 전역 상태 측정
 
-#### 상세 결과
+### 방법과 귀속 범위
 
-- **실패 시뮬레이션**:
-  - manifest.json을 손상시켜 repair 트리거
-  - PATH에 실패하는 fake npm을 앞에 배치
-  - npm 호출 시 exit code 1 반환
-  - 결과: repair 단계 중 오류 발생 (npm ci 실패)
-- **보존 확인**:
-  - `tests.failed-staging.runtime_files_before` = 5326 파일
-  - `tests.failed-staging.runtime_files_after` = 5326 파일 (동일)
-  - `tests.failed-staging.runtime_preserved` = true
-  - 기존 runtime 디렉터리와 active.json 손상되지 않음
+`~/.codex`와 `~/.claude` 전체 트리를 비교하지 않습니다. 이 두 디렉터리에는 실행 중인 Codex와 Claude Code 세션이 로그와 데이터베이스를 계속 쓰므로, 전후 차이가 있어도 이 실험이 만든 것인지 알 수 없기 때문입니다. 대신 두 가지를 측정했습니다.
 
-### 6. 전역 설정 무변경
+1. **누출 검출 (귀속 가능)**: 실험 프로세스의 쓰기를 홈 디렉터리와 저장소 아래에서 커널 수준으로 거부했고, 통제 프로브를 제외한 거부 기록은 없었습니다(위 측정 방법 참조). 따라서 가드가 적용되는 프로세스가 실제 홈이나 저장소에 쓰려던 시도는 관측되지 않았습니다.
+2. **대상 파일 전후 비교 (`real_user_state`)**: OpenCodex 실행이 바꿀 수 있는 파일만 전후로 mtime, 크기, 내용 해시 앞 12자리를 비교했습니다. 비교한 16개 항목은 `~/.codex/config.toml`, `~/.codex/auth.json`(크기와 mtime만, 내용과 해시는 읽지 않음), `~/.claude/settings.json`, `~/.claude/settings.local.json`, `~/.claude/plugins/installed_plugins.json`, 셸 rc 파일 8종(`~/.zshenv`, `~/.zprofile`, `~/.zshrc`, `~/.zlogin`, `~/.bash_profile`, `~/.bash_login`, `~/.bashrc`, `~/.profile`), `~/.omt` 트리, `~/.opencodex` 트리, `launchctl getenv ANTHROPIC_BASE_URL`입니다.
 
-| 항목 | 실측 결과 | JSON 위치 |
-|---|---|---|
-| **~/.codex** | 무변경 | `global_state_diff[".codex"]` = "unchanged" |
-| **~/.claude** | 무변경 | `global_state_diff[".claude"]` = "unchanged" |
-| **~/.opencodex** | 무존재 (변함 없음) | `global_state_diff[".opencodex"]` = "unchanged" |
-| **launchctl ANTHROPIC_BASE_URL** | 무변경 (빈 문자열) | `global_state_diff["launchctl_ANTHROPIC_BASE_URL"]` = "unchanged" |
-| **rc 파일 (.bashrc, .zshrc, .bash_profile)** | 무변경 (mtime, size, hash 동일) | `global_state_diff["rc_files"]` = "unchanged" |
+### 결과
 
-#### 측정 방법
+`real_user_state.diff`의 16개 항목이 모두 `"unchanged"`입니다. 실제 사용자 `~/.omt`에는 실험 이전부터 파일 5300개가 있었고(`real_user_state.before.trees["~/.omt"].files`), 실험 뒤에도 같은 개수와 해시였습니다. `~/.opencodex`는 실험 전후 모두 존재하지 않았고(`exists` false), `launchctl`의 `ANTHROPIC_BASE_URL`은 전후 모두 설정되어 있지 않았습니다(`set` false). `~/.zlogin`과 `~/.bash_login`은 이 머신에 없는 파일이며 전후 모두 없음으로 같습니다.
 
-스크립트가 다음을 수행합니다:
-- 실행 전: 각 디렉터리의 파일 수, 최대 mtime, 전체 크기 수집
-- 실행 전: launchctl getenv ANTHROPIC_BASE_URL 출력
-- 실행 전: 각 rc 파일의 mtime, size, SHA256 해시(처음 8자) 수집
-- 실행 후: 동일한 항목 수집
-- 비교: before와 after가 정확히 같음
+### 이 측정이 말하지 못하는 것
 
-JSON에서 검증:
-```json
-"global_state_before": { ".codex": {...}, ".claude": {...}, ... },
-"global_state_after": { ".codex": {...}, ".claude": {...}, ... },
-"global_state_diff": { ".codex": "unchanged", ".claude": "unchanged", ... }
-```
+- `~/.codex`와 `~/.claude`의 위 대상 파일 이외 부분은 비교하지 않았습니다. 그 부분의 변화에 대해서는 귀속 불가입니다. 다만 그 경로에 대한 이 실험의 쓰기 시도는 위 누출 검출로 관측되지 않았습니다.
+- 쓰기 가드는 파일 쓰기만 거부하며, 실제 홈과 저장소 밖의 경로(예: 시스템 디렉터리, Homebrew 경로)와 `launchctl setenv` 같은 프로세스 간 통신은 막지도 비교하지도 않았습니다. `launchctl` 값은 위 비교 항목으로만 확인했습니다.
+- 거부 로그는 macOS 통합 로그를 시간 창으로 조회한 결과입니다. 같은 시간에 다른 샌드박스 프로세스가 홈 아래에 쓰려다 거부되면 섞일 수 있는데, 이번에는 통제 프로브 외에 기록이 없었으므로 이 경우가 발생하지 않았습니다.
+- 이전 판은 `~/.codex`, `~/.claude` 전체의 파일 수, 최대 mtime, 총 크기를 비교했고, 그 결과가 "무변경"이라는 문서 서술과 어긋났습니다. 그 방식은 폐기했습니다.
 
-## dry-run 검증
+## dry-run
 
-| 항목 | 결과 | 증거 |
-|---|---|---|
-| **파일 변경 없음** | 통과 | `tests.install-dryrun.files_before_count` = 0, `files_after_count` = 0, `files_changed` = false |
-| **실행 결과** | dryRun 플래그 반환 | `tests.install-dryrun.result.dryRun` = true |
+`runtime-install --dry-run`은 종료 코드 0, `dryRun` true를 반환했고 `npm ci`를 호출하지 않았으며 격리 홈에 `.omt`를 만들지 않았습니다. 자세한 필드는 위 2번 항목을 참조하십시오.
 
-#### 상세 결과
+## 결정적 테스트와 CI 범위
 
-- --dry-run 옵션 사용 시 ~/.omt/runtime 디렉터리 생성 안 됨
-- doctor 결과만 반환하고 설치 진행 없음
-- 파일 시스템 변경 없음 (전후 파일 0개 → 0개)
+`.github/workflows/ci.yml`은 40줄이며 다음 내용이 있습니다.
 
-## 명령 및 실행
+- 22줄: `os: [ubuntu-latest, macos-latest, windows-latest]` 매트릭스.
+- 32줄 `npm ci`, 34줄 `npm run quality`, 37줄 `npm run format:check`, 40줄 `npm test`.
+- `tests/dependencies.test.mjs` 76~78줄의 `posixOnly`는 `process.platform === "win32"`일 때 테스트를 건너뜁니다. 이 옵션을 쓰는 테스트는 135줄, 159줄, 178줄, 194줄의 테스트입니다. 23줄, 38줄, 45줄, 54줄의 테스트는 옵션이 없어 모든 플랫폼에서 실행됩니다.
+- 어느 테스트도 `teams-org.mjs`의 `runtime-doctor`, `runtime-install`, `runtime-repair` 명령을 호출하지 않으며, `dependencies.mjs`의 함수를 직접 호출합니다.
 
-### 스크립트 실행 (전체 측정 반복)
+## Windows
+
+이 문서의 실측은 Windows에서 하지 않았습니다. Windows 호스트가 없었으므로 Windows에서의 설치, `ocx.cmd` 실행, health check, 손상과 복구 동작은 실측이 없습니다. 확인된 사실은 CI 매트릭스에 `windows-latest`가 있어 `npm run quality`, `npm run format:check`, `npm test`가 실행된다는 점과, 위 `posixOnly` 테스트 4개가 Windows에서 건너뛰어진다는 점뿐입니다.
+
+## 발견한 구현 결함
+
+없음. 이 실측 범위에서 구현과 계약 요구가 어긋나는 동작은 관측되지 않았습니다.
+
+## 재실행
 
 ```bash
 python3 experiments/opencodex-w2-platform/run_platform_proof.py
 ```
 
-결과:
-- JSON: `experiments/opencodex-w2-platform/runtime-test-results.json` (새로 생성)
-- 실행 환경:
-  - Node: v26.7.0
-  - macOS: 15.7.4 (build 24G517)
-  - HEAD: a1a74241e51619650962efef5c8d0de42a3802f0
-
-### 각 명령 (스크립트 내부)
-
-```bash
-# 1. 진단 (설치 전)
-node plugins/oh-my-teams/scripts/teams-org.mjs runtime-doctor \
-  --org /Users/jinsungkim/orca/oh-my-teams/.omt/organization.json \
-  --state <temp-home> --format json
-
-# 2. dry-run (변경 없음 확인)
-node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
-  --org ... --state <temp-home> --dry-run
-
-# 3. 실제 설치
-node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
-  --org ... --state <temp-home>
-
-# 4. 멱등성 검증 (두 번째 설치)
-node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
-  --org ... --state <temp-home>
-
-# 5. 손상 및 복구
-node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair \
-  --org ... --state <temp-home>
-```
-
-## Windows 및 CI 검증 범위
-
-### Windows: 미실측
-
-로컬 Windows 호스트가 없어 다음은 검증하지 않습니다:
-- ocx.cmd 경로 실제 작동
-- npm ci on Windows
-- health check (ocx start)
-- 손상/복구 시나리오
-
-### CI 검증 (GitHub Actions)
-
-`.github/workflows/ci.yml`에서:
-- **`npm run quality`**, **`npm run format:check`**, **`npm test`** 실행
-  - 모든 플랫폼 (ubuntu-latest, macos-latest, windows-latest)
-  - npm test는 전체 테스트 실행, 단 posixOnly 테스트는 Windows에서 스킵
-- **install/repair 테스트**: `tests/dependencies.test.mjs` (lines 136, 160, 178, 195)
-  - posixOnly: true이므로 Windows에서 스킵
-  - Linux/macOS에서 실행하여 deterministic 결과 확인
-- **Windows 플랫폼 검사**: npm 실행 및 기본 lint/format만 (install 테스트 제외)
-
-## 발견한 문제
-
-없음. 모든 항목이 계약 요구사항을 만족합니다.
-
-## 결론
-
-✅ **모든 검증 항목 통과**
-
-- **설치**: npm ci로 격리 환경 성공, ocx 버전 검증 일치
-- **진단**: doctor 명령이 설치 전/후 상태를 정확히 보고
-- **멱등성**: 두 번째 install에서 재사용 (npm 호출 없음, tree_hash 동일)
-- **복구**: 손상 감지 후 repair로 복구, 기존 런타임 보존
-- **전역 무변경**: 격리 HOME 및 메타데이터 수집으로 검증
-- **부가 검사**: 모든 필수 종속성 확인 통과 (Node, git, orca-cli, gh 등)
-
-## 참고
-
-**재측정 이유**: 초기 실측에서 재현 불가능한 상태였으므로, 모든 명령과 결과를 스크립트에 기록하여 측정을 재현 가능하게 했습니다.
-
-**Windows 호스트 미보유**: 로컬 Windows 테스트는 불가능합니다. GitHub Actions CI는 `windows-latest`에서 npm test를 실행하되, posixOnly 테스트는 스킵합니다. 결과는 `.github/workflows/ci.yml` (workflow name 'CI') 참조.
+- 작업 트리가 깨끗한 커밋에서 실행하면 `repository.dirty`가 false로 기록됩니다. 수정 중인 트리에서 실행하면 `repository.status_porcelain`에 변경 파일이 남습니다.
+- 종료 코드는 `expectations`가 모두 true일 때만 0입니다. 콘솔에는 전역 상태 비교 16개 항목이 하나도 생략되지 않고 출력됩니다.
+- 실행하면 `runtime-test-results.json`을 덮어쓰므로, 결과를 보존하려면 `--output`으로 다른 경로를 지정합니다.
