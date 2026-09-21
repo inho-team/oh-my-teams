@@ -1102,6 +1102,32 @@ test("minimal-change discipline lives in one place and each role links it", () =
   );
 });
 
+test("no-ghostwriting discipline lives in one place and every role limit links it", () => {
+  const canonical = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/references/no-ghostwriting.md"),
+    "utf8",
+  );
+  // Review independence is the reason specific to this organization, and the
+  // exception keeps a run without lower roles from reading the rule as a ban.
+  assert.match(canonical, /\*\*검토 독립성:\*\*/);
+  assert.match(canonical, /\*\*하위 역할이 없는 실행:\*\*/);
+  assert.match(canonical, /## 합리화 차단표/);
+  // The limits section is the part role-spec prepends to each instruction.
+  for (const role of ["pm", "pl", "senior", "junior"]) {
+    const limits = readSkill(role).split("### 한계")[1]?.split(/\n## /)[0];
+    assert.ok(limits, `${role} must have a ### 한계 section`);
+    assert.match(
+      limits,
+      /\.\.\/\.\.\/references\/no-ghostwriting\.md/,
+      `${role} must link to no-ghostwriting.md inside ### 한계`,
+    );
+  }
+  assert.match(
+    readSkill("junior"),
+    /옮겨 적었다는 사실을 `worker_done` 보고에 남긴다/,
+  );
+});
+
 test("a senior may implement only a task assigned to it, and never reviews its own work", () => {
   const senior = readSkill("senior");
   const pm = readSkill("pm");
