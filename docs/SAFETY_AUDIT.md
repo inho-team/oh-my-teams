@@ -37,9 +37,9 @@
 
 ## 검증 범위와 남은 항목
 
-2026-09-16 최종 점검에서 `npm test`의 447개 테스트, `npm run quality`의
-95개 활성 모듈·306개 공개 export 검사, `npm run format:check`의 Prettier
-검사, `npm run eval:organization`의 8개 결정적 시나리오가 모두 통과했다. 테스트는 실제 CLI 프로세스와 테스트 전용
+2026-09-16 최종 점검에서 `npm test`의 523개 테스트, `npm run quality`의
+99개 활성 모듈·327개 공개 export 검사, `npm run format:check`의 Prettier
+검사, `npm run eval:organization`의 9개 결정적 시나리오가 모두 통과했다. 테스트는 실제 CLI 프로세스와 테스트 전용
 provider를 사용하며, 이 최종 점검에서는 추가 유료 모델을 호출하지 않았다.
 
 품질 검사는 여전히 경량 소스 검사다. JSDoc의 의미적 정확성, 모든 JS

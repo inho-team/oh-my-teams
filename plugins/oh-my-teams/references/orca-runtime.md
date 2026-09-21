@@ -130,7 +130,7 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 ### 역할 터미널에서 시작
 
-모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Agy 역할의 시작 경로는 `role-terminal`이 `scripts/launch-matrix.mjs`의 호환성 표를 조회해 정한다. 표가 `blocked`를 돌려주면 터미널을 만들기 전에(시도 예약 전에) 거부하고, `headless`를 돌려주면 아래 Agy 대기 판정 문단의 headless 경로를 따른다. 실행 경로가 `supervised-terminal`이고 근거가 `unverified`인 조합도 별도 승인 없이 터미널을 연다. 결과의 `matrix`와 `warnings`에 근거 등급·환경·버전 경고를 남기며, 실행 후 준비 상태와 모델을 확인하기 전에는 작업을 넘기지 않는다. `--allow-unverified` 옵션은 이전 호출과의 호환을 위해 남겨 두며 알려진 실패를 우회하지 않는다. 검사 대상은 선언 세션이 아니라 저장된 역할 프로필의 실행기다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
+모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Agy 역할의 시작 경로는 `role-terminal`이 `scripts/launch-matrix.mjs`의 호환성 표를 조회해 정한다. 표가 `blocked`를 돌려주면 터미널을 만들기 전에(시도 예약 전에) 거부하고, `headless`를 돌려주면 아래 Agy 대기 판정 문단의 headless 경로를 따른다. 실행 경로가 `supervised-terminal`이고 근거가 `unverified`인 조합도 별도 승인 없이 터미널을 연다. 결과의 `matrix`와 `warnings`에 근거 등급·환경·버전 경고를 남기며, 실행 후 준비 상태와 모델을 확인하기 전에는 작업을 넘기지 않는다. `--allow-unverified` 옵션은 이전 호출과의 호환을 위해 남겨 두며 알려진 실패를 우회하지 않는다. 검사 대상은 이사(kickoff를 선언한 호스트 세션)가 아니라 저장된 역할 프로필의 실행기다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
 
 ```text
 <orca> worktree create --name <name> --parent-worktree active --json
@@ -202,7 +202,7 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --
 <orca> terminal send --terminal <handle> --text "<브리프 경로와 시작 지시>" --enter --json
 ```
 
-`role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model>`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 브리프를 보내지 않고 사용자에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 선언 세션이 PM을 대신 맡지도 않는다.
+`role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model>`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort>`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 보내기 전에 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 브리프를 보내지 않고 이사에게 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 이사가 PM을 대신 맡지도 않는다.
 
 ## 무응답 worker 감독
 
