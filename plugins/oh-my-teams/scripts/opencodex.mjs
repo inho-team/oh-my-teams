@@ -7,16 +7,29 @@ import net from "node:net";
 import { assert } from "./core.mjs";
 
 /**
+ * Providers that support OpenCodex fixed-account runner binding.
+ * @type {string[]}
+ */
+export const OPENCODEX_RUNNER_PROVIDERS = Object.freeze(["codex"]);
+
+/**
  * Validates a profile's optional OpenCodex runner without changing legacy profile behavior.
  * @param {object} profile - Organization profile.
  * @param {object} activeRuntime - Active runtime identity.
+ * @param {string} [profileId] - Organization profile ID (the key of `org.profiles`) named in a rejection message.
  * @returns {{kind: string, mode: string, accountHomeRef: string, runtimeFingerprint: string} | null} Valid runner or null for legacy.
  */
-export function validateOpenCodexRunner(profile, activeRuntime) {
+export function validateOpenCodexRunner(profile, activeRuntime, profileId) {
   if (!profile.runner) return null;
   const runner = profile.runner;
   assert(runner.kind === "opencodex", "opencodex-binding-unverified");
   assert(runner.mode === "fixed-account", "opencodex-pool-unverified");
+  if (profile.provider !== undefined) {
+    assert(
+      OPENCODEX_RUNNER_PROVIDERS.includes(profile.provider),
+      `Invalid OpenCodex runner binding: ${profileId ?? "(unknown)"} (provider ${profile.provider} does not support runners)`,
+    );
+  }
   assert(
     typeof runner.accountHomeRef === "string" &&
       runner.accountHomeRef === profile.account,
@@ -778,14 +791,16 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
  * @param {object} profile - Organization profile with an OpenCodex runner.
  * @param {object} runtime - Active runtime diagnosis result.
  * @param {NodeJS.ProcessEnv} [environment=process.env] - Explicit caller configuration.
+ * @param {string} [profileId] - Organization profile ID named in a rejection message.
  * @returns {object} Secret-free fixed-account binding.
  */
 export function resolveOpenCodexBinding(
   profile,
   runtime,
   environment = process.env,
+  profileId,
 ) {
-  const runner = validateOpenCodexRunner(profile, runtime);
+  const runner = validateOpenCodexRunner(profile, runtime, profileId);
   if (!runner) return null;
   const key = runner.accountHomeRef.toUpperCase().replace(/[^A-Z0-9]/g, "_");
   const accountHome = environment[`OMT_OPENCODEX_${key}_HOME`];
