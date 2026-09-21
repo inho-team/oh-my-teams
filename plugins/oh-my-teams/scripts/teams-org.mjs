@@ -94,7 +94,6 @@ import { recordLaunch } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
 import {
   acknowledgeSignal,
-  findCloseReadySignal,
   listInbox,
   notifyDirector,
   readSignal,
