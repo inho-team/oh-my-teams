@@ -153,7 +153,11 @@ purpose-changed는 task가 바뀌어서 나온 값이 아닙니다. 같은 터�
 
 명령 범위를 판정하는 `judgeCommandScope`와 `decideApproval`은 `prompt-answers.mjs`에 구현되어 `tests/prompt-answers.test.mjs`에서 검증되지만, `prompt-answers.mjs` 밖의 런타임 코드에서는 호출되지 않습니다(저장소 전체에서 두 이름을 검색해 확인했습니다). 따라서 명령 승인 질문에 감독자가 대신 답하는 동작은 아직 작동하지 않습니다.
 
-`orca-runtime.md`의 「프롬프트 질문 답하기」 절과 `waiting-on-human-prompt` 항목은 폴더 신뢰나 명령 승인 같은 질문에 감독자가 `prompt-answer`로 답한다고 적고, 같은 절의 4번 항목은 명령 승인 화면을 분류기가 아직 알아보지 못한다고 적습니다. 이 서술들은 함께 읽어야 합니다. 현재 코드에서 분류기가 질문으로 인식하지 못한 화면(`kind`가 `unknown`이고 CLI를 특정하지 못한 경우)은 `prompt-supervision.mjs`가 키를 보내지 않고 `no-question`과 `next: resume-precheck`로 기록합니다. 따라서 명령 승인 화면이 나오면 감독자는 답하지 못하고, 그 화면이 상위 보고로 이어지는지는 `escalate`의 `waiting-on-human-prompt` 판정을 거치는 별도 경로에 달려 있으며 이번 통합에서 실측하지 않았습니다. 이 서술의 어긋남을 문서에서 고치는 일도 남아 있습니다.
+분류기가 알아보지 못한 화면(`kind`가 `unknown`이고 CLI를 특정하지 못한 경우)의 처리는 이 통합 뒤에 고쳤습니다. 고치기 전에는 `prompt-supervision.mjs`가 이 화면을 키 없이 `no-question`과 `next: resume-precheck`로 기록했고, `terminal-idle-check`와 `worker-start`의 사전 점검은 같은 화면을 Orca의 `blockedReason`으로 거부하면서 `prompt-answer`를 실행하라고 안내했습니다. 그래서 캡처되지 않은 명령 승인이나 업데이트 안내에서는 "`prompt-answer`가 `no-question` → 점검 거부 → `prompt-answer`"가 되풀이되었고 문서에도 출구가 없었습니다.
+
+지금은 `prompt-answer`가 그런 화면에서 사전 점검과 같은 `terminal wait --for tui-idle`을 3초 동안 실행해 Orca의 상태를 읽습니다(`probeTerminalBlock`, `orca-adapter.mjs`). Orca가 `blockedReason`을 보고하면 키와 지시를 보내지 않고 `escalate`와 `next: report-upstream`으로 끝내며, 그 `blockedReason`을 결과와 `prompt-answers.jsonl`에 남깁니다. Orca가 멈춤을 보고하지 않으면(`satisfied: true`, 이유 없는 `satisfied: false`, `timeout`) 예전처럼 `no-question`입니다. Orca의 응답을 얻지 못하거나 해석하지 못하면 `orca-state-unavailable`로 거부해서, 화면을 깨끗하다고 단정하지 않습니다. 같은 화면과 같은 `blockedReason`을 감독 루프가 다시 읽으면 기록에 줄을 더하지 않고 앞선 시도를 `repeated: true`로 돌려줍니다. 화면 내용은 기록하지 않고 행의 지문만 비교하므로, 화면이나 이유가 바뀌면 새 시도로 기록합니다. `orca-runtime.md`, 두 사전 점검의 거부 메시지, PM·PL 스킬은 이 동작에 맞췄고, 명령 승인 화면을 분류기가 알아보지 못한다는 서술은 유지했습니다. 회귀 테스트는 `tests/prompt-supervision.test.mjs`에 있습니다.
+
+이 동작은 가짜 Orca로만 검증했습니다. 실제 Orca에서 캡처되지 않은 명령 승인 화면에 `terminal wait`를 실행해 `blockedReason`이 나오는지, 짧은 대기 시간 안에 그 값이 돌아오는지는 확인하지 못했습니다. 키를 보낸 뒤 재확인에서 인식된 질문이 사라지고 캡처되지 않은 다른 질문이 이어지는 경우는 여전히 `resolved`로 기록될 수 있으며, 그다음 사전 점검이 그 질문을 거부한 뒤에야 위 경로로 드러납니다. 명령 승인에 감독자가 키로 대신 답하는 동작은 앞에서 적은 대로 아직 작동하지 않습니다.
 
 ### 미검증: Codex와 Agy, 그리고 Enter와 Esc의 효과
 

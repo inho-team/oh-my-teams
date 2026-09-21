@@ -14,6 +14,9 @@
  * 2. The screen is read, and `classifyPromptScreen` decides. Only `send-key`
  *    sends a key, `redirect` sends the worker a message without any key, and
  *    everything else goes back to the caller as a report for the level above.
+ *    A screen the classifier does not recognize is judged by Orca's own state
+ *    of the terminal: a reported stop (`blockedReason`) escalates, without a
+ *    key, and a state that cannot be read is refused, never taken as clear.
  * 3. One key is sent for one screen state. The screen is then read again: a
  *    question that is still there is never answered a second time.
  * 4. Every attempt, including one that sent nothing, is appended to
@@ -35,7 +38,11 @@ import path from "node:path";
 import { assert, run, withAsyncFileLock } from "./core.mjs";
 import { kickoffOwner } from "./delivery.mjs";
 import { listKickoffs } from "./kickoff-registry.mjs";
-import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+import {
+  probeTerminalBlock,
+  runOrcaJson,
+  selectOrcaExecutable,
+} from "./orca-adapter.mjs";
 import { classifyPromptScreen } from "./prompt-answers.mjs";
 import { readSendReceipt } from "./prompt-submission.mjs";
 import { DISPATCH_AUTHORITY, assertWorktreeUnshared } from "./role-launch.mjs";
@@ -60,6 +67,7 @@ export const PROMPT_ANSWER_REFUSALS = Object.freeze([
   "worktree-shared",
   "worktree-lineage-unproven",
   "screen-unavailable",
+  "orca-state-unavailable",
   "key-not-allowed",
   "already-answered",
   "answer-in-progress",
@@ -170,6 +178,7 @@ export function promptAnswerSummary(stateDir) {
     kind: record.kind,
     status: record.status,
     refusal: record.refusal,
+    blockedReason: record.blockedReason ?? null,
     key: record.key?.name ?? null,
     keyBasis: record.key?.basis ?? null,
     sent: record.sent,
@@ -452,6 +461,78 @@ async function reconfirm({
   return last;
 }
 
+// A screen the classifier does not recognize is not necessarily clear: a command
+// approval or an update notice nobody captured is unknown to it, yet Orca's
+// tui-idle wait, which the launch pre-check reads, stops on it and names a
+// `blockedReason`. Without this step the pre-check refuses the terminal and
+// sends the supervisor back here, which would answer "no question" forever.
+// No key is sent for such a screen. When Orca reports the stop, the attempt
+// escalates with that reason; when Orca reports none, it is `no-question`; when
+// Orca's state cannot be read, the screen is not judged clear.
+async function judgeUnrecognizedScreen({
+  orca,
+  terminal,
+  stateDir,
+  lines,
+  description,
+  finish,
+  execute,
+}) {
+  const probe = await probeTerminalBlock(orca, terminal, { execute });
+  if (probe.state === "unknown")
+    return finish({
+      ...description,
+      status: "refused",
+      refusal: "orca-state-unavailable",
+      sent: false,
+      key: null,
+      reason: `The classifier does not recognize this screen and Orca's state of the terminal could not be read (${probe.detail}), so it is not judged clear`,
+      next: "report-upstream",
+    });
+  if (probe.state !== "blocked")
+    return finish({
+      ...description,
+      orcaState: probe.state,
+      status: "no-question",
+      sent: false,
+      key: null,
+      next: "resume-precheck",
+    });
+  // Only the digest of the rows is kept, never the rows: the screen is
+  // unrecognized work output. A supervision loop that reads the same stopped
+  // screen again gets the earlier attempt back instead of one more line, and
+  // any change of the screen or of Orca's reason is a new attempt.
+  const { blockedReason } = probe;
+  const fingerprint = crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify([
+        terminal,
+        "blocked",
+        blockedReason,
+        lines.map((line) => String(line ?? "").trimEnd()),
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 24);
+  const earlier = readPromptAnswers(stateDir).findLast(
+    (record) => record.terminal === terminal,
+  );
+  if (earlier?.status === "escalate" && earlier.fingerprint === fingerprint)
+    return { ...earlier, repeated: true, repeatOf: earlier.id };
+  return finish({
+    ...description,
+    orcaState: "blocked",
+    blockedReason,
+    fingerprint,
+    status: "escalate",
+    sent: false,
+    key: null,
+    reason: `The classifier does not recognize this screen, and Orca reports the terminal held at a question (${blockedReason}); no key is sent`,
+    next: "report-upstream",
+  });
+}
+
 /**
  * Reads a terminal's screen and answers its question once, when it may be.
  *
@@ -534,12 +615,14 @@ export async function answerTerminalPrompt({
     excerpt: excerptOf(screen.lines, found),
   };
   if (found.kind === "unknown" && found.cli === null)
-    return finish({
-      ...description,
-      status: "no-question",
-      sent: false,
-      key: null,
-      next: "resume-precheck",
+    return judgeUnrecognizedScreen({
+      orca,
+      terminal,
+      stateDir,
+      lines: screen.lines,
+      description,
+      finish,
+      execute,
     });
   const fingerprint = screenFingerprint(terminal, found);
   if (found.action === "redirect") {
