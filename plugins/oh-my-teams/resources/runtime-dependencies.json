@@ -6,9 +6,15 @@
       "requiredFor": ["omt-runtime", "npm-install", "opencodex", "orca-cli"],
       "platforms": ["macos", "windows"],
       "detect": {
-        "command": "node --version",
+        "command": {
+          "argv": ["node", "--version"],
+          "description": "Report the version of the selected Node executable."
+        },
         "minimum": ">=22.13.0",
-        "pathCommand": "command -v node (macOS) or Get-Command node (PowerShell)",
+        "pathCommand": {
+          "argv": ["node"],
+          "description": "Resolve the selected Node executable with the platform PATH resolver."
+        },
         "failureKinds": ["missing", "path-mismatch", "version-too-old"]
       },
       "install": {
@@ -26,10 +32,24 @@
       "requiredFor": ["worktrees", "repository-evidence", "pull-requests"],
       "platforms": ["macos", "windows"],
       "detect": {
-        "command": "git --version",
-        "recommendedMinimum": ">=2.23.0",
-        "pathCommand": "command -v git (macOS) or Get-Command git (PowerShell)",
-        "featureChecks": ["git rev-parse --show-toplevel", "git worktree list"],
+        "command": {
+          "argv": ["git", "--version"],
+          "description": "Report the version of the selected Git executable."
+        },
+        "pathCommand": {
+          "argv": ["git"],
+          "description": "Resolve the selected Git executable with the platform PATH resolver."
+        },
+        "featureChecks": [
+          {
+            "argv": ["git", "rev-parse", "--show-toplevel"],
+            "description": "Confirm that the current directory is a Git repository."
+          },
+          {
+            "argv": ["git", "worktree", "list"],
+            "description": "Confirm that Git worktree listing is available."
+          }
+        ],
         "failureKinds": [
           "missing",
           "path-mismatch",
@@ -53,9 +73,24 @@
       "requiredFor": ["codex-runner", "codex-auth", "opencodex-backend"],
       "platforms": ["macos", "windows"],
       "detect": {
-        "command": "codex --version",
-        "authCommand": "codex login status",
-        "featureChecks": ["codex exec --help", "codex features list"],
+        "command": {
+          "argv": ["codex", "--version"],
+          "description": "Report the version of the selected Codex executable."
+        },
+        "authCommand": {
+          "argv": ["codex", "login", "status"],
+          "description": "Check login state without printing credentials."
+        },
+        "featureChecks": [
+          {
+            "argv": ["codex", "exec", "--help"],
+            "description": "Confirm that non-interactive execution is available."
+          },
+          {
+            "argv": ["codex", "features", "list"],
+            "description": "Read the feature set from the selected Codex executable."
+          }
+        ],
         "failureKinds": [
           "missing",
           "path-mismatch",
@@ -82,8 +117,26 @@
       "requiredFor": ["opencodex-backend", "model-routing"],
       "platforms": ["macos", "windows"],
       "detect": {
-        "commands": ["ocx --version", "opencodex --version"],
-        "featureChecks": ["ocx --help", "ocx status"],
+        "commands": [
+          {
+            "argv": ["ocx", "--version"],
+            "description": "Report the version of the ocx executable."
+          },
+          {
+            "argv": ["opencodex", "--version"],
+            "description": "Report the version of the opencodex executable."
+          }
+        ],
+        "featureChecks": [
+          {
+            "argv": ["ocx", "--help"],
+            "description": "Confirm the OpenCodex command surface."
+          },
+          {
+            "argv": ["ocx", "status"],
+            "description": "Confirm the local OpenCodex server and backend status."
+          }
+        ],
         "failureKinds": [
           "missing",
           "path-mismatch",
@@ -96,7 +149,11 @@
       "install": {
         "macos": "With Node and npm ready, install the exact dependency version declared by plugins/oh-my-teams/package.json using npm; no separate Bun installation is required by the official guide.",
         "windows": "With Node and npm ready, install the exact dependency version declared by plugins/oh-my-teams/package.json using npm. Windows execution is documented as an install path, not as a completed platform measurement.",
-        "login": "Configure the provider or user-controlled ChatGPT login required by the selected route, then verify the local server and Codex backend separately.",
+        "login": {
+          "argv": ["ocx", "login"],
+          "environment": ["OPENCODEX_HOME=<owned-empty-directory>"],
+          "description": "Log in exactly one user-selected account in a separate OPENCODEX_HOME. Do not read or copy existing Claude credentials. Verify exactly one account and a secret-free account label with ocx status; block on missing, multiple, or secret-bearing labels."
+        },
         "repair": "Check both command names and PATH, compare the installed package version with package.json, and reinstall only in an owned staging prefix. Do not claim pool switching or automatic account changes from a healthy process alone."
       },
       "sources": [
@@ -109,11 +166,50 @@
       "requiredFor": ["orca-worktree", "orca-terminal", "supervised-worker"],
       "platforms": ["macos", "windows"],
       "detect": {
-        "command": "orca --version",
+        "command": {
+          "argv": ["<selected-orca-executable>", "--version"],
+          "description": "Run the executable selected once by orca-adapter.mjs; do not choose a fallback after failure."
+        },
+        "discovery": {
+          "adapter": "plugins/oh-my-teams/scripts/orca-adapter.mjs",
+          "selection": "selectOrcaExecutable",
+          "fallback": "forbidden",
+          "steps": [
+            {
+              "argv": ["<selected-orca-executable>", "--version"],
+              "description": "Confirm the selected CLI executable."
+            },
+            {
+              "argv": [
+                "<selected-orca-executable>",
+                "skills",
+                "get",
+                "orca-cli"
+              ],
+              "description": "Discover the version-matched Orca CLI guide."
+            },
+            {
+              "argv": ["<selected-orca-executable>", "status", "--json"],
+              "description": "Read status JSON and require app version, ready runtime identity, and capabilities."
+            }
+          ],
+          "statusFields": [
+            "result.runtime.appVersion",
+            "result.runtime.reachable",
+            "result.runtime.state",
+            "result.capabilities",
+            "_meta.runtimeId or result.runtime.runtimeId"
+          ]
+        },
         "featureChecks": [
-          "orca --help",
-          "orca worktree --help",
-          "orca terminal --help"
+          {
+            "argv": ["<selected-orca-executable>", "worktree", "--help"],
+            "description": "Confirm worktree capability on the selected executable."
+          },
+          {
+            "argv": ["<selected-orca-executable>", "terminal", "--help"],
+            "description": "Confirm terminal capability on the selected executable."
+          }
         ],
         "failureKinds": [
           "missing",
@@ -138,12 +234,33 @@
       "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"],
       "platforms": ["macos", "windows"],
       "detect": {
-        "binary": "orca --version",
+        "binary": {
+          "argv": ["<selected-orca-executable>", "--version"],
+          "description": "Reuse the executable selected by orca-adapter.mjs; a failed selection cannot trigger fallback."
+        },
+        "discovery": {
+          "adapter": "plugins/oh-my-teams/scripts/orca-adapter.mjs",
+          "selection": "selectOrcaExecutable",
+          "fallback": "forbidden",
+          "statusFields": [
+            "result.runtime.appVersion",
+            "result.runtime.reachable",
+            "result.runtime.state",
+            "result.capabilities",
+            "_meta.runtimeId or result.runtime.runtimeId"
+          ]
+        },
         "process": "Orca desktop process must be observable on the host before GUI-dependent features are enabled.",
         "featureChecks": [
-          "owned worktree is visible",
-          "terminal capability is available",
-          "runtime identity matches the CLI"
+          {
+            "description": "Confirm that an owned worktree is visible in status JSON."
+          },
+          {
+            "description": "Confirm that the requested terminal capability is available."
+          },
+          {
+            "description": "Confirm that desktop runtime identity matches the selected CLI."
+          }
         ],
         "failureKinds": [
           "not-installed",
@@ -167,9 +284,24 @@
       "requiredFor": ["pull-requests", "github-api", "remote-evidence"],
       "platforms": ["macos", "windows"],
       "detect": {
-        "command": "gh --version",
-        "authCommand": "gh auth status",
-        "featureChecks": ["gh repo view --help", "gh pr --help"],
+        "command": {
+          "argv": ["gh", "--version"],
+          "description": "Report the version of the selected GitHub CLI executable."
+        },
+        "authCommand": {
+          "argv": ["gh", "auth", "status"],
+          "description": "Check GitHub CLI login state without printing a token."
+        },
+        "featureChecks": [
+          {
+            "argv": ["gh", "repo", "view", "--help"],
+            "description": "Confirm repository inspection capability."
+          },
+          {
+            "argv": ["gh", "pr", "--help"],
+            "description": "Confirm pull request capability."
+          }
+        ],
         "failureKinds": [
           "missing",
           "path-mismatch",

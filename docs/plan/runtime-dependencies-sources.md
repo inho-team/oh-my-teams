@@ -4,7 +4,7 @@
 
 ## 범위와 버전 원칙
 
-Node.js는 저장소의 `package.json`이 요구하는 `>=22.13.0`을 필수 런타임으로 취급합니다. Git은 worktree와 저장소 증거에 필요하며, Codex 공식 설치 문서가 권장하는 2.23 이상을 최소 권장 기준으로 기록합니다. OpenCodex 버전은 미래에 추가될 `plugins/oh-my-teams/package.json`의 dependency가 정본이며, 이 카탈로그에는 별도의 버전 상수를 두지 않습니다.
+Node.js는 저장소의 `package.json`이 요구하는 `>=22.13.0`을 필수 런타임으로 취급합니다. Git은 임의의 버전 하한이 아니라 `git rev-parse --show-toplevel`과 `git worktree list` 같은 필요한 기능의 실행 결과로 지원 여부를 판정합니다. OpenCodex 버전은 미래에 추가될 `plugins/oh-my-teams/package.json`의 dependency가 정본이며, 이 카탈로그에는 별도의 버전 상수를 두지 않습니다.
 
 Codex CLI와 OpenCodex는 서로 다른 구성 요소입니다. Codex CLI는 실행기와 로그인 상태를 제공하고, OpenCodex는 Codex 앞의 로컬 라우팅 계층을 제공합니다. Orca CLI는 worktree와 terminal을 관리하며, Orca desktop은 GUI와 호스트 런타임을 제공합니다. `gh`는 GitHub 원격 작업과 pull request 기능을 사용할 때만 필수입니다.
 
@@ -31,10 +31,10 @@ Codex CLI와 OpenCodex는 서로 다른 구성 요소입니다. Codex CLI는 실
 | 미설치 | macOS에서 `command -v <command>`, PowerShell에서 `Get-Command <command>`를 실행 | 해당 도구의 공식 설치 경로를 사용자에게 안내하고, 전역 설치를 대신 수행하지 않습니다. |
 | PATH 누락 또는 잘못된 실행 파일 | `<command> --version`과 resolved path를 함께 확인 | 새 셸을 열고 PATH를 다시 확인합니다. 여러 관리 방식이 보이면 사용자의 선택 없이 하나를 삭제하지 않습니다. |
 | 버전 부족 또는 불일치 | Node/Git 버전과 OpenCodex의 package.json dependency를 대조하고, Orca CLI와 desktop의 버전을 대조 | staging에서 지원 버전을 확인한 뒤 활성 경로를 바꿉니다. 기존 정상 실행기를 먼저 삭제하지 않습니다. |
-| 기능 부족 | `git worktree list`, `codex exec --help`, `orca worktree --help`, `gh pr --help`를 실행 | 기능이 확인되지 않으면 해당 기능을 비활성화하고, 다른 도구나 다른 provider로 묵시적으로 전환하지 않습니다. |
+| 기능 부족 | catalog의 각 항목에 정의한 argv를 그대로 실행합니다. 예를 들어 `git worktree list`, `codex exec --help`, 선택된 Orca 실행 파일의 `worktree --help`, `gh pr --help`를 사용합니다. | 기능이 확인되지 않으면 해당 기능을 비활성화하고, 다른 도구나 다른 provider로 묵시적으로 전환하지 않습니다. 명령 문자열을 셸에서 재해석하거나 eval하지 않습니다. |
 | 로그인 필요 | Codex는 `codex login status`, GitHub CLI는 `gh auth status`를 실행 | 사용자가 직접 `codex login` 또는 `gh auth login`을 수행합니다. `auth.json`, 토큰, `gh auth token` 출력은 수집하거나 보고하지 않습니다. |
-| Orca 앱 미실행 | CLI 확인과 별도로 Orca desktop 프로세스 및 요청한 capability를 확인 | 앱을 사용자가 실행한 뒤 CLI/runtime 버전을 다시 발견합니다. CLI가 있다는 이유만으로 desktop 서비스가 실행 중이라고 판단하지 않습니다. |
-| OpenCodex 서버 또는 backend 미준비 | `ocx --version`, `opencodex --version`, `ocx --help`와 Codex backend 진단을 각각 확인 | 명령 이름 둘 중 하나만 발견해 성공으로 판단하지 않습니다. package.json 버전과 설치 버전을 대조하고, 서버·Codex 로그인·provider 설정을 별도로 복구합니다. |
+| Orca 앱 미실행 | `plugins/oh-my-teams/scripts/orca-adapter.mjs`의 `selectOrcaExecutable`가 선택한 하나의 실행 파일을 재사용하여 `--version`, `skills get orca-cli`, `status --json`을 argv로 실행하고, status JSON의 app/runtime/capabilities와 desktop 프로세스를 확인합니다. 선택 실행 파일이 실패하면 다른 바이너리로 fallback하지 않습니다. | 앱을 사용자가 실행한 뒤 같은 CLI/runtime 쌍을 다시 발견합니다. CLI가 있다는 이유만으로 desktop 서비스가 실행 중이라고 판단하지 않습니다. |
+| OpenCodex 서버 또는 backend 미준비 | `ocx --version`, `opencodex --version`, `ocx --help`와 Codex backend 진단을 각각 확인합니다. 로그인은 별도 소유 디렉터리를 `OPENCODEX_HOME`으로 지정한 argv에서 정확히 한 계정만 확인하고, 비밀값이 없는 label만 허용합니다. | 명령 이름 둘 중 하나만 발견해 성공으로 판단하지 않습니다. 기존 Claude 자격 증명을 읽거나 복사하지 않고, package.json 버전과 설치 버전을 대조하며 서버·Codex 로그인·provider 설정을 별도로 복구합니다. |
 
 ## 복구 경계와 기능 선언
 
