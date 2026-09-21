@@ -14,6 +14,8 @@ const taskSchema = () =>
   readJson("plugins/oh-my-teams/schemas/task.schema.json");
 const workflowSchema = () =>
   readJson("plugins/oh-my-teams/schemas/workflow.schema.json");
+const organizationSchema = () =>
+  readJson("plugins/oh-my-teams/schemas/organization.schema.json");
 
 const delegation = {
   scope: "closed",
@@ -117,4 +119,40 @@ test("workflow schema and runtime both allow omitted role and retain explicit ro
       }),
     /Each workflow task needs a file and role when explicitly assigned/,
   );
+});
+
+test("organization policy delegation is optional and accepts only intern-first", () => {
+  const schema = organizationSchema();
+  const policy = schema.properties.policy;
+  const delegation = policy.properties.delegation;
+  assert.ok(!policy.required.includes("delegation"));
+  assert.equal(delegation.type, "object");
+  assert.equal(delegation.additionalProperties, false);
+  assert.deepEqual(delegation.required, ["strategy"]);
+  assert.deepEqual(delegation.properties.strategy.enum, ["intern-first"]);
+
+  const existingOrganization = readJson(
+    "plugins/oh-my-teams/examples/organization.json",
+  );
+  assert.equal(existingOrganization.policy.delegation, undefined);
+  assert.ok(existingOrganization.policy);
+
+  const valid = {
+    ...existingOrganization,
+    policy: {
+      ...existingOrganization.policy,
+      delegation: { strategy: "intern-first" },
+    },
+  };
+  assert.equal(valid.policy.delegation.strategy, "intern-first");
+  assert.deepEqual(delegation.properties.strategy.enum, [
+    valid.policy.delegation.strategy,
+  ]);
+  assert.equal(delegation.additionalProperties, false);
+
+  assert.ok(!delegation.properties.strategy.enum.includes("junior-first"));
+  assert.ok(!delegation.properties.strategy.enum.includes(1));
+  assert.ok(!delegation.required.includes(""));
+  assert.equal(delegation.additionalProperties, false);
+  assert.notEqual(typeof "intern-first", delegation.type);
 });

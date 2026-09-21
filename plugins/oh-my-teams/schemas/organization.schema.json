@@ -87,6 +87,14 @@
               "maximum": 10
             }
           }
+        },
+        "delegation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strategy"],
+          "properties": {
+            "strategy": { "enum": ["intern-first"] }
+          }
         }
       }
     }
