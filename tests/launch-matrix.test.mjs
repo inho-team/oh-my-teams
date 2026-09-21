@@ -283,7 +283,7 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
   );
   assert.equal(geminiWin32.evidence, "verified");
 
-  // 예시 3: Codex 신뢰 없음 → blocked (codex-trust-workspace)
+  // 예시 3: Codex 신뢰 없음 → 터미널은 열고 감독자가 질문에 답한다 (codex-trust-workspace)
   const codexNoTrust = predictLaunchPath({
     runner: "codex",
     model: undefined,
@@ -294,8 +294,11 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
-  assert.equal(codexNoTrust.path, "blocked");
+  assert.equal(codexNoTrust.path, "supervised-terminal");
   assert.ok(codexNoTrust.reason.includes("codex-trust-workspace"));
+  assert.equal(codexNoTrust.nextOwner, "pm");
+  assert.match(codexNoTrust.nextAction, /prompt-answer/);
+  assert.notEqual(codexNoTrust.evidence, "verified");
 
   // 예시 4: 검증에 쓰지 않은 버전 → 경로는 유지하고 근거 등급만 낮춘다
   const otherVersion = predictLaunchPath({
@@ -598,7 +601,7 @@ test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () =
     "codexTrustRecordExists=true → 4행 건너뜀",
   );
 
-  // codexTrustRecordExists: false → 4행 적용
+  // codexTrustRecordExists: false → 4행 적용 (열고, 감독자가 답한다)
   const notTrustedFalse = predictLaunchPath({
     runner: "codex",
     model: undefined,
@@ -609,13 +612,13 @@ test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () =
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
-  assert.equal(notTrustedFalse.path, "blocked");
+  assert.equal(notTrustedFalse.path, "supervised-terminal");
   assert.ok(
     notTrustedFalse.reason.includes("codex-trust-workspace"),
-    "codexTrustRecordExists=false → blocked(codex-trust-workspace)",
+    "codexTrustRecordExists=false → supervised-terminal(codex-trust-workspace)",
   );
 
-  // codexTrustRecordExists: "unknown" → 4행 적용 (신뢰 미확인도 차단)
+  // codexTrustRecordExists: "unknown" → 4행 적용 (신뢰 미확인도 열고 감독자가 답한다)
   const notTrustedUnknown = predictLaunchPath({
     runner: "codex",
     model: undefined,
@@ -626,10 +629,10 @@ test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () =
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
-  assert.equal(notTrustedUnknown.path, "blocked");
+  assert.equal(notTrustedUnknown.path, "supervised-terminal");
   assert.ok(
     notTrustedUnknown.reason.includes("codex-trust-workspace"),
-    "codexTrustRecordExists=unknown → blocked(codex-trust-workspace)",
+    "codexTrustRecordExists=unknown → supervised-terminal(codex-trust-workspace)",
   );
 });
 
@@ -677,7 +680,7 @@ test("Codex 신뢰 있음은 verified supervised-terminal을 돌려주고 검증
   assert.equal(trustedWin.evidence, "verified");
 });
 
-test("Codex 신뢰 없음/unknown은 4행 codex-trust-workspace로 차단된다", () => {
+test("Codex 신뢰 없음/unknown은 4행 codex-trust-workspace로 열리고 감독자가 답한다", () => {
   for (const codexTrustRecordExists of [false, "unknown", undefined, null]) {
     const result = predictLaunchPath({
       runner: "codex",
@@ -693,12 +696,50 @@ test("Codex 신뢰 없음/unknown은 4행 codex-trust-workspace로 차단된다"
     });
     assert.equal(
       result.path,
-      "blocked",
-      `codexTrustRecordExists=${JSON.stringify(codexTrustRecordExists)} → blocked`,
+      "supervised-terminal",
+      `codexTrustRecordExists=${JSON.stringify(codexTrustRecordExists)} → supervised-terminal`,
+    );
+    assert.equal(result.nextOwner, "pm", "사람이 아니라 감독자가 답한다");
+    assert.notEqual(
+      result.evidence,
+      "verified",
+      "실측 전에는 verified가 아니다",
     );
     assert.ok(
       result.reason.includes("codex-trust-workspace"),
       `codexTrustRecordExists=${JSON.stringify(codexTrustRecordExists)} → codex-trust-workspace`,
     );
   }
+});
+
+test("Agy 신뢰 기록 없음은 터미널을 열고 감독자가 질문에 답하게 하며 버전 경고를 덮지 않는다", () => {
+  const result = predictLaunchPath({
+    runner: "agy",
+    model: "gemini-3.1-pro-high",
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: false,
+    skipDangerousModePermissionPrompt: true,
+    ...V,
+  });
+  assert.equal(result.path, "supervised-terminal");
+  assert.deepEqual(result.reason, ["agent-trust-workspace"]);
+  assert.equal(result.nextOwner, "pm");
+  assert.match(result.nextAction, /prompt-answer/);
+  assert.notEqual(result.evidence, "verified");
+
+  // 검증하지 않은 Orca 버전이면 근거 등급이 unverified로 내려가도 안내는 남는다.
+  const lowered = predictLaunchPath({
+    runner: "codex",
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: true,
+    codexTrustRecordExists: false,
+    skipDangerousModePermissionPrompt: true,
+    orcaVersion: "9.9.9",
+    cliVersion: V.cliVersion,
+  });
+  assert.equal(lowered.evidence, "unverified");
+  assert.match(lowered.nextAction, /prompt-answer/);
+  assert.match(lowered.nextAction, /검증 기록이 부족합니다/);
 });

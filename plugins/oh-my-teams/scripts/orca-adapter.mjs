@@ -482,9 +482,10 @@ async function assertTerminalIdle(
   const wait = envelope?.result?.wait;
   if (!waited.timedOut && wait?.satisfied === false) {
     // Orca stops waiting at once when the screen holds a trust, update or
-    // approval prompt, and says so only inside an `ok` envelope. The prompt
-    // needs someone at the terminal, so the signal is built without the hint
-    // table: a reason that matched a hinted code would gain a route.
+    // approval prompt, and says so only inside an `ok` envelope. The signal is
+    // built without the hint table: a reason that matched a hinted code would
+    // gain a route. The question is answered by the supervisor through the
+    // `prompt-answer` command, not by a person at the terminal.
     const reason = wait.blockedReason ?? "not_idle";
     const state = wait.blockedReason
       ? `is held at a prompt (${reason})`
@@ -492,8 +493,13 @@ async function assertTerminalIdle(
     // When the matrix predicted the terminal would reach supervised-terminal
     // but Orca refused it here, the prediction itself is wrong: signal that
     // so the table can be revised rather than the same start repeated.
+    // A trust question the matrix already named (its reason lists a trust code)
+    // is the expected supervised path, not a wrong prediction.
+    const trustExpected =
+      /trust/.test(reason) &&
+      (matrixPrediction?.reason ?? []).some((code) => /trust/.test(code));
     const mismatch =
-      matrixPrediction?.path === "supervised-terminal"
+      matrixPrediction?.path === "supervised-terminal" && !trustExpected
         ? "matrix-mismatch"
         : undefined;
     const refused = assertFailureSignal({
@@ -502,7 +508,13 @@ async function assertTerminalIdle(
       message:
         `Terminal ${terminal} ${state} instead of reporting tui-idle, ` +
         "so Orca worker-start could not hand it a task; no Dispatch was created. " +
-        "Read the terminal screen and report it rather than repeating the start" +
+        (wait.blockedReason
+          ? "Do not repeat the start. The supervisor answers the question: run " +
+            `\`teams-org.mjs prompt-answer --org <org> --terminal ${terminal} --workflow-id <id> --state <dir>\` ` +
+            "(it reads the screen, sends one key, and re-reads it), then run terminal-idle-check again and " +
+            "worker-start only after the terminal reports idle; when the command reports escalate or unresolved, " +
+            "report it upward and send a director-signal only for what a person must decide (references/orca-runtime.md)"
+          : "Read the terminal screen and report it rather than repeating the start") +
         (mismatch
           ? ` (matrix-prediction-failure: predicted supervised-terminal for ${reason})`
           : ""),
