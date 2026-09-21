@@ -5,8 +5,6 @@ description: 실패·취소·중단된 oh my teams kickoff의 실행 팀을 안�
 
 # 팀 해체
 
-해체할 때에는 Intern의 배정·실행·실패 및 상위 승격 기록과 Junior 통합·Senior 검토 결과를 함께 보존한다. 실행 중인 작업을 완료로 간주하지 않으며, 기존 예산·실패 증거·재개 조건을 유지한다.
-
 성공으로 종료할 수 없는 kickoff를 정리한다. 해체는 성공 완료가 아니며 실패를 숨기거나 Goal을 `complete`로 바꾸지 않는다.
 
 해체할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회해 `<pm-state>` 경로를 확인한다. kickoff가 여럿이면 사용자가 지목한 것만 해체한다. PM 워크트리를 회수하므로 이 절차도 kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.

@@ -83,7 +83,7 @@ node <runtime> role-spec --org <project>/.omt/organization.json --role senior --
 | 4 | PM → Senior → Junior → Intern | 3단계 과제에 더해, 인용 수집·반복 수정처럼 좁고 검증이 쉬운 일이 많은 경우. |
 | 5 | PM → PL → Senior → Junior → Intern | 의존성이 있는 병렬 작업 파동이 여럿이라 분할과 통합을 따로 맡겨야 하는 경우. |
 
-깊이 3을 기본으로 선택하더라도 Intern에 맡길 수 있는 닫힌 실무를 Junior에게 자동으로 접지 않는다. 이번 실행의 깊이에 Intern이 없으면 가장 가까운 상위 역할이 이어받고 그 사실을 기록하며, Intern을 포함할 수 있는지와 포함하지 않은 이유를 함께 남긴다. 조직에 Intern이 선언되지 않은 기존 workflow는 그대로 보존하고 호환 방식으로 처리한다.
+깊이 3은 PM → Senior → Junior만 포함하므로 Intern 후보 작업은 현재 역할 해석 규칙에 따라 Junior에게 접힌다. 사용자가 깊이를 명시하지 않은 새 일반 계획에서 적합한 Intern 후보가 있으면 PM은 계획 단계에서 depth 4 이상을 선택하여 Intern을 포함하고, 사용자가 깊이를 명시했거나 기존 workflow를 재개하는 경우에는 그 선택과 실행 의미를 우선하여 자동으로 바꾸지 않는다. 조직 또는 workflow에 Intern이 없으면 가장 가까운 상위 역할이 이어받고, Intern 미사용·승격 사유와 실제 실행 역할을 기록한다.
 
 처음 깊이는 workflow 요청의 `depth`에 적는다. 적지 않으면 조직이 선언한 모든 역할을 쓴다. `adjust`로 조직에서 뺀 역할은 깊이를 올려도 돌아오지 않는다. 조직에서 역할을 빼는 것은 구독이 없는 것 같은 영구적인 제약을 위한 것이고, 난이도는 깊이로 다룬다.
 
