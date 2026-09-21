@@ -17,6 +17,7 @@ import {
   SIGNAL_KINDS,
   processLiveness,
 } from "../plugins/oh-my-teams/scripts/director.mjs";
+import { releaseKickoff } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
   acquireResource,
   parseMeminfo,
@@ -74,6 +75,28 @@ function makeProject(t, { withDirectorTerminal = false } = {}) {
   return { dir, orgFile, worktreeId };
 }
 
+// Registers a second kickoff in the same project and returns its worktree id.
+function addKickoff(dir, orgFile, name) {
+  const pmDir = path.join(dir, name);
+  fs.mkdirSync(path.join(pmDir, ".omt"), { recursive: true });
+  const worktreeId = `test-repo::${pmDir}`;
+  const entryName = crypto
+    .createHash("sha256")
+    .update(worktreeId)
+    .digest("hex");
+  writeJSON(path.join(path.dirname(orgFile), "kickoffs", `${entryName}.json`), {
+    schemaVersion: 1,
+    goal: "other goal",
+    pm: { worktreeId, path: pmDir, stateDir: path.join(pmDir, ".omt") },
+    runId: null,
+    organizationRevision: exampleOrg.revision,
+    brief: path.join(dir, "brief.md"),
+    delivery: { mode: "none" },
+    createdAt: new Date().toISOString(),
+  });
+  return worktreeId;
+}
+
 // ─── SIGNAL_KINDS and RESOURCE_KINDS ─────────────────────────────────────────
 
 test("SIGNAL_KINDS contains the four expected kinds", () => {
@@ -94,8 +117,8 @@ test("sendSignal writes a pending record and lists it in director-inbox", (t) =>
 
   const result = sendSignal(orgFile, {
     worktreeId,
-    kind: "progress",
-    text: "halfway done",
+    kind: "blocked",
+    text: "waiting on a decision",
   });
 
   assert.ok(result.signaled);
@@ -104,10 +127,154 @@ test("sendSignal writes a pending record and lists it in director-inbox", (t) =>
   const { signals } = listInbox(orgFile);
   assert.equal(signals.length, 1);
   assert.equal(signals[0].id, result.id);
-  assert.equal(signals[0].kind, "progress");
-  assert.equal(signals[0].text, "halfway done");
+  assert.equal(signals[0].kind, "blocked");
+  assert.equal(signals[0].text, "waiting on a decision");
   assert.equal(signals[0].status, "pending");
   assert.equal(signals[0].worktreeId, worktreeId);
+});
+
+test("a progress signal is stored acknowledged and never waits in the pending list", (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "halfway done",
+  });
+  assert.equal(first.record.status, "acknowledged");
+  assert.equal(first.record.autoAcknowledged, true);
+  assert.ok(first.record.acknowledgedAt);
+  assert.deepEqual(listInbox(orgFile).signals, []);
+
+  // Nothing is pending, so the same progress text may be sent again.
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "halfway done",
+  });
+  assert.notEqual(second.id, first.id);
+  assert.equal(readSignal(orgFile, first.id).status, "acknowledged");
+});
+
+test("a new close-ready supersedes the older pending close-ready of the same worktree only", (t) => {
+  const { orgFile, worktreeId, dir } = makeProject(t);
+  const otherId = addKickoff(dir, orgFile, "pm-other");
+  const otherReady = sendSignal(orgFile, {
+    worktreeId: otherId,
+    kind: "close-ready",
+    text: "ready",
+    head: "sha0",
+  });
+
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "close-ready",
+    text: "ready",
+    head: "sha1",
+    source: "/src",
+  });
+  const decision = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "keep me",
+  });
+  // The same text for a new HEAD is not a duplicate; it replaces the old one.
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "close-ready",
+    text: "ready",
+    head: "sha2",
+    source: "/src",
+  });
+  assert.deepEqual(second.superseded, [first.id]);
+
+  const old = readSignal(orgFile, first.id);
+  assert.equal(old.status, "superseded");
+  assert.equal(old.supersededBy, second.id);
+  assert.ok(old.supersededAt);
+  assert.deepEqual(
+    listInbox(orgFile)
+      .signals.map((s) => s.id)
+      .sort(),
+    [decision.id, second.id, otherReady.id].sort(),
+  );
+  assert.equal(findCloseReadySignal(orgFile, worktreeId).head, "sha2");
+
+  // Resending the identical close-ready is still a duplicate.
+  assert.throws(
+    () =>
+      sendSignal(orgFile, {
+        worktreeId,
+        kind: "close-ready",
+        text: "ready",
+        head: "sha2",
+        source: "/src",
+      }),
+    /Duplicate pending/,
+  );
+  assert.equal(readSignal(orgFile, otherReady.id).status, "pending");
+});
+
+test("kickoff-release closes that kickoff's pending signals and leaves other kickoffs alone", (t) => {
+  const { orgFile, worktreeId, dir } = makeProject(t);
+  const otherId = addKickoff(dir, orgFile, "pm-other");
+  const pending = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "still open",
+  });
+  const replied = sendSignal(orgFile, {
+    worktreeId,
+    kind: "blocked",
+    text: "b",
+  });
+  acknowledgeSignal(orgFile, replied.id);
+  const others = sendSignal(orgFile, {
+    worktreeId: otherId,
+    kind: "decision",
+    text: "other kickoff",
+  });
+
+  const warn = t.mock.method(console, "warn", () => {});
+  const released = releaseKickoff(orgFile, { worktreeId, reason: "disbanded" });
+  assert.ok(warn.mock.callCount() >= 1);
+  assert.deepEqual(released.closedSignals, [pending.id]);
+
+  const closed = readSignal(orgFile, pending.id);
+  assert.equal(closed.status, "closed");
+  assert.equal(closed.closedBy, "kickoff-release");
+  assert.equal(closed.closedReason, "disbanded");
+  assert.ok(closed.closedAt);
+  assert.equal(readSignal(orgFile, replied.id).status, "acknowledged");
+  assert.deepEqual(
+    listInbox(orgFile).signals.map((s) => s.id),
+    [others.id],
+  );
+});
+
+test("findCloseReadySignal ignores a superseded record even when its time sorts later", (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "close-ready",
+    text: "v1",
+    head: "sha1",
+  });
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "close-ready",
+    text: "v2",
+    head: "sha2",
+  });
+  // Same-millisecond sends leave sentAt equal; the superseded one must still lose.
+  const file = path.join(
+    path.dirname(orgFile),
+    "director",
+    "inbox",
+    `${first.id}.json`,
+  );
+  writeJSON(file, { ...readJSON(file), sentAt: "2999-01-01T00:00:00.000Z" });
+  assert.equal(findCloseReadySignal(orgFile, worktreeId).id, second.id);
 });
 
 test("sendSignal rejects an unknown kind", (t) => {

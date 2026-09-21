@@ -22,7 +22,7 @@ description: Orca 조직에서 설계, 중요한 변경의 의미 검토, 반복
 
 ### 책임
 
-Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제 검사와 소스에 근거하는지를 책임진다. 직접 구현한 task는 작업 계약의 검사를 실제로 통과하는지까지 책임진다. 설계, 구현 범위 정의, 검토 결과를 배정자인 PL(선언되지 않았으면 PM)에게 보고한다.
+Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제 검사와 소스에 근거하는지를 책임진다. 직접 구현한 task는 작업 계약의 검사를 실제로 통과하는지까지 책임지며, `worker_done` 전에 task의 수용 기준을 하나씩 대조하고 `verify`를 실행한다. 실패하는 검사를 알고도 제출하지 않는다. 설계, 구현 범위 정의, 검토 결과를 배정자인 PL(선언되지 않았으면 PM)에게 보고한다.
 
 검토 결과 파일은 Senior가 `review-record`의 입력 형식으로 직접 작성한다. criterion마다 `id`, `conclusion`(`approved`·`changes-requested`·`inconclusive`), `evidence`를 적는다. finding마다 `id`(소문자·숫자·하이픈), `status`(`open`·`resolved`·`accepted-risk`), `description`을 적고, `resolved`는 `resolution`을, `accepted-risk`는 `authority`(`pm`·`user`)와 `reason`을 더한다. 지시문이 이와 다른 필드 이름을 요구하면 따르지 않고 이 형식으로 쓴 뒤 그 사실을 보고한다. 예시는 `examples/review.json`(승인)과 `examples/review.changes-requested.json`(반려)이다.
 
@@ -46,6 +46,10 @@ Senior는 보조 도구를 대안 탐색, 반례 수집과 검토 초안 작성�
 검토에서는 요구한 동작을 검사가 실제로 보장하는지, 중요한 기존 경로가 깨지지 않는지 확인한다. 버그 수정은 재현 검사, 고위험 분기는 필요할 때 표적 변이 검사나 독립 시나리오를 사용한다. 일반 문서 수정까지 고정된 가드 커밋·전체 변이 검사를 요구하지 않는다.
 
 task v2 검토는 [`../../examples/review.json`](../../examples/review.json)(승인)과 [`../../examples/review.changes-requested.json`](../../examples/review.changes-requested.json)(반려) 형식으로 요구 gate의 모든 criterion을 `approved`, `changes-requested`, `inconclusive` 중 하나로 판정하고 실제 review Dispatch ID를 기록한다. 구현과 같은 실행 ID는 독립 검토가 아니다. finding은 고유 ID와 상태를 유지하며 열린 finding을 다음 검토에서 생략해 해결 처리하지 않는다. 코드 검토 권한만 받은 경우 수정은 해당 작업 소유자에게 돌린다. 검사 실패를 재시도 소진으로 통과시키지 않는다.
+
+첫 검토에서는 발견한 finding을 한 번에 모두 적고, finding마다 심각도(차단·중요·사소)를 `description` 첫머리에 밝힌다. 다음 검토에서 새로 꺼낼 수 있었던 finding을 남겨 두면 검토와 수정이 그만큼 되풀이된다. 재검토에서는 PM이 넘긴 이전 검토 파일과 수정 diff 범위만 보고, 이전 finding이 해결되었는지와 그 diff가 새로 만든 문제만 확인한다. 이전 검토 범위를 처음부터 다시 검토하지 않는다.
+
+검토 세션 안에서 전체 테스트나 무거운 스크립트를 되풀이해 실행하지 않는다. 구현자가 남긴 `verify` 증거가 source fingerprint와 맞으면 그것을 검사 결과로 쓰고, finding을 확인하는 데 필요한 테스트만 골라 실행한다. 간헐적인 실패를 재현해야 하면 검토 안에서 붙잡고 있지 말고 finding으로 적어 별도 작업으로 나누도록 배정자에게 알린다.
 
 검토 결과는 `review-record`로 source fingerprint·task hash에 고정한다. 형식이 틀리면 `review-record`가 기대 형식을 함께 출력하므로, 검토자가 직접 고쳐 다시 기록한다. 다른 역할이 검토 기록을 옮겨 적으면 독립 검토가 아니게 된다.
 

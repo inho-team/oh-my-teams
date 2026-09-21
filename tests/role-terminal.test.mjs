@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
@@ -10,7 +11,9 @@ import {
 } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import {
   agentStarted,
+  clearRoleTerminal,
   commandPending,
+  freshContextDecision,
   AGY_BANNER_COLUMNS,
   launchLine,
   openRoleTerminal,
@@ -24,6 +27,10 @@ import {
   ALLOWED_OPTIONS,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import {
+  readLaunches,
+  recordLaunch,
+} from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
@@ -998,4 +1005,178 @@ test("Claude POSIX PM launches without approval and preserves evidence warnings 
       if (!started) assert.equal(result.status, "blocked");
     }
   }
+});
+
+test("a reused Claude terminal is cleared for a different task or any review, not for a rework", () => {
+  const line = (extra) => ({
+    via: "worker-start",
+    at: "2026-09-21T00:00:00.000Z",
+    terminal: "term_1",
+    workflowId: "wf",
+    workflowTaskId: "task-a",
+    orcaTaskId: "orca_1",
+    purpose: null,
+    ...extra,
+  });
+  const ask = (extra) => ({
+    terminal: "term_1",
+    provider: "claude",
+    workflowId: "wf",
+    workflowTaskId: "task-a",
+    orcaTaskId: null,
+    purpose: null,
+    ...extra,
+  });
+  // role-terminal lines and other terminals do not count as a previous task.
+  const opened = [
+    { via: "role-terminal", terminal: "term_1" },
+    line({ terminal: "term_2", workflowTaskId: "task-z" }),
+  ];
+  assert.deepEqual(freshContextDecision(opened, ask()), {
+    clear: false,
+    reason: "first-task",
+  });
+
+  const history = [...opened, line()];
+  assert.equal(freshContextDecision(history, ask()).reason, "same-task");
+  assert.equal(freshContextDecision(history, ask()).clear, false);
+  const other = freshContextDecision(
+    history,
+    ask({ workflowTaskId: "task-b" }),
+  );
+  assert.deepEqual(other, {
+    clear: true,
+    reason: "different-task",
+    previousLaunchAt: "2026-09-21T00:00:00.000Z",
+  });
+  // The same task id in another workflow is another task.
+  assert.equal(
+    freshContextDecision(history, ask({ workflowId: "wf-2" })).clear,
+    true,
+  );
+  // A spec-only start names no task, so it is treated as a different one.
+  assert.equal(
+    freshContextDecision(
+      history,
+      ask({ workflowId: null, workflowTaskId: null }),
+    ).reason,
+    "task-unidentified",
+  );
+  // An Orca task handed again with --task is the same task.
+  assert.equal(
+    freshContextDecision(
+      [line({ workflowTaskId: null })],
+      ask({ workflowTaskId: null, orcaTaskId: "orca_1" }),
+    ).reason,
+    "same-task",
+  );
+  // Reviews always start fresh, and so does the task after a review.
+  assert.equal(
+    freshContextDecision(history, ask({ purpose: "review" })).reason,
+    "review",
+  );
+  assert.equal(
+    freshContextDecision([line({ purpose: "review" })], ask()).reason,
+    "purpose-changed",
+  );
+  // Only Claude terminals are cleared.
+  for (const provider of ["codex", "agy"]) {
+    assert.deepEqual(
+      freshContextDecision(
+        history,
+        ask({ provider, workflowTaskId: "task-b" }),
+      ),
+      { clear: false, reason: "not-claude" },
+    );
+  }
+});
+
+test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again", async () => {
+  const calls = [];
+  const idle = JSON.stringify({
+    ok: true,
+    result: { wait: { satisfied: true } },
+  });
+  const execute = async (argv) => {
+    calls.push(argv);
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout: argv[2] === "wait" ? idle : '{"ok":true}',
+    };
+  };
+  const result = await clearRoleTerminal({
+    terminal: "term_1",
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, { cleared: true, terminal: "term_1" });
+  assert.deepEqual(
+    calls.map((argv) => argv.slice(1, 3).join(" ")),
+    ["terminal wait", "terminal send", "terminal wait"],
+  );
+  assert.deepEqual(calls[1], [
+    "orca",
+    "terminal",
+    "send",
+    "--terminal",
+    "term_1",
+    "--text",
+    "/clear",
+    "--enter",
+    "--json",
+  ]);
+
+  // A busy terminal is refused before /clear is typed into it.
+  const busy = [];
+  await assert.rejects(
+    () =>
+      clearRoleTerminal({
+        terminal: "term_1",
+        executable: "orca",
+        execute: async (argv) => {
+          busy.push(argv);
+          return {
+            code: 0,
+            stderr: "",
+            timedOut: false,
+            stdout: JSON.stringify({ ok: false, error: { code: "timeout" } }),
+          };
+        },
+      }),
+    (error) => error.signal?.code === "timeout",
+  );
+  assert.equal(busy.length, 1);
+});
+
+test("worker-start accepts the task identity and purpose that decide a clear", () => {
+  for (const option of ["workflow-task", "purpose"]) {
+    assert.ok(ALLOWED_OPTIONS["worker-start"].includes(option), option);
+  }
+});
+
+test("the launch ledger records the task a worker-start handed over", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ledger-task-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, ".omt", "organization.json");
+  recordLaunch(orgFile, {
+    via: "role-terminal",
+    role: "senior",
+    terminal: "term_1",
+  });
+  recordLaunch(orgFile, {
+    via: "worker-start",
+    role: "senior",
+    terminal: "term_1",
+    workflowId: "wf",
+    workflowTaskId: "task-a",
+    orcaTaskId: "orca_1",
+    purpose: "review",
+  });
+  const [opened, started] = readLaunches(orgFile);
+  assert.equal("workflowTaskId" in opened, false);
+  assert.equal(started.workflowTaskId, "task-a");
+  assert.equal(started.orcaTaskId, "orca_1");
+  assert.equal(started.purpose, "review");
 });

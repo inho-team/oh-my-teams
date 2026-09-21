@@ -11,6 +11,7 @@ import {
   withFileLock,
   writeJSON,
 } from "./core.mjs";
+import { closeKickoffSignals } from "./director.mjs";
 
 /** Reasons a registered kickoff may be ended, in the order they end one. */
 export const RELEASE_REASONS = ["completed", "disbanded", "taken-over"];
@@ -550,7 +551,8 @@ export function recordDelivery(
  *
  * Other kickoffs are untouched. Ending one whose PM cannot be reached
  * is recorded as `taken-over`, which needs explicit authorization, so a failed
- * liveness query never retires a kickoff that may still be running.
+ * liveness query never retires a kickoff that may still be running. The
+ * kickoff's pending director signals are closed after the entry is archived.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {object} request - Release request.
@@ -558,7 +560,7 @@ export function recordDelivery(
  * @param {string} request.reason - One of `RELEASE_REASONS`.
  * @param {boolean} [request.force=false] - Whether a takeover is authorized.
  * @param {string} [request.callerCwd] - Caller's working directory for director check.
- * @returns {{released: boolean, reason: string, archived: string, entry: object}} Result.
+ * @returns {{released: boolean, reason: string, archived: string, entry: object, closedSignals: string[]}} Result.
  * @throws {Error} When the worktree holds no kickoff, the reason is unknown, or
  *   a takeover is requested without authorization.
  */
@@ -566,7 +568,7 @@ export function releaseKickoff(
   orgFile,
   { worktreeId, reason, force = false, callerCwd = process.cwd() },
 ) {
-  return withRegistry(orgFile, () => {
+  const released = withRegistry(orgFile, () => {
     const file = locateEntry(orgFile, worktreeId);
     assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
     const entry = validateEntry(readJSON(file));
@@ -618,6 +620,10 @@ export function releaseKickoff(
     fs.unlinkSync(file);
     return { released: true, reason, archived, entry };
   });
+  // The inbox lock is taken only after the registry lock is released, so a
+  // signal being sent, which reads the registry first, never waits in a cycle.
+  const { closed } = closeKickoffSignals(orgFile, worktreeId, reason);
+  return { ...released, closedSignals: closed };
 }
 
 /**

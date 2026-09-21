@@ -8,6 +8,7 @@ import {
   ROLES,
   readJSON,
   run,
+  validateOrg,
   writeJSON,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
@@ -239,11 +240,13 @@ test("the PM command carries the model the PM profile pins", () => {
     "--dangerously-skip-permissions",
     "--model",
     "opus[1m]",
+    "--autocompact",
+    "250k",
   ]);
   // Brackets are a glob in POSIX shells, so the command string quotes them.
   assert.equal(
     pm.command,
-    "claude --dangerously-skip-permissions --model 'opus[1m]'",
+    "claude --dangerously-skip-permissions --model 'opus[1m]' --autocompact 250k",
   );
 
   org.roles.pm.profile = "codex-terra";
@@ -259,7 +262,12 @@ test("the PM command carries the model the PM profile pins", () => {
   org.roles.pm.profile = "claude-current";
   org.profiles["claude-current"].model = null;
   const unpinned = roleCommand(org, "pm");
-  assert.deepEqual(unpinned.argv, ["claude", "--dangerously-skip-permissions"]);
+  assert.deepEqual(unpinned.argv, [
+    "claude",
+    "--dangerously-skip-permissions",
+    "--autocompact",
+    "250k",
+  ]);
   assert.equal(unpinned.modelRequested, null);
 
   org.roles.pm.profile = "agy-opus";
@@ -269,6 +277,37 @@ test("the PM command carries the model the PM profile pins", () => {
     "--model",
     "claude-opus-4-6-thinking",
   ]);
+});
+
+test("only Claude role commands carry --autocompact, set by policy.claudeAutoCompact", () => {
+  const org = example();
+  assert.equal(roleCommand(org, "pm").autoCompact, "250k");
+
+  org.policy.claudeAutoCompact = 400000;
+  assert.deepEqual(roleCommand(org, "pm").argv.slice(-2), [
+    "--autocompact",
+    "400k",
+  ]);
+  org.policy.claudeAutoCompact = 123456;
+  assert.equal(roleCommand(org, "pm").autoCompact, "123456");
+
+  org.policy.claudeAutoCompact = "auto";
+  const auto = roleCommand(org, "pm");
+  assert.equal(auto.autoCompact, null);
+  assert.ok(!auto.argv.includes("--autocompact"));
+
+  delete org.policy.claudeAutoCompact;
+  for (const profile of ["codex-terra", "agy-opus"]) {
+    org.roles.pm.profile = profile;
+    const command = roleCommand(org, "pm");
+    assert.ok(!command.argv.includes("--autocompact"), profile);
+    assert.equal(command.autoCompact, null);
+  }
+
+  for (const bad of [99999, 1000001, 250000.5, "250k", "", null]) {
+    org.policy.claudeAutoCompact = bad;
+    assert.throws(() => validateOrg(org), /claudeAutoCompact/, String(bad));
+  }
 });
 
 test("every role skill states its authority, responsibility and limits", () => {

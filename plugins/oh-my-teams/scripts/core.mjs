@@ -893,7 +893,38 @@ export function validateOrg(org) {
         org.policy.adviceBudget <= 50),
     "adviceBudget must be 1..50",
   );
+  const autoCompact = org.policy.claudeAutoCompact;
+  assert(
+    autoCompact === undefined ||
+      autoCompact === "auto" ||
+      (Number.isInteger(autoCompact) &&
+        autoCompact >= 100000 &&
+        autoCompact <= 1000000),
+    'claudeAutoCompact must be "auto" or an integer 100000..1000000',
+  );
   return org;
+}
+
+/**
+ * Auto-compact window a Claude role session gets when the policy sets none.
+ *
+ * A PM session that kept its whole history re-sent about 280k tokens on every
+ * call; compacting at 250k kept the session useful while cutting the context
+ * it carried per hour.
+ */
+export const CLAUDE_AUTO_COMPACT_DEFAULT = 250000;
+
+/**
+ * Reads the `--autocompact` value a Claude role command should carry.
+ *
+ * @param {object} org - Validated organization.
+ * @returns {string | null} Value such as `250k`, or null when the policy is
+ *   `"auto"` and the flag is left to Claude Code's own default.
+ */
+export function claudeAutoCompact(org) {
+  const value = org.policy?.claudeAutoCompact ?? CLAUDE_AUTO_COMPACT_DEFAULT;
+  if (value === "auto") return null;
+  return value % 1000 === 0 ? `${value / 1000}k` : String(value);
 }
 
 /**

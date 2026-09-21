@@ -53,9 +53,11 @@ node <runtime> worker-start --org <organization.json> --role junior --repo <pl-w
 node <runtime> role-terminal --org <organization.json> --role senior --worktree current --workflow-id <workflowId> --state <pm-state>
 node <runtime> terminal-idle-check --terminal <senior-handle>
 node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
-node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <senior-handle> --worktree current --spec "<설계 또는 검토 작업>"
-<orca> orchestration check --wait --types "worker_done,escalation,question" --timeout-ms <progressCheckMs> --json
+node <runtime> worker-start --org <organization.json> --role senior --repo <pl-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> [--purpose review] --terminal <senior-handle> --worktree current --spec "<설계 또는 검토 작업>"
+node <runtime> supervision-wait --run <pl-run-id> --org <organization.json> [--ack <deliveryId>]
 ```
+
+이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 같은 task의 수정은 같은 `--workflow-task`를 넘겨 대화를 유지한다. 규칙은 [pm](../pm/SKILL.md)의 「작업 배정」과 같다.
 
 Senior는 PL의 워크트리(`current`)나 새 워크트리에서 실행하고, Junior의 워크트리에 띄우지 않는다. 검토할 결과는 경로와 커밋으로 넘긴다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
 
@@ -74,7 +76,7 @@ node <runtime> work --org <returned-org> --task <returned-task> --repo <returned
 
 **일반 감독 작업:** 위 「하위 역할 배정」의 `worker-start --org --role` 래퍼로만 배정한다. `role-terminal`이 역할 프로필의 모델·강도·권한 우회 플래그로 터미널을 열고 래퍼가 `--terminal` 없는 시작과 명시한 `--agent`·`--model`·`--effort`를 거부하므로, 원시 `orca orchestration worker-start`로 `--agent`나 `--model`을 직접 적지 않는다. 시작 결과의 `binding.modelProof`와 대화형 화면의 현재 모델 대조, 역할 터미널에서 시작하는 절차, 별도 계정·Ollama 프로필을 `work` 하네스로 실행하는 규칙은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따른다. 요청 모델이 적용됐다는 증거가 없거나 화면의 모델이 다르면 추가 지시를 보내지 않고 PM에게 보고한다. 계정 이름만 브리프에 적어 계정이 바뀌었다고 판단하지 않는다.
 
-감독 메시지는 현재 injected preamble의 Task/Dispatch 권한을 사용한다. 대기에는 `check --wait`를 쓰며 터미널 화면을 주기적으로 전체 읽어 모델을 깨우지 않는다. timeout은 완료나 재시도 근거가 아니지만, 그 시점마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절에 따라 활동을 다시 조회하고 진행 요청과 상향 보고를 결정한다. 메시지를 처리하고 accepted settlement의 다음 소유권을 정한 뒤 acknowledge한다.
+감독 메시지는 현재 injected preamble의 Task/Dispatch 권한을 사용한다. 대기에는 `supervision-wait`를 쓰며 터미널 화면을 주기적으로 전체 읽어 모델을 깨우지 않는다. 이 명령은 heartbeat만 담긴 전달을 직접 확인 처리하고, 다른 메시지가 오면 그 메시지와 `deliveryId`를 돌려준다. 메시지를 처리한 뒤 다음 대기에 `--ack <deliveryId>`를 넘긴다. timeout은 완료나 재시도 근거가 아니지만, 그 시점마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절에 따라 활동을 다시 조회하고 진행 요청과 상향 보고를 결정한다. 메시지를 처리하고 accepted settlement의 다음 소유권을 정한 뒤 acknowledge한다.
 
 ## 보고 취합과 검증 재사용
 

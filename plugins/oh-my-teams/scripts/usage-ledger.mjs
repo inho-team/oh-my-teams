@@ -155,6 +155,15 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
       workerId: launch.workerId ?? null,
       callerCwd,
       workflowId: launch.workflowId ?? null,
+      // worker-start records what it handed over, so the next hand-over to
+      // the same terminal can tell a rework from a different task.
+      ...(launch.via === "worker-start"
+        ? {
+            workflowTaskId: launch.workflowTaskId ?? null,
+            orcaTaskId: launch.orcaTaskId ?? null,
+            purpose: launch.purpose ?? null,
+          }
+        : {}),
       kickoffPmWorktreeId: resolveLaunchKickoff(
         kickoffs,
         readLaunches(orgFile),

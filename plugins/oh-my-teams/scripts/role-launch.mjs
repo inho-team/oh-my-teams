@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import {
   canonicalRole,
   assert,
+  claudeAutoCompact,
   definedRoles,
   DIRECTOR_ROLE,
   foldRole,
@@ -329,7 +330,8 @@ function shellToken(token) {
  * @param {string} requestedRole - Role to launch.
  * @param {object} [run={}] - Run context.
  * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
- * @returns {object} Role, profile, argv, shell command and requested model.
+ * @returns {object} Role, profile, argv, shell command, requested model and
+ *   the Claude `--autocompact` value (null for other providers).
  * @throws {Error} When the role is not held or the profile cannot be launched.
  */
 export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
@@ -375,6 +377,12 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
         actualRunner: "codex",
       }
     : null;
+  // Claude Code 2.1.221 and later compact a session at this window instead of
+  // near the model's limit, so a long-lived role does not resend its whole
+  // history on every call. Codex and Agy have no such flag.
+  const autoCompact =
+    profile.provider === "claude" ? claudeAutoCompact(org) : null;
+  if (autoCompact) argv.push("--autocompact", autoCompact);
   return {
     role,
     profile: profileId,
@@ -385,6 +393,7 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
     modelRequested: profile.model,
     effortRequested: profile.effort ?? null,
     ...(runner ? { runner } : {}),
+    autoCompact,
   };
 }
 

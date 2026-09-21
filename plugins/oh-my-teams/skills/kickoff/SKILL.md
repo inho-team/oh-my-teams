@@ -35,7 +35,7 @@ kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook �
 2. PM이 과제 난이도로 정한 실행 깊이의 역할만 활성화하여 구현·검토·통합을 진행하고, 판단이 바뀌면 깊이를 조정한다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 독립 편집에는 Orca child worktree를 사용한다. 역할은 원시 `orca orchestration worker-start`가 아니라 `worker-start --org --role --workflow-id --state` 래퍼로만 띄우고, 산출물은 PM·PL이 아니라 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할이 만든다.
 3. 각 주기마다 코드 변경, 새 검사 결과, 검토 결과, 명확해진 장애물 중 하나 이상의 확인 가능한 진전을 남긴다.
 4. 실패하면 같은 시도를 무한 반복하지 않는다. 실패 원인과 시도를 기록하고 접근 방법이나 담당 역할을 바꾼다. `work` 실행·attempt마다 적용되는 provider 호출 한도, workflow의 호출 예산과 attempt 한도, 사용자가 정한 중단 조건을 지킨다. 대화형 역할 터미널의 턴은 이 한도에 세지 않으므로, 사용량은 `usage-report`로 따로 확인한다.
-5. worker를 기다리는 동안 `check --wait`의 제한 시간마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.
+5. worker를 기다리는 동안 `supervision-wait`의 대기 시간이 끝날 때마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.
 6. 대화가 이어지거나 재개되면 authoritative Goal, workflow, Run과 worker 상태를 먼저 대조한다. 계획만 존재하거나 worker 상태가 불명확하다는 이유로 새 작업을 중복 생성하지 않는다.
 
 단순히 모델이 완료했다고 말했거나 일부 테스트가 통과했다는 이유로 루프를 끝내지 않는다. 모든 수용 기준, 필수 검토, 최신 소스에 대한 검증과 사용자가 요청한 전달 범위가 충족되어야 한다.

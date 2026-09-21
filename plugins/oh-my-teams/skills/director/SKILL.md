@@ -60,6 +60,8 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 - `director-ack --org <project>/.omt/organization.json --signal <id>`: 수신 확인
 - `director-watch --org <project>/.omt/organization.json`: kickoff별 신호·슬롯 점유·여유 메모리·PM liveness 요약 조회
 
+`progress` 신호는 알림용이므로 보낼 때 수신 확인된 상태(`autoAcknowledged: true`)로 기록되고, `director-inbox`와 `director-watch`의 미처리 목록에 남지 않는다. 같은 워크트리에서 새 `close-ready`가 오면 이전의 미처리 `close-ready`는 `superseded` 상태가 되고 `supersededBy`에 새 신호 ID가 적힌다. `kickoff-release`는 그 kickoff에 남은 미처리 신호를 `closed` 상태(`closedBy: "kickoff-release"`)로 정리하며, 다른 kickoff의 신호는 건드리지 않는다.
+
 `close-ready` 신호는 `close`의 입력(통합 워크트리·HEAD)과 연결된다. 신호가 있는데 HEAD가 다르면 거부하고, 신호가 없으면 경고한 뒤 진행한다. 신호가 없는 경우는 신호 통로가 생기기 전에 등록된 kickoff를 종료할 수 있도록 남겨 둔 호환 경로다.
 
 ## 종료

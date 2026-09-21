@@ -1117,3 +1117,45 @@ test("a senior may implement only a task assigned to it, and never reviews its o
   assert.match(pm, /같은 실행이 검토하면 런타임이 거부한다/);
   assert.match(readSkill("pl"), /「구현 등급」을 따른다/);
 });
+
+test("skills cut review-rework loops and wasted context", () => {
+  const pm = readSkill("pm");
+  const senior = readSkill("senior");
+  const junior = readSkill("junior");
+  const pl = readSkill("pl");
+  const runtime = readReference("orca-runtime.md");
+  // A Junior implementation goes up after its first rejected review.
+  assert.match(pm, /Junior 구현이 검토에서 한 번 반려된 일/);
+  assert.match(pm, /첫 검토에서 반려되면 수정을 Junior에게 다시 맡기지 않고/);
+  assert.doesNotMatch(pm, /반복해서 실패한 일/);
+  // Reviewers list every finding at once, then re-review only the fix diff.
+  assert.match(senior, /첫 검토에서는 발견한 finding을 한 번에 모두 적고/);
+  assert.match(
+    senior,
+    /이전 finding이 해결되었는지와 그 diff가 새로 만든 문제만/,
+  );
+  assert.match(pm, /앞선 검토 파일의 경로와 수정 diff 범위/);
+  // Reviewers reuse recorded verify evidence instead of rerunning suites.
+  assert.match(
+    senior,
+    /전체 테스트나 무거운 스크립트를 되풀이해 실행하지 않는다/,
+  );
+  assert.match(senior, /별도 작업으로 나누도록/);
+  // Implementers self-check before worker_done.
+  for (const text of [junior, senior]) {
+    assert.match(text, /`worker_done` 전에 (task의 )?수용 기준/);
+    assert.match(text, /실패하는 검사를 알고도 제출하지 않/);
+  }
+  // Fresh context and early compaction for Claude role terminals.
+  assert.match(pm, /`\/clear`/);
+  assert.match(pm, /--autocompact 250k/);
+  assert.match(pm, /--purpose review/);
+  assert.match(pl, /--workflow-task/);
+  assert.match(runtime, /다른 task를 넘길 때의 새 대화/);
+  // Supervisors wait through heartbeats with supervision-wait.
+  assert.match(runtime, /node <runtime> supervision-wait --run <runId>/);
+  for (const text of [pm, pl]) {
+    assert.match(text, /supervision-wait/);
+  }
+  assert.doesNotMatch(pl, /check --wait --types/);
+});
