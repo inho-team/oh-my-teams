@@ -870,13 +870,17 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
   fsM.mkdirSync(fakeRepoRoot, { recursive: true });
   fsM.mkdirSync(fakeWorktree, { recursive: true });
   // Create fake .git file in worktree pointing to repo
-  fsM.writeFileSync(pathM.join(fakeWorktree, ".git"), `gitdir: ${pathM.join(fakeRepoRoot, ".git", "worktrees", "fake-worktree")}`);
+  fsM.writeFileSync(
+    pathM.join(fakeWorktree, ".git"),
+    `gitdir: ${pathM.join(fakeRepoRoot, ".git", "worktrees", "fake-worktree")}`,
+  );
 
   const makeExecute = () => async () => {
     return { code: 1, stdout: "", stderr: "skip" };
   };
 
-  const normPath = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const normPath = (p) =>
+    p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   const normalizedFakeRepoRoot = normPath(fakeRepoRoot);
 
   fsM.writeFileSync(
@@ -917,7 +921,10 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
   const worktreeForEscape = pathM.join(tmpBase, "escape-wt");
   fsM.mkdirSync(repoRootForEscape, { recursive: true });
   fsM.mkdirSync(worktreeForEscape, { recursive: true });
-  fsM.writeFileSync(pathM.join(worktreeForEscape, ".git"), `gitdir: ${pathM.join(repoRootForEscape, ".git", "worktrees", "escape-wt")}`);
+  fsM.writeFileSync(
+    pathM.join(worktreeForEscape, ".git"),
+    `gitdir: ${pathM.join(repoRootForEscape, ".git", "worktrees", "escape-wt")}`,
+  );
 
   const escapedKey = normPath(repoRootForEscape).replace(/\//g, "\\\\");
 
@@ -939,7 +946,10 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
   const singleQuoteWorktree = pathM.join(tmpBase, "single-wt");
   fsM.mkdirSync(singleQuoteRepoRoot, { recursive: true });
   fsM.mkdirSync(singleQuoteWorktree, { recursive: true });
-  fsM.writeFileSync(pathM.join(singleQuoteWorktree, ".git"), `gitdir: ${pathM.join(singleQuoteRepoRoot, ".git", "worktrees", "single-wt")}`);
+  fsM.writeFileSync(
+    pathM.join(singleQuoteWorktree, ".git"),
+    `gitdir: ${pathM.join(singleQuoteRepoRoot, ".git", "worktrees", "single-wt")}`,
+  );
   const singleQuoteLiteralKey = singleQuoteRepoRoot.replace(/\//g, "\\");
   fsM.writeFileSync(
     codexConfig,
