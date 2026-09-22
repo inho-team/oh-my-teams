@@ -116,9 +116,9 @@ worker 브리프 머리글(`scripts/role-launch.mjs:488`)에 체크포인트 규
 | 단계                                               | 내용                                                                                                                                                                                      | 완료 기준                                                                                                                      |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | 0. 실측 (완료)                                     | Claude, Codex, Agy의 한도 화면 문구와 headless 출력을 수집한다.                                                                                                                           | provider별 원문 고정 자료가 저장되고, 수집하지 못한 provider가 목록으로 남는다. 결과는 8절에 있다.                             |
-| 1. 문서와 체크포인트 (구현 완료, 터미널 확인 남음) | `handoff-checkpoint`, 문서 형식 검증, 브리프 머리글의 체크포인트 규칙을 만든다. 브리프 규칙은 `worker-start`와 `role-spec`에 `--workflow-id`와 `--workflow-task`가 함께 주어질 때 붙는다. | worker가 커밋할 때 체크포인트를 갱신하는 것을 실제 Orca 터미널에서 확인한다. 이 단계만으로도 사람이 수동으로 이어받을 수 있다. |
+| 1. 문서와 체크포인트 (완료) | `handoff-checkpoint`, 문서 형식 검증, 브리프 머리글의 체크포인트 규칙을 만든다. 브리프 규칙은 `worker-start`와 `role-spec`에 `--workflow-id`와 `--workflow-task`가 함께 주어질 때 붙는다. | worker가 커밋할 때 체크포인트를 갱신하는 것을 실제 Orca 터미널에서 확인한다. 결과는 12절에 있다. 이 단계만으로도 사람이 수동으로 이어받을 수 있다. |
 | 2. 감지와 분류 (완료)                              | `worker-limit-check`, headless outcome 반영, `rate-limited` 신호, `capacity-handoff` 경로를 만든다.                                                                                       | 고정 자료로 감지와 분류를 검사하는 테스트가 통과한다.                                                                          |
-| 3. 전이와 실행 (구현 완료, 터미널 확인 남음)       | `workflow-handoff`, `--profile`, snapshot 생성, 실행 기록 필드를 만든다.                                                                                                                  | 한도 상황을 흉내 낸 workflow에서 fallback 프로필이 같은 worktree에서 task를 끝내고 검토를 통과한다.                            |
+| 3. 전이와 실행 (완료) | `workflow-handoff`, `--profile`, snapshot 생성, 실행 기록 필드를 만든다.                                                                                                                  | 한도 상황을 흉내 낸 workflow에서 fallback 프로필이 같은 worktree에서 task를 끝내고 검토를 통과한다. 결과는 12절에 있다.                            |
 | 4. 절차와 평가 (완료)                              | PM 스킬, 감독 절차, 조직 구성 스킬(`skills/form`)의 fallback 안내를 고치고 eval 시나리오를 추가한다.                                                                                      | `npm run sync`, `npm run lint`, `npm test`가 통과한다.                                                                         |
 
 ## 5. 비목표
@@ -135,9 +135,15 @@ worker 브리프 머리글(`scripts/role-launch.mjs:488`)에 체크포인트 규
 1. **시도 예산:** handoff는 task의 `maxAttempts`를 소모하지 않는다. 대신 한 task의 handoff 횟수는 그 역할에 선언된 fallback 개수를 넘지 못한다. 한도는 작업의 결함이 아니라 용량의 문제이기 때문이다.
 2. **실행 방식:** 조직 정책이 `fallback`이면 PM이 저장된 정책으로서 곧바로 handoff를 실행하고, 실행한 사실을 이사에게 `progress` 신호로 알린다. 정책이 `stop`이면 지금처럼 멈추고 보고한다. 이 방식은 2절의 원칙 1과 같다.
 
-## 7. 남은 결정
+## 7. 역할별 fallback
 
-- **역할별 fallback:** 현재 조직 파일의 각 역할(`pm`, `pl`, `senior`, `junior`)에 어떤 Codex 또는 Agy 프로필을 fallback으로 둘지는 아직 정하지 않았다. 3단계에서 실제 handoff를 확인하기 전까지 사용자가 정한다.
+2026-09-22에 사용자가 Codex 프로필을 먼저 쓰고 그다음에 Agy 프로필을 쓰도록 정했다. 이 저장소의 `.omt/organization.json`에는 다음과 같이 적었다.
+
+| 역할 | 첫째 fallback | 둘째 fallback |
+|---|---|---|
+| `pm` | `codex-gpt-6-astra` | `agy-opus` |
+| `pl`, `senior` | `codex-terra` | `agy-sonnet` |
+| `junior` | `codex-luna` | `agy-oss` |
 
 ## 8. 0단계 실측 결과
 
@@ -163,7 +169,7 @@ Codex는 한도에 걸린 상태의 계정으로 Orca 터미널에서 직접 요
 
 - **Claude의 5시간·주간 사용 한도 문구:** 이 머신의 기록에는 Fable 사용 크레딧 소진(`You're out of usage credits`) 한 가지만 있었다. 구독의 5시간·주간 한도에 걸렸을 때도 같은 `error: "rate_limit"` 필드가 남는지는 확인하지 못했다. 2단계에서 필드 값만으로 판정하되, 실제 한도에 처음 걸렸을 때 이 가정을 검증하고 고정 자료에 추가한다.
 - **Claude와 Agy의 터미널 화면 문구:** 두 provider는 지금 한도에 걸려 있지 않아 화면을 재현하지 못했다. 한도에 걸리지 않은 계정으로 한도를 일부러 소진하는 실측은 하지 않았다.
-- **Agy 세션과 worktree의 연결:** Agy 기록에는 `cwd` 필드가 없다. 2단계에서는 Orca task ID 대신, 1단계 브리프 규칙이 첫 입력에 넣는 `--workflow-id <id> --workflow-task <task>` 문자열로 세션을 찾도록 구현했다. 이 방법은 고정 자료로만 검사했고, 실제 Agy worker로는 아직 확인하지 않았다. 세션을 찾지 못하면 `worker-limit-check`는 `--terminal`의 화면을 읽는다.
+- **Agy 세션과 worktree의 연결:** Agy 기록에는 `cwd` 필드가 없다. 2단계에서는 Orca task ID 대신, 1단계 브리프 규칙이 첫 입력에 넣는 `--workflow-id <id> --workflow-task <task>` 문자열로 세션을 찾도록 구현했다. 이 방법은 고정 자료로만 검사했고, 실제 Agy 터미널 worker로는 아직 확인하지 않았다. 12절의 검증에서는 Agy를 headless로 실행했기 때문에 이 경로를 거치지 않았다. 세션을 찾지 못하면 `worker-limit-check`는 `--terminal`의 화면을 읽는다.
 
 ## 9. 2단계 구현에서 정한 세부 사항
 
@@ -194,4 +200,30 @@ Codex는 한도에 걸린 상태의 계정으로 Orca 터미널에서 직접 요
 - **PL의 역할:** PL은 자기가 감독하는 worker가 한도에 걸리면 `worker-limit-check` 결과를 PM에게 escalation으로 보내고, `workflow-handoff`는 PM만 수행한다. workflow 전이는 원래 PM의 권한이기 때문이다.
 - **대체 프로필 선택:** `form`은 결성 때 대체 프로필을 정하지 않는다. 사용자가 고르지 않은 구독을 쓰게 되기 때문이다. `adjust`의 「대체 프로필」 절이 한도 공유 조건, 여러 대체의 순서, 예산과 적용 시점을 안내한다.
 - **평가:** `evals/organization/scenarios.json`에 `usage-limit-handoff` 시나리오를 추가했다. 3단계의 전이 테스트와 절차 문서 검사를 근거로 쓴다.
-- **남은 일:** 실제 Orca 터미널에서 1단계의 체크포인트 갱신과 3단계의 이어받기를 확인하는 일, 그리고 7절의 역할별 fallback 결정이 남아 있다.
+- **남은 일:** 12.3절에 적은 발견 사항이 남아 있다.
+
+## 12. 실제 터미널 검증 결과
+
+2026-09-22에 이 저장소의 조직 파일(7절)로 실제 Orca 터미널에서 1단계와 3단계를 확인했다. 검증에는 파일 두 개를 만드는 task 하나를 담은 별도 workflow와 전용 worktree를 썼고, 확인을 마친 뒤 worktree와 브랜치를 지웠다.
+
+### 12.1 1단계: 체크포인트 갱신
+
+- `claude-sonnet` 프로필의 PL을 Orca 터미널로 실행했다. worker는 첫 파일을 커밋한 뒤 브리프 규칙에 따라 스스로 `handoff-checkpoint`를 실행했다.
+- 기록된 `checkpoint.json`의 `head`는 그 커밋과 같았고, `sequence`는 1이었다. checkpoint.md에는 일곱 절이 모두 채워져 있었으며, worker는 `worker_done`을 보냈다.
+
+### 12.2 3단계: 두 번의 handoff와 이어받기
+
+1. Claude 세션에 대한 `worker-limit-check`는 worktree로 실제 세션 기록을 찾았고 `none`을 돌려주었다. 첫 한도는 이 세션 대신 흉내 낸 `rate-limited` 신호로 정산했고, 실패는 `capacity-handoff` 경로로 분류되었다.
+2. `codex-terra`로 handoff하자 snapshot-1.json이 올바르게 기록되었다(`checkpoint.commitsSince`는 0). `dispatch-ready`는 `profile: codex-terra`와 `handoffIndex: 1`을 보여 주었고, `role-terminal --profile codex-terra` 화면에는 gpt-5.6-terra 모델이 표시되었다. `maxAttempts` 1을 이미 쓴 상태에서도 예약이 성공했고, `attemptsUsed`는 1로 유지되었다.
+3. Codex는 실제 사용 한도(`try again at Sep 26th, 2026 6:11 AM`)에 걸렸다. `worker-limit-check`는 rollout 기록에서 `verdict: handoff`를 돌려주었다.
+4. `agy-sonnet`으로 두 번째 handoff를 했다. Agy 터미널은 실행 매트릭스가 `agent-trust-workspace`로 막았으므로, `headless-start --profile agy-sonnet`으로 실행했다. 실행 기록에는 `handoffFrom: codex-terra`와 `handoffIndex: 2`가 남았다.
+5. Agy worker는 checkpoint.md와 snapshot-2.json을 읽은 뒤 두 번째 파일을 커밋했고, checkpoint를 갱신했다(`sequence` 3). 실행은 `done`으로 끝났고 `modelProof`도 일치했다.
+6. `verify`가 통과했고, `gate-check`는 검토가 필요 없는 task로서 `reviewed`를 돌려주었다. `accept`를 기록한 뒤 workflow는 `accepted`로 끝났다. 시도 기록은 attempt-1(기본 프로필, 실패), attempt-2(`codex-terra`, handoff 1, 실패), attempt-3(`agy-sonnet`, handoff 2, 정산)이었다.
+
+### 12.3 발견 사항
+
+- **전역 지침과 Claude worker:** 사용자 전역 CLAUDE.md의 "파일 수정 전 허락" 규칙 때문에 Claude 역할 worker가 파일을 고치기 전에 승인 질문에서 멈췄다. 검증에서는 worker 터미널에 직접 응답했다. 이 규칙을 역할 worker에 어떻게 적용할지는 사용자가 정해야 한다.
+- **Codex fallback 소진:** 이 계정의 Codex 프로필은 2026-09-26 06:11까지 사용 한도에 걸려 있다. 그때까지 `pl`과 `senior`의 첫째 fallback은 쓸 수 없다.
+- **새 worktree의 Agy 터미널:** trust 기록이 없는 worktree에서는 Agy 터미널 실행이 `agent-trust-workspace`로 막히고, 다음 담당자는 사용자이다. headless 실행은 이 제약을 받지 않았다.
+- **브리프 문구:** 이어받기 지시에서 프로필 이름과 파일 경로 바로 뒤에 조사를 붙여 "codex-terra이", "snapshot-1.json를"처럼 조사가 맞지 않았다. 프로필과 파일이라는 명사 뒤에 조사를 붙이도록 고쳤다.
+- **외부 터미널의 정지:** 역할 터미널로 실행한 worker에 `worker-stop`을 쓰면 `stop_unknown`이 나왔다. 검증에서는 `worker-abandon`으로 정리했다.
