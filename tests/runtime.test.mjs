@@ -2487,3 +2487,12 @@ test("director skill exists, has authority-responsibility-limits section, and PM
     );
   }
 });
+
+test("STATE-05: validateWorkflowRequest is not exported from workflow.mjs", async (t) => {
+  const mod = await import("../plugins/oh-my-teams/scripts/workflow.mjs");
+  assert.equal(
+    mod.validateWorkflowRequest,
+    undefined,
+    "validateWorkflowRequest should not be exported",
+  );
+});

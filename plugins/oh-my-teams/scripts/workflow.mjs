@@ -47,7 +47,7 @@ const GATEABLE_STATES = ["submitted", "review-pending", "reviewed", "accepted"];
  * @returns {object} The same validated request.
  * @throws {Error} When identity, task assignment, limits, or budgets are invalid.
  */
-export function validateWorkflowRequest(request) {
+function validateWorkflowRequest(request) {
   assert(
     request?.schemaVersion === 1 && WORKFLOW_ID_PATTERN.test(request.id),
     "Workflow schemaVersion=1 and id required",
