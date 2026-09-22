@@ -447,6 +447,55 @@ test("request-history pagination and an unrelated concurrent row fail closed", a
   );
 });
 
+test("readOpenCodexObservation stops fetching history pages once the boundary is reached", async (t) => {
+  const accountHome = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-ocx-account-"),
+  );
+  t.after(() => fs.rmSync(accountHome, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(accountHome, "admin-api-token"), "test-token");
+
+  let fetchCount = 0;
+  const fetcher = async () => {
+    fetchCount++;
+    if (fetchCount === 1 || fetchCount === 3)
+      return {
+        ok: true,
+        json: async () => ({ entries: [row("new")], nextCursor: "c1" }),
+      };
+    if (fetchCount === 2 || fetchCount === 4)
+      return {
+        ok: true,
+        json: async () => ({
+          entries: [{ requestId: "old" }],
+          nextCursor: "c2",
+        }),
+      };
+    return {
+      ok: true,
+      json: async () => ({
+        entries: [{ requestId: "very-old" }],
+        nextCursor: null,
+      }),
+    };
+  };
+
+  const boundary = new Set(["old"]);
+  boundary.capturedAt = 0;
+
+  const input = {
+    accountHome,
+    port: 43123,
+    provider: "codex",
+    model: "gpt-6-astra",
+    accountLogLabel: "fixed-account",
+    settleMs: 0,
+    historyBoundary: boundary,
+  };
+
+  await readOpenCodexObservation(input, fetcher);
+  assert.equal(fetchCount, 4, "should not fetch pages beyond the boundary");
+});
+
 test("run reports whether the input reached the child and whether its exit was seen", async () => {
   const seen = await run(
     [process.execPath, "-e", "process.stdin.resume().on('end',()=>{})"],
@@ -524,6 +573,9 @@ if (mode === "serve" || mode === "stubborn-descendant") {
   record("descendant", d.pid);
 } else if (mode === "wrong-health") {
   http.createServer((q, r) => r.end(JSON.stringify({ status: "ok", port: port + 1 }))).listen(port, "127.0.0.1");
+  process.on("SIGTERM", () => process.exit(0));
+} else if (mode === "unresponsive") {
+  http.createServer().listen(port, "127.0.0.1");
   process.on("SIGTERM", () => process.exit(0));
 }
 `;
@@ -1168,5 +1220,20 @@ test(
     );
     assert.equal(Date.now() - started >= 250, true);
     assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "stale");
+  },
+);
+
+test(
+  "a healthy responder that hangs is aborted within the ready timeout",
+  posixOnly,
+  async (t) => {
+    const runtime = fakeRuntime(t, "unresponsive");
+    const start = Date.now();
+    await assert.rejects(
+      () => startOpenCodexProxy({ ...runtime.binding, readyTimeoutMs: 1200 }),
+      /opencodex-proxy-not-ready/,
+    );
+    assert.ok(Date.now() - start < 3000, "Should timeout rather than hang");
+    assert.equal(await gone(runtime.read("launcher")), true);
   },
 );

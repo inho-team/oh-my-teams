@@ -178,6 +178,41 @@ test("a Codex worker is found by its worktree and judged by its last turn", asyn
   );
 });
 
+test("limit-check reads from the tail backwards and stops early, avoiding parsing the entire input", async (t) => {
+  const { worktree, homes } = box(t);
+  const limited = fixtureEvent("codex", "usage-limit"); // payload.type === 'task_complete'
+  const padding = Array.from({ length: 200 }, () =>
+    codexEvent("task_complete"),
+  );
+  writeCodex(homes, "rollout-long.jsonl", [
+    codexMeta(worktree),
+    codexEvent("task_started"),
+    ...padding,
+    limited,
+  ]);
+
+  let parseCalls = 0;
+  const originalParse = JSON.parse;
+  t.mock.method(JSON, "parse", (text, reviver) => {
+    parseCalls++;
+    return originalParse(text, reviver);
+  });
+
+  const stopped = await workerLimitCheck({
+    provider: "codex",
+    worktree,
+    homes,
+  });
+
+  assert.equal(stopped.verdict, "handoff");
+  // The first line parse in findProviderSession + a few lines at the end.
+  // Without the fix, parseCalls would be > 200.
+  assert.ok(
+    parseCalls < 10,
+    `JSON.parse was called ${parseCalls} times, expected < 10`,
+  );
+});
+
 test("a Claude worker's limit counts only while it is the last message", async (t) => {
   const { worktree, homes } = box(t);
   const dir = path.join(
