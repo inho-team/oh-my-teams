@@ -31,9 +31,13 @@ test("P-10: ingestIncident and incidentStatus", () => {
     observedAt: new Date().toISOString(),
   };
 
-  const result = ingestIncident(tmpdir, event, config);
-  assert.equal(result.duplicate, false);
-  assert.equal(result.incident.status, "proposed");
+  const result1 = ingestIncident(tmpdir, event, config);
+  assert.equal(result1.duplicate, false);
+  assert.equal(result1.incident.status, "proposed");
+
+  // Duplicate check
+  const result2 = ingestIncident(tmpdir, event, config);
+  assert.equal(result2.duplicate, true);
 
   const state = incidentStatus(tmpdir);
   assert.equal(Object.keys(state.incidents).length, 1);
