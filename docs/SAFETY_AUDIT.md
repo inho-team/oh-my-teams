@@ -37,7 +37,7 @@
 
 ## 검증 범위와 남은 항목
 
-2026-09-16 최종 점검에서 `npm test`의 648개 테스트, `npm run quality`의
+2026-09-16 최종 점검에서 `npm test`의 649개 테스트, `npm run quality`의
 110개 활성 모듈·383개 공개 export 검사, `npm run format:check`의 Prettier
 검사, `npm run eval:organization`의 11개 결정적 시나리오가 모두 통과했다. 테스트는 실제 CLI 프로세스와 테스트 전용
 provider를 사용하며, 이 최종 점검에서는 추가 유료 모델을 호출하지 않았다.
