@@ -38,7 +38,13 @@ export const NEUTRAL_FAILURE_KINDS = Object.freeze([
   "contract",
   "review",
   "implementation",
+  // The provider ended the turn on a usage limit or on missing capacity;
+  // `limitKind` says which, since only a usage limit calls for a handoff.
+  "rate-limited",
 ]);
+
+/** Limits a `rate-limited` signal may name in `limitKind`. */
+export const LIMIT_KINDS = Object.freeze(["usage-limit", "capacity"]);
 
 /**
  * Validates the workspace receipt an execution adapter returns.
@@ -82,6 +88,12 @@ export function assertFailureSignal(signal) {
   assert(
     signal.kind === undefined || NEUTRAL_FAILURE_KINDS.includes(signal.kind),
     `Failure signal carries an unknown kind: ${signal.kind}`,
+  );
+  assert(
+    signal.limitKind === undefined ||
+      (signal.kind === "rate-limited" &&
+        LIMIT_KINDS.includes(signal.limitKind)),
+    `Failure signal carries an invalid limitKind: ${signal.limitKind}`,
   );
   assert(
     signal.processState === undefined || signal.processState === "unknown",

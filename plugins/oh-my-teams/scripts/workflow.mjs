@@ -333,9 +333,23 @@ function tasksConflict(left, right) {
   ].some((ownedPath) => leftOwnership.has(ownedPath));
 }
 
-function recordFailure(state, item, failureInput) {
+// Whether a limit may hand the task over depends on the frozen organization:
+// its exhaustion policy and the role's declared fallbacks not yet used here.
+function limitContext(organization, item) {
+  const binding = organization?.roles[canonicalRole(item.role)];
+  if (!binding) return {};
+  return {
+    onExhaustion: organization.policy.onExhaustion,
+    fallbackAvailable: binding.fallbacks.length > (item.handoffs?.length ?? 0),
+  };
+}
+
+function recordFailure(state, item, failureInput, organization) {
   const evidence = validateFailureEvidence(failureInput);
-  const route = classifyFailure(evidence);
+  const route = classifyFailure({
+    ...evidence,
+    ...limitContext(organization, item),
+  });
   // classifyFailure names the role that owns this failure in a full ladder. A
   // reduced organization may not declare it, and an owner nobody holds would
   // leave the failure unresolvable, so the decision is folded onto a declared
@@ -390,7 +404,7 @@ function availableCalls(state) {
   return Math.max(0, state.budget.maxCalls - state.budget.callsUsed - reserved);
 }
 
-function reconcileRunningTask(state, item, taskId, observed) {
+function reconcileRunningTask(state, item, taskId, observed, organization) {
   assert(
     observed.executionId === item.execution.executionId,
     `Observation execution mismatch: ${taskId}`,
@@ -421,7 +435,12 @@ function reconcileRunningTask(state, item, taskId, observed) {
   attempt.settledAt = new Date().toISOString();
   if (observed.status === "failed") {
     item.state = "failed";
-    attempt.failure = recordFailure(state, item, observed.failure);
+    attempt.failure = recordFailure(
+      state,
+      item,
+      observed.failure,
+      organization,
+    );
   } else {
     item.state = "submitted";
   }
@@ -728,7 +747,13 @@ export function resumeWorkflow(
           });
           continue;
         }
-        const event = reconcileRunningTask(state, item, taskId, observed);
+        const event = reconcileRunningTask(
+          state,
+          item,
+          taskId,
+          observed,
+          organization,
+        );
         if (event) observedEvents.push(event);
         if (observed.status === "running") continue;
       }
@@ -1037,7 +1062,7 @@ function validateSettlementInput(input) {
  */
 export function recordSettlement(stateDir, id, expectedRevision, input) {
   return withWorkflowUpdate(stateDir, id, () => {
-    const { state, dir } = readWorkflow(stateDir, id);
+    const { state, organization, dir } = readWorkflow(stateDir, id);
     validateSettlementInput(input);
     if (state.eventIds.includes(input.eventId))
       return { state, duplicate: true };
@@ -1076,7 +1101,7 @@ export function recordSettlement(stateDir, id, expectedRevision, input) {
 
     item.state = input.outcome === "failed" ? "failed" : "submitted";
     if (input.outcome === "failed") {
-      attempt.failure = recordFailure(state, item, input.failure);
+      attempt.failure = recordFailure(state, item, input.failure, organization);
     }
     appendWorkflowEvent(dir, state, {
       ...input,

@@ -117,7 +117,7 @@ worker 브리프 머리글(`scripts/role-launch.mjs:488`)에 체크포인트 규
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | 0. 실측 (완료)                                     | Claude, Codex, Agy의 한도 화면 문구와 headless 출력을 수집한다.                                                                                                                           | provider별 원문 고정 자료가 저장되고, 수집하지 못한 provider가 목록으로 남는다. 결과는 8절에 있다.                             |
 | 1. 문서와 체크포인트 (구현 완료, 터미널 확인 남음) | `handoff-checkpoint`, 문서 형식 검증, 브리프 머리글의 체크포인트 규칙을 만든다. 브리프 규칙은 `worker-start`와 `role-spec`에 `--workflow-id`와 `--workflow-task`가 함께 주어질 때 붙는다. | worker가 커밋할 때 체크포인트를 갱신하는 것을 실제 Orca 터미널에서 확인한다. 이 단계만으로도 사람이 수동으로 이어받을 수 있다. |
-| 2. 감지와 분류                                     | `worker-limit-check`, headless outcome 반영, `rate-limited` 신호, `capacity-handoff` 경로를 만든다.                                                                                       | 고정 자료로 감지와 분류를 검사하는 테스트가 통과한다.                                                                          |
+| 2. 감지와 분류 (완료)                              | `worker-limit-check`, headless outcome 반영, `rate-limited` 신호, `capacity-handoff` 경로를 만든다.                                                                                       | 고정 자료로 감지와 분류를 검사하는 테스트가 통과한다.                                                                          |
 | 3. 전이와 실행                                     | `workflow-handoff`, `--profile`, snapshot 생성, 실행 기록 필드를 만든다.                                                                                                                  | 한도 상황을 흉내 낸 workflow에서 fallback 프로필이 같은 worktree에서 task를 끝내고 검토를 통과한다.                            |
 | 4. 절차와 평가                                     | PM 스킬, 감독 절차, 조직 구성 스킬(`skills/form`)의 fallback 안내를 고치고 eval 시나리오를 추가한다.                                                                                      | `npm run sync`, `npm run lint`, `npm test`가 통과한다.                                                                         |
 
@@ -163,4 +163,16 @@ Codex는 한도에 걸린 상태의 계정으로 Orca 터미널에서 직접 요
 
 - **Claude의 5시간·주간 사용 한도 문구:** 이 머신의 기록에는 Fable 사용 크레딧 소진(`You're out of usage credits`) 한 가지만 있었다. 구독의 5시간·주간 한도에 걸렸을 때도 같은 `error: "rate_limit"` 필드가 남는지는 확인하지 못했다. 2단계에서 필드 값만으로 판정하되, 실제 한도에 처음 걸렸을 때 이 가정을 검증하고 고정 자료에 추가한다.
 - **Claude와 Agy의 터미널 화면 문구:** 두 provider는 지금 한도에 걸려 있지 않아 화면을 재현하지 못했다. 한도에 걸리지 않은 계정으로 한도를 일부러 소진하는 실측은 하지 않았다.
-- **Agy 세션과 worktree의 연결:** Agy 기록에는 `cwd` 필드가 없다. 첫 입력에 들어 있는 Orca task ID로 세션을 찾는 방법을 2단계에서 검증한다.
+- **Agy 세션과 worktree의 연결:** Agy 기록에는 `cwd` 필드가 없다. 2단계에서는 Orca task ID 대신, 1단계 브리프 규칙이 첫 입력에 넣는 `--workflow-id <id> --workflow-task <task>` 문자열로 세션을 찾도록 구현했다. 이 방법은 고정 자료로만 검사했고, 실제 Agy worker로는 아직 확인하지 않았다. 세션을 찾지 못하면 `worker-limit-check`는 `--terminal`의 화면을 읽는다.
+
+## 9. 2단계 구현에서 정한 세부 사항
+
+설계에 적혀 있지 않아 구현하면서 정한 내용이다. 3단계에서 바꿀 수 있다.
+
+- **판정 값:** `worker-limit-check`는 `verdict`로 `handoff`(사용 한도로 turn이 끝남), `retry`(용량 부족으로 turn이 끝남), `wait`(provider가 아직 재시도 중), `none`(한도로 끝나지 않음), `unknown`(세션 기록도 화면도 없음) 가운데 하나를 돌려준다. `source`는 근거가 세션 기록인지(`session`) 화면인지(`screen`)를 나타낸다.
+- **마지막 turn의 기준:** Codex는 마지막 `task_started`, `task_complete`, `turn_aborted` 이벤트를, Claude는 마지막 `user` 또는 `assistant` 기록을, Agy는 마지막 기록을 본다. 한도 오류 뒤에 새 입력이나 새 turn이 있으면 한도는 이미 지나간 것으로 본다.
+- **Agy 재시도:** 이 머신의 Agy 기록에서 `RESOURCE_EXHAUSTED (code 429)`는 7번 모두 `attempt 8`까지 이어진 뒤 turn이 끝났고, `UNAVAILABLE (code 503)`은 6번 모두 1~2번째 시도 뒤 회복되었다. 그래서 429는 `attempt 8`에 이르렀을 때에만 `handoff`로, 그 전과 503은 `wait`로 판정한다.
+- **화면 판정:** 화면의 마지막 40줄만 이어 붙여 읽는다. worker가 자기 출력에서 한도 문구를 인용한 것을 provider 오류로 오인하지 않기 위해서이다. Claude 화면 문구는 확인된 `You're out of usage credits` 하나만 인식한다.
+- **용량 부족의 경로:** `rate-limited` 신호에 `limitKind: "capacity"`가 붙으면 `provider-capacity` 경로(다음 담당 PM, 조치 `retry-after-capacity`, 재시도 가능)로 분류한다.
+- **남은 fallback 계산:** workflow가 실패를 분류할 때 조직 스냅샷의 `policy.onExhaustion`과, 그 역할의 `fallbacks` 수가 task의 `handoffs` 기록 수보다 많은지를 함께 넘긴다. `handoffs` 기록은 3단계의 `workflow-handoff`가 만든다.
+- **headless outcome:** 실패한 turn이 한도로 끝났으면 `exit-error` 대신 `rate-limited`를 쓰고 `limitKind`를 함께 보고한다. Agy는 실패한 결과의 `error` 필드만 읽고, 성공한 응답 본문은 읽지 않는다.

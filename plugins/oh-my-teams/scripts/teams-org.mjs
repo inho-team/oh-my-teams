@@ -59,6 +59,8 @@ import {
   createWorktree,
   discoverOrcaRuntime,
   injectTask,
+  runOrcaJson,
+  selectOrcaExecutable,
   startWorker,
   runOrcaJson,
   selectOrcaExecutable,
@@ -86,6 +88,7 @@ import {
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
 import { recordCheckpoint } from "./handoff.mjs";
+import { workerLimitCheck } from "./limit-check.mjs";
 import {
   incidentStatus,
   ingestIncident,
@@ -194,6 +197,12 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
             (serves the headless workers to a browser; every request needs the token)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
+  worker-limit-check --worktree DIR --provider claude|codex|agy
+                     [--workflow-id ID --workflow-task ID]
+                     [--terminal HANDLE] [--orca EXECUTABLE]
+                     (reads the provider's session log for the worker; the
+                     screen of --terminal is read only when no log is found;
+                     Agy needs the workflow task to find its log)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
             [--workflow-task ID] [--text]
   role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
@@ -337,6 +346,14 @@ export const ALLOWED_OPTIONS = {
     "text",
   ],
   "terminal-idle-check": ["terminal", "orca", "org", "role"],
+  "worker-limit-check": [
+    "worktree",
+    "provider",
+    "workflow-id",
+    "workflow-task",
+    "terminal",
+    "orca",
+  ],
   "headless-start": [
     "org",
     "role",
@@ -487,6 +504,7 @@ export const REQUIRED_OPTIONS = {
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
   "terminal-idle-check": ["terminal"],
+  "worker-limit-check": ["worktree", "provider"],
   "headless-start": ["org", "role", "cwd", "spec", "state"],
   "headless-status": ["state", "worker"],
   "headless-answer": ["state", "worker", "text"],
@@ -1268,6 +1286,27 @@ async function executeCommand(args) {
         token: started.token,
       };
     }
+    case "worker-limit-check":
+      return workerLimitCheck({
+        provider: args.provider,
+        worktree: path.resolve(args.worktree),
+        workflowId: args["workflow-id"],
+        workflowTask: args["workflow-task"],
+        ...(args.terminal
+          ? {
+              readScreen: async () =>
+                (
+                  await runOrcaJson(selectOrcaExecutable(args.orca), [
+                    "terminal",
+                    "read",
+                    "--terminal",
+                    args.terminal,
+                    "--screen",
+                  ])
+                ).result?.terminal?.tail ?? [],
+            }
+          : {}),
+      });
     case "terminal-idle-check": {
       // --org와 --role이 주어질 때만 matrixPrediction을 계산합니다.
       // 예측이 없으면 기존 동작을 유지합니다(matrixPrediction 전달 안 함).
