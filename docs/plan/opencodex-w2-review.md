@@ -172,17 +172,17 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 
 ## 남은 한계
 
-1. Claude 구독 OAuth와 Antigravity 구독은 OMT runner로 한 번도 실행되지 않았고 runner가 지원하지도 않습니다.
+1. Claude 구독 OAuth와 Antigravity 구독은 runner 경로를 구현했지만 구독 실측을 하지 않았으므로 OPENCODEX_RUNNER_PROVIDERS에 없고 validate·조직 저장에서 거부됩니다(opencodex-followups-design.md A절).
 2. e4a4 고정 비교와 풀 전환의 동시 요청 기록은 실행하지 않았습니다.
 3. 입력 수락 이후의 제출, `turn_started`, 상위 요청 중 취소는 실제 터미널에서 확인되지 않았습니다.
-4. Windows 설치와 실행은 실측하지 않았고 프록시 시작이 거부됩니다.
+4. Windows 설치와 실행은 실측하지 않았습니다. 프록시 시작·소유권 증명·종료 경로는 CI의 windows-latest에서 가짜 `ocx`로 확인했습니다(582개 중 571 통과, 0 실패, 11 건너뜀; opencodex-followups-windows.md의 「Windows에서 새로 실행된 테스트」와 「설계 C절 미확인 항목 중 CI로 확인한 것과 못한 것」의 U6-U9·U16). 실제 OpenCodex와 bun 프로세스의 소유권 판정, 로그인, 모델 호출, 데스크톱 Orca에서의 동작, Windows의 `runtime-install` 전체 경로(`npm ci`, `.cmd` shim 포함)는 미검증입니다(같은 문서의 「미검증 항목」). Windows에는 프로세스 그룹이 없어 종료 증명이 스냅샷 밖의 후손까지는 보지 못하므로 결과는 `exited-snapshot`으로 남고, Windows runner turn은 완료해도 unverified 상태를 벗어나지 못합니다(같은 문서의 「종료 증명」).
 5. 실측은 macOS 15.7.4, arm64, Node v26.7.0 한 환경입니다.
-6. 사용자의 실제 HOME에서 상태 확인을 실행한 결과는 없습니다. 가짜 HOME에서는 Bun 캐시와 도구 상태 외의 쓰기를 관찰하지 못했습니다(F-4).
+6. F-4(상태 확인의 실제 HOME 침범)는 macOS에서 해소를 확인했습니다. 실제 macOS 사용자 HOME에서 `sandbox-exec`로 읽기·쓰기를 모두 차단한 채 상태 확인을 실행해도 `ready`가 되는 것을 확인했습니다(opencodex-followups-health.md의 「가짜 HOME 실측」). Windows의 `HOMEDRIVE`·`HOMEPATH` 격리는 CI의 windows-latest에서 단위 테스트로 값 계산만 확인했고(posixOnly 아님), 실제 사용자 HOME에서 실행한 결과와 실제 OpenCodex가 그 값을 홈으로 해석하는지는 미검증입니다(같은 문서의 「미검증 항목」).
 7. 중복 코드 제거와 코드 감소 보고가 없습니다.
 8. W1의 키체인 메타데이터 변경 주체를 확인하지 못했습니다.
-9. Claude 구독과 Agy 구독의 귀속은 사람의 로그인 확인에 기댑니다(기준 1).
-10. Node 22.13.0 하한과 CI의 Node 22에서의 실측이 없고, `posixOnly` 테스트 23개는 Windows에서 건너뜁니다(기준 7).
-11. 활성 런타임 트리에 상태 확인 잔존 디렉터리가 남고 정리 명령이 없습니다(F-13).
+9. Claude 구독과 Agy 구독의 귀속은 사람의 로그인 확인에 기댑니다. runner 경로 구현의 상태는 항목 1과 같습니다.
+10. 테스트 스위트는 CI의 세 OS(ubuntu-latest, macos-latest, windows-latest)에서 Node 22로 실행되어 통과했습니다(582개 중 windows 571 통과·11 건너뜀, ubuntu·macos 각 579 통과·3 건너뜀, 실패 0; opencodex-followups-windows.md의 「CI 검증 결과」, 실행 <https://github.com/inho-team/oh-my-teams/actions/runs/35646799744>). `.github/workflows/ci.yml`의 `setup-node`가 풀어 주는 "22"가 실제로 Node 22.13.0 이상인지는 확인하지 않았고, 실제 OpenCodex 런타임을 Windows에서 실행한 결과도 미검증입니다. Windows에서 건너뛰는 posixOnly 테스트는 11개입니다(같은 문서의 「남긴 posixOnly와 사유」 표).
+11. F-13(상태 확인 잔존 디렉터리)은 새 설치에서는 해소되었습니다. `healthCheck`가 임시 홈을 staging이 아니라 소유 접두사 바로 아래(`health-<임의 ID>`)에 만들어 staging 이동과 무관하게 활성 트리에 들어가지 않고, `runtime-prune` 명령이 실패한 런타임(`runtimes/<지문>.failed-<숫자>`)과 `staging/`의 잔여물을 지웁니다(opencodex-followups-health.md). 다만 이 변경 이전에 이미 설치되어 `runtimes/<지문>/health-home`, `health-codex-home`을 가진 기존 런타임에는 이 잔존 디렉터리를 지우는 경로가 없습니다. `pruneRuntimes`(`dependencies.mjs:533-635`)는 `.failed-<숫자>` 항목과 `staging/`만 지우고, 정상 런타임은 `runtime-repair`도 그대로 재사용하므로(`reused: true`) 기존 설치의 잔존 디렉터리는 남은 한계입니다.
 12. runner 프로필이 `role-command`와 `worker-start`를 통해 runner 없이 실행될 수 있습니다(F-6).
 
 ## 통합 단계에서 확인할 사항
