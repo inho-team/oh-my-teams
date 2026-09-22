@@ -165,22 +165,22 @@ export async function judge({
   try {
     const apiKey = env.TYPESAFE_API_KEY;
     if (!apiKey) {
-      return write(directory, {
+      return {
         ...record,
         status: "unavailable",
         reason: "missing-api-key",
-      });
+      };
     }
     const slot = claimSlot(
       path.join(directory, ".slots"),
       policy.budgetPerKickoff,
     );
     if (slot === null) {
-      return write(directory, {
+      return {
         ...record,
         status: "unavailable",
         reason: "budget-exhausted",
-      });
+      };
     }
     try {
       const response = await callSystemOne({
