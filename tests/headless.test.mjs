@@ -1310,3 +1310,66 @@ test("waitAllRunnersExited waits for runnerPid to exit to prevent EPERM", async 
   }
   assert.equal(isRunning, false, "The runner process should have exited");
 });
+
+test("U-01: headlessTranscriptFile reads stream files chunk by chunk without memory leak", async () => {
+  const { headlessTranscriptFile } =
+    await import("../plugins/oh-my-teams/scripts/headless.mjs");
+  const tmpFile = path.join(
+    os.tmpdir(),
+    "omt-u01-test-" + Date.now() + ".jsonl",
+  );
+  try {
+    fs.writeFileSync(
+      tmpFile,
+      Array(500)
+        .fill(
+          '{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}',
+        )
+        .join("\n"),
+    );
+    const transcript = headlessTranscriptFile("claude", tmpFile, 100);
+    assert.equal(transcript.length, 100);
+    assert.equal(transcript[0].text, "hello");
+  } finally {
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {}
+  }
+});
+
+test("U-01: buildLifecycle reads large stream files without memory leak", async () => {
+  const { buildLifecycle } =
+    await import("../plugins/oh-my-teams/scripts/headless-runner.mjs");
+  const tmpDir = path.join(os.tmpdir(), "omt-u01-lifecycle-" + Date.now());
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const turnDir = path.join(tmpDir, "headless", "testworker", "turns", "1");
+  fs.mkdirSync(turnDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(turnDir, "turn.json"),
+    JSON.stringify({ number: 1 }),
+  );
+
+  try {
+    fs.writeFileSync(
+      path.join(turnDir, "stream.jsonl"),
+      '{"type":"turn.started"}\n' +
+        Array(500).fill('{"type":"middle"}').join("\n") +
+        '\n{"type":"turn.completed"}',
+    );
+    const lifecycle = buildLifecycle({
+      turnDir,
+      observed: { requestIds: ["req1"] },
+      inputAccepted: true,
+      exitObserved: true,
+      cancelRequested: false,
+      descendantsExited: true,
+      orphansTerminated: 0,
+      proxyExited: true,
+    });
+    assert.equal(lifecycle.turnStarted, true);
+    assert.equal(lifecycle.completed, true);
+    assert.equal(lifecycle.termination, "exited");
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
