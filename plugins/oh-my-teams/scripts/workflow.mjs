@@ -1539,12 +1539,18 @@ export function handoffTask(stateDir, id, expectedRevision, input) {
       input.profile !== from && !handoffs.some((h) => h.to === input.profile),
       `Profile ${input.profile} already ran this task`,
     );
+    // Every profile that ran this task stopped on its limit, not only the
+    // last one, so none of their limits may come back through a later fallback.
+    const exhausted = [binding.profile, ...handoffs.map((h) => h.to)].find(
+      (profileId) =>
+        profilesShareLimit(
+          organization.profiles[profileId],
+          organization.profiles[input.profile],
+        ),
+    );
     assert(
-      !profilesShareLimit(
-        organization.profiles[from],
-        organization.profiles[input.profile],
-      ),
-      `Profile ${input.profile} shares the exhausted limit of ${from}`,
+      exhausted === undefined,
+      `Profile ${input.profile} shares the exhausted limit of ${exhausted}`,
     );
     assertSameWorktree(item, input.worktree);
 

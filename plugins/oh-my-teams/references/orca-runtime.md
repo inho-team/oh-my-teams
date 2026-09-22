@@ -235,6 +235,58 @@ node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <
 
 하위 worker는 진행 요청을 받으면 `orchestration reply --id <msg_id> --body <진행 상황>`으로 현재 단계, 끝낸 항목과 남은 항목, 장애물을 곧바로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다. 답의 첫 줄에는 [`bluf.md`](bluf.md)대로 현재 단계와 예상되는 다음 사건을 쓰고, 끝낸 항목과 남은 항목, 장애물은 그 뒤에 쓴다.
 
+## 사용 한도 handoff
+
+worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 그 역할에 선언한 fallback 프로필이 이어받는다. 설계와 근거는 저장소의 `docs/plan/role-handoff.md`에 있다. PM이 이 절차를 수행하며, PL은 자기가 감독하는 worker가 한도에 걸렸으면 아래 1단계의 판정 결과를 `orchestration send --type escalation`으로 PM에게 보내고 직접 handoff하지 않는다. PM 자신의 한도는 이 절차의 대상이 아니며, 이사에게 `blocked`로 보고한다.
+
+1. **판정:** 위 「무응답 worker 감독」의 `inspect`나 `escalate` 단계에서, 또는 `worker-read` 출력에 한도 문구가 보이면 다음을 실행한다. Codex와 Claude는 워크트리 경로만으로 세션 기록을 찾고, Agy는 `--workflow-id`와 `--workflow-task`로 찾는다. 세션 기록이 없을 때에만 `--terminal`의 화면을 읽는다.
+
+   ```text
+   node <runtime> worker-limit-check --worktree <작업 워크트리> --provider <claude|codex|agy> --workflow-id <workflowId> --workflow-task <task id> [--terminal <handle>]
+   ```
+
+2. **판정에 따른 행동:** 결과의 `verdict`에 따라 행동한다.
+
+   | verdict   | 행동                                                                                                                                                                         |
+   | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `handoff` | 사용 한도로 turn이 끝났다. 3단계로 간다.                                                                                                                                     |
+   | `retry`   | provider의 용량 부족으로 turn이 끝났다. `limitKind: "capacity"`로 정산하면 `provider-capacity` 경로가 되며, 잠시 뒤 같은 프로필로 `workflow-retry`한다. 프로필을 바꾸지 않는다. |
+   | `wait`    | provider가 아직 스스로 재시도하고 있다. 아무것도 하지 않고 다음 감독 주기에 다시 판정한다.                                                                                    |
+   | `none`    | 한도로 끝나지 않았다. 무응답 감독 절차를 그대로 따른다.                                                                                                                       |
+   | `unknown` | 세션 기록도 화면도 읽지 못했다. 한도로 추정하지 않고 무응답 감독의 `inspect`나 `escalate`로 보낸다.                                                                           |
+
+3. **정산:** 한도에 걸린 터미널을 「worker-start 실패 복구」의 2단계대로 `worker-stop`으로 멈추고, 종료를 확인하지 못하면 `worker-abandon`으로 봉인한다. 워크트리와 커밋은 지우지 않는다. 이어서 현재 attempt를 `workflow-settle`로 `failed` 정산한다. `failure`에는 `kind: "rate-limited"`, `limitKind: "usage-limit"`, 판정 결과를 옮긴 `message`와 `evidence`를 적는다. headless worker는 결과의 `outcome`이 `rate-limited`이고 `limitKind`가 함께 보고되므로, 그 값을 그대로 옮긴다.
+4. **경로 확인:** 정산한 task의 `failure.route.category`가 `capacity-handoff`이면 5단계로 간다. 조직 정책(`policy.onExhaustion`)이 `stop`이거나 남은 fallback이 없으면 `quota-exhausted`가 되며, 이때에는 handoff하지 않고 판정 결과의 `limit.resetsAt` 또는 `limit.resetsIn`을 붙여 이사에게 `blocked`로 보고한다.
+5. **handoff:** 그 역할의 `fallbacks`를 순서대로 보고, 이 task에서 아직 실행되지 않았고, 이 task를 실행하다 한도에 걸린 어느 프로필과도 계정이나 `pool`을 공유하지 않는 첫 프로필을 고른다. 다음 파일을 써서 `workflow-handoff`를 실행한다. 런타임은 조건에 맞지 않는 프로필을 거부하며, 거부되면 다음 fallback으로 넘어가되 모두 거부되면 이사에게 `blocked`로 보고한다.
+
+   ```json
+   {
+     "schemaVersion": 1,
+     "eventId": "<새 id>",
+     "taskId": "<task id>",
+     "profile": "<fallback 프로필>",
+     "worktree": "<멈춘 attempt의 작업 워크트리>",
+     "reason": "<worker-limit-check 출력 전체>",
+     "evidence": "<판정 근거 한 줄>"
+   }
+   ```
+
+   ```text
+   node <runtime> workflow-handoff --id <workflowId> --state <pm-state> --revision <n> --handoff <handoff.json>
+   ```
+
+   런타임은 워크트리의 git 상태로 `snapshot-<n>.json`을 만들고 task를 다시 대기 상태로 둔다. 이 handoff 뒤의 첫 실행은 시도 예산을 쓰지 않는다. 정책이 `fallback`이면 사용자에게 묻지 않고 곧바로 수행하며, 수행한 뒤 이사에게 `director-signal --kind progress`로 task, 멈춘 프로필, 이어받은 프로필, 한도가 풀리는 시각을 알린다.
+6. **이어서 실행:** `workflow-resume`의 `dispatch-ready`에 나온 `profile`과 `worktree`로 같은 워크트리에 fallback 터미널을 연다. `role-terminal`과 `worker-start`에는 같은 `--workflow-id`, `--state`, `--workflow-task`와 `--profile <fallback>`을 넘기며, 기록된 handoff 대상이 아닌 프로필은 런타임이 거부한다. 지시문에는 남은 일을 끝내라는 목표만 쓰면 된다. 래퍼가 handoff 이력, `checkpoint.md`와 snapshot 경로, "먼저 worktree와 대조하라"는 지시를 머리글에 붙인다. 이후 이 task의 재시도도 같은 fallback으로 실행한다.
+
+   ```text
+   node <runtime> role-terminal --org <org> --role <role> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback>
+   node <runtime> worker-start --org <org> --role <role> --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback> --terminal <handle> --worktree id:<worktreeId> --spec "<남은 일을 끝낸다>"
+   ```
+
+7. **검토:** 검토는 평소처럼 배정하되, 검토 `worker-start`에도 같은 `--workflow-task`를 넘긴다. 그러면 검토 지시문에 handoff 이력이 붙어, 검토자가 두 프로필이 나누어 만든 변경의 경계를 확인한다.
+
+`headless-start`에는 아직 `--profile`이 없으므로, headless로 실행하던 역할의 fallback은 `role-terminal`과 `worker-start`로 연다. 한도가 풀린 뒤에도 진행 중인 task를 원래 프로필로 되돌리지 않으며, 원래 프로필은 다음 task부터 다시 쓴다.
+
 ## worker-list와 liveness
 
 감독 작업의 실시간 상태는 해당 Run의 `worker-list`에서 확인한다. 이 조회 없이 계획의 존재나 최근 커밋만으로 실행 중이라고 판단하지 않는다.

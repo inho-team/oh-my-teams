@@ -119,7 +119,7 @@ worker 브리프 머리글(`scripts/role-launch.mjs:488`)에 체크포인트 규
 | 1. 문서와 체크포인트 (구현 완료, 터미널 확인 남음) | `handoff-checkpoint`, 문서 형식 검증, 브리프 머리글의 체크포인트 규칙을 만든다. 브리프 규칙은 `worker-start`와 `role-spec`에 `--workflow-id`와 `--workflow-task`가 함께 주어질 때 붙는다. | worker가 커밋할 때 체크포인트를 갱신하는 것을 실제 Orca 터미널에서 확인한다. 이 단계만으로도 사람이 수동으로 이어받을 수 있다. |
 | 2. 감지와 분류 (완료)                              | `worker-limit-check`, headless outcome 반영, `rate-limited` 신호, `capacity-handoff` 경로를 만든다.                                                                                       | 고정 자료로 감지와 분류를 검사하는 테스트가 통과한다.                                                                          |
 | 3. 전이와 실행 (구현 완료, 터미널 확인 남음)       | `workflow-handoff`, `--profile`, snapshot 생성, 실행 기록 필드를 만든다.                                                                                                                  | 한도 상황을 흉내 낸 workflow에서 fallback 프로필이 같은 worktree에서 task를 끝내고 검토를 통과한다.                            |
-| 4. 절차와 평가                                     | PM 스킬, 감독 절차, 조직 구성 스킬(`skills/form`)의 fallback 안내를 고치고 eval 시나리오를 추가한다.                                                                                      | `npm run sync`, `npm run lint`, `npm test`가 통과한다.                                                                         |
+| 4. 절차와 평가 (완료)                              | PM 스킬, 감독 절차, 조직 구성 스킬(`skills/form`)의 fallback 안내를 고치고 eval 시나리오를 추가한다.                                                                                      | `npm run sync`, `npm run lint`, `npm test`가 통과한다.                                                                         |
 
 ## 5. 비목표
 
@@ -180,10 +180,18 @@ Codex는 한도에 걸린 상태의 계정으로 Orca 터미널에서 직접 요
 ## 10. 3단계 구현에서 정한 세부 사항
 
 - **명령 형식:** 3.5절의 플래그 대신 다른 workflow 명령과 같은 형식인 `workflow-handoff --id <workflowId> --state <pm-state> --revision <N> --handoff <handoff.json>`을 쓴다. 입력 파일에는 `schemaVersion: 1`, `eventId`, `taskId`, `profile`, `worktree`, `reason`(`worker-limit-check` 출력), `evidence`를 적는다. `reason`에 `verdict`가 있으면 `handoff`여야 한다.
-- **받아들이는 조건:** task가 `capacity-handoff` 경로로 실패했고, 조직 스냅샷의 `policy.onExhaustion`이 `fallback`이며, 요청한 프로필이 그 역할의 `fallbacks`에 있고, 이 task에서 아직 실행되지 않았을 때에만 받아들인다. 멈춘 프로필은 마지막 handoff의 대상이고, handoff가 없으면 역할의 기본 프로필이다. 두 프로필이 같은 `pool`을 선언했거나, provider와 `account`가 같으면 같은 한도를 쓰는 것으로 보고 거부한다. 멈춘 attempt의 receipt가 `<repo-id>::<path>` 형식의 worktree를 기록했다면, 입력한 `worktree`가 그 경로와 같아야 한다.
+- **받아들이는 조건:** task가 `capacity-handoff` 경로로 실패했고, 조직 스냅샷의 `policy.onExhaustion`이 `fallback`이며, 요청한 프로필이 그 역할의 `fallbacks`에 있고, 이 task에서 아직 실행되지 않았을 때에만 받아들인다. 멈춘 프로필은 마지막 handoff의 대상이고, handoff가 없으면 역할의 기본 프로필이다. 두 프로필이 같은 `pool`을 선언했거나, provider와 `account`가 같으면 같은 한도를 쓰는 것으로 보고 거부한다. 비교 대상은 직전 프로필만이 아니라 이 task를 실행하다 한도에 걸린 모든 프로필(기본 프로필과 앞선 handoff 대상)이다. 멈춘 attempt의 receipt가 `<repo-id>::<path>` 형식의 worktree를 기록했다면, 입력한 `worktree`가 그 경로와 같아야 한다.
 - **snapshot:** `snapshot-<n>.json`에는 멈춘 시점의 HEAD, 기준 commit 이후의 커밋 목록, 커밋하지 않은 파일(`git status --porcelain -uall`), 기준 commit과의 diff 요약, 마지막 checkpoint의 시각과 그 뒤에 쌓인 커밋 수, 한도 근거, 두 프로필을 기록한다.
 - **시도 예산:** handoff 뒤의 첫 실행(`handoffPending`)은 `attemptsUsed`를 늘리지 않으며, 시도 예산이 다 쓰인 뒤에도 `dispatch-ready`로 나온다. 그 실행을 `workflow-release`로 되돌리면 같은 fallback을 다시 기다린다. 호출 예산(`maxCalls`)은 handoff에도 그대로 적용된다.
 - **프로필 유지:** handoff한 task는 이후 재시도도 fallback 프로필로 실행한다. `dispatch-ready`에는 `profile`과 `worktree`가 붙고, handoff 뒤 첫 실행에는 `handoffIndex`도 붙는다. 5절의 비목표와 같이, 진행 중인 task를 원래 프로필로 되돌리지 않는다.
 - **실행:** `role-terminal`과 `worker-start`의 `--profile`은 `--workflow-id`, `--state`, `--workflow-task`와 함께 주어져야 하고, 그 task의 마지막 handoff 대상과 같아야 하며, task가 `pending`, `reserved`, `running` 가운데 하나여야 한다. `headless-start`에는 아직 `--profile`을 추가하지 않았다.
 - **브리프:** `--workflow-task`가 주어진 브리프에는 그 task의 handoff 이력이 붙는다. handoff 뒤 첫 실행을 기다리거나 그 실행이 예약·진행 중인 동안에는 checkpoint.md와 snapshot 경로, 그리고 "먼저 worktree와 대조하라"는 지시도 붙는다. 검토 브리프도 같은 task를 가리키므로 이력을 함께 받는다.
 - **실행 기록:** handoff 실행은 `handoffFrom`(멈춘 프로필)과 `handoffIndex`를 남긴다. handoff가 아닌 실행에는 두 필드가 없다.
+
+## 11. 4단계에서 정한 절차
+
+- **정본 위치:** 감독 절차는 `references/orca-runtime.md`의 「사용 한도 handoff」 절에 두고, PM 스킬의 「사용 한도」 절과 PL 스킬의 한계 항목이 그 절을 가리킨다. 판정, 정산, 경로 확인, handoff, 이어서 실행, 검토의 순서로 적었다.
+- **PL의 역할:** PL은 자기가 감독하는 worker가 한도에 걸리면 `worker-limit-check` 결과를 PM에게 escalation으로 보내고, `workflow-handoff`는 PM만 수행한다. workflow 전이는 원래 PM의 권한이기 때문이다.
+- **대체 프로필 선택:** `form`은 결성 때 대체 프로필을 정하지 않는다. 사용자가 고르지 않은 구독을 쓰게 되기 때문이다. `adjust`의 「대체 프로필」 절이 한도 공유 조건, 여러 대체의 순서, 예산과 적용 시점을 안내한다.
+- **평가:** `evals/organization/scenarios.json`에 `usage-limit-handoff` 시나리오를 추가했다. 3단계의 전이 테스트와 절차 문서 검사를 근거로 쓴다.
+- **남은 일:** 실제 Orca 터미널에서 1단계의 체크포인트 갱신과 3단계의 이어받기를 확인하는 일, 그리고 7절의 역할별 fallback 결정이 남아 있다.

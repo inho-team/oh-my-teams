@@ -313,6 +313,31 @@ test("a handoff refuses profiles that are not unused fallbacks on another limit"
   assert.throws(() => handoff(ctx, "agy-pro", "again"), /already ran/);
 });
 
+test("a later handoff cannot return to a limit an earlier profile exhausted", async (t) => {
+  const ctx = await workflow(
+    t,
+    org(["agy-pro", "codex-luna", "claude-current"]),
+    3,
+  );
+  attach(ctx, 1);
+  settle(ctx, 1, limit);
+  handoff(ctx, "agy-pro");
+  attach(ctx, 2);
+  settle(ctx, 2, limit);
+  assert.throws(
+    () => handoff(ctx, "codex-luna"),
+    /shares the exhausted limit of codex-current/,
+  );
+  const { state } = handoff(ctx, "claude-current");
+  assert.deepEqual(
+    state.tasks.a.handoffs.map((h) => [h.from, h.to]),
+    [
+      ["codex-current", "agy-pro"],
+      ["agy-pro", "claude-current"],
+    ],
+  );
+});
+
 test("the handoff count is capped by the declared fallbacks", async (t) => {
   const ctx = await workflow(t, org(["agy-pro"]), 3);
   attach(ctx, 1);
@@ -567,4 +592,22 @@ test("workflow-handoff and role-command --profile go through the CLI", async (t)
   ]);
   assert.notEqual(unrecorded.code, 0);
   assert.match(unrecorded.stderr, /has no handoff to codex-luna/);
+});
+
+test("the skills and runtime reference carry the usage-limit handoff procedure", () => {
+  const read = (file) =>
+    fs.readFileSync(path.resolve("plugins/oh-my-teams", file), "utf8");
+  const runtime = read("references/orca-runtime.md");
+  assert.match(runtime, /^## 사용 한도 handoff$/m);
+  assert.match(runtime, /node <runtime> worker-limit-check --worktree/);
+  assert.match(runtime, /node <runtime> workflow-handoff --id/);
+  assert.match(runtime, /--workflow-task <task id> --profile <fallback>/);
+  for (const verdict of ["handoff", "retry", "wait", "none", "unknown"])
+    assert.match(runtime, new RegExp(`\\| \`${verdict}\` +\\|`));
+  const pm = read("skills/pm/SKILL.md");
+  assert.match(pm, /`workflow-handoff`/);
+  assert.match(pm, /`사용 한도 handoff` 절/);
+  assert.match(read("skills/pl/SKILL.md"), /`workflow-handoff`는 PM이 수행/);
+  assert.match(read("skills/adjust/SKILL.md"), /^## 대체 프로필$/m);
+  assert.match(read("skills/form/SKILL.md"), /`adjust`에서 사용자가 고르게/);
 });
