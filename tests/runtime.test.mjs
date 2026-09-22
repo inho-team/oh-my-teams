@@ -1068,7 +1068,7 @@ test("presets match provider as well as model to prevent Claude Code profiles fr
   const org = clone();
   org.profiles["claude-opus-spoof"] = {
     provider: "claude",
-    command: ["claude"],
+    command: ["claude", "--profile", "test"],
     model: "claude-opus-4-6-thinking",
     account: "test",
     subscription: "test",
@@ -1076,7 +1076,7 @@ test("presets match provider as well as model to prevent Claude Code profiles fr
   };
   org.profiles["claude-sonnet-spoof"] = {
     provider: "claude",
-    command: ["claude"],
+    command: ["claude", "--profile", "test"],
     model: "claude-sonnet-4-6",
     account: "test",
     subscription: "test",
