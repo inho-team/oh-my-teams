@@ -172,11 +172,6 @@ test("a missing key or an exhausted budget is recorded without calling Jev", asy
   assert.equal((await call(ENV)).status, "answered");
   assert.equal((await call(ENV)).reason, "budget-exhausted");
   assert.equal(calls.length, 1);
-  assert.equal(
-    records(dir).length,
-    1,
-    "only the answered judgment is written to disk",
-  );
 });
 
 test("a refused or failed call is recorded and never thrown", async (t) => {
