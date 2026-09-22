@@ -198,6 +198,7 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
       profile: launch.profile ?? null,
       provider: launch.provider ?? null,
       modelRequested: launch.modelRequested ?? null,
+      modelResolved: launch.modelResolved ?? null,
       effortRequested: launch.effortRequested ?? null,
       worktreePath: launch.worktreePath
         ? path.resolve(launch.worktreePath)
