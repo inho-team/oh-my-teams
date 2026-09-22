@@ -189,7 +189,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                last received a different task, or any review, gets /clear first)
   headless-start --org FILE --role ROLE --cwd DIR --spec TEXT --state DIR
                  [--workflow-id ID] [--timeout-ms N] [--worker ID]
-                 (runs the role as a non-interactive process, without Orca)
+                 [--workflow-task ID --profile FALLBACK]
+                 (runs the role as a non-interactive process, without Orca;
+                 --profile runs the fallback a workflow-handoff recorded)
   headless-status --state DIR --worker ID [--wait-ms N]
   headless-answer --state DIR --worker ID --text TEXT [--timeout-ms N]
   headless-stop --state DIR --worker ID
@@ -367,6 +369,8 @@ export const ALLOWED_OPTIONS = {
     "spec",
     "state",
     "workflow-id",
+    "workflow-task",
+    "profile",
     "timeout-ms",
     "worker",
   ],
@@ -872,6 +876,10 @@ async function freshenTerminal(args, launch, identity) {
 // checkout, and another role's worktree. The instruction carries the role's
 // charter and the headless protocol, since no one answers a prompt.
 function startHeadlessRole(args) {
+  assert(
+    args.profile === undefined || args["workflow-id"],
+    "--profile requires --workflow-id, --state and --workflow-task",
+  );
   // `--state` is where the worker is recorded; it names workflow state only
   // together with `--workflow-id`.
   const { org, run } = launchContext(
@@ -927,6 +935,7 @@ ${HEADLESS_PROTOCOL}
       workerId,
       workflowId: args["workflow-id"] ?? null,
       stateDir: args.state,
+      ...run.handoff,
     }),
   };
 }

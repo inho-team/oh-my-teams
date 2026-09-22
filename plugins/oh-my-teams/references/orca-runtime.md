@@ -276,16 +276,17 @@ worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 
    ```
 
    런타임은 워크트리의 git 상태로 `snapshot-<n>.json`을 만들고 task를 다시 대기 상태로 둔다. 이 handoff 뒤의 첫 실행은 시도 예산을 쓰지 않는다. 정책이 `fallback`이면 사용자에게 묻지 않고 곧바로 수행하며, 수행한 뒤 이사에게 `director-signal --kind progress`로 task, 멈춘 프로필, 이어받은 프로필, 한도가 풀리는 시각을 알린다.
-6. **이어서 실행:** `workflow-resume`의 `dispatch-ready`에 나온 `profile`과 `worktree`로 같은 워크트리에 fallback 터미널을 연다. `role-terminal`과 `worker-start`에는 같은 `--workflow-id`, `--state`, `--workflow-task`와 `--profile <fallback>`을 넘기며, 기록된 handoff 대상이 아닌 프로필은 런타임이 거부한다. 지시문에는 남은 일을 끝내라는 목표만 쓰면 된다. 래퍼가 handoff 이력, `checkpoint.md`와 snapshot 경로, "먼저 worktree와 대조하라"는 지시를 머리글에 붙인다. 이후 이 task의 재시도도 같은 fallback으로 실행한다.
+6. **이어서 실행:** `workflow-resume`의 `dispatch-ready`에 나온 `profile`과 `worktree`로 같은 워크트리에 fallback을 실행한다. `role-terminal`, `worker-start`와 `headless-start`에는 같은 `--workflow-id`, `--state`, `--workflow-task`와 `--profile <fallback>`을 넘기며, 기록된 handoff 대상이 아닌 프로필은 런타임이 거부한다. 지시문에는 남은 일을 끝내라는 목표만 쓰면 된다. 래퍼가 handoff 이력, `checkpoint.md`와 snapshot 경로, "먼저 worktree와 대조하라"는 지시를 머리글에 붙인다. 이후 이 task의 재시도도 같은 fallback으로 실행한다.
 
    ```text
    node <runtime> role-terminal --org <org> --role <role> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback>
    node <runtime> worker-start --org <org> --role <role> --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback> --terminal <handle> --worktree id:<worktreeId> --spec "<남은 일을 끝낸다>"
+   node <runtime> headless-start --org <org> --role <role> --cwd <worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback> --spec "<남은 일을 끝낸다>"
    ```
 
 7. **검토:** 검토는 평소처럼 배정하되, 검토 `worker-start`에도 같은 `--workflow-task`를 넘긴다. 그러면 검토 지시문에 handoff 이력이 붙어, 검토자가 두 프로필이 나누어 만든 변경의 경계를 확인한다.
 
-`headless-start`에는 아직 `--profile`이 없으므로, headless로 실행하던 역할의 fallback은 `role-terminal`과 `worker-start`로 연다. 한도가 풀린 뒤에도 진행 중인 task를 원래 프로필로 되돌리지 않으며, 원래 프로필은 다음 task부터 다시 쓴다.
+headless로 실행하던 역할은 fallback도 `headless-start`로 실행할 수 있다. 다만 `--workflow-id`를 넘긴 `headless-start`는 `--state`를 workflow 상태 경로로 읽으므로, headless worker 기록도 PM의 상태 디렉터리에 남는다. 한도가 풀린 뒤에도 진행 중인 task를 원래 프로필로 되돌리지 않으며, 원래 프로필은 다음 task부터 다시 쓴다.
 
 ## worker-list와 liveness
 
