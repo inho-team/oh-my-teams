@@ -311,7 +311,7 @@ function isolatedHealthEnvironment(home, codexHome) {
   return { ...environment, OPENCODEX_HOME: home, CODEX_HOME: codexHome };
 }
 
-async function healthCheck(ocx, staging) {
+async function healthCheck(ocx, staging, spawnImpl = spawn) {
   const port = await freePort();
   const home = path.join(staging, "health-home");
   const codexHome = path.join(staging, "health-codex-home");
@@ -328,7 +328,7 @@ async function healthCheck(ocx, staging) {
       claudeCode: { enabled: false, systemEnv: false, injectAgents: false },
     }),
   );
-  const child = spawn(ocx, ["start", "--port", String(port)], {
+  const child = spawnImpl(ocx, ["start", "--port", String(port)], {
     cwd: staging,
     env: isolatedHealthEnvironment(home, codexHome),
     stdio: "ignore",
@@ -427,7 +427,7 @@ export async function installRuntime(root, options = {}) {
           timeoutMs: 30000,
         });
         assert(bunVersion.code === 0, "runtime-bun-unavailable");
-        await healthCheck(ocx, staging);
+        await healthCheck(ocx, staging, options._spawnImpl);
         writeJSON(path.join(staging, "manifest.json"), {
           fingerprint: paths.fingerprint,
           version: paths.version,

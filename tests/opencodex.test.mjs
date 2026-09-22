@@ -574,6 +574,9 @@ if (mode === "serve" || mode === "stubborn-descendant") {
 } else if (mode === "wrong-health") {
   http.createServer((q, r) => r.end(JSON.stringify({ status: "ok", port: port + 1 }))).listen(port, "127.0.0.1");
   process.on("SIGTERM", () => process.exit(0));
+} else if (mode === "unresponsive") {
+  http.createServer().listen(port, "127.0.0.1");
+  process.on("SIGTERM", () => process.exit(0));
 }
 `;
   const binary = path.join(prefix, "node_modules", ".bin", "ocx");
@@ -1217,5 +1220,20 @@ test(
     );
     assert.equal(Date.now() - started >= 250, true);
     assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "stale");
+  },
+);
+
+test(
+  "a healthy responder that hangs is aborted within the ready timeout",
+  posixOnly,
+  async (t) => {
+    const runtime = fakeRuntime(t, "unresponsive");
+    const start = Date.now();
+    await assert.rejects(
+      () => startOpenCodexProxy({ ...runtime.binding, readyTimeoutMs: 1200 }),
+      /opencodex-proxy-not-ready/,
+    );
+    assert.ok(Date.now() - start < 3000, "Should timeout rather than hang");
+    assert.equal(await gone(runtime.read("launcher")), true);
   },
 );
