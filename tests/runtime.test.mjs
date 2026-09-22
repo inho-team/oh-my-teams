@@ -101,19 +101,31 @@ function fixture(t) {
   return dir;
 }
 
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
+import { after } from "node:test";
 let templateRepoDir = null;
+after(() => {
+  if (templateRepoDir) {
+    try {
+      fs.rmSync(templateRepoDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+      });
+    } catch (e) {}
+  }
+});
 async function getTemplateRepo() {
   if (templateRepoDir) return templateRepoDir;
-  const dir = fs.realpathSync(fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), "omt-repo-template-")));
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-repo-template-")),
+  );
   for (const args of [
     ["init"],
-    ["config", "user.name", "Test"],
+    ["config", "user.name", "Orca Test"],
     ["config", "user.email", "test@example.invalid"],
   ]) {
-    const result = await require('../plugins/oh-my-teams/scripts/core.mjs').run(["git", ...args], { cwd: dir });
-    if (result.code !== 0) throw new Error("Git failed: " + result.stderr);
+    const result = await run(["git", ...args], { cwd: dir });
+    assert.equal(result.code, 0, result.stderr);
   }
   templateRepoDir = dir;
   return templateRepoDir;
