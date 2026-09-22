@@ -15,6 +15,7 @@ import { assert, definedRoles, validateOrg } from "./core.mjs";
 export const PRESETS = {
   "opus-first": {
     kind: "models",
+    provider: "agy",
     description: "Use Opus for implementation and review roles.",
     models: {
       senior: "claude-opus-4-6-thinking",
@@ -25,6 +26,7 @@ export const PRESETS = {
   },
   balanced: {
     kind: "models",
+    provider: "agy",
     description: "Use Opus for judgment and Sonnet for implementation.",
     models: {
       senior: "claude-opus-4-6-thinking",
@@ -87,13 +89,14 @@ function sharesQuotaWith(profile, candidate) {
   );
 }
 
-function profileForModel(org, model) {
+function profileForModel(org, provider, model) {
+  assert(provider, "Preset missing provider metadata");
   const matches = Object.entries(org.profiles).filter(
-    ([, profile]) => profile.model === model,
+    ([, profile]) => profile.model === model && profile.provider === provider,
   );
   assert(
     matches.length === 1,
-    `Preset requires exactly one profile for model ${model}; ` +
+    `Preset requires exactly one ${provider} profile for model ${model}; ` +
       "add or disambiguate it with the adjust skill first",
   );
   return matches[0][0];
@@ -108,9 +111,9 @@ function modelChanges(org, preset) {
   return roles.map((role) => ({
     role,
     after: {
-      profile: profileForModel(org, preset.models[role]),
+      profile: profileForModel(org, preset.provider, preset.models[role]),
       fallbacks: preset.fallbacks[role].map((model) =>
-        profileForModel(org, model),
+        profileForModel(org, preset.provider, model),
       ),
       concurrency: preset.concurrency[role],
     },

@@ -1045,6 +1045,52 @@ test("presets pin one slot per shared-pool role and keep each fallback chain to 
   assert.deepEqual(opusFirst.senior.fallbacks, []);
   assert.deepEqual(opusFirst.junior.fallbacks, []);
 });
+test("presets lacking provider metadata throw when generating model or tier changes", async () => {
+  const org = clone();
+  const { PRESETS } =
+    await import("../plugins/oh-my-teams/scripts/presets.mjs");
+
+  for (const [name, preset] of Object.entries(PRESETS)) {
+    if (preset.kind === "models" || preset.kind === "tiers") {
+      assert.ok(preset.provider, `Preset ${name} missing provider metadata`);
+    }
+  }
+
+  const original = PRESETS["opus-first"].provider;
+  PRESETS["opus-first"].provider = undefined;
+  assert.throws(
+    () => previewPreset(org, "opus-first"),
+    /Preset missing provider metadata/,
+  );
+  PRESETS["opus-first"].provider = original;
+});
+test("presets match provider as well as model to prevent Claude Code profiles from masking Agy profiles", () => {
+  const org = clone();
+  org.profiles["claude-opus-spoof"] = {
+    provider: "claude",
+    command: ["claude", "--profile", "test"],
+    model: "claude-opus-4-6-thinking",
+    account: "test",
+    subscription: "test",
+    concurrency: 1,
+  };
+  org.profiles["claude-sonnet-spoof"] = {
+    provider: "claude",
+    command: ["claude", "--profile", "test"],
+    model: "claude-sonnet-4-6",
+    account: "test",
+    subscription: "test",
+    concurrency: 1,
+  };
+
+  const opusFirst = previewPreset(org, "opus-first").organization;
+  assert.equal(opusFirst.roles.senior.profile, "agy-opus");
+  assert.equal(opusFirst.roles.junior.profile, "agy-opus");
+
+  const balanced = previewPreset(org, "balanced").organization;
+  assert.equal(balanced.roles.senior.profile, "agy-opus");
+  assert.equal(balanced.roles.junior.profile, "agy-sonnet");
+});
 test("provider print timeout expires before the runtime kills the call", () => {
   for (const timeoutMs of [60000, 300000, 600000]) {
     const spec = providerCommand(
