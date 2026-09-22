@@ -85,7 +85,16 @@ async function git(dir, ...args) {
 
 async function workflow(t, organization = org(), maxAttempts = 1) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-flow-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // A detached headless runner may still hold its working directory on
+  // Windows, so removal retries while it exits.
+  t.after(() =>
+    fs.rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    }),
+  );
   await git(dir, "init");
   await git(dir, "config", "user.name", "Test");
   await git(dir, "config", "user.email", "test@example.invalid");
