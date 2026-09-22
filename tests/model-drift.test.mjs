@@ -88,7 +88,7 @@ test("model drift warning for model: null profiles via command paths", async (t)
     else if (argsStr.includes("show") && argsStr.includes("worktree")) out = { ok: true, result: { worktree: { id: "repo", path: "${dir.replace(/\\/g, "\\\\")}" } } };
     
     import fs from "node:fs";
-    fs.appendFileSync("${process.cwd().replace(/\\/g, "\\\\")}/orca-trace.txt", argsStr + "\\n");
+    fs.appendFileSync("${dir.replace(/\\/g, "\\\\")}/orca-trace.txt", argsStr + "\\n");
     fs.writeSync(1, JSON.stringify(out) + "\\n");
     process.exit(0);
   `,
