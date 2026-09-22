@@ -1287,10 +1287,8 @@ test("waitAllRunnersExited waits for runnerPid to exit to prevent EPERM", async 
   const turnDir = path.join(stateDir, "headless", "worker-1", "turns", "1");
   fs.mkdirSync(turnDir, { recursive: true });
 
-  const { spawn } = require("child_process");
-  const child = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 200)"], {
-    detached: true,
-  });
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, ['-e', 'setTimeout(()=>{}, 200)'], { detached: true });
   fs.writeFileSync(
     path.join(turnDir, "pids.json"),
     JSON.stringify({ runner: child.pid }),

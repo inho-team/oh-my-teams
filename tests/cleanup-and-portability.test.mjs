@@ -52,19 +52,28 @@ const task = {
   risk: "low",
 };
 
-
-import { createRequire } from 'node:module';
+import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 let templateRepoDir = null;
 async function getTemplateRepo() {
   if (templateRepoDir) return templateRepoDir;
-  const dir = fs.realpathSync(fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), "omt-repo-template-")));
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(
+      require("node:path").join(
+        require("node:os").tmpdir(),
+        "omt-repo-template-",
+      ),
+    ),
+  );
   for (const args of [
     ["init"],
     ["config", "user.name", "Test"],
     ["config", "user.email", "test@example.invalid"],
   ]) {
-    const result = await require('../plugins/oh-my-teams/scripts/core.mjs').run(["git", ...args], { cwd: dir });
+    const result = await require("../plugins/oh-my-teams/scripts/core.mjs").run(
+      ["git", ...args],
+      { cwd: dir },
+    );
     if (result.code !== 0) throw new Error("Git failed: " + result.stderr);
   }
   templateRepoDir = dir;
