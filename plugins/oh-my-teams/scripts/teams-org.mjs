@@ -697,7 +697,8 @@ async function compatibilityPrepare(args) {
 }
 
 async function resolveAndCheckDrift(orgFile, org, launch) {
-  const requested = launch.modelRequested !== undefined ? launch.modelRequested : launch.model;
+  const requested =
+    launch.modelRequested !== undefined ? launch.modelRequested : launch.model;
   if (requested !== null) {
     return {
       modelResolved: requested,
@@ -1214,10 +1215,14 @@ async function writeDraft(args) {
   const projectDir = path.dirname(output);
   const defaults = await resolveHostDefaults({ project: projectDir });
   if (defaults.codex?.error) {
-    process.stderr.write(`Warning: Failed to resolve Codex defaults: ${defaults.codex.error}\\n`);
+    process.stderr.write(
+      `Warning: Failed to resolve Codex defaults: ${defaults.codex.error}\n`,
+    );
   }
   if (defaults.claude?.error) {
-    process.stderr.write(`Warning: Failed to resolve Claude defaults: ${defaults.claude.error}\\n`);
+    process.stderr.write(
+      `Warning: Failed to resolve Claude defaults: ${defaults.claude.error}\n`,
+    );
   }
   for (const profile of Object.values(organization.profiles)) {
     if (profile.model === null) {
