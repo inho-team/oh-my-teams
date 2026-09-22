@@ -255,7 +255,7 @@ export async function invoke(
           try {
             process.kill(-result.pid, "SIGKILL");
           } catch (error) {
-            if (error.code !== "ESRCH") throw error;
+            if (error.code !== "ESRCH" && error.code !== "EPERM") throw error;
           }
           for (
             let i = 0;
