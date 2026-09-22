@@ -187,6 +187,6 @@ test("the version policy does not hardcode a specific major version", () => {
   assert.ok(section, "AGENTS.md must have a version policy section");
   assert.ok(
     !/\d+\.x\.x/.test(section[1]),
-    "the version policy should not specify a major version like 1.x.x"
+    "the version policy should not specify a major version like 1.x.x",
   );
 });
