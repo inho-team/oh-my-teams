@@ -22,6 +22,10 @@ import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { assertFailureSignal } from "./execution.mjs";
 import { gateCheck } from "./gates.mjs";
 import {
+  profilesShareLimit,
+  writeHandoffSnapshot,
+} from "./handoff-snapshot.mjs";
+import {
   WORKFLOW_ID_PATTERN,
   appendWorkflowEvent,
   readWorkflowSnapshot,
@@ -503,11 +507,10 @@ function roleRunningCount(state, role) {
 }
 
 function dispatchActions(state, tasks, organization) {
-  if (
-    availableCalls(state) === 0 ||
-    state.budget.attemptsUsed >= state.budget.maxAttempts
-  )
-    return [];
+  if (availableCalls(state) === 0) return [];
+  // A handoff does not spend an attempt, so it can still launch after the
+  // attempt budget is used up.
+  const attemptsLeft = state.budget.attemptsUsed < state.budget.maxAttempts;
   const capacity = dispatchCapacity(state);
   const selected = [];
   const actions = [];
@@ -515,6 +518,7 @@ function dispatchActions(state, tasks, organization) {
     if (
       selected.length >= capacity ||
       item.state !== "pending" ||
+      !(attemptsLeft || item.handoffPending) ||
       !dependenciesReady(tasks[taskId], state)
     ) {
       continue;
@@ -533,11 +537,15 @@ function dispatchActions(state, tasks, organization) {
       continue;
 
     selected.push(taskId);
+    // After a handoff the task stays on its fallback, a later retry included.
+    const handoff = item.handoffs?.at(-1);
     actions.push({
       type: "dispatch-ready",
       taskId,
       taskRevision: item.revision,
       taskHash: item.taskHash,
+      ...(handoff ? { profile: handoff.to, worktree: handoff.worktree } : {}),
+      ...(item.handoffPending ? { handoffIndex: handoff.index } : {}),
     });
   }
   return actions;
@@ -920,8 +928,10 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
       ),
       "Duplicate attempt or execution receipt",
     );
+    const handoff = item.handoffPending ? item.handoffs.at(-1) : null;
+    const profile = item.handoffs?.at(-1)?.to;
     assert(
-      state.budget.attemptsUsed < state.budget.maxAttempts,
+      handoff || state.budget.attemptsUsed < state.budget.maxAttempts,
       "Workflow attempt budget exhausted",
     );
     assert(
@@ -966,8 +976,11 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
       callAllowance,
       receipt: item.execution,
       attachedAt: new Date().toISOString(),
+      ...(profile ? { profile } : {}),
+      ...(handoff ? { handoffIndex: handoff.index } : {}),
     });
-    state.budget.attemptsUsed += 1;
+    if (handoff) item.handoffPending = false;
+    else state.budget.attemptsUsed += 1;
     appendWorkflowEvent(dir, state, {
       id: input.eventId,
       type: reserveOnly ? "execution-reserved" : "execution-attached",
@@ -975,6 +988,7 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
       taskId: input.taskId,
       attemptId: input.attemptId,
       receipt: input.receipt,
+      ...(handoff ? { handoffIndex: handoff.index, profile: handoff.to } : {}),
     });
     state.revision += 1;
     state.status = deriveWorkflowStatus(state);
@@ -1192,9 +1206,11 @@ export function releaseReservation(stateDir, id, expectedRevision, input) {
         input.refusal.kind === "not-started",
         "Only a launch refused before any work started returns its attempt",
       );
-      state.budget.attemptsUsed -= 1;
+      if (attempt.handoffIndex === undefined) state.budget.attemptsUsed -= 1;
       attempt.refusal = input.refusal;
     }
+    // A handoff launch spent no attempt; the task waits for the same fallback.
+    if (attempt.handoffIndex !== undefined) item.handoffPending = true;
     // Otherwise the attempt stays spent: an unobserved launch is not free work.
     attempt.status = refused ? "refused" : "released";
     attempt.releasedAt = new Date().toISOString();
@@ -1433,6 +1449,145 @@ export function retryTask(stateDir, id, expectedRevision, input) {
     state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return state;
+  });
+}
+
+function validateHandoffInput(input) {
+  assert(
+    input?.schemaVersion === 1 &&
+      WORKFLOW_ID_PATTERN.test(input.eventId ?? "") &&
+      typeof input.taskId === "string" &&
+      typeof input.profile === "string" &&
+      typeof input.worktree === "string" &&
+      input.worktree.trim(),
+    "Handoff requires schemaVersion=1, eventId, taskId, profile and worktree",
+  );
+  assert(
+    input.reason && typeof input.reason === "object",
+    "Handoff requires the limit reason, e.g. worker-limit-check output",
+  );
+  assert(
+    input.reason.verdict === undefined || input.reason.verdict === "handoff",
+    `Limit check verdict "${input.reason.verdict}" does not call for a handoff`,
+  );
+  assert(
+    typeof input.evidence === "string" && input.evidence.trim(),
+    "Handoff requires evidence",
+  );
+}
+
+// The receipt names the worktree as `<repo-id>::<path>`; a handoff must keep
+// working in that same checkout.
+function assertSameWorktree(item, worktree) {
+  const worktreeId = item.execution?.worktreeId;
+  const sep = worktreeId?.indexOf("::") ?? -1;
+  if (sep === -1) return;
+  const real = (value) => fs.realpathSync(path.resolve(value));
+  assert(
+    real(worktree) === real(worktreeId.slice(sep + 2)),
+    "Handoff worktree differs from the stopped attempt's worktree",
+  );
+}
+
+/**
+ * Hands a task stopped by a usage limit to a fallback profile of its role.
+ *
+ * The worktree and its commits stay; only the profile changes. The runtime
+ * writes `snapshot-<n>.json` beside the worker's checkpoint, and the next
+ * attempt of the task does not spend the attempt budget. A task takes at most
+ * as many handoffs as its role declares fallbacks, each one once.
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} id - Workflow ID.
+ * @param {number} expectedRevision - Optimistic state revision.
+ * @param {object} input - Event id, task, fallback profile, worktree, the
+ *   limit `reason`, and `evidence` text.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, the failure is not a
+ *   `capacity-handoff`, the policy is not `fallback`, or the profile is not an
+ *   unused fallback on a different limit.
+ */
+export function handoffTask(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, tasks, organization, dir } = readWorkflow(stateDir, id);
+    validateHandoffInput(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+
+    const item = state.tasks[input.taskId];
+    assert(
+      item?.state === "failed" &&
+        item.failure?.route?.category === "capacity-handoff",
+      "Task has no usage-limit failure to hand off",
+    );
+    assert(
+      organization.policy.onExhaustion === "fallback",
+      "Organization policy does not allow a fallback handoff",
+    );
+    const binding = organization.roles[canonicalRole(item.role)];
+    const handoffs = item.handoffs ?? [];
+    const from = handoffs.at(-1)?.to ?? binding.profile;
+    assert(
+      binding.fallbacks.includes(input.profile),
+      `Profile ${input.profile} is not a fallback of ${item.role}`,
+    );
+    assert(
+      input.profile !== from && !handoffs.some((h) => h.to === input.profile),
+      `Profile ${input.profile} already ran this task`,
+    );
+    assert(
+      !profilesShareLimit(
+        organization.profiles[from],
+        organization.profiles[input.profile],
+      ),
+      `Profile ${input.profile} shares the exhausted limit of ${from}`,
+    );
+    assertSameWorktree(item, input.worktree);
+
+    const index = handoffs.length + 1;
+    const { file } = writeHandoffSnapshot(
+      path.join(dir, "tasks", input.taskId, "handoff"),
+      {
+        index,
+        worktree: input.worktree,
+        baseRef: tasks[input.taskId].baseRef,
+        taskHash: item.taskHash,
+        from,
+        to: input.profile,
+        reason: input.reason,
+      },
+    );
+    const handoff = {
+      index,
+      from,
+      to: input.profile,
+      fromAttempt: item.attemptId,
+      reason: input.reason,
+      evidence: input.evidence,
+      snapshot: file,
+      worktree: path.resolve(input.worktree),
+      recordedAt: new Date().toISOString(),
+    };
+    item.handoffs = [...handoffs, handoff];
+    item.handoffPending = true;
+    item.state = "pending";
+    item.attemptId = null;
+    item.execution = null;
+    item.failure = null;
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "task-handoff-ready",
+      taskId: input.taskId,
+      ...handoff,
+    });
+    state.revision += 1;
+    state.status = deriveWorkflowStatus(state);
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
   });
 }
 

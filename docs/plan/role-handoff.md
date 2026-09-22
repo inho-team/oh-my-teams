@@ -118,7 +118,7 @@ worker 브리프 머리글(`scripts/role-launch.mjs:488`)에 체크포인트 규
 | 0. 실측 (완료)                                     | Claude, Codex, Agy의 한도 화면 문구와 headless 출력을 수집한다.                                                                                                                           | provider별 원문 고정 자료가 저장되고, 수집하지 못한 provider가 목록으로 남는다. 결과는 8절에 있다.                             |
 | 1. 문서와 체크포인트 (구현 완료, 터미널 확인 남음) | `handoff-checkpoint`, 문서 형식 검증, 브리프 머리글의 체크포인트 규칙을 만든다. 브리프 규칙은 `worker-start`와 `role-spec`에 `--workflow-id`와 `--workflow-task`가 함께 주어질 때 붙는다. | worker가 커밋할 때 체크포인트를 갱신하는 것을 실제 Orca 터미널에서 확인한다. 이 단계만으로도 사람이 수동으로 이어받을 수 있다. |
 | 2. 감지와 분류 (완료)                              | `worker-limit-check`, headless outcome 반영, `rate-limited` 신호, `capacity-handoff` 경로를 만든다.                                                                                       | 고정 자료로 감지와 분류를 검사하는 테스트가 통과한다.                                                                          |
-| 3. 전이와 실행                                     | `workflow-handoff`, `--profile`, snapshot 생성, 실행 기록 필드를 만든다.                                                                                                                  | 한도 상황을 흉내 낸 workflow에서 fallback 프로필이 같은 worktree에서 task를 끝내고 검토를 통과한다.                            |
+| 3. 전이와 실행 (구현 완료, 터미널 확인 남음)       | `workflow-handoff`, `--profile`, snapshot 생성, 실행 기록 필드를 만든다.                                                                                                                  | 한도 상황을 흉내 낸 workflow에서 fallback 프로필이 같은 worktree에서 task를 끝내고 검토를 통과한다.                            |
 | 4. 절차와 평가                                     | PM 스킬, 감독 절차, 조직 구성 스킬(`skills/form`)의 fallback 안내를 고치고 eval 시나리오를 추가한다.                                                                                      | `npm run sync`, `npm run lint`, `npm test`가 통과한다.                                                                         |
 
 ## 5. 비목표
@@ -176,3 +176,14 @@ Codex는 한도에 걸린 상태의 계정으로 Orca 터미널에서 직접 요
 - **용량 부족의 경로:** `rate-limited` 신호에 `limitKind: "capacity"`가 붙으면 `provider-capacity` 경로(다음 담당 PM, 조치 `retry-after-capacity`, 재시도 가능)로 분류한다.
 - **남은 fallback 계산:** workflow가 실패를 분류할 때 조직 스냅샷의 `policy.onExhaustion`과, 그 역할의 `fallbacks` 수가 task의 `handoffs` 기록 수보다 많은지를 함께 넘긴다. `handoffs` 기록은 3단계의 `workflow-handoff`가 만든다.
 - **headless outcome:** 실패한 turn이 한도로 끝났으면 `exit-error` 대신 `rate-limited`를 쓰고 `limitKind`를 함께 보고한다. Agy는 실패한 결과의 `error` 필드만 읽고, 성공한 응답 본문은 읽지 않는다.
+
+## 10. 3단계 구현에서 정한 세부 사항
+
+- **명령 형식:** 3.5절의 플래그 대신 다른 workflow 명령과 같은 형식인 `workflow-handoff --id <workflowId> --state <pm-state> --revision <N> --handoff <handoff.json>`을 쓴다. 입력 파일에는 `schemaVersion: 1`, `eventId`, `taskId`, `profile`, `worktree`, `reason`(`worker-limit-check` 출력), `evidence`를 적는다. `reason`에 `verdict`가 있으면 `handoff`여야 한다.
+- **받아들이는 조건:** task가 `capacity-handoff` 경로로 실패했고, 조직 스냅샷의 `policy.onExhaustion`이 `fallback`이며, 요청한 프로필이 그 역할의 `fallbacks`에 있고, 이 task에서 아직 실행되지 않았을 때에만 받아들인다. 멈춘 프로필은 마지막 handoff의 대상이고, handoff가 없으면 역할의 기본 프로필이다. 두 프로필이 같은 `pool`을 선언했거나, provider와 `account`가 같으면 같은 한도를 쓰는 것으로 보고 거부한다. 멈춘 attempt의 receipt가 `<repo-id>::<path>` 형식의 worktree를 기록했다면, 입력한 `worktree`가 그 경로와 같아야 한다.
+- **snapshot:** `snapshot-<n>.json`에는 멈춘 시점의 HEAD, 기준 commit 이후의 커밋 목록, 커밋하지 않은 파일(`git status --porcelain -uall`), 기준 commit과의 diff 요약, 마지막 checkpoint의 시각과 그 뒤에 쌓인 커밋 수, 한도 근거, 두 프로필을 기록한다.
+- **시도 예산:** handoff 뒤의 첫 실행(`handoffPending`)은 `attemptsUsed`를 늘리지 않으며, 시도 예산이 다 쓰인 뒤에도 `dispatch-ready`로 나온다. 그 실행을 `workflow-release`로 되돌리면 같은 fallback을 다시 기다린다. 호출 예산(`maxCalls`)은 handoff에도 그대로 적용된다.
+- **프로필 유지:** handoff한 task는 이후 재시도도 fallback 프로필로 실행한다. `dispatch-ready`에는 `profile`과 `worktree`가 붙고, handoff 뒤 첫 실행에는 `handoffIndex`도 붙는다. 5절의 비목표와 같이, 진행 중인 task를 원래 프로필로 되돌리지 않는다.
+- **실행:** `role-terminal`과 `worker-start`의 `--profile`은 `--workflow-id`, `--state`, `--workflow-task`와 함께 주어져야 하고, 그 task의 마지막 handoff 대상과 같아야 하며, task가 `pending`, `reserved`, `running` 가운데 하나여야 한다. `headless-start`에는 아직 `--profile`을 추가하지 않았다.
+- **브리프:** `--workflow-task`가 주어진 브리프에는 그 task의 handoff 이력이 붙는다. handoff 뒤 첫 실행을 기다리거나 그 실행이 예약·진행 중인 동안에는 checkpoint.md와 snapshot 경로, 그리고 "먼저 worktree와 대조하라"는 지시도 붙는다. 검토 브리프도 같은 task를 가리키므로 이력을 함께 받는다.
+- **실행 기록:** handoff 실행은 `handoffFrom`(멈춘 프로필)과 `handoffIndex`를 남긴다. handoff가 아닌 실행에는 두 필드가 없다.

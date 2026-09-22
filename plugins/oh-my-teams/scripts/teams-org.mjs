@@ -62,8 +62,6 @@ import {
   runOrcaJson,
   selectOrcaExecutable,
   startWorker,
-  runOrcaJson,
-  selectOrcaExecutable,
   waitForSupervisionMessage,
 } from "./orca-adapter.mjs";
 import { withRuntimeSignal } from "./adapters.mjs";
@@ -82,6 +80,7 @@ import {
   releaseReservation,
   resumeWorkflow,
   retryTask,
+  handoffTask,
   reworkTask,
   setWorkflowDepth,
 } from "./workflow.mjs";
@@ -180,9 +179,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                --terminal HANDLE [--worktree SELECTOR] [--run ID]
                [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
                [--workflow-task ID] [--purpose implement|review]
-               [--inject-fallback "USER APPROVAL"]
+               [--inject-fallback "USER APPROVAL"] [--profile FALLBACK]
                [--orca EXECUTABLE]
                (with --workflow-id, the workflow's organization snapshot is used;
+               --profile runs the fallback a workflow-handoff recorded for
+               --workflow-task;
                the terminal comes from role-terminal; the worker's tab title
                starts with its role tag, e.g. [PL]; a Claude terminal that
                last received a different task, or any review, gets /clear first)
@@ -209,6 +210,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   role-terminal --org FILE --role ROLE --worktree SELECTOR [--title TEXT]
                 [--workflow-id ID --state DIR] [--orca EXECUTABLE]
                 [--allow-unverified "APPROVAL SENTENCE"]
+                [--workflow-task ID --profile FALLBACK]
+                (--profile opens the fallback a workflow-handoff recorded)
                 (the tab title is the role tag, e.g. [PM], then TEXT or the worktree)
   host-defaults [--project DIR] [--codex-home DIR]
   usage-report --org FILE [--worktree ID | --all] [--state DIR]
@@ -250,6 +253,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-settle --id ID --state DIR --revision N --settlement FILE
   workflow-release --id ID --state DIR --revision N --release FILE
   workflow-retry --id ID --state DIR --revision N --retry FILE
+  workflow-handoff --id ID --state DIR --revision N --handoff FILE
+                   (hands a usage-limited task to a fallback profile in the
+                   same worktree; writes snapshot-<n>.json)
   workflow-rework --id ID --state DIR --revision N --rework FILE
                   (attaches the corrected execution after a review asked for changes)
   workflow-depth --id ID --state DIR --revision N --change FILE
@@ -376,6 +382,8 @@ export const ALLOWED_OPTIONS = {
     "worktree",
     "title",
     "workflow-id",
+    "workflow-task",
+    "profile",
     "state",
     "orca",
     "allow-unverified",
@@ -410,6 +418,7 @@ export const ALLOWED_OPTIONS = {
     "retry-of",
     "title",
     "inject-fallback",
+    "profile",
     "workflow-id",
     "workflow-task",
     "purpose",
@@ -435,6 +444,7 @@ export const ALLOWED_OPTIONS = {
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
+  "workflow-handoff": ["id", "state", "revision", "handoff"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
   "handoff-checkpoint": [
@@ -536,6 +546,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
+  "workflow-handoff": ["id", "state", "revision", "handoff"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
   "handoff-checkpoint": ["state", "workflow-id", "workflow-task", "file"],
@@ -689,6 +700,10 @@ async function compatibilityPrepare(args) {
 // The terminal keeps the model it was opened with, so the proof stays
 // unproven until the screen is read.
 async function startSupervisedWorker(args) {
+  assert(
+    args.profile === undefined || args["workflow-id"],
+    "--profile requires --workflow-id, --state and --workflow-task",
+  );
   const { org, run } = launchContext(args);
   const launch = resolveRoleLaunch(
     org,
@@ -799,6 +814,7 @@ async function startSupervisedWorker(args) {
       ...identity,
       orcaTaskId: started.taskId ?? identity.orcaTaskId,
       stateDir: args.state ?? null,
+      ...run.handoff,
     });
     return {
       ...started,
@@ -1027,7 +1043,31 @@ function launchContext(args) {
       workflowState: snapshot.state,
       ...(args["workflow-task"] ? { workflowTask: args["workflow-task"] } : {}),
       ...(director ? { director } : {}),
+      ...handoffLaunch(args, snapshot.state),
     },
+  };
+}
+
+// `--profile` launches a fallback only for the task a workflow-handoff gave
+// it, so a hand-typed profile cannot move a role onto another account.
+function handoffLaunch(args, state) {
+  if (args.profile === undefined) return {};
+  const taskId = args["workflow-task"];
+  assert(taskId, "--profile requires --workflow-task");
+  const item = Object.hasOwn(state.tasks, taskId) ? state.tasks[taskId] : null;
+  assert(item, `Unknown workflow task: ${taskId}`);
+  const handoff = item.handoffs?.at(-1);
+  assert(
+    handoff?.to === args.profile,
+    `Task ${taskId} has no handoff to ${args.profile}; run workflow-handoff first`,
+  );
+  assert(
+    ["pending", "reserved", "running"].includes(item.state),
+    `Task ${taskId} is ${item.state}; a handoff launch needs it pending, reserved or running`,
+  );
+  return {
+    profile: args.profile,
+    handoff: { handoffFrom: handoff.from, handoffIndex: handoff.index },
   };
 }
 
@@ -1358,6 +1398,10 @@ async function executeCommand(args) {
       return command;
     }
     case "role-terminal": {
+      assert(
+        args.profile === undefined || args["workflow-id"],
+        "--profile requires --workflow-id, --state and --workflow-task",
+      );
       const { org, run: runCtx } = launchContext(args);
       const command = roleCommand(org, args.role, runCtx);
       assert(
@@ -1421,6 +1465,7 @@ async function executeCommand(args) {
           terminal: opened.terminal,
           workflowId: args["workflow-id"] ?? null,
           stateDir: args.state ?? null,
+          ...runCtx.handoff,
         }),
       };
     }
@@ -1619,6 +1664,13 @@ async function executeCommand(args) {
         args.id,
         Number(args.revision),
         readJSON(args.retry),
+      );
+    case "workflow-handoff":
+      return handoffTask(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.handoff),
       );
     case "handoff-checkpoint":
       return recordCheckpoint(

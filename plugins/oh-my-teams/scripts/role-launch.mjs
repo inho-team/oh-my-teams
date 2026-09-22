@@ -171,6 +171,45 @@ function checkpointRule(workflowId, stateDir, workflowTask) {
 }
 const BARE_COMMAND = /^[A-Za-z0-9._-]+$/;
 
+// A launch runs the role's own profile unless a workflow handoff named one of
+// its declared fallbacks; teams-org checks the handoff record itself.
+function roleProfileId(org, role, profile) {
+  if (profile === undefined) return org.roles[role].profile;
+  assert(
+    org.roles[role].fallbacks.includes(profile),
+    `Profile ${profile} is not a fallback of ${role}`,
+  );
+  return profile;
+}
+
+// Whoever works on or reviews a task that changed hands must know which
+// profile did which part; the one taking it over first reads what was left.
+function handoffBrief(workflowState, workflowTask) {
+  const item = workflowTask && workflowState?.tasks?.[workflowTask];
+  const handoffs = item?.handoffs ?? [];
+  if (handoffs.length === 0) return [];
+  const last = handoffs.at(-1);
+  const history = handoffs
+    .map((h) => `${h.index}. ${h.from} → ${h.to} (snapshot ${h.snapshot})`)
+    .join("; ");
+  const checkpoint = path.join(path.dirname(last.snapshot), "checkpoint.md");
+  // A reservation clears handoffPending before worker-start builds the brief,
+  // so the reserved or running handoff attempt still counts as taking over.
+  const takingOver =
+    item.handoffPending ||
+    (["reserved", "running"].includes(item.state) &&
+      item.attempts?.at(-1)?.handoffIndex === last.index);
+  return [
+    `handoff 이력: ${history}. 두 프로필이 나누어 만든 변경이므로, 넘겨받은 경계에서 생긴 불일치를 확인한다.`,
+    ...(takingOver
+      ? [
+          `이 task는 ${last.from}이 사용 한도로 멈춘 뒤 넘겨받은 것이다. 작업하기 전에 ${checkpoint}와 ${last.snapshot}를 읽고, ` +
+            `먼저 worktree(${last.worktree})의 커밋과 변경 사항과 대조하라. 문서와 worktree가 다르면 worktree를 기준으로 삼는다.`,
+        ]
+      : []),
+  ];
+}
+
 function launchableProfile(role, profileId, profile) {
   assert(
     Object.hasOwn(ORCA_LAUNCH, profile.provider),
@@ -243,6 +282,7 @@ function assertHeldRole(org, roles, requestedRole, role) {
  * @param {object} [run={}] - Run context.
  * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
  * @param {string} [run.terminal] - Terminal handle the role was opened in.
+ * @param {string} [run.profile] - Fallback profile a workflow handoff named.
  * @returns {object} Role, profile, provider, agent, launch path, model, effort.
  * @throws {Error} For PM, an unlaunchable profile, a missing terminal, or any
  *   explicit agent, model or effort.
@@ -251,7 +291,7 @@ export function resolveRoleLaunch(
   requestedOrg,
   requestedRole,
   explicit = {},
-  { roles, terminal } = {},
+  { roles, terminal, profile: handoffProfile } = {},
 ) {
   const org = validateOrg(requestedOrg);
   assert(
@@ -266,7 +306,7 @@ export function resolveRoleLaunch(
       ? "PM runs in its own terminal opened with role-command, not worker-start"
       : `${foldReason(org, roles, requestedRole)} and its work folds to pm, which does it itself`,
   );
-  const profileId = org.roles[role].profile;
+  const profileId = roleProfileId(org, role, handoffProfile);
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
   // A runner profile reaches its fixed account only through the runner, which
@@ -360,11 +400,16 @@ function shellToken(token) {
  * @param {string} requestedRole - Role to launch.
  * @param {object} [run={}] - Run context.
  * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
+ * @param {string} [run.profile] - Fallback profile a workflow handoff named.
  * @returns {object} Role, profile, argv, shell command, requested model and
  *   the Claude `--autocompact` value (null for other providers).
  * @throws {Error} When the role is not held or the profile cannot be launched.
  */
-export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
+export function roleCommand(
+  requestedOrg,
+  requestedRole,
+  { roles, profile: handoffProfile } = {},
+) {
   const org = validateOrg(requestedOrg);
   assert(
     requestedRole !== DIRECTOR_ROLE,
@@ -373,7 +418,7 @@ export function roleCommand(requestedOrg, requestedRole, { roles } = {}) {
   );
   const role = foldRole(activeRoles(org, roles), requestedRole);
   assertHeldRole(org, roles, requestedRole, role);
-  const profileId = org.roles[role].profile;
+  const profileId = roleProfileId(org, role, handoffProfile);
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
   assert(
@@ -471,6 +516,7 @@ const names = (list) =>
  * @param {string} [run.director.terminalHandle] - Orca terminal handle of the director session.
  * @param {string} [run.director.checkoutPath] - Owner checkout path of the director.
  * @param {string} [run.workflowTask] - Workflow task ID; with `workflowId` it adds the checkpoint rule.
+ * @param {object} [run.workflowState] - Workflow state; a task's handoffs add their history.
  * @returns {string} Header, charter and task, in that order.
  * @throws {Error} When the role is unknown or the task is empty.
  */
@@ -478,7 +524,15 @@ export function roleSpec(
   requestedOrg,
   requestedRole,
   spec,
-  { roles, orgFile, workflowId, stateDir, director, workflowTask } = {},
+  {
+    roles,
+    orgFile,
+    workflowId,
+    stateDir,
+    director,
+    workflowTask,
+    workflowState,
+  } = {},
 ) {
   const org = validateOrg(requestedOrg);
   assert(typeof spec === "string" && spec.trim(), "Spec text required");
@@ -510,6 +564,7 @@ export function roleSpec(
     ...(orgFile ? [`조직 파일: ${orgFile}`] : []),
     ...(workflowId ? [`workflow: ${workflowId} (state ${stateDir})`] : []),
     ...checkpointRule(workflowId, stateDir, workflowTask),
+    ...handoffBrief(workflowState, workflowTask),
     `역할 스킬 전문: ${path.join(skillsDir, role, "SKILL.md")}`,
     "",
     "아래 권한·책임·한계를 벗어나는 요청은 수행하지 않고, 거부 사유와 함께 보고 대상에게 돌려보낸다.",
