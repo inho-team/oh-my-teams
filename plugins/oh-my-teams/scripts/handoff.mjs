@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { assert, readJSON, writeJSON } from "./core.mjs";
 
-import { workflowDirectory } from "./workflow-store.mjs";
+import { readWorkflowSnapshot } from "./workflow-store.mjs";
 
 /** Sections every checkpoint.md must carry, each once and non-empty. */
 export const HANDOFF_SECTIONS = Object.freeze([
@@ -63,11 +63,7 @@ export function validateCheckpoint(text) {
  * @throws {Error} When the workflow or the task does not exist.
  */
 export function handoffDirectory(stateDir, workflowId, taskId) {
-  const dir = workflowDirectory(stateDir, workflowId);
-  const txFile = path.join(dir, "transaction.json");
-  const state = fs.existsSync(txFile)
-    ? readJSON(txFile).state
-    : readJSON(path.join(dir, "state.json"));
+  const { dir, state } = readWorkflowSnapshot(stateDir, workflowId);
   const task = Object.hasOwn(state.tasks, taskId) ? state.tasks[taskId] : null;
   assert(task, `Unknown workflow task: ${taskId}`);
   return {

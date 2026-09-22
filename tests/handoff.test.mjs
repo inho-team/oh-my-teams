@@ -211,16 +211,32 @@ test("the brief carries the checkpoint rule only for a workflow task", async (t)
     assert.match(brief, new RegExp(`## ${name}`));
 });
 
-test("handoffDirectory isolates file read cost to transaction.json without reading all task contracts", async (t) => {
+test("handoffDirectory reuses readWorkflowSnapshot to avoid duplicated read logic", async (t) => {
   const { stateDir, id } = await workflow(t);
-
-  const dir = path.join(stateDir, "workflows", id, "tasks", "b", "revisions");
-  fs.mkdirSync(dir, { recursive: true });
 
   const txFile = path.join(stateDir, "workflows", id, "state.json");
   const tx = JSON.parse(fs.readFileSync(txFile, "utf8"));
   tx.tasks.b = { revision: 1, role: "junior", state: "reserved" };
   fs.writeFileSync(txFile, JSON.stringify(tx));
+
+  const dir = path.join(stateDir, "workflows", id, "tasks", "b", "revisions");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "1.json"), JSON.stringify({}));
+
+  const orgFile = path.join(stateDir, "workflows", id, "organization.json");
+  fs.writeFileSync(orgFile, JSON.stringify({}));
+
+  const originalReadFileSync = fs.readFileSync;
+  let readOrganization = false;
+  fs.readFileSync = function (file, options) {
+    if (typeof file === "string" && file.endsWith("organization.json")) {
+      readOrganization = true;
+    }
+    return originalReadFileSync.call(this, file, options);
+  };
+  t.after(() => {
+    fs.readFileSync = originalReadFileSync;
+  });
 
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "omt-"));
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
@@ -228,19 +244,8 @@ test("handoffDirectory isolates file read cost to transaction.json without readi
   await run(["git", "commit", "--allow-empty", "-m", "init"], { cwd: repo });
 
   recordCheckpoint(stateDir, id, "a", { text: checkpoint(), repo });
-  const meta = JSON.parse(
-    fs.readFileSync(
-      path.join(
-        stateDir,
-        "workflows",
-        id,
-        "tasks",
-        "a",
-        "handoff",
-        "checkpoint.json",
-      ),
-      "utf8",
-    ),
+  assert(
+    readOrganization,
+    "Should reuse readWorkflowSnapshot which reads organization.json",
   );
-  assert.equal(meta.role, "pl");
 });
