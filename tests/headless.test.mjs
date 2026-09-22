@@ -58,7 +58,7 @@ async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
       const lastTurn = turnNumbers.at(-1);
       if (lastTurn !== undefined) {
         const turnDir = path.join(turnsDir, String(lastTurn));
-        
+
         const exitFile = path.join(turnDir, "exit.json");
         const stopFile = path.join(turnDir, "stop.request");
         const pidsFile = path.join(turnDir, "pids.json");
@@ -73,12 +73,10 @@ async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
         while (!fs.existsSync(exitFile) && Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 100));
         }
-        
+
         if (fs.existsSync(pidsFile)) {
           let runnerPid;
-          try {
-            runnerPid = JSON.parse(fs.readFileSync(pidsFile, 'utf8')).runner;
-          } catch {}
+          runnerPid = JSON.parse(fs.readFileSync(pidsFile, "utf8")).runner;
           if (runnerPid) {
             while (Date.now() < deadline) {
               try {
@@ -90,7 +88,6 @@ async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
             }
           }
         }
-
       }
     }
   }
@@ -1279,4 +1276,37 @@ test("runnerTurnProven demands every stage and the same request set in both reco
     }),
     false,
   );
+});
+
+test("waitAllRunnersExited waits for runnerPid to exit to prevent EPERM", async (t) => {
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-eperm-")),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, "state");
+  const turnDir = path.join(stateDir, "headless", "worker-1", "turns", "1");
+  fs.mkdirSync(turnDir, { recursive: true });
+
+  const { spawn } = require("child_process");
+  const child = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 200)"], {
+    detached: true,
+  });
+  fs.writeFileSync(
+    path.join(turnDir, "pids.json"),
+    JSON.stringify({ runner: child.pid }),
+  );
+  fs.writeFileSync(
+    path.join(turnDir, "exit.json"),
+    JSON.stringify({ code: 0 }),
+  );
+
+  await waitAllRunnersExited(stateDir);
+
+  let isRunning = true;
+  try {
+    process.kill(child.pid, 0);
+  } catch {
+    isRunning = false;
+  }
+  assert.equal(isRunning, false, "The runner process should have exited");
 });
