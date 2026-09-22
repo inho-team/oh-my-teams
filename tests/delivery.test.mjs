@@ -29,28 +29,52 @@ async function git(cwd, ...args) {
 // A project on main that owns an organization, and one kickoff worktree with
 // a committed result, like literacy-test's report branch.
 
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
+import { after } from "node:test";
 let templateProjectDir = null;
+after(() => {
+  if (templateProjectDir) {
+    try {
+      fs.rmSync(templateProjectDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+      });
+    } catch (e) {}
+  }
+});
 async function getTemplateProject() {
   if (templateProjectDir) return templateProjectDir;
-  const root = fs.realpathSync(fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), "omt-template-")));
-  const project = require('node:path').join(root, "project");
+  const root = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-template-")),
+  );
+  const project = path.join(root, "project");
   fs.mkdirSync(project);
   await git(project, "init", "-q", "-b", "main");
   await git(project, "config", "user.email", "t@example.invalid");
   await git(project, "config", "user.name", "t");
-  fs.writeFileSync(require('node:path').join(project, ".gitignore"), ".omt\n");
-  fs.writeFileSync(require('node:path').join(project, "README.md"), "base\n");
+  fs.writeFileSync(path.join(project, ".gitignore"), ".omt\n");
+  fs.writeFileSync(path.join(project, "README.md"), "base\n");
   await git(project, "add", ".");
   await git(project, "commit", "-q", "-m", "base");
   templateProjectDir = project;
   return templateProjectDir;
 }
 
-async function kickoffProject(t, delivery = { mode: "local-merge", branch: "main" }) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "omt-deliver-")));
-  t.after(() => { try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) {} });
+async function kickoffProject(
+  t,
+  delivery = { mode: "local-merge", branch: "main" },
+) {
+  const root = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-deliver-")),
+  );
+  t.after(() =>
+    fs.rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    }),
+  );
   const project = path.join(root, "project");
   fs.cpSync(await getTemplateProject(), project, { recursive: true });
   const org = path.join(project, ".omt", "organization.json");
@@ -365,4 +389,18 @@ test("the lifecycle documents keep the owner merge in close alone", () => {
   for (const skill of ["skills/pm/SKILL.md", "skills/pl/SKILL.md"]) {
     assert.match(read(skill), /주인 체크아웃\)에는 커밋하거나 병합하지 않/);
   }
+});
+
+test("kickoffProject creates isolated projects using the template", async (t) => {
+  const fixture1 = await kickoffProject(t);
+  const fixture2 = await kickoffProject(t);
+  assert.notEqual(fixture1.project, fixture2.project);
+
+  const git1 = await git(fixture1.project, "log", "-1", "--format=%s");
+  const git2 = await git(fixture2.project, "log", "-1", "--format=%s");
+  assert.equal(git1, "base");
+  assert.equal(git2, "base");
+
+  fs.writeFileSync(path.join(fixture1.project, "isolate.txt"), "isolate");
+  assert.ok(!fs.existsSync(path.join(fixture2.project, "isolate.txt")));
 });
