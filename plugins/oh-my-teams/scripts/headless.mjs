@@ -590,6 +590,7 @@ export function modelVerdict(requested, reported) {
   if (!requested) return "unrequested";
   if (!reported) return "unproven";
   if (reported === requested) return "matched";
+  // An alias such as `sonnet` names a family the reported id belongs to.
   if (
     !/\d/.test(requested) &&
     reported.toLowerCase().includes(requested.toLowerCase())

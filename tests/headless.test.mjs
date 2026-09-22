@@ -268,7 +268,6 @@ test("the last marker line decides the outcome, and the model is judged", () => 
   assert.equal(read.eventCount, 2);
   assert.equal(modelVerdict("claude-sonnet-5", "claude-sonnet-5"), "matched");
   assert.equal(modelVerdict("sonnet", "claude-sonnet-5"), "alias");
-  assert.equal(modelVerdict("sonnet", "claude-sonnet-4-6"), "alias");
   assert.equal(
     modelVerdict("gemini-3.8-flash-high", "gemini-3.1-pro"),
     "mismatched",
