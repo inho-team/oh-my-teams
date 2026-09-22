@@ -1050,6 +1050,11 @@ test("all roles and director follow bluf for reports and signals", () => {
     /이사가 사용자에게 보내는 보고/,
     "bluf.md must explicitly include the director reporting to the user",
   );
+  assert.match(
+    bluf,
+    /배정자, 이사, 사용자가 결정해야 하는 일/,
+    "bluf.md must include the user as a decision maker in the second line",
+  );
 
   // (e) pm·director 스킬이 신호 본문의 두괄식 첫 줄 규칙을 적는다
   assert.match(
