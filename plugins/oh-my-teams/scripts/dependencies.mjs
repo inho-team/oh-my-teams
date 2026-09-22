@@ -342,7 +342,9 @@ async function healthCheck(ocx, staging) {
     const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/healthz`);
+        const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+          signal: AbortSignal.timeout(1000),
+        });
         if (response.ok) return;
       } catch {}
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -351,10 +353,16 @@ async function healthCheck(ocx, staging) {
   } finally {
     if (child.exitCode === null && !exited) child.kill("SIGTERM");
     if (child.exitCode === null && !exited) {
-      await Promise.race([
-        new Promise((resolve) => child.once("close", resolve)),
-        new Promise((resolve) => setTimeout(resolve, 3000)),
-      ]);
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 3000);
+        child.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+    if (child.exitCode === null && !exited) {
+      child.kill("SIGKILL");
     }
   }
 }
