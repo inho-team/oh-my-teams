@@ -2,7 +2,7 @@
 
 ## 통합 HEAD 구성
 
-이 문서가 설명하는 코드 기준 커밋은 345def2e021d93f80dab2b4a431e170803d9cf47입니다. 이 문서를 더하기 전의 통합 브랜치이며, 아래 실제 경로 검증에 쓴 워크트리도 이 커밋에서 만들었습니다. 이 커밋의 코드는 수정 전 상태이고, 이후 c5feb62가 `prompt-supervision.mjs`, `orca-adapter.mjs` 등의 코드를 바꾸었습니다. 그래서 통합 브랜치의 HEAD는 코드 기준 커밋과 코드 트리가 같지 않습니다.
+이 문서가 설명하는 코드 기준 커밋은 345def2e021d93f80dab2b4a431e170803d9cf47입니다. 이 문서를 더하기 전의 통합 브랜치이며, 아래 Claude 실제 경로 검증에 쓴 워크트리도 이 커밋에서 만들었습니다. Agy 검증 워크트리는 origin/main에서 따로 만든 뒤 통합 브랜치의 8768f9c로 옮겼으며, 아래 Agy 절에 적었습니다. 이 커밋의 코드는 수정 전 상태이고, 이후 c5feb62가 `prompt-supervision.mjs`, `orca-adapter.mjs` 등의 코드를 바꾸었습니다. 그래서 통합 브랜치의 HEAD는 코드 기준 커밋과 코드 트리가 같지 않습니다.
 
 통합 브랜치의 HEAD는 이 문서를 반영하는 병합과 코드 수정을 반영하는 병합을 거치며 바뀌었고, 이 문서를 다시 고친 커밋이 병합되면 한 번 더 바뀝니다. 그래서 최종 병합 커밋의 해시는 적지 않고, 커밋 사이의 관계와 각 시점의 검사 결과를 적습니다.
 
@@ -108,21 +108,75 @@ origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브�
 
 ## Agy와 Codex
 
-이번 통합 시점에는 두 클라이언트의 검증이 미완료입니다.
+이번 통합 시점에 Agy는 일부 경로만 관측했고 작업 수행은 검증하지 못했습니다. Codex는 검증을 시작하지 못했습니다. Agy 검증은 실행 당시 사용자가 승인한 결정이 아니라 알림 결함으로 생긴 무승인 결정(이슈 #82)에 따라 실행되었으므로, 정정을 먼저 적습니다. 이후 2026-09-22에 사용자가 그 결과를 증거로 유지하도록 사후 승인했고, 같은 날 Codex 검증의 역할 매핑도 승인했습니다. 근거 파일은 `.omt/evidence-2.8.0-features.md`의 「무승인 결정(#82)으로 진행한 Agy 실제 경로」 절과 「사용자의 직접 결정 (2026-09-22)」 절, `.omt/w2/CORRECTION-82.md`입니다.
 
-**Agy**
-현재 /Users/jinsungkim/orca/oh-my-teams/.omt/organization.json의 역할 구성에 Agy 프로필을 사용하는 역할이 없어 검증을 시작할 수 없습니다. 조직의 모든 역할이 Claude 프로필이라 role-terminal과 prompt-answer 경로로 Agy나 Codex를 열 수 없기 때문입니다.
+### 무승인 결정 정정 (이슈 #82)
 
-이 때문에 PM이 2026-09-21 17시대(UTC)에 director-signal decision(id 1f7bbebc-a5ee-4813-8cf3-6421ab2dbc18)으로 이사에게 결정을 요청했고, 알림은 전달되었습니다(notified true). 요청한 선택지는 두 가지입니다. (A)는 검증 전용 역할 매핑(예: junior를 agy-oss로, 한도가 풀린 뒤 junior를 codex-luna로)과 검증 전용 workflow를 만드는 것이고, (B)는 Agy와 Codex를 미검증으로 남기는 것입니다. 근거 기록을 남긴 시점까지 이사의 답은 없었습니다.
+PM은 Agy 검증을 위해 director-signal decision으로 이사에게 결정을 세 번 요청했습니다.
 
-**Codex**
-Codex의 주간 사용량 한도가 2026-09-26 06:11 KST에 리셋될 예정이므로, 그 이후에 같은 경로(새 워크트리 생성 → role-terminal → prompt-answer → worker-start)를 검증합니다. 현재 결과 표에는 Codex를 완료로 나타내지 않습니다.
+| 결정 요청 신호 | 요청한 내용 | 이 결정에 따라 실행한 일 |
+|---|---|---|
+| 1f7bbebc | (A) 검증 전용 역할 매핑(예: junior를 agy-oss로)과 검증 전용 workflow를 만드는 것, (B) Agy와 Codex를 미검증으로 남기는 것 | 조직 revision 7·8 변경과 workflow 생성 (w2/org-edit-agy.out, w2/create.out, w2/org-edit-revert.out) |
+| f7c7658f | 감독 worker-start가 시작되지 않는 Agy 터미널에 `--inject-fallback`을 쓰는 것 | workflow-reserve, worker-start `--inject-fallback`, workflow-attach (w2/reserve-agy-path-1.json, w2/start-agy-path-1.json, w2/attach-agy-path-1.json) |
+| 0fa15db8 | 제공자 503 뒤에 같은 터미널에 다시 입력을 보내는 것 | `terminal send` 1회 (w2/send-retry-1.json) |
+
+1f7bbebc는 2026-09-21 17시대(UTC)에 요청했습니다. 이사는 세 건의 답을 '사용자 결정'으로 전달했고, 그 전달에 따라 위 작업을 실행했습니다. 그러나 2026-09-22에 이사가 확인한 바로는 세 건 모두 사용자가 직접 고른 답이 아니었습니다. director-signal 알림의 Enter가 이사 화면에 열려 있던 선택 창의 첫 번째 선택지를 골랐고, 사용자는 직접 답하지 않았습니다(이슈 #82).
+
+실행 당시 조직 매핑 변경, 주입, 재시도는 사용자 승인이 아니라 알림 결함으로 생긴 무승인 결정에 따라 실행되었습니다. 어느 것도 실행 당시의 사용자 승인을 근거로 서술하지 않습니다. `w2/start-agy-path-1.json`의 `approval` 문자열("사용자가 … 승인함")은 당시 전달받은 내용을 그대로 적은 실행 기록이며 사실과 다릅니다. 원본 실행 기록은 고치지 않았습니다. 관측 결과(신뢰 응답, 주입, 제공자 503)는 사실 기록으로 유지합니다.
+
+### 사후 승인 (2026-09-22)
+
+이사가 전달한 바로는, 사용자가 선택 창 없이 이사 대화에 글로 직접 답했습니다('1 A, 2 유지'). 이 결정은 두 가지입니다. 첫째, 사용자는 Agy·Codex 실제 경로 검증에 A안(검증 전용 역할 매핑)을 승인했습니다. Codex는 주간 사용량 한도가 리셋되는 2026-09-26 06:11 KST 이후 junior를 codex-luna로 매핑해 같은 절차를 따릅니다. 조건은 앞서 이사가 전달한 것과 같습니다. 조직에 있는 프로필만 매핑하고, 검증 전용 workflow를 만드는 동안만 매핑을 유지한 뒤 곧바로 되돌리며, 바꾼 revision과 되돌린 revision을 progress 신호로 알리고, 사용자 설정 파일의 신뢰 목록은 직접 고치지 않습니다. 둘째, 사용자는 이미 얻은 Agy 결과(폴더 신뢰 자동 응답, 터미널 재열기, 주입까지 확인, 작업 수행은 제공자 503으로 미검증)를 증거로 유지하도록 승인했으며, Agy는 다시 실행하지 않습니다.
+
+이에 따라 이 문서가 적은 조직 매핑 변경, 주입, 재시도는 "실행 당시에는 무승인(#82)이었고, 2026-09-22에 사용자가 결과를 증거로 유지하도록 사후 승인함"으로 기록합니다. 사후 승인은 결과를 증거로 쓰는 것에 대한 승인이며, 실행 당시에 승인이 있었다는 뜻이 아닙니다. 이 승인을 근거로 하는 새 작업은 Codex의 junior→codex-luna 검증 전용 매핑뿐이며, 다른 매핑 변경은 시작하지 않습니다(근거: `.omt/evidence-2.8.0-features.md`의 「사용자의 직접 결정 (2026-09-22)」 절, `.omt/w2/CORRECTION-82.md`의 「사후 승인」 절).
+
+### Agy 관측 (Antigravity CLI 1.2.7, agy-oss, 화면 모델 GPT-OSS 120B (Medium))
+
+**조직 매핑과 workflow**
+- 조직 revision 6에서 7로 바꾸어 junior를 agy-oss에 매핑했고, workflow `supervised-prompt-answers-w2-agy`(depth 2, organizationRevision 7)를 만든 직후 revision 8에서 junior를 claude-haiku로 되돌렸습니다. 세 명령은 한 셸 호출에서 연달아 실행했습니다. 이 문서를 고치는 시점의 조직 파일(revision 9)에서도 모든 역할은 Claude 프로필이며, Agy와 Codex 프로필을 쓰는 역할은 없습니다.
+
+**워크트리 생성 (w2/wt-verify-agy.json)**
+- 새 워크트리 spa-verify-agy는 Orca가 origin/main의 b625b25로 만들었고, PM이 통합 브랜치의 8768f9c로 fast-forward했습니다. 8768f9c는 c5feb62의 수정을 포함합니다. 생성 전 Agy settings.json에는 이 경로가 없었습니다(읽기만 했습니다).
+
+**role-terminal 실행 (w2/rt-verify-agy.json)**
+- profile은 agy-oss이고, 실행 명령은 `agy --dangerously-skip-permissions --model gpt-oss-120b-medium`입니다. submission은 enter-sent, trust는 accepted, ready는 true입니다.
+- `reopened`에는 닫힌 터미널 term_ebd209e6과 사유 trust-question-in-buffer가 기록되었고, 준비가 끝난 터미널은 새로 열린 term_6d5f46f4입니다. 화면에는 모델 "GPT-OSS 120B (Medium)"과 작업 폴더 ~/orca/workspaces/oh-my-teams/spa-verify-agy가 표시되었습니다.
+
+**신뢰 질문에 대한 감독자 응답 (prompt-answers.jsonl의 id 79e300e5)**
+- promptAnswers 1건입니다. 감독자는 PM(run_560d98ca9f04)이고, kind는 trust, cli는 agy, 확인한 버전은 1.2.7입니다. 화면에서 대조한 줄은 "Do you trust the contents of this project?", "> Yes, I trust this folder", "No, exit", "↑/↓ Navigate · enter Confirm"이고 선택된 항목은 index 1입니다. workspace는 역할 워크트리와 같았습니다.
+- 보낸 키는 Enter이고 근거는 existing-behavior입니다. 기록은 status sending에서 resolved로 바뀌었고, delivery는 accepted, 키를 보낸 뒤 화면은 kind unknown(질문이 사라짐)이며, next는 resume-precheck입니다. 감독자 응답으로 Agy의 신뢰 질문이 해소된 것을 관측했습니다.
+- 응답 뒤 Agy settings.json에는 spa-verify-agy 경로가 한 건 생겼습니다(읽기만 했습니다). PM이 쓴 것이 아니라 Agy CLI가 신뢰 응답을 기록한 결과입니다.
+
+**terminal-idle-check (w2/idle-verify-agy.json)**
+- 20초 안에 tui-idle을 보고하지 않아 거부되었습니다(종료 코드 1, Dispatch 없음). `orca terminal show`의 agentWait는 null이었습니다. `orca-runtime.md`의 Agy 문단에 적힌 대로, 모델 이름이 gemini로 시작하지 않는 Agy 프로필(GPT-OSS)은 Orca의 대기 판정을 통과하지 못하므로 예상된 거부입니다. 시도를 예약하기 전이어서 workflow 예산은 쓰지 않았습니다.
+- 그래서 감독 worker-start 경로로는 이 터미널에 작업을 넘길 수 없었습니다. Orca가 GPT-OSS Agy 터미널의 대기를 보고하지 못했기 때문입니다.
+
+**주입 (무승인 결정 f7c7658f에 따라 1회 실행)**
+- workflow-reserve(revision 1에서 2) 뒤 `worker-start --inject-fallback`을 실행했습니다(w2/start-agy-path-1.json, 지시문 w2/spec-agy-path-1.md). 결과는 `via: "dispatch-inject"`, `supervised: false`, `injected: true`, taskId task_e6bdb8c32de5, dispatchId ctx_5f6f07b38873, `liveness: "unverifiable"`입니다. `binding.modelProof`는 `unproven`이고, `refusal`에는 사전 점검의 timeout 원문이 남았습니다. 이 결과는 감독 worker-start 경로가 아닙니다.
+- workflow-attach(revision 3)에는 via dispatch-inject, screenModel "GPT-OSS 120B (Medium)", supervised false로 기록되었습니다.
+
+**제공자 503**
+- 주입한 지시문은 Agy 화면에 도착했습니다. 그러나 Agy는 모델 호출에서 "UNAVAILABLE (code 503): No capacity available for model gpt-oss-120b-medium on the server"(Error ID f7586aaf-a0b3-4272-b070-c5a1a7eba445-1-2010)를 표시하고 입력 대기(`>`)로 돌아갔습니다. 2분 뒤에도 화면은 같았고, 워크트리에는 커밋과 변경이 없었으며, worker_done도 오지 않았습니다. 이 오류는 Orca의 주입 거부가 아니라 모델 제공자의 용량 부족입니다.
+- 이어서 무승인 결정 0fa15db8에 따라 같은 터미널에 `terminal send --text "다시 시도" --enter`를 1회 보냈습니다(w2/send-retry-1.json). 결과는 `accepted: true`, stages `["input_accepted"]`이고, provider와 observation은 `unsupported`이며 "this provider cannot report delivery" 경고가 붙었습니다. 60초 뒤 화면에는 같은 503 오류(Error ID f7586aaf-a0b3-4272-b070-c5a1a7eba445-3-2010)가 다시 나왔고 워크트리에는 변경이 없었습니다. 그 뒤로 입력을 더 보내지 않았습니다.
+
+**정산과 정리**
+- workflow-settle는 outcome failed, callsUsed 2로 기록되었습니다(w2/settle-agy-path-1.json, workflow revision 4, status blocked, route unknown이며 pm이 classify-with-evidence). 명령의 종료 코드는 1이었지만 상태 파일에는 정산이 기록되었습니다. Orca Task task_e6bdb8c32de5는 failed로 닫았습니다(w2/task-close.json).
+- 터미널 term_6d5f46f4를 닫았고(w2/term-close.json), 워크트리 spa-verify-agy를 제거했습니다(w2/wt-rm.json, removed true). 브랜치 dev-inho/spa-verify-agy는 8768f9c로 보존되었고 새 커밋은 없습니다. Agy CLI가 settings.json에 기록한 spa-verify-agy 신뢰 항목은 사용자 설정이므로 PM이 지우지 않았습니다.
+
+**미검증으로 남은 것**
+- Agy가 작업 계약(docs/plan/agy-path-check.md를 작업 워크트리에 커밋)을 수행하는지, worker_done을 보내는지는 확인하지 못했습니다. 두 번의 시도 모두 제공자 503으로 끝났기 때문입니다.
+- 감독 worker-start 경로로 Agy에 작업을 넘기는 동작은 시작할 수 없었으므로 확인하지 못했습니다.
+- 주입 경로의 결과는 `supervised: false`, `modelProof: unproven` 그대로입니다. 화면에 표시된 모델만 확인했습니다.
+
+### Codex
+
+Codex는 검증을 시작하지 못했으며 아직 미검증입니다. 주간 사용량 한도가 2026-09-26 06:11 KST에 리셋될 예정입니다. 사용자가 2026-09-22에 A안(검증 전용 역할 매핑)을 승인했으므로, 한도가 풀린 뒤 junior를 codex-luna로 매핑하는 검증 전용 매핑으로 Agy와 같은 경로(새 워크트리 생성 → role-terminal → prompt-answer → worker-start)를 검증할 예정입니다. 검증 전용 workflow를 만드는 동안만 매핑을 유지하고, 만든 직후 되돌립니다(자세한 승인 내용은 앞 절의 「사후 승인 (2026-09-22)」를 참고합니다).
 
 | 클라이언트 | 확인한 경로 | 미확인 단계 | 상태 |
 |---|---|---|---|
 | Claude (Haiku 4.5) | wt, rt(신뢰 질문 제외), pa, idle, ws | 신뢰 질문 경로(prompt-answer 키 전달) | ✓ 부분 확인 |
-| Agy | — | 모든 경로 | ⏳ 이사에게 요청한 역할 매핑 결정 대기 (답 없음) |
-| Codex | — | 모든 경로 | ⏳ 한도 리셋(2026-09-26 06:11 KST) 뒤 예정 |
+| Agy (GPT-OSS 120B) | wt, rt와 신뢰 질문 감독자 응답, idle(거부), 주입(supervised false) | 감독 worker-start, 작업 수행, worker_done | 부분 관측. 실행 당시 무승인(#82)이었고, 2026-09-22 결과를 증거로 유지하도록 사후 승인됨. 제공자 503으로 중단 |
+| Codex | 없음 | 모든 경로 | ⏳ 미검증. 2026-09-22 사용자가 A안 승인, 한도 리셋(2026-09-26 06:11 KST) 뒤 junior→codex-luna 매핑으로 검증 예정 |
 
 ## 2.8.0 기능 관측 요약
 
@@ -172,10 +226,11 @@ purpose-changed는 task가 바뀌어서 나온 값이 아닙니다. 같은 터�
 
 ### 미검증: Codex와 Agy, 그리고 Enter와 Esc의 효과
 
-- Codex와 Agy의 신뢰 질문 이후 화면(업데이트 안내, 명령 승인, 사용자 질문 등)은 확인하지 못했습니다. 신뢰 질문에 답하면 사용자 설정에 신뢰가 기록되므로 캡처 단계에서 답하지 않았습니다.
+- Codex와 Agy의 신뢰 질문 이후 화면(업데이트 안내, 명령 승인, 사용자 질문 등)은 확인하지 못했습니다. Agy는 신뢰 질문에 답한 뒤 질문이 사라지는 것까지만 관측했습니다. 신뢰 질문에 답하면 사용자 설정에 신뢰가 기록되므로 캡처 단계에서는 답하지 않았습니다. Agy 검증 워크트리에서는 무승인 결정(#82)에 따라 답했고, Agy CLI가 기록한 신뢰 항목은 지우지 않았습니다.
 - Codex와 Agy에서 신뢰 질문에 Esc를 보냈을 때의 동작은 확인하지 못했습니다. Claude에서는 Esc를 한 번 보냈을 때 질문이 닫히고 Claude가 종료되었으며, 이 관측은 지시 밖 입력이었습니다.
-- Codex와 Claude의 신뢰 질문에서 Enter의 효과는 어느 CLI에서도 실측하지 못했습니다. classifier의 accept 기준서에는 "Enter는 화면 안내문에서 도출한 미검증 키로 코드와 문서에 표시"되어 있고, 이 키의 근거는 `footer-text`입니다. 이번 통합 단계의 실제 경로 검증에서도 확인하지 못했습니다.
-- Codex는 주간 사용량 한도로, Agy는 역할 매핑 결정 대기로 검증하지 못했습니다(앞 절의 표를 참고합니다).
+- Codex와 Claude의 신뢰 질문에서 Enter의 효과는 실측하지 못했습니다. classifier의 accept 기준서에는 "Enter는 화면 안내문에서 도출한 미검증 키로 코드와 문서에 표시"되어 있고, 이 키의 근거는 `footer-text`입니다. 이번 통합 단계의 Claude 실제 경로 검증에서도 확인하지 못했습니다. Agy 1.2.7의 신뢰 질문에서는 Enter를 한 번 보낸 뒤 질문이 사라진 것을 관측했습니다(`prompt-answers.jsonl`의 id 79e300e5, 키 근거 existing-behavior). 이 관측은 무승인 결정(#82)에 따른 검증 중에 얻었습니다.
+- Codex는 주간 사용량 한도로 검증하지 못했습니다. 역할 매핑(junior→codex-luna)은 2026-09-22에 사용자가 A안으로 승인했으므로, 한도 리셋 뒤 그 매핑으로 검증할 예정입니다.
+- Agy는 작업 수행과 worker_done을 검증하지 못했습니다. 주입한 지시문과 재시도 입력이 모두 제공자 503으로 끝났고, 감독 worker-start 경로는 시작할 수 없었습니다(앞 절을 참고합니다). 이미 얻은 결과는 2026-09-22에 사용자가 증거로 유지하도록 승인했으며, Agy는 다시 실행하지 않습니다.
 - 이 문서에는 PR의 CI 결과가 없습니다. PR을 만든 뒤 `CI` 워크플로 결과를 확인해야 합니다.
 
 ### 결정 필요: Claude 신뢰 질문 실측
