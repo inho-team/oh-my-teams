@@ -60,6 +60,56 @@ export function readLaunches(orgFile) {
     });
 }
 
+/**
+ * Provides a findLast method that reads the ledger backward indefinitely until
+ * the predicate matches, avoiding loading the entire file into memory.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @returns {{findLast: Function}} Object duck-typing an array's findLast.
+ */
+export function lazyLaunchesBackward(orgFile) {
+  return {
+    findLast: (predicate) => {
+      const file = ledgerFile(orgFile);
+      if (!fs.existsSync(file)) return undefined;
+      const fd = fs.openSync(file, "r");
+      try {
+        const stats = fs.fstatSync(fd);
+        let position = stats.size;
+        const chunkSize = 64 * 1024;
+        let tail = "";
+        while (position > 0) {
+          const readSize = Math.min(chunkSize, position);
+          position -= readSize;
+          const buffer = Buffer.alloc(readSize);
+          fs.readSync(fd, buffer, 0, readSize, position);
+          const text = buffer.toString("utf8") + tail;
+          const parts = text.split(/\r?\n/);
+          tail = parts.shift() || "";
+          for (let i = parts.length - 1; i >= 0; i -= 1) {
+            const line = parts[i];
+            if (line.trim()) {
+              try {
+                const entry = JSON.parse(line);
+                if (predicate(entry)) return entry;
+              } catch {}
+            }
+          }
+        }
+        if (tail.trim()) {
+          try {
+            const entry = JSON.parse(tail);
+            if (predicate(entry)) return entry;
+          } catch {}
+        }
+        return undefined;
+      } finally {
+        fs.closeSync(fd);
+      }
+    },
+  };
+}
+
 function samePath(a, b) {
   return Boolean(a && b) && pathWithin(a, b) && pathWithin(b, a);
 }
@@ -176,7 +226,7 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
         : {}),
       kickoffPmWorktreeId: resolveLaunchKickoff(
         kickoffs,
-        readLaunches(orgFile),
+        lazyLaunchesBackward(orgFile),
         {
           stateDir: launch.stateDir ? path.resolve(launch.stateDir) : null,
           callerCwd,
