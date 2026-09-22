@@ -1045,6 +1045,33 @@ test("presets pin one slot per shared-pool role and keep each fallback chain to 
   assert.deepEqual(opusFirst.senior.fallbacks, []);
   assert.deepEqual(opusFirst.junior.fallbacks, []);
 });
+test("presets match provider as well as model to prevent Claude Code profiles from masking Agy profiles", () => {
+  const org = clone();
+  org.profiles["claude-opus-spoof"] = {
+    provider: "claude",
+    command: ["claude"],
+    model: "claude-opus-4-6-thinking",
+    account: "test",
+    subscription: "test",
+    concurrency: 1,
+  };
+  org.profiles["claude-sonnet-spoof"] = {
+    provider: "claude",
+    command: ["claude"],
+    model: "claude-sonnet-4-6",
+    account: "test",
+    subscription: "test",
+    concurrency: 1,
+  };
+  
+  const opusFirst = previewPreset(org, "opus-first").organization;
+  assert.equal(opusFirst.roles.senior.profile, "agy-opus");
+  assert.equal(opusFirst.roles.junior.profile, "agy-opus");
+
+  const balanced = previewPreset(org, "balanced").organization;
+  assert.equal(balanced.roles.senior.profile, "agy-opus");
+  assert.equal(balanced.roles.junior.profile, "agy-sonnet");
+});
 test("provider print timeout expires before the runtime kills the call", () => {
   for (const timeoutMs of [60000, 300000, 600000]) {
     const spec = providerCommand(
