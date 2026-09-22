@@ -23,7 +23,17 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 - 자문자: `advisors`가 비어 있어 모든 역할의 `advise` 호출이 거부된다. 허용하면 자문 예산(`policy.adviceBudget`)은 kickoff 상태 하나당 6회가 기본값이다.
 - 계정: 모든 프로필이 현재 로그인 계정을 쓰며, 같은 실행기의 프로필은 하나의 `pool`로 묶여 있다.
 - 무응답 감독: `policy.supervision`이 `progressCheckMs: 900000`(15분), `unansweredLimit: 2`다. 이 값이 없는 이전 조직도 같은 기본값으로 읽힌다.
+- 실험 기능: `policy.experimental`이 없어 모든 실험이 꺼져 있다. 사용자가 요청하면 Jev shadow 판단을 켤 수 있으며, 켜는 값과 기록 방식은 [`../../references/jev.md`](../../references/jev.md)를 따른다. shadow 모드는 명령의 결과를 바꾸지 않지만 TypeSafe API 호출 비용이 들고 `TYPESAFE_API_KEY`가 필요하다는 점을 함께 알린다.
 - Claude 세션 압축: `policy.claudeAutoCompact`가 없어 Claude 역할 터미널은 `--autocompact 250k`로 열린다. 100000부터 1000000까지의 정수 토큰이나 `"auto"`(플래그 생략)를 받는다. 값을 키우면 압축이 늦어지는 대신 호출마다 보내는 문맥이 커진다.
+
+## 대체 프로필
+
+역할의 `fallbacks`에는 그 역할이 사용 한도에 걸렸을 때 같은 워크트리의 작업을 이어받을 프로필을 순서대로 적는다. 조직 정책 `policy.onExhaustion`이 `fallback`일 때에만 PM이 이 순서로 넘기며(`stop`이면 멈추고 보고한다), 절차는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `사용 한도 handoff` 절에 있다. 대체 프로필은 사용자가 직접 고르게 하고, 다음을 함께 알린다.
+
+- 그 task를 이미 실행하다 한도에 걸린 프로필(주 프로필과 앞선 대체)과 같은 한도를 쓰는 프로필은 이어받을 수 없다. 실행기(provider)와 계정(`account`)이 모두 같거나 같은 `pool`에 속한 프로필은 런타임이 거부한다. 결성 기본값은 같은 실행기의 프로필을 하나의 `pool`로 묶으므로, 실제로는 다른 실행기의 프로필을 고르게 된다.
+- 대체 프로필이 여럿이면 앞의 대체가 다시 한도에 걸렸을 때 다음 대체로 넘어가므로, 서로 다른 한도를 쓰는 프로필을 이어서 적어야 두 번째 handoff가 가능하다.
+- 한 task의 handoff 횟수는 적어 둔 대체 프로필 수를 넘지 않으며, handoff는 workflow의 시도 예산을 쓰지 않는다. 다만 이어받은 프로필도 그 구독의 사용량을 쓴다.
+- 진행 중인 kickoff는 생성 시의 조직 스냅샷을 쓰므로, 바꾼 대체 순서는 다음 kickoff부터 적용된다.
 
 무응답 감독 값을 바꿀 때에는 `policy.supervision`의 두 값을 함께 적는다. `progressCheckMs`는 60000부터 86400000까지, `unansweredLimit`는 1부터 10까지 받으며, 한쪽만 적은 블록은 런타임이 거부한다. 간격을 줄이면 진행 요청 메시지가 늘어나고, 한도를 높이면 상위 보고가 늦어진다는 점을 함께 알린다. 이 정책은 재시도나 종료를 결정하지 않는다.
 
