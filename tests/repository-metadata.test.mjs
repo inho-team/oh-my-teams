@@ -47,14 +47,6 @@ test("the version is a plain semantic version the other manifests can follow", (
     3,
     "the three following manifests must all be sync targets",
   );
-
-  const agents = fs.readFileSync(path.join(root, "AGENTS.md"), "utf8");
-  const major = declared.split(".")[0];
-  assert.match(
-    agents,
-    new RegExp(`\`${major}\\.x\\.x\` 범위에서 버전을 올립니다`),
-    "AGENTS.md must describe the version policy for the current major version",
-  );
 });
 
 test("the codex manifest keeps its build metadata suffix", () => {

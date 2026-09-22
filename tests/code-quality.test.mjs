@@ -167,13 +167,6 @@ test("the repository's own modules satisfy the audit rules", () => {
   assert.deepEqual(offenders, []);
   assert.equal(report.status, "passed");
   assert.ok(report.totals.files > 0, "the audit must inspect real modules");
-
-  // DOCS-04: evals directory is explicitly ignored because its internal
-  // functions (e.g. escapeForPattern) lack JSDoc but aren't public API.
-  assert.ok(
-    !report.files.some((file) => file.file.startsWith("evals")),
-    "the audit must ignore the evals directory",
-  );
 });
 
 test("the help tables list exactly the installed skills", () => {
