@@ -125,7 +125,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 1. 먼저 `runtime-doctor`와 같은 진단을 합니다. 런타임이 이미 정상(`runtimeHealthy`)이면 아무것도 바꾸지 않고 결과에 `reused: true`를 담아 돌려줍니다. 카탈로그의 다른 검사가 실패했더라도 정상 런타임은 다시 설치하지 않습니다.
 2. 정상이 아니면 `~/.omt/runtime/opencodex/locks/<지문>.lock`을 잡고 `staging/<지문>-<임의 ID>` 디렉터리에 `package.json`과 `package-lock.json`을 복사한 뒤 `npm ci`를 실행합니다(제한 시간 180초).
-3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다. 임시 홈은 `~/.omt/runtime/opencodex/health-<uuid>/` 아래에 만들어지며, 성공과 실패 모두에서 정리됩니다. `HOME`, `USERPROFILE`, `OPENCODEX_HOME`, `CODEX_HOME`은 모든 플랫폼에서 임시 경로로 격리하고, Windows에서는 `HOMEDRIVE`와 `HOMEPATH`도 임시 경로로 바꿉니다. 그 밖의 플랫폼에서는 두 변수를 물려받지 않도록 제거합니다. 그래서 상태 확인이 실제 사용자 홈 디렉터리를 읽거나 쓰지 않습니다.
+3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다. 임시 홈은 `~/.omt/runtime/opencodex/health-<uuid>/` 아래에 만들어지며, 성공과 실패 모두에서 정리됩니다. `HOME`, `USERPROFILE`, `OPENCODEX_HOME`, `CODEX_HOME`은 모든 플랫폼에서 임시 경로로 격리합니다. Windows에서는 `HOMEDRIVE`와 `HOMEPATH`도 임시 경로로 바꾸는데, 이 Windows 분기는 **미검증**입니다(opencodex-followups-health.md). 그 밖의 플랫폼에서는 두 변수를 물려받지 않도록 제거합니다. 상태 확인은 가짜 HOME에서 실제 사용자 홈 디렉터리를 읽거나 쓰지 않으므로, 사용자의 실제 HOME에서 실행한 결과는 없습니다(같은 문서의 가짜 HOME 실측).
 4. 모두 통과하면 `staging`을 `runtimes/<지문>`으로 옮기고, 활성 포인터 `active.json`을 임시 파일 교체 방식으로 갱신한 뒤 다시 진단한 결과에 `installed: true`를 담아 돌려줍니다.
 5. 성공과 실패에 관계없이 이번 실행의 `staging` 디렉터리는 마지막에 삭제합니다.
 
@@ -320,7 +320,8 @@ runner 프로필로 실행하기 직전에 `runtime-doctor`와 같은 진단을 
 ## 지원 범위와 한계
 
 - 계정: 계정 홈 검증이 OpenAI(ChatGPT·Codex) 계정 저장소(`codexAccounts`, `codex-accounts.json`)만 읽으므로 고정 계정 실행은 이 계정만 받습니다. Claude와 Agy 계정 홈은 `opencodex-binding-unverified`로 거부됩니다.
-- Windows: 프록시를 시작하는 코드가 Windows에서 `opencodex-proxy-ownership-unverifiable`로 실패하므로 고정 계정 runner는 Windows에서 막힙니다. 설치기의 런타임 설치 단계를 Windows에서 실행해 검증하지는 않았습니다.
+- Windows: 프록시를 시작할 때 소유권을 증명하고 종료를 확인하는 경로가 있습니다. 소유권 판정 알고리즘과 `taskkill` 명령은 CI의 windows-latest에서 가짜 `ocx`로 확인했습니다(opencodex-followups-windows.md의 CI 검증 결과). 그러나 실제 OpenCodex와 bun 프로세스의 부모 자식 관계, 실제 bun 명령줄과 실행 파일, `.cmd` shim의 `EINVAL` 여부는 미검증입니다(같은 문서의 설계 C절 미확인 항목 U6, U7, U8, U9). 종료는 프로세스 그룹이 없으므로 기록한 PID 스냅샷이 모두 사라짐까지만 증명할 수 있고 `exited-snapshot`으로 기록되어, runner turn은 계속 unverified로 남습니다(같은 문서의 종료 증명 절).
+- 설치기의 런타임 설치 단계: Windows에서 실행해 검증하지 않았습니다.
 - 그 밖의 플랫폼: 의존성 카탈로그에 선언된 플랫폼은 `macos`와 `windows`뿐이고, 이 문서는 macOS 밖에서 OpenCodex 런타임이나 runner를 실행해 검증하지 않았습니다. 따라서 다른 플랫폼을 지원한다고 선언하지 않습니다.
 
 ### 다계정 풀 모드
@@ -367,7 +368,7 @@ runner 프로필로 실행하기 직전에 `runtime-doctor`와 같은 진단을 
 | `opencodex-pool-unverified` | 계정이 고정되지 않았거나 풀 모드·클라이언트 통합 설정이 다릅니다. | 계정 홈 검증 표의 세 번째 행을 확인합니다. |
 | `opencodex-global-change-blocked: account home lacks ...` | `runtimeRole` 또는 `claudeCode` 설정이 조건을 만족하지 않습니다. | 오류 메시지에 나온 이름의 조건을 확인합니다. |
 | `api-key-fallback-blocked` | 프로필 `env`에 API 키 이름이 있습니다. | 해당 키를 `env`에서 제거합니다. |
-| `opencodex-proxy-ownership-unverifiable` | Windows에서 프록시를 시작하려 했습니다. | Windows에서는 고정 계정 runner를 쓸 수 없습니다. |
+| `opencodex-proxy-exit-unverifiable` | Windows에서 프록시 종료를 증명하지 못했습니다. | 프로세스 표를 읽을 수 없거나 소유 트리가 완전히 정리되지 않았습니다. 종료 증명이 실패해도 lease는 유지됩니다(opencodex-followups-windows.md의 종료 증명 절). |
 
 ## 더 알아보기
 

@@ -172,17 +172,17 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 
 ## 남은 한계
 
-1. Claude 구독 OAuth와 Antigravity 구독은 OMT runner로 한 번도 실행되지 않았고 runner가 지원하지도 않습니다.
+1. Claude 구독 OAuth와 Antigravity 구독은 runner 경로를 구현했지만 구독 실측을 하지 않았으므로 OPENCODEX_RUNNER_PROVIDERS에 없고 validate·조직 저장에서 거부됩니다(opencodex-followups-design.md A절).
 2. e4a4 고정 비교와 풀 전환의 동시 요청 기록은 실행하지 않았습니다.
 3. 입력 수락 이후의 제출, `turn_started`, 상위 요청 중 취소는 실제 터미널에서 확인되지 않았습니다.
-4. Windows 설치와 실행은 실측하지 않았고 프록시 시작이 거부됩니다.
+4. Windows 설치와 실행은 실측하지 않았습니다. 프록시 시작은 CI의 windows-latest에서 가짜 `ocx`로 소유권 판정 알고리즘을 확인했지만, 실제 OpenCodex와 bun 프로세스는 실행하지 않았습니다(opencodex-followups-windows.md의 실행한 테스트와 U6-U9, U16).
 5. 실측은 macOS 15.7.4, arm64, Node v26.7.0 한 환경입니다.
-6. 사용자의 실제 HOME에서 상태 확인을 실행한 결과는 없습니다. 가짜 HOME에서는 Bun 캐시와 도구 상태 외의 쓰기를 관찰하지 못했습니다(F-4).
+6. 사용자의 실제 HOME에서 상태 확인을 실행한 결과는 없습니다. 가짜 HOME에서는 Bun 캐시와 도구 상태 외의 쓰기를 관찰하지 못했으며 정리 명령은 health.md에서 구현되어 F-4와 F-13이 해소되었습니다(opencodex-followups-health.md).
 7. 중복 코드 제거와 코드 감소 보고가 없습니다.
 8. W1의 키체인 메타데이터 변경 주체를 확인하지 못했습니다.
-9. Claude 구독과 Agy 구독의 귀속은 사람의 로그인 확인에 기댑니다(기준 1).
-10. Node 22.13.0 하한과 CI의 Node 22에서의 실측이 없고, `posixOnly` 테스트 23개는 Windows에서 건너뜁니다(기준 7).
-11. 활성 런타임 트리에 상태 확인 잔존 디렉터리가 남고 정리 명령이 없습니다(F-13).
+9. Claude 구독과 Agy 구독의 귀속은 사람의 로그인 확인에 기댑니다. runner 경로 구현의 상태는 항목 1과 같습니다.
+10. Node 22.13.0 하한과 CI의 Node 22에서의 실측이 없고, Windows에서 건너뛰는 posixOnly 테스트는 11개입니다(opencodex-followups-windows.md의 "남긴 posixOnly와 사유" 표).
+11. 활성 런타임 트리에 상태 확인 잔존 디렉터리 문제는 health.md에서 해소되었습니다(F-13, opencodex-followups-health.md).
 12. runner 프로필이 `role-command`와 `worker-start`를 통해 runner 없이 실행될 수 있습니다(F-6).
 
 ## 통합 단계에서 확인할 사항
