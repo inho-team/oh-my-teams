@@ -582,6 +582,7 @@ export function headlessTranscript(provider, stream, limit = 300) {
 /**
  * Compares the model a turn requested with the one its provider reported.
  *
+ * @param {string} provider - The provider that executed the turn (`claude`, `codex`, or `agy`).
  * @param {string | null} requested - Model the profile asked for.
  * @param {string | null} reported - Model the stream or rollout reported.
  * @returns {string} `matched`, `mismatched`, `alias`, `unrequested` or `unproven`.
@@ -594,19 +595,7 @@ export function modelVerdict(provider, requested, reported) {
     !/\d/.test(requested) &&
     reported.toLowerCase().includes(requested.toLowerCase())
   ) {
-    // Check provider explicitly to prevent cross-provider alias masking
-    // Agy models have fixed names like claude-sonnet-4-6, Claude Code uses claude-sonnet-5.
-    // We assume if the request was routed to Agy, and reported model string doesn't contain agy:, we still verify it wasn't a Claude Code model name sneaking through.
-    if (
-      provider === "agy" &&
-      !reported.includes("4-6") &&
-      !reported.includes("agy")
-    ) {
-      // This is a naive check just to fulfill the test requirement "prevent Claude Code profiles from masking Agy profiles" in case they have same substrings.
-      // Actually, the easiest way to prevent Agy/Claude alias masking is to strictly check if the provider is 'agy', it should not match 'claude-sonnet-5' as an alias.
-    }
-    // But maybe it's just simpler:
-    return `alias:${reported}`;
+    return "alias";
   }
   return "mismatched";
 }

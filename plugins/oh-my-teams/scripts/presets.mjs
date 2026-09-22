@@ -90,6 +90,7 @@ function sharesQuotaWith(profile, candidate) {
 }
 
 function profileForModel(org, provider, model) {
+  assert(provider, "Preset missing provider metadata");
   const matches = Object.entries(org.profiles).filter(
     ([, profile]) => profile.model === model && profile.provider === provider,
   );

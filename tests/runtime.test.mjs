@@ -1045,6 +1045,25 @@ test("presets pin one slot per shared-pool role and keep each fallback chain to 
   assert.deepEqual(opusFirst.senior.fallbacks, []);
   assert.deepEqual(opusFirst.junior.fallbacks, []);
 });
+test("presets lacking provider metadata throw when generating model or tier changes", async () => {
+  const org = clone();
+  const { PRESETS } =
+    await import("../plugins/oh-my-teams/scripts/presets.mjs");
+
+  for (const [name, preset] of Object.entries(PRESETS)) {
+    if (preset.kind === "models" || preset.kind === "tiers") {
+      assert.ok(preset.provider, `Preset ${name} missing provider metadata`);
+    }
+  }
+
+  const original = PRESETS["opus-first"].provider;
+  PRESETS["opus-first"].provider = undefined;
+  assert.throws(
+    () => previewPreset(org, "opus-first"),
+    /Preset missing provider metadata/,
+  );
+  PRESETS["opus-first"].provider = original;
+});
 test("presets match provider as well as model to prevent Claude Code profiles from masking Agy profiles", () => {
   const org = clone();
   org.profiles["claude-opus-spoof"] = {

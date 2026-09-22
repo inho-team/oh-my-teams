@@ -264,8 +264,7 @@ function verdictOf(provider, requested, reported) {
     modelVerdict(provider, requested, model),
   );
   if (verdicts.includes("mismatched")) return "mismatched";
-  const aliasVerdict = verdicts.find((v) => v.startsWith("alias:"));
-  return aliasVerdict ? aliasVerdict : "matched";
+  return verdicts.includes("alias") ? "alias" : "matched";
 }
 
 /**
