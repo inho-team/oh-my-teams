@@ -17,10 +17,20 @@ const evidenceTests = [
 // unrelated failure elsewhere, or a machine slower than the timeout, reported
 // all seven as failed. Each evidence test is run by name instead, so a scenario
 // only fails on its own evidence and the run costs seconds rather than minutes.
+/**
+ * Escapes characters with special meaning in RegExp.
+ * @param {string} name - The string to escape.
+ * @returns {string} The escaped string.
+ */
 function escapeForPattern(name) {
   return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Runs a single evidence test by its full description.
+ * @param {string} name - The name of the test to run.
+ * @returns {Promise<boolean>} True if the test passes.
+ */
 async function runEvidenceTest(name) {
   const started = Date.now();
   // Run across all test files so evidence tests can live in any *.test.mjs.
