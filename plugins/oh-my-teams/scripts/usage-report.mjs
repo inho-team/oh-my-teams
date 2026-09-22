@@ -11,7 +11,13 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { assert, canonicalRole, readJSON, writeJSON } from "./core.mjs";
+import {
+  displayModel,
+  assert,
+  canonicalRole,
+  readJSON,
+  writeJSON,
+} from "./core.mjs";
 import { modelVerdict } from "./headless.mjs";
 import {
   kickoffEntryName,
@@ -375,6 +381,7 @@ export function summarizeByRole(records) {
     // Sessions recorded before 2.6.0 may name intern; they count toward Junior.
     const role = (byRole[canonicalRole(record.role)] ??= {
       models: { requested: [], reported: [] },
+      modelsDisplay: { requested: [], reported: [] },
       sources: [],
       sessions: 0,
       measuredSessions: 0,
@@ -390,14 +397,24 @@ export function summarizeByRole(records) {
     if (record.reason && !role.reasons.includes(record.reason))
       role.reasons.push(record.reason);
     if (!role.sources.includes(record.source)) role.sources.push(record.source);
-    if (
-      record.modelRequested &&
-      !role.models.requested.includes(record.modelRequested)
-    )
-      role.models.requested.push(record.modelRequested);
+
+    if (record.modelRequested) {
+      if (!role.models.requested.includes(record.modelRequested)) {
+        role.models.requested.push(record.modelRequested);
+      }
+      const displayStr = displayModel(record.provider, record.modelRequested);
+      if (!role.modelsDisplay.requested.includes(displayStr)) {
+        role.modelsDisplay.requested.push(displayStr);
+      }
+    }
     for (const model of record.modelReported) {
-      if (!role.models.reported.includes(model))
+      if (!role.models.reported.includes(model)) {
         role.models.reported.push(model);
+      }
+      const displayStr = displayModel(record.provider, model);
+      if (!role.modelsDisplay.reported.includes(displayStr)) {
+        role.modelsDisplay.reported.push(displayStr);
+      }
     }
     for (const field of SUMMED_FIELDS) {
       // An unmeasured session's token fields are null already; its turns and
@@ -554,7 +571,13 @@ async function kickoffUsage(entry, options) {
         source: record.source,
         sessionKey: record.sessionKey,
         modelRequested: record.modelRequested,
+        modelRequestedDisplay: record.modelRequested
+          ? displayModel(record.provider, record.modelRequested)
+          : null,
         modelReported: record.modelReported,
+        modelReportedDisplay: record.modelReported.map((m) =>
+          displayModel(record.provider, m),
+        ),
       })),
     unattributed: records
       .filter((record) => ["unattributed", "ambiguous"].includes(record.role))
@@ -746,9 +769,11 @@ export function formatUsageTable(report) {
     ];
     for (const [role, summary] of Object.entries(kickoff.byRole)) {
       const share = kickoff.share[role];
+      const displayReq = (summary.modelsDisplay || summary.models).requested;
+      const displayRep = (summary.modelsDisplay || summary.models).reported;
       rows.push([
         role,
-        `${summary.models.requested.join(",") || "-"} -> ${summary.models.reported.join(",") || "-"}`,
+        `${displayReq.join(",") || "-"} -> ${displayRep.join(",") || "-"}`,
         `${summary.measuredSessions}${summary.partialSessions ? `+${summary.partialSessions} partial` : ""}/${summary.sessions}`,
         number(summary.turns),
         number(summary.calls),
@@ -780,8 +805,10 @@ export function formatUsageTable(report) {
         lines.push(`source ${source} unavailable: ${summary.unavailable}`);
     }
     for (const mismatch of kickoff.mismatches) {
+      const req = mismatch.modelRequestedDisplay || mismatch.modelRequested;
+      const rep = mismatch.modelReportedDisplay || mismatch.modelReported;
       lines.push(
-        `model mismatch: ${mismatch.role} requested ${mismatch.modelRequested}, reported ${mismatch.modelReported.join(",")} (${mismatch.source})`,
+        `model mismatch: ${mismatch.role} requested ${req}, reported ${rep.join(",")} (${mismatch.source})`,
       );
     }
     if (kickoff.unattributed.length) {

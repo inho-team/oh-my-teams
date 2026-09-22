@@ -26,7 +26,7 @@ description: 최초 oh my teams 상설 조직을 네 역할의 모델만 물어 
 | Senior | Claude Sonnet → `claude:sonnet`, Codex Terra → `codex:gpt-5.6-terra`, Agy Gemini Pro → `agy:gemini-3.1-pro-high`, Agy Claude Opus → `agy:claude-opus-4-6-thinking` |
 | Junior | Claude Haiku → `claude:haiku`, Codex Luna → `codex:gpt-5.6-luna`, Agy Flash → `agy:gemini-3.8-flash-medium`, Agy Claude Sonnet → `agy:claude-sonnet-4-6` |
 
-이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 자유 입력으로 `provider:model` 형식의 값을 언제든 받는다.
+이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 자유 입력으로 `provider:model` 형식의 값을 언제든 받는다. 질문 본문에 Claude Code 선택지는 최신 모델을 따라가고 Agy 선택지는 4.6 버전으로 고정되며 서로 구독이 다르다는 차이를 한 줄로 밝힌다.
 
 PL은 선택지가 다섯 개다. 구조화된 선택 도구(예: Claude Code `AskUserQuestion`, 질문당 선택지 최대 4개)를 쓰는 호스트에서는 앞의 네 개(Claude Opus, Codex Sol, Agy Gemini Pro, Claude Sonnet)를 선택지로 두고, Codex Terra는 질문 본문에 "자유 입력으로 `codex:gpt-5.6-terra`"처럼 안내한다. 번호를 매긴 선택지로 묻는 호스트에서는 다섯 개를 모두 제시한다.
 

@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import {
   assert,
   chart,
+  displayModel,
+  definedRoles,
   readJSON,
+  ROOT_ROLE,
   saveOrg,
   supervisionPolicy,
   validateOrg,
@@ -651,7 +654,14 @@ function applyPreset(args) {
 function showOrganization(args) {
   const org = validateOrg(readJSON(args.org));
   const status = organizationStatus(org, args.state);
-  if (args.json) return { organization: org, ...status };
+
+  if (args.json) {
+    const orgOutput = structuredClone(org);
+    for (const profile of Object.values(orgOutput.profiles)) {
+      profile.displayModel = displayModel(profile.provider, profile.model);
+    }
+    return { organization: orgOutput, ...status };
+  }
   console.log(chart(org));
   if (args.state) console.log(JSON.stringify(status, null, 2));
   return undefined;
@@ -1255,8 +1265,13 @@ async function executeCommand(args) {
       return { valid: Boolean(validateOrg(readJSON(args.org))) };
     case "kickoff-claim":
       return registerKickoff(args.org, readJSON(args.from));
-    case "kickoff-show":
-      return listKickoffs(args.org, args.worktree);
+    case "kickoff-show": {
+      const result = listKickoffs(args.org, args.worktree);
+      for (const k of result.kickoffs) {
+        k.pm.modelDisplay = displayModel(k.pm.provider, k.pm.model);
+      }
+      return result;
+    }
     case "kickoff-bind":
       return bindKickoffRun(args.org, {
         worktreeId: args.worktree,
@@ -1845,8 +1860,24 @@ async function executeCommand(args) {
       });
     case "resource-release":
       return releaseResource(args.org, args.slot);
-    case "director-watch":
-      return directorWatch(args.org, { orcaExecutable: args.orca });
+    case "director-watch": {
+      const watch = await directorWatch(args.org, {
+        orcaExecutable: args.orca,
+      });
+      const { kickoffs } = listKickoffs(args.org);
+      for (const summary of watch.kickoffs) {
+        const entry = kickoffs.find(
+          (k) => k.pm.worktreeId === summary.worktreeId,
+        );
+        if (entry) {
+          summary.pmModelDisplay = displayModel(
+            entry.pm.provider,
+            entry.pm.model,
+          );
+        }
+      }
+      return watch;
+    }
     default:
       throw new Error(`Unknown command: ${args.command}`);
   }

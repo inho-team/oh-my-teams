@@ -18,6 +18,7 @@ import {
 import {
   attributeSessions,
   formatUsageTable,
+  summarizeByRole,
   kickoffPlaces,
   usageReport,
 } from "../plugins/oh-my-teams/scripts/usage-report.mjs";
@@ -704,7 +705,11 @@ test("usage-report runs from the CLI with explicit homes and writes a snapshot",
   ]);
   table.restore();
   const printed = table.lines.join("\n");
-  assert.match(printed, /pl +\| gpt-5\.6-sol -> gpt-5\.6-sol/);
+  assert.match(
+    printed,
+    /pl +\| OpenCodex gpt-5\.6-sol -> OpenCodex gpt-5\.6-sol/,
+  );
+  assert.match(printed, /junior +\| OpenCodex gpt-5\.6-sol -> -/);
   const [written] = fs
     .readdirSync(path.join(path.dirname(fixture.orgFile), "history"))
     .filter((name) => name.startsWith("usage-"));
@@ -782,5 +787,97 @@ test("a launch whose ledger cannot be written still starts, and says so", async 
       codexHome: fixture.homes.codexHome,
     }).map((worker) => worker.worker),
     ["junior-1", "junior-2"],
+  );
+});
+
+test("summarizeByRole includes both models if provider differs but model is the same", () => {
+  const records = [
+    {
+      role: "senior",
+      provider: "claude",
+      modelRequested: "sonnet",
+      modelReported: [],
+      source: "x",
+      measured: true,
+      turns: 1,
+      calls: 1,
+      promptTokens: 10,
+      outputTokens: 10,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      timeToFirstToken: 0,
+    },
+    {
+      role: "senior",
+      provider: "agy",
+      modelRequested: "sonnet",
+      modelReported: [],
+      source: "x",
+      measured: true,
+      turns: 1,
+      calls: 1,
+      promptTokens: 10,
+      outputTokens: 10,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      timeToFirstToken: 0,
+    },
+  ];
+  const byRole = summarizeByRole(records);
+  assert.equal(byRole.senior.models.requested.length, 1);
+  assert.equal(byRole.senior.modelsDisplay.requested.length, 2);
+  assert.equal(
+    byRole.senior.modelsDisplay.requested.includes("Claude Code sonnet"),
+    true,
+  );
+  assert.equal(
+    byRole.senior.modelsDisplay.requested.includes("Agy sonnet"),
+    true,
+  );
+});
+
+test("formatUsageTable falls back to models and modelRequested/modelReported for legacy snapshots", () => {
+  const legacyReport = {
+    kickoffs: [
+      {
+        kickoff: { worktreeId: "test-wt", status: "active" },
+        window: { from: "a", to: "b" },
+        coverage: { measuredSessions: 1, totalSessions: 1, note: "ok" },
+        byRole: {
+          pm: {
+            models: { requested: ["claude"], reported: ["claude"] },
+            measuredSessions: 1,
+            partialSessions: 0,
+            sessions: 1,
+            turns: 1,
+            calls: 1,
+            steps: 1,
+            promptTokens: 1,
+            cachedInputTokens: 0,
+            cacheCreationTokens: 0,
+            outputTokens: 1,
+          },
+        },
+        share: { pm: 1 },
+        places: [],
+        sources: {},
+        mismatches: [
+          {
+            role: "pm",
+            modelRequested: "claude",
+            modelReported: ["gpt"],
+            source: "x",
+          },
+        ],
+        unattributed: [],
+      },
+    ],
+    written: [],
+  };
+  const table = formatUsageTable(legacyReport);
+  assert.match(table, /claude -> claude/);
+  assert.match(
+    table,
+    /model mismatch: pm requested claude, reported gpt \(x\)/,
   );
 });
