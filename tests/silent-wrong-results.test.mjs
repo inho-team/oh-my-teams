@@ -1,4 +1,5 @@
 /** Covers defects that produced a wrong answer instead of an error. */
+import { after } from "node:test";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -13,6 +14,8 @@ import { validateTask } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import { classifyProviderFailure } from "../plugins/oh-my-teams/scripts/providers.mjs";
 import { work } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import {
   attachExecution,
   createWorkflow,
@@ -29,34 +32,6 @@ function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-silent-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
-}
-
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let templateRepoDir = null;
-async function getTemplateRepo() {
-  if (templateRepoDir) return templateRepoDir;
-  const dir = fs.realpathSync(
-    fs.mkdtempSync(
-      require("node:path").join(
-        require("node:os").tmpdir(),
-        "omt-repo-template-",
-      ),
-    ),
-  );
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    const result = await require("../plugins/oh-my-teams/scripts/core.mjs").run(
-      ["git", ...args],
-      { cwd: dir },
-    );
-    if (result.code !== 0) throw new Error("Git failed: " + result.stderr);
-  }
-  templateRepoDir = dir;
-  return templateRepoDir;
 }
 
 async function repo(t) {

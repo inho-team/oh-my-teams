@@ -1,4 +1,5 @@
 /** Covers the installer wrappers, engine floor, and the prepared-input check. */
+import { after } from "node:test";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -16,6 +17,9 @@ import {
   main,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { prepareInput } from "../plugins/oh-my-teams/scripts/workspace.mjs";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+
+after(() => cleanupTemplates());
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const organization = readJSON(
@@ -51,34 +55,6 @@ const task = {
   baseRef: "HEAD",
   risk: "low",
 };
-
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let templateRepoDir = null;
-async function getTemplateRepo() {
-  if (templateRepoDir) return templateRepoDir;
-  const dir = fs.realpathSync(
-    fs.mkdtempSync(
-      require("node:path").join(
-        require("node:os").tmpdir(),
-        "omt-repo-template-",
-      ),
-    ),
-  );
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    const result = await require("../plugins/oh-my-teams/scripts/core.mjs").run(
-      ["git", ...args],
-      { cwd: dir },
-    );
-    if (result.code !== 0) throw new Error("Git failed: " + result.stderr);
-  }
-  templateRepoDir = dir;
-  return templateRepoDir;
-}
 
 async function repo(t) {
   const dir = fixture(t);

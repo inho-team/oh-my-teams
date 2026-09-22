@@ -1,4 +1,5 @@
 /** Covers the guards that protect concurrent state, reviews, and the Orca edge. */
+import { after } from "node:test";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -26,6 +27,8 @@ import {
   runOrcaJson,
   selectOrcaExecutable,
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import {
   ALLOWED_OPTIONS,
   REQUIRED_OPTIONS,
@@ -40,34 +43,6 @@ function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-safety-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
-}
-
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let templateRepoDir = null;
-async function getTemplateRepo() {
-  if (templateRepoDir) return templateRepoDir;
-  const dir = fs.realpathSync(
-    fs.mkdtempSync(
-      require("node:path").join(
-        require("node:os").tmpdir(),
-        "omt-repo-template-",
-      ),
-    ),
-  );
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    const result = await require("../plugins/oh-my-teams/scripts/core.mjs").run(
-      ["git", ...args],
-      { cwd: dir },
-    );
-    if (result.code !== 0) throw new Error("Git failed: " + result.stderr);
-  }
-  templateRepoDir = dir;
-  return templateRepoDir;
 }
 
 async function repo(t) {
