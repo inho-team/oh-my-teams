@@ -176,6 +176,10 @@ export function classifyAgentCliFailure(result, decoded) {
   return "model-error";
 }
 
+/** Provider prose naming how long exhausted capacity stays unavailable, e.g. `Resets in 1h11m42s`. */
+export const RESET_IN_PATTERN =
+  /\bresets?\s+in\s+([0-9]+(?:\.[0-9]+)?[hms](?:[0-9]+(?:\.[0-9]+)?[hms])*)/i;
+
 /**
  * Reads how long a provider says its exhausted capacity stays unavailable.
  *
@@ -193,8 +197,6 @@ export function agentCliResetHint(result, decoded) {
   const envelope = tryParseJson(result.stdout);
   const error = envelope?.error ?? envelope;
   const text = typeof error === "string" ? error : `${result.stdout ?? ""}`;
-  const pattern =
-    /\bresets?\s+in\s+([0-9]+(?:\.[0-9]+)?[hms](?:[0-9]+(?:\.[0-9]+)?[hms])*)/i;
-  const match = pattern.exec(text);
+  const match = RESET_IN_PATTERN.exec(text);
   return match ? match[1] : null;
 }

@@ -74,6 +74,16 @@
         "an organization without the experimental block stays valid and judges nothing",
         "no gate or acceptance path reads a judgment"
       ]
+    },
+    {
+      "id": "usage-limit-handoff",
+      "description": "A task stopped by a usage limit is handed to a declared fallback on a different limit, finishes in the same worktree without spending an attempt, and the skills carry the procedure.",
+      "evidenceTests": [
+        "a fallback finishes a usage-limited task in the same worktree and passes the gate",
+        "a handoff refuses profiles that are not unused fallbacks on another limit",
+        "a later handoff cannot return to a limit an earlier profile exhausted",
+        "the skills and runtime reference carry the usage-limit handoff procedure"
+      ]
     }
   ]
 }

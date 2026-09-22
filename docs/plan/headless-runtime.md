@@ -59,6 +59,7 @@ turns/<n>/stop.request  중단 요청 (있으면 러너가 종료 처리)
 | `QUESTION: <질문>` | `question` | 상위 역할이 답을 정해 `headless-answer`로 재개한다 |
 | `FAILED: <이유>` | `failed` | 실패 분류로 넘긴다 |
 | 표식 없음, 0이 아닌 종료, 시간 초과, 중단 | `no-marker`, `exit-error`, `timed-out`, `stopped` | 실패 분류로 넘긴다. `timed-out`은 부분 변경이 남았을 수 있다 |
+| 실패한 turn의 오류가 사용 한도나 용량 부족 | `rate-limited` | `limitKind`(`usage-limit`, `capacity`)와 함께 `rate-limited` 신호로 실패 분류에 넘긴다 |
 
 ## 5. 지시 규약
 

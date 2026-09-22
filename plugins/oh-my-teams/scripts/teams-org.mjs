@@ -59,9 +59,9 @@ import {
   createWorktree,
   discoverOrcaRuntime,
   injectTask,
-  startWorker,
   runOrcaJson,
   selectOrcaExecutable,
+  startWorker,
   waitForSupervisionMessage,
 } from "./orca-adapter.mjs";
 import { withRuntimeSignal } from "./adapters.mjs";
@@ -80,11 +80,14 @@ import {
   releaseReservation,
   resumeWorkflow,
   retryTask,
+  handoffTask,
   reworkTask,
   setWorkflowDepth,
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
+import { recordCheckpoint } from "./handoff.mjs";
+import { workerLimitCheck } from "./limit-check.mjs";
 import {
   incidentStatus,
   ingestIncident,
@@ -176,9 +179,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                --terminal HANDLE [--worktree SELECTOR] [--run ID]
                [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
                [--workflow-task ID] [--purpose implement|review]
-               [--inject-fallback "USER APPROVAL"]
+               [--inject-fallback "USER APPROVAL"] [--profile FALLBACK]
                [--orca EXECUTABLE]
                (with --workflow-id, the workflow's organization snapshot is used;
+               --profile runs the fallback a workflow-handoff recorded for
+               --workflow-task;
                the terminal comes from role-terminal; the worker's tab title
                starts with its role tag, e.g. [PL]; a Claude terminal that
                last received a different task, or any review, gets /clear first)
@@ -193,12 +198,20 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
             (serves the headless workers to a browser; every request needs the token)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
+  worker-limit-check --worktree DIR --provider claude|codex|agy
+                     [--workflow-id ID --workflow-task ID]
+                     [--terminal HANDLE] [--orca EXECUTABLE]
+                     (reads the provider's session log for the worker; the
+                     screen of --terminal is read only when no log is found;
+                     Agy needs the workflow task to find its log)
   role-spec --org FILE --role ROLE --spec TEXT [--workflow-id ID --state DIR]
-            [--text]
+            [--workflow-task ID] [--text]
   role-command --org FILE --role ROLE [--workflow-id ID --state DIR]
   role-terminal --org FILE --role ROLE --worktree SELECTOR [--title TEXT]
                 [--workflow-id ID --state DIR] [--orca EXECUTABLE]
                 [--allow-unverified "APPROVAL SENTENCE"]
+                [--workflow-task ID --profile FALLBACK]
+                (--profile opens the fallback a workflow-handoff recorded)
                 (the tab title is the role tag, e.g. [PM], then TEXT or the worktree)
   host-defaults [--project DIR] [--codex-home DIR]
   usage-report --org FILE [--worktree ID | --all] [--state DIR]
@@ -240,9 +253,16 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-settle --id ID --state DIR --revision N --settlement FILE
   workflow-release --id ID --state DIR --revision N --release FILE
   workflow-retry --id ID --state DIR --revision N --retry FILE
+  workflow-handoff --id ID --state DIR --revision N --handoff FILE
+                   (hands a usage-limited task to a fallback profile in the
+                   same worktree; writes snapshot-<n>.json)
   workflow-rework --id ID --state DIR --revision N --rework FILE
                   (attaches the corrected execution after a review asked for changes)
   workflow-depth --id ID --state DIR --revision N --change FILE
+  handoff-checkpoint --state DIR --workflow-id ID --workflow-task ID --file FILE
+                     [--repo DIR]
+                     (validates the checkpoint sections and records HEAD of
+                     --repo, default the current directory)
   failure-classify --failure FILE [--org FILE --state DIR]
   lesson-record --lesson FILE --state DIR
   incident-ingest --event FILE --config FILE --state DIR
@@ -322,8 +342,24 @@ export const ALLOWED_OPTIONS = {
   "runtime-doctor": ["org", "state", "format"],
   "runtime-install": ["org", "state", "dry-run"],
   "runtime-repair": ["org", "state", "dry-run"],
-  "role-spec": ["org", "role", "spec", "workflow-id", "state", "text"],
+  "role-spec": [
+    "org",
+    "role",
+    "spec",
+    "workflow-id",
+    "state",
+    "workflow-task",
+    "text",
+  ],
   "terminal-idle-check": ["terminal", "orca", "org", "role"],
+  "worker-limit-check": [
+    "worktree",
+    "provider",
+    "workflow-id",
+    "workflow-task",
+    "terminal",
+    "orca",
+  ],
   "headless-start": [
     "org",
     "role",
@@ -346,6 +382,8 @@ export const ALLOWED_OPTIONS = {
     "worktree",
     "title",
     "workflow-id",
+    "workflow-task",
+    "profile",
     "state",
     "orca",
     "allow-unverified",
@@ -380,6 +418,7 @@ export const ALLOWED_OPTIONS = {
     "retry-of",
     "title",
     "inject-fallback",
+    "profile",
     "workflow-id",
     "workflow-task",
     "purpose",
@@ -405,8 +444,16 @@ export const ALLOWED_OPTIONS = {
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
+  "workflow-handoff": ["id", "state", "revision", "handoff"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
+  "handoff-checkpoint": [
+    "state",
+    "workflow-id",
+    "workflow-task",
+    "file",
+    "repo",
+  ],
   "failure-classify": ["failure", "org", "state"],
   "lesson-record": ["lesson", "state"],
   "incident-ingest": ["event", "config", "state"],
@@ -467,6 +514,7 @@ export const REQUIRED_OPTIONS = {
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
   "terminal-idle-check": ["terminal"],
+  "worker-limit-check": ["worktree", "provider"],
   "headless-start": ["org", "role", "cwd", "spec", "state"],
   "headless-status": ["state", "worker"],
   "headless-answer": ["state", "worker", "text"],
@@ -498,8 +546,10 @@ export const REQUIRED_OPTIONS = {
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
+  "workflow-handoff": ["id", "state", "revision", "handoff"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
+  "handoff-checkpoint": ["state", "workflow-id", "workflow-task", "file"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
   "incident-ingest": ["event", "config", "state"],
@@ -650,6 +700,10 @@ async function compatibilityPrepare(args) {
 // The terminal keeps the model it was opened with, so the proof stays
 // unproven until the screen is read.
 async function startSupervisedWorker(args) {
+  assert(
+    args.profile === undefined || args["workflow-id"],
+    "--profile requires --workflow-id, --state and --workflow-task",
+  );
   const { org, run } = launchContext(args);
   const launch = resolveRoleLaunch(
     org,
@@ -760,6 +814,7 @@ async function startSupervisedWorker(args) {
       ...identity,
       orcaTaskId: started.taskId ?? identity.orcaTaskId,
       stateDir: args.state ?? null,
+      ...run.handoff,
     });
     return {
       ...started,
@@ -986,8 +1041,33 @@ function launchContext(args) {
       workflowId: args["workflow-id"],
       stateDir,
       workflowState: snapshot.state,
+      ...(args["workflow-task"] ? { workflowTask: args["workflow-task"] } : {}),
       ...(director ? { director } : {}),
+      ...handoffLaunch(args, snapshot.state),
     },
+  };
+}
+
+// `--profile` launches a fallback only for the task a workflow-handoff gave
+// it, so a hand-typed profile cannot move a role onto another account.
+function handoffLaunch(args, state) {
+  if (args.profile === undefined) return {};
+  const taskId = args["workflow-task"];
+  assert(taskId, "--profile requires --workflow-task");
+  const item = Object.hasOwn(state.tasks, taskId) ? state.tasks[taskId] : null;
+  assert(item, `Unknown workflow task: ${taskId}`);
+  const handoff = item.handoffs?.at(-1);
+  assert(
+    handoff?.to === args.profile,
+    `Task ${taskId} has no handoff to ${args.profile}; run workflow-handoff first`,
+  );
+  assert(
+    ["pending", "reserved", "running"].includes(item.state),
+    `Task ${taskId} is ${item.state}; a handoff launch needs it pending, reserved or running`,
+  );
+  return {
+    profile: args.profile,
+    handoff: { handoffFrom: handoff.from, handoffIndex: handoff.index },
   };
 }
 
@@ -1246,6 +1326,27 @@ async function executeCommand(args) {
         token: started.token,
       };
     }
+    case "worker-limit-check":
+      return workerLimitCheck({
+        provider: args.provider,
+        worktree: path.resolve(args.worktree),
+        workflowId: args["workflow-id"],
+        workflowTask: args["workflow-task"],
+        ...(args.terminal
+          ? {
+              readScreen: async () =>
+                (
+                  await runOrcaJson(selectOrcaExecutable(args.orca), [
+                    "terminal",
+                    "read",
+                    "--terminal",
+                    args.terminal,
+                    "--screen",
+                  ])
+                ).result?.terminal?.tail ?? [],
+            }
+          : {}),
+      });
     case "terminal-idle-check": {
       // --org와 --role이 주어질 때만 matrixPrediction을 계산합니다.
       // 예측이 없으면 기존 동작을 유지합니다(matrixPrediction 전달 안 함).
@@ -1297,6 +1398,10 @@ async function executeCommand(args) {
       return command;
     }
     case "role-terminal": {
+      assert(
+        args.profile === undefined || args["workflow-id"],
+        "--profile requires --workflow-id, --state and --workflow-task",
+      );
       const { org, run: runCtx } = launchContext(args);
       const command = roleCommand(org, args.role, runCtx);
       assert(
@@ -1360,6 +1465,7 @@ async function executeCommand(args) {
           terminal: opened.terminal,
           workflowId: args["workflow-id"] ?? null,
           stateDir: args.state ?? null,
+          ...runCtx.handoff,
         }),
       };
     }
@@ -1558,6 +1664,23 @@ async function executeCommand(args) {
         args.id,
         Number(args.revision),
         readJSON(args.retry),
+      );
+    case "workflow-handoff":
+      return handoffTask(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.handoff),
+      );
+    case "handoff-checkpoint":
+      return recordCheckpoint(
+        path.resolve(args.state),
+        args["workflow-id"],
+        args["workflow-task"],
+        {
+          text: fs.readFileSync(path.resolve(args.file), "utf8"),
+          repo: path.resolve(args.repo ?? "."),
+        },
       );
     case "workflow-depth":
       return setWorkflowDepth(
