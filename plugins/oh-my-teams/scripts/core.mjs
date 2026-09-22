@@ -886,6 +886,7 @@ export function validateOrg(org) {
     "repeatFailureLimit required",
   );
   validateSupervision(org.policy.supervision);
+  validateExperimental(org.policy.experimental);
   assert(
     org.policy.adviceBudget === undefined ||
       (Number.isInteger(org.policy.adviceBudget) &&
@@ -995,6 +996,91 @@ function validateSupervision(supervision) {
  */
 export function supervisionPolicy(org) {
   return { ...SUPERVISION_DEFAULTS, ...(org.policy?.supervision ?? {}) };
+}
+
+/**
+ * Decision points where an experimental Jev judgment may be recorded.
+ *
+ * Each point sits inside a runtime command that already has the input, so a
+ * judgment costs no role turn: the supervision wait, the stalled-worker check,
+ * the role terminal's model screen, and a failure the rules leave unknown.
+ */
+export const JEV_POINTS = Object.freeze([
+  "status-filter",
+  "auto-observe",
+  "model-check",
+  "failure-fallback",
+]);
+
+/**
+ * Modes the experimental Jev block accepts.
+ *
+ * `shadow` records a judgment and changes nothing. A mode that acts on the
+ * judgment is refused until shadow records show it would not lose a message or
+ * misroute a failure.
+ */
+export const JEV_MODES = Object.freeze(["off", "shadow"]);
+
+const JEV_KEYS = ["mode", "model", "points", "budgetPerKickoff", "timeoutMs"];
+
+// An experiment is opt-in and must say everything it spends, so a present block
+// is complete. The model is a pinned version because a moving alias would shift
+// the answers that any later threshold was measured against.
+function validateExperimental(experimental) {
+  if (experimental === undefined) return;
+  assert(
+    experimental &&
+      typeof experimental === "object" &&
+      Object.keys(experimental).every((key) => key === "jev"),
+    "experimental accepts only jev",
+  );
+  const jev = experimental.jev;
+  if (jev === undefined) return;
+  assert(
+    jev &&
+      typeof jev === "object" &&
+      Object.keys(jev).every((key) => JEV_KEYS.includes(key)) &&
+      JEV_KEYS.every((key) => Object.hasOwn(jev, key)),
+    `experimental.jev requires exactly ${JEV_KEYS.join(", ")}`,
+  );
+  assert(
+    JEV_MODES.includes(jev.mode),
+    `experimental.jev.mode must be ${JEV_MODES.join(" or ")}`,
+  );
+  assert(
+    typeof jev.model === "string" && /^jev-\d+\.\d+\.\d+$/.test(jev.model),
+    "experimental.jev.model must be a pinned version such as jev-1.13.0",
+  );
+  assert(
+    Array.isArray(jev.points) &&
+      jev.points.length > 0 &&
+      new Set(jev.points).size === jev.points.length &&
+      jev.points.every((point) => JEV_POINTS.includes(point)),
+    `experimental.jev.points must list distinct points from ${JEV_POINTS.join(", ")}`,
+  );
+  assert(
+    Number.isInteger(jev.budgetPerKickoff) &&
+      jev.budgetPerKickoff >= 1 &&
+      jev.budgetPerKickoff <= 5000,
+    "experimental.jev.budgetPerKickoff must be 1..5000",
+  );
+  assert(
+    Number.isInteger(jev.timeoutMs) &&
+      jev.timeoutMs >= 200 &&
+      jev.timeoutMs <= 10000,
+    "experimental.jev.timeoutMs must be 200..10000",
+  );
+}
+
+/**
+ * Reads the experimental Jev block when it is switched on.
+ *
+ * @param {object} org - Validated organization.
+ * @returns {object | null} The block, or null when it is absent or `off`.
+ */
+export function jevPolicy(org) {
+  const jev = org.policy?.experimental?.jev;
+  return jev && jev.mode !== "off" ? jev : null;
 }
 
 /**

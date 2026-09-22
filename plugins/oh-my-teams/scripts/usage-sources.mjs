@@ -806,11 +806,13 @@ export function collectHarnessReports(stateDir, { window, org } = {}) {
       );
     });
   }
-  // Assist and advice reports share one shape for usage: the calling role, the
-  // profile it spent, and the provider's usage block.
+  // Assist, advice and judgment reports share one shape for usage: the calling
+  // role, the profile it spent (or the provider a judgment names), and the
+  // provider's usage block.
   for (const [directory, prefix] of [
     ["assists", "assist"],
     ["advice", "advice"],
+    ["judgments", "judgment"],
   ]) {
     const reports = reportsIn(path.join(state, directory), (dir, entry) =>
       entry.isFile() && entry.name.endsWith(".json")
@@ -821,10 +823,15 @@ export function collectHarnessReports(stateDir, { window, org } = {}) {
       const read = readReport(file);
       if (!read) continue;
       const { report } = read;
+      // A judgment that never reached the provider spent nothing to count.
+      if (report.status === "unavailable") continue;
       records.push(
         harnessRecord({
           role: report.callerRole ?? null,
-          provider: org?.profiles?.[report.profile]?.provider ?? null,
+          provider:
+            org?.profiles?.[report.profile]?.provider ??
+            report.provider ??
+            null,
           profile: report.profile ?? null,
           call: report,
           key: `${prefix}:${path.basename(file, ".json")}`,

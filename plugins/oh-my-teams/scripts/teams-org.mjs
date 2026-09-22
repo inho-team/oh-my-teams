@@ -60,6 +60,8 @@ import {
   discoverOrcaRuntime,
   injectTask,
   startWorker,
+  runOrcaJson,
+  selectOrcaExecutable,
   waitForSupervisionMessage,
 } from "./orca-adapter.mjs";
 import { withRuntimeSignal } from "./adapters.mjs";
@@ -90,6 +92,12 @@ import {
 } from "./incidents.mjs";
 import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { nextSupervisionAction, organizationStatus } from "./status.mjs";
+import {
+  shadowAutoObserve,
+  shadowFailureFallback,
+  shadowModelCheck,
+  shadowStatusFilter,
+} from "./jev.mjs";
 import { draftOrganization } from "./org-draft.mjs";
 import {
   bindKickoffRun,
@@ -199,8 +207,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                (per-role turns and tokens from provider session records, read-only;
                --write stores the report in <project>/.omt/history)
   supervision-next --org FILE --observation FILE
+                   [--dispatch ID --state DIR] [--orca EXECUTABLE]
+                   (dispatch and state only feed an experimental Jev shadow judgment)
   supervision-wait --run ID (--org FILE | --timeout-ms N) [--ack DELIVERY]
-                   [--orca EXECUTABLE]
+                   [--orca EXECUTABLE] [--state DIR]
                    (waits on the Run's coordinator mailbox until a message other
                    than a heartbeat arrives; heartbeat-only deliveries are
                    acknowledged here; the timeout defaults to the organization's
@@ -233,7 +243,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-rework --id ID --state DIR --revision N --rework FILE
                   (attaches the corrected execution after a review asked for changes)
   workflow-depth --id ID --state DIR --revision N --change FILE
-  failure-classify --failure FILE
+  failure-classify --failure FILE [--org FILE --state DIR]
   lesson-record --lesson FILE --state DIR
   incident-ingest --event FILE --config FILE --state DIR
   incident-observe --observation FILE --config FILE --state DIR
@@ -353,8 +363,8 @@ export const ALLOWED_OPTIONS = {
     "write",
     "json",
   ],
-  "supervision-next": ["org", "observation"],
-  "supervision-wait": ["run", "org", "timeout-ms", "ack", "orca"],
+  "supervision-next": ["org", "observation", "dispatch", "state", "orca"],
+  "supervision-wait": ["run", "org", "timeout-ms", "ack", "orca", "state"],
   "worker-start": [
     "org",
     "role",
@@ -397,7 +407,7 @@ export const ALLOWED_OPTIONS = {
   "workflow-retry": ["id", "state", "revision", "retry"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
-  "failure-classify": ["failure"],
+  "failure-classify": ["failure", "org", "state"],
   "lesson-record": ["lesson", "state"],
   "incident-ingest": ["event", "config", "state"],
   "incident-observe": ["observation", "config", "state"],
@@ -1329,6 +1339,12 @@ async function executeCommand(args) {
         allowUnverified: allowUnverifiedApproval !== undefined,
         allowUnverifiedApproval,
       });
+      if (args.state)
+        await shadowModelCheck({
+          org,
+          stateDir: path.resolve(args.state),
+          opened,
+        });
       return {
         ...opened,
         ...(allowUnverifiedApproval ? { allowUnverifiedApproval } : {}),
@@ -1354,19 +1370,54 @@ async function executeCommand(args) {
       });
     case "usage-report":
       return reportUsage(args);
-    case "supervision-next":
-      return nextSupervisionAction({
-        ...readJSON(args.observation),
-        policy: supervisionPolicy(validateOrg(readJSON(args.org))),
+    case "supervision-next": {
+      const org = validateOrg(readJSON(args.org));
+      const observation = readJSON(args.observation);
+      const decision = nextSupervisionAction({
+        ...observation,
+        policy: supervisionPolicy(org),
       });
-    case "supervision-wait":
-      return waitForSupervisionMessage({
+      if (args.state && args.dispatch)
+        await shadowAutoObserve({
+          org,
+          stateDir: path.resolve(args.state),
+          dispatchId: args.dispatch,
+          decision,
+          liveness: observation.liveness,
+          readOutput: (dispatchId) =>
+            runOrcaJson(
+              selectOrcaExecutable(args.orca),
+              [
+                "orchestration",
+                "worker-read",
+                "--dispatch",
+                dispatchId,
+                "--source",
+                "auto",
+                "--limit",
+                "60",
+              ],
+              { cwd: process.cwd(), timeoutMs: 15000 },
+            ),
+        });
+      return decision;
+    }
+    case "supervision-wait": {
+      const delivery = await waitForSupervisionMessage({
         runId: args.run,
         timeoutMs: supervisionWaitTimeout(args),
         ack: args.ack,
         executable: args.orca,
         cwd: process.cwd(),
       });
+      if (args.state && args.org)
+        await shadowStatusFilter({
+          org: validateOrg(readJSON(args.org)),
+          stateDir: path.resolve(args.state),
+          delivery,
+        });
+      return delivery;
+    }
     case "work":
       return work(
         path.resolve(args.repo),
@@ -1515,10 +1566,20 @@ async function executeCommand(args) {
         Number(args.revision),
         readJSON(args.change),
       );
-    case "failure-classify":
-      return classifyFailure(
-        withRuntimeSignal(validateFailureEvidence(readJSON(args.failure))),
+    case "failure-classify": {
+      const input = withRuntimeSignal(
+        validateFailureEvidence(readJSON(args.failure)),
       );
+      const decision = classifyFailure(input);
+      if (args.state && args.org)
+        await shadowFailureFallback({
+          org: validateOrg(readJSON(args.org)),
+          stateDir: path.resolve(args.state),
+          input,
+          decision,
+        });
+      return decision;
+    }
     case "lesson-record":
       return recordLessonCandidate(
         path.resolve(args.state),

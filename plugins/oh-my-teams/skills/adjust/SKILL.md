@@ -23,6 +23,7 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 - 자문자: `advisors`가 비어 있어 모든 역할의 `advise` 호출이 거부된다. 허용하면 자문 예산(`policy.adviceBudget`)은 kickoff 상태 하나당 6회가 기본값이다.
 - 계정: 모든 프로필이 현재 로그인 계정을 쓰며, 같은 실행기의 프로필은 하나의 `pool`로 묶여 있다.
 - 무응답 감독: `policy.supervision`이 `progressCheckMs: 900000`(15분), `unansweredLimit: 2`다. 이 값이 없는 이전 조직도 같은 기본값으로 읽힌다.
+- 실험 기능: `policy.experimental`이 없어 모든 실험이 꺼져 있다. 사용자가 요청하면 Jev shadow 판단을 켤 수 있으며, 켜는 값과 기록 방식은 [`../../references/jev.md`](../../references/jev.md)를 따른다. shadow 모드는 명령의 결과를 바꾸지 않지만 TypeSafe API 호출 비용이 들고 `TYPESAFE_API_KEY`가 필요하다는 점을 함께 알린다.
 - Claude 세션 압축: `policy.claudeAutoCompact`가 없어 Claude 역할 터미널은 `--autocompact 250k`로 열린다. 100000부터 1000000까지의 정수 토큰이나 `"auto"`(플래그 생략)를 받는다. 값을 키우면 압축이 늦어지는 대신 호출마다 보내는 문맥이 커진다.
 
 무응답 감독 값을 바꿀 때에는 `policy.supervision`의 두 값을 함께 적는다. `progressCheckMs`는 60000부터 86400000까지, `unansweredLimit`는 1부터 10까지 받으며, 한쪽만 적은 블록은 런타임이 거부한다. 간격을 줄이면 진행 요청 메시지가 늘어나고, 한도를 높이면 상위 보고가 늦어진다는 점을 함께 알린다. 이 정책은 재시도나 종료를 결정하지 않는다.
