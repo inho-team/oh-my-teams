@@ -254,7 +254,9 @@ export async function invoke(
         if (processGroupMembers(result.pid)?.length) {
           try {
             process.kill(-result.pid, "SIGKILL");
-          } catch {}
+          } catch (error) {
+            if (error.code !== "ESRCH") throw error;
+          }
           for (
             let i = 0;
             i < 40 && processGroupMembers(result.pid)?.length !== 0;
