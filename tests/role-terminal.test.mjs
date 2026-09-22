@@ -1178,3 +1178,77 @@ test("the launch ledger records the task a worker-start handed over", (t) => {
   assert.equal(started.orcaTaskId, "orca_1");
   assert.equal(started.purpose, "review");
 });
+test("readLaunchEnvironment gitdir resolution matches git rev-parse", async (t) => {
+  const { readLaunchEnvironment: readEnv } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+  const tmpDir = await import("node:os").then((m) => m.tmpdir());
+  const fsM = await import("node:fs");
+  const pathM = await import("node:path");
+  const { execSync } = await import("node:child_process");
+
+  const tmpBase = pathM.join(tmpDir, "omt-gitdir-test-" + Date.now());
+  fsM.mkdirSync(tmpBase, { recursive: true });
+  t.after(() => fsM.rmSync(tmpBase, { recursive: true, force: true }));
+
+  // Create a real git repository
+  const repoRoot = pathM.join(tmpBase, "repo");
+  fsM.mkdirSync(repoRoot);
+  execSync("git init", { cwd: repoRoot });
+
+  // Create a real git worktree
+  execSync('git commit --allow-empty -m "init"', { cwd: repoRoot });
+  execSync("git worktree add ../wt", { cwd: repoRoot });
+  const wtRoot = pathM.join(tmpBase, "wt");
+
+  // Relative gitdir worktree
+  const relWtRoot = pathM.join(tmpBase, "wt-rel");
+  fsM.mkdirSync(relWtRoot);
+  fsM.writeFileSync(
+    pathM.join(relWtRoot, ".git"),
+    "gitdir: ../repo/.git/worktrees/wt-rel\n",
+  );
+
+  const codexDir = pathM.join(tmpBase, "codex-home");
+  fsM.mkdirSync(codexDir);
+  const codexConfig = pathM.join(codexDir, "config.toml");
+
+  // Normalize path function
+  const normPath = (p) =>
+    p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const normalizedRepoRoot = normPath(repoRoot);
+
+  fsM.writeFileSync(
+    codexConfig,
+    `[projects."${normalizedRepoRoot}"]\ntrust_level = "trusted"\n`,
+  );
+
+  const execute = async () => ({ code: 1, stdout: "", stderr: "skip" });
+
+  // 1. Normal repo (.git directory)
+  const envRepo = await readEnv({
+    worktreePath: repoRoot,
+    codexHome: codexDir,
+    execute,
+  });
+  assert.equal(envRepo.codexTrustRecordExists, true, "Normal repo");
+
+  // 2. Worktree (.git file)
+  const envWt = await readEnv({
+    worktreePath: wtRoot,
+    codexHome: codexDir,
+    execute,
+  });
+  assert.equal(envWt.codexTrustRecordExists, true, "Worktree");
+
+  // 3. Relative gitdir
+  const envRelWt = await readEnv({
+    worktreePath: relWtRoot,
+    codexHome: codexDir,
+    execute,
+  });
+  assert.equal(
+    envRelWt.codexTrustRecordExists,
+    true,
+    "Relative gitdir worktree",
+  );
+});
