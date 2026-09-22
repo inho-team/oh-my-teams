@@ -23,6 +23,7 @@ import {
   retryTask,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { recordCheckpoint } from "../plugins/oh-my-teams/scripts/handoff.mjs";
+import { waitHeadless } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import { profilesShareLimit } from "../plugins/oh-my-teams/scripts/handoff-snapshot.mjs";
 import {
   resolveRoleLaunch,
@@ -608,15 +609,17 @@ test("workflow-handoff and role-command --profile go through the CLI", async (t)
 });
 
 test("headless-start --profile runs only the recorded fallback and names the profile it replaced", async (t) => {
-  const ctx = await workflow(t);
-  attach(ctx, 1);
-  settle(ctx, 1, limit);
-  handoff(ctx, "agy-pro");
   // Every profile names an executable that does not exist, so the start can
-  // never run a real, billed provider CLI.
+  // never run a real, billed provider CLI. A workflow launch reads the
+  // organization frozen into the workflow, not --org, so the workflow is
+  // created from this one.
   const organization = org();
   for (const profile of Object.values(organization.profiles))
     profile.command = ["omt-no-such-cli"];
+  const ctx = await workflow(t, organization);
+  attach(ctx, 1);
+  settle(ctx, 1, limit);
+  handoff(ctx, "agy-pro");
   const orgFile = path.join(ctx.stateDir, "organization.json");
   writeJSON(orgFile, organization);
   const start = (extra) =>
@@ -647,17 +650,17 @@ test("headless-start --profile runs only the recorded fallback and names the pro
   assert.match(unrecorded.stderr, /has no handoff to codex-luna/);
   const started = await start([...workflowArgs, "--profile", "agy-pro"]);
   assert.equal(started.code, 0, started.stderr);
-  t.after(() =>
-    run([
-      process.execPath,
-      cli,
-      "headless-stop",
-      "--state",
-      ctx.stateDir,
-      "--worker",
-      "pl-handoff",
-    ]),
+  // The runner fails at once on the missing executable. Waiting for it keeps
+  // the cleanup from removing a directory it still holds on Windows.
+  const ended = await waitHeadless(ctx.stateDir, "pl-handoff", 15000, {
+    pollMs: 100,
+  });
+  assert.equal(ended.liveness, "exited");
+  assert.equal(ended.outcome, "exit-error");
+  const worker = readJSON(
+    path.join(ctx.stateDir, "headless", "pl-handoff", "worker.json"),
   );
+  assert.deepEqual(worker.binary, ["omt-no-such-cli"]);
   const { ledger } = JSON.parse(started.stdout);
   const line = JSON.parse(
     fs.readFileSync(ledger, "utf8").trim().split("\n").at(-1),
