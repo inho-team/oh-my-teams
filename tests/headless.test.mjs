@@ -266,9 +266,18 @@ test("the last marker line decides the outcome, and the model is judged", () => 
   assert.deepEqual(read.marker, { kind: "question", detail: "which one?" });
   assert.equal(read.session, "s");
   assert.equal(read.eventCount, 2);
-  assert.equal(modelVerdict("claude", "claude-sonnet-5", "claude-sonnet-5"), "matched");
-  assert.equal(modelVerdict("claude", "sonnet", "claude-sonnet-5"), "alias:claude-sonnet-5");
-  assert.equal(modelVerdict("agy", "sonnet", "claude-sonnet-4-6"), "alias:claude-sonnet-4-6");
+  assert.equal(
+    modelVerdict("claude", "claude-sonnet-5", "claude-sonnet-5"),
+    "matched",
+  );
+  assert.equal(
+    modelVerdict("claude", "sonnet", "claude-sonnet-5"),
+    "alias:claude-sonnet-5",
+  );
+  assert.equal(
+    modelVerdict("agy", "sonnet", "claude-sonnet-4-6"),
+    "alias:claude-sonnet-4-6",
+  );
   assert.equal(
     modelVerdict("agy", "gemini-3.8-flash-high", "gemini-3.1-pro"),
     "mismatched",

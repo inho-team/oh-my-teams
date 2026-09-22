@@ -1063,7 +1063,7 @@ test("presets match provider as well as model to prevent Claude Code profiles fr
     subscription: "test",
     concurrency: 1,
   };
-  
+
   const opusFirst = previewPreset(org, "opus-first").organization;
   assert.equal(opusFirst.roles.senior.profile, "agy-opus");
   assert.equal(opusFirst.roles.junior.profile, "agy-opus");

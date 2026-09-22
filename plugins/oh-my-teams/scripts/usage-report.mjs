@@ -260,7 +260,9 @@ function depth(directory) {
 function verdictOf(provider, requested, reported) {
   if (!requested) return "unrequested";
   if (!reported.length) return "unproven";
-  const verdicts = reported.map((model) => modelVerdict(provider, requested, model));
+  const verdicts = reported.map((model) =>
+    modelVerdict(provider, requested, model),
+  );
   if (verdicts.includes("mismatched")) return "mismatched";
   const aliasVerdict = verdicts.find((v) => v.startsWith("alias:"));
   return aliasVerdict ? aliasVerdict : "matched";
@@ -310,7 +312,11 @@ export function attributeSessions(records, places, options = {}) {
         method: "place",
         reason: candidates.length ? "outside-launch-window" : "no-place",
       };
-      record.modelVerdict = verdictOf(record.provider, null, record.modelReported);
+      record.modelVerdict = verdictOf(
+        record.provider,
+        null,
+        record.modelReported,
+      );
       continue;
     }
     valid.sort((a, b) => depth(b.path) - depth(a.path) || b.at - a.at);
@@ -332,7 +338,11 @@ export function attributeSessions(records, places, options = {}) {
         roles: [...new Set([best.role, ...rivals.map((place) => place.role)])],
       };
       if (record.measured === true) record.measured = "partial";
-      record.modelVerdict = verdictOf(record.provider, null, record.modelReported);
+      record.modelVerdict = verdictOf(
+        record.provider,
+        null,
+        record.modelReported,
+      );
       continue;
     }
     record.role = best.role;
