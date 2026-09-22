@@ -111,7 +111,11 @@ import {
   registerKickoff,
   releaseKickoff,
 } from "./kickoff-registry.mjs";
-import { readLaunches, recordLaunch } from "./usage-ledger.mjs";
+import {
+  readLaunches,
+  recordLaunch,
+  lazyLaunchesBackward,
+} from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
 import {
   defaultRuntimeRoot,
@@ -692,6 +696,40 @@ async function compatibilityPrepare(args) {
   };
 }
 
+async function resolveAndCheckDrift(orgFile, org, launch) {
+  const requested =
+    launch.modelRequested !== undefined ? launch.modelRequested : launch.model;
+  if (requested !== null) {
+    return {
+      modelResolved: requested,
+      warnings: [],
+    };
+  }
+
+  const projectDir = ownerProject(orgFile);
+  const defaults = await resolveHostDefaults({
+    project: projectDir ? path.resolve(projectDir) : undefined,
+  });
+  const currentResolved = defaults[launch.provider]?.model ?? null;
+  if (!currentResolved) return { modelResolved: null, warnings: [] };
+
+  const prev = lazyLaunchesBackward(orgFile).findLast(
+    (l) => l.profile === launch.profile && typeof l.modelResolved === "string",
+  );
+  const baseline = prev
+    ? prev.modelResolved
+    : org.profiles[launch.profile]?.modelResolvedAtFormation;
+
+  const warnings = [];
+  if (baseline && baseline !== currentResolved) {
+    warnings.push(
+      `해석된 모델이 ${baseline}에서 ${currentResolved}(으)로 바뀌었습니다. 설정 변경의 영향일 수 있습니다.`,
+    );
+  }
+
+  return { modelResolved: currentResolved, warnings };
+}
+
 // The receipt is returned whether or not the start reached `ready`, because a
 // start that failed still names the Dispatch and the resources someone has to
 // reclaim. A refusal that produced no Dispatch throws, and its neutral signal
@@ -804,12 +842,14 @@ async function startSupervisedWorker(args) {
         title,
       })),
     );
+    const drift = await resolveAndCheckDrift(args.org, org, launch);
     const ledger = recordLaunchSafely(args.org, launchedAt, {
       via: "worker-start",
       role: launch.role,
       profile: launch.profile,
       provider: launch.provider,
       modelRequested: launch.model,
+      modelResolved: drift.modelResolved,
       effortRequested: launch.effort,
       worktreePath:
         selectedWorktreePath(args.worktree ?? "current", args.repo) ??
@@ -829,6 +869,7 @@ async function startSupervisedWorker(args) {
       title,
       titlePinned,
       binding: { ...binding, roleHeader: Boolean(args.spec) },
+      warnings: drift.warnings.length > 0 ? drift.warnings : undefined,
     };
   } catch (error) {
     if (!error.signal) throw error;
@@ -1161,7 +1202,7 @@ function supervisionWaitTimeout(args) {
   return supervisionPolicy(validateOrg(readJSON(args.org))).progressCheckMs;
 }
 
-function writeDraft(args) {
+async function writeDraft(args) {
   const output = path.resolve(args.output);
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
@@ -1171,6 +1212,24 @@ function writeDraft(args) {
     tiers: args.tiers === undefined ? undefined : Number(args.tiers),
     models: args.models.split(","),
   });
+  const projectDir = path.dirname(output);
+  const defaults = await resolveHostDefaults({ project: projectDir });
+  if (defaults.codex?.error) {
+    process.stderr.write(
+      `Warning: Failed to resolve Codex defaults: ${defaults.codex.error}\n`,
+    );
+  }
+  if (defaults.claude?.error) {
+    process.stderr.write(
+      `Warning: Failed to resolve Claude defaults: ${defaults.claude.error}\n`,
+    );
+  }
+  for (const profile of Object.values(organization.profiles)) {
+    if (profile.model === null) {
+      profile.modelResolvedAtFormation =
+        defaults[profile.provider]?.model ?? null;
+    }
+  }
   writeJSON(output, organization);
   return { output, organization };
 }
@@ -1178,7 +1237,7 @@ function writeDraft(args) {
 async function executeCommand(args) {
   switch (args.command) {
     case "org-draft":
-      return writeDraft(args);
+      return await writeDraft(args);
     case "init":
       return fs.existsSync(args.org)
         ? { created: false, organization: validateOrg(readJSON(args.org)) }
@@ -1463,15 +1522,19 @@ async function executeCommand(args) {
           stateDir: path.resolve(args.state),
           opened,
         });
+      const drift = await resolveAndCheckDrift(args.org, org, command);
+      const warnings = [...(opened.warnings || []), ...drift.warnings];
       return {
         ...opened,
         ...(allowUnverifiedApproval ? { allowUnverifiedApproval } : {}),
+        ...(warnings.length > 0 ? { warnings } : { warnings: undefined }),
         ...recordLaunchSafely(args.org, launchedAt, {
           via: "role-terminal",
           role: command.role,
           profile: command.profile,
           provider: command.provider,
           modelRequested: command.modelRequested,
+          modelResolved: drift.modelResolved,
           effortRequested: command.effortRequested,
           worktreePath: target,
           worktreeSelector: args.worktree,
