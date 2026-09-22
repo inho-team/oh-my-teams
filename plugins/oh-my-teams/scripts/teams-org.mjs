@@ -771,8 +771,10 @@ async function startSupervisedWorker(args) {
         orcaVersion: env.orcaVersion,
         cliVersion: env.cliVersion,
       });
-    } catch {
-      // 예측 실패 시 matrixPrediction undefined (기존 동작 유지)
+    } catch (error) {
+      process.stderr.write(
+        `Warning: Failed to predict launch path: ${error.message}\n`,
+      );
     }
   }
   try {
@@ -1380,8 +1382,10 @@ async function executeCommand(args) {
             orcaVersion: env.orcaVersion,
             cliVersion: env.cliVersion,
           });
-        } catch {
-          // 예측 실패 시 기존 동작 유지 (matrixPrediction undefined)
+        } catch (error) {
+          process.stderr.write(
+            `Warning: Failed to predict launch path: ${error.message}\n`,
+          );
         }
       }
       return checkTerminalIdle(args.terminal, {

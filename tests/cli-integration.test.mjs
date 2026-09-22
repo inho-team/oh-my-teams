@@ -422,3 +422,34 @@ test("CLI newer changes-requested review with no findings revokes prior approval
     "semantic-review",
   ]);
 });
+
+test("STATE-04: terminal-idle-check warns about launch path prediction failures without crashing", async (t) => {
+  const dir = tempDir(t);
+  const orgOllama = readJSON(
+    new URL(
+      "../plugins/oh-my-teams/examples/organization.local-ollama.json",
+      import.meta.url,
+    ),
+  );
+  fs.writeFileSync(path.join(dir, "org.json"), JSON.stringify(orgOllama));
+  const result = await run(
+    [
+      process.execPath,
+      cli,
+      "terminal-idle-check",
+      "--org",
+      "org.json",
+      "--role",
+      "intern",
+      "--terminal",
+      "t-123",
+      "--orca",
+      "does-not-exist-orca",
+    ],
+    { cwd: dir },
+  );
+  assert.ok(
+    result.stderr.includes("Warning: Failed to predict launch path"),
+    "Should print warning to stderr",
+  );
+});
