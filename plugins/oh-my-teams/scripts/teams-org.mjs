@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import {
   assert,
   chart,
+  definedRoles,
   readJSON,
+  ROOT_ROLE,
   saveOrg,
   supervisionPolicy,
   validateOrg,
@@ -14,6 +16,7 @@ import {
 } from "./core.mjs";
 import {
   assertWorktreeUnshared,
+  displayModel,
   launchBinding,
   PERMISSION_BYPASS,
   selectedWorktreePath,
@@ -651,8 +654,13 @@ function applyPreset(args) {
 function showOrganization(args) {
   const org = validateOrg(readJSON(args.org));
   const status = organizationStatus(org, args.state);
+
+  for (const profile of Object.values(org.profiles)) {
+    profile.displayModel = displayModel(profile.provider, profile.model);
+  }
+
   if (args.json) return { organization: org, ...status };
-  console.log(chart(org));
+  console.log(displayChart(org));
   if (args.state) console.log(JSON.stringify(status, null, 2));
   return undefined;
 }
@@ -1255,8 +1263,13 @@ async function executeCommand(args) {
       return { valid: Boolean(validateOrg(readJSON(args.org))) };
     case "kickoff-claim":
       return registerKickoff(args.org, readJSON(args.from));
-    case "kickoff-show":
-      return listKickoffs(args.org, args.worktree);
+    case "kickoff-show": {
+      const result = listKickoffs(args.org, args.worktree);
+      for (const k of result.kickoffs) {
+        k.pm.modelDisplay = displayModel(k.pm.provider, k.pm.model);
+      }
+      return result;
+    }
     case "kickoff-bind":
       return bindKickoffRun(args.org, {
         worktreeId: args.worktree,
@@ -1845,8 +1858,24 @@ async function executeCommand(args) {
       });
     case "resource-release":
       return releaseResource(args.org, args.slot);
-    case "director-watch":
-      return directorWatch(args.org, { orcaExecutable: args.orca });
+    case "director-watch": {
+      const watch = await directorWatch(args.org, {
+        orcaExecutable: args.orca,
+      });
+      const { kickoffs } = listKickoffs(args.org);
+      for (const summary of watch.kickoffs) {
+        const entry = kickoffs.find(
+          (k) => k.pm.worktreeId === summary.worktreeId,
+        );
+        if (entry) {
+          summary.pmModelDisplay = displayModel(
+            entry.pm.provider,
+            entry.pm.model,
+          );
+        }
+      }
+      return watch;
+    }
     default:
       throw new Error(`Unknown command: ${args.command}`);
   }
@@ -1900,4 +1929,34 @@ if (
     console.error(error.message);
     process.exitCode = 1;
   });
+}
+
+function displayChart(org) {
+  validateOrg(org);
+  const lines = [`Organization: ${org.name} (revision ${org.revision})`];
+
+  function visit(role, depth) {
+    const binding = org.roles[role];
+    const profile = org.profiles[binding.profile];
+    lines.push(
+      `${"  ".repeat(depth)}${role.toUpperCase()}: ${binding.profile}` +
+        ` | ${profile.subscription}` +
+        ` | ${displayModel(profile.provider, profile.model)}` +
+        ` | effort=${profile.effort ?? "provider-default"}` +
+        ` | slots=${binding.concurrency}`,
+    );
+    definedRoles(org)
+      .filter((child) => org.roles[child].parent === role)
+      .forEach((child) => visit(child, depth + 1));
+  }
+
+  visit(ROOT_ROLE, 0);
+  for (const [role, profiles] of Object.entries(org.advisors ?? {})) {
+    const models = profiles.map(
+      (id) =>
+        `${id} (${displayModel(org.profiles[id].provider, org.profiles[id].model)})`,
+    );
+    lines.push(`ADVISOR for ${role.toUpperCase()}: ${models.join(", ")}`);
+  }
+  return lines.join("\n");
 }

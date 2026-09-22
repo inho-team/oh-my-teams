@@ -12,6 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { assert, canonicalRole, readJSON, writeJSON } from "./core.mjs";
+import { displayModel } from "./role-launch.mjs";
 import { modelVerdict } from "./headless.mjs";
 import {
   kickoffEntryName,
@@ -375,6 +376,7 @@ export function summarizeByRole(records) {
     // Sessions recorded before 2.6.0 may name intern; they count toward Junior.
     const role = (byRole[canonicalRole(record.role)] ??= {
       models: { requested: [], reported: [] },
+      modelsDisplay: { requested: [], reported: [] },
       sources: [],
       sessions: 0,
       measuredSessions: 0,
@@ -390,14 +392,20 @@ export function summarizeByRole(records) {
     if (record.reason && !role.reasons.includes(record.reason))
       role.reasons.push(record.reason);
     if (!role.sources.includes(record.source)) role.sources.push(record.source);
-    if (
-      record.modelRequested &&
-      !role.models.requested.includes(record.modelRequested)
-    )
-      role.models.requested.push(record.modelRequested);
+
+    if (record.modelRequested) {
+      if (!role.models.requested.includes(record.modelRequested)) {
+        role.models.requested.push(record.modelRequested);
+        role.modelsDisplay.requested.push(
+          displayModel(record.provider, record.modelRequested),
+        );
+      }
+    }
     for (const model of record.modelReported) {
-      if (!role.models.reported.includes(model))
+      if (!role.models.reported.includes(model)) {
         role.models.reported.push(model);
+        role.modelsDisplay.reported.push(displayModel(record.provider, model));
+      }
     }
     for (const field of SUMMED_FIELDS) {
       // An unmeasured session's token fields are null already; its turns and
@@ -554,7 +562,13 @@ async function kickoffUsage(entry, options) {
         source: record.source,
         sessionKey: record.sessionKey,
         modelRequested: record.modelRequested,
+        modelRequestedDisplay: record.modelRequested
+          ? displayModel(record.provider, record.modelRequested)
+          : null,
         modelReported: record.modelReported,
+        modelReportedDisplay: record.modelReported.map((m) =>
+          displayModel(record.provider, m),
+        ),
       })),
     unattributed: records
       .filter((record) => ["unattributed", "ambiguous"].includes(record.role))
@@ -748,7 +762,7 @@ export function formatUsageTable(report) {
       const share = kickoff.share[role];
       rows.push([
         role,
-        `${summary.models.requested.join(",") || "-"} -> ${summary.models.reported.join(",") || "-"}`,
+        `${summary.modelsDisplay.requested.join(",") || "-"} -> ${summary.modelsDisplay.reported.join(",") || "-"}`,
         `${summary.measuredSessions}${summary.partialSessions ? `+${summary.partialSessions} partial` : ""}/${summary.sessions}`,
         number(summary.turns),
         number(summary.calls),
@@ -781,7 +795,7 @@ export function formatUsageTable(report) {
     }
     for (const mismatch of kickoff.mismatches) {
       lines.push(
-        `model mismatch: ${mismatch.role} requested ${mismatch.modelRequested}, reported ${mismatch.modelReported.join(",")} (${mismatch.source})`,
+        `model mismatch: ${mismatch.role} requested ${mismatch.modelRequestedDisplay}, reported ${mismatch.modelReportedDisplay.join(",")} (${mismatch.source})`,
       );
     }
     if (kickoff.unattributed.length) {

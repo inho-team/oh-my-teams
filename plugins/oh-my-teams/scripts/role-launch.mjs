@@ -587,3 +587,21 @@ export function roleSpec(
     "",
   ].join("\n");
 }
+/**
+ * Formats a provider and model for display.
+ *
+ * @param {string} provider - Provider name.
+ * @param {string} model - Model name.
+ * @returns {string} The formatted string.
+ */
+export function displayModel(provider, model) {
+  const providerNames = {
+    claude: "Claude Code",
+    agy: "Agy",
+    codex: "OpenCodex",
+  };
+  const p =
+    providerNames[provider] || (provider ? String(provider) : "Unknown");
+  const m = model ? String(model) : "host-default";
+  return `${p} ${m}`;
+}

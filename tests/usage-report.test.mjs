@@ -704,7 +704,8 @@ test("usage-report runs from the CLI with explicit homes and writes a snapshot",
   ]);
   table.restore();
   const printed = table.lines.join("\n");
-  assert.match(printed, /pl +\| gpt-5\.6-sol -> gpt-5\.6-sol/);
+  assert.match(printed, /pl +\| OpenCodex gpt-5\.6-sol -> OpenCodex gpt-5\.6-sol/);
+  assert.match(printed, /junior +\| OpenCodex gpt-5\.6-sol -> -/);
   const [written] = fs
     .readdirSync(path.join(path.dirname(fixture.orgFile), "history"))
     .filter((name) => name.startsWith("usage-"));
