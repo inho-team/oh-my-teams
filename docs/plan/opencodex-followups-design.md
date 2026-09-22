@@ -135,7 +135,7 @@ claude·agy 프로필이 runner를 가져도 실제로 실행되는 것은 Claud
 | role-terminal | `teams-org.mjs:1289-1296` | runner 프로필을 거부합니다(assert는 `:1291-1295`). | 해당 없음 | 병렬 kickoff 소유이므로 이 task에서 손대지 않습니다. | 거부를 유지합니다. |
 | worker-start | `role-launch.mjs:246-262` | runner 프로필을 거부합니다(`role-launch.mjs:250-256`). | 해당 없음 | 그대로 둡니다. | 거부를 유지합니다. |
 
-`roleCommand`(`role-launch.mjs:366-408`)는 runner가 있으면 `actualRunner`를 `argv[0]`의 basename에서 동적으로 계산한 객체를 만듭니다(`:386`, validation 이전 코드 기준). `launchableProfile`(`role-launch.mjs:152-176`)은 `ORCA_LAUNCH`에 없는 provider를 예외 없이 거부하고(`:153-156`), runner 예외는 그 뒤의 "현재 계정, env 없음, 단일 명령" 검사에만 적용됩니다(`:161-166`).
+`roleCommand`(`role-launch.mjs:366-408`)는 runner가 있으면 `actualRunner: "codex"`를 명시한 객체를 만듭니다(`role-launch.mjs:375-386`). [바로잡음: 이 서술은 validation 이전 코드(`e544faf`)를 설명합니다. validation(`40897be`, `562cbbd`) 이후인 현재 코드는 `actualRunner`를 `argv[0]`의 basename에서 동적으로 계산합니다(`path.basename(argv[0]).replace(/\.(exe|cmd)$/i, "")`, `:386`).] `launchableProfile`(`role-launch.mjs:152-176`)은 `ORCA_LAUNCH`에 없는 provider를 예외 없이 거부하고(`:153-156`), runner 예외는 그 뒤의 "현재 계정, env 없음, 단일 명령" 검사에만 적용됩니다(`:161-166`).
 
 runner를 가진 프로필이 지원되려면 `OPENCODEX_RUNNER_PROVIDERS`(`opencodex.mjs`가 export하는 동결 배열)에 해당 provider가 들어 있어야 합니다. 이 이름은 병렬 task가 추가하고 있으며(이 워크트리에는 아직 없습니다), 지원 목록의 정본으로 가정합니다.
 
