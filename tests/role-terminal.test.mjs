@@ -840,16 +840,19 @@ test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
     worktreePath: "/nonexistent",
     homedir: "/nonexistent-home",
     execute: async () => {
-      throw new Error("no orca");
+      const err = new Error("no orca");
+      err.code = "ENOENT";
+      throw err;
     },
   });
-  assert.equal(env3.orcaVersion, "unknown", "버전 읽기 실패 시 unknown");
-  assert.equal(env3.trustRecordExists, "unknown", "설정 읽기 실패 시 unknown");
+  assert.equal(env3.orcaVersion, "unknown");
+  assert.equal(env3.cliVersion, "unknown");
+  assert.equal(env3.trustRecordExists, "unknown");
+  assert.equal(env3.skipDangerousModePermissionPrompt, "unknown");
+  assert.equal(env3.codexTrustRecordExists, "unknown");
 });
 
 test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", async () => {
-  // finding: codex-trust-unknown — role-terminal.mjs가 Codex 신뢰 기록을 unknown으로 넘기던 버그 수정 검증.
-  // 설정 내용을 주입해 true·false·unknown 세 경우를 결정적으로 확인한다.
   const { readLaunchEnvironment: readEnv } =
     await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
   const tmpDir = await import("node:os").then((m) => m.tmpdir());
@@ -857,111 +860,106 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
   const pathM = await import("node:path");
 
   const tmpBase = pathM.join(tmpDir, "omt-codex-trust-" + Date.now());
-  // 임시 Codex 설정 디렉터리
   const codexDir = pathM.join(tmpBase, "codex-home");
   fsM.mkdirSync(codexDir, { recursive: true });
   const codexConfig = pathM.join(codexDir, "config.toml");
 
-  // 주 저장소 루트 경로: git rev-parse 시뮬레이션을 위해 주입
-  const fakeRepoRoot = "C:/Users/kjsun/orca/oh-my-teams";
-  const fakeGitCommonDir = fakeRepoRoot + "/.git";
+  // Create a fake repo root and worktree inside tmpBase
+  const fakeRepoRoot = pathM.join(tmpBase, "fake-repo");
+  const fakeWorktree = pathM.join(tmpBase, "fake-worktree");
+  fsM.mkdirSync(fakeRepoRoot, { recursive: true });
+  fsM.mkdirSync(fakeWorktree, { recursive: true });
+  // Create fake .git file in worktree pointing to repo
+  fsM.writeFileSync(
+    pathM.join(fakeWorktree, ".git"),
+    `gitdir: ${pathM.join(fakeRepoRoot, ".git", "worktrees", "fake-worktree")}`,
+  );
 
-  // fakeExecute: git rev-parse는 fakeGitCommonDir 반환, 나머지는 실패
-  const makeExecute = () => async (argv) => {
-    if (argv[0] === "git" && argv.includes("--git-common-dir")) {
-      return { code: 0, stdout: fakeGitCommonDir + "\n" };
-    }
-    // orca --version, agy --version → code:1 (unknown 유지)
+  const makeExecute = () => async () => {
     return { code: 1, stdout: "", stderr: "skip" };
   };
 
-  // 케이스 1: trust_level = "trusted" → codexTrustRecordExists = true
+  const normPath = (p) =>
+    p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const normalizedFakeRepoRoot = normPath(fakeRepoRoot);
+
   fsM.writeFileSync(
     codexConfig,
-    `[projects."${fakeRepoRoot}"]\ntrust_level = "trusted"\n`,
+    `[projects."${normalizedFakeRepoRoot}"]\ntrust_level = "trusted"\n`,
   );
   const envTrue = await readEnv({
-    worktreePath: fakeRepoRoot + "/some-worktree",
+    worktreePath: fakeWorktree,
     homedir: tmpBase,
     codexHome: codexDir,
     execute: makeExecute(),
   });
-  assert.equal(
-    envTrue.codexTrustRecordExists,
-    true,
-    "trust_level=trusted → true",
-  );
+  assert.equal(envTrue.codexTrustRecordExists, true);
 
-  // 케이스 2: 다른 경로 or trust_level 없음 → false
   fsM.writeFileSync(
     codexConfig,
     `[projects."C:/other/repo"]\ntrust_level = "trusted"\n`,
   );
   const envFalse = await readEnv({
-    worktreePath: fakeRepoRoot + "/some-worktree",
+    worktreePath: fakeWorktree,
     homedir: tmpBase,
     codexHome: codexDir,
     execute: makeExecute(),
   });
-  assert.equal(envFalse.codexTrustRecordExists, false, "경로 불일치 → false");
+  assert.equal(envFalse.codexTrustRecordExists, false);
 
-  // 케이스 3: 설정 파일 없음 → unknown
   fsM.unlinkSync(codexConfig);
   const envUnknown = await readEnv({
-    worktreePath: fakeRepoRoot + "/some-worktree",
+    worktreePath: fakeWorktree,
     homedir: tmpBase,
     codexHome: codexDir,
     execute: makeExecute(),
   });
-  assert.equal(
-    envUnknown.codexTrustRecordExists,
-    "unknown",
-    "설정 파일 없음 → unknown",
+  assert.equal(envUnknown.codexTrustRecordExists, "unknown");
+
+  // escaped path test
+  const repoRootForEscape = pathM.join(tmpBase, "escape-repo");
+  const worktreeForEscape = pathM.join(tmpBase, "escape-wt");
+  fsM.mkdirSync(repoRootForEscape, { recursive: true });
+  fsM.mkdirSync(worktreeForEscape, { recursive: true });
+  fsM.writeFileSync(
+    pathM.join(worktreeForEscape, ".git"),
+    `gitdir: ${pathM.join(repoRootForEscape, ".git", "worktrees", "escape-wt")}`,
   );
 
-  // 케이스 추가: 큰따옴표 키에 TOML 이스케이프(\\ → \) — 실제 config.toml 형식
-  fsM.mkdirSync(codexDir, { recursive: true });
-  // 실제 config.toml: [projects."C:\Users\me\repo"] — \\ 두 글자가 실제 백슬래시 하나
-  const escapedKey = "C:\\\\Users\\\\me\\\\repo"; // JS 문자열로 \\ 두 글자씩
-  const repoRootForEscape = "C:/Users/me/repo";
-  // git rev-parse 응답도 이 루트에 맞춰 재정의
-  const makeExecuteForRepo = (root) => async (argv) => {
-    if (argv[0] === "git" && argv.includes("--git-common-dir")) {
-      return { code: 0, stdout: root + "/.git\n" };
-    }
-    return { code: 1, stdout: "", stderr: "skip" };
-  };
+  const escapedKey = normPath(repoRootForEscape).replace(/\//g, "\\\\");
+
   fsM.writeFileSync(
     codexConfig,
-    // 파일 내용: [projects."C:\\Users\\me\\repo"]\ntrust_level = "trusted"\n
-    // TOML 기본 문자열에서 \\ 두 글자 = 백슬래시 하나
     `[projects."${escapedKey}"]\ntrust_level = "trusted"\n`,
   );
   const envDoubleQuoteEscape = await readEnv({
-    worktreePath: repoRootForEscape + "/wt",
+    worktreePath: worktreeForEscape,
     homedir: tmpBase,
     codexHome: codexDir,
-    execute: makeExecuteForRepo(repoRootForEscape),
+    execute: makeExecute(),
   });
-  assert.equal(
-    envDoubleQuoteEscape.codexTrustRecordExists,
-    true,
-    `큰따옴표 TOML 이스케이프(\\\\ → \\) 해제 후 true`,
-  );
+  assert.equal(envDoubleQuoteEscape.codexTrustRecordExists, true);
 
   // 케이스 추가: 작은따옴표(리터럴) 키 — 이스케이프 없음
   // [projects.'c:\users\me\repo'] — 백슬래시 그대로
-  const singleQuoteRepoRoot = "c:/users/me/repo2";
-  const singleQuoteLiteralKey = "c:\\users\\me\\repo2"; // \ 한 글자
+  const singleQuoteRepoRoot = pathM.join(tmpBase, "single-repo");
+  const singleQuoteWorktree = pathM.join(tmpBase, "single-wt");
+  fsM.mkdirSync(singleQuoteRepoRoot, { recursive: true });
+  fsM.mkdirSync(singleQuoteWorktree, { recursive: true });
+  fsM.writeFileSync(
+    pathM.join(singleQuoteWorktree, ".git"),
+    `gitdir: ${pathM.join(singleQuoteRepoRoot, ".git", "worktrees", "single-wt")}`,
+  );
+  const singleQuoteLiteralKey = singleQuoteRepoRoot.replace(/\//g, "\\");
   fsM.writeFileSync(
     codexConfig,
     `[projects.'${singleQuoteLiteralKey}']\ntrust_level = "trusted"\n`,
   );
   const envSingleQuote = await readEnv({
-    worktreePath: singleQuoteRepoRoot + "/wt",
+    worktreePath: singleQuoteWorktree,
     homedir: tmpBase,
     codexHome: codexDir,
-    execute: makeExecuteForRepo(singleQuoteRepoRoot),
+    execute: makeExecute(),
   });
   assert.equal(
     envSingleQuote.codexTrustRecordExists,
@@ -1179,4 +1177,78 @@ test("the launch ledger records the task a worker-start handed over", (t) => {
   assert.equal(started.workflowTaskId, "task-a");
   assert.equal(started.orcaTaskId, "orca_1");
   assert.equal(started.purpose, "review");
+});
+test("readLaunchEnvironment gitdir resolution matches git rev-parse", async (t) => {
+  const { readLaunchEnvironment: readEnv } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+  const tmpDir = await import("node:os").then((m) => m.tmpdir());
+  const fsM = await import("node:fs");
+  const pathM = await import("node:path");
+  const { execSync } = await import("node:child_process");
+
+  const tmpBase = pathM.join(tmpDir, "omt-gitdir-test-" + Date.now());
+  fsM.mkdirSync(tmpBase, { recursive: true });
+  t.after(() => fsM.rmSync(tmpBase, { recursive: true, force: true }));
+
+  // Create a real git repository
+  const repoRoot = pathM.join(tmpBase, "repo");
+  fsM.mkdirSync(repoRoot);
+  execSync("git init", { cwd: repoRoot });
+
+  // Create a real git worktree
+  execSync('git commit --allow-empty -m "init"', { cwd: repoRoot });
+  execSync("git worktree add ../wt", { cwd: repoRoot });
+  const wtRoot = pathM.join(tmpBase, "wt");
+
+  // Relative gitdir worktree
+  const relWtRoot = pathM.join(tmpBase, "wt-rel");
+  fsM.mkdirSync(relWtRoot);
+  fsM.writeFileSync(
+    pathM.join(relWtRoot, ".git"),
+    "gitdir: ../repo/.git/worktrees/wt-rel\n",
+  );
+
+  const codexDir = pathM.join(tmpBase, "codex-home");
+  fsM.mkdirSync(codexDir);
+  const codexConfig = pathM.join(codexDir, "config.toml");
+
+  // Normalize path function
+  const normPath = (p) =>
+    p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const normalizedRepoRoot = normPath(repoRoot);
+
+  fsM.writeFileSync(
+    codexConfig,
+    `[projects."${normalizedRepoRoot}"]\ntrust_level = "trusted"\n`,
+  );
+
+  const execute = async () => ({ code: 1, stdout: "", stderr: "skip" });
+
+  // 1. Normal repo (.git directory)
+  const envRepo = await readEnv({
+    worktreePath: repoRoot,
+    codexHome: codexDir,
+    execute,
+  });
+  assert.equal(envRepo.codexTrustRecordExists, true, "Normal repo");
+
+  // 2. Worktree (.git file)
+  const envWt = await readEnv({
+    worktreePath: wtRoot,
+    codexHome: codexDir,
+    execute,
+  });
+  assert.equal(envWt.codexTrustRecordExists, true, "Worktree");
+
+  // 3. Relative gitdir
+  const envRelWt = await readEnv({
+    worktreePath: relWtRoot,
+    codexHome: codexDir,
+    execute,
+  });
+  assert.equal(
+    envRelWt.codexTrustRecordExists,
+    true,
+    "Relative gitdir worktree",
+  );
 });
