@@ -69,8 +69,8 @@ export async function readLaunchEnvironment({
         .find((t) => /^\d+\.\d+\.\d+/.test(t));
       if (ver) orcaVersion = ver;
     }
-  } catch {
-    // unknown 유지
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
   }
 
   // Agy CLI 버전 읽기
@@ -84,8 +84,8 @@ export async function readLaunchEnvironment({
         .find((t) => /^\d+\.\d+\.\d+/.test(t));
       if (ver) cliVersion = ver;
     }
-  } catch {
-    // unknown 유지
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
   }
 
   // Agy 신뢰 기록: ~/.gemini/antigravity-cli/settings.json의 trustedWorkspaces
@@ -109,9 +109,8 @@ export async function readLaunchEnvironment({
     } else if (Array.isArray(trusted)) {
       trustRecordExists = false;
     }
-    // 읽었지만 배열이 아니면 unknown 유지
-  } catch {
-    // unknown 유지
+  } catch (error) {
+    if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
   }
 
   // Claude skipDangerousModePermissionPrompt: ~/.claude/settings.json
@@ -124,8 +123,8 @@ export async function readLaunchEnvironment({
       skipDangerousModePermissionPrompt =
         settings.skipDangerousModePermissionPrompt;
     }
-  } catch {
-    // unknown 유지
+  } catch (error) {
+    if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
   }
 
   // Codex 신뢰 기록: CODEX_HOME/config.toml 또는 ~/.codex/config.toml
@@ -134,21 +133,21 @@ export async function readLaunchEnvironment({
   let codexTrustRecordExists = "unknown";
   if (worktreePath) {
     try {
-      const gitCommonDir = await execute(
-        [
-          "git",
-          "-C",
-          worktreePath,
-          "rev-parse",
-          "--path-format=absolute",
-          "--git-common-dir",
-        ],
-        { timeoutMs: 10000 },
-      );
-      if (gitCommonDir.code === 0) {
-        const gitCommonDirPath = String(gitCommonDir.stdout ?? "").trim();
-        // --git-common-dir 결과의 부모가 주 저장소 루트
-        const repoRoot = path.dirname(gitCommonDirPath);
+      let repoRoot = null;
+      const gitPath = path.join(worktreePath, ".git");
+      const stat = fs.statSync(gitPath);
+      if (stat.isDirectory()) {
+        repoRoot = worktreePath;
+      } else {
+        const gitFile = fs.readFileSync(gitPath, "utf8");
+        const match = gitFile.match(/^gitdir:\s*(.+)$/m);
+        if (match) {
+          const gitDir = path.resolve(worktreePath, match[1].trim());
+          repoRoot = path.dirname(path.dirname(path.dirname(gitDir)));
+        }
+      }
+
+      if (repoRoot) {
         // 경로 정규화: 대소문자 통일(Windows), 구분자 통일
         const normPath = (p) =>
           p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -198,12 +197,12 @@ export async function readLaunchEnvironment({
             if (found) break;
           }
           codexTrustRecordExists = found;
-        } catch {
-          // 읽기 실패: unknown 유지
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
         }
       }
-    } catch {
-      // git 실행 실패: unknown 유지
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
     }
   }
 
