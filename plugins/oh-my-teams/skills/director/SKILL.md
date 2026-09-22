@@ -23,7 +23,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 
 ### 책임
 
-이사는 사용자가 요청한 목표가 실제로 달성되고 올바른 방식으로 전달되었는지에 대한 최종 판단을 책임진다. PM의 진행 보고와 완료 보고를 받아 사용자에게 전달하고, `close` 또는 `disband`로 kickoff를 끝낸다.
+이사는 사용자가 요청한 목표가 실제로 달성되고 올바른 방식으로 전달되었는지에 대한 최종 판단을 책임진다. PM의 진행 보고와 완료 보고를 받아 사용자에게 전달하고, `close` 또는 `disband`로 kickoff를 끝낸다. 사용자에게 보내는 진행 보고와 완료 보고는 첫 문단에 판정(`완료`·`부분 완료`·`실패`·`차단`)과 근거를 두고, 이어서 사용자가 내려야 할 결정을 적는 [두괄식](../../references/bluf.md)으로 쓴다. 한국어로 전달할 때의 세부 기준은 [`korean-result-reporting.md`](../../references/korean-result-reporting.md)를 따른다.
 
 ### 한계
 
@@ -56,7 +56,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]`로 이사에게 신호를 보낸다. 이사는 다음 명령으로 신호를 처리한다.
 
 - `director-inbox --org <project>/.omt/organization.json`: 미처리 신호 조회
-- `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`: 결정을 기록하고 PM 터미널에 전달한다. PM 터미널은 `role-terminal`이 남긴 가장 최근의 PM 실행 기록으로 찾으며, Orca가 그 터미널을 같은 워크트리에 띄우고 있을 때만 보낸다. 결과가 `notified: false`이면 결정은 inbox에만 기록된 것이므로, PM 터미널을 확인해 직접 전달한다
+- `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`: 결정을 기록하고 PM 터미널에 전달한다. `--text`의 본문은 두괄식 첫 줄(결정)로 시작한다. PM 터미널은 `role-terminal`이 남긴 가장 최근의 PM 실행 기록으로 찾으며, Orca가 그 터미널을 같은 워크트리에 띄우고 있을 때만 보낸다. 결과가 `notified: false`이면 결정은 inbox에만 기록된 것이므로, PM 터미널을 확인해 직접 전달한다
 - `director-ack --org <project>/.omt/organization.json --signal <id>`: 수신 확인
 - `director-watch --org <project>/.omt/organization.json`: kickoff별 신호·슬롯 점유·여유 메모리·PM liveness 요약 조회
 

@@ -23,6 +23,7 @@ import {
   retryTask,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { recordCheckpoint } from "../plugins/oh-my-teams/scripts/handoff.mjs";
+import { waitHeadless } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import { profilesShareLimit } from "../plugins/oh-my-teams/scripts/handoff-snapshot.mjs";
 import {
   resolveRoleLaunch,
@@ -134,11 +135,12 @@ async function workflow(t, organization = org(), maxAttempts = 1) {
     // `dir` (plugins/oh-my-teams/scripts/headless.mjs launchTurn); on
     // Windows that process keeps `dir` locked until it exits, so it must be
     // observed exited before rmSync runs, whichever t.after runs first.
+    // Removal still retries in case another handle lingers.
     await waitAllRunnersExited(stateDir);
     fs.rmSync(dir, {
       recursive: true,
       force: true,
-      maxRetries: 5,
+      maxRetries: 10,
       retryDelay: 200,
     });
   });
@@ -535,7 +537,11 @@ test("briefs carry the handoff history and, while pending, what to read first", 
   };
   const pending = roleSpec(org(), "pl", "이어서 한다", run);
   assert.match(pending, /handoff 이력: 1\. codex-current → agy-pro/);
-  assert.match(pending, /checkpoint\.md와 .*snapshot-1\.json를 읽고/);
+  assert.match(pending, /codex-current 프로필이 사용 한도로 멈춘 뒤/);
+  assert.match(
+    pending,
+    /checkpoint 파일\(.*checkpoint\.md\)과 snapshot 파일\(.*snapshot-1\.json\)을 읽고/,
+  );
   assert.match(pending, /먼저 worktree/);
   attach(ctx, 2);
   const running = roleSpec(org(), "pl", "이어서 한다", {
@@ -650,15 +656,17 @@ test("workflow-handoff and role-command --profile go through the CLI", async (t)
 });
 
 test("headless-start --profile runs only the recorded fallback and names the profile it replaced", async (t) => {
-  const ctx = await workflow(t);
-  attach(ctx, 1);
-  settle(ctx, 1, limit);
-  handoff(ctx, "agy-pro");
   // Every profile names an executable that does not exist, so the start can
-  // never run a real, billed provider CLI.
+  // never run a real, billed provider CLI. A workflow launch reads the
+  // organization frozen into the workflow, not --org, so the workflow is
+  // created from this one.
   const organization = org();
   for (const profile of Object.values(organization.profiles))
     profile.command = ["omt-no-such-cli"];
+  const ctx = await workflow(t, organization);
+  attach(ctx, 1);
+  settle(ctx, 1, limit);
+  handoff(ctx, "agy-pro");
   const orgFile = path.join(ctx.stateDir, "organization.json");
   writeJSON(orgFile, organization);
   const start = (extra) =>
@@ -689,17 +697,17 @@ test("headless-start --profile runs only the recorded fallback and names the pro
   assert.match(unrecorded.stderr, /has no handoff to codex-luna/);
   const started = await start([...workflowArgs, "--profile", "agy-pro"]);
   assert.equal(started.code, 0, started.stderr);
-  t.after(() =>
-    run([
-      process.execPath,
-      cli,
-      "headless-stop",
-      "--state",
-      ctx.stateDir,
-      "--worker",
-      "pl-handoff",
-    ]),
+  // The runner fails at once on the missing executable. Waiting for it keeps
+  // the cleanup from removing a directory it still holds on Windows.
+  const ended = await waitHeadless(ctx.stateDir, "pl-handoff", 15000, {
+    pollMs: 100,
+  });
+  assert.equal(ended.liveness, "exited");
+  assert.equal(ended.outcome, "exit-error");
+  const worker = readJSON(
+    path.join(ctx.stateDir, "headless", "pl-handoff", "worker.json"),
   );
+  assert.deepEqual(worker.binary, ["omt-no-such-cli"]);
   const { ledger } = JSON.parse(started.stdout);
   const line = JSON.parse(
     fs.readFileSync(ledger, "utf8").trim().split("\n").at(-1),

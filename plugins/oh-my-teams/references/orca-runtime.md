@@ -284,7 +284,7 @@ worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 
    node <runtime> headless-start --org <org> --role <role> --cwd <worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback> --spec "<남은 일을 끝낸다>"
    ```
 
-7. **검토:** 검토는 평소처럼 배정하되, 검토 `worker-start`에도 같은 `--workflow-task`를 넘긴다. 그러면 검토 지시문에 handoff 이력이 붙어, 검토자가 두 프로필이 나누어 만든 변경의 경계를 확인한다.
+7. **검토:** 검토는 평소처럼 배정하되, 검토 `worker-start`에도 같은 `--workflow-task`를 넘긴다. 그러면 검토 지시문에 handoff 이력이 붙어, 검토자가 여러 프로필이 나누어 만든 변경의 경계를 확인한다.
 
 headless로 실행하던 역할은 fallback도 `headless-start`로 실행할 수 있다. 다만 `--workflow-id`를 넘긴 `headless-start`는 `--state`를 workflow 상태 경로로 읽으므로, headless worker 기록도 PM의 상태 디렉터리에 남는다. 한도가 풀린 뒤에도 진행 중인 task를 원래 프로필로 되돌리지 않으며, 원래 프로필은 다음 task부터 다시 쓴다.
 
