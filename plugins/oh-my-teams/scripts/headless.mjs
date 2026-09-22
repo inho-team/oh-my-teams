@@ -582,12 +582,11 @@ export function headlessTranscript(provider, stream, limit = 300) {
 /**
  * Compares the model a turn requested with the one its provider reported.
  *
- * @param {string} provider - The provider that executed the turn (`claude`, `codex`, or `agy`).
  * @param {string | null} requested - Model the profile asked for.
  * @param {string | null} reported - Model the stream or rollout reported.
  * @returns {string} `matched`, `mismatched`, `alias`, `unrequested` or `unproven`.
  */
-export function modelVerdict(provider, requested, reported) {
+export function modelVerdict(requested, reported) {
   if (!requested) return "unrequested";
   if (!reported) return "unproven";
   if (reported === requested) return "matched";
@@ -595,16 +594,6 @@ export function modelVerdict(provider, requested, reported) {
     !/\d/.test(requested) &&
     reported.toLowerCase().includes(requested.toLowerCase())
   ) {
-    if (provider === "claude" && !reported.startsWith("claude-"))
-      return "mismatched";
-    if (provider === "codex" && !reported.startsWith("gpt-"))
-      return "mismatched";
-    if (
-      provider === "agy" &&
-      reported.startsWith("claude-") &&
-      !reported.includes("4-6")
-    )
-      return "mismatched";
     return "alias";
   }
   return "mismatched";
@@ -932,7 +921,6 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     modelRequested: worker.modelRequested,
     modelReported: observation?.model ?? stream.model,
     modelProof: modelVerdict(
-      worker.provider,
       worker.modelRequested,
       observation?.model ?? stream.model,
     ),

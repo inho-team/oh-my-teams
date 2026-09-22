@@ -257,12 +257,10 @@ function depth(directory) {
     .filter(Boolean).length;
 }
 
-function verdictOf(provider, requested, reported) {
+function verdictOf(requested, reported) {
   if (!requested) return "unrequested";
   if (!reported.length) return "unproven";
-  const verdicts = reported.map((model) =>
-    modelVerdict(provider, requested, model),
-  );
+  const verdicts = reported.map((model) => modelVerdict(requested, model));
   if (verdicts.includes("mismatched")) return "mismatched";
   return verdicts.includes("alias") ? "alias" : "matched";
 }
@@ -286,7 +284,6 @@ export function attributeSessions(records, places, options = {}) {
   for (const record of records) {
     if (record.attribution?.method === "declared") {
       record.modelVerdict = verdictOf(
-        record.provider,
         record.modelRequested,
         record.modelReported,
       );
@@ -311,11 +308,7 @@ export function attributeSessions(records, places, options = {}) {
         method: "place",
         reason: candidates.length ? "outside-launch-window" : "no-place",
       };
-      record.modelVerdict = verdictOf(
-        record.provider,
-        null,
-        record.modelReported,
-      );
+      record.modelVerdict = verdictOf(null, record.modelReported);
       continue;
     }
     valid.sort((a, b) => depth(b.path) - depth(a.path) || b.at - a.at);
@@ -337,11 +330,7 @@ export function attributeSessions(records, places, options = {}) {
         roles: [...new Set([best.role, ...rivals.map((place) => place.role)])],
       };
       if (record.measured === true) record.measured = "partial";
-      record.modelVerdict = verdictOf(
-        record.provider,
-        null,
-        record.modelReported,
-      );
+      record.modelVerdict = verdictOf(null, record.modelReported);
       continue;
     }
     record.role = best.role;
@@ -354,7 +343,6 @@ export function attributeSessions(records, places, options = {}) {
       launchedAt: iso(best.at),
     };
     record.modelVerdict = verdictOf(
-      record.provider,
       record.modelRequested,
       record.modelReported,
     );
