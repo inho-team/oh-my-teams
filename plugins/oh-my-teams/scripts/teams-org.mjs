@@ -1201,7 +1201,7 @@ function supervisionWaitTimeout(args) {
   return supervisionPolicy(validateOrg(readJSON(args.org))).progressCheckMs;
 }
 
-function writeDraft(args) {
+async function writeDraft(args) {
   const output = path.resolve(args.output);
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
@@ -1211,6 +1211,20 @@ function writeDraft(args) {
     tiers: args.tiers === undefined ? undefined : Number(args.tiers),
     models: args.models.split(","),
   });
+  const projectDir = path.dirname(output);
+  const defaults = await resolveHostDefaults({ project: projectDir });
+  if (defaults.codex?.error) {
+    process.stderr.write(`Warning: Failed to resolve Codex defaults: ${defaults.codex.error}\\n`);
+  }
+  if (defaults.claude?.error) {
+    process.stderr.write(`Warning: Failed to resolve Claude defaults: ${defaults.claude.error}\\n`);
+  }
+  for (const profile of Object.values(organization.profiles)) {
+    if (profile.model === null) {
+      profile.modelResolvedAtFormation =
+        defaults[profile.provider]?.model ?? null;
+    }
+  }
   writeJSON(output, organization);
   return { output, organization };
 }
@@ -1218,7 +1232,7 @@ function writeDraft(args) {
 async function executeCommand(args) {
   switch (args.command) {
     case "org-draft":
-      return writeDraft(args);
+      return await writeDraft(args);
     case "init":
       return fs.existsSync(args.org)
         ? { created: false, organization: validateOrg(readJSON(args.org)) }
