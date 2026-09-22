@@ -244,53 +244,62 @@ test(
   },
 );
 
-test("healthCheck clears timer on normal exit and sends SIGKILL if stubborn", posixOnly, async (t) => {
-  const box = healthyRuntime(t);
-  
-  // Fake the fetch to return ok instantly
-  const originalFetch = global.fetch;
-  global.fetch = async () => ({ ok: true });
-  t.after(() => { global.fetch = originalFetch; });
+test(
+  "healthCheck clears timer on normal exit and sends SIGKILL if stubborn",
+  posixOnly,
+  async (t) => {
+    const box = healthyRuntime(t);
 
-  const events = [];
-  let closeCb;
-  const mockChild = {
-    exitCode: null,
-    kill: (signal) => {
-      events.push("kill:" + signal);
-      if (signal === "SIGTERM") {
-         setTimeout(() => {
-           if (mockChild.shouldClose) {
-             mockChild.exitCode = 0;
-             if (closeCb) closeCb();
-           }
-         }, 50);
-      }
-    },
-    once: (event, cb) => {
-      if (event === "close") closeCb = cb;
-    }
-  };
-  
-  const spawnImpl = () => mockChild;
+    // Fake the fetch to return ok instantly
+    const originalFetch = global.fetch;
+    global.fetch = async () => ({ ok: true });
+    t.after(() => {
+      global.fetch = originalFetch;
+    });
 
-  // Test 1: normal close
-  fs.rmSync(box.paths.active);
-  mockChild.shouldClose = true;
-  mockChild.exitCode = null;
-  events.length = 0;
-  const start1 = Date.now();
-  await installRuntime(box.root, { _spawnImpl: spawnImpl });
-  assert.deepEqual(events, ["kill:SIGTERM"]);
-  assert.ok(Date.now() - start1 < 3000, "Should close quickly, clearing the 3s timer");
+    const events = [];
+    let closeCb;
+    const mockChild = {
+      exitCode: null,
+      kill: (signal) => {
+        events.push("kill:" + signal);
+        if (signal === "SIGTERM") {
+          setTimeout(() => {
+            if (mockChild.shouldClose) {
+              mockChild.exitCode = 0;
+              if (closeCb) closeCb();
+            }
+          }, 50);
+        }
+      },
+      once: (event, cb) => {
+        if (event === "close") closeCb = cb;
+      },
+    };
 
-  // Test 2: stubborn child
-  fs.rmSync(box.paths.active);
-  mockChild.shouldClose = false;
-  mockChild.exitCode = null;
-  events.length = 0;
-  const start2 = Date.now();
-  await installRuntime(box.root, { _spawnImpl: spawnImpl });
-  assert.deepEqual(events, ["kill:SIGTERM", "kill:SIGKILL"]);
-  assert.ok(Date.now() - start2 >= 3000, "Should wait 3s before SIGKILL");
-});
+    const spawnImpl = () => mockChild;
+
+    // Test 1: normal close
+    fs.rmSync(box.paths.active);
+    mockChild.shouldClose = true;
+    mockChild.exitCode = null;
+    events.length = 0;
+    const start1 = Date.now();
+    await installRuntime(box.root, { _spawnImpl: spawnImpl });
+    assert.deepEqual(events, ["kill:SIGTERM"]);
+    assert.ok(
+      Date.now() - start1 < 3000,
+      "Should close quickly, clearing the 3s timer",
+    );
+
+    // Test 2: stubborn child
+    fs.rmSync(box.paths.active);
+    mockChild.shouldClose = false;
+    mockChild.exitCode = null;
+    events.length = 0;
+    const start2 = Date.now();
+    await installRuntime(box.root, { _spawnImpl: spawnImpl });
+    assert.deepEqual(events, ["kill:SIGTERM", "kill:SIGKILL"]);
+    assert.ok(Date.now() - start2 >= 3000, "Should wait 3s before SIGKILL");
+  },
+);
