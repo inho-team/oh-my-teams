@@ -24,7 +24,10 @@ Windows에는 프로세스 그룹이 없으므로 소유 트리를 `(pid, Creati
   - 스냅샷에 적힌 `(pid, created)` 쌍이 지금 표와 둘 다 일치할 때.
   - 런처 pid에서 살아 있는 프로세스의 `created`가 기록된 시작 시각(`processStart`)과 같을 때. 시작 시각을 기록하지 못했거나 값이 다르면 그 pid는 소유가 증명되지 않은 것이며 그 pid와 자식은 소유로 세지 않습니다. 시작 시각이 없고 스냅샷에도 없는 프로세스가 런처 pid에 살아 있으면 종료 증명은 실패(`opencodex-proxy-exit-unverifiable`)하고 그 프로세스를 종료하지도 않습니다.
   - 소유로 인정된 부모의 자식이면서 부모보다 늦게 만들어졌을 때(손자 이하도 같습니다).
-- 런처가 이미 사라졌다면 그 pid의 자식은 런처의 종료를 관찰한 시각(`launcherGoneBy`)이 기록되어 있고, 자식이 `notBefore`(알고 있으면 런처의 시작 시각)와 `launcherGoneBy` 사이에 만들어졌을 때에만 후손으로 인정합니다. 부모 프로세스 핸들을 쥔 동안에는 그 pid를 다른 프로세스가 재사용할 수 없으므로 종료 관찰 시각 이전에 만들어진 자식은 런처의 것입니다. 종료를 관찰하지 못한 채 저장된 기록(런처가 다른 프로세스에서 이미 죽은 경우)에서는 런처가 사라진 뒤의 후손을 스냅샷 밖에서 찾지 않으며, 그 후손은 종료 대상이 되지 못할 수 있습니다. 종료 증명이 런처를 직접 끝내는 경우에는 이 제한이 적용되지 않습니다(아래 "종료 증명").
+- 런처가 이미 사라졌다면 그 pid의 자식은 런처의 종료를 관찰한 시각(`launcherGoneBy`)이 기록되어 있고, 자식이 `notBefore`(알고 있으면 런처의 시작 시각)와 `launcherGoneBy` 사이에 만들어졌을 때에만 후손으로 인정합니다. `launcherGoneBy`를 기록하는 곳은 두 군데이며 근거의 강도가 다릅니다.
+  - `startOpenCodexProxy`의 런처 `exit` 이벤트: 이 프로세스가 부모 프로세스 핸들을 쥐고 있는 동안에는 그 pid를 다른 프로세스가 재사용할 수 없습니다. 따라서 이 시각 이전에 만들어진 자식은 런처의 것입니다.
+  - `terminateWindowsTree` 안에서 소유로 증명된 런처가 표에서 처음 사라진 것을 본 때: 이 값은 그 표를 읽은 뒤에 재는 관찰 시각이며 핸들이 뒷받침하지 않습니다(`stop`과 죽은 소유자의 lease 회수는 핸들이 없습니다). 런처가 실제로 끝난 때와 이 시각 사이에 간격이 있을 수 있고, 코드는 그 간격을 좁히지 않습니다. 그 사이에 다른 프로세스가 런처의 pid를 재사용해 자식을 만들었다가 부모만 먼저 끝났다면, 그 자식이 후손으로 세어져 종료 대상이 될 수 있습니다.
+- 종료를 관찰하지 못한 채 저장된 기록(런처가 다른 프로세스에서 이미 죽은 경우)에서는 런처가 사라진 뒤의 후손을 스냅샷 밖에서 찾지 않으며, 그 후손은 종료 대상이 되지 못할 수 있습니다. 종료 증명이 살아 있는 런처를 직접 끝내는 경우에는 이 제한이 적용되지 않습니다(아래 "종료 증명").
 - 프록시를 소유했다고 인정하려면 `Get-NetTCPConnection -State Listen`의 리스너가 정확히 하나여야 하고, 그 pid가 헬스 응답 본문의 `pid`와 같아야 하며, 그 pid가 트리 구성원이어야 합니다. 하나라도 어긋나거나 조회에 실패하면 거부합니다(fail-closed).
 - 헬스 본문의 `pid` 대조는 Windows 분기에서만 합니다. POSIX 동작은 바뀌지 않았습니다.
 
@@ -34,13 +37,15 @@ Windows에는 프로세스 그룹이 없으므로 소유 트리를 `(pid, Creati
 
 종료는 `taskkill /PID <pid> /T /F`로 하고, 종료 코드는 증거로 쓰지 않습니다. 프로세스 표를 다시 읽어 소유 트리에 남은 구성원이 없음을 확인해야 종료로 인정하며, 표를 읽지 못하면 `opencodex-proxy-exit-unverifiable`로 실패하고 lease를 유지합니다.
 
-종료 증명은 패스마다 고정된 기록으로 트리를 다시 계산하지 않고, 지금까지 본 구성원을 기록에 이어서 더합니다(`terminateWindowsTree`). 패스마다 소유로 인정된 프로세스의 `(pid, created)` 쌍을 스냅샷에 더하므로, 런처를 끝낸 뒤에도 그 전에 관찰한 후손은 자기 쌍으로 계속 종료 대상입니다. 소유로 증명된 런처를 표에서 더 이상 볼 수 없게 된 첫 관찰의 직후에는 `launcherGoneBy`를 기록해서, 종료 중에 런처가 새로 시작한 자식도 그 시각 이전에 만들어졌다면 종료 대상으로 셉니다. 런처가 살아 있는 동안 종료를 시작한 경로(상태 확인, `stop`, 죽은 소유자의 lease 회수)에서는 이 두 가지로 스냅샷 밖의 후손이 종료 증명에서 빠지지 않습니다. 살아남은 후손이 있으면 증명은 실패하고 lease는 풀리지 않습니다. 이 기록은 그 호출 안에서만 쓰이며 lease 파일에는 저장하지 않습니다.
+종료 증명은 패스마다 고정된 기록으로 트리를 다시 계산하지 않고, 지금까지 본 구성원을 기록에 이어서 더합니다(`terminateWindowsTree`). 패스마다 소유로 인정된 프로세스의 `(pid, created)` 쌍을 스냅샷에 더하므로, 런처를 끝낸 뒤에도 그 전에 관찰한 후손은 자기 쌍으로 계속 종료 대상입니다. 소유로 증명된 런처를 표에서 더 이상 볼 수 없게 된 첫 관찰의 직후에는 `launcherGoneBy`를 기록해서, 종료 중에 런처가 새로 시작한 자식도 그 시각 이전에 만들어졌다면 종료 대상으로 셉니다. 이 시각의 근거와 한계는 위 "소유권 증명"에서 설명한 대로입니다.
+
+`terminateWindowsTree`를 쓰는 경로는 `stop`과 죽은 소유자의 lease 회수(`endWindowsProxy`) 두 곳입니다. 이 두 경로가 런처가 살아 있는 상태에서 종료를 시작하면 위 두 가지로 스냅샷 밖의 후손이 종료 증명에서 빠지지 않습니다. 진입할 때 런처가 이미 죽어 있으면 표에서 런처가 사라지는 것을 관찰할 수 없으므로 `launcherGoneBy`를 기록하지 않습니다. 살아남은 후손이 있으면 증명은 실패하고 lease는 풀리지 않습니다. 이 기록은 그 호출 안에서만 쓰이며 lease 파일에는 저장하지 않습니다. 상태 확인(`healthCheck`)은 이 증명을 쓰지 않습니다(아래 "상태 확인 종료").
 
 증명이 통과해도 결과는 `{termination: "exited-snapshot", descendantsExited: false}`입니다. POSIX의 `{termination: "exited", descendantsExited: true}`와 구분하는 이유는 스냅샷 이후에 생겨 트리를 벗어난 프로세스를 이 방식으로는 볼 수 없기 때문입니다. `runnerTurnProven`의 요건은 바꾸지 않았고(PM 결정), 그 결과 Windows runner turn은 완료해도 unverified로 남습니다. 이 성질은 `tests/headless.test.mjs`의 "a proxy that proves only an exited snapshot leaves the turn unverified" 테스트가 모든 OS에서 확인합니다.
 
 ### 상태 확인 종료
 
-`healthCheck`는 Windows에서 `taskkill /T /F`로 자식 트리 전체를 끝냅니다. POSIX는 이전처럼 `child.kill("SIGTERM")`이며 바뀌지 않았습니다.
+`healthCheck`는 Windows에서 `killWindowsProcessTree`로 `taskkill /T /F`만 실행해 자식 트리 전체를 끝냅니다. `terminateWindowsTree`를 거치지 않으며 종료한 뒤에 프로세스 표를 읽지도 않으므로, 종료했다는 증명을 하지 않습니다. POSIX는 이전처럼 `child.kill("SIGTERM")`이며 바뀌지 않았습니다.
 
 ## CI 검증 결과
 
@@ -89,7 +94,7 @@ Windows에는 프로세스 그룹이 없으므로 소유 트리를 `(pid, Creati
 
 모든 OS에서 실행되는 새 테스트:
 
-- `tests/opencodex.test.mjs`: a Windows proxy tree is the launcher and its descendants created after the spawn / a dead launcher's descendants stay owned because Windows keeps their parent pid / a child of a dead launcher's reused pid is not owned / a live launcher pid with no recorded start time is not owned / a descendant must be created after its own parent / a reused launcher pid takes no children with it / a snapshot pair counts only when pid and creation time both match / a Windows listener is owned only when it is the sole listener, in the tree and named by health / the runtime launch names this Node for the package entry on Windows and the bin script elsewhere
+- `tests/opencodex.test.mjs`: a Windows proxy tree is the launcher and its descendants created after the spawn / a dead launcher's descendants stay owned because Windows keeps their parent pid / a child of a dead launcher's reused pid is not owned / a live launcher pid with no recorded start time is not owned / a descendant must be created after its own parent / a reused launcher pid takes no children with it / a snapshot pair counts only when pid and creation time both match / a Windows listener is owned only when it is the sole listener, in the tree and named by health / the runtime launch names this Node for the package entry on Windows and the bin script elsewhere / a survivor outside the snapshot keeps the exit unproven after the launcher is gone / a child started while the launcher is being killed still has to be gone / a stranger that takes the launcher's pid or its orphans' parent pid after the kill is not ended / a launcher pid that no record can prove is neither ended nor taken for gone
 - `tests/headless.test.mjs`: a proxy that proves only an exited snapshot leaves the turn unverified
 - `tests/dependencies.test.mjs`: a passing health check ends the launcher it started, a health check on Windows ends the launcher's child, not only the launcher (뒤의 것은 Windows 전용)
 
