@@ -56,6 +56,7 @@ export async function readLaunchEnvironment({
 } = {}) {
   const platform = process.platform;
   const shell = platform === "win32" ? "powershell" : "posix";
+  const launchErrors = [];
 
   // Orca 버전 읽기
   let orcaVersion = "unknown";
@@ -70,7 +71,7 @@ export async function readLaunchEnvironment({
       if (ver) orcaVersion = ver;
     }
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    launchErrors.push(error);
   }
 
   // Agy CLI 버전 읽기
@@ -85,7 +86,7 @@ export async function readLaunchEnvironment({
       if (ver) cliVersion = ver;
     }
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    launchErrors.push(error);
   }
 
   // Agy 신뢰 기록: ~/.gemini/antigravity-cli/settings.json의 trustedWorkspaces
@@ -110,7 +111,7 @@ export async function readLaunchEnvironment({
       trustRecordExists = false;
     }
   } catch (error) {
-    if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+    launchErrors.push(error);
   }
 
   // Claude skipDangerousModePermissionPrompt: ~/.claude/settings.json
@@ -124,7 +125,7 @@ export async function readLaunchEnvironment({
         settings.skipDangerousModePermissionPrompt;
     }
   } catch (error) {
-    if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+    launchErrors.push(error);
   }
 
   // Codex 신뢰 기록: CODEX_HOME/config.toml 또는 ~/.codex/config.toml
@@ -198,11 +199,11 @@ export async function readLaunchEnvironment({
           }
           codexTrustRecordExists = found;
         } catch (error) {
-          if (error.code !== "ENOENT") throw error;
+          launchErrors.push(error);
         }
       }
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      launchErrors.push(error);
     }
   }
 
@@ -214,6 +215,7 @@ export async function readLaunchEnvironment({
     trustRecordExists,
     codexTrustRecordExists,
     skipDangerousModePermissionPrompt,
+    launchErrors,
   };
 }
 
