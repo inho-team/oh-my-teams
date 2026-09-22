@@ -184,7 +184,7 @@ Codex는 한도에 걸린 상태의 계정으로 Orca 터미널에서 직접 요
 - **snapshot:** `snapshot-<n>.json`에는 멈춘 시점의 HEAD, 기준 commit 이후의 커밋 목록, 커밋하지 않은 파일(`git status --porcelain -uall`), 기준 commit과의 diff 요약, 마지막 checkpoint의 시각과 그 뒤에 쌓인 커밋 수, 한도 근거, 두 프로필을 기록한다.
 - **시도 예산:** handoff 뒤의 첫 실행(`handoffPending`)은 `attemptsUsed`를 늘리지 않으며, 시도 예산이 다 쓰인 뒤에도 `dispatch-ready`로 나온다. 그 실행을 `workflow-release`로 되돌리면 같은 fallback을 다시 기다린다. 호출 예산(`maxCalls`)은 handoff에도 그대로 적용된다.
 - **프로필 유지:** handoff한 task는 이후 재시도도 fallback 프로필로 실행한다. `dispatch-ready`에는 `profile`과 `worktree`가 붙고, handoff 뒤 첫 실행에는 `handoffIndex`도 붙는다. 5절의 비목표와 같이, 진행 중인 task를 원래 프로필로 되돌리지 않는다.
-- **실행:** `role-terminal`과 `worker-start`의 `--profile`은 `--workflow-id`, `--state`, `--workflow-task`와 함께 주어져야 하고, 그 task의 마지막 handoff 대상과 같아야 하며, task가 `pending`, `reserved`, `running` 가운데 하나여야 한다. `headless-start`에는 아직 `--profile`을 추가하지 않았다.
+- **실행:** `role-terminal`, `worker-start`와 `headless-start`의 `--profile`은 `--workflow-id`, `--state`, `--workflow-task`와 함께 주어져야 하고, 그 task의 마지막 handoff 대상과 같아야 하며, task가 `pending`, `reserved`, `running` 가운데 하나여야 한다.
 - **브리프:** `--workflow-task`가 주어진 브리프에는 그 task의 handoff 이력이 붙는다. handoff 뒤 첫 실행을 기다리거나 그 실행이 예약·진행 중인 동안에는 checkpoint.md와 snapshot 경로, 그리고 "먼저 worktree와 대조하라"는 지시도 붙는다. 검토 브리프도 같은 task를 가리키므로 이력을 함께 받는다.
 - **실행 기록:** handoff 실행은 `handoffFrom`(멈춘 프로필)과 `handoffIndex`를 남긴다. handoff가 아닌 실행에는 두 필드가 없다.
 

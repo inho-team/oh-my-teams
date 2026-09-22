@@ -594,6 +594,67 @@ test("workflow-handoff and role-command --profile go through the CLI", async (t)
   assert.match(unrecorded.stderr, /has no handoff to codex-luna/);
 });
 
+test("headless-start --profile runs only the recorded fallback and names the profile it replaced", async (t) => {
+  const ctx = await workflow(t);
+  attach(ctx, 1);
+  settle(ctx, 1, limit);
+  handoff(ctx, "agy-pro");
+  // Every profile names an executable that does not exist, so the start can
+  // never run a real, billed provider CLI.
+  const organization = org();
+  for (const profile of Object.values(organization.profiles))
+    profile.command = ["omt-no-such-cli"];
+  const orgFile = path.join(ctx.stateDir, "organization.json");
+  writeJSON(orgFile, organization);
+  const start = (extra) =>
+    run([
+      process.execPath,
+      cli,
+      "headless-start",
+      "--org",
+      orgFile,
+      "--role",
+      "pl",
+      "--cwd",
+      ctx.dir,
+      "--spec",
+      "남은 일을 끝낸다",
+      "--state",
+      ctx.stateDir,
+      "--worker",
+      "pl-handoff",
+      ...extra,
+    ]);
+  const bare = await start(["--profile", "agy-pro"]);
+  assert.notEqual(bare.code, 0);
+  assert.match(bare.stderr, /--profile requires --workflow-id/);
+  const workflowArgs = ["--workflow-id", ctx.id, "--workflow-task", "a"];
+  const unrecorded = await start([...workflowArgs, "--profile", "codex-luna"]);
+  assert.notEqual(unrecorded.code, 0);
+  assert.match(unrecorded.stderr, /has no handoff to codex-luna/);
+  const started = await start([...workflowArgs, "--profile", "agy-pro"]);
+  assert.equal(started.code, 0, started.stderr);
+  t.after(() =>
+    run([
+      process.execPath,
+      cli,
+      "headless-stop",
+      "--state",
+      ctx.stateDir,
+      "--worker",
+      "pl-handoff",
+    ]),
+  );
+  const { ledger } = JSON.parse(started.stdout);
+  const line = JSON.parse(
+    fs.readFileSync(ledger, "utf8").trim().split("\n").at(-1),
+  );
+  assert.equal(line.via, "headless-start");
+  assert.equal(line.profile, "agy-pro");
+  assert.equal(line.handoffFrom, "codex-current");
+  assert.equal(line.handoffIndex, 1);
+});
+
 test("the skills and runtime reference carry the usage-limit handoff procedure", () => {
   const read = (file) =>
     fs.readFileSync(path.resolve("plugins/oh-my-teams", file), "utf8");
@@ -602,6 +663,11 @@ test("the skills and runtime reference carry the usage-limit handoff procedure",
   assert.match(runtime, /node <runtime> worker-limit-check --worktree/);
   assert.match(runtime, /node <runtime> workflow-handoff --id/);
   assert.match(runtime, /--workflow-task <task id> --profile <fallback>/);
+  assert.match(
+    runtime,
+    /node <runtime> headless-start .* --profile <fallback>/,
+  );
+  assert.doesNotMatch(runtime, /아직 `--profile`이 없/);
   for (const verdict of ["handoff", "retry", "wait", "none", "unknown"])
     assert.match(runtime, new RegExp(`\\| \`${verdict}\` +\\|`));
   const pm = read("skills/pm/SKILL.md");
