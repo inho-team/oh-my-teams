@@ -1,4 +1,5 @@
 /** Covers reclaiming abandoned leases and giving back an unlaunched reservation. */
+import { after } from "node:test";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -13,6 +14,8 @@ import {
   writeJSON,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { work } from "../plugins/oh-my-teams/scripts/worker.mjs";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import {
   createWorkflow,
   readWorkflow,
@@ -33,13 +36,7 @@ function fixture(t) {
 
 async function repo(t) {
   const dir = fixture(t);
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    assert.equal((await run(["git", ...args], { cwd: dir })).code, 0);
-  }
+  fs.cpSync(await getTemplateRepo(), dir, { recursive: true });
   fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   fs.writeFileSync(path.join(dir, "value.txt"), "wrong\n");
   assert.equal(

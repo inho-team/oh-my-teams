@@ -1,4 +1,7 @@
 /** End-to-end and unit regression coverage for the oh my teams runtime. */
+import { after } from "node:test";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -100,16 +103,10 @@ function fixture(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+
 async function repo(t) {
   const dir = fixture(t);
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Orca Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    const result = await run(["git", ...args], { cwd: dir });
-    assert.equal(result.code, 0, result.stderr);
-  }
+  fs.cpSync(await getTemplateRepo(), dir, { recursive: true });
   fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   fs.writeFileSync(path.join(dir, "value.txt"), "wrong\n");
   fs.writeFileSync(

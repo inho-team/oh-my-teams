@@ -1,4 +1,5 @@
 /** Regression tests for path containment, settled state, and failure routing. */
+import { after } from "node:test";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -22,6 +23,8 @@ import {
   recordSettlement,
   readWorkflow,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import {
   longExecutableLines,
   templateLineStarts,
@@ -39,13 +42,7 @@ function fixture(t) {
 
 async function repo(t) {
   const dir = fixture(t);
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    assert.equal((await run(["git", ...args], { cwd: dir })).code, 0);
-  }
+  fs.cpSync(await getTemplateRepo(), dir, { recursive: true });
   fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   fs.writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   assert.equal(
