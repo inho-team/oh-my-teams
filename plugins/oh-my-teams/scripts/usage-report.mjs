@@ -11,8 +11,13 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { assert, canonicalRole, readJSON, writeJSON } from "./core.mjs";
-import { displayModel } from "./role-launch.mjs";
+import {
+  displayModel,
+  assert,
+  canonicalRole,
+  readJSON,
+  writeJSON,
+} from "./core.mjs";
 import { modelVerdict } from "./headless.mjs";
 import {
   kickoffEntryName,
@@ -394,17 +399,17 @@ export function summarizeByRole(records) {
     if (!role.sources.includes(record.source)) role.sources.push(record.source);
 
     if (record.modelRequested) {
-      if (!role.models.requested.includes(record.modelRequested)) {
+      const displayStr = displayModel(record.provider, record.modelRequested);
+      if (!role.modelsDisplay.requested.includes(displayStr)) {
         role.models.requested.push(record.modelRequested);
-        role.modelsDisplay.requested.push(
-          displayModel(record.provider, record.modelRequested),
-        );
+        role.modelsDisplay.requested.push(displayStr);
       }
     }
     for (const model of record.modelReported) {
-      if (!role.models.reported.includes(model)) {
+      const displayStr = displayModel(record.provider, model);
+      if (!role.modelsDisplay.reported.includes(displayStr)) {
         role.models.reported.push(model);
-        role.modelsDisplay.reported.push(displayModel(record.provider, model));
+        role.modelsDisplay.reported.push(displayStr);
       }
     }
     for (const field of SUMMED_FIELDS) {

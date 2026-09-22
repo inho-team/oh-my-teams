@@ -2563,7 +2563,10 @@ test("show command formats provider and model as human readable display string",
   ]);
   assert.equal(shownJson.code, 0, shownJson.stderr);
   const output = JSON.parse(shownJson.stdout);
-  assert.equal(output.organization.profiles[pmProfileId].displayModel, "Claude Code claude-3-5-sonnet-20240620");
+  assert.equal(
+    output.organization.profiles[pmProfileId].displayModel,
+    "Claude Code claude-3-5-sonnet-20240620",
+  );
 });
 
 test("director-watch command includes pmModelDisplay", async (t) => {
@@ -2574,7 +2577,7 @@ test("director-watch command includes pmModelDisplay", async (t) => {
   org.profiles[pmProfileId].provider = "agy";
   org.profiles[pmProfileId].model = "claude-sonnet-4-6";
   fs.writeFileSync(orgFile, JSON.stringify(org, null, 2));
-  
+
   const claim = {
     schemaVersion: 1,
     organizationRevision: 1,
@@ -2582,7 +2585,13 @@ test("director-watch command includes pmModelDisplay", async (t) => {
     brief: "x",
     createdAt: new Date().toISOString(),
     runId: null,
-    pm: { worktreeId: "pm-wt", path: "x", stateDir: "x", provider: "agy", model: "claude-sonnet-4-6" }
+    pm: {
+      worktreeId: "pm-wt",
+      path: "x",
+      stateDir: "x",
+      provider: "agy",
+      model: "claude-sonnet-4-6",
+    },
   };
   const regDir = path.join(dir, "kickoffs");
   fs.mkdirSync(regDir, { recursive: true });
@@ -2610,7 +2619,13 @@ test("kickoff-show command includes pm.modelDisplay", async (t) => {
     brief: "x",
     createdAt: new Date().toISOString(),
     runId: null,
-    pm: { worktreeId: "pm-wt", path: "x", stateDir: "x", provider: "claude", model: "claude-3-5-sonnet-20240620" }
+    pm: {
+      worktreeId: "pm-wt",
+      path: "x",
+      stateDir: "x",
+      provider: "claude",
+      model: "claude-3-5-sonnet-20240620",
+    },
   };
   const regDir = path.join(dir, "kickoffs");
   fs.mkdirSync(regDir, { recursive: true });
@@ -2627,6 +2642,8 @@ test("kickoff-show command includes pm.modelDisplay", async (t) => {
   ]);
   assert.equal(shown.code, 0, shown.stderr);
   const output = JSON.parse(shown.stdout);
-  assert.equal(output.kickoffs[0].pm.modelDisplay, "Claude Code claude-3-5-sonnet-20240620");
+  assert.equal(
+    output.kickoffs[0].pm.modelDisplay,
+    "Claude Code claude-3-5-sonnet-20240620",
+  );
 });
-

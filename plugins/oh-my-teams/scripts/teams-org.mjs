@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   assert,
   chart,
+  displayModel,
   definedRoles,
   readJSON,
   ROOT_ROLE,
@@ -16,7 +17,6 @@ import {
 } from "./core.mjs";
 import {
   assertWorktreeUnshared,
-  displayModel,
   launchBinding,
   PERMISSION_BYPASS,
   selectedWorktreePath,
@@ -655,12 +655,14 @@ function showOrganization(args) {
   const org = validateOrg(readJSON(args.org));
   const status = organizationStatus(org, args.state);
 
-  for (const profile of Object.values(org.profiles)) {
-    profile.displayModel = displayModel(profile.provider, profile.model);
+  if (args.json) {
+    const orgOutput = structuredClone(org);
+    for (const profile of Object.values(orgOutput.profiles)) {
+      profile.displayModel = displayModel(profile.provider, profile.model);
+    }
+    return { organization: orgOutput, ...status };
   }
-
-  if (args.json) return { organization: org, ...status };
-  console.log(displayChart(org));
+  console.log(chart(org));
   if (args.state) console.log(JSON.stringify(status, null, 2));
   return undefined;
 }
@@ -1929,34 +1931,4 @@ if (
     console.error(error.message);
     process.exitCode = 1;
   });
-}
-
-function displayChart(org) {
-  validateOrg(org);
-  const lines = [`Organization: ${org.name} (revision ${org.revision})`];
-
-  function visit(role, depth) {
-    const binding = org.roles[role];
-    const profile = org.profiles[binding.profile];
-    lines.push(
-      `${"  ".repeat(depth)}${role.toUpperCase()}: ${binding.profile}` +
-        ` | ${profile.subscription}` +
-        ` | ${displayModel(profile.provider, profile.model)}` +
-        ` | effort=${profile.effort ?? "provider-default"}` +
-        ` | slots=${binding.concurrency}`,
-    );
-    definedRoles(org)
-      .filter((child) => org.roles[child].parent === role)
-      .forEach((child) => visit(child, depth + 1));
-  }
-
-  visit(ROOT_ROLE, 0);
-  for (const [role, profiles] of Object.entries(org.advisors ?? {})) {
-    const models = profiles.map(
-      (id) =>
-        `${id} (${displayModel(org.profiles[id].provider, org.profiles[id].model)})`,
-    );
-    lines.push(`ADVISOR for ${role.toUpperCase()}: ${models.join(", ")}`);
-  }
-  return lines.join("\n");
 }
