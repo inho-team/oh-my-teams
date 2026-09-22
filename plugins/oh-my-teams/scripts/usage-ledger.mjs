@@ -106,7 +106,7 @@ export function lazyLaunchesBackward(orgFile) {
       } finally {
         fs.closeSync(fd);
       }
-    }
+    },
   };
 }
 

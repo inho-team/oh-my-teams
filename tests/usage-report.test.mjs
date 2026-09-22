@@ -187,17 +187,18 @@ test("F-04: recordLaunch reads only until found, keeping cost low regardless of 
   for (let i = 0; i < 50000; i++) {
     fs.writeSync(fd, dummyLine);
   }
-  
+
   // Write a target line near the start (e.g. line 100)
-  const targetLine = JSON.stringify({
-    schemaVersion: 1,
-    at: new Date().toISOString(),
-    via: "role-terminal",
-    role: "junior",
-    kickoffPmWorktreeId: "repo::target",
-  }) + "\n";
+  const targetLine =
+    JSON.stringify({
+      schemaVersion: 1,
+      at: new Date().toISOString(),
+      via: "role-terminal",
+      role: "junior",
+      kickoffPmWorktreeId: "repo::target",
+    }) + "\n";
   fs.writeSync(fd, targetLine);
-  
+
   for (let i = 0; i < 1500; i++) {
     fs.writeSync(fd, dummyLine);
   }
