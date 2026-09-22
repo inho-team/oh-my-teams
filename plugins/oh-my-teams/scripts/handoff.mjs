@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { assert, readJSON, writeJSON } from "./core.mjs";
-
 import { readWorkflowSnapshot } from "./workflow-store.mjs";
 
 /** Sections every checkpoint.md must carry, each once and non-empty. */
