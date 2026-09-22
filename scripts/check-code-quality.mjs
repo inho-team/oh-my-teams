@@ -10,6 +10,7 @@ const ignoredDirectories = new Set([
   ".omc",
   ".orca",
   ".omt",
+  "evals",
   "legacy",
   "node_modules",
   "results",
