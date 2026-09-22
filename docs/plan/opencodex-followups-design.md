@@ -36,6 +36,8 @@
 
 ## A. Claude·Agy fixed-account runner
 
+검토 결과 범위 밖으로 결정함(이사, 2026-09-23). 아래 내용은 참고 자료로 남깁니다.
+
 ### A1. 계정 홈 구조와 "계정 하나로 고정됨"의 검증 조건
 
 OpenAI(Codex) 전용 검증기 `validateFixedOpenCodexAccountHome`(`plugins/oh-my-teams/scripts/opencodex.mjs:84-134`)은 `config.json`의 `codexAccounts`와 `codex-accounts.json`을 읽습니다. 그리고 `resolveOpenCodexBinding`(`opencodex.mjs:783-805`)은 항상 이 검증기를 호출합니다. Claude와 Agy에는 같은 검증기가 없으므로 provider별 검증기가 새로 필요합니다.
@@ -148,6 +150,8 @@ runner를 가진 프로필이 지원되려면 `OPENCODEX_RUNNER_PROVIDERS`(`open
 - 이 변경은 D절의 claude-agy-runner 범위에 포함합니다.
 
 ### A4. 격리 로그인 절차와 사용자 확인 항목
+
+검토 결과 범위 밖으로 결정함(이사, 2026-09-23). 아래 내용은 참고 자료로 남깁니다.
 
 이 절차는 사람이 직접 실행합니다. 이 task는 로그인을 수행하지 않았습니다. `ocx account ...` 명령은 실행 중인 프록시가 필요하므로 터미널 A에서 프록시를 foreground로 띄우고 터미널 B에서 로그인합니다. 두 터미널은 사용자 환경을 물려받지 않는 새 셸에서 실행하며, 어떤 확인 단계든 실패하면 그 자리에서 절차를 중단하고 다음 단계로 넘어가지 않습니다.
 
@@ -307,6 +311,8 @@ console.log(provider==="google-antigravity"?"label: o"+h("google-antigravity\0"+
 9. 이 설계와 실측은 Codex 주간 한도가 리셋되는 2026-09-26 06:11 KST 전에 OpenAI 계정으로 모델을 호출하지 않는다는 점을 확인합니다.
 
 ### A5. 실측 계획과 지원 목록 편입 규칙
+
+검토 결과 범위 밖으로 결정함(이사, 2026-09-23). 아래 내용은 참고 자료로 남깁니다.
 
 실측은 A4를 마치고 승인이 끝난 계정 홈 하나마다 한 번씩, 작은 저장소에서 수행합니다. 이 task에서는 실행하지 않았고 후속 task `runner-measure`가 담당합니다. 측정 항목은 경로별 샌드박스(A3)와 모순되지 않게 나눕니다.
 

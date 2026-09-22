@@ -272,7 +272,7 @@ runner 프로필을 쓰는 프로세스(workflow를 실행하는 프로세스)�
 
 ### 계정 홈 검증
 
-이 절은 `codex`(OpenAI) provider의 계정 홈 검증(`validateFixedOpenCodexAccountHome`, `opencodex.mjs:143`)만 설명합니다. Claude·Agy 계정 홈 검증(`validateFixedOpenCodexOAuthHome`, `opencodex.mjs:234`)은 다른 파일과 필드(`auth.json`의 계정 배열, `config.json`의 `providers`·`defaultProvider`·`anthropicAccountPool` 등)를 검사하도록 이미 구현되어 있지만, 아래 「지원 범위와 한계」의 계정 항목대로 아직 실행할 수 없습니다.
+이 절은 `codex`(OpenAI) provider의 계정 홈 검증(`validateFixedOpenCodexAccountHome`, `opencodex.mjs:143`)만 설명합니다. Claude·Agy 계정 홈 검증(`validateFixedOpenCodexOAuthHome`, `opencodex.mjs:234`)은 다른 파일과 필드(`auth.json`의 계정 배열, `config.json`의 `providers`·`defaultProvider`·`anthropicAccountPool` 등)를 검사하도록 이미 구현되어 있지만, 아래 「지원 범위와 한계」의 계정 항목대로 Claude·Agy 귀속을 지원 범위 밖으로 결정했기 때문에 실행 경로에 닿지 않습니다.
 
 계정 홈은 다음 파일과 값을 모두 만족해야 합니다. 검사는 위에서 아래 순서로 진행되며, 처음 어긋난 그룹의 오류가 나옵니다. 아래 오류는 조건을 하나씩 어긴 임시 계정 홈으로 실제 재현한 결과입니다.
 
@@ -321,7 +321,7 @@ runner 프로필로 실행하기 직전에 `runtime-doctor`와 같은 진단을 
 
 ## 지원 범위와 한계
 
-- 계정: `OPENCODEX_RUNNER_PROVIDERS`(`opencodex.mjs:13`)가 `["codex"]`뿐이므로, Claude·Agy를 provider로 쓰는 runner 프로필은 계정 홈을 읽기도 전에 조직 파일 `validate`(`core.mjs:693`)와 실행 직전 검증(`validateOpenCodexRunner`, `opencodex.mjs:57-62`)에서 `Invalid OpenCodex runner binding: <프로필 ID> (provider claude does not support runners)`로 거부됩니다. Claude·Agy 계정 홈을 검증하는 코드(`validateFixedOpenCodexOAuthHome`, `opencodex.mjs:234`)는 이미 구현되어 있지만, 두 구독으로 실제 실행해 확인하지 않았으므로 `OPENCODEX_RUNNER_PROVIDERS`에 아직 들어 있지 않습니다. 실제 실행은 OpenAI(ChatGPT·Codex) 계정만 받습니다.
+- 계정: `OPENCODEX_RUNNER_PROVIDERS`(`opencodex.mjs:13`)가 `["codex"]`뿐이므로, Claude·Agy를 provider로 쓰는 runner 프로필은 계정 홈을 읽기도 전에 조직 파일 `validate`(`core.mjs:693`)와 실행 직전 검증(`validateOpenCodexRunner`, `opencodex.mjs:57-62`)에서 `Invalid OpenCodex runner binding: <프로필 ID> (provider claude does not support runners)`로 거부됩니다. Claude·Agy 계정 홈을 검증하는 코드(`validateFixedOpenCodexOAuthHome`, `opencodex.mjs:234`)는 이미 구현되어 있지만, 사용자가 2026-09-23에 Claude·Agy 귀속(F-1의 구독 실측)을 OMT 지원 범위 밖으로 확정했으므로 `OPENCODEX_RUNNER_PROVIDERS`에 넣지 않기로 했습니다(`docs/plan/opencodex-followups-measure.md`). 실제 실행은 OpenAI(ChatGPT·Codex) 계정만 받습니다.
 - Windows: 프록시를 시작할 때 소유권을 증명하고 종료를 확인하는 경로가 있습니다. 소유권 판정 알고리즘과 `taskkill` 명령은 CI의 windows-latest에서 가짜 `ocx`로 확인했습니다(opencodex-followups-windows.md의 「CI 검증 결과」). 그러나 실제 OpenCodex와 bun 프로세스의 부모 자식 관계, 실제 bun 명령줄과 실행 파일, `.cmd` shim의 `EINVAL` 여부는 미검증입니다(같은 문서의 U6, U7, U8). Windows에는 프로세스 그룹이 없으므로 종료 증명은 프로세스 표를 다시 계산해서 스냅샷 이후에 생긴 후손도 종료 대상에 더하지만, 종료를 관찰하지 못한 채 저장된 기록에서는 이미 사라진 런처의 후손을 스냅샷 밖에서 찾지 못하고, `launcherGoneBy` 관찰 시각과 런처가 실제로 끝난 시각 사이의 간격에서는 pid가 재사용되어 다른 프로세스의 자식이 후손으로 잘못 세어질 수 있습니다(같은 문서의 「소유권 증명」·「종료 증명」). 이 때문에 증명을 통과해도 결과는 `exited-snapshot`이고, 증명하지 못하면 `opencodex-proxy-exit-unverifiable`로 실패해 lease가 유지되며, 어느 쪽이든 Windows runner turn은 완료해도 unverified로 남습니다. `taskkill /F` 뒤 실제 OpenCodex의 pid 파일과 포트 파일이 남는지는 실제 프록시가 필요해 미검증입니다(같은 문서의 U9). 백신·방화벽이 `taskkill`이나 포트 조회에 미치는 영향과 PowerShell이 제약 언어 모드일 때의 동작도 미검증이며, 조회가 실패하면 fail-closed로 거부하므로 안전한 쪽으로 실패하지만 실제 환경에서 얼마나 자주 그런지는 알 수 없습니다. 데스크톱 Orca에서의 동작도 미검증입니다.
 - 환경 상속: 프록시 자식과 상태 확인 임시 환경은 모두 부모 프로세스의 환경을 복사한 뒤 API 키·토큰류와 `OPENCODEX_HOME`·`CODEX_HOME`·`HOME`(Windows에서는 `USERPROFILE`·`HOMEDRIVE`·`HOMEPATH`도)만 덮어쓰거나 지웁니다(`opencodex.mjs:120-134`, `dependencies.mjs:316-343`). Windows의 `APPDATA`와 `LOCALAPPDATA`는 격리 대상이 아니므로 부모 프로세스의 값이 그대로 상속되며, OpenCodex가 이 두 변수를 실제로 쓰는지는 확인하지 않았습니다.
 - 설치기의 런타임 설치 단계: Windows에서 실행해 검증하지 않았습니다.
