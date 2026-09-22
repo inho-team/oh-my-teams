@@ -1005,6 +1005,64 @@ test("reports lead with a verdict and instructions lead with the goal", () => {
     /\[`bluf\.md`\]\(bluf\.md\)/,
   );
 });
+test("all roles and director follow bluf for reports and signals", () => {
+  const bluf = readReference("bluf.md");
+  const koreanReport = readReference("korean-result-reporting.md");
+  const director = readSkill("director");
+  const pm = readSkill("pm");
+
+  // (a) director 스킬이 bluf.md와 korean-result-reporting.md를 링크한다
+  assert.match(
+    director,
+    /\[두괄식\]\(\.\.\/\.\.\/references\/bluf\.md\)/,
+    "director must link to bluf.md",
+  );
+  assert.match(
+    director,
+    /korean-result-reporting\.md/,
+    "director must link to korean-result-reporting.md",
+  );
+
+  // (b) korean-result-reporting.md의 대상이 이사다
+  assert.match(
+    koreanReport,
+    /이사가 한국어 사용자에게/,
+    "korean-result-reporting.md must target the director",
+  );
+  assert.match(
+    koreanReport,
+    /PM이 이사에게 올리는 보고/,
+    "korean-result-reporting.md must mention PM reporting to director",
+  );
+
+  // (c) director·pm·pl·senior·junior 스킬이 모두 bluf.md를 참조한다
+  for (const role of ["director", "pm", "pl", "senior", "junior"]) {
+    assert.match(
+      readSkill(role),
+      /references\/bluf\.md/,
+      `${role} must reference bluf.md`,
+    );
+  }
+
+  // (d) bluf.md가 이사를 대상에 포함한다
+  assert.match(
+    bluf,
+    /이사가 사용자에게 보내는 보고/,
+    "bluf.md must explicitly include the director reporting to the user",
+  );
+
+  // (e) pm·director 스킬이 신호 본문의 두괄식 첫 줄 규칙을 적는다
+  assert.match(
+    pm,
+    /두괄식 첫 줄\(판정 또는 결정 요청\)/,
+    "pm must state signal text starts with bluf first line",
+  );
+  assert.match(
+    director,
+    /두괄식 첫 줄\(결정\)/,
+    "director must state reply text starts with bluf first line",
+  );
+});
 test("minimal-change discipline lives in one place and each role links it", () => {
   const references = path.join(root, "plugins/oh-my-teams/references");
   const canonicalPath = path.join(references, "minimal-change.md");
