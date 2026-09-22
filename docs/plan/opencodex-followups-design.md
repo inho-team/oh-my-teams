@@ -1,19 +1,19 @@
 # OpenCodex 후속 설계: Claude·Agy fixed-account runner와 Windows 프록시 시작
 
-작성 기준은 `b625b25`(OMT 2.8.2)와 설치된 OpenCodex 2.59.0입니다. 이 문서는 설계만 확정하며 로그인, 계정 조작, 프록시 기동, 모델 호출은 하나도 수행하지 않았습니다. 후속 구현 task(claude-agy-runner, windows-proxy, runner-measure)와 사람의 격리 로그인 요청은 이 문서를 근거로 삼습니다. 독립 검토(`review-runner-design-1`)가 반려한 8건을 반영한 개정판이며, 개정에는 PM 결정 세 가지가 들어 있습니다(D절에 요약했습니다).
+작성 기준은 `b625b25`(OMT 2.8.2)와 설치된 OpenCodex 2.59.0입니다. 이 문서는 설계만 확정하며 로그인, 계정 조작, 프록시 기동, 모델 호출은 하나도 수행하지 않았습니다. 이사 결정(2026-09-23)으로 Claude·Agy runner는 OMT 지원 범위 밖으로 확정했고, 후속 구현 task(claude-agy-runner)와 사람의 격리 로그인 요청은 취소했습니다. 이 문서는 그 범위에 한해 참고 자료입니다. 남은 후속 구현 task(windows-proxy)는 이 문서를 근거로 삼습니다. 독립 검토(`review-runner-design-1`)가 반려한 8건을 반영한 개정판이며, 개정에는 PM 결정 세 가지가 들어 있습니다(D절에 요약했습니다).
 
 ## 판정 요약
 
 ### Claude runner
 
-구현은 가능하지만 아직 지원 완료로 쓸 수 없습니다. W1 실측이 이미 확인한 것은 다음과 같습니다. `anthropic/claude-sonnet-4-6`을 Codex CLI로 요청하면 프록시가 접두사를 뗀 `claude-sonnet-4-6`으로 라우팅했고, 파일 수정과 테스트 실패에서 성공까지 완료했으며, 요청 이력의 provider는 단일 OAuth 계정에서 `anthropic`이었습니다(W1:91, `experiments/opencodex/evidence.json`의 `requestHistory`). 이 이력에는 계정 표식이 없으므로, 계정 홈에 `anthropicAccountPool.enabled`만 켜서 `anthropic-p<hex6>` 접미사를 표식으로 삼는 설계가 필요합니다. 이 방식이 계정 1개 홈에서 실제로 요청을 통과시키는지, OMT 검증기와 증명 규칙을 연결한 뒤에도 성립하는지, 압축 요청이 다른 provider로 새지 않는지는 실측 전이므로 미검증입니다.
+이 판정은 이사 결정(2026-09-23)으로 OMT 지원 범위 밖으로 확정되었으므로, 앞으로 지원을 목표로 진행하지 않습니다. 구현은 가능하지만 아직 지원 완료로 쓸 수 없습니다. W1 실측이 이미 확인한 것은 다음과 같습니다. `anthropic/claude-sonnet-4-6`을 Codex CLI로 요청하면 프록시가 접두사를 뗀 `claude-sonnet-4-6`으로 라우팅했고, 파일 수정과 테스트 실패에서 성공까지 완료했으며, 요청 이력의 provider는 단일 OAuth 계정에서 `anthropic`이었습니다(W1:91, `experiments/opencodex/evidence.json`의 `requestHistory`). 이 이력에는 계정 표식이 없으므로, 계정 홈에 `anthropicAccountPool.enabled`만 켜서 `anthropic-p<hex6>` 접미사를 표식으로 삼는 설계가 필요합니다. 이 방식이 계정 1개 홈에서 실제로 요청을 통과시키는지, OMT 검증기와 증명 규칙을 연결한 뒤에도 성립하는지, 압축 요청이 다른 provider로 새지 않는지는 실측 전이므로 미검증입니다.
 
 - 자동으로 증명할 수 있는 것: 계정 홈에 대상 provider 계정이 하나뿐이고 다른 provider 경로가 없다는 점, 이력의 provider 표식(접미사 포함)과 모델 문자열.
 - 사람이 확인해야 하는 것: 로그인한 Claude 계정이 OMT 전용 실행에 써도 되는 계정인지, 구독 등급, 청구 귀속, 제3자 프록시 사용이 약관에 부합하는지.
 
 ### Agy runner
 
-구현이 가능하며 현재 구조에 가장 가깝습니다. W1 실측은 두 Agy 계정에서 HTTP 200 요청 3건씩의 계정 표식(`oa45d2e`, `o097be0`)과 sendCount 1을 실제 행에서 관측했습니다(W1:92-93). 새로 필요한 것은 OMT 검증기와 증명 규칙을 Agy에 연결하는 일이며, 이 연결과 압축 경로는 실측 전이므로 미검증입니다.
+이 판정도 이사 결정(2026-09-23)으로 OMT 지원 범위 밖으로 확정되었으므로, 앞으로 지원을 목표로 진행하지 않습니다. 구현이 가능하며 현재 구조에 가장 가깝습니다. W1 실측은 두 Agy 계정에서 HTTP 200 요청 3건씩의 계정 표식(`oa45d2e`, `o097be0`)과 sendCount 1을 실제 행에서 관측했습니다(W1:92-93). 새로 필요한 것은 OMT 검증기와 증명 규칙을 Agy에 연결하는 일이며, 이 연결과 압축 경로는 실측 전이므로 미검증입니다.
 
 - 자동으로 증명할 수 있는 것: 계정 1개와 OAuth 출처, 계정 라벨(`o<hex6>`), 요청 모델.
 - 사람이 확인해야 하는 것: 로그인 화면에서 올바른 Google 계정을 고르는지, 구독 등급(W1:84는 API가 등급을 돌려주지 않았다고 기록했습니다), 청구 귀속, 약관.
