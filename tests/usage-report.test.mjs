@@ -169,7 +169,8 @@ test("a launch is tied to its kickoff by state, by PM worktree, or through an ea
 test("F-04: recordLaunch reads only until found, keeping cost low regardless of ledger size", (t) => {
   const dir = tempDir(t, "f04-recent-");
   const orgFile = path.join(dir, "org.json");
-  fs.writeFileSync(orgFile, "{}");
+  // Provide a dummy kickoff registry so listKickoffs doesn't crash
+  fs.writeFileSync(orgFile, JSON.stringify({ revision: 2 }));
   const file = ledgerFile(orgFile);
   fs.mkdirSync(path.dirname(file), { recursive: true });
 
@@ -189,6 +190,7 @@ test("F-04: recordLaunch reads only until found, keeping cost low regardless of 
   }
 
   // Write a target line near the start (e.g. line 100)
+  const targetCwd = path.join(dir, "target-cwd");
   const targetLine =
     JSON.stringify({
       schemaVersion: 1,
@@ -196,6 +198,7 @@ test("F-04: recordLaunch reads only until found, keeping cost low regardless of 
       via: "role-terminal",
       role: "junior",
       kickoffPmWorktreeId: "repo::target",
+      worktreePath: targetCwd,
     }) + "\n";
   fs.writeSync(fd, targetLine);
 
@@ -204,9 +207,62 @@ test("F-04: recordLaunch reads only until found, keeping cost low regardless of 
   }
   fs.closeSync(fd);
 
-  const lazy = lazyLaunchesBackward(orgFile);
-  const found = lazy.findLast((line) => line.role === "junior");
-  assert.equal(found.kickoffPmWorktreeId, "repo::target");
+  // Register the kickoff so resolveLaunchKickoff can find it
+  const kickoffDir = path.join(path.dirname(orgFile), "kickoffs");
+  fs.mkdirSync(kickoffDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(kickoffDir, "repo-target.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      goal: "dummy",
+      organizationRevision: 2,
+      brief: "dummy.md",
+      delivery: { mode: "none" },
+      pm: {
+        worktreeId: "repo::target",
+        path: targetCwd,
+        stateDir: path.join(targetCwd, ".omt"),
+      },
+      createdAt: new Date().toISOString(),
+      runId: null,
+    }),
+  );
+
+  let bytesRead = 0;
+  const origReadSync = fs.readSync;
+  fs.readSync = (fd2, buffer, offset, length, position) => {
+    const read = origReadSync(fd2, buffer, offset, length, position);
+    bytesRead += read;
+    return read;
+  };
+
+  const origReadFileSync = fs.readFileSync;
+  let usedReadFileSync = false;
+  fs.readFileSync = (f, ...rest) => {
+    if (f === file) usedReadFileSync = true;
+    return origReadFileSync(f, ...rest);
+  };
+
+  try {
+    const launch = recordLaunch(orgFile, {
+      via: "role-terminal",
+      role: "junior",
+      callerCwd: path.join(targetCwd, "sub"),
+    });
+    assert.equal(launch.line.kickoffPmWorktreeId, "repo::target");
+    assert.equal(
+      usedReadFileSync,
+      false,
+      "Should not read entire ledger with readFileSync",
+    );
+    assert.ok(
+      bytesRead < 500 * 1024,
+      "Should read far less than the full file size",
+    );
+  } finally {
+    fs.readSync = origReadSync;
+    fs.readFileSync = origReadFileSync;
+  }
 });
 
 test("sessions go to the role launched in their place, and unclear ones are not guessed", () => {
