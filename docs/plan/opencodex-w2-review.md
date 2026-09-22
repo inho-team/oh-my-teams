@@ -2,7 +2,7 @@
 
 부분 충족: 수용 기준 1~8 가운데 충족은 없고 7개가 부분 충족, 1개(기준 8)가 미충족입니다. 구현은 `6db7efc`에서 `npm ci` 후 `npm test`가 526개 중 526개 통과했고, 플랫폼 실측은 `b9b5e7c`의 `runtime-test-results.json` 11개 시나리오로 확인했습니다.
 
-이사가 결정할 사항은 두 가지입니다. 첫째, Claude 구독과 Antigravity 구독에는 runner 경로가 없으므로(`opencodex.mjs:90-134`가 OpenAI 고정 계정만 허용합니다) 이 두 구독을 이번 범위에서 제외하고 릴리스할지 정해야 합니다. 둘째, 이 문서가 통합 단계로 넘긴 항목(PR CI, 최신 `origin/main` 통합 HEAD)을 누가 언제 확인할지 정해야 합니다.
+이사는 2026-09-23에 Claude 구독과 Antigravity 구독의 runner 귀속(F-1)을 OMT 지원 범위 밖으로 확정했습니다(`opencodex.mjs:90-134`가 OpenAI 고정 계정만 허용합니다; `docs/plan/opencodex-followups-measure.md`). 이사가 결정할 사항은 이 문서가 통합 단계로 넘긴 항목(PR CI, 최신 `origin/main` 통합 HEAD)을 누가 언제 확인할지 하나뿐입니다.
 
 ## 판정 범위와 방법
 
@@ -198,7 +198,7 @@ provider, account, subscription, model, effort, pool은 논리 바인딩으로 �
 ## 이사에게 보고할 사항
 
 1. 수용 기준 8개 중 충족은 없습니다. 7개가 부분 충족이고, 기준 8은 통합 전이라 미충족입니다.
-2. Claude 구독과 Antigravity 구독은 runner 경로가 없습니다. 이번 범위에서 제외할지, 후속 작업으로 둘지 결정이 필요합니다(F-1).
+2. Claude 구독과 Antigravity 구독의 runner 귀속(F-1)은 사용자가 2026-09-23에 OMT 지원 범위 밖으로 결정했습니다. 두 provider는 OPENCODEX_RUNNER_PROVIDERS에 추가되지 않고 validate·조직 저장의 거부를 그대로 유지하며, 실측은 실행하지 않았습니다(`docs/plan/opencodex-followups-measure.md`).
 3. 중복 코드 제거와 코드 감소 보고가 이루어지지 않았습니다. 후속으로 둘지 기준 6을 조정할지 결정이 필요합니다(F-2).
 4. Windows는 실측이 없으므로 지원을 선언하지 않는 표현을 유지해야 합니다(F-9).
 5. `role-command`와 `worker-start`는 runner 프로필을 runner 없이 실행할 수 있게 두고 그 사실을 기록하지 않습니다. 중간 심각도이며 릴리스 차단급은 아닙니다. 구현 파일을 고치지 않는 범위여서 후속 수정 항목으로 등재했으므로 수정 담당과 시점을 정해야 합니다(F-6).
