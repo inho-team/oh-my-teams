@@ -15,6 +15,7 @@ import {
   PROVIDER_IDS,
   transportFor,
 } from "./providers/index.mjs";
+import { OPENCODEX_RUNNER_PROVIDERS } from "./opencodex.mjs";
 
 /**
  * Stable role identifiers used by schemas, organization graphs, and reports.
@@ -688,6 +689,10 @@ function validateProfile(id, profile, pools) {
     `Unknown pool for profile: ${id}`,
   );
   if (profile.runner !== undefined) {
+    assert(
+      OPENCODEX_RUNNER_PROVIDERS.includes(profile.provider),
+      `Invalid OpenCodex runner binding: ${id} (provider ${profile.provider} does not support runners)`,
+    );
     assert(
       profile.runner &&
         profile.runner.kind === "opencodex" &&

@@ -28,6 +28,7 @@ import {
   assertDirectorAuthority,
   checkCloseReady,
 } from "./delivery.mjs";
+import { assertDistinctOpenCodexHomes } from "./opencodex.mjs";
 import { startDashboard } from "./dashboard.mjs";
 import {
   answerHeadless,
@@ -117,6 +118,7 @@ import {
   defaultRuntimeRoot,
   doctor as runtimeDoctor,
   installRuntime,
+  pruneRuntimes,
 } from "./dependencies.mjs";
 import {
   acknowledgeSignal,
@@ -175,6 +177,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   runtime-doctor --org FILE --state DIR [--format json]
   runtime-install --org FILE --state DIR [--dry-run]
   runtime-repair --org FILE --state DIR [--dry-run]
+  runtime-prune --org FILE --state DIR [--dry-run]
+                (removes failed runtime directories and stale staging directories;
+                preserves active runtimes and paths outside the ownership prefix)
   worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
                --terminal HANDLE [--worktree SELECTOR] [--run ID]
                [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
@@ -344,6 +349,7 @@ export const ALLOWED_OPTIONS = {
   "runtime-doctor": ["org", "state", "format"],
   "runtime-install": ["org", "state", "dry-run"],
   "runtime-repair": ["org", "state", "dry-run"],
+  "runtime-prune": ["org", "state", "dry-run"],
   "role-spec": [
     "org",
     "role",
@@ -515,6 +521,7 @@ export const REQUIRED_OPTIONS = {
   "runtime-doctor": ["org", "state"],
   "runtime-install": ["org", "state"],
   "runtime-repair": ["org", "state"],
+  "runtime-prune": ["org", "state"],
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
   "terminal-idle-check": ["terminal"],
@@ -898,6 +905,15 @@ function startHeadlessRole(args) {
     `Role ${command.role} uses ${command.provider}, which has no headless runtime; ` +
       `supported: ${HEADLESS_PROVIDERS.join(", ")}`,
   );
+  // One run's runner accounts must not share a session home or use an account
+  // home as one; the run's other roles are checked with this one.
+  if (command.runner) {
+    assertDistinctOpenCodexHomes(
+      (run.roles ?? Object.keys(org.roles)).map(
+        (name) => org.profiles[org.roles[name]?.profile],
+      ),
+    );
+  }
   const cwd = path.resolve(args.cwd);
   assertNotKickoffOwner(cwd, `starting ${command.role}`);
   assertWorktreeUnshared(run.workflowState, command.role, `path:${cwd}`, cwd);
@@ -1298,6 +1314,11 @@ async function executeCommand(args) {
       return installRuntime(defaultRuntimeRoot(), {
         dryRun: Boolean(args["dry-run"]),
         repair: true,
+      });
+    case "runtime-prune":
+      validateOrg(readJSON(args.org));
+      return pruneRuntimes(defaultRuntimeRoot(), {
+        dryRun: Boolean(args["dry-run"]),
       });
     case "worker-start":
       return startSupervisedWorker(args);

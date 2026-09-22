@@ -548,6 +548,11 @@ export function modelVerdict(requested, reported) {
   return "mismatched";
 }
 
+// An explicit runner always executes the Codex CLI against the OpenCodex proxy,
+// whichever provider the profile is logically for, so its stream is a Codex
+// stream. Reading it with the profile's provider would misparse it.
+const streamProvider = (worker) => (worker.runner ? "codex" : worker.provider);
+
 function workerDir(stateDir, workerId) {
   assert(
     WORKER_ID.test(String(workerId)),
@@ -714,7 +719,7 @@ export function startHeadlessWorker({
 function readTurn(worker, turnDir, options) {
   const file = (name) => path.join(turnDir, name);
   const stream = readHeadlessStreamFile(
-    worker.provider,
+    streamProvider(worker),
     file("stream.jsonl"),
     options,
   );
@@ -823,7 +828,11 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     readExit: () => (fs.existsSync(exitFile) ? readJSON(exitFile) : null),
   });
   const streamFile = path.join(turnDir, "stream.jsonl");
-  const stream = readHeadlessStreamFile(worker.provider, streamFile, options);
+  const stream = readHeadlessStreamFile(
+    streamProvider(worker),
+    streamFile,
+    options,
+  );
   const observationFile = path.join(turnDir, "opencodex.json");
   const observation = fs.existsSync(observationFile)
     ? readJSON(observationFile)
@@ -840,7 +849,11 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   for (const earlier of turns.slice(0, -1).reverse()) {
     if (session) break;
     const file = path.join(earlier, "stream.jsonl");
-    session = readHeadlessStreamFile(worker.provider, file, options).session;
+    session = readHeadlessStreamFile(
+      streamProvider(worker),
+      file,
+      options,
+    ).session;
   }
   let outcome = null;
   if (exit) {
@@ -929,7 +942,7 @@ export function headlessDetail(stateDir, workerId, options = {}) {
       prompt: clip(read(path.join(turnDir, "prompt.txt")), 6000),
       exit,
       transcript: headlessTranscript(
-        status.provider,
+        turn.runner ? "codex" : status.provider,
         read(path.join(turnDir, "stream.jsonl")),
       ),
       stderrTail: stderr.length > 2000 ? stderr.slice(-2000) : stderr,
