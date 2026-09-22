@@ -197,6 +197,10 @@
         "account": { "type": "string", "minLength": 1 },
         "subscription": { "type": "string", "minLength": 1 },
         "model": { "type": ["string", "null"] },
+        "modelResolvedAtFormation": {
+          "type": ["string", "null"],
+          "$comment": "The host default model resolved at formation time. Null if the profile uses a fixed model or resolution was skipped."
+        },
         "effort": {
           "enum": ["low", "medium", "high", "xhigh", "max", "ultra"],
           "$comment": "Reasoning effort. Omit to keep the provider default. Each adapter in scripts/providers/ states the levels it accepts and core.mjs narrows the set from that registry: agy and ollama low|medium|high, codex low|medium|high|xhigh|max|ultra, claude low|medium|high|xhigh|max."
