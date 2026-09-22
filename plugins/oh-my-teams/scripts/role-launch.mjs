@@ -200,11 +200,12 @@ function handoffBrief(workflowState, workflowTask) {
     (["reserved", "running"].includes(item.state) &&
       item.attempts?.at(-1)?.handoffIndex === last.index);
   return [
-    `handoff 이력: ${history}. 두 프로필이 나누어 만든 변경이므로, 넘겨받은 경계에서 생긴 불일치를 확인한다.`,
+    `handoff 이력: ${history}. 여러 프로필이 나누어 만든 변경이므로, 넘겨받은 경계에서 생긴 불일치를 확인한다.`,
     ...(takingOver
       ? [
-          `이 task는 ${last.from}이 사용 한도로 멈춘 뒤 넘겨받은 것이다. 작업하기 전에 ${checkpoint}와 ${last.snapshot}를 읽고, ` +
-            `먼저 worktree(${last.worktree})의 커밋과 변경 사항과 대조하라. 문서와 worktree가 다르면 worktree를 기준으로 삼는다.`,
+          `이 task는 ${last.from} 프로필이 사용 한도로 멈춘 뒤 넘겨받은 것이다. ` +
+            `작업하기 전에 checkpoint 파일(${checkpoint})과 snapshot 파일(${last.snapshot})을 읽고, ` +
+            `먼저 worktree(${last.worktree})의 커밋, 변경 사항과 대조하라. 문서와 worktree가 다르면 worktree를 기준으로 삼는다.`,
         ]
       : []),
   ];

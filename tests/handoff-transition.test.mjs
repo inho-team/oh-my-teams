@@ -480,7 +480,11 @@ test("briefs carry the handoff history and, while pending, what to read first", 
   };
   const pending = roleSpec(org(), "pl", "이어서 한다", run);
   assert.match(pending, /handoff 이력: 1\. codex-current → agy-pro/);
-  assert.match(pending, /checkpoint\.md와 .*snapshot-1\.json를 읽고/);
+  assert.match(pending, /codex-current 프로필이 사용 한도로 멈춘 뒤/);
+  assert.match(
+    pending,
+    /checkpoint 파일\(.*checkpoint\.md\)과 snapshot 파일\(.*snapshot-1\.json\)을 읽고/,
+  );
   assert.match(pending, /먼저 worktree/);
   attach(ctx, 2);
   const running = roleSpec(org(), "pl", "이어서 한다", {
