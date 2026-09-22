@@ -321,7 +321,7 @@ test("one rule lives in one place", () => {
   // be restated in four or five places, so a correction had to be applied in
   // every one of them or the copies disagreed.
   assert.match(runtime, /## worker-list와 liveness/);
-  assert.match(assistRef, /gpt-oss-120b-medium/);
+  assert.match(assistRef, /런타임이 허용하는 보조 모델이어야/);
 
   const restatements = [
     [/`live` worker가 0명이면.*표현하지 않는다/, "the liveness verdict"],
