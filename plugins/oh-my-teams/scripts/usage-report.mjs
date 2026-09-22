@@ -805,8 +805,10 @@ export function formatUsageTable(report) {
         lines.push(`source ${source} unavailable: ${summary.unavailable}`);
     }
     for (const mismatch of kickoff.mismatches) {
+      const req = mismatch.modelRequestedDisplay || mismatch.modelRequested;
+      const rep = mismatch.modelReportedDisplay || mismatch.modelReported;
       lines.push(
-        `model mismatch: ${mismatch.role} requested ${mismatch.modelRequestedDisplay}, reported ${mismatch.modelReportedDisplay.join(",")} (${mismatch.source})`,
+        `model mismatch: ${mismatch.role} requested ${req}, reported ${rep.join(",")} (${mismatch.source})`,
       );
     }
     if (kickoff.unattributed.length) {

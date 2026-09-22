@@ -835,3 +835,49 @@ test("summarizeByRole includes both models if provider differs but model is the 
     true,
   );
 });
+
+test("formatUsageTable falls back to models and modelRequested/modelReported for legacy snapshots", () => {
+  const legacyReport = {
+    kickoffs: [
+      {
+        kickoff: { worktreeId: "test-wt", status: "active" },
+        window: { from: "a", to: "b" },
+        coverage: { measuredSessions: 1, totalSessions: 1, note: "ok" },
+        byRole: {
+          pm: {
+            models: { requested: ["claude"], reported: ["claude"] },
+            measuredSessions: 1,
+            partialSessions: 0,
+            sessions: 1,
+            turns: 1,
+            calls: 1,
+            steps: 1,
+            promptTokens: 1,
+            cachedInputTokens: 0,
+            cacheCreationTokens: 0,
+            outputTokens: 1,
+          },
+        },
+        share: { pm: 1 },
+        places: [],
+        sources: {},
+        mismatches: [
+          {
+            role: "pm",
+            modelRequested: "claude",
+            modelReported: ["gpt"],
+            source: "x",
+          },
+        ],
+        unattributed: [],
+      },
+    ],
+    written: [],
+  };
+  const table = formatUsageTable(legacyReport);
+  assert.match(table, /claude -> claude/);
+  assert.match(
+    table,
+    /model mismatch: pm requested claude, reported gpt \(x\)/,
+  );
+});
