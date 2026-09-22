@@ -1373,3 +1373,51 @@ test("U-01: buildLifecycle reads large stream files without memory leak", async 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("U-01 (pm-chunk-boundary): chunk parsing correctly handles boundaries (long line, multi-byte, no trailing newline, empty lines)", async () => {
+  const { headlessTranscriptFile } = await import("../plugins/oh-my-teams/scripts/headless.mjs");
+  const { buildLifecycle } = await import("../plugins/oh-my-teams/scripts/headless-runner.mjs");
+  
+  const tmpDir = path.join(os.tmpdir(), "omt-u01-boundary-" + Date.now());
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const turnDir = path.join(tmpDir, "headless", "testworker", "turns", "1");
+  fs.mkdirSync(turnDir, { recursive: true });
+  fs.writeFileSync(path.join(turnDir, "turn.json"), JSON.stringify({ number: 1 }));
+  const streamFile = path.join(turnDir, "stream.jsonl");
+
+  let buf = Buffer.from('{"type":"turn.started"}\n\n\n');
+  
+  const longText = "A".repeat(70000);
+  buf = Buffer.concat([buf, Buffer.from('{"type":"assistant","message":{"content":[{"type":"text","text":"' + longText + '"}]}}\n')]);
+  
+  const paddingLen = 65535 - buf.length;
+  const padding = "B".repeat(Math.max(0, paddingLen));
+  buf = Buffer.concat([buf, Buffer.from('{"type":"assistant","message":{"content":[{"type":"text","text":"' + padding)]);
+  
+  buf = Buffer.concat([buf, Buffer.from('가나다"}]}}\n')]);
+  buf = Buffer.concat([buf, Buffer.from('{"type":"turn.completed"}')]); 
+  
+  fs.writeFileSync(streamFile, buf);
+  
+  try {
+    const transcript = headlessTranscriptFile("claude", streamFile, 100);
+    assert.equal(transcript.length, 2);
+    assert.equal(transcript[0].text, longText);
+    assert.ok(transcript[1].text.endsWith("가나다"));
+    
+    const lifecycle = buildLifecycle({
+      turnDir,
+      observed: { requestIds: ["req1"] },
+      inputAccepted: true,
+      exitObserved: true,
+      cancelRequested: false,
+      descendantsExited: true,
+      orphansTerminated: 0,
+      proxyExited: true,
+    });
+    assert.equal(lifecycle.turnStarted, true);
+    assert.equal(lifecycle.completed, true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
