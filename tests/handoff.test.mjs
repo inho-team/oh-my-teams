@@ -210,3 +210,37 @@ test("the brief carries the checkpoint rule only for a workflow task", async (t)
   for (const name of HANDOFF_SECTIONS)
     assert.match(brief, new RegExp(`## ${name}`));
 });
+
+test("handoffDirectory isolates file read cost to transaction.json without reading all task contracts", async (t) => {
+  const { stateDir, id } = await workflow(t);
+
+  const dir = path.join(stateDir, "workflows", id, "tasks", "b", "revisions");
+  fs.mkdirSync(dir, { recursive: true });
+
+  const txFile = path.join(stateDir, "workflows", id, "state.json");
+  const tx = JSON.parse(fs.readFileSync(txFile, "utf8"));
+  tx.tasks.b = { revision: 1, role: "junior", state: "reserved" };
+  fs.writeFileSync(txFile, JSON.stringify(tx));
+
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "omt-"));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  await run(["git", "init", repo]);
+  await run(["git", "commit", "--allow-empty", "-m", "init"], { cwd: repo });
+
+  recordCheckpoint(stateDir, id, "a", { text: checkpoint(), repo });
+  const meta = JSON.parse(
+    fs.readFileSync(
+      path.join(
+        stateDir,
+        "workflows",
+        id,
+        "tasks",
+        "a",
+        "handoff",
+        "checkpoint.json",
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(meta.role, "pl");
+});

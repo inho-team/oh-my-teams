@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { assert, readJSON, writeJSON } from "./core.mjs";
-import { readWorkflow } from "./workflow.mjs";
+
 import { workflowDirectory } from "./workflow-store.mjs";
 
 /** Sections every checkpoint.md must carry, each once and non-empty. */
@@ -63,16 +63,15 @@ export function validateCheckpoint(text) {
  * @throws {Error} When the workflow or the task does not exist.
  */
 export function handoffDirectory(stateDir, workflowId, taskId) {
-  const { state } = readWorkflow(stateDir, workflowId);
+  const dir = workflowDirectory(stateDir, workflowId);
+  const txFile = path.join(dir, "transaction.json");
+  const state = fs.existsSync(txFile)
+    ? readJSON(txFile).state
+    : readJSON(path.join(dir, "state.json"));
   const task = Object.hasOwn(state.tasks, taskId) ? state.tasks[taskId] : null;
   assert(task, `Unknown workflow task: ${taskId}`);
   return {
-    directory: path.join(
-      workflowDirectory(stateDir, workflowId),
-      "tasks",
-      taskId,
-      "handoff",
-    ),
+    directory: path.join(dir, "tasks", taskId, "handoff"),
     task,
   };
 }
