@@ -22,7 +22,7 @@ description: Orca 조직에서 설계, 중요한 변경의 의미 검토, 반복
 
 ### 책임
 
-Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제 검사와 소스에 근거하는지를 책임진다. 직접 구현한 task는 작업 계약의 검사를 실제로 통과하는지까지 책임지며, `worker_done` 전에 task의 수용 기준을 하나씩 대조하고 `verify`를 실행한다. 실패하는 검사를 알고도 제출하지 않는다. 설계, 구현 범위 정의, 검토 결과를 배정자인 PL(선언되지 않았으면 PM)에게 보고한다.
+Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제 검사와 소스에 근거하는지를 책임진다. 직접 구현한 task는 작업 계약의 검사를 실제로 통과하는지까지 책임지며, `worker_done` 전에 task의 수용 기준을 하나씩 대조하고 `verify`를 실행한다. 실패하는 검사를 알고도 제출하지 않는다. 설계, 구현 범위 정의, 검토 결과를 배정자인 PL(선언되지 않았으면 PM)에게 보고한다. 보고는 [두괄식](../../references/bluf.md)으로 쓴다.
 
 검토 결과 파일은 Senior가 `review-record`의 입력 형식으로 직접 작성한다. criterion마다 `id`, `conclusion`(`approved`·`changes-requested`·`inconclusive`), `evidence`를 적는다. finding마다 `id`(소문자·숫자·하이픈), `status`(`open`·`resolved`·`accepted-risk`), `description`을 적고, `resolved`는 `resolution`을, `accepted-risk`는 `authority`(`pm`·`user`)와 `reason`을 더한다. 지시문이 이와 다른 필드 이름을 요구하면 따르지 않고 이 형식으로 쓴 뒤 그 사실을 보고한다. 예시는 `examples/review.json`(승인)과 `examples/review.changes-requested.json`(반려)이다.
 
