@@ -1310,3 +1310,171 @@ test("waitAllRunnersExited waits for runnerPid to exit to prevent EPERM", async 
   }
   assert.equal(isRunning, false, "The runner process should have exited");
 });
+
+test("U-01: headlessDetail reads large stream files without memory leak", async () => {
+  const tmpDir = path.join(os.tmpdir(), "omt-u01-detail-" + Date.now());
+  const workerDir = path.join(tmpDir, "headless", "testworker");
+  const turnsDir = path.join(workerDir, "turns");
+  const turnDir = path.join(turnsDir, "1");
+  fs.mkdirSync(turnDir, { recursive: true });
+
+  fs.writeFileSync(
+    path.join(workerDir, "worker.json"),
+    JSON.stringify({ provider: "claude" }),
+  );
+  fs.writeFileSync(
+    path.join(workerDir, "status.json"),
+    JSON.stringify({ provider: "claude" }),
+  );
+  fs.writeFileSync(
+    path.join(turnDir, "turn.json"),
+    JSON.stringify({ number: 1 }),
+  );
+
+  const streamFile = path.join(turnDir, "stream.jsonl");
+  try {
+    const chunk = Buffer.from(
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"' +
+        "A".repeat(1000) +
+        '"}]}}\n'.repeat(1000),
+    );
+    const fd = fs.openSync(streamFile, "w");
+    // 1MB per chunk * 30 = 30MB
+    for (let i = 0; i < 30; i++) {
+      fs.writeSync(fd, chunk);
+    }
+    fs.closeSync(fd);
+
+    const testScript = path.join(tmpDir, "child.mjs");
+    fs.writeFileSync(
+      testScript,
+      `
+      import { headlessDetail } from "file://${new URL("../plugins/oh-my-teams/scripts/headless.mjs", import.meta.url).pathname}";
+      const detail = headlessDetail(process.argv[2], "testworker", { limit: 10 });
+      if (detail.turns[0].transcript.length === 0) throw new Error("Empty transcript");
+    `,
+    );
+
+    const { execSync } = await import("child_process");
+    execSync(`node --max-old-space-size=20 "${testScript}" "${tmpDir}"`, {
+      stdio: "pipe",
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("U-01: buildLifecycle reads large stream files without memory leak", async () => {
+  const tmpDir = path.join(os.tmpdir(), "omt-u01-lifecycle-" + Date.now());
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const turnDir = path.join(tmpDir, "headless", "testworker", "turns", "1");
+  fs.mkdirSync(turnDir, { recursive: true });
+
+  try {
+    const streamFile = path.join(turnDir, "stream.jsonl");
+    const fd = fs.openSync(streamFile, "w");
+    fs.writeSync(fd, '{"type":"turn.started"}\n');
+    const chunk = Buffer.from(
+      '{"type":"middle","data":"' + "A".repeat(1000) + '"}\n'.repeat(1000),
+    );
+    for (let i = 0; i < 30; i++) {
+      fs.writeSync(fd, chunk);
+    }
+    fs.writeSync(fd, '{"type":"turn.completed"}\n');
+    fs.closeSync(fd);
+
+    const testScript = path.join(tmpDir, "child.mjs");
+    fs.writeFileSync(
+      testScript,
+      `
+      import { buildLifecycle } from "file://${new URL("../plugins/oh-my-teams/scripts/headless-runner.mjs", import.meta.url).pathname}";
+      const lifecycle = buildLifecycle({
+        turnDir: process.argv[2],
+        observed: { requestIds: ["req1"] },
+        inputAccepted: true,
+        exitObserved: true,
+        cancelRequested: false,
+        descendantsExited: true,
+        orphansTerminated: 0,
+        proxyExited: true,
+      });
+      if (!lifecycle.turnStarted || !lifecycle.completed || lifecycle.termination !== "exited") {
+        throw new Error("Invalid lifecycle");
+      }
+    `,
+    );
+
+    const { execSync } = await import("child_process");
+    execSync(`node --max-old-space-size=20 "${testScript}" "${turnDir}"`, {
+      stdio: "pipe",
+    });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("U-01 (결과 동일성 테스트): chunk parsing correctly handles boundaries (long line, multi-byte, no trailing newline, empty lines)", async () => {
+  const { headlessTranscriptFile } =
+    await import("../plugins/oh-my-teams/scripts/headless.mjs");
+  const { buildLifecycle } =
+    await import("../plugins/oh-my-teams/scripts/headless-runner.mjs");
+
+  const tmpDir = path.join(os.tmpdir(), "omt-u01-boundary-" + Date.now());
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const turnDir = path.join(tmpDir, "headless", "testworker", "turns", "1");
+  fs.mkdirSync(turnDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(turnDir, "turn.json"),
+    JSON.stringify({ number: 1 }),
+  );
+  const streamFile = path.join(turnDir, "stream.jsonl");
+
+  let buf = Buffer.from('{"type":"turn.started"}\n\n\n');
+
+  const longText = "A".repeat(70000);
+  buf = Buffer.concat([
+    buf,
+    Buffer.from(
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"' +
+        longText +
+        '"}]}}\n',
+    ),
+  ]);
+
+  const paddingLen = 65535 - buf.length;
+  const padding = "B".repeat(Math.max(0, paddingLen));
+  buf = Buffer.concat([
+    buf,
+    Buffer.from(
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"' +
+        padding,
+    ),
+  ]);
+
+  buf = Buffer.concat([buf, Buffer.from('가나다"}]}}\n')]);
+  buf = Buffer.concat([buf, Buffer.from('{"type":"turn.completed"}')]);
+
+  fs.writeFileSync(streamFile, buf);
+
+  try {
+    const transcript = headlessTranscriptFile("claude", streamFile, 100);
+    assert.equal(transcript.length, 2);
+    assert.equal(transcript[0].text, longText);
+    assert.ok(transcript[1].text.endsWith("가나다"));
+
+    const lifecycle = buildLifecycle({
+      turnDir,
+      observed: { requestIds: ["req1"] },
+      inputAccepted: true,
+      exitObserved: true,
+      cancelRequested: false,
+      descendantsExited: true,
+      orphansTerminated: 0,
+      proxyExited: true,
+    });
+    assert.equal(lifecycle.turnStarted, true);
+    assert.equal(lifecycle.completed, true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
