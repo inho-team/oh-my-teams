@@ -778,3 +778,28 @@ test("paths compare at separators, and without case on Windows", () => {
     path.join(os.homedir(), ".gemini", "antigravity-cli"),
   );
 });
+
+test('pm-jsonl-order: collectClaudeTranscripts handles out-of-order and timeless lines correctly without aborting early', (t) => {
+  const home = tempDir(t);
+  const worktree = path.join(home, 'work', 'kickoff-b');
+  const base = Date.parse('2026-09-10T10:00:00.000Z');
+
+  const project = path.join(home, 'projects', encodeClaudeProject(worktree));
+  fs.mkdirSync(project, { recursive: true });
+
+  const fd = fs.openSync(path.join(project, 'session1.jsonl'), 'w');
+
+  fs.writeSync(fd, JSON.stringify(claudeAssistant(base, 20, { id: 'msg-1', cwd: worktree, usage: { input_tokens: 10, output_tokens: 20 } })) + '\n');
+  fs.writeSync(fd, JSON.stringify({ type: 'session_summary', title: 'timeless', content: 'no timestamp' }) + '\n');
+  fs.writeSync(fd, JSON.stringify(claudeAssistant(base, -10, { id: 'msg-2', cwd: worktree, usage: { input_tokens: 5, output_tokens: 5 } })) + '\n');
+  fs.writeSync(fd, JSON.stringify(claudeAssistant(base, 25, { id: 'msg-3', cwd: worktree, usage: { input_tokens: 15, output_tokens: 30 } })) + '\n');
+  fs.closeSync(fd);
+
+  const report = collectClaudeTranscripts({ claudeHome: home, places: [worktree], window: { from: base, to: base + 30 * MINUTE } });
+
+  const sessionRecord = report.records[0];
+console.log(JSON.stringify(report, null, 2));
+  assert.equal(sessionRecord.calls, 2);
+  assert.equal(sessionRecord.inputTokens, 25);
+  assert.equal(sessionRecord.outputTokens, 50);
+});

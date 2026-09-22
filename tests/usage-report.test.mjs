@@ -12,6 +12,7 @@ import {
 import {
   ledgerFile,
   readLaunches,
+  lazyLaunchesBackward,
   recordLaunch,
 } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import {
@@ -163,6 +164,48 @@ test("a launch is tied to its kickoff by state, by PM worktree, or through an ea
     () => recordLaunch(fixture.orgFile, { via: "typed-by-hand", role: "pl" }),
     /Launch via must be one of/,
   );
+});
+
+test("F-04: recordLaunch reads only until found, keeping cost low regardless of ledger size", (t) => {
+  const dir = tempDir(t, "f04-recent-");
+  const orgFile = path.join(dir, "org.json");
+  fs.writeFileSync(orgFile, "{}");
+  const file = ledgerFile(orgFile);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  const dummyLine =
+    JSON.stringify({
+      schemaVersion: 1,
+      at: new Date().toISOString(),
+      via: "role-terminal",
+      role: "senior",
+      kickoffPmWorktreeId: "repo::dummy",
+    }) + "\n";
+
+  // Write a large ledger (e.g., 50000 lines)
+  const fd = fs.openSync(file, "w");
+  for (let i = 0; i < 50000; i++) {
+    fs.writeSync(fd, dummyLine);
+  }
+  
+  // Write a target line near the start (e.g. line 100)
+  const targetLine = JSON.stringify({
+    schemaVersion: 1,
+    at: new Date().toISOString(),
+    via: "role-terminal",
+    role: "junior",
+    kickoffPmWorktreeId: "repo::target",
+  }) + "\n";
+  fs.writeSync(fd, targetLine);
+  
+  for (let i = 0; i < 1500; i++) {
+    fs.writeSync(fd, dummyLine);
+  }
+  fs.closeSync(fd);
+
+  const lazy = lazyLaunchesBackward(orgFile);
+  const found = lazy.findLast((line) => line.role === "junior");
+  assert.equal(found.kickoffPmWorktreeId, "repo::target");
 });
 
 test("sessions go to the role launched in their place, and unclear ones are not guessed", () => {
