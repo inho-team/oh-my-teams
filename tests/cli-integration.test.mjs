@@ -425,7 +425,13 @@ test("CLI newer changes-requested review with no findings revokes prior approval
 
 test("STATE-04: terminal-idle-check warns about launch path prediction failures without crashing", async (t) => {
   const dir = tempDir(t);
-  fs.writeFileSync(path.join(dir, "org.json"), JSON.stringify(exampleOrg));
+  const orgOllama = readJSON(
+    new URL(
+      "../plugins/oh-my-teams/examples/organization.local-ollama.json",
+      import.meta.url,
+    ),
+  );
+  fs.writeFileSync(path.join(dir, "org.json"), JSON.stringify(orgOllama));
   const result = await run(
     [
       process.execPath,
@@ -434,7 +440,7 @@ test("STATE-04: terminal-idle-check warns about launch path prediction failures 
       "--org",
       "org.json",
       "--role",
-      "junior",
+      "intern",
       "--terminal",
       "t-123",
       "--orca",
