@@ -202,9 +202,8 @@ test("the brief carries the checkpoint rule only for a workflow task", async (t)
     workflowTask: "a",
   });
   assert.match(brief, /handoff checkpoint: 커밋할 때마다/);
-  assert.match(
-    brief,
-    new RegExp(
+  assert.ok(
+    brief.includes(
       `handoff-checkpoint --state ${stateDir} --workflow-id ${id} --workflow-task a`,
     ),
   );
