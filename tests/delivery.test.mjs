@@ -1,4 +1,7 @@
 /** Delivering a kickoff into the project that owns it, and nothing else merging there. */
+import { after } from "node:test";
+import { getTemplateProject, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -28,37 +31,6 @@ async function git(cwd, ...args) {
 
 // A project on main that owns an organization, and one kickoff worktree with
 // a committed result, like literacy-test's report branch.
-
-import { after } from "node:test";
-let templateProjectDir = null;
-after(() => {
-  if (templateProjectDir) {
-    try {
-      fs.rmSync(templateProjectDir, {
-        recursive: true,
-        force: true,
-        maxRetries: 10,
-      });
-    } catch (e) {}
-  }
-});
-async function getTemplateProject() {
-  if (templateProjectDir) return templateProjectDir;
-  const root = fs.realpathSync(
-    fs.mkdtempSync(path.join(os.tmpdir(), "omt-template-")),
-  );
-  const project = path.join(root, "project");
-  fs.mkdirSync(project);
-  await git(project, "init", "-q", "-b", "main");
-  await git(project, "config", "user.email", "t@example.invalid");
-  await git(project, "config", "user.name", "t");
-  fs.writeFileSync(path.join(project, ".gitignore"), ".omt\n");
-  fs.writeFileSync(path.join(project, "README.md"), "base\n");
-  await git(project, "add", ".");
-  await git(project, "commit", "-q", "-m", "base");
-  templateProjectDir = project;
-  return templateProjectDir;
-}
 
 async function kickoffProject(
   t,

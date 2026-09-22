@@ -1,4 +1,5 @@
 /** Adversarial tests for workflow capacity and execution-bound acceptance. */
+import { after } from "node:test";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -24,6 +25,9 @@ import { work } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import { acceptOutcome } from "../plugins/oh-my-teams/scripts/gates.mjs";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+
+after(() => cleanupTemplates());
 
 test("component acceptance cannot bypass failed or stale integration evidence", async (t) => {
   const dir = await repo(t),
@@ -653,45 +657,16 @@ const task = (id, files = [`${id}.txt`]) => ({
   risk: "low",
 });
 
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-let templateRepoDir = null;
-async function getTemplateRepo() {
-  if (templateRepoDir) return templateRepoDir;
-  const dir = fs.realpathSync(
-    fs.mkdtempSync(
-      require("node:path").join(
-        require("node:os").tmpdir(),
-        "omt-repo-template-",
-      ),
-    ),
-  );
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    const result = await require("../plugins/oh-my-teams/scripts/core.mjs").run(
-      ["git", ...args],
-      { cwd: dir },
-    );
-    if (result.code !== 0) throw new Error("Git failed: " + result.stderr);
-  }
-  templateRepoDir = dir;
-  return templateRepoDir;
-}
-
 async function repo(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workflow-safety-"));
   t.after(() => {
-    try {
-      fs.rmSync(dir, {
-        recursive: true,
-        force: true,
-        maxRetries: 10,
-        retryDelay: 200,
-      });
-    } catch (e) {}
+    fs.rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    });
+    // catch block removed for R2-tests-perf-01
   });
   fs.cpSync(await getTemplateRepo(), dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "seed.txt"), "seed\n");

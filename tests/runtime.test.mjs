@@ -1,4 +1,7 @@
 /** End-to-end and unit regression coverage for the oh my teams runtime. */
+import { after } from "node:test";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -99,36 +102,6 @@ function fixture(t) {
   // Exact test-owned directory, verified at creation; no user paths are removed.
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
-}
-
-import { after } from "node:test";
-let templateRepoDir = null;
-after(() => {
-  if (templateRepoDir) {
-    try {
-      fs.rmSync(templateRepoDir, {
-        recursive: true,
-        force: true,
-        maxRetries: 10,
-      });
-    } catch (e) {}
-  }
-});
-async function getTemplateRepo() {
-  if (templateRepoDir) return templateRepoDir;
-  const dir = fs.realpathSync(
-    fs.mkdtempSync(path.join(os.tmpdir(), "omt-repo-template-")),
-  );
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Orca Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    const result = await run(["git", ...args], { cwd: dir });
-    assert.equal(result.code, 0, result.stderr);
-  }
-  templateRepoDir = dir;
-  return templateRepoDir;
 }
 
 async function repo(t) {
