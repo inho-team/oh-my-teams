@@ -227,3 +227,30 @@ test("help does not ask the model to rebuild what it already states", () => {
   );
   assert.match(instructions, /그대로 출력한다/);
 });
+
+
+  for (const file of fs.readdirSync("tests")) {
+    if (!file.endsWith(".test.mjs")) continue;
+    const content = fs.readFileSync(path.join("tests", file), "utf8");
+    if (content.includes("async function kickoffProject(")) {
+    }
+    if (content.includes("async function repo(t)")) {
+    }
+  }
+});
+
+  const content = fs.readFileSync("tests/headless.test.mjs", "utf8");
+});
+
+
+
+test("headless test prevents EPERM by waiting for runner pid to exit", () => {
+  const content = fs.readFileSync("tests/headless.test.mjs", "utf8");
+  assert.ok(content.includes("process.kill(runnerPid, 0)"), "waitAllRunnersExited should wait for runnerPid to exit to prevent EPERM");
+});
+
+
+test("test setup performance: repo and kickoffProject use template caching", () => {
+  const d = fs.readFileSync("tests/delivery.test.mjs", "utf8");
+  assert.ok(d.includes("getTemplateProject"), "kickoffProject should use template caching for performance");
+});

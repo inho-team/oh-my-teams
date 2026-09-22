@@ -653,16 +653,29 @@ const task = (id, files = [`${id}.txt`]) => ({
   risk: "low",
 });
 
-async function repo(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workflow-safety-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+let templateRepoDir = null;
+async function getTemplateRepo() {
+  if (templateRepoDir) return templateRepoDir;
+  const dir = fs.realpathSync(fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), "omt-repo-template-")));
   for (const args of [
     ["init"],
     ["config", "user.name", "Test"],
     ["config", "user.email", "test@example.invalid"],
   ]) {
-    assert.equal((await run(["git", ...args], { cwd: dir })).code, 0);
+    const result = await require('../plugins/oh-my-teams/scripts/core.mjs').run(["git", ...args], { cwd: dir });
+    if (result.code !== 0) throw new Error("Git failed: " + result.stderr);
   }
+  templateRepoDir = dir;
+  return templateRepoDir;
+}
+
+async function repo(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "workflow-safety-"));
+  t.after(() => { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch(e) {} });
+  fs.cpSync(await getTemplateRepo(), dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "seed.txt"), "seed\n");
   assert.equal((await run(["git", "add", "seed.txt"], { cwd: dir })).code, 0);
   assert.equal(

@@ -28,23 +28,31 @@ async function git(cwd, ...args) {
 
 // A project on main that owns an organization, and one kickoff worktree with
 // a committed result, like literacy-test's report branch.
-async function kickoffProject(
-  t,
-  delivery = { mode: "local-merge", branch: "main" },
-) {
-  const root = fs.realpathSync(
-    fs.mkdtempSync(path.join(os.tmpdir(), "omt-deliver-")),
-  );
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const project = path.join(root, "project");
+
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+let templateProjectDir = null;
+async function getTemplateProject() {
+  if (templateProjectDir) return templateProjectDir;
+  const root = fs.realpathSync(fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), "omt-template-")));
+  const project = require('node:path').join(root, "project");
   fs.mkdirSync(project);
   await git(project, "init", "-q", "-b", "main");
   await git(project, "config", "user.email", "t@example.invalid");
   await git(project, "config", "user.name", "t");
-  fs.writeFileSync(path.join(project, ".gitignore"), ".omt\n");
-  fs.writeFileSync(path.join(project, "README.md"), "base\n");
+  fs.writeFileSync(require('node:path').join(project, ".gitignore"), ".omt\n");
+  fs.writeFileSync(require('node:path').join(project, "README.md"), "base\n");
   await git(project, "add", ".");
   await git(project, "commit", "-q", "-m", "base");
+  templateProjectDir = project;
+  return templateProjectDir;
+}
+
+async function kickoffProject(t, delivery = { mode: "local-merge", branch: "main" }) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "omt-deliver-")));
+  t.after(() => { try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch (e) {} });
+  const project = path.join(root, "project");
+  fs.cpSync(await getTemplateProject(), project, { recursive: true });
   const org = path.join(project, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(org), { recursive: true });
   fs.copyFileSync(exampleOrg, org);

@@ -58,8 +58,10 @@ async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
       const lastTurn = turnNumbers.at(-1);
       if (lastTurn !== undefined) {
         const turnDir = path.join(turnsDir, String(lastTurn));
+        
         const exitFile = path.join(turnDir, "exit.json");
         const stopFile = path.join(turnDir, "stop.request");
+        const pidsFile = path.join(turnDir, "pids.json");
         if (!fs.existsSync(exitFile) && !fs.existsSync(stopFile)) {
           try {
             fs.writeFileSync(stopFile, new Date().toISOString());
@@ -71,6 +73,24 @@ async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
         while (!fs.existsSync(exitFile) && Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 100));
         }
+        
+        if (fs.existsSync(pidsFile)) {
+          let runnerPid;
+          try {
+            runnerPid = JSON.parse(fs.readFileSync(pidsFile, 'utf8')).runner;
+          } catch {}
+          if (runnerPid) {
+            while (Date.now() < deadline) {
+              try {
+                process.kill(runnerPid, 0);
+                await new Promise((r) => setTimeout(r, 100));
+              } catch {
+                break;
+              }
+            }
+          }
+        }
+
       }
     }
   }
