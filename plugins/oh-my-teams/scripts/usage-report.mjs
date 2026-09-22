@@ -399,16 +399,20 @@ export function summarizeByRole(records) {
     if (!role.sources.includes(record.source)) role.sources.push(record.source);
 
     if (record.modelRequested) {
+      if (!role.models.requested.includes(record.modelRequested)) {
+        role.models.requested.push(record.modelRequested);
+      }
       const displayStr = displayModel(record.provider, record.modelRequested);
       if (!role.modelsDisplay.requested.includes(displayStr)) {
-        role.models.requested.push(record.modelRequested);
         role.modelsDisplay.requested.push(displayStr);
       }
     }
     for (const model of record.modelReported) {
+      if (!role.models.reported.includes(model)) {
+        role.models.reported.push(model);
+      }
       const displayStr = displayModel(record.provider, model);
       if (!role.modelsDisplay.reported.includes(displayStr)) {
-        role.models.reported.push(model);
         role.modelsDisplay.reported.push(displayStr);
       }
     }
@@ -765,9 +769,11 @@ export function formatUsageTable(report) {
     ];
     for (const [role, summary] of Object.entries(kickoff.byRole)) {
       const share = kickoff.share[role];
+      const displayReq = (summary.modelsDisplay || summary.models).requested;
+      const displayRep = (summary.modelsDisplay || summary.models).reported;
       rows.push([
         role,
-        `${summary.modelsDisplay.requested.join(",") || "-"} -> ${summary.modelsDisplay.reported.join(",") || "-"}`,
+        `${displayReq.join(",") || "-"} -> ${displayRep.join(",") || "-"}`,
         `${summary.measuredSessions}${summary.partialSessions ? `+${summary.partialSessions} partial` : ""}/${summary.sessions}`,
         number(summary.turns),
         number(summary.calls),

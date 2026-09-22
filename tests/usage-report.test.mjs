@@ -824,6 +824,7 @@ test("summarizeByRole includes both models if provider differs but model is the 
     },
   ];
   const byRole = summarizeByRole(records);
+  assert.equal(byRole.senior.models.requested.length, 1);
   assert.equal(byRole.senior.modelsDisplay.requested.length, 2);
   assert.equal(
     byRole.senior.modelsDisplay.requested.includes("Claude Code sonnet"),

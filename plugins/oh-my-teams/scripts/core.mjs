@@ -1181,8 +1181,8 @@ export function saveOrg(file, org, { update = false, expectedRevision } = {}) {
 /**
  * Formats a provider and model for display.
  *
- * @param {string} provider - Provider name.
- * @param {string} model - Model name.
+ * @param {string|null|undefined} provider - Provider name.
+ * @param {string|null|undefined} model - Model name, or null/undefined for host-default.
  * @returns {string} The formatted string.
  */
 export function displayModel(provider, model) {
