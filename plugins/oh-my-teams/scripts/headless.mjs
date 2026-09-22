@@ -595,6 +595,9 @@ export function modelVerdict(provider, requested, reported) {
     !/\d/.test(requested) &&
     reported.toLowerCase().includes(requested.toLowerCase())
   ) {
+    if (provider === "claude" && !reported.startsWith("claude-")) return "mismatched";
+    if (provider === "codex" && !reported.startsWith("gpt-")) return "mismatched";
+    if (provider === "agy" && reported.startsWith("claude-") && !reported.includes("4-6")) return "mismatched";
     return "alias";
   }
   return "mismatched";
