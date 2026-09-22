@@ -83,9 +83,65 @@ async function git(dir, ...args) {
   return result.stdout.trim();
 }
 
+/**
+ * Waits until every headless runner recorded under stateDir has written its
+ * exit.json, mirroring tests/headless.test.mjs's sandbox() cleanup. Most
+ * workflow() tests never start a headless worker, so this returns at once
+ * when no `headless/` directory exists.
+ *
+ * @param {string} stateDir - PM state directory (may hold `headless/`).
+ * @param {number} [timeoutMs=8000] - Longest time to wait for exit.json.
+ * @returns {Promise<void>}
+ */
+async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
+  const headlessRoot = path.join(stateDir, "headless");
+  if (!fs.existsSync(headlessRoot)) return;
+  const deadline = Date.now() + timeoutMs;
+  const workerIds = fs
+    .readdirSync(headlessRoot)
+    .filter((name) => /^[a-z0-9][a-z0-9-]*$/.test(name));
+  for (const workerId of workerIds) {
+    const turnsDir = path.join(headlessRoot, workerId, "turns");
+    if (!fs.existsSync(turnsDir)) continue;
+    const lastTurn = fs
+      .readdirSync(turnsDir)
+      .filter((name) => /^\d+$/.test(name))
+      .map(Number)
+      .sort((a, b) => a - b)
+      .at(-1);
+    if (lastTurn === undefined) continue;
+    const turnDir = path.join(turnsDir, String(lastTurn));
+    const exitFile = path.join(turnDir, "exit.json");
+    const stopFile = path.join(turnDir, "stop.request");
+    if (!fs.existsSync(exitFile) && !fs.existsSync(stopFile)) {
+      try {
+        fs.writeFileSync(stopFile, new Date().toISOString());
+      } catch {
+        // Another caller already requested the stop.
+      }
+    }
+    while (!fs.existsSync(exitFile) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
 async function workflow(t, organization = org(), maxAttempts = 1) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-flow-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const stateDir = path.join(dir, ".omt");
+  t.after(async () => {
+    // A headless test in this file starts a detached runner whose cwd is
+    // `dir` (plugins/oh-my-teams/scripts/headless.mjs launchTurn); on
+    // Windows that process keeps `dir` locked until it exits, so it must be
+    // observed exited before rmSync runs, whichever t.after runs first.
+    await waitAllRunnersExited(stateDir);
+    fs.rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+  });
   await git(dir, "init");
   await git(dir, "config", "user.name", "Test");
   await git(dir, "config", "user.email", "test@example.invalid");
@@ -102,7 +158,6 @@ async function workflow(t, organization = org(), maxAttempts = 1) {
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts, maxCalls: 4 },
   };
-  const stateDir = path.join(dir, ".omt");
   await createWorkflow(stateDir, request, organization, dir);
   return { dir, stateDir, id: request.id };
 }
