@@ -325,8 +325,10 @@ async function takeReclaimMutex(file, token, waitMs) {
 async function reclaimStaleLease(file, options) {
   const seen = readRecord(file);
   if (!seen) {
-    // Absent means someone finished first; unreadable proves nothing.
-    if (!fs.existsSync(file)) return { recovered: null };
+    // Absent means someone finished first; unreadable proves nothing. A new
+    // lease published between the failed read and the existence check is
+    // not unreadable, so it is read once more and judged on the next attempt.
+    if (readRecord(file) || !fs.existsSync(file)) return { recovered: null };
     throw new Error("opencodex-lease-unverifiable: unreadable owner record");
   }
   if (recordOwnerLive(seen))
