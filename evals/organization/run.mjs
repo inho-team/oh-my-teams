@@ -2,6 +2,7 @@
 /** Runs the deterministic organization scenarios and emits JSON evidence. */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readdirSync, readFileSync } from "node:fs";
 import { readJSON, run } from "../../plugins/oh-my-teams/scripts/core.mjs";
 
 const root = path.resolve(
@@ -12,6 +13,13 @@ const manifest = readJSON(path.join(root, "evals/organization/scenarios.json"));
 const evidenceTests = [
   ...new Set(manifest.scenarios.flatMap((scenario) => scenario.evidenceTests)),
 ];
+
+const testFilesCache = readdirSync(path.join(root, "tests"))
+  .filter((f) => f.endsWith(".test.mjs"))
+  .map((f) => ({
+    path: path.join("tests", f),
+    content: readFileSync(path.join(root, "tests", f), "utf8"),
+  }));
 
 // Running the whole test file made every scenario share one verdict: an
 // unrelated failure elsewhere, or a machine slower than the timeout, reported
@@ -39,10 +47,9 @@ async function runEvidenceTest(name) {
   //   total=0  → test name not found anywhere → false positive → failed
   //   total=1  → exactly one test matched → passed (if exit code is 0)
   //   total>1  → duplicate names across files → ambiguous → failed
-  const { readdirSync } = await import("node:fs");
-  const testFiles = readdirSync(path.join(root, "tests"))
-    .filter((f) => f.endsWith(".test.mjs"))
-    .map((f) => path.join("tests", f));
+  const testFiles = testFilesCache
+    .filter((entry) => entry.content.includes(name))
+    .map((entry) => entry.path);
 
   let totalInner = 0;
   let anyFail = false;
