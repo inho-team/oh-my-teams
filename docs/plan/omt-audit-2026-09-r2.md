@@ -2,7 +2,7 @@
 
 ## 결론
 
-열두 묶음(task)에서 Senior 검토가 승인한 결함 38건을 확인했다. 요약표의 35건 중 34건을 수정했고, 1건(R2-NEW-DIRECTOR-01)은 편집 범위 밖이어서 미수정이다. 8절에 별도로 기록한 런타임 구조 공백 3건(R2-CORE-STATE-03·04, 게이트 타임아웃 상수)도 이사 결정으로 수정하지 않았다. 브랜치 `dev-inho/omt-audit-r2-report`에서 lint, sync:check, 전체 테스트(`--test-concurrency=1`), eval:organization이 모두 통과했다.
+열두 묶음(task)에서 Senior 검토가 승인한 결함 39건을 확인했다. 요약표의 35건 중 34건을 수정했고, 1건(R2-NEW-DIRECTOR-01)은 편집 범위 밖이어서 미수정이다. 8절에 별도로 기록한 런타임 구조 공백 4건(R2-CORE-STATE-03·04, 게이트 타임아웃 상수, 통합 task 검사 목록 고정)도 이사 결정으로 수정하지 않았다. 브랜치 `dev-inho/omt-audit-r2-report`에서 lint, sync:check, eval:organization과 통합 게이트 기준 39개 파일 테스트(`--test-concurrency=1`)가 모두 통과했으며, 통합 게이트에서 제외된 나머지 4개 파일도 PM이 별도로 실행하여 통과를 확인했다.
 
 - 조사 기준: `622ca0e..HEAD` (84 커밋, 43 파일 변경, 2,297 삽입, 237 삭제, 보고서 커밋 7b010b3 포함)
 - 보고 시각: 2026-09-23
@@ -65,7 +65,7 @@
 
 ### 기준선 (`334f7ba`, 2026-09-22, PM 측정)
 
-> 기준선은 `.omt/checks/baseline/summary.txt`에 기록된 값이다. 측정 커밋은 `334f7ba7e1588fa7363a3e2c9488e31786b9fc00`이며, Windows 11, Node 24.19.0, 여유 메모리 0.5~1.3 GB 환경에서 측정했다.
+> 기준선은 `.omt/checks/baseline/summary.txt`에 기록된 값이다. 측정 커밋은 `334f7ba7e1588fa7363a3e2c9488e31786b9fc00`이며, Windows 11, Node 24.19.0, 여유 메모리 0.5~1.3 GB 환경에서 측정했다. 기준선 시점의 `tests/*.test.mjs`는 39개이며, `npm test`로 39개 파일 전체를 실행한 결과이다.
 
 | 검사 | 종료 코드 | 소요(초) | 비고 |
 |---|---|---|---|
@@ -82,6 +82,8 @@
 
 ### 수정 후 (브랜치 `dev-inho/omt-audit-r2-report`, 2026-09-23 실측)
 
+> **측정 범위**: 아래 표는 통합 task(`r2-report-integration.json`)의 checks에 등록된 명령 기준이다. checks는 workflow 생성 시점에 고정되므로, 이번 kickoff에서 새로 추가된 테스트 파일 4개(`eval-perf`, `incidents`, `model-drift`, `usage-ledger`)는 포함되지 않았다. 기준선은 `334f7ba` 시점의 39개 파일로 측정했고, 수정 후 표도 39개 파일 기준이다. 현재 저장소에는 43개 파일이 있으므로 두 수치의 파일 범위가 다르다.
+
 아래 명령을 `--test-concurrency=1`로 순서대로 실행하여 결과를 확인했다.
 
 | 검사 명령 | tests | pass | fail | skip | duration_ms | 종료 코드 |
@@ -94,10 +96,17 @@
 | `tests/kickoff-registry + handoff-transition` | 34 | 34 | 0 | 0 | 31,108 | **0** |
 | `run-depth + workflow-safety + headless + limit-check + legacy-intern` | 69 | 66 | 0 | 3 | 56,453 | **0** |
 | 나머지 테스트 29개 파일 | 384 | 359 | 0 | 25 | 71,124 | **0** |
-| **합계** | **608** | **580** | **0** | **28** | — | — |
+| **소계 (39개 파일, 통합 게이트 기준)** | **608** | **580** | **0** | **28** | — | — |
 | `npm run eval:organization` | — | — | — | — | — | **0** (시나리오 11개 모두 통과) |
 
-모든 검사가 종료 코드 0으로 통과했다.
+통합 게이트에서 덮이지 않는 파일 4개(`eval-perf`, `incidents`, `model-drift`, `usage-ledger`)를 PM이 별도로 실행한 결과는 다음과 같다.
+
+| 검사 명령 | tests | pass | fail | skip | duration_ms | 종료 코드 |
+|---|---|---|---|---|---|---|
+| `eval-perf + incidents + model-drift + usage-ledger` | 5 | 5 | 0 | 0 | 5,788 | **0** |
+| **전체 합계 (43개 파일)** | **613** | **585** | **0** | **28** | — | — |
+
+통합 게이트 기준(39개 파일) 검사와 누락 4개 파일 검사 모두 종료 코드 0으로 통과했다.
 
 ---
 
@@ -297,6 +306,11 @@
 
 - 위치: `plugins/oh-my-teams/scripts/evidence.mjs:145` — `timeoutMs = 300000`(300초 기본값)
 - 근거: `verify` 명령(`teams-org.mjs:1661-1668`)은 `timeoutMs` 없이 `verify()` 함수를 호출하므로 기본값 300,000 ms가 항상 적용된다. `verify` 명령의 허용 인자 목록(`teams-org.mjs:549`)에 `timeout-ms`가 없다. 이 kickoff에서 `eval:organization` 검사가 301초를 초과하여 타임아웃으로 실패했다(EVAL-01 수정 전 통합 verify에서 확인). 오래 걸리는 검사 하나가 게이트 전체를 막는 문제를 조정할 수단이 사용자에게 없다.
+
+**INTEGRATION-CHECKS-FROZEN**: 통합 task의 검사 목록이 workflow 생성 시점에 고정되어, 실행 도중 추가된 테스트 파일이 통합 게이트에서 실행되지 않는다.
+
+- 위치: `plugins/oh-my-teams/scripts/workflow.mjs:663` — `snapshot.state.integration?.taskHash === taskHash(task)` 조건으로 통합 task 내용 변경을 거부한다.
+- 근거: `workflow-*` 계열 명령(`teams-org.mjs:449-460`)에는 이미 만들어진 workflow에 task나 검사를 추가하는 명령이 없다. workflow-create, status, resume, attach, reserve, accept, settle, release, retry, handoff, rework, depth만 존재한다. 이 kickoff에서 workflow 생성 이후 새로 추가된 테스트 파일 4개(`eval-perf`, `incidents`, `model-drift`, `usage-ledger`)가 통합 게이트의 checks에서 제외되었다(2절 참조).
 
 ### 측정 미완료 항목
 
