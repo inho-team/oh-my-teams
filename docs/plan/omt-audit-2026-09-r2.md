@@ -2,7 +2,7 @@
 
 ## 결론
 
-열두 묶음(task)에서 Senior 검토가 승인한 결함 36건을 확인했다. 요약표의 34건 중 33건을 수정했고, 1건(R2-NEW-DIRECTOR-01)은 편집 범위 밖이어서 미수정이다. 8절에 별도로 기록한 런타임 구조 공백 2건(R2-CORE-STATE-03·04)도 이사 결정으로 수정하지 않았다. 브랜치 `dev-inho/omt-audit-r2-report`에서 lint, sync:check, 전체 테스트(`--test-concurrency=1`), eval:organization이 모두 통과했다.
+열두 묶음(task)에서 Senior 검토가 승인한 결함 38건을 확인했다. 요약표의 35건 중 34건을 수정했고, 1건(R2-NEW-DIRECTOR-01)은 편집 범위 밖이어서 미수정이다. 8절에 별도로 기록한 런타임 구조 공백 3건(R2-CORE-STATE-03·04, 게이트 타임아웃 상수)도 이사 결정으로 수정하지 않았다. 브랜치 `dev-inho/omt-audit-r2-report`에서 lint, sync:check, 전체 테스트(`--test-concurrency=1`), eval:organization이 모두 통과했다.
 
 - 조사 기준: `622ca0e..HEAD` (84 커밋, 43 파일 변경, 2,297 삽입, 237 삭제, 보고서 커밋 7b010b3 포함)
 - 보고 시각: 2026-09-23
@@ -139,6 +139,7 @@
 | R2-PROVIDER-DISPLAY-04 | 문서 | low | `plugins/oh-my-teams/skills/form/SKILL.md:29` | form 선택지에 Claude Code와 Agy의 차이 설명이 없다 | 추가 요청 10-4 | `c41fdd0` |
 | R2-PROVIDER-DISPLAY-05 | 문서 | low | `plugins/oh-my-teams/skills/adjust/SKILL.md:77` | adjust 선택지에 Claude Code와 Agy의 차이 설명이 없다 | 추가 요청 10-4 | `c41fdd0` |
 | R2-PROVIDER-DISPLAY-06 | 정확성 | high | `plugins/oh-my-teams/scripts/usage-report.mjs:772` | 과거 스냅샷에서 `modelsDisplay`가 없을 때 `formatUsageTable`이 undefined 오류를 일으킨다 | `formatUsageTable` fallback 미비 | `7e9e62f` |
+| EVAL-01 | 실행 비용 | high | `evals/organization/run.mjs:42` | `evidenceTests` 하나당 전체 테스트 파일(42개)을 순회하며 `node --test` 프로세스를 띄워 총 714회의 외부 프로세스가 실행되고, 통합 verify 단계에서 300초 타임아웃을 초과해 검사가 실패한다 | 17개 evidence test × 42개 파일 반복 실행 | `2d199ba`, `f3ef917` |
 
 ---
 
@@ -260,6 +261,22 @@
 | 수정 전 (전체 파싱) | 21 ms / 50,000회 |
 | 수정 후 (꼬리 1회 파싱) | 4.5 ms / 1회 |
 
+### EVAL-01: evals/organization/run.mjs 외부 프로세스 최적화
+
+`evidenceTests` 하나마다 전체 테스트 파일(42개)을 순회하여 `node --test` 프로세스를 띄웠다. 17개 evidence test가 있으므로 총 714회(17 × 42)의 외부 프로세스가 실행되어 전체 eval 소요 시간이 245초에 달했고, 통합 verify의 게이트 타임아웃(300초)을 초과하여 검사가 차단됐다. 수정 후에는 파일 내용을 처음 한 번만 읽어 캐시하고, 이름 문자열을 포함하는 파일만 `node --test`로 실행하여 프로세스 실행 횟수를 17회(evidence test 수와 동일)로 줄였다. 판정 결과는 수정 전후가 일치했다.
+
+측정 조건: PM이 두 판본에 대해 `node evals/organization/run.mjs`를 각각 한 번씩 실행하며 다른 명령을 동시에 띄우지 않고 측정한 실측값.
+
+| 지표 | 수정 전 (6467eeb) | 수정 후 (f3ef917) |
+|---|---|---|
+| 전체 소요 시간 | 245초 | 49초 |
+| `node --test` 시작 횟수 | 714회 (17개 × 42파일) | 17회 (17개 × 1파일) |
+| 파일 읽기(`readFileSync`) | 714회 (17번 순회마다 42개 파일 전체 읽기) | 42회 (전체 42개 파일을 맨 처음 1번만 읽어 캐시) |
+| 11개 시나리오 통합 판정 | passed | passed |
+| 17개 개별 evidence test 통과 여부 | 전 항목 일치 (차이 없음) | 전 항목 일치 (차이 없음) |
+
+게이트 verify에서 `npm run eval:organization`은 38초, 종료 코드 0으로 완료됐다(커밋 f3ef917 기준, `verify-senior-r2-eval-perf.json` 실측).
+
 ---
 
 ## 8. 남은 사항
@@ -275,6 +292,11 @@
 
 - 위치: `plugins/oh-my-teams/scripts/workflow.mjs:959` (`reserveTask`), `1324` (`reworkTask`)
 - 근거: `reserveTask`가 `callAllowance`를 예약 시점에 고정하고, `reworkTask`는 새 시도를 만들지 않은 채 기존 allowance만 검사한다.
+
+**GATE-TIMEOUT**: 게이트 검사의 per-command 타임아웃이 `evidence.mjs`에 상수로 고정되어 있으며, `verify` 명령에 이를 조정할 인자가 없다.
+
+- 위치: `plugins/oh-my-teams/scripts/evidence.mjs:145` — `timeoutMs = 300000`(300초 기본값)
+- 근거: `verify` 명령(`teams-org.mjs:1661-1668`)은 `timeoutMs` 없이 `verify()` 함수를 호출하므로 기본값 300,000 ms가 항상 적용된다. `verify` 명령의 허용 인자 목록(`teams-org.mjs:549`)에 `timeout-ms`가 없다. 이 kickoff에서 `eval:organization` 검사가 301초를 초과하여 타임아웃으로 실패했다(EVAL-01 수정 전 통합 verify에서 확인). 오래 걸리는 검사 하나가 게이트 전체를 막는 문제를 조정할 수단이 사용자에게 없다.
 
 ### 측정 미완료 항목
 
@@ -321,4 +343,4 @@ v1·v2의 이유는 `.omt/plan/RESUME.md`에서 확인하지 못했다.
 
 ---
 
-*이 보고서는 열두 findings 파일(`r2-tests-perf`, `r2-new-director`, `r2-new-exec`, `r2-core-state`, `r2-core-exec`, `r2-launch-headless`, `r2-launch-role`, `r2-docs-rules`, `r2-docs-items`, `r2-model-drift`, `r2-provider-proof`, `r2-provider-display`)과 `.omt/checks/baseline/`의 PM 기록 검사 결과를 근거로 작성했다.*
+*이 보고서는 열세 findings 파일(`r2-tests-perf`, `r2-new-director`, `r2-new-exec`, `r2-core-state`, `r2-core-exec`, `r2-launch-headless`, `r2-launch-role`, `r2-docs-rules`, `r2-docs-items`, `r2-model-drift`, `r2-provider-proof`, `r2-provider-display`, `r2-eval-perf`)과 `.omt/checks/baseline/`의 PM 기록 검사 결과를 근거로 작성했다.*
