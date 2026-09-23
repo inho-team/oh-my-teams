@@ -4,7 +4,7 @@
 
 열두 묶음(task)에서 Senior 검토가 승인한 결함 39건을 확인했다. 요약표의 35건 중 34건을 수정했고, 1건(R2-NEW-DIRECTOR-01)은 편집 범위 밖이어서 미수정이다. 8절에 별도로 기록한 런타임 구조 공백 4건(R2-CORE-STATE-03·04, 게이트 타임아웃 상수, 통합 task 검사 목록 고정)도 이사 결정으로 수정하지 않았다. 브랜치 `dev-inho/omt-audit-r2-report`에서 lint, sync:check, eval:organization과 통합 게이트 기준 39개 파일 테스트(`--test-concurrency=1`)가 모두 통과했으며, 통합 게이트에서 제외된 나머지 4개 파일도 PM이 별도로 실행하여 통과를 확인했다.
 
-- 조사 기준: `622ca0e..HEAD` (84 커밋, 43 파일 변경, 2,297 삽입, 237 삭제, 보고서 커밋 7b010b3 포함)
+- 조사 기준: `622ca0e..HEAD` (91 커밋, 44 파일 변경, 2,455 삽입, 241 삭제, `git rev-list --count`와 `git diff --stat 622ca0e..HEAD` 기준, 현재 HEAD `8e6b663` 포함)
 - 보고 시각: 2026-09-23
 
 ---
@@ -127,8 +127,8 @@
 | R2-CORE-EXEC-01 | 메모리·실행 비용 | high | `plugins/oh-my-teams/scripts/usage-ledger.mjs:220` | `recordLaunch`가 호출될 때마다 원장 전체를 메모리에 읽어 O(N) 비용이 발생한다 | 폴링 시 파일 크기에 비례하여 메모리·CPU 사용량이 증가함 | `daea1d3` |
 | R2-LAUNCH-HEADLESS-01 | 메모리 | high | `plugins/oh-my-teams/scripts/headless.mjs:931` | `headlessDetail`이 스트림 파일 전체를 읽어 OOM이 발생한다 | `fs.readFileSync(..., "utf8")` 사용 | `b8652c3` |
 | R2-LAUNCH-HEADLESS-02 | 메모리 | high | `plugins/oh-my-teams/scripts/headless-runner.mjs:64` | `buildLifecycle`이 스트림 파일 전체를 읽어 OOM이 발생한다 | `fs.readFileSync(..., "utf8")` 사용 | `b8652c3` |
-| R2-LAUNCH-ROLE-01 | 실행 비용·검사 규칙 | medium | `plugins/oh-my-teams/scripts/role-terminal.mjs:72-148` | `readLaunchEnvironment`에서 터미널 실행마다 `git rev-parse` 외부 프로세스를 실행하고 예외를 빈 catch로 삼킨다 | 오류를 삼키는 catch 신규 추가 금지 위반 | `c4a0cea` |
-| R2-LAUNCH-ROLE-02 | 검사 규칙 | low | `plugins/oh-my-teams/scripts/providers.mjs:257` | `process.kill(-pid)` 오류를 빈 catch로 삼킨다 | 오류를 삼키는 catch 신규 추가 금지 위반 | `b7040b9` |
+| R2-LAUNCH-ROLE-01 | 실행 비용·검사 규칙 | medium | `plugins/oh-my-teams/scripts/role-terminal.mjs:72-148` | `readLaunchEnvironment`에서 터미널 실행마다 `git rev-parse` 외부 프로세스를 실행하고 예외를 빈 catch로 처리하지 않고 넘긴다 | 오류를 무시하는 catch 신규 추가 금지 위반 | `c4a0cea` |
+| R2-LAUNCH-ROLE-02 | 검사 규칙 | low | `plugins/oh-my-teams/scripts/providers.mjs:257` | `process.kill(-pid)` 오류를 빈 catch로 처리하지 않고 넘긴다 | 오류를 무시하는 catch 신규 추가 금지 위반 | `b7040b9` |
 | R2-DOCS-RULES-01 | 문서 | low | `AGENTS.md:13` | 버전 정책이 특정 버전 숫자에 결합되어 있다 | 이사 결정(선택지 B)으로 숫자 명시 대신 '부·수 버전만 올린다'로 변경 | `a7abd0c` |
 | R2-DOCS-RULES-02 | 문서 | low | `AGENTS.md:44-48` | 주요 아키텍처 규칙 R13~R17이 정본에 누락되어 있다 | DOCS-02 1차 보고서 지적 사항 | 수정 유지 |
 | R2-DOCS-RULES-03 | 문서 | low | `AGENTS.md:38-42` | 이사 역할 행동 규칙 3가지가 누락되어 있다 | 역할 행동 규칙 추가 필요 | 수정 유지 |
@@ -212,10 +212,10 @@
 
 - `teams-org.mjs:699`의 `resolveAndCheckDrift` 조건 수정(커밋 `6b9c38e`): `worker-start` 경로에서 `launch.modelRequested` 유무를 올바르게 검사하도록 고쳤다.
 - `usage-ledger.mjs`에 `modelResolved` 필드 저장 지원을 추가했다(커밋 `6b9c38e`).
-- `teams-org.mjs:1216`의 `writeDraft` 내 `resolveHostDefaults` 오류를 삼키지 않고 `process.stderr.write`로 경고를 출력하도록 수정했다(커밋 `481bc64`, `3410765`).
+- `teams-org.mjs:1216`의 `writeDraft` 내 `resolveHostDefaults` 오류를 무시하지 않고 `process.stderr.write`로 경고를 출력하도록 수정했다(커밋 `481bc64`, `3410765`).
 - `organization.schema.json`에 `modelResolvedAtFormation` 키를 추가했다(커밋 `2a7de6a`).
 - `form`·`adjust` SKILL.md에 호스트 설정 변경 시 역할 모델도 바뀐다는 안내를 추가했다(커밋 `2a7de6a`).
-- 회귀 테스트: `tests/model-drift.test.mjs` — 해석 모델이 바뀐 경우 경고가 출력되고 같은 경우 출력되지 않음을 확인한다 (1 pass, 0 fail).
+- 회귀 테스트: `tests/model-drift.test.mjs`: 해석 모델이 바뀐 경우 경고가 출력되고 같은 경우 출력되지 않음을 확인한다 (1 pass, 0 fail).
 
 ### 추가 요청 10번: Claude Code·Agy 모델 이름 혼동 해소
 
@@ -304,12 +304,12 @@
 
 **GATE-TIMEOUT**: 게이트 검사의 per-command 타임아웃이 `evidence.mjs`에 상수로 고정되어 있으며, `verify` 명령에 이를 조정할 인자가 없다.
 
-- 위치: `plugins/oh-my-teams/scripts/evidence.mjs:145` — `timeoutMs = 300000`(300초 기본값)
+- 위치: `plugins/oh-my-teams/scripts/evidence.mjs:145`, `timeoutMs = 300000`(300초 기본값)
 - 근거: `verify` 명령(`teams-org.mjs:1661-1668`)은 `timeoutMs` 없이 `verify()` 함수를 호출하므로 기본값 300,000 ms가 항상 적용된다. `verify` 명령의 허용 인자 목록(`teams-org.mjs:549`)에 `timeout-ms`가 없다. 이 kickoff에서 `eval:organization` 검사가 301초를 초과하여 타임아웃으로 실패했다(EVAL-01 수정 전 통합 verify에서 확인). 오래 걸리는 검사 하나가 게이트 전체를 막는 문제를 조정할 수단이 사용자에게 없다.
 
 **INTEGRATION-CHECKS-FROZEN**: 통합 task의 검사 목록이 workflow 생성 시점에 고정되어, 실행 도중 추가된 테스트 파일이 통합 게이트에서 실행되지 않는다.
 
-- 위치: `plugins/oh-my-teams/scripts/workflow.mjs:663` — `snapshot.state.integration?.taskHash === taskHash(task)` 조건으로 통합 task 내용 변경을 거부한다.
+- 위치: `plugins/oh-my-teams/scripts/workflow.mjs:663`, `snapshot.state.integration?.taskHash === taskHash(task)` 조건으로 통합 task 내용 변경을 거부한다.
 - 근거: `workflow-*` 계열 명령(`teams-org.mjs:449-460`)에는 이미 만들어진 workflow에 task나 검사를 추가하는 명령이 없다. workflow-create, status, resume, attach, reserve, accept, settle, release, retry, handoff, rework, depth만 존재한다. 이 kickoff에서 workflow 생성 이후 새로 추가된 테스트 파일 4개(`eval-perf`, `incidents`, `model-drift`, `usage-ledger`)가 통합 게이트의 checks에서 제외되었다(2절 참조).
 
 ### 측정 미완료 항목
@@ -324,7 +324,7 @@
 - DOCS-06 / U-12: `orca-org.mjs`는 레거시 테스트에서 여전히 사용하고 있어 안전한 제거를 확신할 수 없다.
 - R2-NEW-DIRECTOR-01: `handoffDirectory` 파일 N+2개 읽기는 `workflow-store.mjs`가 편집 범위 밖이어서 6dc455c로 복구했다.
 - TESTS4-07: `t.after` 타임아웃 중단 시 클린업이 보장되지 않는 것은 Node.js test runner의 한계이다.
-- LAUNCH-01 / U-08: `orca terminal read` 외부 프로세스 비용의 실환경 측정이 완료되지 않았다.
+- LAUNCH-01 / U-08: `orca terminal read`로 외부 프로세스를 실행할 때 드는 비용을 실제 환경에서 측정하는 작업이 완료되지 않았다.
 
 ---
 
