@@ -78,21 +78,14 @@ test("duplicate test name", () => {});
     env,
   });
 
-  if (result.stderr) {
-    console.error("STDERR of run.mjs:", result.stderr);
-  }
-
   // It should exit with code 1 because both scenarios should fail
-  assert.equal(result.code, 1);
+  assert.equal(
+    result.code,
+    1,
+    "run.mjs should fail when evidence is missing or ambiguous",
+  );
 
-  let output;
-  try {
-    output = JSON.parse(result.stdout);
-  } catch (e) {
-    console.error("STDOUT:", result.stdout);
-    console.error("STDERR:", result.stderr);
-    throw e;
-  }
+  const output = JSON.parse(result.stdout);
 
   const missing = output.scenarios.find((s) => s.id === "missing-scenario");
   assert.equal(missing.status, "failed");
@@ -110,10 +103,9 @@ test("duplicate test name", () => {});
     (e) => e.name === "duplicate test name",
   );
   assert.equal(evidenceDuplicate.passed, false);
-  try {
-    assert.equal(evidenceDuplicate.innerCount, 2);
-  } catch (e) {
-    console.error("Duplicate Evidence:", evidenceDuplicate);
-    throw e;
-  }
+  assert.equal(
+    evidenceDuplicate.innerCount,
+    2,
+    "Duplicate test names should run the file twice and report innerCount=2",
+  );
 });
