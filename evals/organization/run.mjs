@@ -39,10 +39,11 @@ async function runEvidenceTest(name) {
   //   total=0  → test name not found anywhere → false positive → failed
   //   total=1  → exactly one test matched → passed (if exit code is 0)
   //   total>1  → duplicate names across files → ambiguous → failed
-  const { readdirSync } = await import("node:fs");
+  const { readdirSync, readFileSync } = await import("node:fs");
   const testFiles = readdirSync(path.join(root, "tests"))
     .filter((f) => f.endsWith(".test.mjs"))
-    .map((f) => path.join("tests", f));
+    .map((f) => path.join("tests", f))
+    .filter((f) => readFileSync(path.join(root, f), "utf8").includes(name));
 
   let totalInner = 0;
   let anyFail = false;
