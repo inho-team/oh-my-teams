@@ -25,6 +25,8 @@
 | README의 `validate`·`show` 예제 | 현재 예제 조직으로 정상 실행됐다. |
 | 로컬 Markdown 링크 검사 | README, `docs/`, 실험 보고서의 상대 링크에서 누락된 대상이 없었다. |
 
+표의 테스트 개수는 `scripts/metadata.mjs`의 `declaredTestCount`가 세는 값이며, `tests/*.test.mjs`에서 열 0에 선언된 최상위 `test(`만 센다. 문서를 갱신할 때마다 `node --test`를 실행하면 몇 분이 걸리기 때문에 이렇게 정적으로 센다. 러너는 중첩 서브테스트까지 세므로 `npm test`의 출력이 이 값보다 클 수 있다. 예를 들어 `tests/dependencies.test.mjs`의 `withEnv leaves process.env exactly as it found it`이 서브테스트 하나를 선언하고 있어서, 두 값이 하나 차이가 난다.
+
 이 검증은 현재 코드와 결정적 fixture의 일관성을 확인한다. 외부 서비스의 현재 상태, 실제 구독 차감량, 다중 호스트 저장소, 전원 손실 시 fsync, E3 실제 업무 성과까지 보장하지 않는다. 유료 모델을 추가로 호출하지 않았으며 기존 실험의 측정값을 재사용했다.
 
 ## 문서 유지 규칙
