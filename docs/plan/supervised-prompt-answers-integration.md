@@ -55,9 +55,9 @@ PR #105(https://github.com/inho-team/oh-my-teams/pull/105, base main, head feat/
 |---|---|---|---|---|
 | 53e46c2(037e2a5 이전) | 36148381078 | 통과 | 통과 | 실패(Tests 단계에서 테스트 22개 실패) |
 | a717d0f(037e2a5을 병합한 뒤), 첫 시도 | 36153018876의 attempt 1 | 통과 | 통과 | 실패(Tests 단계에서 테스트 1개 실패) |
-| a717d0f(같은 커밋), windows job만 재실행 | 36153018876의 attempt 2 | (attempt 1 결과 유지) | (attempt 1 결과 유지) | 통과 |
+| a717d0f(같은 커밋), `gh run rerun --failed`로 재실행 | 36153018876의 attempt 2 | 통과 | 통과 | 통과 |
 
-53e46c2에서는 windows-latest만 실패했고 ubuntu-latest와 macos-latest는 통과했습니다. a717d0f에서도 첫 시도는 windows-latest만 실패했으나 실패한 테스트는 1개뿐이었습니다. attempt 2의 ubuntu-latest·macos-latest job은 attempt 1과 시작·종료 시각이 그대로 같아 다시 실행되지 않고 attempt 1의 결과를 이어받은 것으로 확인되며, windows-latest job만 다른 시각(15:21:15~15:23:30)에 다시 실행되어 통과했습니다. 두 실패의 원인과 성질은 아래 「Windows 경로 판정 수정」 절에 적습니다.
+53e46c2에서는 windows-latest만 실패했고 ubuntu-latest와 macos-latest는 통과했습니다. a717d0f에서도 첫 시도는 windows-latest만 실패했으나 실패한 테스트는 1개뿐이었습니다. `gh run rerun --failed`로 실패한 job만 다시 실행했습니다. `gh api repos/inho-team/oh-my-teams/actions/runs/36153018876/jobs`로 확인하면 세 job 모두 `run_attempt`가 2로 보고되지만, 시작·종료 시각을 보면 ubuntu-latest(15:16:12~15:16:54Z)와 macos-latest(15:16:18~15:17:23Z)는 attempt 1과 같아 실제로는 다시 실행되지 않았고, windows-latest만 다른 시각(15:21:15~15:23:30Z)에 다시 실행되어 통과했습니다. 즉 API의 `run_attempt` 번호는 전체 실행 시도의 번호이며, 개별 job이 그 시도에서 실제로 재실행되었는지는 시작·종료 시각으로 따로 확인해야 합니다. 두 실패의 원인과 성질은 아래 「Windows 경로 판정 수정」 절에 적습니다.
 
 ### Windows 경로 판정 수정 (037e2a5)
 
@@ -354,7 +354,7 @@ purpose-changed는 task가 바뀌어서 나온 값이 아닙니다. 같은 터�
 - Codex는 2026-09-25 첫 검증에서 폴더 신뢰 질문 화면을 얻지 못했습니다(trust: not-asked, 홈 디렉터리가 이미 trusted). 대신 나타난 업데이트 안내 화면은 분류기가 `kind: unknown`, `blockedReason: agent-update-prompt`, `status: escalate`, `sent: false`로 답하지 않고 넘겼고, PM이 자율 판단으로 Down에 이어 Enter를 한 번 보내 `2. Skip`을 선택해 해소했습니다. 이 경로는 분류기가 아니라 감독자(PM)가 직접 답한 것이므로, 분류기가 Codex의 업데이트 안내 화면에 스스로 답하는 동작은 여전히 미검증입니다. 같은 날 재시도에서는 임시 `CODEX_HOME`으로 신뢰 기록이 없는 상태를 만들어 폴더 신뢰 질문 화면과 분류기 응답을 확인했습니다(「Codex 폴더 신뢰 질문 검증 (2026-09-25, 이사 지시로 재시도)」 절을 참고합니다).
 - Codex와 Agy에서 신뢰 질문에 Esc를 보냈을 때의 동작은 확인하지 못했습니다. Claude에서는 Esc를 한 번 보냈을 때 질문이 닫히고 Claude가 종료되었으며, 이 관측은 지시 밖 입력이었습니다.
 - Claude의 신뢰 질문에서 Enter의 효과는 실측하지 못했습니다. classifier의 accept 기준서에는 "Enter는 화면 안내문에서 도출한 미검증 키로 코드와 문서에 표시"되어 있고, 이 키의 근거는 `footer-text`입니다. 이번 통합 단계의 Claude 실제 경로 검증에서도 확인하지 못했습니다. **Codex 쪽은 확인되었습니다.** 임시 `CODEX_HOME`으로 만든 신뢰 질문 화면에 `prompt-answer`가 같은 근거(footer-text)의 Enter를 보내자 질문이 사라지고 임시 홈의 `config.toml`에 신뢰 항목이 기록되었습니다(「Codex 폴더 신뢰 질문 검증 (2026-09-25, 이사 지시로 재시도)」 절, `w3/pa-trust-1.json`). Agy 1.2.7의 신뢰 질문에서는 Enter를 한 번 보낸 뒤 질문이 사라진 것을 관측했습니다(`prompt-answers.jsonl`의 id 79e300e5, 키 근거 existing-behavior). 이 관측은 무승인 결정(#82)에 따른 검증 중에 얻었습니다.
-- Codex는 2026-09-25에 한도 리셋을 기다리지 않고 실제 경로 검증을 수행했습니다. 워크트리 생성부터 worker 시작(turnStart observed)까지는 주간 한도에 막히지 않았고, 막힌 지점은 시작 뒤 첫 모델 호출이었습니다(리셋 2026-09-26 06:11 KST). 같은 날 이사 지시로 재시도해 폴더 신뢰 질문 화면과 분류기의 응답은 확인했습니다. 확인되지 않은 것은 Codex worker의 실제 작업 수행과 worker_done, 커밋이며, 확인되지 못한 이유는 이 주간 한도입니다(자세한 내용은 앞의 「Codex 관측」 절과 「Codex 폴더 신뢰 질문 검증」 절을 참고합니다). 이 항목을 미검증으로 남긴 채 병합하는 것은 수용 기준을 바꾸는 결정이므로 사용자가 정했습니다. 2026-09-25에 이사를 통해 전달된 바로는, 한도 리셋(2026-09-26 06:11 KST)을 기다리지 않고 지금 병합합니다. 그래서 Codex worker의 작업 수행 검증은 리셋 뒤에 재개하는 것이 아니라, 이번 kickoff에서 미검증으로 확정됩니다.
+- Codex는 2026-09-25에 한도 리셋을 기다리지 않고 실제 경로 검증을 수행했습니다. 워크트리 생성부터 worker 시작(turnStart observed)까지는 주간 한도에 막히지 않았고, 막힌 지점은 시작 뒤 첫 모델 호출이었습니다(리셋 2026-09-26 06:11 KST). 같은 날 이사 지시로 재시도해 폴더 신뢰 질문 화면과 분류기의 응답은 확인했습니다. 확인되지 않은 것은 Codex worker의 실제 작업 수행과 worker_done, 커밋이며, 확인되지 못한 이유는 이 주간 한도입니다(자세한 내용은 앞의 「Codex 관측」 절과 「Codex 폴더 신뢰 질문 검증」 절을 참고합니다). 이 항목을 미검증으로 남긴 채 병합하는 것은 수용 기준을 바꾸는 결정이므로 사용자가 정했습니다. 이사가 이 결정을 전달한 시점은 2026-09-26(KST)입니다. 사용자는 한도 리셋(2026-09-26 06:11 KST)을 기다리지 않고 지금 병합하기로 정했습니다. 그래서 Codex worker의 작업 수행 검증은 리셋 뒤에 재개하는 것이 아니라, 이번 kickoff에서 미검증으로 확정됩니다.
 - Agy는 작업 수행과 worker_done을 검증하지 못했습니다. 주입한 지시문과 재시도 입력이 모두 제공자 503으로 끝났고, 감독 worker-start 경로는 시작할 수 없었습니다(앞 절을 참고합니다). 이미 얻은 결과는 2026-09-22에 사용자가 증거로 유지하도록 승인했으며, Agy는 다시 실행하지 않습니다.
 
 ### 결정 필요: Claude 신뢰 질문 실측
