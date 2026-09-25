@@ -18,6 +18,7 @@ import {
   draftOrganization,
 } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
+import { PROMPT_ANSWER_REFUSALS } from "../plugins/oh-my-teams/scripts/prompt-supervision.mjs";
 import { removedSkillNames } from "./removed-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -779,12 +780,35 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   );
   assert.match(runtime, /`agentDefaultArgs`/);
   // Orca pre-trusts a Codex folder only when it launches Codex itself, so the
-  // terminal path can stop at Codex's trust screen until a person answers.
+  // terminal path can stop at Codex's trust screen; the supervisor answers it.
   assert.match(runtime, /Orca가 Codex 작업 폴더를 미리 신뢰해 두지 않는다/);
+  assert.match(runtime, /`agent-trust-workspace`로 거부하며/);
+  assert.doesNotMatch(runtime, /kickoff는 사람이 답할 때까지 멈춘다/);
+  assert.doesNotMatch(runtime, /사람이 그 터미널에서 답한 뒤/);
+  assert.doesNotMatch(runtime, /터미널 앞의 사람만 답할 수 있으므로/);
+  // A stopped role's question goes through the supervisor command and back to
+  // the precheck.
+  assert.match(runtime, /### 프롬프트 질문 답하기/);
   assert.match(
     runtime,
-    /`agent-trust-workspace`로 거부하므로 kickoff는 사람이 답할 때까지 멈춘다/,
+    /node <runtime> prompt-answer --org <organization\.json> --terminal <handle>/,
   );
+  assert.match(runtime, /`prompt-answers\.jsonl`/);
+  for (const code of PROMPT_ANSWER_REFUSALS) {
+    assert.ok(runtime.includes(`\`${code}\``), `거부 코드 ${code}`);
+  }
+  assert.match(runtime, /`waiting-on-human-prompt`이면 사람을 기다리지 않고/);
+  // The worktree is proven by Orca's own lineage, not by the launcher's word,
+  // and the caller's identity is documented as unproven.
+  assert.match(runtime, /\*\*워크트리 확인\.\*\*/);
+  assert.match(runtime, /orca worktree show --worktree id:<repoId>::<경로>/);
+  assert.match(runtime, /`parentWorktreeId`/);
+  assert.match(runtime, /\*\*호출자 식별의 한계\.\*\*/);
+  assert.match(runtime, /감독 관계가 없는 터미널의 실수 호출/);
+  assert.match(runtime, /「사람이 필요한 경우」를 따른다/);
+  for (const name of ["pm", "pl"]) {
+    assert.match(readSkill(name), /악의적인 프로세스를 막지는 못한다/);
+  }
   assert.doesNotMatch(runtime, /명령이 agent 이름 하나뿐일 때만 붙이므로/);
   assert.match(runtime, /`satisfied: false`와 `blockedReason`/);
   assert.match(
@@ -1247,4 +1271,20 @@ test("skills cut review-rework loops and wasted context", () => {
     assert.match(text, /supervision-wait/);
   }
   assert.doesNotMatch(pl, /check --wait --types/);
+});
+
+test("pm, pl and status skills route a stopped role's question through the supervisor command", () => {
+  for (const name of ["pm", "pl"]) {
+    const text = readSkill(name);
+    assert.match(
+      text,
+      /node <runtime> prompt-answer --org [^\n]*--terminal <[a-z-]*handle> --workflow-id <workflowId> --state <pm-state>/,
+      `${name} 스킬에 prompt-answer 호출이 있다`,
+    );
+    assert.match(text, /terminal-idle-check`부터 다시 진행한다/);
+    assert.match(text, /「프롬프트 질문 답하기」/);
+  }
+  assert.match(readSkill("pm"), /`director-signal`로 이사에게 알린다/);
+  assert.match(readSkill("pl"), /다른 PL의 하위 역할이나 PM의 워크트리 터미널/);
+  assert.match(readSkill("status"), /`promptAnswers`/);
 });

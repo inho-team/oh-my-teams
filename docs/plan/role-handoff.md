@@ -222,8 +222,9 @@ Codex는 한도에 걸린 상태의 계정으로 Orca 터미널에서 직접 요
 
 ### 12.3 발견 사항
 
-- **전역 지침과 Claude worker:** 사용자 전역 CLAUDE.md의 "파일 수정 전 허락" 규칙 때문에 Claude 역할 worker가 파일을 고치기 전에 승인 질문에서 멈췄다. 검증에서는 worker 터미널에 직접 응답했다. 이 규칙을 역할 worker에 어떻게 적용할지는 사용자가 정해야 한다.
+- **전역 지침과 Claude worker:** 사용자 전역 CLAUDE.md의 "파일 수정 전 허락" 규칙 때문에 Claude 역할 worker가 파일을 고치기 전에 승인 질문에서 멈췄다. 검증에서는 worker 터미널에 직접 응답했다. 같은 날 사용자가 전역 규칙에 예외를 추가했다. 첫 입력이 `# oh my teams 역할 지시`로 시작하는 세션에서는 브리프가 맡긴 worktree 안의 파일 수정·생성과 커밋, 브리프가 지시한 `handoff-checkpoint` 기록을 미리 승인된 것으로 본다. worktree 밖의 파일, 파일 삭제, 되돌리기 어려운 작업은 여전히 허락을 구한다. 이 파일은 사용자 개인 설정이므로 저장소에는 포함하지 않는다. 예외를 추가한 뒤 실제 Orca 터미널에서 `claude-haiku` Junior를 실행하자, worker는 묻지 않고 파일을 만들어 커밋했고 checkpoint를 기록했다. `claude-sonnet` PL도 묻지 않고 checkpoint를 기록했다.
 - **Codex fallback 소진:** 이 계정의 Codex 프로필은 2026-09-26 06:11까지 사용 한도에 걸려 있다. 그때까지 `pl`과 `senior`의 첫째 fallback은 쓸 수 없다.
 - **새 worktree의 Agy 터미널:** trust 기록이 없는 worktree에서는 Agy 터미널 실행이 `agent-trust-workspace`로 막히고, 다음 담당자는 사용자이다. headless 실행은 이 제약을 받지 않았다.
 - **브리프 문구:** 이어받기 지시에서 프로필 이름과 파일 경로 바로 뒤에 조사를 붙여 "codex-terra이", "snapshot-1.json를"처럼 조사가 맞지 않았다. 프로필과 파일이라는 명사 뒤에 조사를 붙이도록 고쳤다.
+- **PL에게 직접 맡긴 파일 작업:** 같은 확인에서 PL에게 파일 하나를 쓰는 task를 맡기자, PL은 PL 스킬의 한계 조항에 따라 파일을 직접 쓰지 않았다. 대신 Junior에게 위임하려다 `nested_worker_depth_exceeded`(최대 깊이 1)로 거부되었고, PM에게 escalation을 보낸 뒤 `worker_done --outcome failed`로 끝냈다. 12.1절의 확인에서는 PL이 파일을 직접 커밋했으므로, 같은 역할이 실행마다 다르게 판단한 셈이다. 산출물을 만드는 task는 Junior나 Senior에게 배정한다.
 - **외부 터미널의 정지:** 역할 터미널로 실행한 worker에 `worker-stop`을 쓰면 `stop_unknown`이 나왔다. 검증에서는 `worker-abandon`으로 정리했다.

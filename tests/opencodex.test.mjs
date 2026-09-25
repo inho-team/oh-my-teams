@@ -8,15 +8,23 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   acquireOpenCodexLease,
   isolatedOpenCodexEnvironment,
+  killWindowsProcessTree,
   openCodexCommand,
+  openCodexLaunch,
   openCodexEnvironment,
   openCodexHistoryBoundary,
   processGroupMembers,
   readOpenCodexObservation,
   startOpenCodexProxy,
+  terminateWindowsTree,
   validateFixedOpenCodexAccountHome,
   validateOpenCodexRunner,
+  windowsOwnedListener,
+  windowsOwnedProcesses,
+  windowsProcessTable,
+  windowsRootUnproven,
 } from "../plugins/oh-my-teams/scripts/opencodex.mjs";
+import { killRecorded, writeFakeOcx } from "./fake-ocx.mjs";
 import { run } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   invoke,
@@ -505,13 +513,46 @@ test("run reports whether the input reached the child and whether its exit was s
   assert.equal(seen.exitObserved, true);
 });
 
-const posixOnly = {
+const win = process.platform === "win32";
+
+// Windows proves ownership from a (pid, CreationDate) snapshot with PowerShell;
+// POSIX proves it from process groups and lsof, so only lsof can be missing.
+const proxyProof = {
   skip:
-    process.platform === "win32" ||
-    spawnSync("lsof", ["-v"]).error !== undefined
-      ? "the proxy ownership proof needs POSIX process groups and lsof"
+    !win && spawnSync("lsof", ["-v"]).error !== undefined
+      ? "the POSIX proxy ownership proof needs lsof"
       : false,
 };
+
+// Tests that assert something only a POSIX process group or `ps` can show.
+const posixOnly = {
+  skip: win
+    ? "Windows has no process groups; a sibling test covers the snapshot proof"
+    : proxyProof.skip,
+};
+
+// Tests that assert something only the Windows snapshot proof produces.
+const windowsOnly = {
+  skip: win ? false : "the (pid, CreationDate) proof exists only on Windows",
+};
+
+// What stopping a proxy proves: a whole group on POSIX, only a snapshot on Windows.
+const exitReceipt = win
+  ? { termination: "exited-snapshot", descendantsExited: false }
+  : { termination: "exited", descendantsExited: true };
+
+// Makes every process inspection fail: `ps` and `lsof` come from PATH on POSIX,
+// PowerShell from SystemRoot on Windows.
+async function withBrokenInspection(action) {
+  const key = win ? "SystemRoot" : "PATH";
+  const saved = process.env[key];
+  process.env[key] = path.join(os.tmpdir(), "omt-no-such-bin");
+  try {
+    return await action();
+  } finally {
+    process.env[key] = saved;
+  }
+}
 
 const alive = (pid) => {
   try {
@@ -536,51 +577,9 @@ function fakeRuntime(t, mode) {
   const accountHome = path.join(dir, "account");
   const prefix = path.join(dir, "runtime");
   fs.mkdirSync(accountHome);
-  fs.mkdirSync(path.join(prefix, "node_modules", ".bin"), { recursive: true });
   const pids = path.join(dir, "pids");
   fs.mkdirSync(pids);
-  const script = `#!${process.execPath}
-const http = require("node:http");
-const fs = require("node:fs");
-const { spawn } = require("node:child_process");
-const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
-const pids = ${JSON.stringify(pids)};
-const record = (name, pid) => fs.writeFileSync(pids + "/" + name, String(pid));
-const serve = "require('node:http').createServer((q,r)=>{r.setHeader('content-type','application/json');r.end(JSON.stringify({status:'ok',port:" + port + "}))}).listen(" + port + ",'127.0.0.1');process.on('SIGTERM',()=>{if(!process.env.STUBBORN)process.exit(0)});setInterval(()=>{},1000)";
-const mode = ${JSON.stringify(mode)};
-record("launcher", process.pid);
-fs.writeFileSync(pids + "/home", process.env.HOME || "");
-if (mode === "serve" || mode === "stubborn-descendant") {
-  http.createServer((q, r) => {
-    r.setHeader("content-type", "application/json");
-    r.end(JSON.stringify({ status: "ok", port }));
-  }).listen(port, "127.0.0.1");
-  if (mode === "stubborn-descendant") {
-    const d = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], { stdio: "ignore" });
-    record("descendant", d.pid);
-  }
-  process.on("SIGTERM", () => process.exit(0));
-} else if (mode === "impostor") {
-  // Another group answers health while the launcher stays alive.
-  const d = spawn(process.execPath, ["-e", serve], { detached: true, stdio: "ignore" });
-  d.unref();
-  record("impostor", d.pid);
-  setInterval(() => {}, 1000);
-} else if (mode === "leaves-descendant") {
-  // The launcher exits at once; a same-group descendant keeps the port.
-  const d = spawn(process.execPath, ["-e", serve], { stdio: "ignore" });
-  d.unref();
-  record("descendant", d.pid);
-} else if (mode === "wrong-health") {
-  http.createServer((q, r) => r.end(JSON.stringify({ status: "ok", port: port + 1 }))).listen(port, "127.0.0.1");
-  process.on("SIGTERM", () => process.exit(0));
-} else if (mode === "unresponsive") {
-  http.createServer().listen(port, "127.0.0.1");
-  process.on("SIGTERM", () => process.exit(0));
-}
-`;
-  const binary = path.join(prefix, "node_modules", ".bin", "ocx");
-  fs.writeFileSync(binary, script, { mode: 0o755 });
+  writeFakeOcx(prefix, mode, pids);
   const readText = (name) => fs.readFileSync(path.join(pids, name), "utf8");
   const read = (name) => {
     try {
@@ -590,14 +589,7 @@ if (mode === "serve" || mode === "stubborn-descendant") {
     }
   };
   t.after(() => {
-    for (const name of fs.readdirSync(pids)) {
-      const pid = read(name);
-      for (const target of [-pid, pid]) {
-        try {
-          process.kill(target, "SIGKILL");
-        } catch {}
-      }
-    }
+    killRecorded(pids);
     fs.rmSync(dir, { recursive: true, force: true });
   });
   return {
@@ -615,27 +607,38 @@ if (mode === "serve" || mode === "stubborn-descendant") {
 }
 
 test(
-  "an owned proxy is accepted only as the sole listener of its own process group",
-  posixOnly,
+  "an owned proxy is accepted only as the sole listener of its own process tree",
+  proxyProof,
   async (t) => {
     const runtime = fakeRuntime(t, "serve");
     const proxy = await startOpenCodexProxy(runtime.binding);
     assert.equal(proxy.ownership.group, proxy.pid);
     assert.equal(proxy.ownership.listenerPid, runtime.read("launcher"));
-    assert.ok(
-      processGroupMembers(proxy.pid).includes(proxy.ownership.listenerPid),
-    );
+    if (win) {
+      assert.equal(
+        proxy.ownership.method,
+        "sole-listener-in-owned-process-tree-snapshot",
+      );
+      assert.ok(
+        proxy.ownership.snapshot.some(
+          (member) => member.pid === proxy.ownership.listenerPid,
+        ),
+      );
+    } else {
+      assert.ok(
+        processGroupMembers(proxy.pid).includes(proxy.ownership.listenerPid),
+      );
+    }
     assert.equal(fs.existsSync(runtime.lease), true);
     const stopped = await proxy.stop();
-    assert.deepEqual(stopped, {
-      termination: "exited",
-      descendantsExited: true,
-    });
+    assert.deepEqual(stopped, exitReceipt);
     assert.equal(await gone(runtime.read("launcher")), true);
     assert.equal(fs.existsSync(runtime.lease), false);
   },
 );
 
+// POSIX only: this needs a launcher whose child leads another process group, and
+// Windows has none. "outside-listener" below is the Windows counterpart.
 test(
   "a healthy responder that another process group owns is refused",
   posixOnly,
@@ -653,8 +656,53 @@ test(
 );
 
 test(
+  "a healthy responder outside the launcher's process tree is refused",
+  windowsOnly,
+  async (t) => {
+    const runtime = fakeRuntime(t, "outside-listener");
+    await assert.rejects(
+      () => startOpenCodexProxy(runtime.binding),
+      /opencodex-proxy-not-ready/,
+    );
+    // The launcher was ended and released; the outside listener is not ours to end.
+    assert.equal(await gone(runtime.read("launcher")), true);
+    assert.equal(fs.existsSync(runtime.lease), false);
+    assert.equal(alive(runtime.read("outside")), true);
+  },
+);
+
+test(
+  "a listener that is a child of the launcher is owned and ended with it",
+  proxyProof,
+  async (t) => {
+    const runtime = fakeRuntime(t, "serve-child");
+    const proxy = await startOpenCodexProxy(runtime.binding);
+    const server = runtime.read("server");
+    assert.equal(proxy.ownership.listenerPid, server);
+    assert.notEqual(server, runtime.read("launcher"));
+    assert.deepEqual(await proxy.stop(), exitReceipt);
+    assert.equal(await gone(server), true);
+    assert.equal(await gone(runtime.read("launcher")), true);
+  },
+);
+
+test(
+  "a health body naming another pid than the listener is refused",
+  windowsOnly,
+  async (t) => {
+    const runtime = fakeRuntime(t, "wrong-pid");
+    await assert.rejects(
+      () => startOpenCodexProxy({ ...runtime.binding, readyTimeoutMs: 1200 }),
+      /opencodex-proxy-not-ready/,
+    );
+    assert.equal(await gone(runtime.read("launcher")), true);
+    assert.equal(fs.existsSync(runtime.lease), false);
+  },
+);
+
+test(
   "a health body that does not name the port is refused",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const runtime = fakeRuntime(t, "wrong-health");
     await assert.rejects(
@@ -667,7 +715,7 @@ test(
 
 test(
   "a descendant left behind by an exited launcher is ended, not ignored",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const runtime = fakeRuntime(t, "leaves-descendant");
     await assert.rejects(
@@ -681,17 +729,14 @@ test(
 );
 
 test(
-  "stopping ends every member of the owned group, including one that ignores SIGTERM",
-  posixOnly,
+  "stopping ends every member of the owned tree, including one that ignores termination",
+  proxyProof,
   async (t) => {
     const runtime = fakeRuntime(t, "stubborn-descendant");
     const proxy = await startOpenCodexProxy(runtime.binding);
     const descendant = runtime.read("descendant");
     assert.equal(alive(descendant), true);
-    assert.deepEqual(await proxy.stop(), {
-      termination: "exited",
-      descendantsExited: true,
-    });
+    assert.deepEqual(await proxy.stop(), exitReceipt);
     assert.equal(await gone(descendant), true);
     assert.equal(await gone(runtime.read("launcher")), true);
   },
@@ -699,21 +744,14 @@ test(
 
 test(
   "a tree whose exit cannot be inspected is unverifiable and keeps its lease",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const runtime = fakeRuntime(t, "serve");
     const proxy = await startOpenCodexProxy(runtime.binding);
-    const path0 = process.env.PATH;
-    // Without `ps`, no process group can be shown empty.
-    process.env.PATH = os.tmpdir() + path.sep + "omt-no-such-bin";
-    try {
-      await assert.rejects(
-        () => proxy.stop(),
-        /opencodex-proxy-exit-unverifiable/,
-      );
-    } finally {
-      process.env.PATH = path0;
-    }
+    // Without `ps` or PowerShell, no owned tree can be shown gone.
+    await withBrokenInspection(() =>
+      assert.rejects(() => proxy.stop(), /opencodex-proxy-exit-unverifiable/),
+    );
     assert.equal(fs.existsSync(runtime.lease), true);
     // The lease stays, so a later turn on this home is refused rather than trusted.
     await assert.rejects(
@@ -756,7 +794,7 @@ test("headless command construction cannot bypass an explicit OpenCodex runner",
 
 test(
   "the proxy child runs with a private HOME, not the user's",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const runtime = fakeRuntime(t, "serve");
     const proxy = await startOpenCodexProxy(runtime.binding);
@@ -766,11 +804,295 @@ test(
         path.join(runtime.binding.accountHome, ".omt-proxy-home"),
       );
       assert.notEqual(runtime.readText("home"), os.homedir());
+      if (win)
+        assert.equal(
+          runtime.readText("userprofile"),
+          path.join(runtime.binding.accountHome, ".omt-proxy-home"),
+        );
     } finally {
       await proxy.stop();
     }
   },
 );
+
+// ---- Windows ownership proof: pure decisions, so they run on every platform ----
+
+const FILETIME = 133000000000000000n;
+const at = (offset) => String(FILETIME + BigInt(offset));
+const pidsOf = (members) => members.map((member) => member.pid).sort();
+
+test("a Windows proxy tree is the launcher and its descendants created after the spawn", () => {
+  const table = [
+    { pid: 10, ppid: 1, created: at(10) },
+    { pid: 11, ppid: 10, created: at(20) },
+    { pid: 12, ppid: 11, created: at(30) },
+    // Created before the spawn: a reused pid, not a child of ours.
+    { pid: 13, ppid: 10, created: at(-5) },
+    { pid: 20, ppid: 1, created: at(40) },
+  ];
+  const record = { group: 10, processStart: at(10), notBefore: at(0) };
+  assert.deepEqual(pidsOf(windowsOwnedProcesses(table, record)), [10, 11, 12]);
+});
+
+test("a dead launcher's descendants stay owned because Windows keeps their parent pid", () => {
+  const table = [
+    { pid: 11, ppid: 10, created: at(20) },
+    { pid: 12, ppid: 11, created: at(30) },
+    { pid: 20, ppid: 1, created: at(40) },
+  ];
+  const record = {
+    group: 10,
+    processStart: at(10),
+    notBefore: at(0),
+    launcherGoneBy: at(100),
+  };
+  assert.deepEqual(pidsOf(windowsOwnedProcesses(table, record)), [11, 12]);
+  // The launcher's start time is optional: it may have died before it was read.
+  assert.deepEqual(
+    pidsOf(windowsOwnedProcesses(table, { ...record, processStart: null })),
+    [11, 12],
+  );
+});
+
+test("a child of a dead launcher's reused pid is not owned", () => {
+  // Reviewer's repro: pid 10 was the launcher, is gone, and pid 11 was created
+  // long after any launcher with that pid could have started it.
+  const late = [{ pid: 11, ppid: 10, created: at(90000010) }];
+  const base = { group: 10, processStart: at(10), notBefore: at(0) };
+  // Nothing shows the launcher was gone, so its identity is not shown either.
+  assert.deepEqual(windowsOwnedProcesses(late, base), []);
+  // Seen gone at 100: a child created after that belongs to a stranger.
+  assert.deepEqual(
+    windowsOwnedProcesses(late, { ...base, launcherGoneBy: at(100) }),
+    [],
+  );
+  // A child created before the launcher started cannot be its child.
+  const early = [{ pid: 11, ppid: 10, created: at(5) }];
+  assert.deepEqual(
+    windowsOwnedProcesses(early, { ...base, launcherGoneBy: at(100) }),
+    [],
+  );
+  // The snapshot still names what was known to be ours.
+  assert.deepEqual(
+    windowsOwnedProcesses(late, {
+      ...base,
+      snapshot: [{ pid: 11, created: at(90000010) }],
+    }),
+    [{ pid: 11, created: at(90000010) }],
+  );
+});
+
+test("a live launcher pid with no recorded start time is not owned", () => {
+  // Reviewer's repro: a stranger reused pid 10 and started pid 11.
+  const table = [
+    { pid: 10, ppid: 1, created: at(90000000) },
+    { pid: 11, ppid: 10, created: at(90000010) },
+  ];
+  const unknown = { group: 10, processStart: null, notBefore: at(0) };
+  assert.deepEqual(windowsOwnedProcesses(table, unknown), []);
+  // Nothing was proven either way, so the caller must not treat it as gone.
+  assert.equal(windowsRootUnproven(table, unknown), true);
+  // With the start recorded, the same table is a reused pid: not ours, and gone.
+  const known = { ...unknown, processStart: at(10) };
+  assert.deepEqual(windowsOwnedProcesses(table, known), []);
+  assert.equal(windowsRootUnproven(table, known), false);
+  // A snapshot pair with the same creation time does prove the pid.
+  const seen = { ...unknown, snapshot: [{ pid: 10, created: at(90000000) }] };
+  assert.deepEqual(pidsOf(windowsOwnedProcesses(table, seen)), [10]);
+  assert.equal(windowsRootUnproven(table, seen), false);
+  // No live process at the pid: nothing to prove.
+  assert.equal(windowsRootUnproven([], unknown), false);
+});
+
+test("a descendant must be created after its own parent", () => {
+  const table = [
+    { pid: 10, ppid: 1, created: at(10) },
+    { pid: 11, ppid: 10, created: at(20) },
+    // Its parent pid is ours, but it started before that parent did.
+    { pid: 12, ppid: 11, created: at(15) },
+  ];
+  const record = { group: 10, processStart: at(10), notBefore: at(0) };
+  assert.deepEqual(pidsOf(windowsOwnedProcesses(table, record)), [10, 11]);
+});
+
+test("a reused launcher pid takes no children with it", () => {
+  const table = [
+    { pid: 10, ppid: 1, created: at(500) },
+    { pid: 11, ppid: 10, created: at(510) },
+  ];
+  const record = { group: 10, processStart: at(10), notBefore: at(0) };
+  assert.deepEqual(windowsOwnedProcesses(table, record), []);
+});
+
+test("a snapshot pair counts only when pid and creation time both match", () => {
+  const table = [
+    { pid: 20, ppid: 1, created: at(40) },
+    { pid: 21, ppid: 1, created: at(50) },
+  ];
+  const record = {
+    group: 10,
+    processStart: at(10),
+    notBefore: at(0),
+    snapshot: [
+      { pid: 20, created: at(40) },
+      { pid: 21, created: at(49) },
+      { pid: 22, created: at(60) },
+    ],
+  };
+  assert.deepEqual(pidsOf(windowsOwnedProcesses(table, record)), [20]);
+});
+
+// A simulated Windows host: `rows` is the process table, a kill removes the
+// named pid and its descendants except `unkillable` pids, and `onKill` may add
+// processes that appear while the kill runs.
+function fakeWindowsHost(rows, { unkillable = [], onKill } = {}) {
+  let live = rows.map((row) => ({ ...row }));
+  const killed = [];
+  const descendantsOf = (pid) =>
+    live
+      .filter((row) => row.ppid === pid)
+      .flatMap((row) => [row.pid, ...descendantsOf(row.pid)]);
+  return {
+    killed,
+    io: {
+      table: () => live.map((row) => ({ ...row })),
+      kill: (pid) => {
+        killed.push(pid);
+        const doomed = new Set([pid, ...descendantsOf(pid)]);
+        live = live.filter(
+          (row) => !doomed.has(row.pid) || unkillable.includes(row.pid),
+        );
+        live.push(...(onKill?.(pid, killed.length) ?? []));
+      },
+    },
+  };
+}
+
+const launcherRecord = {
+  group: 10,
+  processStart: at(10),
+  notBefore: at(0),
+  snapshot: [
+    { pid: 10, created: at(10) },
+    { pid: 11, created: at(20) },
+  ],
+};
+const launcherRows = [
+  { pid: 10, ppid: 1, created: at(10) },
+  { pid: 11, ppid: 10, created: at(20) },
+];
+
+test("a survivor outside the snapshot keeps the exit unproven after the launcher is gone", async () => {
+  // Reviewer's repro: pid 12 is the launcher's child but was not in the health
+  // snapshot, and taskkill cannot end it. The launcher is gone after pass 1.
+  const host = fakeWindowsHost(
+    [...launcherRows, { pid: 12, ppid: 10, created: at(30) }],
+    { unkillable: [12] },
+  );
+  await assert.rejects(
+    terminateWindowsTree(launcherRecord, 50, host.io),
+    /opencodex-proxy-exit-unverifiable/,
+  );
+  // It was seen while the launcher lived, so it is ended by its own pair later.
+  assert.equal(host.killed.filter((pid) => pid === 12).length >= 1, true);
+});
+
+test("a child started while the launcher is being killed still has to be gone", async () => {
+  // Pid 13 appears during the kill, so no earlier table names it; its parent
+  // pid is the launcher's, which is absent by the time it is seen.
+  const spawnLate = (pid, count) =>
+    count === 1 ? [{ pid: 13, ppid: 10, created: at(40) }] : [];
+  const stuck = fakeWindowsHost(launcherRows, {
+    unkillable: [13],
+    onKill: spawnLate,
+  });
+  await assert.rejects(
+    terminateWindowsTree(launcherRecord, 50, stuck.io),
+    /opencodex-proxy-exit-unverifiable/,
+  );
+  assert.equal(stuck.killed.includes(13), true);
+  // When the later kill does end it, the proof passes and says only "snapshot".
+  const ended = fakeWindowsHost(launcherRows, { onKill: spawnLate });
+  assert.deepEqual(await terminateWindowsTree(launcherRecord, 50, ended.io), {
+    termination: "exited-snapshot",
+    descendantsExited: false,
+  });
+  assert.equal(ended.killed.includes(13), true);
+});
+
+test("a stranger that takes the launcher's pid or its orphans' parent pid after the kill is not ended", async () => {
+  const far = at(100000000000000000);
+  // A stranger later holds pid 10, with a child of its own.
+  const reused = fakeWindowsHost(launcherRows, {
+    onKill: (pid, count) =>
+      count === 1
+        ? [
+            { pid: 10, ppid: 1, created: far },
+            { pid: 15, ppid: 10, created: far },
+          ]
+        : [],
+  });
+  await terminateWindowsTree(launcherRecord, 50, reused.io);
+  assert.deepEqual(reused.killed, [10, 11]);
+  // A stranger's child of the vanished pid, created after we saw it gone.
+  const orphan = fakeWindowsHost(launcherRows, {
+    onKill: (pid, count) =>
+      count === 1 ? [{ pid: 16, ppid: 10, created: far }] : [],
+  });
+  await terminateWindowsTree(launcherRecord, 50, orphan.io);
+  assert.equal(orphan.killed.includes(16), false);
+});
+
+test("a launcher pid that no record can prove is neither ended nor taken for gone", async () => {
+  const host = fakeWindowsHost(launcherRows);
+  await assert.rejects(
+    terminateWindowsTree(
+      { group: 10, processStart: null, notBefore: at(0) },
+      50,
+      host.io,
+    ),
+    /opencodex-proxy-exit-unverifiable/,
+  );
+  assert.deepEqual(host.killed, []);
+});
+
+test("a Windows listener is owned only when it is the sole listener, in the tree and named by health", () => {
+  const table = [
+    { pid: 10, ppid: 1, created: at(10) },
+    { pid: 11, ppid: 10, created: at(20) },
+    { pid: 20, ppid: 1, created: at(40) },
+  ];
+  const record = { group: 10, processStart: at(10), notBefore: at(0) };
+  assert.equal(windowsOwnedListener(table, record, [11], 11), 11);
+  assert.equal(windowsOwnedListener(table, record, [10, 11], 11), null);
+  assert.equal(windowsOwnedListener(table, record, [20], 20), null);
+  assert.equal(windowsOwnedListener(table, record, [11], 10), null);
+  assert.equal(windowsOwnedListener(table, record, [], 11), null);
+});
+
+test("the runtime launch names this Node for the package entry on Windows and the bin script elsewhere", () => {
+  const prefix = path.join(os.tmpdir(), "omt-launch");
+  const launch = openCodexLaunch(prefix);
+  if (win) {
+    assert.equal(launch.command, process.execPath);
+    assert.deepEqual(launch.args, [
+      path.join(
+        prefix,
+        "node_modules",
+        "@bitkyc08",
+        "opencodex",
+        "bin",
+        "ocx.mjs",
+      ),
+    ]);
+  } else {
+    assert.equal(
+      launch.command,
+      path.join(prefix, "node_modules", ".bin", "ocx"),
+    );
+    assert.deepEqual(launch.args, []);
+  }
+});
 
 // ---- account lease: owner record and stale recovery ----
 
@@ -780,18 +1102,20 @@ function leaseFixture(t) {
   const children = [];
   t.after(() => {
     for (const pid of children) {
-      for (const target of [-pid, pid]) {
-        try {
-          process.kill(target, "SIGKILL");
-        } catch {}
-      }
+      if (win) killWindowsProcessTree(pid);
+      else
+        for (const target of [-pid, pid]) {
+          try {
+            process.kill(target, "SIGKILL");
+          } catch {}
+        }
     }
     fs.rmSync(accountHome, { recursive: true, force: true });
   });
-  // A sleeping process that leads its own group, as an orphaned proxy would.
+  // A sleeping process that leads its own group (POSIX), as an orphaned proxy would.
   const sleeper = () => {
     const child = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], {
-      detached: true,
+      detached: !win,
       stdio: "ignore",
     });
     child.unref();
@@ -799,9 +1123,15 @@ function leaseFixture(t) {
     return child.pid;
   };
   const startOf = (pid) =>
-    spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-      encoding: "utf8",
-    }).stdout.trim();
+    win
+      ? windowsProcessTable(pid)[0].created
+      : spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+          encoding: "utf8",
+        }).stdout.trim();
+  // A time before any process of these tests started, as the Windows proxy records.
+  const notBefore = String(
+    (BigInt(Date.now() - 600000) + 11644473600000n) * 10000n,
+  );
   // A lease file, plus the proxy record kept beside it under the lease's token.
   const write = (record) => {
     if (typeof record === "string") return fs.writeFileSync(file, record);
@@ -810,7 +1140,12 @@ function leaseFixture(t) {
     if (proxy)
       fs.writeFileSync(
         `${file}.proxy.${lease.token}`,
-        JSON.stringify({ token: lease.token, pid: lease.pid, ...proxy }),
+        JSON.stringify({
+          token: lease.token,
+          pid: lease.pid,
+          ...(win && { notBefore }),
+          ...proxy,
+        }),
       );
   };
   // A pid that certainly no longer exists.
@@ -823,7 +1158,7 @@ function leaseFixture(t) {
 
 test(
   "a lease records its owner and, after spawn, the proxy group",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     const lease = await acquireOpenCodexLease(box.accountHome);
@@ -848,7 +1183,7 @@ test(
 
 test(
   "a live owner keeps the home and is told apart from a dead one",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     const owner = box.sleeper();
@@ -868,7 +1203,7 @@ test(
 
 test(
   "a dead owner's lease is taken over and its orphaned proxy group is ended",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     const orphan = box.sleeper();
@@ -878,7 +1213,10 @@ test(
       processStart: "Mon Jan  1 00:00:00 2001",
       proxy: { group: orphan, processStart: box.startOf(orphan) },
     });
-    assert.equal(processGroupMembers(orphan).length > 0, true);
+    assert.equal(
+      win ? alive(orphan) : processGroupMembers(orphan).length > 0,
+      true,
+    );
     const lease = await acquireOpenCodexLease(box.accountHome, {
       stopGraceMs: 600,
     });
@@ -895,7 +1233,7 @@ test(
 
 test(
   "a reused owner pid does not count as a live owner",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     const stranger = box.sleeper();
@@ -913,14 +1251,18 @@ test(
   },
 );
 
-test("a reused proxy group id is not ended", posixOnly, async (t) => {
+test("a reused proxy group id is not ended", proxyProof, async (t) => {
   const box = leaseFixture(t);
   const stranger = box.sleeper();
   box.write({
     token: "t4",
     pid: box.deadPid(),
     processStart: null,
-    proxy: { group: stranger, processStart: "Mon Jan  1 00:00:00 2001" },
+    // A start time that no live process has: `lstart` text on POSIX, a FILETIME on Windows.
+    proxy: {
+      group: stranger,
+      processStart: win ? "116444736000000000" : "Mon Jan  1 00:00:00 2001",
+    },
   });
   const lease = await acquireOpenCodexLease(box.accountHome);
   assert.equal(lease.recovered.terminated, false);
@@ -930,7 +1272,7 @@ test("a reused proxy group id is not ended", posixOnly, async (t) => {
 
 test(
   "a lease whose state cannot be proven clean is kept and reported as unverifiable",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     box.write("not json");
@@ -947,23 +1289,19 @@ test(
       processStart: null,
       proxy: { group: orphan, processStart: null },
     });
-    const path0 = process.env.PATH;
-    process.env.PATH = path.join(os.tmpdir(), "omt-no-such-bin");
-    try {
-      await assert.rejects(
+    await withBrokenInspection(() =>
+      assert.rejects(
         () => acquireOpenCodexLease(box.accountHome, { stopGraceMs: 200 }),
         /opencodex-lease-unverifiable/,
-      );
-    } finally {
-      process.env.PATH = path0;
-    }
+      ),
+    );
     assert.equal(JSON.parse(fs.readFileSync(box.file, "utf8")).token, "t5");
   },
 );
 
 test(
   "a turn killed with SIGKILL leaves a lease and proxy that the next turn cleans up",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const runtime = fakeRuntime(t, "serve");
     const moduleUrl = new URL(
@@ -987,8 +1325,11 @@ test(
     assert.equal(alive(orphan), true);
     runner.kill("SIGKILL");
     await new Promise((resolve) => runner.once("exit", resolve));
-    // The dead runner never ran its cleanup: the proxy and the lease remain.
-    assert.equal(alive(orphan), true);
+    // The dead runner never ran its cleanup, so the lease remains. On POSIX the
+    // proxy remains too; on Windows libuv puts children in a kill-on-close job,
+    // so the proxy dies with its runner and the next turn finds nothing to end.
+    if (win) assert.equal(await gone(orphan), true);
+    else assert.equal(alive(orphan), true);
     assert.equal(fs.existsSync(runtime.lease), true);
     const proxy = await startOpenCodexProxy(runtime.binding);
     try {
@@ -1005,7 +1346,7 @@ test(
 // lease path. Whatever they publish must survive.
 test(
   "a live owner that appears during a reclaim is never displaced",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     const dead = { token: "dead", pid: box.deadPid(), processStart: null };
@@ -1056,7 +1397,7 @@ test(
 
 test(
   "a reclaimer that finds the lease replaced while it waited leaves the new owner alone",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     box.write({ token: "stale", pid: box.deadPid(), processStart: null });
@@ -1112,13 +1453,14 @@ import(moduleUrl).then(async (m) => {
 
 test(
   "many acquirers racing for a dead owner's lease leave exactly one holder",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const moduleUrl = new URL(
       "../plugins/oh-my-teams/scripts/opencodex.mjs",
       import.meta.url,
     ).href;
-    for (let round = 0; round < 4; round += 1) {
+    // PowerShell makes each Windows acquirer slow, so fewer rounds keep the test short.
+    for (let round = 0; round < (win ? 2 : 4); round += 1) {
       const box = leaseFixture(t);
       box.write({
         token: `dead-${round}`,
@@ -1174,7 +1516,7 @@ test(
 
 test(
   "a reclaim mutex left by a dead reclaimer blocks only that lease and is reported as stuck",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     box.write({ token: "stale", pid: box.deadPid(), processStart: null });
@@ -1200,7 +1542,7 @@ test(
 
 test(
   "a reclaim in progress by a live process is waited for, then reported as held",
-  posixOnly,
+  proxyProof,
   async (t) => {
     const box = leaseFixture(t);
     box.write({ token: "stale", pid: box.deadPid(), processStart: null });

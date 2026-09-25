@@ -13,8 +13,8 @@ import {
   agentStarted,
   clearRoleTerminal,
   commandPending,
+  commandTyping,
   freshContextDecision,
-  AGY_BANNER_COLUMNS,
   launchLine,
   openRoleTerminal,
   roleTitle,
@@ -31,6 +31,7 @@ import {
   readLaunches,
   recordLaunch,
 } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
+import { VERIFIED_ORCA_VERSION } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
 
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
@@ -62,9 +63,9 @@ function fakeOrca(
     if (verb === "wait") return reply({ wait: { satisfied: true } });
     if (verb === "read") {
       const other = others[argv[argv.indexOf("--terminal") + 1]];
-      if (other) return reply({ terminal: { tail: other } });
+      if (other) return reply({ terminal: { source: "screen", tail: other } });
       const tail = screens.length > 1 ? screens.shift() : screens[0];
-      return reply({ terminal: { tail } });
+      return reply({ terminal: { source: "screen", tail } });
     }
     if (verb === "send") return reply({ send: { accepted: true } });
     if (verb === "list") return reply({ terminals });
@@ -97,7 +98,26 @@ const fast = {
   allowUnverified: true,
   allowUnverifiedApproval: "test-approved",
 };
-const typedFor = (command) => launchLine(command, "darwin").typed;
+const typedFor = (command) => launchLine(command).typed;
+
+// The supervisor context of a launch whose supervisor is already proven; the
+// proof itself is tested in prompt-supervision.test.mjs.
+const supervised = (t) => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-rt-state-"));
+  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
+  return {
+    orgFile: "unused",
+    stateDir,
+    workflowId: "wf",
+    launchCwd: stateDir,
+    settleMs: 0,
+    rechecks: 1,
+    authorize: async ({ expectedWorktree }) => ({
+      supervisor: { handle: "term_pm", role: "pm", runId: "run_pm" },
+      worktree: expectedWorktree ?? "/worktree",
+    }),
+  };
+};
 
 test("every role command runs tools without an approval prompt", () => {
   // Nobody answers an approval prompt in a role terminal, and Orca adds its
@@ -127,39 +147,29 @@ test("every role command runs tools without an approval prompt", () => {
   assert.throws(() => roleCommand(org, "pm"), /plain command/);
 });
 
-test("an Agy Gemini role is launched narrow enough for Orca to see it idle", async () => {
-  // #41: at Orca's width Agy 1.2.4 draws its logo left of the banner, the
-  // model line starts with logo glyphs, and Orca never reports tui-idle, so
-  // worker-start refused every Agy role.
+test("an Agy Gemini role is launched with no width adjustment on any platform", async () => {
+  // #104: Orca 1.4.210's idle check no longer reads the model line (the
+  // banner-width check #41 relied on is gone), so no platform narrows the
+  // terminal anymore.
   const org = example();
   const gemini = roleCommand(org, "senior");
   assert.equal(gemini.modelRequested, "gemini-3.8-flash-high");
-  assert.deepEqual(launchLine(gemini, "darwin"), {
-    typed: `stty cols ${AGY_BANNER_COLUMNS}; ${gemini.command}`,
-    columns: AGY_BANNER_COLUMNS,
-  });
-  // Windows skips the width adjustment: combining mode con: with agy in one
-  // line keeps powershell.exe as the foreground process and Orca cannot detect
-  // the agent. The matrix blocks that path; on Windows Agy Gemini either runs
-  // through allowUnverified or headless.
-  assert.deepEqual(launchLine(gemini, "win32"), {
-    typed: gemini.command,
-    columns: null,
-  });
-  assert.equal(
-    launchLine(gemini, "linux").typed,
-    launchLine(gemini, "darwin").typed,
-  );
-  // A non-Gemini model fails Orca's check at any width.
+  for (const platform of ["darwin", "linux", "win32"]) {
+    assert.deepEqual(launchLine(gemini, platform), {
+      typed: gemini.command,
+      columns: null,
+    });
+  }
+  // A non-Gemini model never carried a width adjustment either.
   const claudeOnAgy = roleCommand(org, "junior");
   assert.equal(launchLine(claudeOnAgy, "linux").columns, null);
   assert.equal(launchLine(roleCommand(org, "pl"), "linux").columns, null);
 
-  const { typed } = launchLine(gemini, "darwin");
+  const { typed } = launchLine(gemini);
   const orca = fakeOrca([
     [
       `${PROMPT} ${typed}`,
-      "  Antigravity CLI 1.2.4",
+      "  Antigravity CLI 1.2.11",
       "  Gemini 3.8 Flash (High)",
       ">",
     ],
@@ -175,7 +185,7 @@ test("an Agy Gemini role is launched narrow enough for Orca to see it idle", asy
   assert.equal(opened.ready, true);
   assert.equal(opened.submission, "orca");
   assert.equal(opened.launched, typed);
-  assert.equal(opened.columns, AGY_BANNER_COLUMNS);
+  assert.equal(opened.columns, null);
 });
 
 test("a command left at the prompt is told apart from a started agent", () => {
@@ -210,6 +220,100 @@ test("a command left at the prompt is told apart from a started agent", () => {
   assert.equal(commandPending(exited, command), false);
   assert.equal(agentStarted(exited, command), false);
   assert.equal(agentStarted([], command), false);
+});
+
+test("a command still being echoed is neither pending nor a started agent", async () => {
+  // Confirmed against the previous code by feeding it every prefix of the
+  // command: each cut-off line read as `started`. Not confirmed: that a real
+  // shell echoes this way, or that it was the path of the incident where
+  // ready: true came back with the command still in the input line.
+  const command =
+    "claude --dangerously-skip-permissions --model opus[1m] --autocompact 250k";
+  const cutOffs = [
+    [`${PROMPT} cla`],
+    [`${PROMPT} claude --dangerously-skip-permis`],
+    [
+      `${PROMPT} claude --dangerously-skip-permissions --model opus[1m] --a`,
+      "ut",
+    ],
+  ];
+  for (const screen of cutOffs) {
+    assert.equal(commandTyping(screen, command), true, screen.join("|"));
+    assert.equal(commandPending(screen, command), false);
+    assert.equal(agentStarted(screen, command), false);
+  }
+  // The whole command is pending, not typing; a bare prompt is neither.
+  const whole = [`${PROMPT} ${command}`];
+  assert.equal(commandTyping(whole, command), false);
+  assert.equal(commandPending(whole, command), true);
+  assert.equal(commandTyping([PROMPT], command), false);
+  assert.equal(commandTyping(["Claude Code", "❯"], command), false);
+});
+
+test("Enter waits for the echo to finish and is then sent exactly once", async () => {
+  const command = roleCommand(example(), "senior");
+  const line = typedFor(command);
+  const cut = `${PROMPT} ${line.slice(0, 20)}`;
+  const whole = `${PROMPT} ${line}`;
+  // The first reads see a partial echo, then the whole line, then, once Enter
+  // has been sent, the agent.
+  let reads = 0;
+  let entered = false;
+  const calls = [];
+  const execute = async (argv) => {
+    const verb = argv[2];
+    calls.push(argv.slice(1, -1));
+    const reply = (result) => ({
+      code: 0,
+      stdout: JSON.stringify({ ok: true, result }),
+    });
+    if (verb === "create") return reply({ terminal: { handle: "term_1" } });
+    if (verb === "wait") return reply({ wait: { satisfied: true } });
+    if (verb === "read") {
+      reads += 1;
+      if (entered)
+        return reply({ terminal: { tail: [whole, "Antigravity", ">"] } });
+      return reply({ terminal: { tail: [reads <= 3 ? cut : whole] } });
+    }
+    if (verb === "send") {
+      // Never Enter over a cut-off line.
+      assert.ok(
+        reads > 3,
+        "Enter was sent while the command was still echoing",
+      );
+      entered = true;
+      return reply({ send: { accepted: true } });
+    }
+    if (verb === "list") return reply({ terminals: [] });
+    if (verb === "rename") return reply({ rename: { title: "x" } });
+    throw new Error(`unexpected verb ${verb}`);
+  };
+  const opened = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute,
+    settleMs: 5,
+    readyMs: 200,
+    pollMs: 1,
+    platform: "darwin",
+    allowUnverified: true,
+    allowUnverifiedApproval: "test-approved",
+  });
+  assert.equal(opened.ready, true);
+  assert.equal(opened.submission, "enter-sent");
+  assert.equal(calls.filter((call) => call[1] === "send").length, 1);
+
+  // An echo that never finishes is reported blocked, without any Enter.
+  const stuck = fakeOrca([[cut]]);
+  const blocked = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute: stuck.execute,
+    ...fast,
+  });
+  assert.equal(blocked.ready, false);
+  assert.equal(blocked.status, "blocked");
+  assert.deepEqual(stuck.sends(), []);
 });
 
 test("a role terminal Orca started itself gets no extra Enter", async () => {
@@ -413,10 +517,12 @@ test("role titles lead with the role tag and name the worktree", () => {
   assert.deepEqual(workerTerminal(undefined), { handle: null, place: null });
 });
 
-test("Agy's folder trust question is answered once, only when trust is selected", async () => {
+test("Agy's folder trust question is answered once, only when trust is selected", async (t) => {
   const command = roleCommand(example(), "senior");
   const asked = [
     `${PROMPT} ${typedFor(command)}`,
+    "Accessing workspace:",
+    "/worktree",
     "Do you trust the contents of this project?",
     "> Yes, I trust this folder",
     "  No, exit",
@@ -433,12 +539,15 @@ test("Agy's folder trust question is answered once, only when trust is selected"
   );
 
   const agent = [`${PROMPT} ${typedFor(command)}`, "Antigravity", ">"];
-  const trusted = fakeOrca([asked, asked, agent]);
+  // Reads: the launch twice, the answer's own read, the read after its key, and
+  // the one after the settle.
+  const trusted = fakeOrca([asked, asked, asked, agent]);
   const opened = await openRoleTerminal({
     worktree: "active",
     command,
     execute: trusted.execute,
     ...fast,
+    supervision: supervised(t),
   });
   // The answered terminal keeps the question in its buffer, which Orca's
   // startup check blocks on, so a clean terminal is returned instead.
@@ -472,29 +581,42 @@ test("Agy's folder trust question is answered once, only when trust is selected"
     command,
     execute: repeated.execute,
     ...fast,
+    supervision: supervised(t),
   });
   assert.equal(blocked.ready, false);
   assert.equal(blocked.status, "blocked");
   assert.equal(blocked.reopened, null);
+  assert.equal(blocked.trust, "unresolved");
   assert.equal(repeated.sends().length, 1);
   assert.deepEqual(repeated.closes(), []);
 });
 
-test("a reopened terminal asking for trust again is blocked, not reopened", async () => {
+test("a reopened terminal asking for trust again is blocked, not reopened", async (t) => {
   const command = roleCommand(example(), "senior");
   const asked = [
     `${PROMPT} ${typedFor(command)}`,
+    "Accessing workspace:",
+    "/worktree",
     "Do you trust the contents of this project?",
     "> Yes, I trust this folder",
   ];
   const answered = [`${PROMPT} ${typedFor(command)}`, ">"];
   // The question comes back in the second terminal: the trust was not kept.
-  const forgot = fakeOrca([asked, asked, answered, answered, asked]);
+  const forgot = fakeOrca([
+    asked,
+    asked,
+    asked,
+    answered,
+    answered,
+    answered,
+    asked,
+  ]);
   const opened = await openRoleTerminal({
     worktree: "active",
     command,
     execute: forgot.execute,
     ...fast,
+    supervision: supervised(t),
   });
   assert.equal(opened.terminal, "term_2");
   assert.equal(opened.trust, "accepted");
@@ -506,15 +628,49 @@ test("a reopened terminal asking for trust again is blocked, not reopened", asyn
   assert.equal(forgot.creates().length, 2);
 });
 
-test("a trusted terminal that will not close is reported, not doubled", async () => {
+test("a trust question still on the screen under other lines is not reopened but blocked", async (t) => {
   const command = roleCommand(example(), "senior");
   const asked = [
     `${PROMPT} ${typedFor(command)}`,
+    "Accessing workspace:",
+    "/worktree",
+    "Do you trust the contents of this project?",
+    "> Yes, I trust this folder",
+    "  No, exit",
+  ];
+  // The screen was not redrawn after Enter: the question is still shown, with
+  // lines below it, so it must not be taken for an answered question.
+  const stale = [...asked, "  something drawn below the question"];
+  assert.equal(trustQuestion(stale), false);
+  const kept = fakeOrca([asked, asked, asked, stale]);
+  const opened = await openRoleTerminal({
+    worktree: "active",
+    command,
+    execute: kept.execute,
+    ...fast,
+    supervision: supervised(t),
+  });
+  // The screen after the key is neither the question nor a clear screen, so
+  // the answer is reported unresolved and the terminal is kept as it is.
+  assert.equal(opened.trust, "unresolved");
+  assert.equal(opened.reopened, null);
+  assert.equal(opened.ready, false);
+  assert.equal(opened.status, "blocked");
+  assert.equal(kept.creates().length, 1);
+  assert.deepEqual(kept.closes(), []);
+});
+
+test("a trusted terminal that will not close is reported, not doubled", async (t) => {
+  const command = roleCommand(example(), "senior");
+  const asked = [
+    `${PROMPT} ${typedFor(command)}`,
+    "Accessing workspace:",
+    "/worktree",
     "Do you trust the contents of this project?",
     "> Yes, I trust this folder",
   ];
   const stuck = fakeOrca(
-    [asked, asked, [`${PROMPT} ${typedFor(command)}`, ">"]],
+    [asked, asked, asked, [`${PROMPT} ${typedFor(command)}`, ">"]],
     {
       closeFails: true,
     },
@@ -524,6 +680,7 @@ test("a trusted terminal that will not close is reported, not doubled", async ()
     command,
     execute: stuck.execute,
     ...fast,
+    supervision: supervised(t),
   });
   assert.equal(opened.terminal, "term_1");
   assert.equal(opened.trust, "accepted");
@@ -559,7 +716,9 @@ test("the launch documents open role terminals through role-terminal", () => {
 });
 
 test("on Windows an Agy Gemini role without approval is refused before any terminal opens", async () => {
-  // 실측(Orca 1.4.204): Windows gemini+powershell → 8행(headless/verified).
+  // 실측(Orca 1.4.204): Windows gemini+powershell → 8행(headless).
+  // 근거였던 1.4.204 판정 규칙은 1.4.210에서 교체되어 사라졌고 재검증할 Windows
+  // 머신이 없어 evidence는 verified가 아니라 unverified로 낮아졌다(#104).
   // headless 경로는 openRoleTerminal에서 blocked와 동일하게 throw되며
   // 이유 코드는 orca-idle-requires-narrow-screen.
   const org = example();
@@ -593,29 +752,22 @@ test("on Windows an Agy Gemini role without approval is refused before any termi
   assert.doesNotThrow(() => launchLine(claude, "win32"));
 });
 
-test("win32/POSIX별 실행 명령: POSIX에서만 폭 조정 명령이 붙는다", () => {
+test("win32/POSIX별 실행 명령: 어떤 플랫폼에서도 폭 조정 명령이 붙지 않는다", () => {
+  // #104: Orca 1.4.210에서는 POSIX Agy Gemini도 폭 조정 없이 tui-idle을 통과한다.
   const org = example();
   const gemini = roleCommand(org, "senior");
   assert.equal(gemini.provider, "agy");
   assert.match(gemini.modelRequested, /^gemini/i);
 
-  // POSIX: stty cols 44 붙음
-  const posix = launchLine(gemini, "darwin");
-  assert.match(posix.typed, /stty cols 44/);
-  assert.equal(posix.columns, AGY_BANNER_COLUMNS);
+  for (const platform of ["darwin", "linux", "win32"]) {
+    const result = launchLine(gemini, platform);
+    assert.doesNotMatch(result.typed, /stty/);
+    assert.doesNotMatch(result.typed, /mode con/);
+    assert.equal(result.columns, null);
+    assert.equal(result.typed, gemini.command);
+  }
 
-  // Linux도 POSIX
-  const linux = launchLine(gemini, "linux");
-  assert.match(linux.typed, /stty cols 44/);
-
-  // Windows: 폭 조정 없음 (단일 명령만)
-  const win = launchLine(gemini, "win32");
-  assert.doesNotMatch(win.typed, /mode con/);
-  assert.doesNotMatch(win.typed, /stty/);
-  assert.equal(win.columns, null);
-  assert.equal(win.typed, gemini.command);
-
-  // Claude는 플랫폼 무관하게 폭 조정 없음
+  // Claude는 플랫폼 무관하게 폭 조정 없음(변경 전과 동일)
   const claude = roleCommand(org, "pm");
   assert.equal(launchLine(claude, "win32").columns, null);
   assert.equal(launchLine(claude, "darwin").columns, null);
@@ -631,7 +783,7 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
   };
 
   // Agy gemini win32 powershell → 8행 headless → orca-idle-requires-narrow-screen → 터미널 생성 없음
-  // (단일 명령 → isCompoundCommand=false → 2행 건너뜀 → 8행 headless/verified)
+  // (단일 명령 → isCompoundCommand=false → 2행 건너뜀 → 8행 headless, evidence: unverified)
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -653,7 +805,8 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
     "matrix refusal must not call orca terminal create",
   );
 
-  // 신뢰 기록 없는 경우도 마찬가지
+  // 신뢰 기록이 없는 Agy 역할은 거부하지 않는다. 폴더 신뢰 질문은 터미널이 열린 뒤
+  // 감독자가 prompt-answer 경로로 답하므로, 사람을 기다리며 막지 않는다.
   const callsTrust = [];
   const executeTrust = async (argv) => {
     callsTrust.push(argv);
@@ -668,17 +821,14 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
       platform: "darwin",
       shell: "posix",
       trustRecordExists: false,
-      allowUnverified: true,
-      allowUnverifiedApproval: "test",
       ...{ settleMs: 5, readyMs: 20, pollMs: 1 },
     }),
-    /agent-trust-workspace/,
+    (error) => {
+      assert.equal(error.matrixRefusal, undefined, "matrix는 거부하지 않는다");
+      return true;
+    },
   );
-  assert.equal(
-    callsTrust.length,
-    0,
-    "trust refusal must not call orca terminal create",
-  );
+  assert.ok(callsTrust.length > 0, "터미널 생성까지 진행한다");
 });
 test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", async () => {
   // finding: missing-headless-refusal-test
@@ -973,7 +1123,7 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
 
 test("Claude POSIX PM launches without approval and preserves evidence warnings and readiness", async () => {
   const command = roleCommand(example(), "pm");
-  for (const orcaVersion of ["1.4.204", "1.4.205"]) {
+  for (const orcaVersion of [VERIFIED_ORCA_VERSION, "1.4.205"]) {
     for (const started of [true, false]) {
       const orca = fakeOrca([
         started ? ["Claude Code v2.1.277", "Opus 4.6"] : [PROMPT],
@@ -1186,8 +1336,13 @@ test("readLaunchEnvironment gitdir resolution matches git rev-parse", async (t) 
   const pathM = await import("node:path");
   const { execSync } = await import("node:child_process");
 
-  const tmpBase = pathM.join(tmpDir, "omt-gitdir-test-" + Date.now());
-  fsM.mkdirSync(tmpBase, { recursive: true });
+  // git records the resolved path in the worktree's `.git` file, and on macOS
+  // the temporary directory is a symlink, so the base is resolved here too.
+  // Otherwise the expected key and the recorded gitdir name the same directory
+  // by two different paths and the lookup misses.
+  const tmpBase = fsM.realpathSync(
+    fsM.mkdtempSync(pathM.join(tmpDir, "omt-gitdir-test-")),
+  );
   t.after(() => fsM.rmSync(tmpBase, { recursive: true, force: true }));
 
   // Create a real git repository

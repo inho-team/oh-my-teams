@@ -168,7 +168,10 @@ export function validateReviewInput(input, task) {
   return input;
 }
 
-function assertReportBinding(task, report) {
+// requirePassed is false only for a review that concluded changes-requested or
+// inconclusive: that verdict is itself evidence the checks did not pass, and
+// demanding passing evidence for it would make a real rejection unrecordable.
+function assertReportBinding(task, report, { requirePassed = true } = {}) {
   assert(
     report?.taskId === task.id &&
       report.taskHash === taskHash(task) &&
@@ -176,9 +179,13 @@ function assertReportBinding(task, report) {
     "Report does not match task revision/hash",
   );
   assert(
-    report.evidence?.status === "passed" &&
-      typeof report.evidence.key === "string",
-    "Passing implementation evidence required",
+    typeof report.evidence?.key === "string" &&
+      (requirePassed
+        ? report.evidence.status === "passed"
+        : ["passed", "failed"].includes(report.evidence.status)),
+    requirePassed
+      ? "Passing implementation evidence required"
+      : "Implementation evidence required",
   );
 }
 
@@ -305,13 +312,24 @@ function legacyGateStatus(task, report) {
  * @param {object} task - Trusted task contract.
  * @param {object} report - Implementation report bound to the task.
  * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {object} [options] - Gate strictness.
+ * @param {boolean} [options.requirePassed=true] - When `false`, a report whose
+ *   evidence failed is still bound and inspected; `accept` never sets this.
  * @returns {Promise<object>} Current business state and gate details.
  * @throws {Error} When task/report/evidence bindings are stale or invalid.
  */
-export async function gateCheck(repo, task, report, stateDir) {
+export async function gateCheck(
+  repo,
+  task,
+  report,
+  stateDir,
+  { requirePassed = true } = {},
+) {
   validateTask(task);
-  assertReportBinding(task, report);
-  await validateEvidence(repo, report.evidence, task.baseRef, task);
+  assertReportBinding(task, report, { requirePassed });
+  await validateEvidence(repo, report.evidence, task.baseRef, task, {
+    requirePassed,
+  });
   if (task.schemaVersion === 1) return legacyGateStatus(task, report);
 
   const reviews = loadReviews(stateDir, task);
@@ -322,7 +340,10 @@ export async function gateCheck(repo, task, report, stateDir) {
     : undefined;
   const gates = {
     "contract-ready": { status: "passed", taskHash: taskHash(task) },
-    "checks-passed": { status: "passed", evidenceKey: report.evidence.key },
+    "checks-passed": {
+      status: report.evidence.status === "passed" ? "passed" : "failed",
+      evidenceKey: report.evidence.key,
+    },
     "review-complete": review,
     "outcome-accepted": {
       status: decision ? "passed" : "pending",
@@ -364,12 +385,18 @@ export async function recordReview(repo, task, report, input, stateDir) {
 
 async function recordReviewLocked(repo, task, report, input, stateDir) {
   validateReviewInput(input, task);
-  assertReportBinding(task, report);
+  // Only an approval needs passing evidence: a review that asks for changes,
+  // or cannot reach a verdict, is honestly recorded against the failing run it
+  // actually reviewed, not against a passing run that never happened.
+  const requirePassed = input.conclusion === "approved";
+  assertReportBinding(task, report, { requirePassed });
   assert(
     input.implementationExecutionId === report.runId,
     "Review targets a different implementation execution",
   );
-  await validateEvidence(repo, report.evidence, task.baseRef, task);
+  await validateEvidence(repo, report.evidence, task.baseRef, task, {
+    requirePassed,
+  });
 
   const target = reviewFile(stateDir, input.id);
   assert(!fs.existsSync(target), `Review already exists: ${input.id}`);
@@ -388,7 +415,9 @@ async function recordReviewLocked(repo, task, report, input, stateDir) {
     createdAt: new Date().toISOString(),
   };
   writeJSON(target, record);
-  const gateStatus = await gateCheck(repo, task, report, stateDir);
+  const gateStatus = await gateCheck(repo, task, report, stateDir, {
+    requirePassed,
+  });
   writeJSON(gateFile(stateDir, task.id), gateStatus);
   return { review: record, gateStatus };
 }

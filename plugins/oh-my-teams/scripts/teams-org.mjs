@@ -31,6 +31,7 @@ import {
   assertDirectorAuthority,
   checkCloseReady,
 } from "./delivery.mjs";
+import { assertDistinctOpenCodexHomes } from "./opencodex.mjs";
 import { startDashboard } from "./dashboard.mjs";
 import {
   answerHeadless,
@@ -53,6 +54,7 @@ import {
   worktreeLabel,
 } from "./role-terminal.mjs";
 import { predictLaunchPath } from "./launch-matrix.mjs";
+import { answerPrompt } from "./prompt-supervision.mjs";
 import { advise, assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
@@ -86,6 +88,9 @@ import {
   handoffTask,
   reworkTask,
   setWorkflowDepth,
+  increaseCallAllowance,
+  reopenTask,
+  extendIntegrationChecks,
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
@@ -124,6 +129,7 @@ import {
   defaultRuntimeRoot,
   doctor as runtimeDoctor,
   installRuntime,
+  pruneRuntimes,
 } from "./dependencies.mjs";
 import {
   acknowledgeSignal,
@@ -182,6 +188,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   runtime-doctor --org FILE --state DIR [--format json]
   runtime-install --org FILE --state DIR [--dry-run]
   runtime-repair --org FILE --state DIR [--dry-run]
+  runtime-prune --org FILE --state DIR [--dry-run]
+                (removes failed runtime directories and stale staging directories;
+                preserves active runtimes and paths outside the ownership prefix)
   worker-start --org FILE --role ROLE --repo DIR (--spec TEXT | --task ID)
                --terminal HANDLE [--worktree SELECTOR] [--run ID]
                [--retry-of ID] [--title TEXT] [--workflow-id ID --state DIR]
@@ -207,6 +216,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
             (serves the headless workers to a browser; every request needs the token)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
+  prompt-answer --org FILE --terminal HANDLE --workflow-id ID --state DIR
+                [--role ROLE] [--orca EXECUTABLE]
+                (the role's supervisor answers the question that stopped its terminal:
+                only the Run-bound PM, or the PL that started the role; one key per
+                screen state, then the screen is read again; every attempt is recorded
+                in <state>/prompt-answers.jsonl. status: resolved | advanced |
+                unresolved | redirected | escalate | no-question | refused)
   worker-limit-check --worktree DIR --provider claude|codex|agy
                      [--workflow-id ID --workflow-task ID]
                      [--terminal HANDLE] [--orca EXECUTABLE]
@@ -246,7 +262,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   advise --org FILE --brief FILE --repo DIR --state DIR --role ROLE
          --kind plan|design|review|unblock [--profile PROFILE]
          (read-only advisor call; spends one slot of policy.adviceBudget)
-  verify --task FILE --repo DIR --state DIR
+  verify --task FILE --repo DIR --state DIR [--timeout-ms N]
+        (per-command timeout; default 300000, max 1800000; recorded in the
+        evidence fingerprint so differing timeouts never share a cache entry)
   merge-check --evidence FILE --task TRUSTED_TASK --repo DIR --base REF
               [--report FILE --state DIR]
   review-record --task FILE --report FILE --review FILE --repo DIR --state DIR
@@ -268,6 +286,17 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-rework --id ID --state DIR --revision N --rework FILE
                   (attaches the corrected execution after a review asked for changes)
   workflow-depth --id ID --state DIR --revision N --change FILE
+  workflow-allowance --id ID --state DIR --revision N --allowance FILE
+                     (raises the callAllowance of a reserved or running attempt;
+                     the increase must fit inside the workflow's unreserved
+                     call budget)
+  workflow-reopen --id ID --state DIR --revision N --reopen FILE
+                  (manually reopens a submitted or reviewed task by opening a
+                  new attempt; requires approver and reason, spends budget)
+  workflow-integration-checks --id ID --state DIR --revision N --checks FILE
+                              (appends checks to an already-frozen, not yet
+                              accepted integration task without touching the
+                              existing ones)
   handoff-checkpoint --state DIR --workflow-id ID --workflow-task ID --file FILE
                      [--repo DIR]
                      (validates the checkpoint sections and records HEAD of
@@ -351,6 +380,7 @@ export const ALLOWED_OPTIONS = {
   "runtime-doctor": ["org", "state", "format"],
   "runtime-install": ["org", "state", "dry-run"],
   "runtime-repair": ["org", "state", "dry-run"],
+  "runtime-prune": ["org", "state", "dry-run"],
   "role-spec": [
     "org",
     "role",
@@ -361,6 +391,7 @@ export const ALLOWED_OPTIONS = {
     "text",
   ],
   "terminal-idle-check": ["terminal", "orca", "org", "role"],
+  "prompt-answer": ["org", "terminal", "workflow-id", "state", "role", "orca"],
   "worker-limit-check": [
     "worktree",
     "provider",
@@ -440,7 +471,7 @@ export const ALLOWED_OPTIONS = {
   draft: ["org", "task", "repo", "kind"],
   assist: ["org", "task", "repo", "state", "role", "kind", "profile"],
   advise: ["org", "brief", "repo", "state", "role", "kind", "profile"],
-  verify: ["task", "repo", "state"],
+  verify: ["task", "repo", "state", "timeout-ms"],
   "merge-check": ["evidence", "task", "repo", "base", "report", "state"],
   aggregate: ["expected", "report"],
   "review-record": ["task", "report", "review", "repo", "state"],
@@ -458,6 +489,9 @@ export const ALLOWED_OPTIONS = {
   "workflow-handoff": ["id", "state", "revision", "handoff"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
+  "workflow-allowance": ["id", "state", "revision", "allowance"],
+  "workflow-reopen": ["id", "state", "revision", "reopen"],
+  "workflow-integration-checks": ["id", "state", "revision", "checks"],
   "handoff-checkpoint": [
     "state",
     "workflow-id",
@@ -522,9 +556,11 @@ export const REQUIRED_OPTIONS = {
   "runtime-doctor": ["org", "state"],
   "runtime-install": ["org", "state"],
   "runtime-repair": ["org", "state"],
+  "runtime-prune": ["org", "state"],
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
   "terminal-idle-check": ["terminal"],
+  "prompt-answer": ["org", "terminal", "workflow-id", "state"],
   "worker-limit-check": ["worktree", "provider"],
   "headless-start": ["org", "role", "cwd", "spec", "state"],
   "headless-status": ["state", "worker"],
@@ -560,6 +596,9 @@ export const REQUIRED_OPTIONS = {
   "workflow-handoff": ["id", "state", "revision", "handoff"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
+  "workflow-allowance": ["id", "state", "revision", "allowance"],
+  "workflow-reopen": ["id", "state", "revision", "reopen"],
+  "workflow-integration-checks": ["id", "state", "revision", "checks"],
   "handoff-checkpoint": ["state", "workflow-id", "workflow-task", "file"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
@@ -951,6 +990,15 @@ function startHeadlessRole(args) {
     `Role ${command.role} uses ${command.provider}, which has no headless runtime; ` +
       `supported: ${HEADLESS_PROVIDERS.join(", ")}`,
   );
+  // One run's runner accounts must not share a session home or use an account
+  // home as one; the run's other roles are checked with this one.
+  if (command.runner) {
+    assertDistinctOpenCodexHomes(
+      (run.roles ?? Object.keys(org.roles)).map(
+        (name) => org.profiles[org.roles[name]?.profile],
+      ),
+    );
+  }
   const cwd = path.resolve(args.cwd);
   assertNotKickoffOwner(cwd, `starting ${command.role}`);
   assertWorktreeUnshared(run.workflowState, command.role, `path:${cwd}`, cwd);
@@ -1375,6 +1423,11 @@ async function executeCommand(args) {
         dryRun: Boolean(args["dry-run"]),
         repair: true,
       });
+    case "runtime-prune":
+      validateOrg(readJSON(args.org));
+      return pruneRuntimes(defaultRuntimeRoot(), {
+        dryRun: Boolean(args["dry-run"]),
+      });
     case "worker-start":
       return startSupervisedWorker(args);
     case "headless-start":
@@ -1468,6 +1521,15 @@ async function executeCommand(args) {
         matrixPrediction,
       });
     }
+    case "prompt-answer":
+      return answerPrompt({
+        orgFile: path.resolve(args.org),
+        terminal: args.terminal,
+        workflowId: args["workflow-id"],
+        stateDir: args.state,
+        role: args.role,
+        executable: args.orca,
+      });
     case "role-spec":
       return (({ org, run }) => ({
         role: args.role,
@@ -1530,6 +1592,18 @@ async function executeCommand(args) {
         cliVersion: env.cliVersion,
         allowUnverified: allowUnverifiedApproval !== undefined,
         allowUnverifiedApproval,
+        // A folder trust question is answered only by this launch's
+        // supervisor, in the worktree the selector names; without a
+        // workflow and state there is nobody to prove that against.
+        supervision: args["workflow-id"]
+          ? {
+              orgFile: path.resolve(args.org),
+              stateDir: path.resolve(args.state),
+              workflowId: args["workflow-id"],
+              launchCwd: process.cwd(),
+            }
+          : null,
+        expectedWorktree: target,
       });
       if (args.state)
         await shadowModelCheck({
@@ -1660,11 +1734,16 @@ async function executeCommand(args) {
       );
     case "verify": {
       const task = validateTask(readJSON(args.task));
+      const timeoutMs =
+        args["timeout-ms"] === undefined
+          ? undefined
+          : Number(args["timeout-ms"]);
       return verify(path.resolve(args.repo), {
         commands: task.checks,
         baseRef: task.baseRef,
         environment: task.environment,
         store: path.join(path.resolve(args.state), "evidence"),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
     }
     case "review-record":
@@ -1780,6 +1859,27 @@ async function executeCommand(args) {
         Number(args.revision),
         readJSON(args.change),
       );
+    case "workflow-allowance":
+      return increaseCallAllowance(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.allowance),
+      );
+    case "workflow-reopen":
+      return reopenTask(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.reopen),
+      );
+    case "workflow-integration-checks":
+      return extendIntegrationChecks(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.checks),
+      );
     case "failure-classify": {
       const input = withRuntimeSignal(
         validateFailureEvidence(readJSON(args.failure)),
@@ -1884,6 +1984,9 @@ async function executeCommand(args) {
 }
 
 const BLOCKING_STATUSES = ["failed", "blocked"];
+// A prompt answer that was refused, went upward or left the question on the
+// screen did not do what the caller asked.
+const PROMPT_ANSWER_BLOCKING = ["refused", "escalate", "unresolved"];
 
 // Commands do not share one envelope: a worker report carries `status`, the
 // workflow mutations wrap the new state in `{state, ...}`, and the review and
@@ -1892,6 +1995,8 @@ const BLOCKING_STATUSES = ["failed", "blocked"];
 // script saw success. Each known shape is checked explicitly.
 function blockingOutcome(output) {
   if (!output || typeof output !== "object") return false;
+  if (output.event === "prompt-answer")
+    return PROMPT_ANSWER_BLOCKING.includes(output.status);
   return [output.status, output.state?.status, output.gateStatus?.status].some(
     (value) => BLOCKING_STATUSES.includes(value),
   );

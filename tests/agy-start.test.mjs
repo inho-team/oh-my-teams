@@ -196,7 +196,7 @@ test("the runtime reference explains the narrow launch and the exception path", 
   );
   assert.match(
     runtime,
-    /`scripts\/launch-matrix\.mjs`의 호환성 표가 `supervised-terminal`을 돌려주는 Agy 역할 중 POSIX 셸에서는 `stty cols 44`를 앞에 붙인다\. Windows에서는 폭 조정을 생략한다/,
+    /`role-terminal`은 이제 어떤 플랫폼에서도 `stty cols 44` 같은 폭 조정을 붙이지 않고 명령을 그대로 입력한다\..*Windows에서도 처음부터 폭 조정을 붙이지 않았다/s,
   );
   assert.match(runtime, /\*\*주입 예외 경로\.\*\*/);
   assert.match(runtime, /`--inject-fallback "<누가 무엇을 승인했는지>"`/);

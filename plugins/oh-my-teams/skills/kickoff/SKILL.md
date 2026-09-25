@@ -38,6 +38,8 @@ kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook �
 5. worker를 기다리는 동안 `supervision-wait`의 대기 시간이 끝날 때마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.
 6. 대화가 이어지거나 재개되면 authoritative Goal, workflow, Run과 worker 상태를 먼저 대조한다. 계획만 존재하거나 worker 상태가 불명확하다는 이유로 새 작업을 중복 생성하지 않는다.
 
+주기를 도는 동안의 판단은 [`../../references/autonomy.md`](../../references/autonomy.md)의 경계를 따른다. 브리프의 범위 안에서 끝나는 판단은 이사와 PM이 정하고 보고하며, 확정한 계약의 변경, 브리프 밖의 새 범위, 되돌릴 수 없고 사용자가 소유한 대상에 주는 영향, 사용자만 아는 암묵지에 해당할 때에만 사용자에게 확인한다.
+
 단순히 모델이 완료했다고 말했거나 일부 테스트가 통과했다는 이유로 루프를 끝내지 않는다. 모든 수용 기준, 필수 검토, 최신 소스에 대한 검증과 사용자가 요청한 전달 범위가 충족되어야 한다.
 
 ## 종료 경계

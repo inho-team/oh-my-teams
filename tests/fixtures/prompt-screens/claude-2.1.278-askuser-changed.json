@@ -1,0 +1,29 @@
+{
+  "cli": "claude",
+  "version": "2.1.278",
+  "kind": "askuser-changed",
+  "selected": 2,
+  "capturedAt": "2026-09-21T15:24:27.087Z",
+  "command": "claude --dangerously-skip-permissions --model haiku",
+  "lines": [
+    " ▐▛███▛█   Claude Code v2.1.278",
+    "▝▜██████▀  Haiku 4.5 · Claude Max",
+    "  ▝▝ ▝▝    ~/orca/workspaces/oh-my-teams/spa-capture",
+    "⏺ agents-md: no CLAUDE.md found; AGENTS.md loaded: /Users/jinsungkim/orca/workspaces/oh-my-teams/spa-capture/AGENTS.md",
+    "❯ A와 B 중 하나를 고르라고 나에게 물어봐",
+    "⏺ A와 B가 무엇인지 먼저 알려 주시면, 하나를 고르도록 물어 드리겠습니다. 어떤 두 가지 옵션 중에서 선택하길 원하시나요?",
+    "✻ Baked for 5s · done 12:23 AM",
+    "❯ AskUserQuestion 도구를 사용해서 옵션 A와 옵션 B 중 하나를 고르라고 물어봐",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    " ☐ 선택",
+    "A와 B 중 하나를 선택해주세요.",
+    "  1. A",
+    "     옵션 A를 선택합니다.",
+    "❯ 2. B",
+    "     옵션 B를 선택합니다.",
+    "  3. Type something.",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "  4. Chat about this",
+    "Enter to select · ↑/↓ to navigate · Esc to cancel"
+  ]
+}

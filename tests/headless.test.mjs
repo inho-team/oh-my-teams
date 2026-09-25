@@ -10,6 +10,7 @@ import {
   answerHeadless,
   codexRolloutModel,
   headlessCommand,
+  headlessDetail,
   headlessStatus,
   listHeadless,
   modelVerdict,
@@ -1007,7 +1008,11 @@ const CODEX_TURN = [
 async function runnerTurn(
   t,
   deps = {},
-  { command = [process.execPath, "-e", CODEX_TURN], stopAfterMs = 0 } = {},
+  {
+    command = [process.execPath, "-e", CODEX_TURN],
+    stopAfterMs = 0,
+    provider = "codex",
+  } = {},
 ) {
   const state = fs.mkdtempSync(path.join(os.tmpdir(), "omt-runner-turn-"));
   t.after(() => fs.rmSync(state, { recursive: true, force: true }));
@@ -1015,7 +1020,7 @@ async function runnerTurn(
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
   const runner = {
     kind: "opencodex",
-    logicalProvider: "codex",
+    logicalProvider: provider,
     model: "gpt-fake",
   };
   const dir = path.join(state, "headless", "w1");
@@ -1023,7 +1028,7 @@ async function runnerTurn(
   fs.mkdirSync(turnDir, { recursive: true });
   writeJSON(path.join(dir, "worker.json"), {
     id: "w1",
-    provider: "codex",
+    provider,
     modelRequested: "gpt-fake",
     runner,
   });
@@ -1066,9 +1071,13 @@ async function runnerTurn(
       ? JSON.parse(fs.readFileSync(file, "utf8"))
       : null;
   };
-  return { record, read, status: headlessStatus(state, "w1") };
+  return { record, read, state, status: headlessStatus(state, "w1") };
 }
 
+// Kept POSIX only: a turn counts as done only when the provider's process group
+// is seen empty, and Windows has no process group (the runner records
+// descendantsExited=false there, by design). The exited-snapshot test below runs
+// everywhere and shows that a Windows turn stays unverified.
 const posix = {
   skip:
     process.platform === "win32" &&
@@ -1174,6 +1183,36 @@ test(
   },
 );
 
+// A Windows proxy stop shows only that a snapshot of pids is gone, so the turn
+// must stay unverified there, and the same holds wherever that receipt appears.
+test("a proxy that proves only an exited snapshot leaves the turn unverified", async (t) => {
+  const { record, read, status } = await runnerTurn(t, {
+    prepare: async () => ({
+      proxy: {
+        port: 1,
+        stop: async () => ({
+          termination: "exited-snapshot",
+          descendantsExited: false,
+        }),
+      },
+      binding: {},
+      historyBoundary: new Set(),
+      command: [process.execPath, "-e", CODEX_TURN],
+      environment: process.env,
+    }),
+  });
+  assert.equal(record.error, null);
+  const lifecycle = read("lifecycle.json");
+  assert.equal(lifecycle.exitObserved, true);
+  assert.equal(lifecycle.proxyExited, false);
+  assert.equal(lifecycle.termination, "unverifiable");
+  assert.equal(
+    runnerTurnProven({ requestIds: ["req-1", "req-2"] }, lifecycle),
+    false,
+  );
+  assert.equal(status.outcome, "unverifiable");
+});
+
 test("a turn that never started the provider records an unproven lifecycle and no success", async (t) => {
   const { record, read, status } = await runnerTurn(t, {
     prepare: async () => {
@@ -1197,29 +1236,25 @@ test("a turn that never started the provider records an unproven lifecycle and n
   assert.equal(status.outcome, "exit-error");
 });
 
-test(
-  "a stop request is recorded as a cancel request and never as a completed turn",
-  posix,
-  async (t) => {
-    const { record, read, status } = await runnerTurn(
-      t,
-      {},
-      {
-        command: [
-          process.execPath,
-          "-e",
-          "process.stdin.resume();setInterval(()=>{},1000)",
-        ],
-        stopAfterMs: 300,
-      },
-    );
-    assert.equal(record.stopped, true);
-    const lifecycle = read("lifecycle.json");
-    assert.equal(lifecycle.cancelRequested, true);
-    assert.equal(lifecycle.completed, false);
-    assert.equal(status.outcome, "stopped");
-  },
-);
+test("a stop request is recorded as a cancel request and never as a completed turn", async (t) => {
+  const { record, read, status } = await runnerTurn(
+    t,
+    {},
+    {
+      command: [
+        process.execPath,
+        "-e",
+        "process.stdin.resume();setInterval(()=>{},1000)",
+      ],
+      stopAfterMs: 300,
+    },
+  );
+  assert.equal(record.stopped, true);
+  const lifecycle = read("lifecycle.json");
+  assert.equal(lifecycle.cancelRequested, true);
+  assert.equal(lifecycle.completed, false);
+  assert.equal(status.outcome, "stopped");
+});
 
 test("runnerTurnProven demands every stage and the same request set in both records", () => {
   const observation = { requestIds: ["a", "b"] };
@@ -1477,4 +1512,89 @@ test("U-01 (결과 동일성 테스트): chunk parsing correctly handles boundar
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test(
+  "a claude/agy runner turn is read as the Codex stream it actually wrote",
+  posix,
+  async (t) => {
+    // The runner starts the Codex CLI whatever the profile is logically for,
+    // so the stream is Codex's. The Claude and Agy readers cannot parse it.
+    for (const provider of ["claude", "agy"]) {
+      const { record, state, status } = await runnerTurn(t, {}, { provider });
+      assert.equal(record.error, null, provider);
+      assert.equal(status.provider, provider);
+      assert.equal(status.outcome, "done", provider);
+      assert.equal(status.marker?.detail, "wrote it", provider);
+      const detail = headlessDetail(state, "w1");
+      assert.match(JSON.stringify(detail.turns[0].transcript), /wrote it/);
+    }
+  },
+);
+
+test("headless-start refuses runner accounts whose session homes are shared or are an account home", async (t) => {
+  const box = sandbox(t);
+  const org = JSON.parse(
+    fs.readFileSync(
+      path.resolve("plugins/oh-my-teams/examples/organization.json"),
+      "utf8",
+    ),
+  );
+  for (const [role, account] of [
+    ["junior", "acct-a"],
+    ["senior", "acct-b"],
+  ]) {
+    org.profiles[`ocx-${account}`] = {
+      provider: "codex",
+      command: ["omt-no-such-cli"],
+      account,
+      subscription: "Fixed subscription",
+      model: "gpt-6-astra",
+      effort: "medium",
+      runner: {
+        kind: "opencodex",
+        mode: "fixed-account",
+        accountHomeRef: account,
+        runtimeFingerprint: `sha256:${"a".repeat(64)}`,
+      },
+    };
+    org.roles[role].profile = `ocx-${account}`;
+  }
+  const orgFile = path.join(path.dirname(box.state), "organization.json");
+  writeJSON(orgFile, org);
+  const saved = { ...process.env };
+  t.after(() => {
+    for (const key of Object.keys(process.env))
+      if (key.startsWith("OMT_OPENCODEX_")) delete process.env[key];
+    Object.assign(process.env, saved);
+  });
+  const start = () =>
+    main([
+      "headless-start",
+      "--org",
+      orgFile,
+      "--role",
+      "junior",
+      "--cwd",
+      box.cwd,
+      "--spec",
+      "x",
+      "--state",
+      box.state,
+    ]);
+  const overlap = /session homes must differ/;
+  // Two accounts on the one shared variable would share a CODEX_HOME.
+  Object.assign(process.env, {
+    OMT_OPENCODEX_ACCT_A_HOME: "/omt-test/a",
+    OMT_OPENCODEX_ACCT_B_HOME: "/omt-test/b",
+    OMT_OPENCODEX_SESSION_HOME: "/omt-test/session",
+  });
+  await assert.rejects(start(), overlap);
+  // A session home may not be another account's home.
+  Object.assign(process.env, {
+    OMT_OPENCODEX_ACCT_A_SESSION_HOME: "/omt-test/a-session",
+    OMT_OPENCODEX_ACCT_B_SESSION_HOME: "/omt-test/a",
+  });
+  await assert.rejects(start(), overlap);
+  assert.deepEqual(listHeadless(box.state), []);
 });

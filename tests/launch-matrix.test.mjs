@@ -15,6 +15,11 @@ const V = {
   cliVersion: VERIFIED_CLI_VERSION,
 };
 
+test("검증 버전 상수가 Orca 1.4.210·Antigravity CLI 1.2.11이다 (acceptance: verified-versions)", () => {
+  assert.equal(VERIFIED_ORCA_VERSION, "1.4.210");
+  assert.equal(VERIFIED_CLI_VERSION, "1.2.11");
+});
+
 // 모든 결과에 필수 필드가 있는지 확인하는 헬퍼
 function assertValidResult(result, label) {
   const paths = ["supervised-terminal", "headless", "blocked"];
@@ -147,9 +152,9 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 7. Agy claude 계열 신뢰 있음 → blocked
+    // 7. (구 규칙 삭제, #104) Agy claude 계열 posix 신뢰 있음 → 10행 적용, supervised-terminal(verified)
     {
-      label: "agy_claude_model",
+      label: "agy_claude_model_posix",
       params: {
         runner: "agy",
         model: "claude-sonnet-4-6",
@@ -186,7 +191,7 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 10. Agy gemini posix 신뢰 있음 → supervised-terminal unverified
+    // 10. Agy POSIX 신뢰 있음(모델 계열 무관) → supervised-terminal (verified)
     {
       label: "agy_gemini_posix",
       params: {
@@ -196,8 +201,6 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         shell: "posix",
         trustRecordExists: true,
         skipDangerousModePermissionPrompt: true,
-        allowUnverified: true,
-        allowUnverifiedApproval: "승인: 검증 모드",
         ...V,
       },
     },
@@ -230,12 +233,13 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 13. 나머지 모든 미확인 조합 (Agy unknown 계열 posix)
+    // 13. 나머지 모든 미확인 조합. 10행이 모델 계열 무관 POSIX Agy를 모두 덮으므로(#104),
+    // agy·claude·codex 밖의 runner만 이 행에 남는다.
     {
-      label: "agy_unknown_model_posix",
+      label: "unrecognized_runner",
       params: {
-        runner: "agy",
-        model: "some-future-model",
+        runner: "some-future-runner",
+        model: undefined,
         platform: "linux",
         shell: "posix",
         trustRecordExists: true,
@@ -266,7 +270,9 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
   assert.equal(claudeWin.evidence, "verified");
 
   // 예시 2: Windows gemini Agy → headless (orca-idle-requires-narrow-screen)
-  // 실측: tui-idle 120초 미도달, 폭 조정은 에이전트 식별 깨뜨림
+  // 실측(Orca 1.4.204): tui-idle 120초 미도달, 폭 조정은 에이전트 식별 깨뜨림.
+  // 그 판정 규칙은 1.4.210에서 교체되어 사라졌고 재검증할 Windows 머신이 없어
+  // evidence는 unverified로 낮아졌다(#104). 경로(headless)는 바뀌지 않는다.
   const geminiWin32 = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
@@ -281,9 +287,9 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
     geminiWin32.reason.includes("orca-idle-requires-narrow-screen"),
     "8행 reason 코드",
   );
-  assert.equal(geminiWin32.evidence, "verified");
+  assert.equal(geminiWin32.evidence, "unverified");
 
-  // 예시 3: Codex 신뢰 없음 → blocked (codex-trust-workspace)
+  // 예시 3: Codex 신뢰 없음 → 터미널은 열고 감독자가 질문에 답한다 (codex-trust-workspace)
   const codexNoTrust = predictLaunchPath({
     runner: "codex",
     model: undefined,
@@ -294,10 +300,15 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
-  assert.equal(codexNoTrust.path, "blocked");
+  assert.equal(codexNoTrust.path, "supervised-terminal");
   assert.ok(codexNoTrust.reason.includes("codex-trust-workspace"));
+  assert.equal(codexNoTrust.nextOwner, "pm");
+  assert.match(codexNoTrust.nextAction, /prompt-answer/);
+  assert.notEqual(codexNoTrust.evidence, "verified");
 
-  // 예시 4: 검증에 쓰지 않은 버전 → 경로는 유지하고 근거 등급만 낮춘다
+  // 예시 4: 검증에 쓰지 않은 버전 → 경로는 유지하고 근거 등급만 한 단계 낮춘다
+  // 10행의 기본 근거 등급은 verified이므로, 버전 불일치는 unverified가 아니라
+  // source-derived로 한 단계만 낮춘다.
   const otherVersion = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
@@ -308,9 +319,8 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
     orcaVersion: "2.0.0",
     cliVersion: VERIFIED_CLI_VERSION,
   });
-  // 미검증 경로와 버전 경고를 구분하고 실행 경로는 유지한다.
   assert.equal(otherVersion.path, "supervised-terminal");
-  assert.ok(otherVersion.reason.includes("unverified-terminal-evidence"));
+  assert.equal(otherVersion.evidence, "source-derived");
   assert.ok(otherVersion.reason.includes("untested_version"));
 });
 
@@ -328,7 +338,8 @@ test("마지막 행(untested_combination)이 나머지 모든 조합을 덮는�
   assert.equal(unknownRunner.path, "blocked");
   assert.ok(unknownRunner.reason.includes("untested_combination"));
 
-  // Agy unknown 계열 linux
+  // #104: 10행이 모델 계열과 무관하게 Agy POSIX 신뢰 있음을 모두 덮으므로,
+  // 이전에는 미확인 조합(13행)이던 Agy unknown 계열 linux도 이제 10행에 걸린다.
   const unknownModel = predictLaunchPath({
     runner: "agy",
     model: "future-model-xyz",
@@ -338,8 +349,8 @@ test("마지막 행(untested_combination)이 나머지 모든 조합을 덮는�
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
-  assert.equal(unknownModel.path, "blocked");
-  assert.ok(unknownModel.reason.includes("untested_combination"));
+  assert.equal(unknownModel.path, "supervised-terminal");
+  assert.equal(unknownModel.evidence, "verified");
 });
 
 test("Orca 패치 갱신은 검증된 경로를 막지 않는다 (#61)", () => {
@@ -370,7 +381,9 @@ test("Orca 패치 갱신은 검증된 경로를 막지 않는다 (#61)", () => {
     cliVersion: VERIFIED_CLI_VERSION,
   });
   assert.equal(agyPatch.path, "headless");
-  assert.equal(agyPatch.evidence, "verified");
+  // 8행의 근거 등급은 verified가 아니라 unverified로 고정되어 있으므로(#104),
+  // Orca 버전이 일치해도 패치 버전 갱신이 이를 다시 올리지 않는다.
+  assert.equal(agyPatch.evidence, "unverified");
 });
 
 test("Orca 버전을 확인하지 못해도 검증된 경로는 한 단계만 낮아진다", () => {
@@ -438,7 +451,7 @@ test("headless 경로는 Orca 버전 차이의 영향을 받지 않는다", () =
     cliVersion: VERIFIED_CLI_VERSION,
   });
   assert.equal(headless.path, "headless");
-  assert.equal(headless.evidence, "verified");
+  assert.equal(headless.evidence, "unverified");
   assert.ok(!headless.reason.includes("untested_version"));
 });
 
@@ -455,10 +468,11 @@ test("classifyVersion은 같은 버전·패치 차이·그 밖을 구분한다",
 });
 
 test("unverified supervised-terminal은 승인 유무와 관계없이 경고와 함께 실행된다", () => {
-  // Agy gemini posix - unverified
+  // #104로 10행(Agy POSIX)의 기본 근거 등급이 verified로 올라갔으므로,
+  // 여기서는 기본 근거 등급이 여전히 unverified인 11행(Claude POSIX)을 쓴다.
   const withoutApproval = predictLaunchPath({
-    runner: "agy",
-    model: "gemini-3.8-flash-high",
+    runner: "claude",
+    model: undefined,
     platform: "darwin",
     shell: "posix",
     trustRecordExists: true,
@@ -471,8 +485,8 @@ test("unverified supervised-terminal은 승인 유무와 관계없이 경고와 
 
   // 기존 옵션만 전달해도 경고와 함께 실행한다.
   const withoutApprovalText = predictLaunchPath({
-    runner: "agy",
-    model: "gemini-3.8-flash-high",
+    runner: "claude",
+    model: undefined,
     platform: "darwin",
     shell: "posix",
     trustRecordExists: true,
@@ -488,8 +502,8 @@ test("unverified supervised-terminal은 승인 유무와 관계없이 경고와 
 
   // allowUnverified=true 승인 문장 있음 → supervised-terminal
   const withApproval = predictLaunchPath({
-    runner: "agy",
-    model: "gemini-3.8-flash-high",
+    runner: "claude",
+    model: undefined,
     platform: "darwin",
     shell: "posix",
     trustRecordExists: true,
@@ -502,7 +516,8 @@ test("unverified supervised-terminal은 승인 유무와 관계없이 경고와 
   assert.equal(withApproval.evidence, "unverified");
 });
 
-test("Agy claude 모델은 신뢰 기록 있어도 blocked된다", () => {
+test("Agy claude 모델은 더 이상 blocked되지 않고 POSIX에서 supervised-terminal(verified)이다 (acceptance: rule7-removed)", () => {
+  // #104: Orca 1.4.210 실측으로 claude-unsupported-by-orca 규칙(구 7행)이 삭제됐다.
   const result = predictLaunchPath({
     runner: "agy",
     model: "claude-sonnet-4-6",
@@ -512,9 +527,36 @@ test("Agy claude 모델은 신뢰 기록 있어도 blocked된다", () => {
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
-  assert.equal(result.path, "blocked");
-  assert.ok(result.reason.includes("claude-unsupported-by-orca"));
+  assert.equal(result.path, "supervised-terminal");
   assert.equal(result.evidence, "verified");
+  assert.ok(!result.reason.includes("claude-unsupported-by-orca"));
+  assert.deepEqual(result.reason, []);
+});
+
+test("Agy POSIX 신뢰 있음은 모델 계열과 무관하게 supervised-terminal(verified)이다 (acceptance: posix-supervised-verified)", () => {
+  for (const model of [
+    "gemini-3.1-pro-high",
+    "claude-sonnet-4-6",
+    "gpt-oss-120b-medium",
+    "some-unrecognized-model",
+    undefined,
+  ]) {
+    for (const platform of ["darwin", "linux"]) {
+      const result = predictLaunchPath({
+        runner: "agy",
+        model,
+        platform,
+        shell: "posix",
+        trustRecordExists: true,
+        skipDangerousModePermissionPrompt: true,
+        ...V,
+      });
+      const label = `model=${model} platform=${platform}`;
+      assert.equal(result.path, "supervised-terminal", label);
+      assert.equal(result.evidence, "verified", label);
+      assert.deepEqual(result.reason, [], label);
+    }
+  }
 });
 
 test("Windows Agy powershell 복합 명령은 no_agent_detected로 차단된다", () => {
@@ -543,7 +585,7 @@ test("Windows Agy powershell 복합 명령은 no_agent_detected로 차단된다"
 test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한다", () => {
   // 실측 수정: 구현은 Windows에서 폭 조정을 생략해 단일 명령만 입력(isCompoundCommand=false).
   // gemini → 표 3행(신뢰 없음) 또는 표 8행(gemini win32 신뢰 있음) 도달.
-  // gemini + 신뢰 있음 → 8행 headless/verified, 승인 옵션과 무관하다.
+  // gemini + 신뢰 있음 → 8행 headless, evidence: unverified(#104), 승인 옵션과 무관하다.
   const geminiWithTrust = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
@@ -556,14 +598,13 @@ test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한
     ...V,
   });
   // gemini+win32+신뢰 있음 → 8행 headless (orca-idle-requires-narrow-screen)
-  // evidence=verified → applyVerificationGate 미적용 → headless 그대로 반환
   assert.equal(geminiWithTrust.path, "headless");
   assert.ok(
     geminiWithTrust.reason.includes("orca-idle-requires-narrow-screen"),
     "8행 reason 코드",
   );
 
-  // allowUnverified=true+승인 → 8행 headless (verified, gate 불필요)
+  // allowUnverified=true+승인 → 8행 headless (evidence는 unverified 그대로, gate 불필요)
   const geminiAllowed = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
@@ -577,7 +618,7 @@ test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한
     ...V,
   });
   assert.equal(geminiAllowed.path, "headless");
-  assert.equal(geminiAllowed.evidence, "verified");
+  assert.equal(geminiAllowed.evidence, "unverified");
 });
 
 test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () => {
@@ -598,7 +639,7 @@ test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () =
     "codexTrustRecordExists=true → 4행 건너뜀",
   );
 
-  // codexTrustRecordExists: false → 4행 적용
+  // codexTrustRecordExists: false → 4행 적용 (열고, 감독자가 답한다)
   const notTrustedFalse = predictLaunchPath({
     runner: "codex",
     model: undefined,
@@ -609,13 +650,13 @@ test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () =
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
-  assert.equal(notTrustedFalse.path, "blocked");
+  assert.equal(notTrustedFalse.path, "supervised-terminal");
   assert.ok(
     notTrustedFalse.reason.includes("codex-trust-workspace"),
-    "codexTrustRecordExists=false → blocked(codex-trust-workspace)",
+    "codexTrustRecordExists=false → supervised-terminal(codex-trust-workspace)",
   );
 
-  // codexTrustRecordExists: "unknown" → 4행 적용 (신뢰 미확인도 차단)
+  // codexTrustRecordExists: "unknown" → 4행 적용 (신뢰 미확인도 열고 감독자가 답한다)
   const notTrustedUnknown = predictLaunchPath({
     runner: "codex",
     model: undefined,
@@ -626,10 +667,10 @@ test("Codex 신뢰 기록이 표 4행 입력에 올바르게 연결된다", () =
     skipDangerousModePermissionPrompt: true,
     ...V,
   });
-  assert.equal(notTrustedUnknown.path, "blocked");
+  assert.equal(notTrustedUnknown.path, "supervised-terminal");
   assert.ok(
     notTrustedUnknown.reason.includes("codex-trust-workspace"),
-    "codexTrustRecordExists=unknown → blocked(codex-trust-workspace)",
+    "codexTrustRecordExists=unknown → supervised-terminal(codex-trust-workspace)",
   );
 });
 
@@ -677,7 +718,7 @@ test("Codex 신뢰 있음은 verified supervised-terminal을 돌려주고 검증
   assert.equal(trustedWin.evidence, "verified");
 });
 
-test("Codex 신뢰 없음/unknown은 4행 codex-trust-workspace로 차단된다", () => {
+test("Codex 신뢰 없음/unknown은 4행 codex-trust-workspace로 열리고 감독자가 답한다", () => {
   for (const codexTrustRecordExists of [false, "unknown", undefined, null]) {
     const result = predictLaunchPath({
       runner: "codex",
@@ -693,12 +734,82 @@ test("Codex 신뢰 없음/unknown은 4행 codex-trust-workspace로 차단된다"
     });
     assert.equal(
       result.path,
-      "blocked",
-      `codexTrustRecordExists=${JSON.stringify(codexTrustRecordExists)} → blocked`,
+      "supervised-terminal",
+      `codexTrustRecordExists=${JSON.stringify(codexTrustRecordExists)} → supervised-terminal`,
+    );
+    assert.equal(result.nextOwner, "pm", "사람이 아니라 감독자가 답한다");
+    assert.notEqual(
+      result.evidence,
+      "verified",
+      "실측 전에는 verified가 아니다",
     );
     assert.ok(
       result.reason.includes("codex-trust-workspace"),
       `codexTrustRecordExists=${JSON.stringify(codexTrustRecordExists)} → codex-trust-workspace`,
     );
   }
+});
+
+test("Agy 신뢰 기록 없음은 터미널을 열고 감독자가 질문에 답하게 하며 버전 경고를 덮지 않는다", () => {
+  const result = predictLaunchPath({
+    runner: "agy",
+    model: "gemini-3.1-pro-high",
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: false,
+    skipDangerousModePermissionPrompt: true,
+    ...V,
+  });
+  assert.equal(result.path, "supervised-terminal");
+  assert.deepEqual(result.reason, ["agent-trust-workspace"]);
+  assert.equal(result.nextOwner, "pm");
+  assert.match(result.nextAction, /prompt-answer/);
+  assert.notEqual(result.evidence, "verified");
+
+  // 검증하지 않은 Orca 버전이면 근거 등급이 unverified로 내려가도 안내는 남는다.
+  const lowered = predictLaunchPath({
+    runner: "codex",
+    platform: "darwin",
+    shell: "posix",
+    trustRecordExists: true,
+    codexTrustRecordExists: false,
+    skipDangerousModePermissionPrompt: true,
+    orcaVersion: "9.9.9",
+    cliVersion: V.cliVersion,
+  });
+  assert.equal(lowered.evidence, "unverified");
+  assert.match(lowered.nextAction, /prompt-answer/);
+  assert.match(lowered.nextAction, /검증 기록이 부족합니다/);
+});
+
+test("Windows 규칙(8·9)은 headless를 유지하되 evidence가 verified가 아니다 (acceptance: windows-evidence)", () => {
+  // 근거였던 Orca 1.4.204의 판정 규칙은 1.4.210에서 교체되어 더 이상 존재하지 않고,
+  // 재검증할 Windows 머신이 없다(#104). 경로(headless)는 바뀌지 않는다.
+  const gemini = predictLaunchPath({
+    runner: "agy",
+    model: "gemini-3.1-pro-high",
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    ...V,
+  });
+  assert.equal(gemini.path, "headless");
+  assert.ok(gemini.reason.includes("orca-idle-requires-narrow-screen"));
+  assert.notEqual(gemini.evidence, "verified");
+  assert.equal(gemini.evidence, "unverified");
+
+  const gptOss = predictLaunchPath({
+    runner: "agy",
+    model: "gpt-oss-120b-medium",
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: true,
+    skipDangerousModePermissionPrompt: true,
+    ...V,
+  });
+  assert.equal(gptOss.path, "headless");
+  assert.ok(gptOss.reason.includes("agy-headless-fallback"));
+  assert.notEqual(gptOss.evidence, "verified");
+  assert.equal(gptOss.evidence, "unverified");
 });

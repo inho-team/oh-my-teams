@@ -424,6 +424,83 @@ async function resolvedDiscovery(executable, supplied, execute) {
 
 const IDLE_PROBE_MS = 20000;
 
+const BLOCK_PROBE_MS = 3000;
+
+// Runs `terminal wait --for tui-idle` and reads the envelope Orca returns.
+// Orca reports the timeout in its JSON envelope; whether it also exits
+// non-zero is not relied on, so the envelope is read before the exit code.
+async function waitForTuiIdle(orca, terminal, { cwd, execute, timeoutMs }) {
+  const waited = await execute(
+    [
+      orca,
+      "terminal",
+      "wait",
+      "--terminal",
+      terminal,
+      "--for",
+      "tui-idle",
+      "--timeout-ms",
+      String(timeoutMs),
+      "--json",
+    ],
+    { cwd, timeoutMs: timeoutMs + 25000 },
+  );
+  let envelope = null;
+  try {
+    envelope = JSON.parse(waited.stdout);
+  } catch {
+    // Not JSON: the exit code decides.
+  }
+  return { waited, envelope };
+}
+
+/**
+ * Asks Orca whether a terminal is held at a question, using the same
+ * `terminal wait --for tui-idle` answer the launch pre-check reads.
+ *
+ * A wait that is not satisfied and names a `blockedReason` means Orca sees a
+ * trust, update or approval question. A wait that is satisfied, or that is not
+ * satisfied without a reason or runs out its short timeout, means Orca reports
+ * no such stop. Anything else, such as a failed command or an envelope without
+ * `wait.satisfied`, leaves the state unknown, which is not the same as clear.
+ *
+ * @param {string} orca - Orca executable.
+ * @param {string} terminal - Terminal handle.
+ * @param {object} options - Probe options.
+ * @param {Function} options.execute - Command runner.
+ * @param {string} [options.cwd] - Directory to run in.
+ * @param {number} [options.timeoutMs=3000] - How long Orca may wait for idle.
+ * @returns {Promise<{state: "idle" | "busy" | "blocked" | "unknown", blockedReason?: string, detail?: string}>}
+ *   `blocked` carries Orca's reason; `unknown` carries what went wrong.
+ */
+export async function probeTerminalBlock(
+  orca,
+  terminal,
+  { cwd, execute, timeoutMs = BLOCK_PROBE_MS },
+) {
+  const { waited, envelope } = await waitForTuiIdle(orca, terminal, {
+    cwd,
+    execute,
+    timeoutMs,
+  });
+  const unknown = (detail) => ({
+    state: "unknown",
+    detail: String(detail).slice(0, 200),
+  });
+  if (waited.timedOut || !envelope)
+    return unknown(waited.stderr || waited.stdout || "no Orca answer");
+  if (envelope.ok === false)
+    return envelope.error?.code === "timeout"
+      ? { state: "busy" }
+      : unknown(envelope.error?.message ?? envelope.error?.code ?? "refused");
+  const wait = envelope.result?.wait;
+  if (wait?.satisfied === true) return { state: "idle" };
+  if (wait?.satisfied !== false) return unknown("no wait.satisfied in answer");
+  return wait.blockedReason
+    ? { state: "blocked", blockedReason: String(wait.blockedReason) }
+    : { state: "busy" };
+}
+
 // Orca creates the Dispatch before it waits for a reused terminal to reach
 // `tui-idle`, so a terminal that never reports idle leaves a failed Dispatch
 // and a spent attempt behind. Orca 1.4.204 reports no idle for `antigravity`
@@ -435,29 +512,11 @@ async function assertTerminalIdle(
   terminal,
   { cwd, execute, matrixPrediction },
 ) {
-  const waited = await execute(
-    [
-      orca,
-      "terminal",
-      "wait",
-      "--terminal",
-      terminal,
-      "--for",
-      "tui-idle",
-      "--timeout-ms",
-      String(IDLE_PROBE_MS),
-      "--json",
-    ],
-    { cwd, timeoutMs: IDLE_PROBE_MS + 25000 },
-  );
-  // Orca reports the timeout in its JSON envelope; whether it also exits
-  // non-zero is not relied on, so the envelope is read before the exit code.
-  let envelope = null;
-  try {
-    envelope = JSON.parse(waited.stdout);
-  } catch {
-    // Not JSON: the exit code below decides.
-  }
+  const { waited, envelope } = await waitForTuiIdle(orca, terminal, {
+    cwd,
+    execute,
+    timeoutMs: IDLE_PROBE_MS,
+  });
   if (!waited.timedOut && envelope?.ok === false) {
     if (envelope.error?.code === "timeout") {
       // `timeout` means "not idle" only for this wait, so the route is chosen
@@ -482,9 +541,10 @@ async function assertTerminalIdle(
   const wait = envelope?.result?.wait;
   if (!waited.timedOut && wait?.satisfied === false) {
     // Orca stops waiting at once when the screen holds a trust, update or
-    // approval prompt, and says so only inside an `ok` envelope. The prompt
-    // needs someone at the terminal, so the signal is built without the hint
-    // table: a reason that matched a hinted code would gain a route.
+    // approval prompt, and says so only inside an `ok` envelope. The signal is
+    // built without the hint table: a reason that matched a hinted code would
+    // gain a route. The question is answered by the supervisor through the
+    // `prompt-answer` command, not by a person at the terminal.
     const reason = wait.blockedReason ?? "not_idle";
     const state = wait.blockedReason
       ? `is held at a prompt (${reason})`
@@ -492,8 +552,13 @@ async function assertTerminalIdle(
     // When the matrix predicted the terminal would reach supervised-terminal
     // but Orca refused it here, the prediction itself is wrong: signal that
     // so the table can be revised rather than the same start repeated.
+    // A trust question the matrix already named (its reason lists a trust code)
+    // is the expected supervised path, not a wrong prediction.
+    const trustExpected =
+      /trust/.test(reason) &&
+      (matrixPrediction?.reason ?? []).some((code) => /trust/.test(code));
     const mismatch =
-      matrixPrediction?.path === "supervised-terminal"
+      matrixPrediction?.path === "supervised-terminal" && !trustExpected
         ? "matrix-mismatch"
         : undefined;
     const refused = assertFailureSignal({
@@ -502,7 +567,15 @@ async function assertTerminalIdle(
       message:
         `Terminal ${terminal} ${state} instead of reporting tui-idle, ` +
         "so Orca worker-start could not hand it a task; no Dispatch was created. " +
-        "Read the terminal screen and report it rather than repeating the start" +
+        (wait.blockedReason
+          ? "Do not repeat the start. The supervisor answers the question: run " +
+            `\`teams-org.mjs prompt-answer --org <org> --terminal ${terminal} --workflow-id <id> --state <dir>\` ` +
+            "(it reads the screen; for a captured question it sends one key and re-reads it, while a screen " +
+            "the classifier does not recognize, such as a command approval or an update notice, gets no key and ends as " +
+            "escalate with this blockedReason), then run terminal-idle-check again and worker-start only after the " +
+            "terminal reports idle; when the command reports escalate or unresolved, do not run it again for the same " +
+            "screen: report it upward and send a director-signal only for what a person must decide (references/orca-runtime.md)"
+          : "Read the terminal screen and report it rather than repeating the start") +
         (mismatch
           ? ` (matrix-prediction-failure: predicted supervised-terminal for ${reason})`
           : ""),
