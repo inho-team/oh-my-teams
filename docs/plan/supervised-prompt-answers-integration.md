@@ -186,13 +186,13 @@ PM은 Agy 검증을 위해 director-signal decision으로 이사에게 결정을
 - 신뢰 질문이 나타나지 않은 조건을 읽기만 해서 확인했습니다. 사용자 설정 파일 `~/.codex/config.toml`(읽기만 함)에는 projects 항목이 123개 있고, 그 가운데 `[projects."/Users/jinsungkim"]`의 `trust_level = "trusted"`가 있습니다. spa-verify-codex 경로는 개별 항목으로 등록되어 있지 않지만 그 홈 디렉터리 아래에 있습니다.
 - 대신 다른 질문이 나타났습니다. 화면은 `✨ Update available! 0.155.1 -> 0.157.0`과 선택지 세 개(`1. Update now`, `2. Skip`, `3. Skip until next version`), `Press enter to continue`였습니다. 기본 선택은 1번이므로 Enter를 그대로 보내면 전역 npm 설치가 실행됩니다.
 
-**둘째 단계: 감독자가 화면을 읽고 답하는 경로에서는 동작했으나 분류기는 답하지 않았다**
+**둘째 단계: 분류기는 화면에 답하지 않았으나 감독자의 응답은 업데이트 질문을 해소했다**
 - `classifyPromptScreen`을 그 화면 줄로 직접 호출한 결과는 `kind: unknown`, `action: none`, `key: null`이었습니다. 실제 `prompt-answer`도 같은 판정을 내렸습니다. `orcaState: "blocked"`, **`blockedReason: "agent-update-prompt"`**, **`status: "escalate"`**, **`sent: false`**, key는 null, next는 report-upstream이었습니다. 즉 분류기가 업데이트 질문을 신뢰 질문으로 잘못 인식해 Enter를 보내는 일은 일어나지 않았습니다.
 - 그 화면을 넘기는 판단은 PM이 자율 권한으로 정했습니다. `1. Update now`는 전역 npm 설치이므로 되돌릴 수 없고 사용자가 소유한 대상에 영향을 주며, `3. Skip until next version`은 사용자 설정에 기록을 남길 수 있어, 아무것도 바꾸지 않는 `2. Skip`만 골랐습니다.
 - 키는 두 단계로 보냈습니다. 먼저 **Down**을 보내고 화면을 다시 읽어 선택 표시가 `› 2. Skip`으로 옮겨진 것을 확인한 뒤에만 **Enter**를 보냈습니다. 기본 선택이 전역 설치였으므로 Enter를 먼저 보내지 않았습니다.
 - Enter 뒤 화면에서 질문이 사라지고 `model: gpt-5.6-luna medium`, `directory: ~/orca/…/oh-my-teams/spa-verify-codex`, `permissions: YOLO mode`로 입력 대기에 들어갔습니다. 조직이 요청한 모델과 화면의 모델이 일치했습니다.
 
-**셋째 단계: worker 시작에서는 시작 경로는 동작했고 첫 모델 호출이 한도로 막혔다**
+**셋째 단계: worker 시작에서는 절차가 정상적으로 진행되었고 첫 모델 호출이 한도로 막혔다**
 - `terminal-idle-check`는 **idle: true**였습니다. Agy 터미널과 달리 Orca는 Codex 터미널의 대기를 판정했습니다.
 - `workflow-reserve`로 attempt codex-path-1을 예약한 뒤(revision 2, status running), `worker-start --terminal`이 성공했습니다. dispatchId ctx_a0e5e8433001, taskId task_5c3ea0b1ea16, **state: ready**, **stage: input_accepted**, **turnStart: observed**, liveness: live, 터미널·워크트리는 reused, freshContext는 `{cleared: false, reason: "not-claude"}`였습니다. binding은 `{profile: codex-luna, provider: codex, via: terminal, modelRequested: gpt-5.6-luna, modelProof: unproven, screenCheck: required, roleHeader: true}`이고, 화면의 `gpt-5.6-luna medium`으로 모델을 대조했습니다.
 - 지시문이 화면에 들어가고 Working이 시작된 뒤, **첫 모델 호출이 거부되었습니다.** 화면 원문은 `■ You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 26th, 2026 6:11 AM.`입니다.
