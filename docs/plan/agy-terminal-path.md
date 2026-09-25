@@ -1,8 +1,8 @@
 # Agy 터미널 경로 개선 계획 (Orca 판정 규칙)
 
 - 작성일: 2026-09-17
-- 상태: 실측과 Senior 검토 완료. 호환성 표는 `plugins/oh-my-teams/scripts/launch-matrix.mjs`가 정본이며, Codex 신뢰 기록이 없는 조합은 사용자 설정을 바꾸지 않고는 재현할 수 없어 근거 등급이 `source-derived`로 남아 있다. #55는 닫히고 #46은 Orca의 `tui-idle` 판정 규칙 때문에 열려 있다.
-- 대상 버전: Orca 1.4.204, Antigravity CLI 1.2.5
+- 상태: Orca 1.4.210 재실측과 Senior 검토 완료. 호환성 표는 `plugins/oh-my-teams/scripts/launch-matrix.mjs`가 정본이다. 폭 44 조정의 근거와 판정 규칙이 Orca 1.4.210에서 변경되었으나, macOS에서는 폭 조정 없이도 감독 터미널이 성립하고 POSIX 셸에서는 폭 조정을 유지하고 있다. Windows 조합의 근거 등급은 `verified`가 아니며, 근거였던 Orca 1.4.204의 판정 규칙은 더 이상 존재하지 않는다.
+- 대상 버전: Orca 1.4.210, Antigravity CLI 1.2.11
 
 ## Orca 판정 규칙
 
@@ -329,4 +329,24 @@ D는 주입 경로의 `inject_rejected`·`no_agent_detected`가 `not-started` �
 **#46은 열어 둔다.** A와 B의 근본 원인은 Orca의 `q0i(e)` 판정 하드코딩과 Windows 전경 프로세스 트리 파싱이며, OMT 범위에서 해결할 수 없다. Orca 수정(`q0i` 판정 완화 및 `isShellProcess` 보강)이 적용되기 전까지 Windows에서 Agy Gemini 역할의 감독 터미널 경로는 사용할 수 없다.
 
 **#55는 닫을 수 있다.** 비 Gemini Agy 역할의 실행 전 거부(A), headless 경로 검증(B), headless receipt 형식(C)이 모두 표와 런타임에 반영되었다. 이번 실측(`r3-c3`, `r3-c4`)에서도 런타임 동작이 표와 일치함을 확인했다.
+
+## Orca 1.4.210 재실측 (2026-09-25)
+
+환경은 macOS(darwin 24.6.0), Orca 1.4.210, Antigravity CLI 1.2.11이다. `orca terminal create`로 터미널을 열고 `orca terminal wait --for tui-idle`과 `orca terminal show`로 확인했다.
+
+| 조합 | 폭 조정 | `tui-idle` | `agentIdentity` |
+|---|---|---|---|
+| `agy --model claude-sonnet-4-6` | 없음 | `satisfied: true` | `antigravity` |
+| `agy --model gemini-3.1-pro-high` | 없음 | `satisfied: true` | `antigravity` |
+| `stty cols 44; agy --model gemini-3.1-pro-high` | `cols 44` | `satisfied: true` | `antigravity` |
+
+차단 대상이던 claude 계열이 폭 조정 없이 통과했고, 폭을 조정하든 하지 않든 결과가 같았다. `agentIdentity`는 터미널을 연 직후에는 `null`이었다가 몇 초 뒤 `antigravity`로 확정되므로, 조회 시점이 이르면 식별 실패로 오인할 수 있다.
+
+Orca 1.4.210 번들에서 프롬프트 줄을 판정하는 조건은 다음 한 줄이며, 함수 전체에 `gemini`라는 문자열이 없다.
+
+```js
+function Maa(e){return e===`>`||/^>\s+[a-z][a-z-]*\s+mode:\s/i.test(e)}
+```
+
+에이전트 식별도 화면 문자열이 아니라 `antigravity:{detectCmd:"agy", …}`처럼 실행 명령을 기준으로 삼는다.
 
