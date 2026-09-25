@@ -1349,6 +1349,9 @@ test("readLaunchEnvironment gitdir resolution matches git rev-parse", async (t) 
   const repoRoot = pathM.join(tmpBase, "repo");
   fsM.mkdirSync(repoRoot);
   execSync("git init", { cwd: repoRoot });
+  // CI runners have no global identity, so the commit below needs one here.
+  execSync('git config user.name "Test"', { cwd: repoRoot });
+  execSync('git config user.email "test@example.invalid"', { cwd: repoRoot });
 
   // Create a real git worktree
   execSync('git commit --allow-empty -m "init"', { cwd: repoRoot });
