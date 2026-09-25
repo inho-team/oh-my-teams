@@ -123,7 +123,7 @@ task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../
 필수 검토가 `changes-requested`나 `inconclusive`로 끝나거나 열린 finding을 남기면, 그것은 실패가 아니므로 `workflow-retry`가 아니라 검토 반려 루프로 처리한다.
 
 1. 반려한 검토의 finding을 구현 역할에게 그대로 넘겨 같은 워크트리에서 고치게 한다. 새 Orca Dispatch를 만들면 그 receipt를 받는다.
-2. `workflow-rework`로 그 receipt를 현재 attempt에 연결한다. 입력은 `eventId`, `taskId`, 현재 `attemptId`, 반려한 검토의 `reviewId`, 수정 실행의 `receipt`다. 런타임은 그 검토가 이 task의 현재 실행을 검토했는지, attempt의 호출 한도가 남았는지 확인하며, 새 attempt를 쓰지 않는다. 한도가 남지 않았으면 거부되므로 이사에게 보고해 사용자 예산 결정을 받도록 한다.
+2. `workflow-rework`로 그 receipt를 현재 attempt에 연결한다. 입력은 `eventId`, `taskId`, 현재 `attemptId`, 반려한 검토의 `reviewId`, 수정 실행의 `receipt`다. 런타임은 그 검토가 이 task의 현재 실행을 검토했는지, attempt의 호출 한도가 남았는지 확인하며, 새 attempt를 쓰지 않는다. 한도가 남지 않았으면 거부되므로 이사에게 보고해 사용자 예산 결정을 받는다. 증액을 승인받으면 `workflow-allowance`로 같은 attempt의 한도를 늘린 뒤 `workflow-rework`를 다시 시도한다. task는 정산되어 `submitted`나 `reviewed` 상태이므로 `workflow-allowance`가 그 상태를 그대로 받아들인다.
 3. 수정 실행이 끝나면 `workflow-settle`로 정산하고, 검토자가 **수정 실행의 ID**를 `implementationExecutionId`로 적어 다시 검토한다. 재검토를 맡길 때에는 앞선 검토 파일의 경로와 수정 diff 범위(`<이전 검토 HEAD>..<수정 HEAD>`)를 함께 넘긴다. 재검토는 앞선 finding의 해결 여부와 그 diff가 새로 만든 문제만 확인한다. 앞선 검토의 finding은 같은 `id`에 `resolved`와 `resolution`을 적어 닫는다. 생략하면 열린 채로 남는다.
 4. `accept` 뒤 `workflow-resume`을 실행하면 수정 실행의 gate가 task를 `accepted`로 올린다.
 
@@ -133,7 +133,9 @@ node <runtime> workflow-rework --id <workflowId> --state <pm-state> --revision <
 
 workflow 밖에서 수정을 진행하고 로그 파일에만 경위를 남기지 않는다. 그렇게 하면 gate가 수용되어도 task는 `submitted`에 머문다.
 
-검토 반려가 아니라 검토 요구 없이 정산된 task(`submitted` 또는 `reviewed`)를 PM이 수동으로 되돌려야 할 때는 `workflow-rework`가 아니라 `workflow-allowance`나 `workflow-reopen`을 쓴다. `workflow-rework`는 반려한 검토가 있다는 전제로 같은 attempt를 이어가지만, 수동 override에는 그 전제가 없으므로 `workflow-reopen`은 `workflow-retry`처럼 새 attempt를 열어 전체 예산(시도·호출)을 소비하고, 옛 실행에 달린 리뷰는 새 `implementationExecutionId`와 맞지 않아 자연스럽게 재검토를 요구하게 만든다. `accepted` task나 실행 중인 task는 거부된다. 같은 attempt 안에서 호출 한도만 부족하면 새 attempt를 열지 않고 `workflow-allowance`로 그 한도만 늘린다.
+`workflow-allowance`는 현재 attempt의 호출 한도만 늘리며, 증가하는 방향만 허용하고 `availableCalls`와 `state.budget.maxCalls` 안에서만 통과한다. attempt가 아직 실행 중(`reserved`·`running`)이거나 정산되어 검토를 기다리는 중(`submitted`·`review-pending`·`reviewed`)이면 받아들이고, `accepted`·`failed` task와 attempt가 없는 `pending` task는 거부한다. 위 2단계처럼 `workflow-rework`가 한도 소진으로 거부되었을 때 새 attempt 없이 같은 attempt를 이어가는 용도로 주로 쓴다.
+
+검토 반려가 아니라 검토 요구 없이 정산된 task(`submitted` 또는 `reviewed`)를 PM이 수동으로 되돌려야 할 때는 `workflow-rework`가 아니라 `workflow-reopen`을 쓴다. `workflow-rework`는 반려한 검토가 있다는 전제로 같은 attempt를 이어가지만, 수동 override에는 그 전제가 없으므로 `workflow-reopen`은 `workflow-retry`처럼 새 attempt를 열어 전체 예산(시도·호출)을 소비하고, 옛 실행에 달린 리뷰는 새 `implementationExecutionId`와 맞지 않아 자연스럽게 재검토를 요구하게 만든다. `accepted` task나 실행 중인 task는 거부된다.
 
 ```text
 node <runtime> workflow-reopen --id <workflowId> --state <pm-state> --revision <n> --reopen <reopen.json>

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  hash,
   readJSON,
   run,
   writeJSON,
@@ -18,11 +19,18 @@ import {
   readWorkflow,
   recordSettlement,
   reopenTask,
+  reworkTask,
   resumeWorkflow,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import {
+  saveWorkflowState,
+  workflowStateFile,
+} from "../plugins/oh-my-teams/scripts/workflow-store.mjs";
+import {
   DEFAULT_VERIFY_TIMEOUT_MS,
   MAX_VERIFY_TIMEOUT_MS,
+  fingerprint,
+  validateEvidence,
   verify,
 } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
@@ -31,6 +39,15 @@ import {
   gateCheck,
   recordReview,
 } from "../plugins/oh-my-teams/scripts/gates.mjs";
+
+const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
+
+async function cliRun(dir, ...args) {
+  return run([process.execPath, cli, ...args], {
+    cwd: dir,
+    timeoutMs: 120000,
+  });
+}
 
 const organization = readJSON(
   new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
@@ -188,6 +205,190 @@ test("workflow-allowance raises a reserved attempt's allowance within budget and
   assert.equal(replay.duplicate, true);
 });
 
+test("workflow-allowance raises a settled attempt's allowance to unblock a rework rejected for exhausted calls", async (t) => {
+  const { stateDir, request } = await singleTaskWorkflow(t, {
+    id: "allowance-settled-workflow",
+    budget: { maxAttempts: 2, maxCalls: 3 },
+  });
+  const revision = () => readWorkflow(stateDir, request.id).state.revision;
+
+  attachExecution(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "attach-a",
+    attemptId: "attempt-a",
+    taskId: "a",
+    callAllowance: 1,
+    receipt: receipt("a"),
+  });
+  recordSettlement(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "settle-a",
+    attemptId: "attempt-a",
+    taskId: "a",
+    executionId: "a",
+    outcome: "settled",
+    callsUsed: 1,
+  });
+  const settled = readWorkflow(stateDir, request.id).state.tasks.a;
+  assert.equal(settled.state, "submitted");
+
+  fs.mkdirSync(path.join(stateDir, "reviews"), { recursive: true });
+  writeJSON(path.join(stateDir, "reviews", "review-a.json"), {
+    schemaVersion: 1,
+    id: "review-a",
+    taskId: "a",
+    taskHash: settled.taskHash,
+    implementationExecutionId: "a",
+    conclusion: "changes-requested",
+    findings: [{ id: "f1", status: "open", description: "Needs a fix" }],
+  });
+
+  // The attempt's single call is already spent, so the rework the review
+  // demands is blocked purely on budget, not on anything else about it.
+  assert.throws(
+    () =>
+      reworkTask(stateDir, request.id, revision(), {
+        schemaVersion: 1,
+        eventId: "rework-blocked",
+        taskId: "a",
+        attemptId: "attempt-a",
+        reviewId: "review-a",
+        receipt: receipt("a-fix"),
+      }),
+    /no call remains for rework/,
+  );
+
+  const raised = increaseCallAllowance(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "allow-settled",
+    taskId: "a",
+    attemptId: "attempt-a",
+    allowance: 2,
+    approvedBy: "pm",
+    reason: "Give the rework a call to run with",
+  });
+  assert.equal(
+    raised.state.tasks.a.attempts.find((a) => a.id === "attempt-a")
+      .callAllowance,
+    2,
+  );
+
+  const reworked = reworkTask(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "rework-unblocked",
+    taskId: "a",
+    attemptId: "attempt-a",
+    reviewId: "review-a",
+    receipt: receipt("a-fix"),
+  });
+  assert.equal(reworked.tasks.a.state, "running");
+  assert.equal(reworked.tasks.a.execution.executionId, "a-fix");
+});
+
+test("workflow-allowance rejects accepted, failed and pending tasks", async (t) => {
+  const rawState = (stateDir, id) => readJSON(workflowStateFile(stateDir, id));
+  const patchTaskState = (stateDir, id, newState) => {
+    const state = rawState(stateDir, id);
+    state.tasks.a.state = newState;
+    saveWorkflowState(stateDir, id, state);
+  };
+
+  // accepted: settle, then move the task past review straight to accepted —
+  // an allowance increase must not reach a task that is already done.
+  {
+    const { stateDir, request } = await singleTaskWorkflow(t, {
+      id: "allowance-accepted-workflow",
+      budget: { maxAttempts: 2, maxCalls: 3 },
+    });
+    const revision = () => readWorkflow(stateDir, request.id).state.revision;
+    attachExecution(stateDir, request.id, revision(), {
+      schemaVersion: 1,
+      eventId: "attach-a",
+      attemptId: "attempt-a",
+      taskId: "a",
+      callAllowance: 1,
+      receipt: receipt("a"),
+    });
+    recordSettlement(stateDir, request.id, revision(), {
+      schemaVersion: 1,
+      eventId: "settle-a",
+      attemptId: "attempt-a",
+      taskId: "a",
+      executionId: "a",
+      outcome: "settled",
+      callsUsed: 1,
+    });
+    patchTaskState(stateDir, request.id, "accepted");
+    assert.throws(
+      () =>
+        increaseCallAllowance(stateDir, request.id, revision(), {
+          schemaVersion: 1,
+          eventId: "allow-accepted",
+          taskId: "a",
+          attemptId: "attempt-a",
+          allowance: 2,
+          approvedBy: "pm",
+          reason: "Should not reach an accepted task",
+        }),
+      /has no reserved, running or settled attempt/,
+    );
+  }
+
+  // failed: a still-attached attempt that never settled is not reworked, so
+  // an allowance increase must not reach it either.
+  {
+    const { stateDir, request } = await singleTaskWorkflow(t, {
+      id: "allowance-failed-workflow",
+      budget: { maxAttempts: 2, maxCalls: 3 },
+    });
+    const revision = () => readWorkflow(stateDir, request.id).state.revision;
+    attachExecution(stateDir, request.id, revision(), {
+      schemaVersion: 1,
+      eventId: "attach-a",
+      attemptId: "attempt-a",
+      taskId: "a",
+      callAllowance: 1,
+      receipt: receipt("a"),
+    });
+    patchTaskState(stateDir, request.id, "failed");
+    assert.throws(
+      () =>
+        increaseCallAllowance(stateDir, request.id, revision(), {
+          schemaVersion: 1,
+          eventId: "allow-failed",
+          taskId: "a",
+          attemptId: "attempt-a",
+          allowance: 2,
+          approvedBy: "pm",
+          reason: "Should not reach a failed task",
+        }),
+      /has no reserved, running or settled attempt/,
+    );
+  }
+
+  // pending: never attached, so there is no attempt to raise at all.
+  {
+    const { stateDir, request } = await singleTaskWorkflow(t, {
+      id: "allowance-pending-workflow",
+      budget: { maxAttempts: 2, maxCalls: 3 },
+    });
+    const revision = () => readWorkflow(stateDir, request.id).state.revision;
+    assert.throws(
+      () =>
+        increaseCallAllowance(stateDir, request.id, revision(), {
+          schemaVersion: 1,
+          eventId: "allow-pending",
+          taskId: "a",
+          attemptId: "attempt-a",
+          allowance: 2,
+          approvedBy: "pm",
+          reason: "Should not reach a pending task",
+        }),
+      /has no reserved, running or settled attempt/,
+    );
+  }
+});
+
 test("workflow-reopen returns a settled task to pending as a new attempt and rejects the wrong state, exhausted budget and duplicates", async (t) => {
   const { stateDir, request } = await singleTaskWorkflow(t, {
     id: "reopen-workflow",
@@ -332,6 +533,98 @@ test("verify records the caller's timeout in the evidence fingerprint and reject
     () => verify(dir, { ...options, timeoutMs: 0 }),
     /timeoutMs/,
   );
+});
+
+test("validateEvidence and merge-check accept pre-#100 evidence that has no timeoutMs key, while a declared timeout still changes the key", async (t) => {
+  const dir = await repo(t);
+  // Evidence/task/log files live outside the repo so the repo's tree stays
+  // exactly what it was when fingerprinted; an untracked file dropped inside
+  // the repo would itself make every later fingerprint "stale" by changing
+  // the tree hash, which is a different failure than the one under test.
+  const scratch = fs.mkdtempSync(
+    path.join(os.tmpdir(), "workflow-runtime-gaps-evidence-"),
+  );
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const commands = [[process.execPath, "-e", "process.exit(0)"]];
+  const environment = "test";
+
+  // Reproduce the exact pre-#100 seven-key shape (head/base/tree/commands/
+  // environment/platform/node, no timeoutMs) with the same fingerprint()
+  // this runtime now uses, via the compatibility option that lets it.
+  const oldFingerprint = await fingerprint(
+    dir,
+    "HEAD",
+    commands,
+    environment,
+    DEFAULT_VERIFY_TIMEOUT_MS,
+    { includeTimeout: false },
+  );
+  assert.equal(Object.hasOwn(oldFingerprint, "timeoutMs"), false);
+
+  const logPath = path.join(scratch, "old-check-0.log");
+  fs.writeFileSync(logPath, "ok\n");
+  const oldEvidence = {
+    schemaVersion: 1,
+    key: hash(oldFingerprint),
+    fingerprint: oldFingerprint,
+    status: "passed",
+    unchanged: true,
+    checks: [
+      {
+        argv: commands[0],
+        code: 0,
+        timedOut: false,
+        overflow: false,
+        pid: 1,
+        elapsedMs: 1,
+        log: logPath,
+        logHash: hash("ok\n"),
+        tail: "ok\n",
+      },
+    ],
+    createdAt: new Date().toISOString(),
+  };
+
+  await assert.doesNotReject(() => validateEvidence(dir, oldEvidence, "HEAD"));
+
+  // A modern evidence file, with its declared timeout, must not collide with
+  // the key-less shape above — timeoutMs still separates cache entries.
+  const newFingerprint = await fingerprint(
+    dir,
+    "HEAD",
+    commands,
+    environment,
+    1000,
+  );
+  assert.notEqual(hash(newFingerprint), oldEvidence.key);
+
+  const taskFile = path.join(scratch, "merge-check-task.json");
+  writeJSON(taskFile, {
+    schemaVersion: 1,
+    id: "merge-check-task",
+    instruction: "Check something",
+    files: ["seed.txt"],
+    checks: commands,
+    environment,
+    baseRef: "HEAD",
+    risk: "low",
+  });
+  const evidenceFile = path.join(scratch, "old-evidence.json");
+  writeJSON(evidenceFile, oldEvidence);
+  const merged = await cliRun(
+    dir,
+    "merge-check",
+    "--evidence",
+    evidenceFile,
+    "--task",
+    taskFile,
+    "--repo",
+    dir,
+    "--base",
+    "HEAD",
+  );
+  assert.equal(merged.code, 0, merged.stderr);
+  assert.equal(JSON.parse(merged.stdout).valid, true);
 });
 
 test("workflow-integration-checks appends new checks to a frozen integration task and refuses to change one already accepted", async (t) => {

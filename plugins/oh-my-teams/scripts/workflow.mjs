@@ -39,6 +39,22 @@ const TERMINAL_OBSERVATIONS = ["settled", "failed"];
 const occupiesSlot = (item) => ["reserved", "running"].includes(item.state);
 // A gate can only advance a task that has already reported an outcome.
 const GATEABLE_STATES = ["submitted", "review-pending", "reviewed", "accepted"];
+// An allowance increase reaches an attempt that is still executing (reserved
+// or running, the brief's original "raise a reserved attempt's call
+// allowance" case), or one that has settled and is waiting on review
+// (submitted, review-pending or reviewed — the states reworkTask itself
+// requires, and the only ones in which its exhausted-allowance rejection can
+// actually fire). An accepted or failed task is not reworked at all, and a
+// pending task holds no attempt; workflow-reopen (#99) revives an accepted
+// task, and workflow-retry revives a failed one — an allowance increase does
+// neither.
+const ALLOWANCE_ELIGIBLE_STATES = [
+  "reserved",
+  "running",
+  "submitted",
+  "review-pending",
+  "reviewed",
+];
 
 /**
  * Validates a workflow request before task files or external state are read.
@@ -1158,21 +1174,31 @@ function validateAllowanceInput(input) {
 }
 
 /**
- * Raises a reserved or running attempt's call allowance within budget headroom.
+ * Raises the current attempt's call allowance within budget headroom, whether
+ * that attempt is still executing (`reserved`/`running`, the brief's original
+ * case) or has already settled and is waiting on review (`submitted`,
+ * `review-pending` or `reviewed` — the states `reworkTask` itself requires,
+ * and the only ones in which its exhausted-allowance rejection can actually
+ * fire).
  *
  * The increase is bounded by {@link availableCalls}, the pool no other
  * reservation already claims, so growing one attempt can never spend calls
  * another attempt is holding. A `workflow-rework` blocked by an exhausted
- * allowance is expected to pass once the raised allowance is attached.
+ * allowance is expected to pass once the raised allowance is attached. An
+ * `accepted` or `failed` task is not reworked at all — reviving an accepted
+ * task is `workflow-reopen`'s job and a failed one `workflow-retry`'s, not
+ * this command's — and a `pending` task holds no attempt, so none of the
+ * three is eligible here.
  *
  * @param {string} stateDir - PM worktree `.omt` state directory.
  * @param {string} id - Workflow identifier.
  * @param {number} expectedRevision - Revision the caller last read.
  * @param {object} input - Event id, task, attempt, new allowance, approver and reason.
  * @returns {object} Updated workflow state, or the unchanged state on replay.
- * @throws {Error} When the revision is stale, the attempt is not reserved or
- *   running, the new allowance does not exceed the current one, or it exceeds
- *   the workflow's unreserved call budget.
+ * @throws {Error} When the revision is stale, the attempt is not the task's
+ *   current one and either executing or settled awaiting review, the new
+ *   allowance does not exceed the current one, or it exceeds the workflow's
+ *   unreserved call budget.
  */
 export function increaseCallAllowance(stateDir, id, expectedRevision, input) {
   return withWorkflowUpdate(stateDir, id, () => {
@@ -1187,8 +1213,10 @@ export function increaseCallAllowance(stateDir, id, expectedRevision, input) {
 
     const item = state.tasks[input.taskId];
     assert(
-      item && occupiesSlot(item) && item.attemptId === input.attemptId,
-      `Task ${input.taskId} has no reserved or running attempt ${input.attemptId}`,
+      item &&
+        ALLOWANCE_ELIGIBLE_STATES.includes(item.state) &&
+        item.attemptId === input.attemptId,
+      `Task ${input.taskId} has no reserved, running or settled attempt ${input.attemptId}`,
     );
     const attempt = item.attempts.find(
       (candidate) => candidate.id === input.attemptId,

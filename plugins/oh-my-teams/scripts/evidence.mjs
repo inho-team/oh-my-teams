@@ -89,7 +89,14 @@ async function workspaceContents(repo) {
  * @param {number} [timeoutMs=DEFAULT_VERIFY_TIMEOUT_MS] - Per-check timeout that
  *   is part of the fingerprint, so evidence run under a different timeout never
  *   reuses a cache entry it was not actually produced under.
- * @returns {Promise<object>} HEAD, base, tree, commands, timeout, and runtime fingerprint.
+ * @param {object} [options] - Fingerprint shape control.
+ * @param {boolean} [options.includeTimeout=true] - When `false`, the returned
+ *   object omits the `timeoutMs` key entirely instead of carrying `timeoutMs`.
+ *   {@link validateEvidence} passes `false` to reproduce the key-less shape
+ *   evidence recorded before per-check timeouts existed, so that evidence
+ *   keeps hashing to the same key it always did.
+ * @returns {Promise<object>} HEAD, base, tree, commands, (optional) timeout,
+ *   and runtime fingerprint.
  * @throws {Error} For invalid commands, environment, Git, or unsafe paths.
  */
 export async function fingerprint(
@@ -98,6 +105,7 @@ export async function fingerprint(
   commands,
   environment,
   timeoutMs = DEFAULT_VERIFY_TIMEOUT_MS,
+  { includeTimeout = true } = {},
 ) {
   assert(
     typeof environment === "string" && environment.trim(),
@@ -111,16 +119,20 @@ export async function fingerprint(
     "--verify",
     `${baseRef}^{commit}`,
   ]);
-  return {
+  const result = {
     head,
     base,
     tree: hash(await workspaceContents(repo)),
     commands,
     environment,
-    timeoutMs,
-    platform: process.platform,
-    node: process.version,
   };
+  // Key insertion order feeds JSON.stringify inside hash(), so this key is
+  // only ever appended here, never earlier — omitting it (includeTimeout:
+  // false) reproduces the exact pre-#100 seven-key shape byte for byte.
+  if (includeTimeout) result.timeoutMs = timeoutMs;
+  result.platform = process.platform;
+  result.node = process.version;
+  return result;
 }
 
 function checkSucceeded(check) {
@@ -244,6 +256,11 @@ export async function verify(
 /**
  * Revalidates stored evidence against current source and trusted acceptance input.
  *
+ * Evidence recorded before `verify()` fingerprinted its per-check timeout
+ * carries no `timeoutMs` key at all; that key-less shape is reproduced here
+ * rather than backfilled with a default, so such evidence still hashes to its
+ * original key and keeps validating instead of being rejected as stale.
+ *
  * @param {string} repo - Current Git workspace.
  * @param {object} evidence - Previously recorded evidence.
  * @param {string} baseRef - Current trusted base reference.
@@ -285,12 +302,20 @@ export async function validateEvidence(
     "Failed or missing checks",
   );
 
+  // Evidence recorded before per-check timeouts existed never had a
+  // `timeoutMs` key at all, not merely an implicit default; recomputing with
+  // that same key-less shape is what lets it keep hashing to its own
+  // evidence.key. Evidence that does carry the key (any `verify()` output
+  // since #100, default timeout or not) is recomputed with it, so a mismatched
+  // timeout still changes the key as intended.
+  const includeTimeout = Object.hasOwn(evidence.fingerprint ?? {}, "timeoutMs");
   const current = await fingerprint(
     repo,
     baseRef,
     evidence.fingerprint.commands,
     evidence.fingerprint.environment,
     evidence.fingerprint.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
+    { includeTimeout },
   );
   assert(
     hash(current) === evidence.key &&
