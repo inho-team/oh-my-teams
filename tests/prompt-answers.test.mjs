@@ -741,10 +741,13 @@ test("a Windows tilde or $HOME marker followed by a backslash still expands to t
   // The POSIX form of the same text is unaffected: POSIX treats `\` as an
   // ordinary filename character, so the marker is not expanded there and the
   // word still resolves to a literal folder under the worktree, exactly as
-  // before this fix.
+  // before this fix. `platform` is pinned to a POSIX value here, the way
+  // WIN_SCOPE pins "win32" above, so this comparison does not depend on
+  // which platform runs the tests.
+  const posixScope = { ...SCOPE, platform: "linux" };
   const posixResult = judgeCommandScope(
-    { cwd: SCOPE.worktree, paths: ["~\\.aws\\config"] },
-    SCOPE,
+    { cwd: posixScope.worktree, paths: ["~\\.aws\\config"] },
+    posixScope,
   );
   assert.equal(posixResult.verdict, "escalate");
   assert.ok(
