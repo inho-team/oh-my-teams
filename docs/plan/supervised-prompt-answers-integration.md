@@ -108,7 +108,7 @@ origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브�
 
 ## Agy와 Codex
 
-이번 통합 시점에 Agy는 일부 경로만 관측했고 작업 수행은 검증하지 못했습니다. Codex는 검증을 시작하지 못했습니다. Agy 검증은 실행 당시 사용자가 승인한 결정이 아니라 알림 결함으로 생긴 무승인 결정(이슈 #82)에 따라 실행되었으므로, 정정을 먼저 적습니다. 이후 2026-09-22에 사용자가 그 결과를 증거로 유지하도록 사후 승인했고, 같은 날 Codex 검증의 역할 매핑도 승인했습니다. 근거 파일은 `.omt/evidence-2.8.0-features.md`의 「무승인 결정(#82)으로 진행한 Agy 실제 경로」 절과 「사용자의 직접 결정 (2026-09-22)」 절, `.omt/w2/CORRECTION-82.md`입니다.
+이번 통합 시점에 Agy는 일부 경로만 관측했고 작업 수행은 검증하지 못했습니다. Codex는 2026-09-25에 한도 리셋을 기다리지 않고 실제 경로 검증을 수행했으며, 시작 경로까지는 한도에 막히지 않았지만 첫 모델 호출이 주간 한도로 거부되어 작업 수행은 검증하지 못했습니다. Agy 검증은 실행 당시 사용자가 승인한 결정이 아니라 알림 결함으로 생긴 무승인 결정(이슈 #82)에 따라 실행되었으므로, 정정을 먼저 적습니다. 이후 2026-09-22에 사용자가 그 결과를 증거로 유지하도록 사후 승인했고, 같은 날 Codex 검증의 역할 매핑도 승인했습니다. 근거 파일은 `.omt/evidence-2.8.0-features.md`의 「무승인 결정(#82)으로 진행한 Agy 실제 경로」 절과 「사용자의 직접 결정 (2026-09-22)」 절, 「Codex 실제 경로 검증 (2026-09-25, 한도 리셋을 기다리지 않고 수행)」 절, `.omt/w2/CORRECTION-82.md`입니다.
 
 ### 무승인 결정 정정 (이슈 #82)
 
@@ -168,15 +168,113 @@ PM은 Agy 검증을 위해 director-signal decision으로 이사에게 결정을
 - 감독 worker-start 경로로 Agy에 작업을 넘기는 동작은 시작할 수 없었으므로 확인하지 못했습니다.
 - 주입 경로의 결과는 `supervised: false`, `modelProof: unproven` 그대로입니다. 화면에 표시된 모델만 확인했습니다.
 
-### Codex
+### Codex 관측 (OpenAI Codex CLI 0.155.1, codex-luna, 화면 모델 gpt-5.6-luna medium)
 
-Codex는 검증을 시작하지 못했으며 아직 미검증입니다. 주간 사용량 한도가 2026-09-26 06:11 KST에 리셋될 예정입니다. 사용자가 2026-09-22에 A안(검증 전용 역할 매핑)을 승인했으므로, 한도가 풀린 뒤 junior를 codex-luna로 매핑하는 검증 전용 매핑으로 Agy와 같은 경로(새 워크트리 생성 → role-terminal → prompt-answer → worker-start)를 검증할 예정입니다. 검증 전용 workflow를 만드는 동안만 매핑을 유지하고, 만든 직후 되돌립니다(자세한 승인 내용은 앞 절의 「사후 승인 (2026-09-22)」를 참고합니다).
+2026-09-25에 이사가 사용자 결정으로 "한도 리셋을 기다리지 말고 지금 Codex 검증을 재개하라"고 지시했습니다. 근거는 브리프 수용 기준 3의 첫 문장이며, 주간 한도가 막는 것이 모델 호출인지 신뢰 질문 화면인지를 먼저 가리라는 것이었습니다. 근거 파일은 `.omt/evidence-2.8.0-features.md`의 「Codex 실제 경로 검증 (2026-09-25, 한도 리셋을 기다리지 않고 수행)」 절이며, 실행 기록 원문은 `.omt/w3/`에 있습니다.
+
+**조직 매핑(A안)과 검증 전용 workflow**
+- 첫 편집이 거부되었습니다. junior의 profile만 codex-luna로 바꾸고 fallbacks에 codex-luna를 그대로 둔 채 `edit --revision 9`를 보냈더니 "Invalid fallbacks: junior"로 거부되었습니다. 역할의 profile은 자기 fallbacks에 다시 들어갈 수 없습니다.
+- 그 거부를 확인하지 못한 채 `workflow-create`가 먼저 실행되어, junior가 claude-haiku인 조직 revision 9 스냅샷으로 workflow `supervised-prompt-answers-w3-codex`가 만들어졌습니다. 이 workflow는 Codex를 띄울 수 없으므로 쓰지 않고 폐기했습니다(attemptsUsed 0, 실행 이력 없음). 상태 디렉터리는 기록으로 남습니다.
+- 되돌림 편집은 성공해 revision 10이 되었고, 내용은 revision 9와 같습니다(파일 비교로 확인했습니다).
+- 두 번째 시도에서 profile을 codex-luna로, fallbacks를 `["agy-oss"]`로 함께 바꾸어 `edit --revision 10`이 성공했습니다. **바꾼 revision은 11**이며, `show`는 `JUNIOR: codex-luna | Current ChatGPT subscription | codex/gpt-5.6-luna`를 출력했습니다.
+- 그 상태에서 검증 전용 workflow `supervised-prompt-answers-w3-codex-r2`를 만들었습니다(depth 2, roles [pm, junior], organizationRevision 11). 곧바로 매핑을 되돌려 **되돌린 revision은 12**가 되었고, junior는 `{profile: claude-haiku, fallbacks: [codex-luna, agy-oss]}`로 원래대로 돌아왔습니다.
+
+**첫째 단계: 워크트리 생성과 role-terminal — 한도가 막지 않았고 폴더 신뢰 질문은 나타나지 않았다**
+- 새 Orca 워크트리 spa-verify-codex를 만들었습니다(HEAD 636c5b3, branch dev-inho/spa-verify-codex).
+- role-terminal이 터미널 term_eb005eed를 열었습니다. 실행 명령은 `codex --dangerously-bypass-approvals-and-sandbox --model gpt-5.6-luna`이고, matrix는 supervised-terminal, 경고는 untested_patch_version입니다.
+- 결과의 trust는 **not-asked**였습니다. **폴더 신뢰 질문은 나타나지 않았습니다.** 화면에는 `>_ OpenAI Codex (v0.155.1)`, `directory: ~/orca/…/oh-my-teams/spa-verify-codex`, `permissions: YOLO mode`가 떴습니다.
+- 신뢰 질문이 나타나지 않은 조건을 읽기만 해서 확인했습니다. 사용자 설정 파일 `~/.codex/config.toml`(읽기만 함)에는 projects 항목이 123개 있고, 그 가운데 `[projects."/Users/jinsungkim"]`의 `trust_level = "trusted"`가 있습니다. spa-verify-codex 경로는 개별 항목으로 등록되어 있지 않지만 그 홈 디렉터리 아래에 있습니다.
+- 대신 다른 질문이 나타났습니다. 화면은 `✨ Update available! 0.155.1 -> 0.157.0`과 선택지 세 개(`1. Update now`, `2. Skip`, `3. Skip until next version`), `Press enter to continue`였습니다. 기본 선택은 1번이므로 Enter를 그대로 보내면 전역 npm 설치가 실행됩니다.
+
+**둘째 단계: 감독자가 화면을 읽고 답하는 경로 — 동작했으나 분류기는 답하지 않았다**
+- `classifyPromptScreen`을 그 화면 줄로 직접 호출한 결과는 `kind: unknown`, `action: none`, `key: null`이었습니다. 실제 `prompt-answer`도 같은 판정을 내렸습니다. `orcaState: "blocked"`, **`blockedReason: "agent-update-prompt"`**, **`status: "escalate"`**, **`sent: false`**, key는 null, next는 report-upstream이었습니다. 즉 분류기가 업데이트 질문을 신뢰 질문으로 잘못 인식해 Enter를 보내는 일은 일어나지 않았습니다.
+- 그 화면을 넘기는 판단은 PM이 자율 권한으로 정했습니다. `1. Update now`는 전역 npm 설치이므로 되돌릴 수 없고 사용자가 소유한 대상에 영향을 주며, `3. Skip until next version`은 사용자 설정에 기록을 남길 수 있어, 아무것도 바꾸지 않는 `2. Skip`만 골랐습니다.
+- 키는 두 단계로 보냈습니다. 먼저 **Down**을 보내고 화면을 다시 읽어 선택 표시가 `› 2. Skip`으로 옮겨진 것을 확인한 뒤에만 **Enter**를 보냈습니다. 기본 선택이 전역 설치였으므로 Enter를 먼저 보내지 않았습니다.
+- Enter 뒤 화면에서 질문이 사라지고 `model: gpt-5.6-luna medium`, `directory: ~/orca/…/oh-my-teams/spa-verify-codex`, `permissions: YOLO mode`로 입력 대기에 들어갔습니다. 조직이 요청한 모델과 화면의 모델이 일치했습니다.
+
+**셋째 단계: worker 시작 — 시작 경로는 동작했고 첫 모델 호출이 한도로 막혔다**
+- `terminal-idle-check`는 **idle: true**였습니다. Agy 터미널과 달리 Orca는 Codex 터미널의 대기를 판정했습니다.
+- `workflow-reserve`로 attempt codex-path-1을 예약한 뒤(revision 2, status running), `worker-start --terminal`이 성공했습니다. dispatchId ctx_a0e5e8433001, taskId task_5c3ea0b1ea16, **state: ready**, **stage: input_accepted**, **turnStart: observed**, liveness: live, 터미널·워크트리는 reused, freshContext는 `{cleared: false, reason: "not-claude"}`였습니다. binding은 `{profile: codex-luna, provider: codex, via: terminal, modelRequested: gpt-5.6-luna, modelProof: unproven, screenCheck: required, roleHeader: true}`이고, 화면의 `gpt-5.6-luna medium`으로 모델을 대조했습니다.
+- 지시문이 화면에 들어가고 Working이 시작된 뒤, **첫 모델 호출이 거부되었습니다.** 화면 원문은 `■ You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 26th, 2026 6:11 AM.`입니다.
+- `worker-limit-check`가 세션 로그에서 같은 사실을 확인했습니다. source는 session, verdict는 handoff, limit은 `{kind: "usage-limit", resetsAt: "Sep 26th, 2026 6:11 AM"}`입니다.
+- fallback으로 넘기지 않았습니다. junior의 fallback은 agy-oss인데, 사용자가 2026-09-22에 Agy를 다시 실행하지 않기로 결정했기 때문입니다.
+
+**정산과 정리**
+- workflow-attach로 receipt를 attempt에 붙인 뒤(revision 3; attach 없이 정산을 먼저 시도했을 때는 "Current attempt is not running"으로 거부되었습니다), workflow-settle로 attempt를 failed로 정산했습니다(revision 4, status blocked, task codex-path state failed, budget attemptsUsed 1·callsUsed 1). 명령의 종료 코드는 1이었지만 상태 파일에는 정산이 기록되었습니다.
+- 터미널을 닫고(ptyKilled true) dispatch를 정리한 뒤(worker-abandon, state failed, alreadySettled true, processAction none) Orca Task task_5c3ea0b1ea16을 failed로 닫았습니다. 터미널을 닫기 전에 시도한 task 닫기는 "cannot move to failed while supervised Dispatch ctx_a0e5e8433001 is active"로 거부되었습니다.
+- 워크트리는 미커밋 변경이 없고 HEAD가 636c5b3 그대로였습니다(Codex가 모델 호출에 이르지 못해 파일을 만들지 않았습니다). `worktree remove`로 회수했습니다(removed true).
+
+**한도가 막는 지점**
+
+| 단계 | 결과 | 한도가 막았는가 |
+|---|---|---|
+| 새 워크트리에서 Codex 띄우기 | 터미널이 열리고 화면을 읽었다 | 막지 않았다 |
+| 폴더 신뢰 질문 출현 | 나타나지 않았다(trust: not-asked, 홈 디렉터리가 trusted) | 한도와 무관하다 |
+| 감독자가 화면을 읽고 키 한 번 보내 답하기 | 업데이트 질문을 Down 확인 뒤 Enter 한 번으로 해소했다 | 막지 않았다 |
+| 분류기가 그 화면에 답하기 | unknown → escalate, 키를 보내지 않았다 | 한도와 무관하다 |
+| worker 시작(input_accepted, turnStart observed) | 관측되었다 | 막지 않았다 |
+| 첫 모델 호출과 작업 수행 | 거부되었다 | **여기서 막혔다**(리셋 2026-09-26 06:11 KST) |
+
+이사가 전달한 전제는 실측으로 확인되었습니다. 한도는 화면 단계를 막지 않았고 worker 시작까지도 막지 않았으며, 막힌 지점은 시작 뒤 첫 모델 호출입니다.
+
+**미검증으로 남았던 것**
+- Codex의 폴더 신뢰 질문 화면과 그 화면에 대한 분류기의 응답은 이 시점에는 확인하지 못했습니다. 지금 조건(홈 디렉터리 trusted, YOLO 모드)에서는 질문이 나타나지 않아 화면을 얻을 수 없었습니다. 이 항목은 아래 「Codex 폴더 신뢰 질문 검증 (2026-09-25, 이사 지시로 재시도)」 절에서 사용자 설정 파일을 고치지 않는 방법으로 해소되었습니다.
+- Codex worker의 작업 수행과 worker_done, 커밋은 확인하지 못했습니다. 주간 한도로 첫 모델 호출이 거부되었기 때문입니다. 이 항목은 재시도 뒤에도 여전히 미검증으로 남습니다.
+
+조직은 이미 revision 12로 원래 매핑입니다. 폐기한 workflow 상태(`supervised-prompt-answers-w3-codex`)와 정산된 workflow 상태(`supervised-prompt-answers-w3-codex-r2`)는 기록으로 남깁니다. 터미널과 워크트리는 회수했습니다.
+
+### Codex 폴더 신뢰 질문 검증 (2026-09-25, 이사 지시로 재시도)
+
+이사가 "사용자 설정 파일을 고치지 않고도 신뢰 기록이 없는 상태를 만들 수 있다"며 임시 `CODEX_HOME`과 `-c/--config`로 `trust_level`을 덮어쓰는 두 방법을 검토하라고 지시했습니다. 그 지시에 따라 재시도하여 앞서 미검증으로 남겼던 두 항목 가운데 폴더 신뢰 질문 화면과 분류기 응답을 검증했습니다. 사용자의 `~/.codex/config.toml`은 읽기만 했습니다. 근거 파일은 `.omt/evidence-2.8.0-features.md`의 「Codex 폴더 신뢰 질문과 감독자 응답 검증 (2026-09-25, 이사 지시로 재시도)」 절이며, 실행 기록 원문은 `.omt/w3/`에 있습니다.
+
+**방법 선택과 막힌 지점**
+- 먼저 임시 `CODEX_HOME`(scratchpad 아래, 권한 700)에 `auth.json`만 복사해 넣었습니다(권한 600). 그 홈에는 `config.toml`이 없어 신뢰 기록이 없는 상태였습니다.
+- 이 임시 홈을 조직 프로필의 `role-terminal` 경로에 넣으려던 두 시도는 런타임이 거부했습니다. `codex-luna`의 `command`를 `["env","CODEX_HOME=…","codex"]`로 바꾸면 `launchableProfile`이 "does not use the current account with a plain command"로 거부했고(`role-launch.mjs`의 `command.length === 1` 검사), 같은 검사 때문에 `-c/--config` 인자를 프로필에 넣는 방법도 쓸 수 없었습니다.
+- PM 프로세스에 `CODEX_HOME`을 설정해 `role-terminal`을 실행해도, Orca가 만드는 터미널은 PM 프로세스의 환경 변수를 상속하지 않아 열린 터미널의 Codex는 그대로 사용자의 `~/.codex`를 썼고 신뢰 질문이 나타나지 않았습니다.
+- 그래서 `role-terminal`로 터미널을 열어 launch ledger에 등록한 뒤(`prompt-answer`는 `launchOf`로 ledger를 조회하므로, 다른 경로로 만든 터미널은 `terminal-not-launched`로 거부됩니다), 그 터미널의 Codex를 `/quit`로 종료하고 같은 터미널에서 임시 `CODEX_HOME`으로 Codex를 다시 실행해 질문을 만들었습니다. 이 상태는 `role-terminal`이 띄운 그대로가 아니라, 감독자가 같은 터미널에서 CLI를 다시 실행해 만든 상태입니다.
+
+**폴더 신뢰 질문 화면 (실제 관측, Codex 0.155.1)**
+
+`orca terminal read --screen`으로 읽은 줄은 다음과 같습니다(`w3/screen-trust-lines.json`, `w3/screen-t3-trust.json`).
+```
+> You are in /Users/jinsungkim/orca/workspaces/oh-my-teams/spa-verify-codex-trust
+  Note: You're in a subdirectory of a Git project. Trusting will apply to the repository root:
+  /Users/jinsungkim/orca/oh-my-teams
+  Do you trust the contents of this directory? Working with untrusted contents comes with higher risk of prompt injection.
+  Trusting the directory allows project-local config, hooks, and exec policies to load.
+› 1. Yes, continue
+  2. No, quit
+  Press enter to continue
+```
+이 화면은 `--dangerously-bypass-approvals-and-sandbox`(화면의 permissions는 YOLO mode)에서도 나타났습니다. 따라서 앞서 이 질문이 나타나지 않았던 원인은 권한 우회 플래그가 아니라 신뢰 기록이었다는 것이 이 관측으로 구분되었습니다.
+
+**분류기 판정**
+
+같은 화면 줄로 `classifyPromptScreen`을 호출한 결과는 `kind: "trust"`, `cli: "codex"`, `action: "send-key"`, `key: {name: "Enter", basis: "footer-text"}`이고, `evidence.selected`는 `{index: 1, label: "Yes, continue"}`, `evidence.verifiedVersion`은 `"0.155.1"`, `evidence.workspace`는 화면에서 뽑아낸 워크트리 경로였습니다. `worktree`에 다른 경로를 넣으면 같은 화면이 `action: "none"`으로 바뀌었고, 사유는 화면의 작업 폴더가 역할 워크트리와 다르다는 것이었습니다.
+
+**prompt-answer 실행 결과**
+
+`prompt-answer`를 감독 경로 터미널에서 실행한 결과는 `kind: "trust"`, `action: "send-key"`, `status: "resolved"`, `sent: true`, `key: {name: "Enter", basis: "footer-text"}`, `delivery.accepted: true`, `verification: {result: "resolved", kind: "unknown"}`, `next: "resume-precheck"`였습니다(`w3/pa-trust-1.json`, id `e2b60295`). `supervisor`는 PM 터미널(role pm, run `run_560d98ca9f04`)로 기록되었습니다. Enter 한 번으로 질문이 사라지고 Codex 화면이 나타났으며, 임시 홈의 `config.toml`에 저장소 루트를 신뢰 대상으로 기록한 항목이 새로 생긴 것으로 승인이 실제로 저장되었다는 것도 확인했습니다. 같은 터미널에 `prompt-answer`를 다시 실행하면 `status: "no-question"`, `sent: false`, `key: null`이었습니다(`w3/pa-trust-2.json`). 두 기록은 모두 `.omt/prompt-answers.jsonl`에 남았습니다. 그 뒤 `terminal-idle-check`는 `idle: true`였습니다.
+
+이 관측으로, 분류기의 Codex 항목에 남아 있던 "신뢰 Enter의 효과가 캡처로 확인되지 않았다"는 미검증 상태가 해소되었습니다.
+
+**검증 방법과 그 한계**
+
+임시 `CODEX_HOME`을 조직 프로필의 `command`나 `-c/--config` 인자로 넣는 방법은 `launchableProfile`의 "plain command" 검사(command 원소 한 개) 때문에 쓸 수 없었고, Orca 터미널은 PM 프로세스의 환경 변수를 상속하지 않았습니다. 그래서 `role-terminal`로 열어 launch ledger에 등록한 터미널에서 Codex를 `/quit`로 종료하고 같은 터미널에서 임시 `CODEX_HOME`으로 다시 실행해 이 질문을 만들었습니다. 즉 이 신뢰 질문은 `role-terminal`이 띄운 그대로의 상태에서 나온 것이 아니며, 사용자의 신뢰 목록에 저장소 루트가 들어 있는 한 조직 프로필로 띄우는 실제 경로에서는 이 질문이 나타나지 않습니다.
+
+사용자 설정 파일은 고치지 않았습니다. `~/.codex/config.toml`은 검증 전후로 projects 항목 123개, 수정 시각 2026-09-22T11:07 그대로였고 `spa-verify-codex-trust` 항목은 없습니다. 임시 `CODEX_HOME`은 인증 파일 사본을 담고 있었으므로 검증을 마친 뒤 삭제했고, 디렉터리가 없어진 것을 확인했습니다.
+
+**조직 revision과 남는 항목**
+
+임시 홈을 프로필 command에 넣으려던 시도 때문에 조직을 한 번 더 바꾸었습니다. **바꾼 revision은 13**(`codex-luna`의 command를 `["env","CODEX_HOME=…","codex"]`로, junior를 codex-luna로)이고, 그 상태에서 workflow `supervised-prompt-answers-w4-codex-trust`를 만들었으나 프로필 거부 때문에 쓰지 못하고 실행 이력 없이 남겼습니다. **되돌린 revision은 14**이며, 되돌린 뒤 `codex-luna`의 command는 `["codex"]`, junior는 `{profile: claude-haiku, fallbacks: [codex-luna, agy-oss]}`로 원래대로입니다. 실제 검증은 앞서 만든 `supervised-prompt-answers-w3-codex-r2`로 진행했습니다.
+
+이 재시도로도 Codex worker의 실제 작업 수행과 `worker_done`, 커밋은 여전히 미검증으로 남습니다. 원인은 주간 한도이며 리셋은 2026-09-26 06:11입니다.
 
 | 클라이언트 | 확인한 경로 | 미확인 단계 | 상태 |
 |---|---|---|---|
 | Claude (Haiku 4.5) | wt, rt(신뢰 질문 제외), pa, idle, ws | 신뢰 질문 경로(prompt-answer 키 전달) | ✓ 부분 확인 |
 | Agy (GPT-OSS 120B) | wt, rt와 신뢰 질문 감독자 응답, idle(거부), 주입(supervised false) | 감독 worker-start, 작업 수행, worker_done | 부분 관측. 실행 당시 무승인(#82)이었고, 2026-09-22 결과를 증거로 유지하도록 사후 승인됨. 제공자 503으로 중단 |
-| Codex | 없음 | 모든 경로 | ⏳ 미검증. 2026-09-22 사용자가 A안 승인, 한도 리셋(2026-09-26 06:11 KST) 뒤 junior→codex-luna 매핑으로 검증 예정 |
+| Codex (gpt-5.6-luna) | wt, rt(신뢰 질문 제외), 업데이트 안내 화면(감독자가 직접 응답), 폴더 신뢰 질문과 분류기 응답(임시 CODEX_HOME, 2026-09-25 재시도), idle, ws(turnStart observed) | 작업 수행과 worker_done·커밋 | 부분 관측. 2026-09-25 한도 리셋을 기다리지 않고 검증, 첫 모델 호출이 주간 한도로 거부(리셋 2026-09-26 06:11 KST). 같은 날 재시도로 신뢰 질문 화면과 분류기 응답을 추가로 확인 |
 
 ## 2.8.0 기능 관측 요약
 
@@ -226,10 +324,11 @@ purpose-changed는 task가 바뀌어서 나온 값이 아닙니다. 같은 터�
 
 ### 미검증: Codex와 Agy, 그리고 Enter와 Esc의 효과
 
-- Codex와 Agy의 신뢰 질문 이후 화면(업데이트 안내, 명령 승인, 사용자 질문 등)은 확인하지 못했습니다. Agy는 신뢰 질문에 답한 뒤 질문이 사라지는 것까지만 관측했습니다. 신뢰 질문에 답하면 사용자 설정에 신뢰가 기록되므로 캡처 단계에서는 답하지 않았습니다. Agy 검증 워크트리에서는 무승인 결정(#82)에 따라 답했고, Agy CLI가 기록한 신뢰 항목은 지우지 않았습니다.
+- Agy의 신뢰 질문 이후 화면(업데이트 안내, 명령 승인, 사용자 질문 등)은 확인하지 못했습니다. Agy는 신뢰 질문에 답한 뒤 질문이 사라지는 것까지만 관측했습니다. 신뢰 질문에 답하면 사용자 설정에 신뢰가 기록되므로 캡처 단계에서는 답하지 않았습니다. Agy 검증 워크트리에서는 무승인 결정(#82)에 따라 답했고, Agy CLI가 기록한 신뢰 항목은 지우지 않았습니다.
+- Codex는 2026-09-25 첫 검증에서 폴더 신뢰 질문 화면을 얻지 못했습니다(trust: not-asked, 홈 디렉터리가 이미 trusted). 대신 나타난 업데이트 안내 화면은 분류기가 `kind: unknown`, `blockedReason: agent-update-prompt`, `status: escalate`, `sent: false`로 답하지 않고 넘겼고, PM이 자율 판단으로 Down에 이어 Enter를 한 번 보내 `2. Skip`을 선택해 해소했습니다. 이 경로는 분류기가 아니라 감독자(PM)가 직접 답한 것이므로, 분류기가 Codex의 업데이트 안내 화면에 스스로 답하는 동작은 여전히 미검증입니다. 같은 날 재시도에서는 임시 `CODEX_HOME`으로 신뢰 기록이 없는 상태를 만들어 폴더 신뢰 질문 화면과 분류기 응답을 확인했습니다(「Codex 폴더 신뢰 질문 검증 (2026-09-25, 이사 지시로 재시도)」 절을 참고합니다).
 - Codex와 Agy에서 신뢰 질문에 Esc를 보냈을 때의 동작은 확인하지 못했습니다. Claude에서는 Esc를 한 번 보냈을 때 질문이 닫히고 Claude가 종료되었으며, 이 관측은 지시 밖 입력이었습니다.
-- Codex와 Claude의 신뢰 질문에서 Enter의 효과는 실측하지 못했습니다. classifier의 accept 기준서에는 "Enter는 화면 안내문에서 도출한 미검증 키로 코드와 문서에 표시"되어 있고, 이 키의 근거는 `footer-text`입니다. 이번 통합 단계의 Claude 실제 경로 검증에서도 확인하지 못했습니다. Agy 1.2.7의 신뢰 질문에서는 Enter를 한 번 보낸 뒤 질문이 사라진 것을 관측했습니다(`prompt-answers.jsonl`의 id 79e300e5, 키 근거 existing-behavior). 이 관측은 무승인 결정(#82)에 따른 검증 중에 얻었습니다.
-- Codex는 주간 사용량 한도로 검증하지 못했습니다. 역할 매핑(junior→codex-luna)은 2026-09-22에 사용자가 A안으로 승인했으므로, 한도 리셋 뒤 그 매핑으로 검증할 예정입니다.
+- Claude의 신뢰 질문에서 Enter의 효과는 실측하지 못했습니다. classifier의 accept 기준서에는 "Enter는 화면 안내문에서 도출한 미검증 키로 코드와 문서에 표시"되어 있고, 이 키의 근거는 `footer-text`입니다. 이번 통합 단계의 Claude 실제 경로 검증에서도 확인하지 못했습니다. **Codex 쪽은 확인되었습니다.** 임시 `CODEX_HOME`으로 만든 신뢰 질문 화면에 `prompt-answer`가 같은 근거(footer-text)의 Enter를 보내자 질문이 사라지고 임시 홈의 `config.toml`에 신뢰 항목이 기록되었습니다(「Codex 폴더 신뢰 질문 검증 (2026-09-25, 이사 지시로 재시도)」 절, `w3/pa-trust-1.json`). Agy 1.2.7의 신뢰 질문에서는 Enter를 한 번 보낸 뒤 질문이 사라진 것을 관측했습니다(`prompt-answers.jsonl`의 id 79e300e5, 키 근거 existing-behavior). 이 관측은 무승인 결정(#82)에 따른 검증 중에 얻었습니다.
+- Codex는 2026-09-25에 한도 리셋을 기다리지 않고 실제 경로 검증을 수행했습니다. 워크트리 생성부터 worker 시작(turnStart observed)까지는 주간 한도에 막히지 않았고, 막힌 지점은 시작 뒤 첫 모델 호출이었습니다(리셋 2026-09-26 06:11 KST). 같은 날 이사 지시로 재시도해 폴더 신뢰 질문 화면과 분류기의 응답은 확인했습니다. 미검증으로 남는 항목은 Codex worker의 작업 수행과 worker_done·커밋뿐입니다(자세한 내용은 앞의 「Codex 관측」 절과 「Codex 폴더 신뢰 질문 검증」 절을 참고합니다).
 - Agy는 작업 수행과 worker_done을 검증하지 못했습니다. 주입한 지시문과 재시도 입력이 모두 제공자 503으로 끝났고, 감독 worker-start 경로는 시작할 수 없었습니다(앞 절을 참고합니다). 이미 얻은 결과는 2026-09-22에 사용자가 증거로 유지하도록 승인했으며, Agy는 다시 실행하지 않습니다.
 - 이 문서에는 PR의 CI 결과가 없습니다. PR을 만든 뒤 `CI` 워크플로 결과를 확인해야 합니다.
 
