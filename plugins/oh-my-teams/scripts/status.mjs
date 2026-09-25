@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { definedRoles, foldRole, readJSON, validateOrg } from "./core.mjs";
+import { promptAnswerSummary } from "./prompt-supervision.mjs";
 import { workflowStateFile } from "./workflow-store.mjs";
 import { latestQuotaSnapshots, quotaStatus } from "./quota.mjs";
 import {
@@ -254,7 +255,7 @@ function poolStatuses(org, stateDir) {
  *
  * @param {object} org - Valid organization configuration.
  * @param {string | undefined} stateDir - Optional PM worktree `.omt` directory.
- * @returns {object} Runs, explicit usage gaps, and quota-pool observations.
+ * @returns {object} Runs, explicit usage gaps, quota-pool observations, and supervised prompt answers.
  * @throws {Error} When organization or persisted records are invalid.
  */
 export function organizationStatus(org, stateDir) {
@@ -272,5 +273,6 @@ export function organizationStatus(org, stateDir) {
     runs,
     usage: finalizeUsage(usage),
     pools: poolStatuses(org, stateDir),
+    promptAnswers: promptAnswerSummary(stateDir),
   };
 }

@@ -16,7 +16,7 @@ PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분�
 ### 권한
 
 - 맡은 목표를 작업 단위로 나누고, 의존성·작업 파동·파일 소유권과 각 작업의 검사를 정한다.
-- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior를 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 PM에게 보고한다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
+- Orca 설정이 중첩 worker를 허용할 때에만 자기 터미널에서 Orca `orchestration run-create`로 Run을 만들고, 이번 실행의 Senior·Junior를 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 PM에게 보고한다. 화면에 폴더 신뢰나 명령 승인 같은 질문이 남아 `blockedReason`으로 거부되었고 그 터미널이 자신이 시작한 Senior·Junior의 것이면, 자신이 Run을 바인딩한 PL로서 `prompt-answer`로 답한 뒤 `terminal-idle-check`부터 다시 진행한다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). `task-create`로 만든 Task에는 `role-spec`의 출력을 설명으로 쓴다.
 - Orca의 `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`와 `supervision-next`로 하위 worker를 감독하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `prepare`, `prepare-input`, `attach-workspace`, `work`로 제한 편집 하네스를 Junior 역할로 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
 - 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. kickoff 워크트리 사이의 병합은 게이트를 통과시킨 뒤 별도 허가 없이 진행하고, 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않는다.
@@ -60,6 +60,8 @@ node <runtime> supervision-wait --run <pl-run-id> --org <organization.json> [--a
 ```
 
 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 같은 task의 수정은 같은 `--workflow-task`를 넘겨 대화를 유지한다. 규칙은 [pm](../pm/SKILL.md)의 「작업 배정」과 같다.
+
+질문 때문에 점검이 거부되면 `node <runtime> prompt-answer --org <organization.json> --terminal <senior-handle> --workflow-id <workflowId> --state <pm-state>`로 답한 뒤 위 `terminal-idle-check`부터 다시 실행한다. 분류기가 알아보지 못한 화면(캡처되지 않은 명령 승인·업데이트 안내)에는 키를 보내지 않으며, Orca가 그 터미널을 `blockedReason`으로 멈춘 상태라고 보고하면 `escalate`(`next`: `report-upstream`)로 끝나므로 점검으로 되돌아가지 않고 보고한다. `prompt-answer`는 PL이 자신이 시작한 역할의 터미널에만 쓸 수 있고, 다른 PL의 하위 역할이나 PM의 워크트리 터미널, Orca가 kickoff의 PM 워크트리 아래에 만든 것으로 기록하지 않는 워크트리의 터미널에는 거부된다. 호출자는 환경 변수로만 식별되므로 이 확인은 감독 관계가 없는 터미널의 실수 호출을 막을 뿐 악의적인 프로세스를 막지는 못한다. 결과가 `escalate`나 `unresolved`이거나 거부되면 화면과 `prompt-answers.jsonl`의 기록을 증거로 PM에게 보고하며, 사람이 정해야 하는 질문은 PM이 `director-signal`로 이사에게 알린다. 절차는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「프롬프트 질문 답하기」 절을 따른다.
 
 Senior는 PL의 워크트리(`current`)나 새 워크트리에서 실행하고, Junior의 워크트리에 띄우지 않는다. 검토할 결과는 경로와 커밋으로 넘긴다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
 

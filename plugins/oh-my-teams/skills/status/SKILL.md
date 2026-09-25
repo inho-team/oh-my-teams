@@ -24,6 +24,8 @@ workflow가 있으면 `workflow-status`가 돌려주는 현재 `depth`와 이번
 
 상태를 사용자에게 표시하기 직전에 해당 Goal과 `worker-list`를 다시 조회한다. `live` worker 수를 함께 표시한다. 무엇을 `in-progress`·`stopped`·`unverifiable`·`blocked`로 표시할지, 그리고 workflow의 `blocked`를 Goal의 `blocked`와 구분하는 규칙은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 
+`show`의 `promptAnswers`는 감독자가 역할 터미널의 질문에 답한 시도를 요약한다. `total`과 `sent`, 상태별 개수, 아직 풀리지 않은 시도(`unresolved`)를 그대로 표시하고, 풀리지 않은 시도가 있으면 그 역할과 터미널을 함께 알린다. 키를 실제로 보낸 시도와 거부된 시도를 구분하며, 이 조회는 읽기만 하고 답을 다시 보내지 않는다.
+
 역할별 사용량을 물으면 아래 명령으로 조회해 역할별 턴·토큰·모델과 측정 범위(coverage)를 함께 보여 준다. 측정되지 않은 역할은 0이 아니라 `unmeasured`로 전하고, 해석 기준은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「사용량 측정」 절을 따른다. 이 조회도 읽기만 하므로 `--write`를 붙이지 않는다.
 
 ```text

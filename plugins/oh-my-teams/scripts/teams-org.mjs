@@ -51,6 +51,7 @@ import {
   worktreeLabel,
 } from "./role-terminal.mjs";
 import { predictLaunchPath } from "./launch-matrix.mjs";
+import { answerPrompt } from "./prompt-supervision.mjs";
 import { advise, assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
@@ -208,6 +209,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
             (serves the headless workers to a browser; every request needs the token)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
+  prompt-answer --org FILE --terminal HANDLE --workflow-id ID --state DIR
+                [--role ROLE] [--orca EXECUTABLE]
+                (the role's supervisor answers the question that stopped its terminal:
+                only the Run-bound PM, or the PL that started the role; one key per
+                screen state, then the screen is read again; every attempt is recorded
+                in <state>/prompt-answers.jsonl. status: resolved | advanced |
+                unresolved | redirected | escalate | no-question | refused)
   worker-limit-check --worktree DIR --provider claude|codex|agy
                      [--workflow-id ID --workflow-task ID]
                      [--terminal HANDLE] [--orca EXECUTABLE]
@@ -376,6 +384,7 @@ export const ALLOWED_OPTIONS = {
     "text",
   ],
   "terminal-idle-check": ["terminal", "orca", "org", "role"],
+  "prompt-answer": ["org", "terminal", "workflow-id", "state", "role", "orca"],
   "worker-limit-check": [
     "worktree",
     "provider",
@@ -544,6 +553,7 @@ export const REQUIRED_OPTIONS = {
   "worker-start": ["org", "role", "repo"],
   "role-spec": ["org", "role", "spec"],
   "terminal-idle-check": ["terminal"],
+  "prompt-answer": ["org", "terminal", "workflow-id", "state"],
   "worker-limit-check": ["worktree", "provider"],
   "headless-start": ["org", "role", "cwd", "spec", "state"],
   "headless-status": ["state", "worker"],
@@ -1433,6 +1443,15 @@ async function executeCommand(args) {
         matrixPrediction,
       });
     }
+    case "prompt-answer":
+      return answerPrompt({
+        orgFile: path.resolve(args.org),
+        terminal: args.terminal,
+        workflowId: args["workflow-id"],
+        stateDir: args.state,
+        role: args.role,
+        executable: args.orca,
+      });
     case "role-spec":
       return (({ org, run }) => ({
         role: args.role,
@@ -1495,6 +1514,18 @@ async function executeCommand(args) {
         cliVersion: env.cliVersion,
         allowUnverified: allowUnverifiedApproval !== undefined,
         allowUnverifiedApproval,
+        // A folder trust question is answered only by this launch's
+        // supervisor, in the worktree the selector names; without a
+        // workflow and state there is nobody to prove that against.
+        supervision: args["workflow-id"]
+          ? {
+              orgFile: path.resolve(args.org),
+              stateDir: path.resolve(args.state),
+              workflowId: args["workflow-id"],
+              launchCwd: process.cwd(),
+            }
+          : null,
+        expectedWorktree: target,
       });
       if (args.state)
         await shadowModelCheck({
@@ -1855,6 +1886,9 @@ async function executeCommand(args) {
 }
 
 const BLOCKING_STATUSES = ["failed", "blocked"];
+// A prompt answer that was refused, went upward or left the question on the
+// screen did not do what the caller asked.
+const PROMPT_ANSWER_BLOCKING = ["refused", "escalate", "unresolved"];
 
 // Commands do not share one envelope: a worker report carries `status`, the
 // workflow mutations wrap the new state in `{state, ...}`, and the review and
@@ -1863,6 +1897,8 @@ const BLOCKING_STATUSES = ["failed", "blocked"];
 // script saw success. Each known shape is checked explicitly.
 function blockingOutcome(output) {
   if (!output || typeof output !== "object") return false;
+  if (output.event === "prompt-answer")
+    return PROMPT_ANSWER_BLOCKING.includes(output.status);
   return [output.status, output.state?.status, output.gateStatus?.status].some(
     (value) => BLOCKING_STATUSES.includes(value),
   );

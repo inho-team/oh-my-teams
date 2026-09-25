@@ -22,6 +22,17 @@ import os from "node:os";
 import path from "node:path";
 import { assert, run } from "./core.mjs";
 import {
+  classifyPromptScreen,
+  trustQuestionVisible,
+} from "./prompt-answers.mjs";
+import {
+  PROMPT_ANSWER_REFUSALS,
+  answerTerminalPrompt,
+  authorizeLaunch,
+  questionOnScreen,
+  recordRefusal,
+} from "./prompt-supervision.mjs";
+import {
   checkTerminalIdle,
   runOrcaJson,
   selectOrcaExecutable,
@@ -450,6 +461,38 @@ export function commandPending(lines, command) {
 }
 
 /**
+ * Reports whether a screen shows the launch command only partly echoed.
+ *
+ * A cut-off line is neither a whole command waiting for Enter nor a started
+ * agent: Enter now would run the fragment. The previous `agentStarted` judged
+ * such a line as started, which was confirmed by feeding it every prefix of a
+ * command (docs/plan/prompt-submission.md, experiment 11). Whether a shell
+ * really echoes a command in pieces, and whether that was the path behind the
+ * `ready: true` seen with the command still in the input line, was not
+ * reproduced: Orca wrote the command in one piece in every trial.
+ *
+ * @param {string[]} lines - Screen lines, oldest first.
+ * @param {string} command - Shell command the terminal was created with.
+ * @returns {boolean} Whether a proper prefix of the command ends the screen.
+ */
+export function commandTyping(lines, command) {
+  const rows = (lines ?? []).filter((line) => line.trim());
+  const target = squeeze(command);
+  // A wrapped fragment spans a row or two, so try the last rows as its start.
+  for (
+    let start = rows.length - 1;
+    start >= Math.max(0, rows.length - 3);
+    start -= 1
+  ) {
+    const match = /[%$#>❯]\s+(\S.*)$/.exec(rows[start]);
+    if (!match) continue;
+    const text = squeeze(match[1] + rows.slice(start + 1).join(""));
+    if (text.length < target.length && target.startsWith(text)) return true;
+  }
+  return false;
+}
+
+/**
  * Reports whether an agent has drawn its interface after the command.
  *
  * A screen whose last row is the same shell prompt again means the command ran
@@ -467,6 +510,8 @@ export function agentStarted(lines, command) {
   // Orca can expose a just-submitted shell command without the prompt prefix.
   // That text is input acceptance, not a rendered agent interface or turn proof.
   if (!found && squeeze(rows.join("")) === squeeze(command)) return false;
+  // A fragment of the command is the shell still echoing, not an interface.
+  if (!found && commandTyping(rows, command)) return false;
   if (!found) return !PROMPT_MARK.test(rows.at(-1));
   if (found.end === rows.length - 1) return false;
   return rows.at(-1).trim() !== found.prompt;
@@ -474,21 +519,19 @@ export function agentStarted(lines, command) {
 
 // Agy asks once per folder whether to trust it, and every child worktree is a
 // new folder. The bypass flag does not skip this question.
-const TRUST_QUESTION =
-  /Do you trust the contents of this (project|folder|directory)\?/;
-const TRUST_SELECTED = /^\s*[>❯]\s*Yes, I trust this folder\s*$/;
 
 /**
- * Reports whether a screen shows a folder trust question with "trust" selected.
+ * Reports whether a screen shows Agy's folder trust question with "trust" selected.
  *
  * @param {string[]} lines - Screen lines, oldest first.
  * @returns {boolean} Whether one Enter would trust the folder and continue.
  */
 export function trustQuestion(lines) {
-  const rows = lines ?? [];
+  const answer = classifyPromptScreen(lines, { cli: "agy" });
   return (
-    rows.some((line) => TRUST_QUESTION.test(line)) &&
-    rows.some((line) => TRUST_SELECTED.test(line))
+    answer.kind === "trust" &&
+    answer.action === "send-key" &&
+    answer.key?.name === "Enter"
   );
 }
 
@@ -527,12 +570,100 @@ async function observe(orca, handle, command, execute) {
   return {
     screen,
     pending: commandPending(screen, command),
+    typing: commandTyping(screen, command),
     started: agentStarted(screen, command),
   };
 }
 
-// Launches the command in a new terminal and answers a folder trust question
-// when `answerTrust` allows it. The terminal is returned whatever its state.
+// A Claude trust question takes two answers (Down, then Enter), each for its
+// own screen state; the loop stops after this many even if a question remains.
+const MAX_TRUST_ANSWERS = 3;
+
+// Answers the folder trust question of a new terminal through the supervisor
+// path: the caller must supervise this role and the terminal must sit in the
+// worktree Orca records under this kickoff's PM worktree, and each screen state gets one key. A
+// terminal opened without a supervision context is left at its question.
+async function answerTrustQuestion({
+  orca,
+  handle,
+  command,
+  screen,
+  worktree,
+  supervision,
+  execute,
+}) {
+  const asked = classifyPromptScreen(screen, { cli: command.provider });
+  if (asked.kind !== "trust") return { trust: "not-asked", records: [] };
+  if (!supervision)
+    return {
+      trust: "unsupervised",
+      records: [],
+      refusal:
+        "The terminal asks for folder trust, but this launch has no supervisor context (--workflow-id and --state), so nobody may answer it",
+    };
+  const known = {
+    role: command.role,
+    provider: command.provider,
+    terminal: handle,
+    workflowId: supervision.workflowId,
+    caller: (supervision.env ?? process.env).ORCA_TERMINAL_HANDLE,
+  };
+  let authorized;
+  try {
+    authorized = await (supervision.authorize ?? authorizeLaunch)({
+      orgFile: supervision.orgFile,
+      stateDir: supervision.stateDir,
+      workflowId: supervision.workflowId,
+      role: command.role,
+      terminal: handle,
+      launchCwd: supervision.launchCwd,
+      expectedWorktree: worktree,
+      orca,
+      env: supervision.env ?? process.env,
+      execute,
+    });
+  } catch (error) {
+    const code = PROMPT_ANSWER_REFUSALS.includes(error.code)
+      ? error.code
+      : "terminal-unreadable";
+    const record = recordRefusal(
+      supervision.stateDir,
+      known,
+      code,
+      error.message,
+    );
+    return { trust: "refused", records: [record], refusal: error.message };
+  }
+  const records = [];
+  for (let round = 0; round < MAX_TRUST_ANSWERS; round += 1) {
+    const record = await answerTerminalPrompt({
+      orca,
+      terminal: handle,
+      role: command.role,
+      provider: command.provider,
+      worktree: authorized.worktree,
+      stateDir: supervision.stateDir,
+      supervisor: authorized.supervisor,
+      workflowId: supervision.workflowId,
+      settleMs: supervision.settleMs,
+      rechecks: supervision.rechecks,
+      execute,
+    });
+    records.push(record);
+    if (record.status !== "advanced") break;
+  }
+  const last = records.at(-1);
+  const trust =
+    last.status === "resolved"
+      ? "accepted"
+      : last.status === "no-question"
+        ? "not-asked"
+        : "unresolved";
+  return { trust, records, worktree: authorized.worktree };
+}
+
+// Launches the command in a new terminal and, when `supervision` allows it,
+// answers a folder trust question. The terminal is returned whatever its state.
 async function launchOnce({
   orca,
   worktree,
@@ -543,6 +674,8 @@ async function launchOnce({
   readyMs,
   pollMs,
   answerTrust,
+  supervision,
+  expectedWorktree,
   execute,
 }) {
   const created = await runOrcaJson(
@@ -562,10 +695,10 @@ async function launchOnce({
   const handle = created.result?.terminal?.handle;
   assert(handle, "Orca created no terminal handle");
 
-  const until = async (budgetMs) => {
+  const until = async (budgetMs, done = (seen) => seen.started) => {
     const deadline = Date.now() + budgetMs;
     let seen = await observe(orca, handle, typed, execute);
-    while (!seen.started && Date.now() < deadline) {
+    while (!done(seen) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
       seen = await observe(orca, handle, typed, execute);
     }
@@ -574,6 +707,10 @@ async function launchOnce({
 
   let seen = await until(settleMs);
   let submission = "orca";
+  // Enter while the shell is still echoing would run a cut-off command.
+  if (!seen.started && seen.typing) {
+    seen = await until(settleMs, (now) => now.started || !now.typing);
+  }
   if (!seen.started && seen.pending) {
     await runOrcaJson(
       orca,
@@ -584,26 +721,41 @@ async function launchOnce({
   }
   if (!seen.started) seen = await until(readyMs);
   let trust = "not-asked";
+  let promptAnswers = [];
+  let trustRefusal = null;
+  let placed = null;
   if (seen.started) {
     // The interface may still be drawing its header; let it settle so the
     // returned screen shows the model the caller must compare.
     await settle(orca, handle, execute);
     seen = await observe(orca, handle, typed, execute);
-    if (answerTrust && trustQuestion(seen.screen)) {
-      // The worktree was created for this role from the user's repository,
-      // and the role already runs without approval prompts. Enter is sent
-      // once, for the selected "trust" answer only.
-      await runOrcaJson(
+    if (answerTrust) {
+      const answered = await answerTrustQuestion({
         orca,
-        ["terminal", "send", "--terminal", handle, "--text", "", "--enter"],
-        { execute },
-      );
-      trust = "accepted";
-      await settle(orca, handle, execute);
-      seen = await observe(orca, handle, typed, execute);
+        handle,
+        command,
+        screen: seen.screen,
+        worktree: expectedWorktree,
+        supervision,
+        execute,
+      });
+      ({ trust, records: promptAnswers, worktree: placed } = answered);
+      trustRefusal = answered.refusal ?? null;
+      if (promptAnswers.some((record) => record.sent)) {
+        await settle(orca, handle, execute);
+        seen = await observe(orca, handle, typed, execute);
+      }
     }
   }
-  return { handle, seen, submission, trust };
+  return {
+    handle,
+    seen,
+    submission,
+    trust,
+    promptAnswers,
+    trustRefusal,
+    placed,
+  };
 }
 
 /**
@@ -615,7 +767,13 @@ async function launchOnce({
  * final screen, which the caller compares with the requested model before
  * handing the terminal any work.
  *
- * Answering Agy's folder trust question leaves the question in the terminal
+ * A folder trust question of Agy, Codex or Claude is answered only through the
+ * supervisor path (`prompt-supervision.mjs`): the caller must supervise this
+ * role, the terminal must sit in a worktree Orca records under this kickoff's PM
+ * worktree, and each screen state gets one key. Without `supervision` the question is left
+ * unanswered and the terminal is reported blocked.
+ *
+ * Answering a folder trust question leaves the question in the terminal
  * buffer, and Orca's startup check blocks a worker whose buffer still asks
  * for trust. Once the answer is recorded, that terminal is closed and the
  * command is opened once more in a clean one. A question shown again there is
@@ -643,6 +801,10 @@ async function launchOnce({
  * @param {string} [options.cliVersion] - Antigravity CLI version for matrix lookup.
  * @param {boolean} [options.allowUnverified=false] - Legacy compatibility option; unverified evidence no longer blocks launch.
  * @param {string} [options.allowUnverifiedApproval] - Approval sentence recorded for accountability.
+ * @param {object} [options.supervision] - Who may answer the trust question: `orgFile`,
+ *   `stateDir` (PM state holding the record), `workflowId`, `launchCwd`, and optionally
+ *   `env`, `settleMs`, `rechecks` and `authorize` (replaces `authorizeLaunch`).
+ * @param {string | null} [options.expectedWorktree] - Directory the worktree selector names, if it names one.
  * @param {Function} [options.execute=run] - Injectable command runner.
  * The matrix table is consulted before any terminal is created. A `blocked` or
  * unverified-without-approval result throws with the reason codes and next
@@ -668,6 +830,8 @@ export async function openRoleTerminal({
   cliVersion = VERIFIED_CLI_VERSION,
   allowUnverified = false,
   allowUnverifiedApproval,
+  supervision = null,
+  expectedWorktree = null,
   execute = run,
 }) {
   assert(worktree, "role-terminal needs a worktree selector");
@@ -720,11 +884,23 @@ export async function openRoleTerminal({
     readyMs,
     pollMs,
   };
-  const first = await launchOnce({ ...launch, answerTrust: true, execute });
+  const first = await launchOnce({
+    ...launch,
+    answerTrust: true,
+    supervision,
+    expectedWorktree,
+    execute,
+  });
   let { handle, seen, submission } = first;
+  const asking = (lines) =>
+    trustQuestionVisible(lines) ||
+    questionOnScreen(lines, {
+      cli: command.provider,
+      worktree: first.placed ?? expectedWorktree ?? undefined,
+    });
   let reopened = null;
   let closeError = null;
-  if (first.trust === "accepted" && !trustQuestion(seen.screen)) {
+  if (first.trust === "accepted" && !asking(seen.screen)) {
     try {
       await runOrcaJson(orca, ["terminal", "close", "--terminal", handle], {
         execute,
@@ -742,11 +918,13 @@ export async function openRoleTerminal({
       ({ handle, seen, submission } = await launchOnce({
         ...launch,
         answerTrust: false,
+        supervision: null,
+        expectedWorktree,
         execute,
       }));
     }
   }
-  const trustBlocked = trustQuestion(seen.screen);
+  const trustBlocked = asking(seen.screen);
   const ready = seen.started && !trustBlocked && !closeError;
   const titlePinned = ready
     ? await pinTerminalTitle({ orca, handle, title: tabTitle, execute })
@@ -770,6 +948,16 @@ export async function openRoleTerminal({
     effortRequested: command.effortRequested,
     submission,
     trust: first.trust,
+    ...(first.trustRefusal ? { trustRefusal: first.trustRefusal } : {}),
+    promptAnswers: first.promptAnswers.map((record) => ({
+      id: record.id,
+      status: record.status,
+      refusal: record.refusal ?? null,
+      key: record.key?.name ?? null,
+      keyBasis: record.key?.basis ?? null,
+      sent: record.sent,
+      verification: record.verification?.result ?? null,
+    })),
     reopened,
     ...(closeError ? { closeError } : {}),
     ready,

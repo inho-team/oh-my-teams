@@ -446,11 +446,14 @@ test("a terminal held at a prompt is refused before any Dispatch", async () => {
       }),
     (error) => {
       assert.equal(error.signal.code, "agent-trust-workspace");
-      // Only someone at the terminal can answer the prompt, so no route is
+      // The prompt is answered through the supervisor command, so no route is
       // invented for it.
       assert.equal(error.signal.kind, undefined);
       assert.match(error.message, /agent-trust-workspace/);
       assert.match(error.message, /no Dispatch was created/);
+      assert.match(error.message, /prompt-answer .*--terminal term_1/);
+      assert.match(error.message, /terminal-idle-check again/);
+      assert.match(error.message, /director-signal/);
       return true;
     },
   );
@@ -778,6 +781,38 @@ test("matrixPrediction이 없으면 blocked prompt는 matrix-mismatch가 붙지 
     `Expected no kind, got ${err.signal?.kind}`,
   );
   assert.doesNotMatch(err.message, /matrix-prediction-failure/);
+});
+
+test("표가 신뢰 질문을 예고한 조합의 신뢰 질문 거부는 표 불일치가 아니라 감독자 경로로 안내된다", async () => {
+  const trustWait = async () => ({
+    code: 0,
+    timedOut: false,
+    stdout: JSON.stringify({
+      ok: true,
+      result: {
+        wait: { satisfied: false, blockedReason: "agent-trust-workspace" },
+      },
+    }),
+    stderr: "",
+  });
+  const { checkTerminalIdle } =
+    await import("../plugins/oh-my-teams/scripts/orca-adapter.mjs");
+  const err = await checkTerminalIdle("term_z", {
+    matrixPrediction: {
+      path: "supervised-terminal",
+      reason: ["codex-trust-workspace"],
+      evidence: "source-derived",
+    },
+    execute: trustWait,
+  }).then(
+    () => null,
+    (e) => e,
+  );
+  assert.ok(err, "checkTerminalIdle should throw");
+  assert.equal(err.signal?.kind, undefined);
+  assert.doesNotMatch(err.message, /matrix-prediction-failure/);
+  assert.match(err.message, /prompt-answer .*--terminal term_z/);
+  assert.doesNotMatch(err.message, /person at the terminal|human answers/i);
 });
 
 // STATE-02: overflow 경로에도 fallback 타이머가 있어 close가 오지 않아도

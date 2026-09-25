@@ -1,0 +1,12 @@
+{
+  "cli": "claude",
+  "version": "2.1.278",
+  "kind": "unsubmitted-input",
+  "selected": null,
+  "capturedAt": "2026-09-21T15:21:56.419Z",
+  "command": "claude --dangerously-skip-permissions --model haiku",
+  "lines": [
+    "jinsungkim@김진성 님의 MacBookPro-KDF6WKC7L7 spa-capture % cd /private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/t",
+    "mp.6Kiqw25mrE && claude --dangerously-skip-permissions --model haiku"
+  ]
+}
