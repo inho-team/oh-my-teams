@@ -700,6 +700,61 @@ test("a Windows-style scope with a drive letter, backslashes and mixed case judg
   );
 });
 
+// `pathOf` only expanded `~`, `$HOME` and `${HOME}` when a `/` or the end of
+// the word followed. On win32 a marker is just as often followed by `\`, so a
+// path like `~\.aws\config` was read as a literal `~` folder under the
+// worktree instead of the home directory: `zoneOf` then classified it as
+// `worktree`, and it reached `path-not-in-allowed-files` (escalate) instead
+// of `user-config-path` (deny). The filenames below are not on the
+// `CREDENTIAL_FILE` list, so a deny here can only come from the home
+// expansion working, not from the unrelated credential-filename check.
+test("a Windows tilde or $HOME marker followed by a backslash still expands to the home directory", () => {
+  const forbidden = {
+    "tilde then aws config": { paths: ["~\\.aws\\config"] },
+    "tilde then gnupg secring": { paths: ["~\\.gnupg\\secring.gpg"] },
+    "tilde then codex config": { paths: ["~\\.codex\\config.toml"] },
+    "tilde then claude settings": { paths: ["~\\.claude\\settings.json"] },
+    "$HOME then aws config": { paths: ["$HOME\\.aws\\config"] },
+    "${HOME} then codex config": { paths: ["${HOME}\\.codex\\config.toml"] },
+  };
+  for (const [name, request] of Object.entries(forbidden)) {
+    const result = judgeCommandScope(
+      { cwd: WIN_SCOPE.worktree, ...request },
+      WIN_SCOPE,
+    );
+    assert.equal(
+      result.verdict,
+      "deny",
+      `${name}: ${JSON.stringify(result.reasons)}`,
+    );
+    // Checking the verdict alone is not enough: before the fix, the one
+    // backslash-tilde case already in the forbidden list above denied for an
+    // unrelated reason (its filename matched `CREDENTIAL_FILE`), which masked
+    // this same defect. The rule must be `user-config-path` specifically.
+    assert.ok(
+      result.reasons.some((item) => item.rule === "user-config-path"),
+      `${name}: ${JSON.stringify(result.reasons)}`,
+    );
+    assert.deepEqual(result.passed, [], name);
+  }
+
+  // The POSIX form of the same text is unaffected: POSIX treats `\` as an
+  // ordinary filename character, so the marker is not expanded there and the
+  // word still resolves to a literal folder under the worktree, exactly as
+  // before this fix.
+  const posixResult = judgeCommandScope(
+    { cwd: SCOPE.worktree, paths: ["~\\.aws\\config"] },
+    SCOPE,
+  );
+  assert.equal(posixResult.verdict, "escalate");
+  assert.ok(
+    posixResult.reasons.some(
+      (item) => item.rule === "path-not-in-allowed-files",
+    ),
+    JSON.stringify(posixResult.reasons),
+  );
+});
+
 // No approval screen was captured, so these choices and keys are synthetic.
 const KEY = { name: "Enter", send: { text: "", enter: true } };
 const ONCE = { label: "Allow this request", grant: "once", key: KEY };

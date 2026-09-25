@@ -585,6 +585,12 @@ const CREDENTIAL_FILE =
 function pathLib(platform) {
   return platform === "win32" ? path.win32 : path.posix;
 }
+// `~`, `$HOME` and `${HOME}` expand only when a separator or the end of the
+// word follows. POSIX only accepts `/` there, since a backslash can be part
+// of a POSIX filename; win32 additionally accepts `\`, the separator its own
+// shells (including PowerShell's `$HOME`) write after a home marker.
+const HOME_MARKER = /^(~|\$HOME|\$\{HOME\})(?=\/|$)/;
+const HOME_MARKER_WIN32 = /^(~|\$HOME|\$\{HOME\})(?=[\\/]|$)/;
 const foldCase = (value, platform) =>
   platform === "win32" ? value.toLowerCase() : value;
 // A word "looks like a path" when it has a separator, a home marker or a
@@ -619,10 +625,8 @@ function pathOf(
     .replace(/^[<>]+/, "")
     .replace(/^--?[\w-]+=/, "");
   if (!named && !looksLikePath(text, platform)) return null;
-  const expanded = text.replace(
-    /^(~|\$HOME|\$\{HOME\})(?=\/|$)/,
-    home ?? "\u0000",
-  );
+  const homeMarker = platform === "win32" ? HOME_MARKER_WIN32 : HOME_MARKER;
+  const expanded = text.replace(homeMarker, home ?? "\u0000");
   const unresolved =
     /[$*?[\]{}\u0000]/.test(expanded) || (!lib.isAbsolute(expanded) && !cwd);
   return {
