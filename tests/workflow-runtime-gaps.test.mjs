@@ -627,6 +627,56 @@ test("validateEvidence and merge-check accept pre-#100 evidence that has no time
   assert.equal(JSON.parse(merged.stdout).valid, true);
 });
 
+test("fingerprint() preserves the exact key order that pre-#100 and current evidence were hashed under", async (t) => {
+  const dir = await repo(t);
+  const commands = [[process.execPath, "-e", "process.exit(0)"]];
+  const environment = "test";
+
+  // hash() feeds this object straight into JSON.stringify, so key insertion
+  // order is part of what every stored evidence.key is bound to. These two
+  // arrays are the exact orders every existing evidence file was hashed
+  // under (pre-#100, and current); they are written here as literals, not
+  // derived from Object.keys() of a value this same test just produced, so a
+  // change that moves or inserts a key anywhere in fingerprint() — not only
+  // a change to whether timeoutMs itself appears — fails this assertion
+  // instead of only failing once some unrelated evidence file goes stale.
+  const oldFingerprint = await fingerprint(
+    dir,
+    "HEAD",
+    commands,
+    environment,
+    DEFAULT_VERIFY_TIMEOUT_MS,
+    { includeTimeout: false },
+  );
+  assert.deepEqual(Object.keys(oldFingerprint), [
+    "head",
+    "base",
+    "tree",
+    "commands",
+    "environment",
+    "platform",
+    "node",
+  ]);
+
+  const newFingerprint = await fingerprint(
+    dir,
+    "HEAD",
+    commands,
+    environment,
+    DEFAULT_VERIFY_TIMEOUT_MS,
+  );
+  assert.deepEqual(Object.keys(newFingerprint), [
+    "head",
+    "base",
+    "tree",
+    "commands",
+    "environment",
+    "timeoutMs",
+    "platform",
+    "node",
+  ]);
+});
+
 test("workflow-integration-checks appends new checks to a frozen integration task and refuses to change one already accepted", async (t) => {
   const dir = await repo(t),
     stateDir = path.join(dir, ".omt");

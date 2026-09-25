@@ -82,6 +82,16 @@ async function workspaceContents(repo) {
 /**
  * Captures every input that can affect reusable command evidence.
  *
+ * The returned object's key insertion order feeds JSON.stringify inside
+ * hash(), so that order is bound into evidence.key for every piece of
+ * evidence ever recorded, not only the evidence this particular call
+ * produces. A new key must always be appended after the fields that predate
+ * it, and gated behind an option the same way `timeoutMs` is here (see
+ * `includeTimeout` below and the matching logic in {@link validateEvidence}):
+ * inserting a key between existing keys, or adding one unconditionally,
+ * reorders every already-recorded evidence's fingerprint and starts
+ * rejecting all of it, old and new alike, as stale.
+ *
  * @param {string} repo - Git workspace.
  * @param {string} baseRef - Trusted base ref or commit.
  * @param {string[][]} commands - Acceptance commands as argv arrays.
@@ -126,9 +136,16 @@ export async function fingerprint(
     commands,
     environment,
   };
-  // Key insertion order feeds JSON.stringify inside hash(), so this key is
-  // only ever appended here, never earlier — omitting it (includeTimeout:
-  // false) reproduces the exact pre-#100 seven-key shape byte for byte.
+  // This object's key insertion order feeds JSON.stringify inside hash(), so
+  // that order is bound into evidence.key for every piece of evidence ever
+  // recorded, not only this one. A new key must only ever be appended after
+  // the last field that predates it, exactly like timeoutMs here: inserting
+  // a key anywhere between existing keys reorders every already-recorded
+  // evidence's fingerprint and starts rejecting all of it as stale, whether
+  // that evidence carries timeoutMs or not. Omitting it (includeTimeout:
+  // false) reproduces the exact pre-#100 seven-key shape byte for byte, so a
+  // future field must likewise stay conditional on whether the stored
+  // evidence already has it, never backfilled with a default.
   if (includeTimeout) result.timeoutMs = timeoutMs;
   result.platform = process.platform;
   result.node = process.version;
@@ -307,7 +324,11 @@ export async function validateEvidence(
   // that same key-less shape is what lets it keep hashing to its own
   // evidence.key. Evidence that does carry the key (any `verify()` output
   // since #100, default timeout or not) is recomputed with it, so a mismatched
-  // timeout still changes the key as intended.
+  // timeout still changes the key as intended. This is the general pattern
+  // for any key fingerprint() adds in the future: gate it on whether the
+  // stored evidence already carries it, and reproduce whichever shape that
+  // evidence was actually hashed with, rather than assuming every stored
+  // evidence has every key fingerprint() currently knows about.
   const includeTimeout = Object.hasOwn(evidence.fingerprint ?? {}, "timeoutMs");
   const current = await fingerprint(
     repo,
