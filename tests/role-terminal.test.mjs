@@ -1380,6 +1380,38 @@ test("readLaunchEnvironment gitdir resolution matches git rev-parse", async (t) 
     `[projects."${normalizedRepoRoot}"]\ntrust_level = "trusted"\n`,
   );
 
+  // The test's name is its claim: the `.git` file parse must land where
+  // `git rev-parse` does. Both are compared here, and the message names the
+  // two paths so a platform that spells the same directory differently says
+  // which spelling it used instead of only reporting a missed lookup.
+  const gitCommonDir = execSync(
+    "git rev-parse --path-format=absolute --git-common-dir",
+    { cwd: wtRoot, encoding: "utf8" },
+  ).trim();
+  const gitRepoRoot = pathM.dirname(gitCommonDir);
+  const parsedGitDir = pathM.resolve(
+    wtRoot,
+    fsM
+      .readFileSync(pathM.join(wtRoot, ".git"), "utf8")
+      .match(/^gitdir:\s*(.+)$/m)[1]
+      .trim(),
+  );
+  const parsedRepoRoot = pathM.dirname(
+    pathM.dirname(pathM.dirname(parsedGitDir)),
+  );
+  assert.equal(
+    normPath(parsedRepoRoot),
+    normPath(gitRepoRoot),
+    `.git 파일 해석과 git rev-parse 가 다른 곳을 가리킨다: ` +
+      `해석=${parsedRepoRoot} rev-parse=${gitRepoRoot}`,
+  );
+  assert.equal(
+    normPath(gitRepoRoot),
+    normalizedRepoRoot,
+    `git 이 보고한 저장소 루트가 신뢰 기록의 키와 다르다: ` +
+      `rev-parse=${gitRepoRoot} 키=${repoRoot}`,
+  );
+
   const execute = async () => ({ code: 1, stdout: "", stderr: "skip" });
 
   // 1. Normal repo (.git directory)
