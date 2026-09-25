@@ -264,7 +264,7 @@ const MATRIX_RULES = [
       reason: ["orca-idle-requires-narrow-screen"],
       nextOwner: "-",
       nextAction:
-        "Orca tui-idle이 좁은 화면을 요구하고 폭 조정은 에이전트 식별을 깨뜨립니다. headless 경로를 사용합니다.",
+        "1.4.204에서는 좁은 화면이 아니면 tui-idle에 도달하지 못한다고 실측됐지만, 그 판정 규칙은 1.4.210에서 교체되어 근거를 잃었고 Windows에서는 아직 재검증되지 않았습니다. 확인될 때까지 headless 경로를 사용합니다.",
       evidence: "unverified",
     },
   },
