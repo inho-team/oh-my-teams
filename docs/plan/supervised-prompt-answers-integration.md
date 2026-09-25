@@ -47,6 +47,32 @@ origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브�
 | npm run lint | ✓ 통과 | ✓ 통과 |
 | npm test | ✓ 618개 테스트 통과 | ✓ 623개 테스트 통과 |
 
+### PR #105의 CI 결과
+
+PR #105(https://github.com/inho-team/oh-my-teams/pull/105, base main, head feat/supervised-prompt-answers)의 `CI` 워크플로 실행 결과를 `gh pr view`·`gh run list`·`gh run view`로 직접 확인했습니다.
+
+| 커밋 | run | ubuntu-latest | macos-latest | windows-latest |
+|---|---|---|---|---|
+| 53e46c2(037e2a5 이전) | 36148381078 | 통과 | 통과 | 실패(Tests 단계에서 테스트 22개 실패) |
+| a717d0f(037e2a5을 병합한 뒤), 첫 시도 | 36153018876의 attempt 1 | 통과 | 통과 | 실패(Tests 단계에서 테스트 1개 실패) |
+| a717d0f(같은 커밋), `gh run rerun --failed`로 재실행 | 36153018876의 attempt 2 | 통과 | 통과 | 통과 |
+
+53e46c2에서는 windows-latest만 실패했고 ubuntu-latest와 macos-latest는 통과했습니다. a717d0f에서도 첫 시도는 windows-latest만 실패했으나 실패한 테스트는 1개뿐이었습니다. `gh run rerun --failed`로 실패한 job만 다시 실행했습니다. `gh api repos/inho-team/oh-my-teams/actions/runs/36153018876/jobs`로 확인하면 세 job 모두 `run_attempt`가 2로 보고되지만, 시작·종료 시각을 보면 ubuntu-latest(15:16:12~15:16:54Z)와 macos-latest(15:16:18~15:17:23Z)는 attempt 1과 같아 실제로는 다시 실행되지 않았고, windows-latest만 다른 시각(15:21:15~15:23:30Z)에 다시 실행되어 통과했습니다. 즉 API의 `run_attempt` 번호는 전체 실행 시도의 번호이며, 개별 job이 그 시도에서 실제로 재실행되었는지는 시작·종료 시각으로 따로 확인해야 합니다. 두 실패의 원인과 성질은 아래 「Windows 경로 판정 수정」 절에 적습니다.
+
+### Windows 경로 판정 수정 (037e2a5)
+
+PR #105의 첫 CI(run 36148381078, head 53e46c2)에서 windows-latest만 실패했고, `npm test`의 Tests 단계에서 테스트 22개가 실패했습니다. CI 로그의 `not ok` 줄에 적힌 테스트 이름을 저장소에서 검색해 소속 파일을 확인한 결과, `tests/prompt-answers.test.mjs`에서 3건("a path is allowed only inside the worktree and the contract's files" 등 경로 판정 테스트)이 실패했고, `tests/prompt-supervision.test.mjs`에서 나머지 19건(워크트리 판정과 화면 응답을 다루는 테스트)이 실패했습니다. 이 실패는 커밋 037e2a5가 두 갈래 원인으로 고쳤고, 통합 브랜치에는 병합 커밋 a717d0f로 들어왔습니다.
+
+**원인 A(제품 코드): `prompt-answers.mjs`의 경로 판정이 플랫폼을 구분하지 않았습니다.** `judgeCommandScope`와 그 보조 함수(`forbiddenPath`, `allowedFile`, `pathOf`, `zoneOf`)는 `path.relative`·`path.resolve`·`path.isAbsolute`를 플랫폼 구분 없이 호출했습니다. Windows에서는 워크트리에 대한 상대 경로가 백슬래시로 나오는데, task 계약의 `allowedFiles`와 `USER_CONFIG_UNDER_HOME`은 슬래시로만 적혀 있어 문자열 비교가 어긋났습니다. 이 원인으로 `tests/prompt-answers.test.mjs`의 경로 판정 테스트 3건이 실패했습니다. 수정은 `usage-sources.mjs`의 `pathWithin`이 세운 관례를 따랐습니다. `scope.platform`(기본값은 `process.platform`)에 따라 `path.win32`와 `path.posix`를 가려 쓰고, Windows에서는 대소문자를 접어 비교하며, 비교 직전에 경로를 슬래시 표기로 되돌렸습니다. 또한 "경로처럼 보이는지" 판정하던 정규식이 슬래시만 인식해 드라이브 문자로 시작하는 절대 경로(`C:\Users\...`)를 놓치고 있었으므로, Windows에서는 백슬래시와 드라이브 문자도 인식하도록 넓혔습니다. 이 확장은 판정을 느슨하게 하지 않고, 오히려 Windows에서 놓치던 자격 증명 경로 탐지(`CREDENTIAL_FILE`)를 보강하는 방향입니다.
+
+**원인 B(테스트 코드): `prompt-supervision.test.mjs`의 `ROLE_WORKTREE` 상수가 macOS 형태의 리터럴이었습니다.** `usage-ledger.mjs`의 `recordLaunch`는 `launch.worktreePath`를 `path.resolve`로 감싸 저장하는데, Windows에서 `path.resolve`는 드라이브 문자가 없는 이 리터럴에 드라이브 문자를 붙입니다. 반면 테스트의 fakeOrca는 `ROLE_WORKTREE` 리터럴을 그대로 돌려주었으므로, 저장된 값과 화면에서 읽은 값이 Windows에서만 어긋나 `assertRoleWorktree`가 실제 판정에 이르기 전에 `worktree-mismatch`로 거부했습니다. 이 원인으로 `tests/prompt-supervision.test.mjs`의 나머지 19건이 실패했습니다. `prompt-supervision.mjs` 자체는 `samePath`(`pathWithin`을 양방향으로 호출)와 `path.resolve`로 이미 플랫폼에 안전했으므로 바꾸지 않았고, 고친 것은 테스트의 `ROLE_WORKTREE` 상수를 `path.resolve`로 감싼 것뿐입니다.
+
+**검증 방법과 그 한계**: Windows 머신이 없어 실제 Windows 환경에서 재현하지는 못했습니다. 대신 `tests/prompt-answers.test.mjs`에 `platform: "win32"`를 주입한 `WIN_SCOPE`(드라이브 문자·백슬래시·대소문자가 다른 경로)를 새로 추가해, POSIX 형태의 `SCOPE`에서 이미 allow·deny·escalate로 확인된 요청들이 Windows 형태에서도 같은 판정에 이르는지 로컬에서 확인한 뒤, CI(windows-latest)로 다시 확인했습니다. 이 방법은 `judgeCommandScope`의 판정 로직이 두 플랫폼에서 같은 결론에 이르는지를 확인하지만, `path.win32`가 Node.js 안에서 흉내 내는 동작이 실제 Windows 파일 시스템의 대소문자·구분자 처리와 완전히 같다는 것까지 그 자체로 증명하지는 못합니다. 그 마지막 확인은 windows-latest CI의 통과로 대신했습니다.
+
+**두 번째 CI(head a717d0f)의 경과와 잔여 실패 한 건**: 037e2a5를 병합한 a717d0f에서 CI를 다시 실행하자(run 36153018876) 첫 시도(attempt 1)에서도 windows-latest만 실패했습니다. 실패한 테스트는 `tests/opencodex.test.mjs`의 "a descendant left behind by an exited launcher is ended, not ignored" 한 건뿐이었고, ubuntu-latest와 macos-latest는 통과했습니다. windows-latest job만 다시 실행하자(attempt 2) 같은 커밋에서 통과했습니다.
+
+이 테스트는 이번 kickoff의 범위에 속하지 않습니다. `git diff origin/main...HEAD -- tests/opencodex.test.mjs plugins/oh-my-teams/scripts/opencodex.mjs`로 확인한 결과, 이 브랜치는 두 파일을 전혀 바꾸지 않았습니다. 실패 내용은 기대한 오류 `opencodex-proxy-not-ready` 대신 `opencodex-proxy-exit-unverifiable`이 나온 것입니다. 이 테스트는 `fakeRuntime(t, "leaves-descendant")`로 실제 자식 프로세스를 띄우고 `readyTimeoutMs: 4000`·`stopGraceMs: 600`으로 `startOpenCodexProxy`를 호출합니다. 프록시가 준비되었다는 증거(health 응답)를 얻지 못하면 `stop()`을 호출해 `terminateWindowsTree`로 넘어가는데, 이 함수는 소유한 프로세스를 죽인 뒤 `graceMs`(이 테스트에서는 600, 기본값은 3000)를 패스마다 기다리며(최대 2패스) 프로세스 표가 비는지 관찰하고, 끝내 비지 않으면 `opencodex-proxy-exit-unverifiable`을 던집니다. 표가 관찰된 시간 안에 비면 `terminateWindowsTree`는 정상적으로 끝나고, 그 뒤 `startOpenCodexProxy`가 이어서 `opencodex-proxy-not-ready`를 던집니다. 즉 이 테스트는 실제 프로세스가 짧은 시간 창(600ms×2패스) 안에 프로세스 표에서 사라지는지를 관찰하는 시간 의존적인 검사이며, windows-latest 러너의 부하에 따라 실제 종료가 그 창을 넘기면 실패하고 넘기지 않으면 통과합니다. 같은 커밋에서 결과가 갈린 것은 이 시간 창의 변동성 때문으로 보이고, 코드나 테스트를 바꾸지 않았으므로 이 통과를 미검증 항목으로 올리지는 않되, 재실행으로 통과했다는 사실은 남깁니다.
+
 ## 실제 경로 검증 (Claude)
 
 새 Orca 워크트리에서 역할 터미널 생성부터 worker-start까지의 경로를 Claude(Haiku 4.5)로 검증했습니다.
@@ -328,9 +354,8 @@ purpose-changed는 task가 바뀌어서 나온 값이 아닙니다. 같은 터�
 - Codex는 2026-09-25 첫 검증에서 폴더 신뢰 질문 화면을 얻지 못했습니다(trust: not-asked, 홈 디렉터리가 이미 trusted). 대신 나타난 업데이트 안내 화면은 분류기가 `kind: unknown`, `blockedReason: agent-update-prompt`, `status: escalate`, `sent: false`로 답하지 않고 넘겼고, PM이 자율 판단으로 Down에 이어 Enter를 한 번 보내 `2. Skip`을 선택해 해소했습니다. 이 경로는 분류기가 아니라 감독자(PM)가 직접 답한 것이므로, 분류기가 Codex의 업데이트 안내 화면에 스스로 답하는 동작은 여전히 미검증입니다. 같은 날 재시도에서는 임시 `CODEX_HOME`으로 신뢰 기록이 없는 상태를 만들어 폴더 신뢰 질문 화면과 분류기 응답을 확인했습니다(「Codex 폴더 신뢰 질문 검증 (2026-09-25, 이사 지시로 재시도)」 절을 참고합니다).
 - Codex와 Agy에서 신뢰 질문에 Esc를 보냈을 때의 동작은 확인하지 못했습니다. Claude에서는 Esc를 한 번 보냈을 때 질문이 닫히고 Claude가 종료되었으며, 이 관측은 지시 밖 입력이었습니다.
 - Claude의 신뢰 질문에서 Enter의 효과는 실측하지 못했습니다. classifier의 accept 기준서에는 "Enter는 화면 안내문에서 도출한 미검증 키로 코드와 문서에 표시"되어 있고, 이 키의 근거는 `footer-text`입니다. 이번 통합 단계의 Claude 실제 경로 검증에서도 확인하지 못했습니다. **Codex 쪽은 확인되었습니다.** 임시 `CODEX_HOME`으로 만든 신뢰 질문 화면에 `prompt-answer`가 같은 근거(footer-text)의 Enter를 보내자 질문이 사라지고 임시 홈의 `config.toml`에 신뢰 항목이 기록되었습니다(「Codex 폴더 신뢰 질문 검증 (2026-09-25, 이사 지시로 재시도)」 절, `w3/pa-trust-1.json`). Agy 1.2.7의 신뢰 질문에서는 Enter를 한 번 보낸 뒤 질문이 사라진 것을 관측했습니다(`prompt-answers.jsonl`의 id 79e300e5, 키 근거 existing-behavior). 이 관측은 무승인 결정(#82)에 따른 검증 중에 얻었습니다.
-- Codex는 2026-09-25에 한도 리셋을 기다리지 않고 실제 경로 검증을 수행했습니다. 워크트리 생성부터 worker 시작(turnStart observed)까지는 주간 한도에 막히지 않았고, 막힌 지점은 시작 뒤 첫 모델 호출이었습니다(리셋 2026-09-26 06:11 KST). 같은 날 이사 지시로 재시도해 폴더 신뢰 질문 화면과 분류기의 응답은 확인했습니다. 미검증으로 남는 항목은 Codex worker의 작업 수행과 worker_done·커밋뿐입니다(자세한 내용은 앞의 「Codex 관측」 절과 「Codex 폴더 신뢰 질문 검증」 절을 참고합니다).
+- Codex는 2026-09-25에 한도 리셋을 기다리지 않고 실제 경로 검증을 수행했습니다. 워크트리 생성부터 worker 시작(turnStart observed)까지는 주간 한도에 막히지 않았고, 막힌 지점은 시작 뒤 첫 모델 호출이었습니다(리셋 2026-09-26 06:11 KST). 같은 날 이사 지시로 재시도해 폴더 신뢰 질문 화면과 분류기의 응답은 확인했습니다. 확인되지 않은 것은 Codex worker의 실제 작업 수행과 worker_done, 커밋이며, 확인되지 못한 이유는 이 주간 한도입니다(자세한 내용은 앞의 「Codex 관측」 절과 「Codex 폴더 신뢰 질문 검증」 절을 참고합니다). 이 항목을 미검증으로 남긴 채 병합하는 것은 수용 기준을 바꾸는 결정이므로 사용자가 정했습니다. 이사가 이 결정을 전달한 시점은 2026-09-26(KST)입니다. 사용자는 한도 리셋(2026-09-26 06:11 KST)을 기다리지 않고 지금 병합하기로 정했습니다. 그래서 Codex worker의 작업 수행 검증은 리셋 뒤에 재개하는 것이 아니라, 이번 kickoff에서 미검증으로 확정됩니다.
 - Agy는 작업 수행과 worker_done을 검증하지 못했습니다. 주입한 지시문과 재시도 입력이 모두 제공자 503으로 끝났고, 감독 worker-start 경로는 시작할 수 없었습니다(앞 절을 참고합니다). 이미 얻은 결과는 2026-09-22에 사용자가 증거로 유지하도록 승인했으며, Agy는 다시 실행하지 않습니다.
-- 이 문서에는 PR의 CI 결과가 없습니다. PR을 만든 뒤 `CI` 워크플로 결과를 확인해야 합니다.
 
 ### 결정 필요: Claude 신뢰 질문 실측
 
