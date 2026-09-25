@@ -34,7 +34,7 @@ PL은 선택지가 다섯 개다. 구조화된 선택 도구(예: Claude Code `A
 
 - **Agy**: `agy models` 출력에 해당 ID가 있는지 확인한다. 이 배포에서 확인한 ID는 `gemini-3.1-pro-high`, `gemini-3.8-flash-medium`, `claude-opus-4-6-thinking`, `claude-sonnet-4-6`, `gpt-oss-120b-medium`이다.
 - **Codex**: `host-defaults` 출력의 `codex.listed`에 해당 ID가 있는지 확인한다. 카탈로그는 계정과 CLI 버전에 따라 달라지므로 `codex.listed`에 없는 ID는 선택지에서 뺀다.
-- **Claude 별칭**: 설치된 `claude --help`의 `--model` 설명에서 예시로 드는 별칭(예: `fable`, `opus`, `sonnet`)으로 확인한다. `--model` 설명에 예시로 없는 별칭(예: `haiku`)은 `claude -p --model <별칭> --output-format json`으로 짧은 요청을 한 번 보내 응답의 `modelUsage`에 실제 모델이 기록되는지 확인한다. 어느 방법으로도 확인하지 못한 별칭은 선택지에서 뺀다.
+- **Claude 별칭**: 설치된 `claude --help`의 `--model` 설명에서 예시로 드는 별칭(예: `fable`, `opus`, `sonnet`)으로 확인한다. `--model` 설명에 예시로 없는 별칭(예: `haiku`)은 `claude -p --model <별칭> --output-format json`으로 짧은 요청을 한 번 보내 응답의 `modelUsage`에 실제 모델이 기록되는지 확인한다. 어느 방법으로도 확인하지 못한 별칭은 선택지에서 뺀다. 별칭은 판을 가리키지 않고 그때의 최신 판으로 풀리므로, 새 판이 나오면 조직 파일을 고치지 않아도 역할이 쓰는 모델이 바뀐다. 2026-09-22에 Opus 5.5가 나오면서 Claude Code 2.1.280에서는 `opus`가 `claude-opus-5-5`로, `sonnet`이 `claude-sonnet-5`로, `haiku`가 `claude-haiku-4-5`로 풀린다. 판을 묶어 두려면 별칭 대신 `opus-5-5`처럼 판을 담은 이름을 프로필의 `model`에 적는다.
 
 ### 호스트 기본값과 자유 입력 안내
 
@@ -59,7 +59,7 @@ Gemini는 다른 모델과 달리 강도를 비워 둘 수 없다. Agy에는 강
 
 - 팀 이름은 프로젝트 디렉터리 이름을 쓴다.
 - 각 역할의 상위 역할은 서열상 바로 위 역할이고, 모든 프로필은 각 실행기의 현재 로그인 계정(`account: current`)을 쓴다. 같은 실행기의 프로필은 하나의 `pool`로 묶어, 소진이 확인된 계정을 런타임이 건너뛸 수 있게 한다.
-- 역할별 동시 인원과 시도 횟수는 1이고, 대체 프로필은 두지 않으며, 할당량이 소진되면 중단하고, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번과 workflow attempt 하나가 쓰는 provider 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다.
+- 역할별 동시 인원과 시도 횟수는 1이고, 대체 프로필은 두지 않으며, 할당량이 소진되면 중단하고, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번과 workflow attempt 하나가 쓰는 provider 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 대체 프로필을 두면 사용 한도에 걸린 역할의 작업을 다른 실행기가 같은 워크트리에서 이어받을 수 있지만, 사용자가 고르지 않은 구독을 쓰게 되므로 결성 때 정하지 않고 `adjust`에서 사용자가 고르게 한다.
 - 추론 강도(`effort`)는 기록하지 않아 각 CLI의 기본값을 쓴다. 생략했을 때의 실제 강도는 CLI와 계정 설정이 정하므로 특정 값으로 단정해 알리지 않는다.
 - 감독 역할은 `worker_done`을 보내지 않은 worker가 15분(`policy.supervision.progressCheckMs: 900000`) 동안 활동이 없으면 진행 상황을 묻고, 답이 없는 요청이 2회(`unansweredLimit: 2`)에 이르면 상위에 보고한다. 이 정책은 메시지 한 통 외에 호출을 쓰지 않으며, 재시도나 종료를 스스로 하지 않는다.
 - GPT-OSS 보조 도구 호출을 허용할지는 묻지 않고 `assistants`를 비워 둔다. 이 상태에서는 모든 역할의 `assist` 호출이 거부되므로, 필요해지면 `adjust`에서 역할별로 허용한다.

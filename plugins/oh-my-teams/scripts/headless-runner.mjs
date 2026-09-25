@@ -160,7 +160,12 @@ async function prepareOpenCodexTurn(turn) {
     },
   };
   const binding = {
-    ...resolveOpenCodexBinding(profile, diagnosed.runtime),
+    ...resolveOpenCodexBinding(
+      profile,
+      diagnosed.runtime,
+      process.env,
+      turn.runner.profileId,
+    ),
     runtimePrefix: runtimePaths(defaultRuntimeRoot()).runtime,
   };
   const proxy = await startOpenCodexProxy(binding);

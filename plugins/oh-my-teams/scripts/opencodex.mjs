@@ -7,16 +7,58 @@ import net from "node:net";
 import { assert } from "./core.mjs";
 
 /**
+ * Providers that support OpenCodex fixed-account runner binding.
+ * @type {string[]}
+ */
+export const OPENCODEX_RUNNER_PROVIDERS = Object.freeze(["codex"]);
+
+// Logical providers that run on a subscription OAuth account, with the
+// provider name OpenCodex stores their account under and prefixes their models
+// with. Codex (OpenAI) is not listed: its home and its model names are unchanged.
+const OAUTH_PROVIDERS = Object.freeze({
+  claude: "anthropic",
+  agy: "google-antigravity",
+});
+
+/**
+ * Returns the model an OpenCodex request history records for a profile model.
+ * A model carrying its own provider's prefix is recorded without it; any other
+ * model, and every Codex model, is recorded as written.
+ * @param {string | undefined} provider - OMT logical provider identifier.
+ * @param {string} model - Profile model `M`.
+ * @returns {string} `strip(M)`.
+ */
+export function stripOpenCodexModelPrefix(provider, model) {
+  const prefix = OAUTH_PROVIDERS[provider];
+  return prefix && model.startsWith(`${prefix}/`)
+    ? model.slice(prefix.length + 1)
+    : model;
+}
+
+/**
  * Validates a profile's optional OpenCodex runner without changing legacy profile behavior.
  * @param {object} profile - Organization profile.
  * @param {object} activeRuntime - Active runtime identity.
+ * @param {string} [profileId] - Organization profile ID (the key of `org.profiles`) named in a rejection message.
+ * @param {readonly string[]} [supportedProviders] - Providers that may hold a runner; tests inject a list, callers use the exported one.
  * @returns {{kind: string, mode: string, accountHomeRef: string, runtimeFingerprint: string} | null} Valid runner or null for legacy.
  */
-export function validateOpenCodexRunner(profile, activeRuntime) {
+export function validateOpenCodexRunner(
+  profile,
+  activeRuntime,
+  profileId,
+  supportedProviders = OPENCODEX_RUNNER_PROVIDERS,
+) {
   if (!profile.runner) return null;
   const runner = profile.runner;
   assert(runner.kind === "opencodex", "opencodex-binding-unverified");
   assert(runner.mode === "fixed-account", "opencodex-pool-unverified");
+  if (profile.provider !== undefined) {
+    assert(
+      supportedProviders.includes(profile.provider),
+      `Invalid OpenCodex runner binding: ${profileId ?? "(unknown)"} (provider ${profile.provider} does not support runners)`,
+    );
+  }
   assert(
     typeof runner.accountHomeRef === "string" &&
       runner.accountHomeRef === profile.account,
@@ -27,6 +69,17 @@ export function validateOpenCodexRunner(profile, activeRuntime) {
     "opencodex-binding-unverified",
   );
   assert(profile.model !== null, "opencodex-binding-unverified");
+  // A prefix naming another provider would send the turn to that provider's
+  // account, so it is refused before any turn starts.
+  assert(
+    !OAUTH_PROVIDERS[profile.provider] ||
+      !Object.entries(OAUTH_PROVIDERS).some(
+        ([logical, prefix]) =>
+          logical !== profile.provider &&
+          profile.model.startsWith(`${prefix}/`),
+      ),
+    "opencodex-binding-unverified: model prefix names another provider",
+  );
   return runner;
 }
 
@@ -133,6 +186,163 @@ export function validateFixedOpenCodexAccountHome(
   return { provider: "openai", accountLogLabel };
 }
 
+const digest6 = (text) =>
+  crypto.createHash("sha256").update(text).digest("hex").slice(0, 6);
+
+/**
+ * Computes the secret-free label OpenCodex records for an OAuth account.
+ * Only the label is returned; the account id is never printed or stored.
+ * @param {string} provider - `anthropic` or `google-antigravity`.
+ * @param {string} accountId - Account id from `auth.json`.
+ * @returns {string} `anthropic-p<hex6>` (the provider suffix) or `o<hex6>` (the attempt label).
+ */
+export function openCodexAccountLabel(provider, accountId) {
+  return provider === "anthropic"
+    ? `anthropic-p${digest6(accountId)}`
+    : `o${digest6(`${provider}\0${accountId}`)}`;
+}
+
+function readHomeJson(accountHome, name) {
+  const file = path.join(accountHome, name);
+  assert(fs.existsSync(file), "opencodex-binding-unverified");
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    throw new Error("opencodex-binding-unverified");
+  }
+}
+
+const isRecord = (value) =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+// Absent, null, empty text, an empty list or an empty object.
+const isEmpty = (value) =>
+  value === undefined ||
+  value === null ||
+  value === "" ||
+  (typeof value === "object" && Object.keys(value).length === 0);
+
+/**
+ * Verifies that a Claude or Antigravity account home holds exactly one OAuth
+ * account and offers OpenCodex no other account, provider or key to route to.
+ * Credential contents and account ids are never returned or persisted.
+ * @param {string} accountHome - Isolated OpenCodex account directory.
+ * @param {string} provider - `anthropic` or `google-antigravity`.
+ * @param {string} [expectedLabel] - Label the profile names; when given it must equal the label computed from the account id.
+ * @returns {{provider: string, accountLogLabel: string}} Fixed account proof with the computed label.
+ */
+export function validateFixedOpenCodexOAuthHome(
+  accountHome,
+  provider,
+  expectedLabel,
+) {
+  assert(
+    Object.values(OAUTH_PROVIDERS).includes(provider),
+    "opencodex-binding-unverified",
+  );
+  const auth = readHomeJson(accountHome, "auth.json");
+  const config = readHomeJson(accountHome, "config.json");
+  // A file or entry that is not an object cannot describe an account; refuse it
+  // with the standard code instead of failing on a property read.
+  assert(
+    isRecord(auth) &&
+      isRecord(config) &&
+      Object.values(auth).every((item) => item === null || isRecord(item)) &&
+      (config.providers === undefined ||
+        (isRecord(config.providers) &&
+          Object.values(config.providers).every(
+            (item) => item === null || isRecord(item),
+          ))),
+    "opencodex-binding-unverified",
+  );
+  const entry = auth[provider];
+  const accounts = entry?.accounts;
+  const account = accounts?.[0];
+  // 1. Exactly one account, and it is the active one.
+  assert(
+    Array.isArray(accounts) &&
+      accounts.length === 1 &&
+      typeof account?.id === "string" &&
+      account.id !== "" &&
+      entry.activeAccountId === account.id,
+    "opencodex-binding-unverified",
+  );
+  // 2. No other provider's account and no Codex pool a route could fall to.
+  const storeFile = path.join(accountHome, "codex-accounts.json");
+  assert(
+    Object.keys(auth).every(
+      (name) => name === provider || isEmpty(auth[name]?.accounts),
+    ) &&
+      isEmpty(config.codexAccounts) &&
+      (!fs.existsSync(storeFile) ||
+        isEmpty(readHomeJson(accountHome, "codex-accounts.json"))),
+    "opencodex-binding-unverified",
+  );
+  // 3. A subscription login that does not need to sign in again.
+  assert(
+    account.credential?.source === "oauth" && !account.needsReauth,
+    "opencodex-binding-unverified",
+  );
+  // 4. No combo and no API key entry: a bare model name could reach a key route.
+  const configured = Object.values(config.providers ?? {});
+  assert(
+    isEmpty(config.combos) &&
+      configured.every((item) =>
+        Object.keys(item ?? {}).every(
+          (key) => !/^apiKey/i.test(key) || isEmpty(item[key]),
+        ),
+      ),
+    "opencodex-binding-unverified",
+  );
+  // 5. Routing: the target is the OAuth default and OpenAI is not active.
+  const target = config.providers?.[provider];
+  assert(
+    target?.authMode === "oauth" &&
+      target.disabled !== true &&
+      config.defaultProvider === provider &&
+      (config.providers.openai === undefined ||
+        config.providers.openai?.disabled === true),
+    "opencodex-binding-unverified",
+  );
+  // 6. Anthropic keeps the pool switch on and nothing else about it.
+  if (provider === "anthropic") {
+    const pool = config.anthropicAccountPool;
+    assert(
+      pool?.enabled === true &&
+        typeof pool === "object" &&
+        Object.keys(pool).length === 1,
+      "opencodex-pool-unverified",
+    );
+  }
+  // 7. Antigravity has no generic account failover setting.
+  assert(
+    provider !== "google-antigravity" ||
+      config.oauthAccountFailover === undefined,
+    "opencodex-pool-unverified",
+  );
+  // 8. Starting the proxy must not change anything outside this home.
+  const claudeCode = config.claudeCode;
+  const guards = {
+    runtimeRole: config.runtimeRole === "hub",
+    "clientIntegrations.codex": config.clientIntegrations?.codex === false,
+    "claudeCode.integration":
+      claudeCode?.enabled === false ||
+      (claudeCode?.systemEnv === false && claudeCode?.injectAgents === false),
+  };
+  const missing = Object.keys(guards).filter((name) => !guards[name]);
+  assert(
+    missing.length === 0,
+    `opencodex-global-change-blocked: account home lacks ${missing.join(", ")}`,
+  );
+  // 9. The label the profile names is the one this account's id produces.
+  const accountLogLabel = openCodexAccountLabel(provider, account.id);
+  assert(
+    expectedLabel === undefined || expectedLabel === accountLogLabel,
+    "opencodex-binding-unverified",
+  );
+  return { provider, accountLogLabel };
+}
+
 async function unusedPort() {
   const server = net.createServer();
   await new Promise((resolve, reject) =>
@@ -179,6 +389,247 @@ function ownedListenerPid(port, group) {
   return pids.length === 1 && members.includes(pids[0]) ? pids[0] : null;
 }
 
+// ---- Windows: no process groups, so an owned tree is a (pid, CreationDate) snapshot ----
+
+const system32 = (...parts) =>
+  path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", ...parts);
+
+// Runs a PowerShell script from the fixed system directory, never from PATH.
+// Null when it cannot run or fails, which proves nothing.
+function powershell(script) {
+  const result = spawnSync(
+    system32("WindowsPowerShell", "v1.0", "powershell.exe"),
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    { encoding: "utf8", windowsHide: true, timeout: 30000 },
+  );
+  return result.status === 0 ? result.stdout : null;
+}
+
+/**
+ * Lists Windows processes with the creation time that tells a reused pid from the original.
+ * @param {number} [pid] - Only this pid; omitted lists every process.
+ * @returns {{pid: number, ppid: number, created: string}[] | null} Rows (`created` is a FILETIME string, too large for a Number), or null when PowerShell cannot answer.
+ */
+export function windowsProcessTable(pid) {
+  const filter = Number.isInteger(pid) ? ` -Filter 'ProcessId=${pid}'` : "";
+  const listed = powershell(
+    `Get-CimInstance Win32_Process${filter} | ForEach-Object { if ($_.CreationDate) { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToFileTimeUtc() } }`,
+  );
+  if (listed === null) return null;
+  return listed.split(/\r?\n/).flatMap((line) => {
+    const [, id, parent, created] = line.match(/^(\d+) (\d+) (\d+)$/) ?? [];
+    return id ? [{ pid: Number(id), ppid: Number(parent), created }] : [];
+  });
+}
+
+// The pids listening on a loopback port, or null when they cannot be listed.
+function windowsListenerPids(port) {
+  const listed = powershell(
+    `Get-NetTCPConnection -State Listen -LocalPort ${Number(port)} -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess }`,
+  );
+  if (listed === null) return null;
+  const pids = listed
+    .split(/\r?\n/)
+    .filter((line) => /^\d+$/.test(line.trim()));
+  return [...new Set(pids.map(Number))];
+}
+
+/**
+ * Ends a Windows process and every process it started with `taskkill /T /F`.
+ * The exit code is not evidence of anything; callers prove the exit themselves.
+ * @param {number} pid - Root process id.
+ * @returns {void}
+ */
+export function killWindowsProcessTree(pid) {
+  spawnSync(system32("taskkill.exe"), ["/PID", String(pid), "/T", "/F"], {
+    windowsHide: true,
+    stdio: "ignore",
+    timeout: 15000,
+  });
+}
+
+/**
+ * Lists the live processes that belong to a Windows proxy tree.
+ *
+ * A record names the launcher `group`, its `processStart` (CreationDate) when it
+ * could be read, `notBefore` (a time before the launcher was spawned), the
+ * `snapshot` of `(pid, created)` pairs taken when the proxy was healthy and,
+ * once the launcher was seen to exit, `launcherGoneBy` (a time by which it was
+ * already gone). A process counts only when its identity is shown:
+ * - a snapshot pair whose pid and creation time both match;
+ * - the launcher, only when a live process at its pid has the recorded
+ *   `processStart`. Without a recorded start, or with another one, the pid is
+ *   unproven or reused, and neither it nor its children count;
+ * - a child, only when its parent is an owned process that was created before
+ *   it. Windows keeps an orphan's parent pid, so a child of a launcher that is
+ *   gone counts only if `launcherGoneBy` is recorded and the child was created
+ *   between `notBefore` (and the launcher's start, when known) and
+ *   `launcherGoneBy`. The launcher's pid could not be reused before that time,
+ *   so a stranger that later took the pid never qualifies.
+ * @param {{pid: number, ppid: number, created: string}[]} table - Current process table.
+ * @param {{group: number, processStart: string | null, notBefore: string, launcherGoneBy?: string, snapshot?: {pid: number, created: string}[]}} record - Recorded proxy tree.
+ * @returns {{pid: number, created: string}[]} Live members of the tree.
+ */
+export function windowsOwnedProcesses(table, record) {
+  const notBefore = BigInt(record.notBefore);
+  const byPid = new Map(table.map((row) => [row.pid, row]));
+  const members = new Map();
+  const add = (row) =>
+    members.set(row.pid, { pid: row.pid, created: row.created });
+  for (const known of record.snapshot ?? []) {
+    const row = byPid.get(known.pid);
+    if (row?.created === known.created) add(row);
+  }
+  const root = byPid.get(record.group);
+  const start = record.processStart ? BigInt(record.processStart) : null;
+  // Each entry is a proven parent: its pid, when it started, and the latest a
+  // child of it may have been created (null: no bound, the parent is alive).
+  const queue = [];
+  if (root) {
+    if (start !== null && root.created === record.processStart) {
+      add(root);
+      queue.push({ pid: root.pid, created: start, until: null });
+    }
+  } else if (record.launcherGoneBy) {
+    queue.push({
+      pid: record.group,
+      created: start ?? notBefore,
+      until: BigInt(record.launcherGoneBy),
+    });
+  }
+  const seen = new Set(queue.map((parent) => parent.pid));
+  while (queue.length > 0) {
+    const parent = queue.shift();
+    for (const row of table) {
+      if (row.ppid !== parent.pid || seen.has(row.pid)) continue;
+      const created = BigInt(row.created);
+      if (created < notBefore || created <= parent.created) continue;
+      if (parent.until !== null && created > parent.until) continue;
+      seen.add(row.pid);
+      add(row);
+      queue.push({ pid: row.pid, created, until: null });
+    }
+  }
+  return [...members.values()];
+}
+
+/**
+ * Tells whether a live process holds the launcher's pid without its identity being shown.
+ * That is the case when no start time was recorded and no snapshot pair names
+ * it: the process may be ours or a stranger that reused the pid, so it must
+ * neither be ended nor be taken for gone.
+ * @param {{pid: number, ppid: number, created: string}[]} table - Current process table.
+ * @param {object} record - Recorded proxy tree, as for `windowsOwnedProcesses`.
+ * @returns {boolean} True when the pid is live and its owner is unproven.
+ */
+export function windowsRootUnproven(table, record) {
+  const root = table.find((row) => row.pid === record.group);
+  if (!root || record.processStart) return false;
+  return !(record.snapshot ?? []).some(
+    (known) => known.pid === root.pid && known.created === root.created,
+  );
+}
+
+/**
+ * Names the one listener that a Windows proxy tree owns.
+ *
+ * Owned means the port has exactly one listening pid, that pid is a member of
+ * the recorded tree, and the health response reported that same pid. Any other
+ * listener, none, a listener outside the tree, or a health pid that names
+ * another process proves nothing.
+ * @param {{pid: number, ppid: number, created: string}[]} table - Current process table.
+ * @param {object} record - Recorded proxy tree, as for `windowsOwnedProcesses`.
+ * @param {number[]} listeners - Pids listening on the port.
+ * @param {number} healthPid - The `pid` the health response reported.
+ * @returns {number | null} The owned listener pid, or null when ownership is not proven.
+ */
+export function windowsOwnedListener(table, record, listeners, healthPid) {
+  const [listener] = listeners;
+  return listeners.length === 1 &&
+    listener === healthPid &&
+    windowsOwnedProcesses(table, record).some(
+      (member) => member.pid === listener,
+    )
+    ? listener
+    : null;
+}
+
+/**
+ * Ends a recorded Windows tree and shows that none of it remains.
+ *
+ * The proof is only as strong as the snapshot: a process that started after it
+ * and left the tree is missed, so the receipt says `exited-snapshot`, never
+ * `exited`, and `descendantsExited` stays false because a whole tree was not
+ * shown empty. The record is kept between passes so that ending the launcher
+ * does not shrink what must be gone: every member seen joins the snapshot as a
+ * (pid, created) pair, and once the launcher that was proven a member is absent
+ * from the table, `launcherGoneBy` is stamped so that its later children, which
+ * Windows leaves attached to the vanished pid, still count. Anything that
+ * stays alive, or cannot be judged, throws `opencodex-proxy-exit-unverifiable`.
+ * @param {object} record - Recorded proxy tree, as for `windowsOwnedProcesses`.
+ * @param {number} graceMs - How long to wait for the tree to end after each kill.
+ * @param {{table?: Function, kill?: Function}} [io] - Process table reader and tree killer, replaceable in tests.
+ * @returns {Promise<{termination: string, descendantsExited: boolean}>} Receipt of the proven exit.
+ */
+export async function terminateWindowsTree(record, graceMs, io = {}) {
+  const readTable = io.table ?? windowsProcessTable;
+  const kill = io.kill ?? killWindowsProcessTree;
+  assert(record?.group, "opencodex-proxy-exit-unverifiable");
+  assert(
+    /^\d+$/.test(record.notBefore ?? ""),
+    "opencodex-proxy-exit-unverifiable",
+  );
+  let tracked = record;
+  let launcherSeen = false;
+  const observe = (table) => {
+    if (
+      launcherSeen &&
+      !tracked.launcherGoneBy &&
+      !table.some((row) => row.pid === tracked.group)
+    )
+      tracked = { ...tracked, launcherGoneBy: filetimeAt(Date.now()) };
+    assert(
+      !windowsRootUnproven(table, tracked),
+      "opencodex-proxy-exit-unverifiable",
+    );
+    const members = windowsOwnedProcesses(table, tracked);
+    if (members.some((member) => member.pid === tracked.group))
+      launcherSeen = true;
+    const seen = new Set(
+      (tracked.snapshot ?? []).map((known) => `${known.pid}/${known.created}`),
+    );
+    const added = members.filter(
+      (member) => !seen.has(`${member.pid}/${member.created}`),
+    );
+    if (added.length > 0)
+      tracked = {
+        ...tracked,
+        snapshot: [...(tracked.snapshot ?? []), ...added],
+      };
+    return members;
+  };
+  for (let pass = 0; pass < 2; pass += 1) {
+    const table = readTable();
+    assert(table, "opencodex-proxy-exit-unverifiable");
+    const members = observe(table);
+    if (members.length === 0) break;
+    for (const member of members) kill(member.pid);
+    const deadline = Date.now() + graceMs;
+    while (Date.now() < deadline) {
+      const rows = readTable();
+      if (rows && observe(rows).length === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  const table = readTable();
+  assert(table, "opencodex-proxy-exit-unverifiable");
+  assert(observe(table).length === 0, "opencodex-proxy-exit-unverifiable");
+  return { termination: "exited-snapshot", descendantsExited: false };
+}
+
+// A Unix millisecond time as a FILETIME string, the unit of `CreationDate`.
+const filetimeAt = (ms) => String((BigInt(ms) + 11644473600000n) * 10000n);
+
 function processAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -192,7 +643,8 @@ function processAlive(pid) {
 // The kernel's start time of a process, which tells a reused pid from the
 // original. Null when it cannot be read.
 function processStartTime(pid) {
-  if (process.platform === "win32") return null;
+  if (process.platform === "win32")
+    return windowsProcessTable(pid)?.[0]?.created ?? null;
   const listed = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
     encoding: "utf8",
   });
@@ -317,6 +769,24 @@ async function takeReclaimMutex(file, token, waitMs) {
   }
 }
 
+// Ends what is left of a dead owner's Windows proxy tree. False when nothing
+// of it is alive; unprovable state throws.
+async function endWindowsProxy(record, graceMs) {
+  const table = windowsProcessTable();
+  assert(table, "opencodex-proxy-exit-unverifiable");
+  assert(
+    /^\d+$/.test(record.notBefore ?? ""),
+    "opencodex-proxy-exit-unverifiable",
+  );
+  assert(
+    !windowsRootUnproven(table, record),
+    "opencodex-proxy-exit-unverifiable",
+  );
+  if (windowsOwnedProcesses(table, record).length === 0) return false;
+  await terminateWindowsTree(record, graceMs);
+  return true;
+}
+
 // Decides what an existing lease means and, when its owner is dead, takes it
 // over. A live owner keeps the home. The dead owner's proxy group is ended with
 // the same emptiness proof a stop needs, and only then is the lease removed;
@@ -325,8 +795,10 @@ async function takeReclaimMutex(file, token, waitMs) {
 async function reclaimStaleLease(file, options) {
   const seen = readRecord(file);
   if (!seen) {
-    // Absent means someone finished first; unreadable proves nothing.
-    if (!fs.existsSync(file)) return { recovered: null };
+    // Absent means someone finished first; unreadable proves nothing. A new
+    // lease published between the failed read and the existence check is
+    // not unreadable, so it is read once more and judged on the next attempt.
+    if (readRecord(file) || !fs.existsSync(file)) return { recovered: null };
     throw new Error("opencodex-lease-unverifiable: unreadable owner record");
   }
   if (recordOwnerLive(seen))
@@ -349,7 +821,15 @@ async function reclaimStaleLease(file, options) {
     const proxy = readRecord(proxyFile(file, lease.token));
     const group = proxy?.group ?? null;
     let terminated = false;
-    if (group) {
+    if (group && process.platform === "win32") {
+      try {
+        terminated = await endWindowsProxy(proxy, options.stopGraceMs ?? 3000);
+      } catch {
+        throw new Error(
+          `opencodex-lease-unverifiable: proxy tree ${group} of dead owner ${lease.pid} is not proven gone`,
+        );
+      }
+    } else if (group) {
       // A live leader with another start time means the group id was reused,
       // so the recorded group is already empty; anything else in it is not ours.
       const leaderStart = processAlive(group) ? processStartTime(group) : null;
@@ -382,8 +862,8 @@ async function reclaimStaleLease(file, options) {
  * Acquires the account-home lease that makes a request-history boundary exclusive.
  *
  * The lease records its owner's pid and start time and is never rewritten;
- * once the proxy is spawned its process group is recorded in a file named by
- * the lease's token. A lease whose owner is gone is stale. One reclaimer at a
+ * once the proxy is spawned its process group (on Windows, its process tree
+ * snapshot) is recorded in a file named by the lease's token. A lease whose owner is gone is stale. One reclaimer at a
  * time, holding a mutex keyed to that lease, ends its group with the same
  * emptiness proof a stop needs and takes the home over. The lease is only ever
  * created with a link and removed by its owner or by that reclaimer, so two
@@ -391,7 +871,7 @@ async function reclaimStaleLease(file, options) {
  * reclaimer that died, and an unprovable state are different failures.
  * @param {string} accountHome - Fixed-account OpenCodex home.
  * @param {{stopGraceMs?: number, reclaimWaitMs?: number}} [options] - Grace period for ending a dead owner's group and how long to wait for another reclaimer.
- * @returns {Promise<{release: () => void, setProxy: (group: number) => void, recovered: object | null}>} Lease receipt.
+ * @returns {Promise<{release: Function, setProxy: (group: number, extra?: object) => object, recovered: object | null}>} Lease receipt; `setProxy` records the proxy.
  * @throws {Error} `opencodex-lease-held` for a live owner or a reclaim in progress.
  * @throws {Error} `opencodex-lease-reclaim-stuck` when a dead reclaimer left its mutex.
  * @throws {Error} `opencodex-lease-unverifiable` when a dead owner's state cannot be proven clean.
@@ -420,19 +900,23 @@ export async function acquireOpenCodexLease(accountHome, options = {}) {
   let released = false;
   return {
     recovered,
-    setProxy(group) {
+    setProxy(group, extra = {}) {
       const pending = `${proxyFile(file, lease.token)}.pending`;
+      const record = {
+        group,
+        processStart:
+          "processStart" in extra
+            ? extra.processStart
+            : processStartTime(group),
+        ...extra,
+      };
       fs.writeFileSync(
         pending,
-        JSON.stringify({
-          token: lease.token,
-          pid: process.pid,
-          group,
-          processStart: processStartTime(group),
-        }),
+        JSON.stringify({ token: lease.token, pid: process.pid, ...record }),
         { mode: 0o600 },
       );
       fs.renameSync(pending, proxyFile(file, lease.token));
+      return record;
     },
     release() {
       if (released) return;
@@ -445,11 +929,30 @@ export async function acquireOpenCodexLease(accountHome, options = {}) {
   };
 }
 
+// The health body when it names this port, otherwise null.
 async function healthProvesPort(port) {
   const response = await fetch(`http://127.0.0.1:${port}/healthz`);
-  if (!response.ok) return false;
+  if (!response.ok) return null;
   const body = await response.json().catch(() => null);
-  return body?.status === "ok" && Number(body?.port) === port;
+  return body?.status === "ok" && Number(body?.port) === port ? body : null;
+}
+
+/**
+ * Names the executable and leading arguments that start OpenCodex from a runtime prefix.
+ * On Windows this is this Node binary running the package's `bin/ocx.mjs`: an
+ * npm `.cmd` shim cannot be spawned without a shell and would put a `cmd.exe`
+ * layer into the process tree.
+ * @param {string} runtimePrefix - Directory holding the runtime's `node_modules`.
+ * @returns {{command: string, args: string[]}} What to spawn, before OpenCodex's own arguments.
+ */
+export function openCodexLaunch(runtimePrefix) {
+  const modules = path.join(runtimePrefix, "node_modules");
+  return process.platform === "win32"
+    ? {
+        command: process.execPath,
+        args: [path.join(modules, "@bitkyc08", "opencodex", "bin", "ocx.mjs")],
+      }
+    : { command: path.join(modules, ".bin", "ocx"), args: [] };
 }
 
 /**
@@ -465,23 +968,31 @@ async function healthProvesPort(port) {
  * the account-home lease stays held. The lease names its owner and proxy
  * group, so once that owner is dead a later turn ends the group with the same
  * proof and takes the home over, while a live owner is refused.
+ *
+ * Windows has no process groups. There the launcher is this Node binary running
+ * `bin/ocx.mjs`, and ownership needs three matching facts: exactly one
+ * listener, that listener in the `(pid, CreationDate)` snapshot of the
+ * launcher's tree, and the health body's `pid` equal to it. Stopping ends every
+ * snapshot process with `taskkill /T /F` and passes once none of them is left,
+ * but a process that started after the snapshot and left the tree is missed. It
+ * resolves to `termination: "exited-snapshot"` with `descendantsExited: false`,
+ * which never satisfies the `"exited"` a proven runner turn requires.
  * @param {object} binding - Runtime prefix and isolated fixed-account homes.
- * @returns {Promise<object>} Receipt with `port`, `pid`, `env`, `ownership` (listener pid and group) and `stop()`, which resolves to the exit proof.
+ * @returns {Promise<object>} Receipt with `port`, `pid`, `env`, `ownership` (listener pid and group, plus the snapshot on Windows) and `stop()`, which resolves to the exit proof.
  * @throws {Error} `opencodex-proxy-not-ready` when ownership or health is not proven,
  *   or `opencodex-proxy-exit-unverifiable` when the owned tree cannot be shown to have exited.
  */
 export async function startOpenCodexProxy(binding) {
   const env = openCodexEnvironment(binding);
-  assert(
-    process.platform !== "win32",
-    "opencodex-proxy-ownership-unverifiable",
-  );
+  const windows = process.platform === "win32";
   const lease = await acquireOpenCodexLease(binding.accountHome, {
     stopGraceMs: binding.stopGraceMs,
     reclaimWaitMs: binding.reclaimWaitMs,
   });
   let port;
   let child;
+  let notBefore;
+  let tree;
   try {
     port = await unusedPort();
     // The proxy child gets a private HOME so a start-time hook or roster sync
@@ -489,21 +1000,30 @@ export async function startOpenCodexProxy(binding) {
     // missing; the account home already refuses configs that enable them.
     const proxyHome = path.join(binding.accountHome, ".omt-proxy-home");
     fs.mkdirSync(proxyHome, { recursive: true, mode: 0o700 });
+    const launch = openCodexLaunch(binding.runtimePrefix);
+    // Nothing of this tree can predate the spawn; the margin absorbs clock skew.
+    notBefore = filetimeAt(Date.now() - 2000);
     child = spawn(
-      path.join(binding.runtimePrefix, "node_modules", ".bin", "ocx"),
-      ["start", "--port", String(port)],
+      launch.command,
+      [...launch.args, "start", "--port", String(port)],
       {
         cwd: binding.runtimePrefix,
         env: {
           ...isolatedOpenCodexEnvironment(process.env, env),
           HOME: proxyHome,
+          ...(windows && {
+            USERPROFILE: proxyHome,
+            HOMEDRIVE: path.parse(proxyHome).root,
+            HOMEPATH: path.relative(path.parse(proxyHome).root, proxyHome),
+          }),
         },
         stdio: "ignore",
         shell: false,
-        detached: true,
+        detached: !windows,
       },
     );
-    if (child.pid) lease.setProxy(child.pid);
+    if (child.pid)
+      tree = lease.setProxy(child.pid, windows ? { notBefore } : {});
   } catch (error) {
     lease.release();
     throw error;
@@ -516,13 +1036,44 @@ export async function startOpenCodexProxy(binding) {
   child.once("close", () => {
     exited = true;
   });
+  // Our own handle keeps the launcher's pid from being reused until this event,
+  // so a child of that pid created before now is the launcher's, not a stranger's.
+  child.once("exit", () => {
+    if (!windows || !tree) return;
+    try {
+      tree = lease.setProxy(child.pid, {
+        ...tree,
+        launcherGoneBy: filetimeAt(Date.now()),
+      });
+    } catch {
+      // Without the bound, fewer processes count as owned, never more.
+    }
+  });
+  // While that handle holds the pid, only the launcher can own it, so its start
+  // time may be read from the process table when the spawn-time read failed.
+  const withStart = (record, rows) => {
+    const row = rows?.find((item) => item.pid === child.pid);
+    return record.processStart ||
+      record.launcherGoneBy ||
+      !row ||
+      BigInt(row.created) < BigInt(record.notBefore)
+      ? record
+      : { ...record, processStart: row.created };
+  };
   // The lease is released only once the owned group is proven gone.
   let stopping = null;
   const stop = () => {
     stopping ??= (async () => {
-      const receipt = child.pid
-        ? await terminateGroup(child.pid, binding.stopGraceMs ?? 3000)
-        : { termination: "exited", descendantsExited: true };
+      const graceMs = binding.stopGraceMs ?? 3000;
+      if (windows && child.pid) {
+        const filled = withStart(tree, windowsProcessTable(child.pid));
+        if (filled !== tree) tree = lease.setProxy(child.pid, filled);
+      }
+      const receipt = !child.pid
+        ? { termination: "exited", descendantsExited: true }
+        : windows
+          ? await terminateWindowsTree(tree, graceMs)
+          : await terminateGroup(child.pid, graceMs);
       lease.release();
       return receipt;
     })();
@@ -532,19 +1083,39 @@ export async function startOpenCodexProxy(binding) {
   while (Date.now() < deadline) {
     if (spawnError || exited) break;
     try {
-      if (await healthProvesPort(port)) {
-        const listenerPid = child.pid
-          ? ownedListenerPid(port, child.pid)
-          : null;
+      const health = await healthProvesPort(port);
+      if (health) {
+        let listenerPid = null;
+        let method = "sole-listener-in-owned-process-group";
+        let snapshot;
+        if (windows && child.pid) {
+          method = "sole-listener-in-owned-process-tree-snapshot";
+          const table = windowsProcessTable();
+          const listeners = windowsListenerPids(port);
+          if (table && listeners) {
+            tree = withStart(tree, table);
+            listenerPid = windowsOwnedListener(
+              table,
+              tree,
+              listeners,
+              Number(health.pid),
+            );
+            snapshot = windowsOwnedProcesses(table, tree);
+          }
+        } else if (child.pid) {
+          listenerPid = ownedListenerPid(port, child.pid);
+        }
         if (!listenerPid || exited) break;
+        if (snapshot) tree = lease.setProxy(child.pid, { ...tree, snapshot });
         return {
           port,
           pid: child.pid ?? null,
           env,
           ownership: {
-            method: "sole-listener-in-owned-process-group",
+            method,
             listenerPid,
             group: child.pid,
+            ...(snapshot && { snapshot }),
           },
           stop,
         };
@@ -598,12 +1169,23 @@ export function openCodexCommand(request) {
   return argv;
 }
 
+// The label an OAuth profile names: the provider suffix for Claude, the
+// attempt label for Antigravity.
+const OAUTH_LABEL_PATTERN = Object.freeze({
+  claude: /^anthropic-p[a-f0-9]{6}$/,
+  agy: /^o[a-f0-9]{6}$/,
+});
+
 /**
  * Returns the provider name recorded by OpenCodex for an OMT logical provider.
+ * A Claude profile with its account label is recorded under that label, which
+ * is the `anthropic-p<hex6>` suffix the account pool adds to the provider.
  * @param {string} provider - OMT logical provider identifier.
+ * @param {string} [accountLogLabel] - Account label of the fixed-account binding.
  * @returns {string} OpenCodex request-history provider identifier.
  */
 export function openCodexProvider(provider, accountLogLabel) {
+  if (provider === "claude" && accountLogLabel) return accountLogLabel;
   return (
     (provider === "codex" && accountLogLabel
       ? `openai-${accountLogLabel}`
@@ -679,8 +1261,10 @@ function rowTime(entry) {
 // Every attempt of a request must itself be a single, first-try success on the
 // fixed account. A recovery, a resend or a failed attempt inside a request that
 // ended 2xx would hide an account or provider transition this adapter cannot
-// prove, so any of them makes the request unowned by the fixed binding.
-function attemptsProveFixedAccount(entry, expectedProvider, input) {
+// prove, so any of them makes the request unowned by the fixed binding. A
+// Claude attempt carries no account label; its account is proved by the
+// provider suffix, which every attempt must equal.
+function attemptsProveFixedAccount(entry, expectedProvider, input, model) {
   const attempts = entry?.attempts;
   return (
     Array.isArray(attempts) &&
@@ -688,9 +1272,10 @@ function attemptsProveFixedAccount(entry, expectedProvider, input) {
     attempts.every(
       (attempt, index) =>
         attempt?.ordinal === index + 1 &&
-        attempt.accountLogLabel === input.accountLogLabel &&
+        (input.provider === "claude" ||
+          attempt.accountLogLabel === input.accountLogLabel) &&
         attempt.provider === expectedProvider &&
-        attempt.model === input.model &&
+        attempt.model === model &&
         Number.isInteger(attempt.status) &&
         attempt.status >= 200 &&
         attempt.status < 300 &&
@@ -721,18 +1306,28 @@ async function ownedHistoryRows(input, fetcher) {
  * unstable row rejects the observation instead of shrinking it.
  * @param {object} input - Loopback proxy and requested binding data.
  * @param {typeof fetch} [fetcher=fetch] - Injectable loopback fetch implementation.
- * @returns {Promise<object>} `requestId`, every `requestIds`, `provider`, `accountLogLabel`, `model`, `usage`, and every owned request and attempt.
+ * @returns {Promise<object>} `requestId`, every `requestIds`, `provider`,
+ * `accountLogLabel`, `model` (the profile model), `resolvedModel` (the model
+ * the history recorded), `usage`, and every owned request and attempt.
  * @throws {Error} `opencodex-binding-unverified` when ownership or any row is not proven.
  */
 export async function readOpenCodexObservation(input, fetcher = fetch) {
   const capturedAt = input.historyBoundary?.capturedAt;
   assert(Number.isFinite(capturedAt), "opencodex-binding-unverified");
+  assert(
+    !OAUTH_LABEL_PATTERN[input.provider] ||
+      OAUTH_LABEL_PATTERN[input.provider].test(input.accountLogLabel),
+    "opencodex-binding-unverified",
+  );
   const created = await ownedHistoryRows(input, fetcher);
   assert(created.length > 0, "opencodex-binding-unverified");
   const expectedProvider = openCodexProvider(
     input.provider,
     input.accountLogLabel,
   );
+  // The history records a prefixed model without its prefix, so the executed
+  // model is compared with `strip(M)` while the request is compared with `M`.
+  const executedModel = stripOpenCodexModelPrefix(input.provider, input.model);
   const valid = (entry) => {
     const model = entry?.resolvedModel ?? entry?.model;
     const startedAt = rowTime(entry);
@@ -741,13 +1336,13 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
       startedAt !== null &&
       startedAt >= capturedAt &&
       entry.requestedModel === input.model &&
-      model === input.model &&
+      model === executedModel &&
       entry.provider === expectedProvider &&
       Number.isInteger(entry.status) &&
       entry.status >= 200 &&
       entry.status < 300 &&
       entry.terminalStatus === "completed" &&
-      attemptsProveFixedAccount(entry, expectedProvider, input)
+      attemptsProveFixedAccount(entry, expectedProvider, input, executedModel)
     );
   };
   assert(created.every(valid), "opencodex-binding-unverified");
@@ -766,11 +1361,61 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
     requestIds: ids,
     provider: expectedProvider,
     accountLogLabel: input.accountLogLabel,
+    // `model` stays the profile model `M`: the consumers compare it with the
+    // profile, so returning `strip(M)` would refuse every prefixed turn.
     model: input.model,
+    resolvedModel: executedModel,
     usage: created.length === 1 ? (created[0].usage ?? null) : null,
     attempts: created.flatMap((entry) => entry.attempts),
     requests: created,
   };
+}
+
+const openCodexRefKey = (ref) => ref.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+
+// Claude and Antigravity profiles take only their own account's session home.
+// An OpenAI profile keeps the single shared variable as its fallback.
+function openCodexSessionHome(profile, environment) {
+  const key = openCodexRefKey(profile.runner.accountHomeRef);
+  const own = environment[`OMT_OPENCODEX_${key}_SESSION_HOME`];
+  return OAUTH_PROVIDERS[profile.provider]
+    ? own
+    : own || environment.OMT_OPENCODEX_SESSION_HOME;
+}
+
+/**
+ * Checks that the runner accounts of one run keep their homes apart: no two
+ * accounts share a session home, and no session home is any account's home.
+ * Accounts whose homes are not configured are skipped; binding refuses them.
+ * @param {object[]} profiles - Profiles the run uses; those without a runner are ignored.
+ * @param {NodeJS.ProcessEnv} [environment=process.env] - Explicit caller configuration.
+ * @returns {void}
+ * @throws {Error} `opencodex-binding-unverified` when session homes overlap each other or an account home.
+ */
+export function assertDistinctOpenCodexHomes(
+  profiles,
+  environment = process.env,
+) {
+  const accounts = new Map();
+  for (const profile of profiles) {
+    const ref = profile?.runner?.accountHomeRef;
+    if (typeof ref !== "string" || accounts.has(ref)) continue;
+    const home = environment[`OMT_OPENCODEX_${openCodexRefKey(ref)}_HOME`];
+    const session = openCodexSessionHome(profile, environment);
+    accounts.set(ref, {
+      home: home && path.resolve(home),
+      session: session && path.resolve(session),
+    });
+  }
+  const homes = [...accounts.values()].map((item) => item.home);
+  const sessions = [...accounts.values()]
+    .map((item) => item.session)
+    .filter(Boolean);
+  assert(
+    new Set(sessions).size === sessions.length &&
+      sessions.every((session) => !homes.includes(session)),
+    "opencodex-binding-unverified: session homes must differ from each other and from every account home",
+  );
 }
 
 /**
@@ -778,24 +1423,41 @@ export async function readOpenCodexObservation(input, fetcher = fetch) {
  * @param {object} profile - Organization profile with an OpenCodex runner.
  * @param {object} runtime - Active runtime diagnosis result.
  * @param {NodeJS.ProcessEnv} [environment=process.env] - Explicit caller configuration.
+ * @param {string} [profileId] - Organization profile ID named in a rejection message.
+ * @param {readonly string[]} [supportedProviders] - Providers that may hold a runner; tests inject a list, callers use the exported one.
  * @returns {object} Secret-free fixed-account binding.
  */
 export function resolveOpenCodexBinding(
   profile,
   runtime,
   environment = process.env,
+  profileId,
+  supportedProviders = OPENCODEX_RUNNER_PROVIDERS,
 ) {
-  const runner = validateOpenCodexRunner(profile, runtime);
+  const runner = validateOpenCodexRunner(
+    profile,
+    runtime,
+    profileId,
+    supportedProviders,
+  );
   if (!runner) return null;
-  const key = runner.accountHomeRef.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const key = openCodexRefKey(runner.accountHomeRef);
   const accountHome = environment[`OMT_OPENCODEX_${key}_HOME`];
   const accountLogLabel = environment[`OMT_OPENCODEX_${key}_LABEL`];
-  const sessionHome = environment.OMT_OPENCODEX_SESSION_HOME;
+  const sessionHome = openCodexSessionHome(profile, environment);
   assert(
     accountHome && accountLogLabel && sessionHome,
     "opencodex-action-required: configure named account home, label and session home",
   );
-  validateFixedOpenCodexAccountHome(accountHome, accountLogLabel);
+  if (OAUTH_PROVIDERS[profile.provider]) {
+    validateFixedOpenCodexOAuthHome(
+      accountHome,
+      OAUTH_PROVIDERS[profile.provider],
+      accountLogLabel,
+    );
+  } else {
+    validateFixedOpenCodexAccountHome(accountHome, accountLogLabel);
+  }
   return {
     accountHome,
     accountLogLabel,

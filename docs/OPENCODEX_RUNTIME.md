@@ -125,7 +125,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 1. 먼저 `runtime-doctor`와 같은 진단을 합니다. 런타임이 이미 정상(`runtimeHealthy`)이면 아무것도 바꾸지 않고 결과에 `reused: true`를 담아 돌려줍니다. 카탈로그의 다른 검사가 실패했더라도 정상 런타임은 다시 설치하지 않습니다.
 2. 정상이 아니면 `~/.omt/runtime/opencodex/locks/<지문>.lock`을 잡고 `staging/<지문>-<임의 ID>` 디렉터리에 `package.json`과 `package-lock.json`을 복사한 뒤 `npm ci`를 실행합니다(제한 시간 180초).
-3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다.
+3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다. 임시 홈은 `~/.omt/runtime/opencodex/health-<uuid>/` 아래에 만들어지며, 성공과 실패 모두에서 정리됩니다. `HOME`, `USERPROFILE`, `OPENCODEX_HOME`, `CODEX_HOME`은 모든 플랫폼에서 임시 경로로 격리합니다. Windows에서는 `HOMEDRIVE`와 `HOMEPATH`도 임시 경로로 바꿉니다. 이 계산은 CI의 windows-latest에서 단위 테스트로 확인했지만(`tests/dependencies.test.mjs`의 "the isolated health environment maps each variable to its own temporary path", posixOnly 아님), 실제 사용자 HOME에서 실행한 결과와 실제 OpenCodex가 이 값을 홈으로 해석하는지는 **미검증**입니다(opencodex-followups-health.md, opencodex-followups-windows.md). `APPDATA`와 `LOCALAPPDATA`는 이 격리 대상이 아니라서 부모 프로세스의 값이 그대로 상속되며, OpenCodex가 이 두 변수를 실제로 쓰는지는 확인하지 않았습니다. 그 밖의 플랫폼에서는 `HOMEDRIVE`·`HOMEPATH`를 물려받지 않도록 제거합니다. macOS에서는 실제 사용자 HOME의 읽기와 쓰기를 `sandbox-exec`로 모두 차단한 채 실행해도 상태 확인이 `ready`가 되는 것을 확인했습니다(같은 문서의 「가짜 HOME 실측」, macOS 전용 실험).
 4. 모두 통과하면 `staging`을 `runtimes/<지문>`으로 옮기고, 활성 포인터 `active.json`을 임시 파일 교체 방식으로 갱신한 뒤 다시 진단한 결과에 `installed: true`를 담아 돌려줍니다.
 5. 성공과 실패에 관계없이 이번 실행의 `staging` 디렉터리는 마지막에 삭제합니다.
 
@@ -181,9 +181,33 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair \
   --state .omt
 ```
 
-`runtime-repair`는 `runtime-install`과 같은 함수를 `command` 이름만 바꿔 호출합니다. 따라서 정상 런타임은 그대로 재사용하고(`reused: true`), 정상이 아닐 때만 위 설치 절차를 다시 실행합니다. 수리 과정에서 보관하는 대상은 하나뿐입니다. 같은 지문의 `runtimes/<지문>` 디렉터리가 이미 있으면 새 설치가 검증을 통과한 뒤 그 디렉터리를 `runtimes/<지문>.failed-<밀리초 타임스탬프>`로 이름을 바꿔 남깁니다. 중단되거나 부분적인 설치는 보관하지 않으며, 이번 실행의 `staging` 디렉터리는 항상 삭제합니다. 이전 실행이 남긴 `staging`이나 `.failed-*` 디렉터리를 정리하는 동작은 없습니다.
+`runtime-repair`는 `runtime-install`과 같은 함수를 `command` 이름만 바꿔 호출합니다. 따라서 정상 런타임은 그대로 재사용하고(`reused: true`), 정상이 아닐 때만 위 설치 절차를 다시 실행합니다. 수리 과정에서 보관하는 대상은 하나뿐입니다. 같은 지문의 `runtimes/<지문>` 디렉터리가 이미 있으면 새 설치가 검증을 통과한 뒤 그 디렉터리를 `runtimes/<지문>.failed-<밀리초 타임스탬프>`로 이름을 바꿔 남깁니다. 중단되거나 부분적인 설치는 보관하지 않으며, 이번 실행의 `staging` 디렉터리는 항상 삭제합니다.
 
 `--dry-run`은 `runtime-install`과 같이 진단 결과에 `"dryRun": true`를 덧붙일 뿐이며, `command`는 `runtime-repair`로 표시됩니다.
+
+### runtime-prune
+
+```sh
+node plugins/oh-my-teams/scripts/teams-org.mjs runtime-prune \
+  --org .omt/organization.json \
+  --state .omt
+```
+
+`runtime-prune`은 이전 설치와 수리 과정에서 남긴 잔여물을 정리합니다. 정리 대상은 다음과 같습니다:
+
+- `runtimes/<지문>.failed-<밀리초 타임스탬프>` 형태의 실패한 런타임 디렉터리
+- `staging/` 아래에 남은 이전 설치의 디렉터리(첫 설치가 중단되어 `runtimes/`가 없는 경우도 포함합니다)
+
+다음 항목은 보호되어 정리 대상에서 제외됩니다:
+
+- 활성 포인터가 가리키는 현재 런타임
+- 살아 있는 프로세스가 설치 잠금(`locks/<지문>.lock`)을 보유한 staging 디렉터리. 소유자가 종료했음이 확인된 잠금은 보호하지 않습니다.
+- 소유 접두사(`~/.omt/runtime/opencodex/`) 밖의 경로
+- 심볼릭 링크인 항목과, 링크 때문에 실제 경로가 접두사 밖이 되는 `runtimes`, `staging` 디렉터리
+
+접두사 보호는 삭제 직전에 실제 경로(`realpath`)를 다시 확인하는 방식이라 링크를 따라가 밖을 지우는 일이 없습니다. 지우지 않은 항목은 결과의 `skipped`에 사유와 함께 남습니다.
+
+`--dry-run`은 같은 검사를 거쳐 지울 대상을 `deleted`에 담아 출력하기만 하고 실제로 삭제하지 않습니다.
 
 ## 고정 계정 runner 설정
 
@@ -210,6 +234,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-repair \
 
 `validate`가 확인하는 조건과 위반할 때의 오류는 다음과 같습니다. 아래 조건 하나라도 어기면 오류 메시지는 모두 `Invalid OpenCodex runner binding: <프로필 ID>`입니다.
 
+- `provider`가 OpenCodex를 지원하는 provider(`codex`)여야 합니다.
 - `runner.kind`가 `opencodex`이고 `runner.mode`가 `fixed-account`여야 합니다.
 - `runner.accountHomeRef`가 프로필의 `account`와 같아야 합니다.
 - `account`는 `current`가 될 수 없습니다.
@@ -246,6 +271,8 @@ runner 프로필을 쓰는 프로세스(workflow를 실행하는 프로세스)�
 프로필의 `env` 키 가운데 `API_KEY`나 `API-KEY` 형태의 이름이 있으면 `api-key-fallback-blocked`로 실패합니다. 자식 프로세스의 환경에서는 이름에 `OPENAI`, `ANTHROPIC`, `GOOGLE`, `GEMINI`, `API` 중 하나가 있고 그 뒤에 `KEY` 또는 `TOKEN`이 이어지는 변수와 기존 `OPENCODEX_HOME`, `CODEX_HOME`이 먼저 제거되며, 그 다음에 계정 홈과 세션 홈이 지정됩니다.
 
 ### 계정 홈 검증
+
+이 절은 `codex`(OpenAI) provider의 계정 홈 검증(`validateFixedOpenCodexAccountHome`, `opencodex.mjs:143`)만 설명합니다. Claude·Agy 계정 홈 검증(`validateFixedOpenCodexOAuthHome`, `opencodex.mjs:234`)은 다른 파일과 필드(`auth.json`의 계정 배열, `config.json`의 `providers`·`defaultProvider`·`anthropicAccountPool` 등)를 검사하도록 이미 구현되어 있지만, 아래 「지원 범위와 한계」의 계정 항목대로 Claude·Agy 귀속을 지원 범위 밖으로 결정했기 때문에 실행 경로에 닿지 않습니다.
 
 계정 홈은 다음 파일과 값을 모두 만족해야 합니다. 검사는 위에서 아래 순서로 진행되며, 처음 어긋난 그룹의 오류가 나옵니다. 아래 오류는 조건을 하나씩 어긴 임시 계정 홈으로 실제 재현한 결과입니다.
 
@@ -294,8 +321,10 @@ runner 프로필로 실행하기 직전에 `runtime-doctor`와 같은 진단을 
 
 ## 지원 범위와 한계
 
-- 계정: 계정 홈 검증이 OpenAI(ChatGPT·Codex) 계정 저장소(`codexAccounts`, `codex-accounts.json`)만 읽으므로 고정 계정 실행은 이 계정만 받습니다. Claude와 Agy 계정 홈은 `opencodex-binding-unverified`로 거부됩니다.
-- Windows: 프록시를 시작하는 코드가 Windows에서 `opencodex-proxy-ownership-unverifiable`로 실패하므로 고정 계정 runner는 Windows에서 막힙니다. 설치기의 런타임 설치 단계를 Windows에서 실행해 검증하지는 않았습니다.
+- 계정: `OPENCODEX_RUNNER_PROVIDERS`(`opencodex.mjs:13`)가 `["codex"]`뿐이므로, Claude·Agy를 provider로 쓰는 runner 프로필은 계정 홈을 읽기도 전에 조직 파일 `validate`(`core.mjs:693`)와 실행 직전 검증(`validateOpenCodexRunner`, `opencodex.mjs:57-62`)에서 `Invalid OpenCodex runner binding: <프로필 ID> (provider claude does not support runners)`로 거부됩니다. Claude·Agy 계정 홈을 검증하는 코드(`validateFixedOpenCodexOAuthHome`, `opencodex.mjs:234`)는 이미 구현되어 있지만, 사용자가 2026-09-23에 Claude·Agy 귀속(F-1의 구독 실측)을 OMT 지원 범위 밖으로 확정했으므로 `OPENCODEX_RUNNER_PROVIDERS`에 넣지 않기로 했습니다(`docs/plan/opencodex-followups-measure.md`). 실제 실행은 OpenAI(ChatGPT·Codex) 계정만 받습니다.
+- Windows: 프록시를 시작할 때 소유권을 증명하고 종료를 확인하는 경로가 있습니다. 소유권 판정 알고리즘과 `taskkill` 명령은 CI의 windows-latest에서 가짜 `ocx`로 확인했습니다(opencodex-followups-windows.md의 「CI 검증 결과」). 그러나 실제 OpenCodex와 bun 프로세스의 부모 자식 관계, 실제 bun 명령줄과 실행 파일, `.cmd` shim의 `EINVAL` 여부는 미검증입니다(같은 문서의 U6, U7, U8). Windows에는 프로세스 그룹이 없으므로 종료 증명은 프로세스 표를 다시 계산해서 스냅샷 이후에 생긴 후손도 종료 대상에 더하지만, 종료를 관찰하지 못한 채 저장된 기록에서는 이미 사라진 런처의 후손을 스냅샷 밖에서 찾지 못하고, `launcherGoneBy` 관찰 시각과 런처가 실제로 끝난 시각 사이의 간격에서는 pid가 재사용되어 다른 프로세스의 자식이 후손으로 잘못 세어질 수 있습니다(같은 문서의 「소유권 증명」·「종료 증명」). 이 때문에 증명을 통과해도 결과는 `exited-snapshot`이고, 증명하지 못하면 `opencodex-proxy-exit-unverifiable`로 실패해 lease가 유지되며, 어느 쪽이든 Windows runner turn은 완료해도 unverified로 남습니다. `taskkill /F` 뒤 실제 OpenCodex의 pid 파일과 포트 파일이 남는지는 실제 프록시가 필요해 미검증입니다(같은 문서의 U9). 백신·방화벽이 `taskkill`이나 포트 조회에 미치는 영향과 PowerShell이 제약 언어 모드일 때의 동작도 미검증이며, 조회가 실패하면 fail-closed로 거부하므로 안전한 쪽으로 실패하지만 실제 환경에서 얼마나 자주 그런지는 알 수 없습니다. 데스크톱 Orca에서의 동작도 미검증입니다.
+- 환경 상속: 프록시 자식과 상태 확인 임시 환경은 모두 부모 프로세스의 환경을 복사한 뒤 API 키·토큰류와 `OPENCODEX_HOME`·`CODEX_HOME`·`HOME`(Windows에서는 `USERPROFILE`·`HOMEDRIVE`·`HOMEPATH`도)만 덮어쓰거나 지웁니다(`opencodex.mjs:120-134`, `dependencies.mjs:316-343`). Windows의 `APPDATA`와 `LOCALAPPDATA`는 격리 대상이 아니므로 부모 프로세스의 값이 그대로 상속되며, OpenCodex가 이 두 변수를 실제로 쓰는지는 확인하지 않았습니다.
+- 설치기의 런타임 설치 단계: Windows에서 실행해 검증하지 않았습니다.
 - 그 밖의 플랫폼: 의존성 카탈로그에 선언된 플랫폼은 `macos`와 `windows`뿐이고, 이 문서는 macOS 밖에서 OpenCodex 런타임이나 runner를 실행해 검증하지 않았습니다. 따라서 다른 플랫폼을 지원한다고 선언하지 않습니다.
 
 ### 다계정 풀 모드
@@ -342,7 +371,7 @@ runner 프로필로 실행하기 직전에 `runtime-doctor`와 같은 진단을 
 | `opencodex-pool-unverified` | 계정이 고정되지 않았거나 풀 모드·클라이언트 통합 설정이 다릅니다. | 계정 홈 검증 표의 세 번째 행을 확인합니다. |
 | `opencodex-global-change-blocked: account home lacks ...` | `runtimeRole` 또는 `claudeCode` 설정이 조건을 만족하지 않습니다. | 오류 메시지에 나온 이름의 조건을 확인합니다. |
 | `api-key-fallback-blocked` | 프로필 `env`에 API 키 이름이 있습니다. | 해당 키를 `env`에서 제거합니다. |
-| `opencodex-proxy-ownership-unverifiable` | Windows에서 프록시를 시작하려 했습니다. | Windows에서는 고정 계정 runner를 쓸 수 없습니다. |
+| `opencodex-proxy-exit-unverifiable` | 프로세스 표(POSIX는 프로세스 그룹, Windows는 `Get-CimInstance`)를 다시 읽어도 소유 트리가 비었음을 관찰하지 못했습니다. `ps` 또는 PowerShell 호출 실패, 그룹에 남은 구성원, Windows에서 형식이 잘못된 기록상 시작 시각이 원인일 수 있습니다(`opencodex.mjs:667-678`, `tests/opencodex.test.mjs`의 "a tree whose exit cannot be inspected is unverifiable and keeps its lease"). | 프로세스 표 조회 권한과 `ps`(POSIX) 또는 PowerShell(Windows)의 가용성을 확인한 뒤 다시 시도합니다. lease는 유지되므로 같은 계정 홈으로 시작하는 다음 turn은 `opencodex-lease-held`로 거부됩니다. 소유 트리가 실제로 남아 있다고 판단되면 수동으로 종료한 뒤 다시 시도합니다(opencodex-followups-windows.md의 「종료 증명」). |
 
 ## 더 알아보기
 

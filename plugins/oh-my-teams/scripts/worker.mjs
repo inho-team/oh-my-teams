@@ -17,6 +17,7 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { invoke, modelBinding, parseModelJSON } from "./providers.mjs";
+import { assertDistinctOpenCodexHomes } from "./opencodex.mjs";
 import {
   assertGroundedCitations,
   checkCitations,
@@ -391,6 +392,14 @@ export async function work(
   // claimWorkflowCall had already counted the call: the settlement then
   // reported "Workflow call budget exceeded" and hid the configuration error.
   profileIds.forEach((profileId) => profileEnv(org.profiles[profileId]));
+  // Session homes are one run's, so the check covers every role the run uses
+  // (as headless-start does) and the profiles this call may reach.
+  assertDistinctOpenCodexHomes([
+    ...(runRoles ?? Object.keys(org.roles)).map(
+      (name) => org.profiles[org.roles[name]?.profile],
+    ),
+    ...profileIds.map((profileId) => org.profiles[profileId]),
+  ]);
 
   const lease = acquireSlot(stateDir, org, role);
   const runId = `${task.id}-${crypto.randomUUID()}`;

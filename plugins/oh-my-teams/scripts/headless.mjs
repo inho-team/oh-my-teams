@@ -36,6 +36,13 @@ export const HEADLESS_PROTOCOL = [
   "- 임시 스크립트, 의존성 설치, 내려받은 파일은 작업 워크트리 밖의 임시 디렉터리에서 만든다.",
 ].join("\n");
 
+function agyLimitKind(errorText) {
+  if (/RESOURCE_EXHAUSTED/.test(errorText)) return "usage-limit";
+  if (/UNAVAILABLE \(code 503\)|No capacity available/.test(errorText))
+    return "capacity";
+  return null;
+}
+
 const PROVIDERS = {
   claude: {
     command({ binary, model, effort, prompt, session }) {
@@ -57,17 +64,19 @@ const PROVIDERS = {
         (event) => event.type === "system" && event.subtype === "init",
       );
       const result = events.findLast((event) => event.type === "result");
+      const rateLimited = events.some(
+        (event) =>
+          event.type === "rate_limit_event" &&
+          event.rate_limit_info?.status &&
+          event.rate_limit_info.status !== "allowed",
+      );
       return {
         session: init?.session_id ?? result?.session_id ?? null,
         model: init?.model ?? null,
         text: typeof result?.result === "string" ? result.result : null,
         providerError: result?.is_error ? (result.subtype ?? "error") : null,
-        rateLimited: events.some(
-          (event) =>
-            event.type === "rate_limit_event" &&
-            event.rate_limit_info?.status &&
-            event.rate_limit_info.status !== "allowed",
-        ),
+        rateLimited,
+        limitKind: rateLimited ? "usage-limit" : null,
         ...PROVIDERS.claude.usage(events),
       };
     },
@@ -107,6 +116,7 @@ const PROVIDERS = {
         ["error", "turn.failed"].includes(event.type),
       );
       const session = thread?.thread_id ?? null;
+      const failureText = JSON.stringify(failure ?? "");
       return {
         session,
         model:
@@ -115,9 +125,16 @@ const PROVIDERS = {
         providerError: failure
           ? String(failure.message ?? failure.error?.message ?? failure.type)
           : null,
-        rateLimited: /rate.?limit|usage limit|quota/i.test(
-          JSON.stringify(failure ?? ""),
+        rateLimited: /rate.?limit|usage limit|quota|at capacity/i.test(
+          failureText,
         ),
+        // The same sentences the rollout records beside `usage_limit_exceeded`
+        // and `server_overloaded`.
+        limitKind: /usage limit/i.test(failureText)
+          ? "usage-limit"
+          : /at capacity/i.test(failureText)
+            ? "capacity"
+            : null,
         ...PROVIDERS.codex.usage(events),
       };
     },
@@ -156,6 +173,14 @@ const PROVIDERS = {
       const init = events.find((event) => event.event === "init");
       const result = events.findLast((event) => event.event === "result");
       const status = result?.result?.status ?? null;
+      // Only the error of a turn that failed is read: the response is the
+      // model's own words, and a worker writing about rate limits in it was
+      // once reported as rate limited.
+      const errorText =
+        status && status !== "SUCCESS"
+          ? String(result?.result?.error || status)
+          : "";
+      const limit = agyLimitKind(errorText);
       return {
         session:
           init?.conversation_id ?? result?.result?.conversation_id ?? null,
@@ -166,16 +191,11 @@ const PROVIDERS = {
             : null,
         // The result's `error` is the server's own explanation; the status is
         // only the word ERROR, which told the reader nothing about the cause.
-        providerError:
-          status && status !== "SUCCESS"
-            ? String(result?.result?.error || status)
-            : null,
+        providerError: errorText || null,
         // A 503 for missing model capacity asks for a retry later, the same
         // remedy as a rate limit, so it is reported as one.
-        rateLimited:
-          /RESOURCE_EXHAUSTED|rate.?limit|quota|UNAVAILABLE \(code 503\)|No capacity available/i.test(
-            JSON.stringify(result ?? ""),
-          ),
+        rateLimited: Boolean(limit) || /rate.?limit|quota/i.test(errorText),
+        limitKind: limit,
         ...PROVIDERS.agy.usage(events),
       };
     },
@@ -528,6 +548,11 @@ export function modelVerdict(requested, reported) {
   return "mismatched";
 }
 
+// An explicit runner always executes the Codex CLI against the OpenCodex proxy,
+// whichever provider the profile is logically for, so its stream is a Codex
+// stream. Reading it with the profile's provider would misparse it.
+const streamProvider = (worker) => (worker.runner ? "codex" : worker.provider);
+
 function workerDir(stateDir, workerId) {
   assert(
     WORKER_ID.test(String(workerId)),
@@ -694,7 +719,7 @@ export function startHeadlessWorker({
 function readTurn(worker, turnDir, options) {
   const file = (name) => path.join(turnDir, name);
   const stream = readHeadlessStreamFile(
-    worker.provider,
+    streamProvider(worker),
     file("stream.jsonl"),
     options,
   );
@@ -803,7 +828,11 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     readExit: () => (fs.existsSync(exitFile) ? readJSON(exitFile) : null),
   });
   const streamFile = path.join(turnDir, "stream.jsonl");
-  const stream = readHeadlessStreamFile(worker.provider, streamFile, options);
+  const stream = readHeadlessStreamFile(
+    streamProvider(worker),
+    streamFile,
+    options,
+  );
   const observationFile = path.join(turnDir, "opencodex.json");
   const observation = fs.existsSync(observationFile)
     ? readJSON(observationFile)
@@ -820,14 +849,20 @@ export function headlessStatus(stateDir, workerId, options = {}) {
   for (const earlier of turns.slice(0, -1).reverse()) {
     if (session) break;
     const file = path.join(earlier, "stream.jsonl");
-    session = readHeadlessStreamFile(worker.provider, file, options).session;
+    session = readHeadlessStreamFile(
+      streamProvider(worker),
+      file,
+      options,
+    ).session;
   }
   let outcome = null;
   if (exit) {
     if (exit.stopped) outcome = "stopped";
     else if (exit.timedOut) outcome = "timed-out";
     else if (exit.code !== 0 || exit.error || stream.providerError)
-      outcome = "exit-error";
+      // A failed turn the provider ended on a limit needs a different remedy
+      // from a crash; a successful turn that merely mentions one does not.
+      outcome = stream.rateLimited ? "rate-limited" : "exit-error";
     else if (turn.runner && !runnerTurnProven(observation, lifecycle))
       outcome = "unverifiable";
     else outcome = stream.marker?.kind ?? "no-marker";
@@ -853,6 +888,7 @@ export function headlessStatus(stateDir, workerId, options = {}) {
     ),
     providerError: stream.providerError,
     rateLimited: stream.rateLimited,
+    limitKind: stream.limitKind ?? null,
     ...headlessUsageSummary(worker, turns, options),
     stream: streamFile,
   };
@@ -906,7 +942,7 @@ export function headlessDetail(stateDir, workerId, options = {}) {
       prompt: clip(read(path.join(turnDir, "prompt.txt")), 6000),
       exit,
       transcript: headlessTranscript(
-        status.provider,
+        turn.runner ? "codex" : status.provider,
         read(path.join(turnDir, "stream.jsonl")),
       ),
       stderrTail: stderr.length > 2000 ? stderr.slice(-2000) : stderr,

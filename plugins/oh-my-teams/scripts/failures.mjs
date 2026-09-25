@@ -12,6 +12,8 @@ function route(category, nextOwner, action, retryable) {
  * textual error is interpreted as an implementation or environment failure.
  *
  * @param {object} [input={}] - Structured signals plus an optional message.
+ * A limit is routed to `capacity-handoff` only when `onExhaustion` is
+ * `fallback` and `fallbackAvailable` is true.
  * @returns {{category: string, nextOwner: string, action: string, retryable: boolean}}
  * Routing decision. `retryable` means the same contract may be attempted again.
  */
@@ -21,10 +23,23 @@ export function classifyFailure(input = {}) {
   if (input.processState === "unknown" || input.timedOut) {
     return route("process-unknown", "pl", "reconcile-execution", false);
   }
+  const limited = input.kind === "rate-limited";
+  // Missing capacity clears on its own, so the same profile is tried again
+  // before any other profile takes the task over.
+  if (limited && input.limitKind === "capacity") {
+    return route("provider-capacity", "pm", "retry-after-capacity", true);
+  }
   if (
+    limited ||
     ["pool-exhausted", "quota-unknown"].includes(input.failureClass) ||
     /quota.?exhausted/i.test(message)
   ) {
+    // A limit hands the task to a declared fallback of another provider only
+    // when the organization chose fallback and one is still unused; the
+    // caller that knows the organization supplies both facts.
+    if (input.onExhaustion === "fallback" && input.fallbackAvailable === true) {
+      return route("capacity-handoff", "pm", "handoff-to-fallback", true);
+    }
     return route(
       "quota-exhausted",
       "pm",

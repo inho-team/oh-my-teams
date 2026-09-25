@@ -120,6 +120,8 @@ function withLedgerLock(file, callback) {
  * @param {string} launch.role - Role the launch holds.
  * @param {string | null} [launch.stateDir] - `--state` given to the command.
  * @param {string} [launch.callerCwd] - Directory the command ran from.
+ * @param {string} [launch.handoffFrom] - Profile a handoff launch replaces.
+ * @param {number} [launch.handoffIndex] - Handoff number of that task.
  * @param {string} [now] - Timestamp to record; the current time by default.
  * @returns {{recorded: true, file: string, line: object}} The stored line.
  * @throws {Error} When the ledger cannot be written.
@@ -155,6 +157,14 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
       workerId: launch.workerId ?? null,
       callerCwd,
       workflowId: launch.workflowId ?? null,
+      // A fallback profile that took a task over names the profile it
+      // replaced, so a report does not count its work as the role's own.
+      ...(launch.handoffFrom
+        ? {
+            handoffFrom: launch.handoffFrom,
+            handoffIndex: launch.handoffIndex ?? null,
+          }
+        : {}),
       // worker-start records what it handed over, so the next hand-over to
       // the same terminal can tell a rework from a different task.
       ...(launch.via === "worker-start"

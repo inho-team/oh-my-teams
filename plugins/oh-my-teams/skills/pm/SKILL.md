@@ -15,13 +15,14 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 
 - 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 이사에게 결정을 요청한다.
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
-- `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
+- `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-handoff`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
 - 이번 실행의 PL·Senior·Junior를 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. 화면에 폴더 신뢰나 명령 승인 같은 질문이 남아 `blockedReason`으로 거부되었으면 사람을 기다리지 않고 감독자인 PM이 `prompt-answer`로 답한 뒤 `terminal-idle-check`부터 다시 진행한다. Agy 터미널이고 이사가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, worker를 기다릴 때에는 heartbeat를 걸러 주는 `supervision-wait`를 쓰고, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
 - 조직이 PM에게 자문자를 허용했으면 계획 확정, 최종 수용, 반복 실패 같은 결정 관문에서만 자기 역할로 `advise`를 호출한다.
+- 조직이 실험 Jev 판단을 켰으면 `supervision-wait`·`supervision-next`·`role-terminal`·`failure-classify`에 [`../../references/jev.md`](../../references/jev.md)가 정한 `--state`(와 `--org`·`--dispatch`)를 함께 넘긴다. 명령의 결과는 바뀌지 않으므로 기록을 읽거나 판단 근거로 쓰지 않는다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행한다.
-- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다. progress 신호는 이사의 미처리 목록에 남지 않는 알림이므로 답을 기다리지 않는다. HEAD가 바뀌어 완료 준비 신호를 다시 보내면 이전 신호는 자동으로 대체된다.
+- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다. `--text`의 본문은 두괄식 첫 줄(판정 또는 결정 요청)로 시작한다. progress 신호는 이사의 미처리 목록에 남지 않는 알림이므로 답을 기다리지 않는다. HEAD가 바뀌어 완료 준비 신호를 다시 보내면 이전 신호는 자동으로 대체된다.
 - 무거운 작업(테스트·빌드·무거운 worker) 전에 자원 슬롯을 확보하고 작업이 끝나면 해제한다. 슬롯을 얻는 명령은 이사 스킬의 권한 절을 참조한다.
 
 ### 책임
@@ -39,6 +40,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - 검토를 배정할 때 finding이나 criterion의 필드 이름을 지시문에서 새로 정하지 않고 `examples/review.json` 형식을 그대로 요구한다. 검토자가 형식을 틀리게 써도 PM이 옮겨 적지 않고 검토자에게 되돌린다.
 - 자신이 작성하거나 계획한 결과를 스스로 검토해 승인하지 않는다. 단순 개발 요청을 배포·외부 발송 허가로 확대하지 않는다.
 - 막히면 거부 코드와 증거를 붙여 이사에게 보고하고, 같은 시도를 반복하지 않는다.
+- 이사에게 결정을 올리는 경우는 [`../../references/autonomy.md`](../../references/autonomy.md)가 정한 네 가지뿐이다. 실행 깊이, 역할 배정, 작업 분할과 순서, 검토 지적의 수용 여부, 실패 원인의 판정과 접근 방법의 변경처럼 브리프의 범위 안에서 끝나는 판단은 `decision` 신호로 올리지 않고 자기 권한으로 정한 뒤 `progress`로 알린다.
 - 하위 역할이 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없으면 그 역할의 일과 권한은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 이번 실행의 역할은 workflow의 `roles`에서, 그것이 없으면 조직 파일의 `roles`에서 확인하며, PM만 남은 실행에서는 PM이 산출물을 직접 만든다.
 
 ## 작업 배정
@@ -51,7 +53,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - 전체 요청을 목표·수용 기준·비목표·제약과 파일 소유권이 분명한 task v2로 나눈다. 작은 저위험 변경은 한 task로 유지한다. 독립 편집 작업마다 **Orca child worktree**를 사용한다. 기준 커밋을 명시하고 실제 반환된 전체 worktree ID를 보관한다. 다른 역할의 task가 작업하는 워크트리에 역할을 띄우지 않으며, 검토자는 검토 대상을 경로와 커밋으로 읽게 한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
 - 네 역할을 모두 상시 실행하지 않는다. 이번 실행에서 쓰는 역할은 아래 「실행 깊이」로 정하며, 깊이에 포함된 역할 사이에서는 제한된 실무를 PL·Senior를 거치지 않고 Junior에게 직접 배정할 수 있다.
 - 역할별 모델·계정·동시 인원과 fallback을 조직 파일에서 읽는다. 조직도는 보고 구조이며 모든 작업이 모든 단계를 통과해야 한다는 뜻이 아니다. Orca 중첩 깊이 제한에 걸리면 PM/PL이 평평한 작업 파동으로 배정한다.
-- 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다.
+- 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다. 조직이 선언한 fallback 프로필로 넘기는 것은 이 전환에 해당하지 않으며, 절차는 아래 「사용 한도」를 따른다.
 - PM은 자료 정리와 반론 수집을 보조 도구에 맡길 수 있으나 목표·우선순위·수용 결정은 위임하지 않는다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
 - 자문자는 PM보다 비싼 모델이므로 감독이나 보고 취합에는 부르지 않는다. 대화 전문 대신 결정할 질문과 요약만 브리프로 보내고, 자문을 따르든 따르지 않든 결정은 PM이 내린다. 호출 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
 
@@ -142,6 +144,10 @@ kickoff 안의 커밋과 워크트리 사이 병합은 PM이 처리하되 단순
 worker를 기다리는 동안에는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 따른다. 원시 `check --wait` 대신 `node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <deliveryId>]`로 기다리면 heartbeat만 온 경우에는 깨어나지 않는다. 대기 시간은 완료나 실패의 근거가 아니지만, 그 시점마다 활동을 다시 조회해 진행 요청과 보고를 결정한다. 무응답 worker를 사용자에게 `진행 중`으로 보고하지 않는다.
 
 진행 상황이나 최종 결과를 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. 진행 상태 판정은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
+
+## 사용 한도
+
+worker가 사용 한도에 걸리면 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `사용 한도 handoff` 절을 따른다. `worker-limit-check`로 판정하고, `verdict`가 `handoff`이면 `rate-limited` 실패로 정산한 뒤, 경로가 `capacity-handoff`일 때 `workflow-handoff`로 같은 워크트리의 작업을 그 역할의 fallback 프로필에 넘긴다. 조직 정책이 `fallback`이면 사용자에게 묻지 않고 곧바로 수행하고, 수행한 사실을 이사에게 `progress` 신호로 알린다. 정책이 `stop`이거나 남은 fallback이 없으면 한도가 풀리는 시각을 붙여 이사에게 `blocked`로 보고한다. handoff는 시도 예산을 쓰지 않지만, 같은 한도를 쓰는 프로필이나 조직에 선언되지 않은 프로필로 넘기지 않는다. 용량 부족(`verdict: retry`)은 프로필을 바꾸지 않고 같은 프로필로 재시도한다.
 
 ## 이사에게 결과 전달
 

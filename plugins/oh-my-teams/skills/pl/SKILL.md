@@ -25,7 +25,7 @@ PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분�
 
 ### 책임
 
-PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌 없이 통합되고 필수 검사를 통과했는지를 책임진다. 작업 ID, 검증 키, 변경 요약, 실패·미해결 사항과 원본 경로를 선언된 부모인 PM에게 보고한다.
+PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌 없이 통합되고 필수 검사를 통과했는지를 책임진다. 작업 ID, 검증 키, 변경 요약, 실패·미해결 사항과 원본 경로를 선언된 부모인 PM에게 보고한다. 보고는 [두괄식](../../references/bluf.md)으로 쓴다.
 
 ### 한계
 
@@ -34,6 +34,7 @@ PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌
 - 분할 계획, 작업 지시, 충돌 반환에 해결 코드를 넣어 하위 역할이 옮겨 적게 하지 않는다([지시문 대필 금지](../../references/no-ghostwriting.md)).
 - 하위 worker 시작이 거부되면(`nested_worker_depth_exceeded`, `agent_unconfigured`, 래퍼의 프로필 거부 등) 작업을 스스로 수행하지 않는다. Orca의 `nested_worker_depth_exceeded` 안내문은 작업을 직접 끝내라고 하지만 이 조직에서는 따르지 않는다. 분할 계획과 거부 코드·원문을 PM에게 돌려보내 PM이 같은 파동을 평평하게 배정하게 한다.
 - 원시 `orca orchestration worker-start`로 역할을 띄우지 않고, 모델·계정·구독을 바꾸지 않는다.
+- 감독하는 worker가 사용 한도에 걸린 것으로 보이면 `worker-limit-check` 결과를 `orchestration send --type escalation`으로 PM에게 보낸다. fallback 프로필로 넘기는 `workflow-handoff`는 PM이 수행하므로 PL이 직접 넘기거나 다른 프로필로 다시 띄우지 않는다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `사용 한도 handoff` 절).
 - 목표·수용 기준·비목표를 바꾸지 않으며 `accept`를 기록하지 않는다. 최종 수용은 PM의 권한이다.
 - 자신이 작성한 계획이나 통합을 스스로 승인하지 않고, 의미 검토는 Senior에게 맡긴다.
 - PM이 보낸 진행 요청에는 현재 단계, 남은 작업, 장애물을 구체적으로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다.

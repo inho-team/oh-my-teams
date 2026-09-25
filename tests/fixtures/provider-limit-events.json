@@ -1,0 +1,138 @@
+{
+  "description": "Provider usage-limit and capacity events copied from real local records on 2026-09-22. Only identifiers and timestamps were removed; message text is verbatim.",
+  "events": [
+    {
+      "provider": "agy",
+      "kind": "capacity",
+      "record": "~/.gemini/antigravity-cli/brain transcript_full",
+      "event": {
+        "source": "SYSTEM",
+        "type": "ERROR_MESSAGE",
+        "status": "DONE",
+        "error": "API error (attempt 1): UNAVAILABLE (code 503): No capacity available for model gemini-3.8-flash-high on the server"
+      }
+    },
+    {
+      "provider": "agy",
+      "kind": "usage-limit",
+      "record": "~/.gemini/antigravity-cli/brain transcript_full",
+      "event": {
+        "source": "SYSTEM",
+        "type": "ERROR_MESSAGE",
+        "status": "DONE",
+        "error": "API error (attempt 1): RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 21m56s."
+      }
+    },
+    {
+      "provider": "agy",
+      "kind": "usage-limit",
+      "record": "~/.gemini/antigravity-cli/brain transcript_full",
+      "event": {
+        "source": "SYSTEM",
+        "type": "ERROR_MESSAGE",
+        "status": "DONE",
+        "error": "API error (attempt 1): RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h11m42s."
+      }
+    },
+    {
+      "provider": "claude",
+      "kind": "usage-limit",
+      "record": "~/.claude/projects transcript",
+      "event": {
+        "type": "assistant",
+        "error": "rate_limit",
+        "isApiErrorMessage": true,
+        "message": {
+          "model": "<synthetic>",
+          "content": [
+            {
+              "type": "text",
+              "text": "You're out of usage credits. Run /usage-credits to keep using Fable 5.1 or /model to switch models."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "provider": "codex",
+      "kind": "usage-limit",
+      "record": "~/.codex/sessions rollout",
+      "event": {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_complete",
+          "error": {
+            "message": "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 4:54 AM.",
+            "codex_error_info": "usage_limit_exceeded"
+          }
+        }
+      }
+    },
+    {
+      "provider": "codex",
+      "kind": "usage-limit",
+      "record": "~/.codex/sessions rollout",
+      "event": {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_complete",
+          "error": {
+            "message": "You’ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 26th, 2026 6:11 AM.",
+            "codex_error_info": "usage_limit_exceeded"
+          }
+        }
+      }
+    },
+    {
+      "provider": "codex",
+      "kind": "capacity",
+      "record": "~/.codex/sessions rollout",
+      "event": {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_complete",
+          "error": {
+            "message": "Selected model is at capacity. Please try a different model.",
+            "codex_error_info": "server_overloaded"
+          }
+        }
+      }
+    },
+    {
+      "provider": "codex",
+      "kind": "usage-limit",
+      "record": "~/.codex/sessions rollout",
+      "event": {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_complete",
+          "error": {
+            "message": "You've hit your usage limit for GPT-5.3-Codex-Spark. Switch to another model now, or try again at 11:28 PM.",
+            "codex_error_info": "usage_limit_exceeded"
+          }
+        }
+      }
+    },
+    {
+      "provider": "codex",
+      "kind": "usage-limit",
+      "record": "~/.codex/sessions rollout",
+      "event": {
+        "type": "event_msg",
+        "payload": {
+          "type": "task_complete",
+          "error": {
+            "message": "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 20th, 2026 12:51 AM.",
+            "codex_error_info": "usage_limit_exceeded"
+          }
+        }
+      }
+    },
+    {
+      "provider": "codex",
+      "kind": "usage-limit",
+      "record": "Orca terminal screen (codex-cli 0.155.1, 2026-09-22)",
+      "screen": "■ You’ve hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at\nSep 26th, 2026 6:11 AM."
+    }
+  ]
+}
