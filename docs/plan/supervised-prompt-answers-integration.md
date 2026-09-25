@@ -18,7 +18,7 @@
 - a54bf6c, 9292034, 11aa6bc: 통합 기록의 작성과 수정입니다. 문서만 바꾸었고 8d11a83이 병합했습니다.
 - 244ec20: 통합 기록의 독립 검토 finding 4건을 반영했습니다. 문서만 바꾸었고 c5feb62를 거쳐 e09cb6b에 포함되었습니다.
 - c5feb62: 인식되지 않은 질문 화면에서 `prompt-answer`가 순환하지 않고 `escalate`로 끝나도록 코드를 수정했습니다. `orca-runtime.md`, PM·PL 스킬, 수치 문서와 회귀 테스트도 함께 바뀌었고, e09cb6b가 병합했습니다.
-- 이 문서를 다시 고친 커밋: 문서만 바꾸므로 코드 트리는 c5feb62와 같습니다. 이 커밋을 병합한 커밋이 최종 통합 HEAD가 됩니다.
+- 이 문서를 다시 고친 커밋: 문서만 바꾸므로 코드 트리는 c5feb62와 같습니다. 이 커밋을 병합한 뒤에도 통합 브랜치는 origin/main을 두 차례 더 병합했고, 그 뒤의 병합 이력은 아래 「병합 이력의 후속」에 적습니다.
 
 **수용된 task 결과 (네 개)**
 
@@ -32,6 +32,20 @@
 **병합 후 처리**
 
 origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브랜치 쪽 내용을 받았습니다. 이 상태에서 npm run sync를 실행하여 다중 파일에 기재된 버전과 감사 수치를 다시 계산했습니다.
+
+**병합 이력의 후속 (2998611부터 최종 통합 HEAD까지)**
+
+이 문서를 처음 쓴 뒤에도 통합 브랜치는 origin/main을 두 차례 더 병합했습니다. 병합 순서는 2998611(win32 홈 축약 표시 뒤 백슬래시를 경계로 인식하도록 고친 d41ac13을 병합) → 8d39c92(origin/main의 e94e1bf를 --no-ff로 병합, PR #109·#104, 충돌 여섯 개) → 5547c19(POSIX 대조가 호스트 플랫폼과 무관하게 판정되도록 고친 58b5f62를 병합) → a9eb390(origin/main의 2b30907을 병합, PR #112, 충돌 네 개)입니다. **a9eb390(a9eb3903ea820078d087a4ae6c977d3db65b2c06)이 이 통합 브랜치의 최종 HEAD입니다.**
+
+두 차례의 origin/main 병합에서 나온 충돌은 성격이 둘로 나뉩니다. `npm run sync`가 관리하는 docs/CODE_QUALITY.md·docs/PLAN_STATUS.md·docs/SAFETY_AUDIT.md의 충돌은 어느 한쪽 내용을 고르지 않고 구조만 병합한 뒤 npm run sync를 실행해 정본에서 값을 다시 채웠습니다. 반면 실질 충돌(1차 병합의 plugins/oh-my-teams/scripts/launch-matrix.mjs, tests/launch-matrix.test.mjs, plugins/oh-my-teams/references/orca-runtime.md, 2차 병합의 plugins/oh-my-teams/skills/pm/SKILL.md)은 양쪽 브랜치의 내용을 모두 보존했습니다.
+
+1차 병합(8d39c92)에서는 launch-matrix.mjs의 규칙 배열을 공통 조상 636c5b3, PR #105, origin/main, 병합 결과의 네 버전으로 규칙 2~13 전체를 대조했습니다. 그 결과 주석에 적힌 규칙 순서 목록과 배열의 실제 순서가 일치했고, 근거 없이 evidence가 verified로 올라간 조합은 없었으며, 삭제된 규칙 7의 옛 blocked 기대값을 쓰는 테스트도 남아 있지 않았습니다.
+
+2차 병합(a9eb390)에서는 pm/SKILL.md를 공통 조상 e94e1bf 기준으로 양쪽이 추가한 모든 줄을 대조해 사라진 문장이 없음을 확인했습니다. 또한 #112가 문서화한 workflow-allowance·workflow-reopen·workflow-integration-checks가 teams-org.mjs에 실제로 구현되어 문서와 런타임이 어긋나지 않음을 확인했습니다.
+
+두 병합 모두 main을 받아들이는 과정에서 게이트 증거와 검토·수용이 풀려 같은 절차를 되풀이해야 했습니다. 이 문제는 이사가 이슈 #113으로 등록했고, 이번 kickoff가 main을 두 번 병합해야 했던 사실이 그 이슈의 사례로 적혀 있습니다. 이번 PR이 고치는 대상은 아닙니다.
+
+이 시점의 package.json 버전은 2.8.9이며 origin/main과 같습니다. 이번 kickoff에서 버전을 직접 올리거나 내린 적은 없습니다.
 
 ## 시점별 검사 결과
 
@@ -72,6 +86,27 @@ PR #105의 첫 CI(run 36148381078, head 53e46c2)에서 windows-latest만 실패�
 **두 번째 CI(head a717d0f)의 경과와 잔여 실패 한 건**: 037e2a5를 병합한 a717d0f에서 CI를 다시 실행하자(run 36153018876) 첫 시도(attempt 1)에서도 windows-latest만 실패했습니다. 실패한 테스트는 `tests/opencodex.test.mjs`의 "a descendant left behind by an exited launcher is ended, not ignored" 한 건뿐이었고, ubuntu-latest와 macos-latest는 통과했습니다. windows-latest job만 다시 실행하자(attempt 2) 같은 커밋에서 통과했습니다.
 
 이 테스트는 이번 kickoff의 범위에 속하지 않습니다. `git diff origin/main...HEAD -- tests/opencodex.test.mjs plugins/oh-my-teams/scripts/opencodex.mjs`로 확인한 결과, 이 브랜치는 두 파일을 전혀 바꾸지 않았습니다. 실패 내용은 기대한 오류 `opencodex-proxy-not-ready` 대신 `opencodex-proxy-exit-unverifiable`이 나온 것입니다. 이 테스트는 `fakeRuntime(t, "leaves-descendant")`로 실제 자식 프로세스를 띄우고 `readyTimeoutMs: 4000`·`stopGraceMs: 600`으로 `startOpenCodexProxy`를 호출합니다. 프록시가 준비되었다는 증거(health 응답)를 얻지 못하면 `stop()`을 호출해 `terminateWindowsTree`로 넘어가는데, 이 함수는 소유한 프로세스를 죽인 뒤 `graceMs`(이 테스트에서는 600, 기본값은 3000)를 패스마다 기다리며(최대 2패스) 프로세스 표가 비는지 관찰하고, 끝내 비지 않으면 `opencodex-proxy-exit-unverifiable`을 던집니다. 표가 관찰된 시간 안에 비면 `terminateWindowsTree`는 정상적으로 끝나고, 그 뒤 `startOpenCodexProxy`가 이어서 `opencodex-proxy-not-ready`를 던집니다. 즉 이 테스트는 실제 프로세스가 짧은 시간 창(600ms×2패스) 안에 프로세스 표에서 사라지는지를 관찰하는 시간 의존적인 검사이며, windows-latest 러너의 부하에 따라 실제 종료가 그 창을 넘기면 실패하고 넘기지 않으면 통과합니다. 같은 커밋에서 결과가 갈린 것은 이 시간 창의 변동성 때문으로 보이고, 코드나 테스트를 바꾸지 않았으므로 이 통과를 미검증 항목으로 올리지는 않되, 재실행으로 통과했다는 사실은 남깁니다.
+
+### CI 미실행 구간과 실행 여부 판별의 한계 (이슈 #111)
+
+통합 HEAD 가운데 ebafd10과 2998611에는 `CI` 워크플로 run이 없습니다. `.github/workflows/ci.yml`의 트리거는 push가 main 브랜치로 한정되고 나머지는 pull_request뿐이므로, PR 브랜치에 push만 해서는 run이 생기지 않습니다. 게다가 PR이 CONFLICTING 상태이면 GitHub가 병합 커밋을 만들 수 없어 pull_request run도 생기지 않습니다. 여기에 더해 `gh pr checks 105`는 검사가 하나도 없을 때 "no checks reported"를 출력하면서도 종료 코드 0을 돌려주고 `statusCheckRollup`의 길이도 0이므로, 종료 코드나 명령의 성공 여부만으로는 미실행을 통과와 구분할 수 없습니다. 이 문제는 이사가 이슈 #111로 등록했습니다. 이번 PR이 고치는 대상은 아닙니다.
+
+### 두 번째 Windows CI 실패와 수정 (58b5f62)
+
+| 커밋 | run | ubuntu-latest | macos-latest | windows-latest |
+|---|---|---|---|---|
+| 8d39c92(58b5f62 이전, PR #104 병합 직후) | 36163900703 | 통과 | 통과 | 실패(Tests 단계에서 테스트 1개 실패) |
+| a9eb390(58b5f62·PR #112 반영 뒤), attempt 1 | 36167579068 | 통과 | 통과 | 통과 |
+
+8d39c92(head 8d39c9285f093e766ec778a8802f1c47920b21aa)에서 돌아간 run 36163900703은 ubuntu-latest와 macOS는 success였고 windows-latest만 failure였습니다. 실패한 테스트는 `tests/prompt-answers.test.mjs`의 "a Windows tilde or $HOME marker followed by a backslash still expands to the home directory"였습니다. 원인은 POSIX 불변을 확인하는 대조가 `platform` 키가 없는 `SCOPE` 상수를 그대로 써서, `judgeCommandScope`가 기본값인 `process.platform`으로 판정을 넘겼기 때문입니다. 제품 코드는 정상이었고, 수정은 커밋 58b5f62 한 건(tests/prompt-answers.test.mjs, +6/-3)으로 그 대조에만 `platform: "linux"`를 명시했습니다. `SCOPE` 상수 자체는 건드리지 않았습니다.
+
+이 원인을 실증하기 위해 `tests/prompt-answers.test.mjs`의 `SCOPE`에 `platform: "win32"`를 강제하면 그 파일의 테스트가 모두 통과하고, `WIN_SCOPE`의 `platform`을 `"linux"`로 바꾸면 2건이 실패하는 것을 확인했습니다. `path.win32`가 정방향 슬래시도 경로 구분자로 인식하기 때문에 POSIX 표기 문자열은 `platform` 값에 둔감하고, 백슬래시와 드라이브 문자를 담은 문자열은 민감합니다. 따라서 `SCOPE`가 `platform`을 생략한 채 세 플랫폼에서 통과하는 것은 우연이 아니라 구조적인 것이며, Windows 표기 문자열을 `SCOPE`로 판정하는 순간에만 결함이 됩니다. 다만 호스트가 값을 만들어 내는 자리, 곧 `process.cwd()`나 `path.resolve`가 드라이브 문자를 붙이는 자리는 이 문자열 실험으로 덮이지 않으며, 이번 PR의 범위가 아니어서 조사하지 않았습니다.
+
+### 최종 CI 결과와 통합 HEAD의 대응
+
+run 36167579068은 headSha a9eb3903ea820078d087a4ae6c977d3db65b2c06에서 attempt 1로 돌아 재실행 없이 conclusion success를 얻었습니다. statusCheckRollup 길이는 3으로 verify(ubuntu-latest)·verify(macos-latest)·verify(windows-latest)가 모두 success였습니다(created 2026-09-25T17:30:42Z, updated 2026-09-25T17:33:00Z). 즉 통합 HEAD a9eb390과 CI run 36167579068이 대응합니다. 이사가 병합 전에 run의 headSha를 병합할 HEAD와 대조하므로, 이 대응 관계를 여기에 남깁니다.
+
+이 run에서 세 플랫폼의 테스트 선언 수는 모두 746건으로 같았습니다. ubuntu와 macOS는 pass 743·fail 0·skip 3·todo 0이었고, windows는 pass 734·fail 0·skip 12·todo 0이었습니다. macOS와 ubuntu가 건너뛴 3건("a health check on Windows ends the launcher's child, not only the launcher", "a healthy responder outside the launcher's process tree is refused", "a health body naming another pid than the listener is refused")은 windows-latest에서 SKIP 표시 없이 각각 ok 57, ok 369, ok 371로 통과했습니다. windows가 건너뛴 12건은 모두 POSIX 전용 사유(the fake runtime uses POSIX scripts 8건, descendant proof needs POSIX process groups 3건, Windows has no process groups 1건)였고, ubuntu에서는 그 12건이 하나도 건너뛰어지지 않았습니다. 따라서 746건 가운데 세 플랫폼 전부에서 건너뛰어진 테스트는 없습니다.
 
 ## 실제 경로 검증 (Claude)
 
