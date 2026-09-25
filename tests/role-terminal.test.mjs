@@ -1336,11 +1336,13 @@ test("readLaunchEnvironment gitdir resolution matches git rev-parse", async (t) 
   const pathM = await import("node:path");
   const { execSync } = await import("node:child_process");
 
-  // git records the resolved path in the worktree's `.git` file, and on macOS
-  // the temporary directory is a symlink, so the base is resolved here too.
-  // Otherwise the expected key and the recorded gitdir name the same directory
-  // by two different paths and the lookup misses.
-  const tmpBase = fsM.realpathSync(
+  // git records its own spelling of the path in the worktree's `.git` file, so
+  // the base is resolved to the same spelling here. `realpathSync.native` is
+  // needed rather than `realpathSync`: on macOS the temporary directory is a
+  // symlink, and on Windows it is an 8.3 short name (`RUNNER~1`) that only the
+  // native call expands to the long name git writes. Otherwise the expected key
+  // and the recorded gitdir name one directory by two spellings.
+  const tmpBase = fsM.realpathSync.native(
     fsM.mkdtempSync(pathM.join(tmpDir, "omt-gitdir-test-")),
   );
   t.after(() => fsM.rmSync(tmpBase, { recursive: true, force: true }));
