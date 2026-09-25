@@ -39,7 +39,6 @@ import {
 } from "./orca-adapter.mjs";
 import {
   predictLaunchPath,
-  normalizeModelFamily,
   VERIFIED_ORCA_VERSION,
   VERIFIED_CLI_VERSION,
 } from "./launch-matrix.mjs";
@@ -232,47 +231,19 @@ export async function readLaunchEnvironment({
 const PROMPT_MARK = /[%$#>❯]\s*$/;
 
 /**
- * Terminal width an Agy Gemini role is launched at.
+ * Returns the shell command a role terminal types.
  *
- * Orca decides that an `antigravity` terminal is idle from its screen: after
- * the `Antigravity CLI` banner it needs a line that starts with `gemini` and a
- * line holding only `>`. At the width Orca opens a terminal, Agy 1.2.4 draws
- * its logo to the left of the banner, so the model line starts with logo glyphs
- * and the terminal never reads as idle; worker-start then refuses it. Below
- * this width Agy draws the logo above the banner and the model line starts
- * with the model name. A model whose name does not start with `gemini` fails
- * Orca's check at any width, so only Gemini models are launched narrow.
- */
-export const AGY_BANNER_COLUMNS = 44;
-
-/**
- * Returns the shell command a role terminal types, narrowed for Agy Gemini on POSIX.
- *
- * Role commands run in a POSIX shell or in PowerShell. A POSIX shell narrows
- * the terminal with `stty` so Orca's tui-idle check sees the model line without
- * logo glyphs. On Windows, narrowing with `mode con:` in the same line as `agy`
- * keeps `powershell.exe` as the foreground process and Orca cannot detect the
- * agent, so the width adjustment is skipped there entirely; the matrix routes
- * Windows Agy Gemini through a separate path (see `predictLaunchPath`).
+ * Orca 1.4.210's idle check no longer reads the model line, so a POSIX Agy
+ * role no longer needs a narrowed terminal to read as idle (Orca 1.4.204's
+ * banner-width check that once required this is gone; #104). The command is
+ * always typed as given, on every platform.
  *
  * @param {object} command - Result of `roleCommand`.
- * @param {string} [platform=process.platform] - Host platform.
  * @returns {{typed: string, columns: number | null}} Command to type, and the
- *   width it sets or null.
+ *   width it sets, always null now that no width adjustment is applied.
  */
-export function launchLine(command, platform = process.platform) {
-  // Kept pure for every platform so the typed line stays testable; the refusal
-  // for a Windows Agy role happens in openRoleTerminal before any terminal is
-  // created.
-  const narrow =
-    command.provider === "agy" &&
-    normalizeModelFamily(command.modelRequested) === "gemini" &&
-    platform !== "win32";
-  if (!narrow) return { typed: command.command, columns: null };
-  return {
-    typed: `stty cols ${AGY_BANNER_COLUMNS}; ${command.command}`,
-    columns: AGY_BANNER_COLUMNS,
-  };
+export function launchLine(command) {
+  return { typed: command.command, columns: null };
 }
 
 /** Tag each role's tab title starts with, so PM and PL tabs are told apart. */
@@ -868,7 +839,7 @@ export async function openRoleTerminal({
     Array.isArray(command?.argv) && command.argv.length > 0,
     "role-terminal needs a role command",
   );
-  const { typed, columns } = launchLine(command, platform);
+  const { typed, columns } = launchLine(command);
   const isCompoundCommand = columns !== null;
   const matrixResult = predictLaunchPath({
     runner: command.provider,

@@ -15,7 +15,6 @@ import {
   commandPending,
   commandTyping,
   freshContextDecision,
-  AGY_BANNER_COLUMNS,
   launchLine,
   openRoleTerminal,
   roleTitle,
@@ -32,6 +31,7 @@ import {
   readLaunches,
   recordLaunch,
 } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
+import { VERIFIED_ORCA_VERSION } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
 
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
@@ -98,7 +98,7 @@ const fast = {
   allowUnverified: true,
   allowUnverifiedApproval: "test-approved",
 };
-const typedFor = (command) => launchLine(command, "darwin").typed;
+const typedFor = (command) => launchLine(command).typed;
 
 // The supervisor context of a launch whose supervisor is already proven; the
 // proof itself is tested in prompt-supervision.test.mjs.
@@ -147,39 +147,29 @@ test("every role command runs tools without an approval prompt", () => {
   assert.throws(() => roleCommand(org, "pm"), /plain command/);
 });
 
-test("an Agy Gemini role is launched narrow enough for Orca to see it idle", async () => {
-  // #41: at Orca's width Agy 1.2.4 draws its logo left of the banner, the
-  // model line starts with logo glyphs, and Orca never reports tui-idle, so
-  // worker-start refused every Agy role.
+test("an Agy Gemini role is launched with no width adjustment on any platform", async () => {
+  // #104: Orca 1.4.210's idle check no longer reads the model line (the
+  // banner-width check #41 relied on is gone), so no platform narrows the
+  // terminal anymore.
   const org = example();
   const gemini = roleCommand(org, "senior");
   assert.equal(gemini.modelRequested, "gemini-3.8-flash-high");
-  assert.deepEqual(launchLine(gemini, "darwin"), {
-    typed: `stty cols ${AGY_BANNER_COLUMNS}; ${gemini.command}`,
-    columns: AGY_BANNER_COLUMNS,
-  });
-  // Windows skips the width adjustment: combining mode con: with agy in one
-  // line keeps powershell.exe as the foreground process and Orca cannot detect
-  // the agent. The matrix blocks that path; on Windows Agy Gemini either runs
-  // through allowUnverified or headless.
-  assert.deepEqual(launchLine(gemini, "win32"), {
-    typed: gemini.command,
-    columns: null,
-  });
-  assert.equal(
-    launchLine(gemini, "linux").typed,
-    launchLine(gemini, "darwin").typed,
-  );
-  // A non-Gemini model fails Orca's check at any width.
+  for (const platform of ["darwin", "linux", "win32"]) {
+    assert.deepEqual(launchLine(gemini, platform), {
+      typed: gemini.command,
+      columns: null,
+    });
+  }
+  // A non-Gemini model never carried a width adjustment either.
   const claudeOnAgy = roleCommand(org, "junior");
   assert.equal(launchLine(claudeOnAgy, "linux").columns, null);
   assert.equal(launchLine(roleCommand(org, "pl"), "linux").columns, null);
 
-  const { typed } = launchLine(gemini, "darwin");
+  const { typed } = launchLine(gemini);
   const orca = fakeOrca([
     [
       `${PROMPT} ${typed}`,
-      "  Antigravity CLI 1.2.4",
+      "  Antigravity CLI 1.2.11",
       "  Gemini 3.8 Flash (High)",
       ">",
     ],
@@ -195,7 +185,7 @@ test("an Agy Gemini role is launched narrow enough for Orca to see it idle", asy
   assert.equal(opened.ready, true);
   assert.equal(opened.submission, "orca");
   assert.equal(opened.launched, typed);
-  assert.equal(opened.columns, AGY_BANNER_COLUMNS);
+  assert.equal(opened.columns, null);
 });
 
 test("a command left at the prompt is told apart from a started agent", () => {
@@ -726,7 +716,9 @@ test("the launch documents open role terminals through role-terminal", () => {
 });
 
 test("on Windows an Agy Gemini role without approval is refused before any terminal opens", async () => {
-  // 실측(Orca 1.4.204): Windows gemini+powershell → 8행(headless/verified).
+  // 실측(Orca 1.4.204): Windows gemini+powershell → 8행(headless).
+  // 근거였던 1.4.204 판정 규칙은 1.4.210에서 교체되어 사라졌고 재검증할 Windows
+  // 머신이 없어 evidence는 verified가 아니라 unverified로 낮아졌다(#104).
   // headless 경로는 openRoleTerminal에서 blocked와 동일하게 throw되며
   // 이유 코드는 orca-idle-requires-narrow-screen.
   const org = example();
@@ -760,29 +752,22 @@ test("on Windows an Agy Gemini role without approval is refused before any termi
   assert.doesNotThrow(() => launchLine(claude, "win32"));
 });
 
-test("win32/POSIX별 실행 명령: POSIX에서만 폭 조정 명령이 붙는다", () => {
+test("win32/POSIX별 실행 명령: 어떤 플랫폼에서도 폭 조정 명령이 붙지 않는다", () => {
+  // #104: Orca 1.4.210에서는 POSIX Agy Gemini도 폭 조정 없이 tui-idle을 통과한다.
   const org = example();
   const gemini = roleCommand(org, "senior");
   assert.equal(gemini.provider, "agy");
   assert.match(gemini.modelRequested, /^gemini/i);
 
-  // POSIX: stty cols 44 붙음
-  const posix = launchLine(gemini, "darwin");
-  assert.match(posix.typed, /stty cols 44/);
-  assert.equal(posix.columns, AGY_BANNER_COLUMNS);
+  for (const platform of ["darwin", "linux", "win32"]) {
+    const result = launchLine(gemini, platform);
+    assert.doesNotMatch(result.typed, /stty/);
+    assert.doesNotMatch(result.typed, /mode con/);
+    assert.equal(result.columns, null);
+    assert.equal(result.typed, gemini.command);
+  }
 
-  // Linux도 POSIX
-  const linux = launchLine(gemini, "linux");
-  assert.match(linux.typed, /stty cols 44/);
-
-  // Windows: 폭 조정 없음 (단일 명령만)
-  const win = launchLine(gemini, "win32");
-  assert.doesNotMatch(win.typed, /mode con/);
-  assert.doesNotMatch(win.typed, /stty/);
-  assert.equal(win.columns, null);
-  assert.equal(win.typed, gemini.command);
-
-  // Claude는 플랫폼 무관하게 폭 조정 없음
+  // Claude는 플랫폼 무관하게 폭 조정 없음(변경 전과 동일)
   const claude = roleCommand(org, "pm");
   assert.equal(launchLine(claude, "win32").columns, null);
   assert.equal(launchLine(claude, "darwin").columns, null);
@@ -798,7 +783,7 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
   };
 
   // Agy gemini win32 powershell → 8행 headless → orca-idle-requires-narrow-screen → 터미널 생성 없음
-  // (단일 명령 → isCompoundCommand=false → 2행 건너뜀 → 8행 headless/verified)
+  // (단일 명령 → isCompoundCommand=false → 2행 건너뜀 → 8행 headless, evidence: unverified)
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -1140,7 +1125,7 @@ test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", a
 
 test("Claude POSIX PM launches without approval and preserves evidence warnings and readiness", async () => {
   const command = roleCommand(example(), "pm");
-  for (const orcaVersion of ["1.4.204", "1.4.205"]) {
+  for (const orcaVersion of [VERIFIED_ORCA_VERSION, "1.4.205"]) {
     for (const started of [true, false]) {
       const orca = fakeOrca([
         started ? ["Claude Code v2.1.277", "Opus 4.6"] : [PROMPT],

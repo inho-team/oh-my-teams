@@ -1,8 +1,8 @@
 # Agy 터미널 경로 개선 계획 (Orca 판정 규칙)
 
 - 작성일: 2026-09-17
-- 상태: 실측과 Senior 검토 완료. 호환성 표는 `plugins/oh-my-teams/scripts/launch-matrix.mjs`가 정본이며, Codex 신뢰 기록이 없는 조합은 사용자 설정을 바꾸지 않고는 재현할 수 없어 근거 등급이 `source-derived`로 남아 있다. #55는 닫히고 #46은 Orca의 `tui-idle` 판정 규칙 때문에 열려 있다.
-- 대상 버전: Orca 1.4.204, Antigravity CLI 1.2.5
+- 상태: Orca 1.4.210 재실측과 검토 반영 완료. 호환성 표는 `plugins/oh-my-teams/scripts/launch-matrix.mjs`가 정본이다. 판정 규칙이 Orca 1.4.210에서 교체되어, POSIX를 포함한 모든 플랫폼에서 폭 44 조정이 제거되었고 macOS에서는 폭 조정 여부와 무관하게 감독 터미널이 성립한다. Windows 조합의 근거 등급은 `verified`가 아니며, 근거였던 Orca 1.4.204의 판정 규칙은 더 이상 존재하지 않고 재검증할 Windows 머신이 없다.
+- 대상 버전: Orca 1.4.210, Antigravity CLI 1.2.11
 
 ## Orca 판정 규칙
 
@@ -19,6 +19,8 @@
   - `antigravity`: 입력 `e`는 화면 버퍼 문자열을 소문자로 변환한 값(`e.toLowerCase()`)입니다. `e.lastIndexOf('antigravity cli')`로 배너를 찾고, 이어진 줄에서 온전히 `gemini`로 시작하는 줄(`e.startsWith('gemini', o)`)과 길이가 1이고 `>`인 줄(`s-o===1 && e.charCodeAt(o)===62`)이 모두 존재해야 대기로 판정합니다. 화면 폭(44) 조정 시 로고가 배너 위로 밀려나 모델 줄 맨 앞에 로고 문자가 붙지 않으므로 `gemini`로 시작할 수 있게 됩니다.
   - **Claude 판정**: `W0i(e)` 등에서 `V0i = '✳'` 상수를 사용해 `e.startsWith('✳')`로 제목을 검사하거나, `/hook/claude`로 들어오는 상태 훅 메시지로 판정합니다.
   - **상태 훅 및 제목**: `antigravity` 터미널은 화면 내 문자열(`antigravity cli`, `gemini`, `>`)만으로 대기를 판정하는 `q0i(e)` 함수에 완전히 의존하며, `Stop` 훅이나 터미널 제목(`✳`)은 판정 근거로 쓰이지 않습니다.
+
+> **Orca 1.4.210 갱신**: 이 절이 분석한 `q0i(e)`는 Orca 1.4.204 번들의 판정 함수였다. Orca 1.4.210에서는 이 함수가 `Maa(e)`로 교체되었고, 프롬프트 줄이 `>` 하나이거나 `> <모드 이름> mode: ` 형식이면 대기로 판정한다. 함수 전체에 `gemini` 문자열이 없으므로, 위에서 서술한 `gemini`로 시작하는 줄 요구와 그에 따른 배너 폭 조정 근거는 더 이상 유효하지 않다([#104](https://github.com/inho-team/oh-my-teams/issues/104), 2026-09-25, Orca 1.4.210, Antigravity CLI 1.2.11 실측).
 
 ### 3. `blockedReason` 판정 (신뢰 질문 등)
 - **위치**: `out/main/index.js` 화면 파싱 로직
@@ -52,6 +54,8 @@
 | 171행: 신뢰 질문 답변 뒤 버퍼 문구 잔존 문제 | 화면 파싱 시 `lastIndexOf`로 전체 확인하므로, 버퍼 내 남아있으면 차단 | 일치 | `out/main/index.js` 문자열 포함(`workspace`, `folder` 등) 확인부 |
 | 181행: 명령줄에 `--dangerously-skip-permissions` 등 우회 플래그 적용 시 도구 승인 건너뜀 | 소스 상에서 전달된 명령어 기반으로 에이전트가 실행됨 (Orca 단에서 차단하지 않음) | 일치 | (해당 부분은 터미널 래퍼와 Orca 명령 전달 방식에 해당됨) |
 
+> **Orca 1.4.210 갱신**: 이 표는 Orca 1.4.204 번들을 분석해 작성했다. 151행이 근거로 삼은 `q0i` 함수는 1.4.210에서 `Maa(e)`로 교체되어 더 이상 `gemini`로 시작하는 줄을 요구하지 않으므로, 151행의 '일치' 판정은 1.4.204 당시에만 유효하다([#104](https://github.com/inho-team/oh-my-teams/issues/104)).
+
 ### 6. `agentIdentity` 결정 규칙과 `isTerminalRunningAgent`의 차이
 
 번들 코드(`out/shared/pane-agent-identity-adapter.js` 및 `out/main/index.js`) 확인 결과, 두 판정은 서로 다른 목적과 로직을 가집니다.
@@ -72,7 +76,7 @@
 | claude-sonnet-4-6 (제목 지정: probe-2-claude, probe-2-claude-r2) | `null` (없음) | 프로세스는 `agy.exe`이나 화면 파싱, `claude` 상태 훅(`live-hook`) 등으로 인해 `claude` 증거와 `antigravity` 증거가 경합하여 충돌(ambiguous)로 처리되었을 가능성 높음 (미확인: 실제 충돌 증거 조합 로깅 필요). |
 | `--title` 미지정 시 (gemini) | `null` (없음) | 프로세스 증거(`isForegroundProcessProofFresh`의 수명 초과 등)가 누락된 상황에서, 터미널 제목(`Terminal 1`)만으로는 에이전트를 식별할 수 없어 `null`이 반환되었을 수 있음 (미확인: 프로세스 증거 무효화 여부 등 실제 값 확인 필요). |
 
-> **올바른 규칙 수정 필요 사항 (orca-runtime.md 불일치 시)**: 현재 `orca-runtime.md`의 서술은 설치된 소스의 실제 판정 기준(화면 파싱 문자열 기반 대기 및 차단 판독, 셸 프로세스 필터링)과 대체로 일치합니다. 단, Agy 대기 판정이 `gemini`로 시작하는 문자열에 강하게 의존(`startsWith('gemini', o)`)한다는 점이 확인되었으므로, 다른 모델(예: `claude`, `gpt-oss`) 사용 시 폭을 아무리 조정해도 해당 줄이 `gemini`로 시작하지 않기 때문에 무조건 실패할 수밖에 없음이 소스로 증명되었습니다.
+> **올바른 규칙 수정 필요 사항 (orca-runtime.md 불일치 시)**: 현재 `orca-runtime.md`의 서술은 설치된 소스의 실제 판정 기준(화면 파싱 문자열 기반 대기 및 차단 판독, 셸 프로세스 필터링)과 대체로 일치합니다. 단, Agy 대기 판정이 `gemini`로 시작하는 문자열에 강하게 의존(`startsWith('gemini', o)`)한다는 점이 확인되었으므로, 다른 모델(예: `claude`, `gpt-oss`) 사용 시 폭을 아무리 조정해도 해당 줄이 `gemini`로 시작하지 않기 때문에 무조건 실패할 수밖에 없음이 소스로 증명되었습니다. 이 결론은 Orca 1.4.204의 `q0i` 판정에서만 유효했다. Orca 1.4.210에서는 판정 함수가 `Maa(e)`로 교체되어 `gemini` 문자열에 의존하지 않으며, claude 계열도 폭 조정 없이 통과하는 것을 실측으로 확인해 이 결론은 반증되었다([#104](https://github.com/inho-team/oh-my-teams/issues/104), 2026-09-25).
 
 ## 설계
 
@@ -121,20 +125,18 @@ export function predictLaunchPath(params) {
 | Codex / - / - / - / 신뢰 없음 / - | blocked | codex-trust-workspace | user / 폴더 신뢰 | source-derived (out/main/index.js) |
 | Claude / - / - / - / - / skipPrompt=false | blocked | claude-permission-prompt | user / 권한 승인 | unverified |
 | Claude / - / win32 / - / - / skipPrompt=true | supervised-terminal | - | - / - | verified (26-09-17, Claude Code 2.1.274, Haiku 4.5; `plugins/oh-my-teams/references/orca-runtime.md` Claude 역할 검증, worker_done 확인) |
-| Agy / claude / - / - / 신뢰 있음 / - | blocked | claude-unsupported-by-orca | pm / headless 권장 | verified (26-09-17, Orca 1.4.204, CLI 1.2.5; `docs/plan/agy-terminal-probes.md` 2-2절) |
-| Agy / gemini / win32 / powershell / 신뢰 있음 / - | supervised-terminal | - | pm / 브리프 기준 9 실측 (검증 모드에서만 터미널 생성 허용) | unverified (식별·tui-idle은 agy-terminal-probes.md 2-1·2-5절에서 확인, worker_done 미확인) |
-| Agy / - / win32 / powershell / 신뢰 있음 / - | headless | - | - / Agy 역할 대체 경로 | verified (26-09-17, CLI 1.2.4; `docs/plan/headless-runtime.md` Windows 검증) |
-| Agy / gemini,gpt-oss / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | unverified |
+| *(규칙 7, 삭제됨)* Agy / claude / - / - / 신뢰 있음 / - | - | - | - | Orca 1.4.210 실측으로 반증되어 규칙을 삭제했다([#104](https://github.com/inho-team/oh-my-teams/issues/104)) |
+| Agy / gemini / win32 / powershell / 신뢰 있음 / - | headless | orca-idle-requires-narrow-screen | - / 1.4.204의 좁은 화면 요구가 근거를 잃어 headless를 유지 | unverified (근거였던 Orca 1.4.204 판정 규칙이 1.4.210에서 사라졌고 Windows에서 재검증되지 않음, #104) |
+| Agy / - / win32 / powershell / 신뢰 있음 / - (gemini 외 다른 계열 포함) | headless | agy-headless-fallback | - / Agy 역할 대체 경로 | unverified (근거였던 Orca 1.4.204 판정 규칙이 1.4.210에서 사라졌고 Windows에서 재검증되지 않음, #104) |
+| Agy / - / posix / - / 신뢰 있음 / - | supervised-terminal | - | - / - | verified (모델 계열 무관; 26-09-25, Orca 1.4.210, CLI 1.2.11, #104) |
 | Claude / - / posix / - / - / skipPrompt=true | supervised-terminal | - | - / - | unverified |
 | Codex / - / - / - / 신뢰 있음 / - | blocked | codex-worker-done-unverified | pm / 브리프 기준 9 실측 | unverified |
 | 그 외 모든 미확인 조합 | blocked | untested_combination | pm / 검증 필요 | unverified |
 
 **규칙 적용 예시:**
-- **Windows Claude**: `Claude / - / win32 / - / - / skipPrompt=true` -> 6번째 행(Claude / - / win32 / - / - / skipPrompt=true)에 걸려 `supervised-terminal`
-- **Windows gemini Agy (검증 모드 유무)**:
-  - 검증 모드(`allowUnverified=true`): `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true / allowUnverified=true` -> 8번째 행(Agy / gemini / win32 / powershell / 신뢰 있음 / -)에 걸려 `supervised-terminal`
-  - 검증 모드 해제(`allowUnverified=false`): `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true / allowUnverified=false` -> 8번째 행(Agy / gemini / win32 / powershell / 신뢰 있음 / -)에 도달하나 검증 모드가 아니므로 `blocked (unverified-terminal-creation)`
-- **Codex**: `Codex / - / - / - / 신뢰 없음 / -` -> 4번째 행(Codex / - / - / - / 신뢰 없음 / -)에 걸려 `blocked (codex-trust-workspace)`
+- **Windows Claude**: `Claude / - / win32 / - / - / skipPrompt=true` -> 5번째 행(Claude / - / win32 / - / - / skipPrompt=true)에 걸려 `supervised-terminal`
+- **Windows gemini Agy**: `Agy / gemini / win32 / powershell / 신뢰 있음 / skipPrompt=true` -> 7번째 행(Agy / gemini / win32 / powershell / 신뢰 있음 / -)에 걸려 `headless`(근거 unverified). `allowUnverified`는 더 이상 경로를 가르지 않고 이전 호출과의 호환을 위해서만 남아 있다.
+- **Codex**: `Codex / - / - / - / 신뢰 없음 / -` -> 3번째 행(Codex / - / - / - / 신뢰 없음 / -)에 걸려 `blocked (codex-trust-workspace)`
 - **검증에 쓰지 않은 버전**: 경로는 그대로 두고 근거 등급만 낮춘다. 패치 버전만 다르면 `untested_patch_version`을 붙이고 등급을 유지하며, 주·부 버전이 다르거나 버전을 확인하지 못하면 `untested_version`을 붙이고 등급을 한 단계 낮춘다(#61). Orca 버전은 Orca 터미널을 쓰는 경로에만, Antigravity CLI 버전은 Agy 역할에만 적용한다.
 
 
@@ -173,7 +175,7 @@ export function predictLaunchPath(params) {
 
 ### 7. 기존 조건을 대체할 호출 지점 목록
 기존의 하드코딩된 조건들을 표(matrix)를 읽는 로직으로 대체합니다.
-- `plugins/oh-my-teams/scripts/role-terminal.mjs:56`: 폭 조정(narrow) 로직에서 Windows의 경우 폭 조정을 **생략**하도록 변경합니다. 이유: `mode con: cols=44`를 `agy` 실행과 함께 묶거나 분리하여 전송하더라도, 전경 프로세스가 `powershell.exe`로 남아 Orca가 에이전트를 식별하지 못하기 때문입니다(`docs/plan/agy-terminal-probes.md` 1절 조합 A, B 참조). 반면 POSIX에서는 터미널 에이전트 식별이 정상 동작하므로 기존처럼 `stty cols 44`를 함께 적용합니다.
+- `plugins/oh-my-teams/scripts/role-terminal.mjs`의 `launchLine`: 폭 조정(narrow) 로직을 제거합니다. Windows에서는 `mode con: cols=44`를 `agy` 실행과 함께 묶거나 분리하여 전송하더라도 전경 프로세스가 `powershell.exe`로 남아 Orca가 에이전트를 식별하지 못했습니다(`docs/plan/agy-terminal-probes.md` 1절 조합 A, B 참조). POSIX에서도 Orca 1.4.210의 판정 함수가 교체되어 폭 조정 없이 감독 터미널이 성립하는 것을 실측으로 확인했으므로([#104](https://github.com/inho-team/oh-my-teams/issues/104)), `stty cols 44`를 더 이상 붙이지 않고 모든 플랫폼에서 명령을 그대로 입력합니다.
 - `plugins/oh-my-teams/scripts/role-terminal.mjs:497-502`: `platform === "win32" && /^gemini/...` 검사 대신 `predictLaunchPath` 결과가 `blocked`인지 확인.
 - `plugins/oh-my-teams/scripts/role-terminal.mjs:315, 420, 521, 543`: `trustQuestion` 로직이 `agent-trust-workspace` 등 매트릭스의 reason 코드와 연계.
 - `plugins/oh-my-teams/scripts/orca-adapter.mjs:484`: `blockedReason`이 매트릭스 예측과 다를 경우 `matrix-mismatch`로 분류.
@@ -232,6 +234,9 @@ headless 모드 실행 시 workflow에 연결하기 위한 receipt 형식입니�
   // 예시: 모델 줄이 빈 문자열이 아니고 다음 줄들에 프롬프트 '>'가 나오는지 확인하는 구조적 검사
   e.lastIndexOf('antigravity cli') ... /* 배너 아래 줄 확인 */ && s-o===1 && e.charCodeAt(o)===62
   ```
+
+> **Orca 1.4.210 갱신**: 위 `q0i` 제안이 요청한 방향대로, 실제 Orca 1.4.210의 판정 함수(`Maa(e)`, 아래 「Orca 1.4.210 재실측」 절 참고)는 모델명을 하드코딩하지 않고 프롬프트 줄의 구조만으로 대기를 판정하도록 이미 교체되었다. 이 제안은 더 이상 필요하지 않다([#104](https://github.com/inho-team/oh-my-teams/issues/104)). 아래 `isShellProcess` 제안은 Windows 전경 프로세스 인식 문제를 다루며, 이 문제는 아직 확인되지 않았다.
+
 **위치:** `out/shared/shell-process-detection.js` (`isShellProcess`)
 - **수정안:** Windows PowerShell에서 복합 명령(`mode con: cols=44; agy...`) 사용 시 전경 프로세스가 여전히 `powershell.exe`로 남는 문제 해결을 위해, 터미널 내부 프로세스 트리에서 `agy.exe` 말단 프로세스 활성 상태를 직접 확인하는 로직 보강.
 
@@ -329,4 +334,24 @@ D는 주입 경로의 `inject_rejected`·`no_agent_detected`가 `not-started` �
 **#46은 열어 둔다.** A와 B의 근본 원인은 Orca의 `q0i(e)` 판정 하드코딩과 Windows 전경 프로세스 트리 파싱이며, OMT 범위에서 해결할 수 없다. Orca 수정(`q0i` 판정 완화 및 `isShellProcess` 보강)이 적용되기 전까지 Windows에서 Agy Gemini 역할의 감독 터미널 경로는 사용할 수 없다.
 
 **#55는 닫을 수 있다.** 비 Gemini Agy 역할의 실행 전 거부(A), headless 경로 검증(B), headless receipt 형식(C)이 모두 표와 런타임에 반영되었다. 이번 실측(`r3-c3`, `r3-c4`)에서도 런타임 동작이 표와 일치함을 확인했다.
+
+## Orca 1.4.210 재실측 (2026-09-25)
+
+환경은 macOS(darwin 24.6.0), Orca 1.4.210, Antigravity CLI 1.2.11이다. `orca terminal create`로 터미널을 열고 `orca terminal wait --for tui-idle`과 `orca terminal show`로 확인했다.
+
+| 조합 | 폭 조정 | `tui-idle` | `agentIdentity` |
+|---|---|---|---|
+| `agy --model claude-sonnet-4-6` | 없음 | `satisfied: true` | `antigravity` |
+| `agy --model gemini-3.1-pro-high` | 없음 | `satisfied: true` | `antigravity` |
+| `stty cols 44; agy --model gemini-3.1-pro-high` | `cols 44` | `satisfied: true` | `antigravity` |
+
+차단 대상이던 claude 계열이 폭 조정 없이 통과했고, 폭을 조정하든 하지 않든 결과가 같았다. `agentIdentity`는 터미널을 연 직후에는 `null`이었다가 몇 초 뒤 `antigravity`로 확정되므로, 조회 시점이 이르면 식별 실패로 오인할 수 있다.
+
+Orca 1.4.210 번들에서 프롬프트 줄을 판정하는 조건은 다음 한 줄이며, 함수 전체에 `gemini`라는 문자열이 없다.
+
+```js
+function Maa(e){return e===`>`||/^>\s+[a-z][a-z-]*\s+mode:\s/i.test(e)}
+```
+
+에이전트 식별도 화면 문자열이 아니라 `antigravity:{detectCmd:"agy", …}`처럼 실행 명령을 기준으로 삼는다.
 

@@ -28,7 +28,7 @@
  *
  * @type {string}
  */
-export const VERIFIED_ORCA_VERSION = "1.4.204";
+export const VERIFIED_ORCA_VERSION = "1.4.210";
 
 /**
  * 호환성 표를 실측으로 검증할 때 사용한 Antigravity CLI 버전. Agy 역할에만 적용하며,
@@ -36,7 +36,7 @@ export const VERIFIED_ORCA_VERSION = "1.4.204";
  *
  * @type {string}
  */
-export const VERIFIED_CLI_VERSION = "1.2.5";
+export const VERIFIED_CLI_VERSION = "1.2.11";
 
 /**
  * Agy 모델 이름을 계열('gemini', 'claude', 'gpt-oss')로 정규화합니다.
@@ -178,11 +178,12 @@ const SUPERVISED_TRUST_ACTION =
  *
  * 각 규칙은 `{ match(params): boolean, result: MatrixResult }` 형태입니다.
  *
- * 설계 3절의 표 순서를 그대로 따릅니다:
+ * 설계 3절의 표 순서를 그대로 따릅니다(Orca 1.4.210 실측으로 7번을 삭제하고 10번을 확장, #104;
+ * 신뢰 기록 없는 Agy·Codex는 supervised-terminal로 바뀌어 감독자가 답함, #105):
  * 복합 명령 Windows Agy → 신뢰 없음(Agy, 감독자가 답함) → 신뢰 없음(Codex, 감독자가 답함) →
- * Claude skipPrompt=false → Claude win32 skipPrompt=true → Agy claude 계열 →
+ * Claude skipPrompt=false → Claude win32 skipPrompt=true →
  * Agy gemini win32/powershell → Agy win32/powershell(다른 계열) →
- * Agy gemini/gpt-oss POSIX → Claude POSIX skipPrompt=true →
+ * Agy POSIX(모델 계열 무관) → Claude POSIX skipPrompt=true →
  * Codex 신뢰 있음 → 나머지
  *
  * @type {Array<{match: function(object): boolean, result: MatrixResult}>}
@@ -262,24 +263,12 @@ const MATRIX_RULES = [
       evidence: "verified",
     },
   },
-  // 7. Agy / claude 계열 / 신뢰 있음 → blocked (Orca가 claude 모델을 antigravity로 인식 불가)
-  {
-    match: ({ runner, trustRecordExists, model }) =>
-      runner === "agy" &&
-      trustRecordExists &&
-      normalizeModelFamily(model) === "claude",
-    result: {
-      path: "blocked",
-      reason: ["claude-unsupported-by-orca"],
-      nextOwner: "pm",
-      nextAction:
-        "Agy claude 모델은 Orca tui-idle 판정을 통과할 수 없습니다. headless를 권장합니다.",
-      evidence: "verified",
-    },
-  },
+  // 7. (삭제됨) Agy + claude 계열 + 신뢰 있음 → blocked였던 규칙. Orca 1.4.210 실측으로 반증되어 삭제(#104).
   // 8. Agy / gemini / win32 / 신뢰 있음 → headless
   // 실측(Orca 1.4.204): tui-idle이 120초까지 오지 않아 worker-start 불가.
   // 폭 조정(Windows에서는 mode con: cols)은 powershell 전경 문제로 에이전트 식별을 깨뜨려 두 조건을 동시에 만족할 방법이 없음.
+  // 근거였던 Orca 1.4.204의 판정 규칙은 1.4.210에서 교체되어 더 이상 존재하지 않고, 재검증할 Windows 머신이
+  // 없으므로 evidence를 verified에서 unverified로 낮춘다. 경로(headless)는 바꾸지 않는다(#104).
   {
     match: ({ runner, model, platform, trustRecordExists }) =>
       runner === "agy" &&
@@ -291,11 +280,13 @@ const MATRIX_RULES = [
       reason: ["orca-idle-requires-narrow-screen"],
       nextOwner: "-",
       nextAction:
-        "Orca tui-idle이 좁은 화면을 요구하고 폭 조정은 에이전트 식별을 깨뜨립니다. headless 경로를 사용합니다.",
-      evidence: "verified",
+        "1.4.204에서는 좁은 화면이 아니면 tui-idle에 도달하지 못한다고 실측됐지만, 그 판정 규칙은 1.4.210에서 교체되어 근거를 잃었고 Windows에서는 아직 재검증되지 않았습니다. 확인될 때까지 headless 경로를 사용합니다.",
+      evidence: "unverified",
     },
   },
   // 9. Agy / - / win32 / 신뢰 있음 (gemini 외 다른 계열 포함) → headless
+  // 근거였던 Orca 1.4.204의 판정 규칙은 1.4.210에서 교체되어 더 이상 존재하지 않고, 재검증할 Windows 머신이
+  // 없으므로 evidence를 verified에서 unverified로 낮춘다. 경로(headless)는 바꾸지 않는다(#104).
   {
     match: ({ runner, platform, trustRecordExists }) =>
       runner === "agy" && platform === "win32" && trustRecordExists,
@@ -304,26 +295,23 @@ const MATRIX_RULES = [
       reason: ["agy-headless-fallback"],
       nextOwner: "-",
       nextAction: "Agy 역할 대체 경로(headless)를 사용합니다.",
-      evidence: "verified",
+      evidence: "unverified",
     },
   },
-  // 10. Agy / gemini 또는 gpt-oss / posix / 신뢰 있음 → supervised-terminal (unverified)
+  // 10. Agy / POSIX(platform !== win32) / 신뢰 있음 → supervised-terminal (verified), 모델 계열 무관.
+  // 실측(macOS darwin 24.6.0, Orca 1.4.210, Antigravity CLI 1.2.11, #104): `agy --model claude-sonnet-4-6`,
+  // `agy --model gemini-3.1-pro-high`, `stty cols 44; agy --model gemini-3.1-pro-high` 세 조합 모두
+  // tui-idle satisfied:true, agentIdentity:antigravity로 확인됐다. Orca의 새 판정 함수는 모델 줄을 읽지 않으므로
+  // claude 계열도 통과하며, 폭 조정 여부와 결과가 같아 gemini·gpt-oss 한정 조건은 근거를 잃었다.
   {
-    match: ({ runner, model, platform, trustRecordExists }) => {
-      const family = normalizeModelFamily(model);
-      return (
-        runner === "agy" &&
-        (family === "gemini" || family === "gpt-oss") &&
-        platform !== "win32" &&
-        trustRecordExists
-      );
-    },
+    match: ({ runner, platform, trustRecordExists }) =>
+      runner === "agy" && platform !== "win32" && trustRecordExists,
     result: {
       path: "supervised-terminal",
       reason: [],
       nextOwner: "-",
       nextAction: "",
-      evidence: "unverified",
+      evidence: "verified",
     },
   },
   // 11. Claude / posix / skipPrompt=true → supervised-terminal (unverified)
