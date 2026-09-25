@@ -505,6 +505,58 @@ const TRANSCRIBE = {
   },
 };
 
+import { StringDecoder } from "node:string_decoder";
+
+/**
+ * Turns a provider stream file into a readable transcript for people.
+ * Reads the file synchronously in chunks to avoid OOM on large transcripts.
+ *
+ * @param {string} provider - Provider that wrote the stream.
+ * @param {string} filePath - Absolute path to stream.jsonl.
+ * @param {number} [limit=300] - Most recent entries to keep.
+ * @returns {{kind: string, text: string, name?: string}[]}
+ */
+export function headlessTranscriptFile(provider, filePath, limit = 300) {
+  const CHUNK = 65536;
+  let fd;
+  try {
+    fd = fs.openSync(filePath, "r");
+  } catch {
+    return [];
+  }
+  const buf = Buffer.allocUnsafe(CHUNK);
+  const decoder = new StringDecoder("utf8");
+  let tail = "";
+  let bytesRead;
+  const events = [];
+  try {
+    do {
+      bytesRead = fs.readSync(fd, buf, 0, CHUNK, null);
+      tail += decoder.write(buf.subarray(0, bytesRead));
+      let start = 0;
+      let pos;
+      while ((pos = tail.indexOf("\n", start)) !== -1) {
+        const line = tail.slice(start, pos).trim();
+        start = pos + 1;
+        if (!line) continue;
+        try {
+          events.push(JSON.parse(line));
+        } catch {}
+      }
+      tail = tail.slice(start);
+    } while (bytesRead > 0);
+    const line = tail.trim();
+    if (line) {
+      try {
+        events.push(JSON.parse(line));
+      } catch {}
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return (TRANSCRIBE[provider]?.(events) ?? []).slice(-limit);
+}
+
 /**
  * Turns a provider stream into a readable transcript for people.
  *
@@ -941,9 +993,9 @@ export function headlessDetail(stateDir, workerId, options = {}) {
       resumed: Boolean(turn.session),
       prompt: clip(read(path.join(turnDir, "prompt.txt")), 6000),
       exit,
-      transcript: headlessTranscript(
+      transcript: headlessTranscriptFile(
         turn.runner ? "codex" : status.provider,
-        read(path.join(turnDir, "stream.jsonl")),
+        path.join(turnDir, "stream.jsonl"),
       ),
       stderrTail: stderr.length > 2000 ? stderr.slice(-2000) : stderr,
     };

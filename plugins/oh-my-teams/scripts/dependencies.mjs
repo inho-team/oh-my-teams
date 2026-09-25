@@ -356,10 +356,16 @@ export function isolatedHealthEnvironment(home, codexHome) {
  * @param {{command: string, args: string[]}} launch - What to spawn, from `openCodexLaunch`.
  * @param {string} staging - Staging directory where npm packages are installed.
  * @param {string} healthBase - Base directory for health check temporary homes.
+ * @param {Function} [spawnImpl] - Spawn implementation, replaced by tests that must not start a runtime.
  * @returns {Promise<void>} Resolves once the runtime answered its health endpoint and was stopped.
  * @throws {Error} `runtime-health-check-failed` when it never answered.
  */
-export async function healthCheck(launch, staging, healthBase) {
+export async function healthCheck(
+  launch,
+  staging,
+  healthBase,
+  spawnImpl = spawn,
+) {
   const port = await freePort();
   const healthDir = path.join(
     healthBase,
@@ -380,7 +386,7 @@ export async function healthCheck(launch, staging, healthBase) {
       claudeCode: { enabled: false, systemEnv: false, injectAgents: false },
     }),
   );
-  const child = spawn(
+  const child = spawnImpl(
     launch.command,
     [...launch.args, "start", "--port", String(port)],
     {
@@ -398,7 +404,9 @@ export async function healthCheck(launch, staging, healthBase) {
     const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/healthz`);
+        const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+          signal: AbortSignal.timeout(1000),
+        });
         if (response.ok) return;
       } catch {}
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -410,10 +418,16 @@ export async function healthCheck(launch, staging, healthBase) {
       else child.kill("SIGTERM");
     }
     if (child.exitCode === null && !exited) {
-      await Promise.race([
-        new Promise((resolve) => child.once("close", resolve)),
-        new Promise((resolve) => setTimeout(resolve, 3000)),
-      ]);
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 3000);
+        child.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+    if (child.exitCode === null && !exited) {
+      child.kill("SIGKILL");
     }
     fs.rmSync(healthDir, { recursive: true, force: true });
   }
@@ -479,7 +493,7 @@ export async function installRuntime(root, options = {}) {
           timeoutMs: 30000,
         });
         assert(bunVersion.code === 0, "runtime-bun-unavailable");
-        await healthCheck(launch, staging, paths.base);
+        await healthCheck(launch, staging, paths.base, options._spawnImpl);
         writeJSON(path.join(staging, "manifest.json"), {
           fingerprint: paths.fingerprint,
           version: paths.version,

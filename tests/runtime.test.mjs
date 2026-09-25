@@ -1,4 +1,7 @@
 /** End-to-end and unit regression coverage for the oh my teams runtime. */
+import { after } from "node:test";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -100,16 +103,10 @@ function fixture(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+
 async function repo(t) {
   const dir = fixture(t);
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Orca Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    const result = await run(["git", ...args], { cwd: dir });
-    assert.equal(result.code, 0, result.stderr);
-  }
+  fs.cpSync(await getTemplateRepo(), dir, { recursive: true });
   fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   fs.writeFileSync(path.join(dir, "value.txt"), "wrong\n");
   fs.writeFileSync(
@@ -1047,6 +1044,52 @@ test("presets pin one slot per shared-pool role and keep each fallback chain to 
   const opusFirst = previewPreset(org, "opus-first").organization.roles;
   assert.deepEqual(opusFirst.senior.fallbacks, []);
   assert.deepEqual(opusFirst.junior.fallbacks, []);
+});
+test("presets lacking provider metadata throw when generating model or tier changes", async () => {
+  const org = clone();
+  const { PRESETS } =
+    await import("../plugins/oh-my-teams/scripts/presets.mjs");
+
+  for (const [name, preset] of Object.entries(PRESETS)) {
+    if (preset.kind === "models" || preset.kind === "tiers") {
+      assert.ok(preset.provider, `Preset ${name} missing provider metadata`);
+    }
+  }
+
+  const original = PRESETS["opus-first"].provider;
+  PRESETS["opus-first"].provider = undefined;
+  assert.throws(
+    () => previewPreset(org, "opus-first"),
+    /Preset missing provider metadata/,
+  );
+  PRESETS["opus-first"].provider = original;
+});
+test("presets match provider as well as model to prevent Claude Code profiles from masking Agy profiles", () => {
+  const org = clone();
+  org.profiles["claude-opus-spoof"] = {
+    provider: "claude",
+    command: ["claude", "--profile", "test"],
+    model: "claude-opus-4-6-thinking",
+    account: "test",
+    subscription: "test",
+    concurrency: 1,
+  };
+  org.profiles["claude-sonnet-spoof"] = {
+    provider: "claude",
+    command: ["claude", "--profile", "test"],
+    model: "claude-sonnet-4-6",
+    account: "test",
+    subscription: "test",
+    concurrency: 1,
+  };
+
+  const opusFirst = previewPreset(org, "opus-first").organization;
+  assert.equal(opusFirst.roles.senior.profile, "agy-opus");
+  assert.equal(opusFirst.roles.junior.profile, "agy-opus");
+
+  const balanced = previewPreset(org, "balanced").organization;
+  assert.equal(balanced.roles.senior.profile, "agy-opus");
+  assert.equal(balanced.roles.junior.profile, "agy-sonnet");
 });
 test("provider print timeout expires before the runtime kills the call", () => {
   for (const timeoutMs of [60000, 300000, 600000]) {
@@ -2489,4 +2532,118 @@ test("director skill exists, has authority-responsibility-limits section, and PM
       `${role} spec is missing the no-direct-user-contact sentence`,
     );
   }
+});
+
+test("show command formats provider and model as human readable display string", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-show-"));
+  const orgFile = path.join(dir, "org.json");
+  const org = clone();
+  const pmProfileId = org.roles.pm.profile;
+  org.profiles[pmProfileId].provider = "claude";
+  org.profiles[pmProfileId].model = "claude-3-5-sonnet-20240620";
+  fs.writeFileSync(orgFile, JSON.stringify(org, null, 2));
+
+  const shown = await run([
+    process.execPath,
+    path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs"),
+    "show",
+    "--org",
+    orgFile,
+  ]);
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.match(shown.stdout, /Claude Code claude-3-5-sonnet-20240620/);
+
+  const shownJson = await run([
+    process.execPath,
+    path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs"),
+    "show",
+    "--org",
+    orgFile,
+    "--json",
+  ]);
+  assert.equal(shownJson.code, 0, shownJson.stderr);
+  const output = JSON.parse(shownJson.stdout);
+  assert.equal(
+    output.organization.profiles[pmProfileId].displayModel,
+    "Claude Code claude-3-5-sonnet-20240620",
+  );
+});
+
+test("director-watch command includes pmModelDisplay", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-watch-"));
+  const orgFile = path.join(dir, "org.json");
+  const org = clone();
+  const pmProfileId = org.roles.pm.profile;
+  org.profiles[pmProfileId].provider = "agy";
+  org.profiles[pmProfileId].model = "claude-sonnet-4-6";
+  fs.writeFileSync(orgFile, JSON.stringify(org, null, 2));
+
+  const claim = {
+    schemaVersion: 1,
+    organizationRevision: 1,
+    goal: "watch test",
+    brief: "x",
+    createdAt: new Date().toISOString(),
+    runId: null,
+    pm: {
+      worktreeId: "pm-wt",
+      path: "x",
+      stateDir: "x",
+      provider: "agy",
+      model: "claude-sonnet-4-6",
+    },
+  };
+  const regDir = path.join(dir, "kickoffs");
+  fs.mkdirSync(regDir, { recursive: true });
+  fs.writeFileSync(path.join(regDir, "pm-wt.json"), JSON.stringify(claim));
+
+  const shown = await run([
+    process.execPath,
+    path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs"),
+    "director-watch",
+    "--org",
+    orgFile,
+  ]);
+  assert.equal(shown.code, 0, shown.stderr);
+  const output = JSON.parse(shown.stdout);
+  assert.equal(output.kickoffs[0].pmModelDisplay, "Agy claude-sonnet-4-6");
+});
+
+test("kickoff-show command includes pm.modelDisplay", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-kickoff-"));
+  const orgFile = path.join(dir, "org.json");
+  const claim = {
+    schemaVersion: 1,
+    organizationRevision: 1,
+    goal: "kickoff test",
+    brief: "x",
+    createdAt: new Date().toISOString(),
+    runId: null,
+    pm: {
+      worktreeId: "pm-wt",
+      path: "x",
+      stateDir: "x",
+      provider: "claude",
+      model: "claude-3-5-sonnet-20240620",
+    },
+  };
+  const regDir = path.join(dir, "kickoffs");
+  fs.mkdirSync(regDir, { recursive: true });
+  fs.writeFileSync(path.join(regDir, "pm-wt.json"), JSON.stringify(claim));
+
+  const shown = await run([
+    process.execPath,
+    path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs"),
+    "kickoff-show",
+    "--org",
+    orgFile,
+    "--worktree",
+    "pm-wt",
+  ]);
+  assert.equal(shown.code, 0, shown.stderr);
+  const output = JSON.parse(shown.stdout);
+  assert.equal(
+    output.kickoffs[0].pm.modelDisplay,
+    "Claude Code claude-3-5-sonnet-20240620",
+  );
 });

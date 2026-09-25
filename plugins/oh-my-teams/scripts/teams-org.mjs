@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import {
   assert,
   chart,
+  displayModel,
+  definedRoles,
   readJSON,
+  ROOT_ROLE,
   saveOrg,
   supervisionPolicy,
   validateOrg,
@@ -116,7 +119,11 @@ import {
   registerKickoff,
   releaseKickoff,
 } from "./kickoff-registry.mjs";
-import { readLaunches, recordLaunch } from "./usage-ledger.mjs";
+import {
+  readLaunches,
+  recordLaunch,
+  lazyLaunchesBackward,
+} from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
 import {
   defaultRuntimeRoot,
@@ -686,7 +693,14 @@ function applyPreset(args) {
 function showOrganization(args) {
   const org = validateOrg(readJSON(args.org));
   const status = organizationStatus(org, args.state);
-  if (args.json) return { organization: org, ...status };
+
+  if (args.json) {
+    const orgOutput = structuredClone(org);
+    for (const profile of Object.values(orgOutput.profiles)) {
+      profile.displayModel = displayModel(profile.provider, profile.model);
+    }
+    return { organization: orgOutput, ...status };
+  }
   console.log(chart(org));
   if (args.state) console.log(JSON.stringify(status, null, 2));
   return undefined;
@@ -729,6 +743,40 @@ async function compatibilityPrepare(args) {
       "Compatibility prepare completed. New integrations should use " +
       "prepare-input, current Orca discovery, then attach-workspace.",
   };
+}
+
+async function resolveAndCheckDrift(orgFile, org, launch) {
+  const requested =
+    launch.modelRequested !== undefined ? launch.modelRequested : launch.model;
+  if (requested !== null) {
+    return {
+      modelResolved: requested,
+      warnings: [],
+    };
+  }
+
+  const projectDir = ownerProject(orgFile);
+  const defaults = await resolveHostDefaults({
+    project: projectDir ? path.resolve(projectDir) : undefined,
+  });
+  const currentResolved = defaults[launch.provider]?.model ?? null;
+  if (!currentResolved) return { modelResolved: null, warnings: [] };
+
+  const prev = lazyLaunchesBackward(orgFile).findLast(
+    (l) => l.profile === launch.profile && typeof l.modelResolved === "string",
+  );
+  const baseline = prev
+    ? prev.modelResolved
+    : org.profiles[launch.profile]?.modelResolvedAtFormation;
+
+  const warnings = [];
+  if (baseline && baseline !== currentResolved) {
+    warnings.push(
+      `해석된 모델이 ${baseline}에서 ${currentResolved}(으)로 바뀌었습니다. 설정 변경의 영향일 수 있습니다.`,
+    );
+  }
+
+  return { modelResolved: currentResolved, warnings };
 }
 
 // The receipt is returned whether or not the start reached `ready`, because a
@@ -810,8 +858,10 @@ async function startSupervisedWorker(args) {
         orcaVersion: env.orcaVersion,
         cliVersion: env.cliVersion,
       });
-    } catch {
-      // 예측 실패 시 matrixPrediction undefined (기존 동작 유지)
+    } catch (error) {
+      process.stderr.write(
+        `Warning: Failed to predict launch path: ${error.message}\n`,
+      );
     }
   }
   try {
@@ -841,12 +891,14 @@ async function startSupervisedWorker(args) {
         title,
       })),
     );
+    const drift = await resolveAndCheckDrift(args.org, org, launch);
     const ledger = recordLaunchSafely(args.org, launchedAt, {
       via: "worker-start",
       role: launch.role,
       profile: launch.profile,
       provider: launch.provider,
       modelRequested: launch.model,
+      modelResolved: drift.modelResolved,
       effortRequested: launch.effort,
       worktreePath:
         selectedWorktreePath(args.worktree ?? "current", args.repo) ??
@@ -866,6 +918,7 @@ async function startSupervisedWorker(args) {
       title,
       titlePinned,
       binding: { ...binding, roleHeader: Boolean(args.spec) },
+      warnings: drift.warnings.length > 0 ? drift.warnings : undefined,
     };
   } catch (error) {
     if (!error.signal) throw error;
@@ -1207,7 +1260,7 @@ function supervisionWaitTimeout(args) {
   return supervisionPolicy(validateOrg(readJSON(args.org))).progressCheckMs;
 }
 
-function writeDraft(args) {
+async function writeDraft(args) {
   const output = path.resolve(args.output);
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
@@ -1217,6 +1270,24 @@ function writeDraft(args) {
     tiers: args.tiers === undefined ? undefined : Number(args.tiers),
     models: args.models.split(","),
   });
+  const projectDir = path.dirname(output);
+  const defaults = await resolveHostDefaults({ project: projectDir });
+  if (defaults.codex?.error) {
+    process.stderr.write(
+      `Warning: Failed to resolve Codex defaults: ${defaults.codex.error}\n`,
+    );
+  }
+  if (defaults.claude?.error) {
+    process.stderr.write(
+      `Warning: Failed to resolve Claude defaults: ${defaults.claude.error}\n`,
+    );
+  }
+  for (const profile of Object.values(organization.profiles)) {
+    if (profile.model === null) {
+      profile.modelResolvedAtFormation =
+        defaults[profile.provider]?.model ?? null;
+    }
+  }
   writeJSON(output, organization);
   return { output, organization };
 }
@@ -1224,7 +1295,7 @@ function writeDraft(args) {
 async function executeCommand(args) {
   switch (args.command) {
     case "org-draft":
-      return writeDraft(args);
+      return await writeDraft(args);
     case "init":
       return fs.existsSync(args.org)
         ? { created: false, organization: validateOrg(readJSON(args.org)) }
@@ -1242,8 +1313,13 @@ async function executeCommand(args) {
       return { valid: Boolean(validateOrg(readJSON(args.org))) };
     case "kickoff-claim":
       return registerKickoff(args.org, readJSON(args.from));
-    case "kickoff-show":
-      return listKickoffs(args.org, args.worktree);
+    case "kickoff-show": {
+      const result = listKickoffs(args.org, args.worktree);
+      for (const k of result.kickoffs) {
+        k.pm.modelDisplay = displayModel(k.pm.provider, k.pm.model);
+      }
+      return result;
+    }
     case "kickoff-bind":
       return bindKickoffRun(args.org, {
         worktreeId: args.worktree,
@@ -1433,8 +1509,10 @@ async function executeCommand(args) {
             orcaVersion: env.orcaVersion,
             cliVersion: env.cliVersion,
           });
-        } catch {
-          // 예측 실패 시 기존 동작 유지 (matrixPrediction undefined)
+        } catch (error) {
+          process.stderr.write(
+            `Warning: Failed to predict launch path: ${error.message}\n`,
+          );
         }
       }
       return checkTerminalIdle(args.terminal, {
@@ -1533,15 +1611,19 @@ async function executeCommand(args) {
           stateDir: path.resolve(args.state),
           opened,
         });
+      const drift = await resolveAndCheckDrift(args.org, org, command);
+      const warnings = [...(opened.warnings || []), ...drift.warnings];
       return {
         ...opened,
         ...(allowUnverifiedApproval ? { allowUnverifiedApproval } : {}),
+        ...(warnings.length > 0 ? { warnings } : { warnings: undefined }),
         ...recordLaunchSafely(args.org, launchedAt, {
           via: "role-terminal",
           role: command.role,
           profile: command.profile,
           provider: command.provider,
           modelRequested: command.modelRequested,
+          modelResolved: drift.modelResolved,
           effortRequested: command.effortRequested,
           worktreePath: target,
           worktreeSelector: args.worktree,
@@ -1878,8 +1960,24 @@ async function executeCommand(args) {
       });
     case "resource-release":
       return releaseResource(args.org, args.slot);
-    case "director-watch":
-      return directorWatch(args.org, { orcaExecutable: args.orca });
+    case "director-watch": {
+      const watch = await directorWatch(args.org, {
+        orcaExecutable: args.orca,
+      });
+      const { kickoffs } = listKickoffs(args.org);
+      for (const summary of watch.kickoffs) {
+        const entry = kickoffs.find(
+          (k) => k.pm.worktreeId === summary.worktreeId,
+        );
+        if (entry) {
+          summary.pmModelDisplay = displayModel(
+            entry.pm.provider,
+            entry.pm.model,
+          );
+        }
+      }
+      return watch;
+    }
     default:
       throw new Error(`Unknown command: ${args.command}`);
   }

@@ -59,6 +59,11 @@ if (mode === "serve" || mode === "stubborn-descendant") {
   process.on("SIGTERM", () => process.exit(0));
 } else if (mode === "wrong-pid") {
   createServer(health({ status: "ok", port, pid: process.pid + 1 })).listen(port, "127.0.0.1");
+} else if (mode === "unresponsive") {
+  // Accepts the connection and never answers, so a health request without a
+  // timeout would hang until the ready deadline instead of being aborted.
+  createServer().listen(port, "127.0.0.1");
+  process.on("SIGTERM", () => process.exit(0));
 }
 `;
 

@@ -335,6 +335,70 @@ test(
   },
 );
 
+test(
+  "healthCheck clears timer on normal exit and sends SIGKILL if stubborn",
+  posixOnly,
+  async (t) => {
+    const box = healthyRuntime(t);
+
+    // Fake the fetch to return ok instantly
+    const originalFetch = global.fetch;
+    global.fetch = async () => ({ ok: true });
+    t.after(() => {
+      global.fetch = originalFetch;
+    });
+
+    const events = [];
+    let closeCb;
+    const mockChild = {
+      exitCode: null,
+      kill: (signal) => {
+        events.push("kill:" + signal);
+        if (signal === "SIGTERM") {
+          setTimeout(() => {
+            if (mockChild.shouldClose) {
+              mockChild.exitCode = 0;
+              if (closeCb) closeCb();
+            }
+          }, 50);
+        }
+      },
+      once: (event, cb) => {
+        if (event === "close") closeCb = cb;
+      },
+    };
+
+    const spawnImpl = () => mockChild;
+    // healthCheck is called directly rather than through installRuntime,
+    // because this fixture's fake npm always fails and an install would end at
+    // `runtime-npm-install-failed` before any runtime is started.
+    const launch = { command: "ocx", args: [] };
+    const healthBase = path.join(box.root, "health");
+    fs.mkdirSync(healthBase, { recursive: true });
+
+    // Test 1: normal close
+    mockChild.shouldClose = true;
+    mockChild.exitCode = null;
+    events.length = 0;
+    const start1 = Date.now();
+    await healthCheck(launch, box.paths.runtime, healthBase, spawnImpl);
+    assert.deepEqual(events, ["kill:SIGTERM"]);
+    assert.ok(
+      Date.now() - start1 < 3000,
+      "Should close quickly, clearing the 3s timer",
+    );
+
+    // Test 2: stubborn child
+    mockChild.shouldClose = false;
+    mockChild.exitCode = null;
+    events.length = 0;
+    const start2 = Date.now();
+    await healthCheck(launch, box.paths.runtime, healthBase, spawnImpl);
+    assert.deepEqual(events, ["kill:SIGTERM", "kill:SIGKILL"]);
+    assert.ok(Date.now() - start2 >= 3000, "Should wait 3s before SIGKILL");
+  },
+);
+
 // Sets variables for one test; a variable that was unset is deleted again,
 // because assigning undefined to process.env would leave the string "undefined".
 function withEnv(t, values) {

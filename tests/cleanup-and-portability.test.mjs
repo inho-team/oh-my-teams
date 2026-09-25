@@ -1,4 +1,5 @@
 /** Covers the installer wrappers, engine floor, and the prepared-input check. */
+import { after } from "node:test";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -16,6 +17,9 @@ import {
   main,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { prepareInput } from "../plugins/oh-my-teams/scripts/workspace.mjs";
+import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
+
+after(() => cleanupTemplates());
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const organization = readJSON(
@@ -54,13 +58,7 @@ const task = {
 
 async function repo(t) {
   const dir = fixture(t);
-  for (const args of [
-    ["init"],
-    ["config", "user.name", "Test"],
-    ["config", "user.email", "test@example.invalid"],
-  ]) {
-    assert.equal((await run(["git", ...args], { cwd: dir })).code, 0);
-  }
+  fs.cpSync(await getTemplateRepo(), dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "value.txt"), "wrong\n");
   assert.equal((await run(["git", "add", "value.txt"], { cwd: dir })).code, 0);
   assert.equal(

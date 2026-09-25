@@ -12,11 +12,13 @@ import {
 import {
   ledgerFile,
   readLaunches,
+  lazyLaunchesBackward,
   recordLaunch,
 } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import {
   attributeSessions,
   formatUsageTable,
+  summarizeByRole,
   kickoffPlaces,
   usageReport,
 } from "../plugins/oh-my-teams/scripts/usage-report.mjs";
@@ -163,6 +165,105 @@ test("a launch is tied to its kickoff by state, by PM worktree, or through an ea
     () => recordLaunch(fixture.orgFile, { via: "typed-by-hand", role: "pl" }),
     /Launch via must be one of/,
   );
+});
+
+test("F-04: recordLaunch reads only until found, keeping cost low regardless of ledger size", (t) => {
+  const dir = tempDir(t, "f04-recent-");
+  const orgFile = path.join(dir, "org.json");
+  // Provide a dummy kickoff registry so listKickoffs doesn't crash
+  fs.writeFileSync(orgFile, JSON.stringify({ revision: 2 }));
+  const file = ledgerFile(orgFile);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  const dummyLine =
+    JSON.stringify({
+      schemaVersion: 1,
+      at: new Date().toISOString(),
+      via: "role-terminal",
+      role: "senior",
+      kickoffPmWorktreeId: "repo::dummy",
+    }) + "\n";
+
+  // Write a large ledger (e.g., 50000 lines)
+  const fd = fs.openSync(file, "w");
+  for (let i = 0; i < 50000; i++) {
+    fs.writeSync(fd, dummyLine);
+  }
+
+  // Write a target line near the start (e.g. line 100)
+  const targetCwd = path.join(dir, "target-cwd");
+  const targetLine =
+    JSON.stringify({
+      schemaVersion: 1,
+      at: new Date().toISOString(),
+      via: "role-terminal",
+      role: "junior",
+      kickoffPmWorktreeId: "repo::target",
+      worktreePath: targetCwd,
+    }) + "\n";
+  fs.writeSync(fd, targetLine);
+
+  for (let i = 0; i < 1500; i++) {
+    fs.writeSync(fd, dummyLine);
+  }
+  fs.closeSync(fd);
+
+  // Register the kickoff so resolveLaunchKickoff can find it
+  const kickoffDir = path.join(path.dirname(orgFile), "kickoffs");
+  fs.mkdirSync(kickoffDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(kickoffDir, "repo-target.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      goal: "dummy",
+      organizationRevision: 2,
+      brief: "dummy.md",
+      delivery: { mode: "none" },
+      pm: {
+        worktreeId: "repo::target",
+        path: targetCwd,
+        stateDir: path.join(targetCwd, ".omt"),
+      },
+      createdAt: new Date().toISOString(),
+      runId: null,
+    }),
+  );
+
+  let bytesRead = 0;
+  const origReadSync = fs.readSync;
+  fs.readSync = (fd2, buffer, offset, length, position) => {
+    const read = origReadSync(fd2, buffer, offset, length, position);
+    bytesRead += read;
+    return read;
+  };
+
+  const origReadFileSync = fs.readFileSync;
+  let usedReadFileSync = false;
+  fs.readFileSync = (f, ...rest) => {
+    if (f === file) usedReadFileSync = true;
+    return origReadFileSync(f, ...rest);
+  };
+
+  try {
+    const launch = recordLaunch(orgFile, {
+      via: "role-terminal",
+      role: "junior",
+      callerCwd: path.join(targetCwd, "sub"),
+    });
+    assert.equal(launch.line.kickoffPmWorktreeId, "repo::target");
+    assert.equal(
+      usedReadFileSync,
+      false,
+      "Should not read entire ledger with readFileSync",
+    );
+    assert.ok(
+      bytesRead < 500 * 1024,
+      "Should read far less than the full file size",
+    );
+  } finally {
+    fs.readSync = origReadSync;
+    fs.readFileSync = origReadFileSync;
+  }
 });
 
 test("sessions go to the role launched in their place, and unclear ones are not guessed", () => {
@@ -604,7 +705,11 @@ test("usage-report runs from the CLI with explicit homes and writes a snapshot",
   ]);
   table.restore();
   const printed = table.lines.join("\n");
-  assert.match(printed, /pl +\| gpt-5\.6-sol -> gpt-5\.6-sol/);
+  assert.match(
+    printed,
+    /pl +\| OpenCodex gpt-5\.6-sol -> OpenCodex gpt-5\.6-sol/,
+  );
+  assert.match(printed, /junior +\| OpenCodex gpt-5\.6-sol -> -/);
   const [written] = fs
     .readdirSync(path.join(path.dirname(fixture.orgFile), "history"))
     .filter((name) => name.startsWith("usage-"));
@@ -682,5 +787,97 @@ test("a launch whose ledger cannot be written still starts, and says so", async 
       codexHome: fixture.homes.codexHome,
     }).map((worker) => worker.worker),
     ["junior-1", "junior-2"],
+  );
+});
+
+test("summarizeByRole includes both models if provider differs but model is the same", () => {
+  const records = [
+    {
+      role: "senior",
+      provider: "claude",
+      modelRequested: "sonnet",
+      modelReported: [],
+      source: "x",
+      measured: true,
+      turns: 1,
+      calls: 1,
+      promptTokens: 10,
+      outputTokens: 10,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      timeToFirstToken: 0,
+    },
+    {
+      role: "senior",
+      provider: "agy",
+      modelRequested: "sonnet",
+      modelReported: [],
+      source: "x",
+      measured: true,
+      turns: 1,
+      calls: 1,
+      promptTokens: 10,
+      outputTokens: 10,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      timeToFirstToken: 0,
+    },
+  ];
+  const byRole = summarizeByRole(records);
+  assert.equal(byRole.senior.models.requested.length, 1);
+  assert.equal(byRole.senior.modelsDisplay.requested.length, 2);
+  assert.equal(
+    byRole.senior.modelsDisplay.requested.includes("Claude Code sonnet"),
+    true,
+  );
+  assert.equal(
+    byRole.senior.modelsDisplay.requested.includes("Agy sonnet"),
+    true,
+  );
+});
+
+test("formatUsageTable falls back to models and modelRequested/modelReported for legacy snapshots", () => {
+  const legacyReport = {
+    kickoffs: [
+      {
+        kickoff: { worktreeId: "test-wt", status: "active" },
+        window: { from: "a", to: "b" },
+        coverage: { measuredSessions: 1, totalSessions: 1, note: "ok" },
+        byRole: {
+          pm: {
+            models: { requested: ["claude"], reported: ["claude"] },
+            measuredSessions: 1,
+            partialSessions: 0,
+            sessions: 1,
+            turns: 1,
+            calls: 1,
+            steps: 1,
+            promptTokens: 1,
+            cachedInputTokens: 0,
+            cacheCreationTokens: 0,
+            outputTokens: 1,
+          },
+        },
+        share: { pm: 1 },
+        places: [],
+        sources: {},
+        mismatches: [
+          {
+            role: "pm",
+            modelRequested: "claude",
+            modelReported: ["gpt"],
+            source: "x",
+          },
+        ],
+        unattributed: [],
+      },
+    ],
+    written: [],
+  };
+  const table = formatUsageTable(legacyReport);
+  assert.match(table, /claude -> claude/);
+  assert.match(
+    table,
+    /model mismatch: pm requested claude, reported gpt \(x\)/,
   );
 });

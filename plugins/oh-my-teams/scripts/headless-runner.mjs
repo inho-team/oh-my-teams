@@ -13,6 +13,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { StringDecoder } from "node:string_decoder";
 import { readJSON, resolveCommand, writeJSON } from "./core.mjs";
 import { defaultRuntimeRoot, doctor, runtimePaths } from "./dependencies.mjs";
 import {
@@ -61,16 +62,58 @@ export function buildLifecycle({
 }) {
   let events = [];
   try {
-    events = fs
-      .readFileSync(path.join(turnDir, "stream.jsonl"), "utf8")
-      .split("\n")
-      .flatMap((line) => {
-        try {
-          return [JSON.parse(line)];
-        } catch {
-          return [];
+    const CHUNK = 65536;
+    let fd;
+    try {
+      fd = fs.openSync(path.join(turnDir, "stream.jsonl"), "r");
+    } catch {
+      fd = null;
+    }
+    if (fd !== null) {
+      const buf = Buffer.allocUnsafe(CHUNK);
+      // We only need to check if turn.started and turn.completed exist.
+      // We don't need a StringDecoder if we just search for the strings.
+      // But they might cross boundaries. Since we only check their presence,
+      // and they are small JSON events, we can parse them just to be safe.
+
+      const decoder = new StringDecoder("utf8");
+      let tail = "";
+      let bytesRead;
+      do {
+        bytesRead = fs.readSync(fd, buf, 0, CHUNK, null);
+        tail += decoder.write(buf.subarray(0, bytesRead));
+        let start = 0;
+        let pos;
+        while ((pos = tail.indexOf("\n", start)) !== -1) {
+          const line = tail.slice(start, pos).trim();
+          start = pos + 1;
+          if (line) {
+            try {
+              const event = JSON.parse(line);
+              if (
+                event.type === "turn.started" ||
+                event.type === "turn.completed"
+              ) {
+                events.push(event);
+              }
+            } catch {}
+          }
         }
-      });
+        tail = tail.slice(start);
+      } while (bytesRead > 0);
+      if (tail.trim()) {
+        try {
+          const event = JSON.parse(tail.trim());
+          if (
+            event.type === "turn.started" ||
+            event.type === "turn.completed"
+          ) {
+            events.push(event);
+          }
+        } catch {}
+      }
+      fs.closeSync(fd);
+    }
   } catch {}
   let turn = {};
   try {

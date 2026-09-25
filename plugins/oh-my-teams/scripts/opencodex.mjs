@@ -931,7 +931,9 @@ export async function acquireOpenCodexLease(accountHome, options = {}) {
 
 // The health body when it names this port, otherwise null.
 async function healthProvesPort(port) {
-  const response = await fetch(`http://127.0.0.1:${port}/healthz`);
+  const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+    signal: AbortSignal.timeout(1000),
+  });
   if (!response.ok) return null;
   const body = await response.json().catch(() => null);
   return body?.status === "ok" && Number(body?.port) === port ? body : null;
@@ -1198,9 +1200,10 @@ export function openCodexProvider(provider, accountLogLabel) {
  * Reads every page of request history using the endpoint's opaque cursor.
  * @param {object} input - Loopback proxy and account directory.
  * @param {typeof fetch} fetcher - Injectable loopback fetch implementation.
+ * @param {Set<string>} [boundary] - Optional boundary to stop paging early.
  * @returns {Promise<object[]>} Complete history, newest first.
  */
-async function readOpenCodexHistory(input, fetcher) {
+async function readOpenCodexHistory(input, fetcher, boundary = null) {
   const tokenFile = path.join(input.accountHome, "admin-api-token");
   assert(fs.existsSync(tokenFile), "opencodex-binding-unverified");
   const token = fs.readFileSync(tokenFile, "utf8").trim();
@@ -1219,6 +1222,14 @@ async function readOpenCodexHistory(input, fetcher) {
     const page = await response.json();
     assert(Array.isArray(page.entries), "opencodex-binding-unverified");
     entries.push(...page.entries);
+
+    if (
+      boundary &&
+      page.entries.some((entry) => boundary.has(entry?.requestId))
+    ) {
+      break;
+    }
+
     cursor =
       typeof page.nextCursor === "string" && page.nextCursor
         ? page.nextCursor
@@ -1287,8 +1298,8 @@ function attemptsProveFixedAccount(entry, expectedProvider, input, model) {
 }
 
 async function ownedHistoryRows(input, fetcher) {
-  const entries = await readOpenCodexHistory(input, fetcher);
   const before = input.historyBoundary ?? new Set();
+  const entries = await readOpenCodexHistory(input, fetcher, before);
   return entries.filter((entry) => !before.has(entry?.requestId));
 }
 

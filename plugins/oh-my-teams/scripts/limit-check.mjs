@@ -251,32 +251,44 @@ export function findProviderSession(
 
 // Each provider's last turn is judged from the record that ended it; a later
 // input or a turn still running means the limit, if any, is already behind.
-function lastTurn(provider, records) {
-  if (provider === "codex") {
-    const last = records.findLast((record) =>
-      ["task_started", "task_complete", "turn_aborted"].includes(
-        record.payload?.type,
-      ),
-    );
-    if (!last) return { ended: false, limit: null };
-    return {
-      ended: last.payload.type !== "task_started",
-      limit: classifyLimitRecord(provider, last),
-    };
+function lastTurn(provider, lines) {
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (!lines[i].trim()) continue;
+    let record;
+    try {
+      record = JSON.parse(lines[i]);
+    } catch {
+      continue;
+    }
+    if (provider === "codex") {
+      if (
+        ["task_started", "task_complete", "turn_aborted"].includes(
+          record.payload?.type,
+        )
+      ) {
+        return {
+          ended: record.payload.type !== "task_started",
+          limit: classifyLimitRecord(provider, record),
+        };
+      }
+      continue;
+    }
+    if (provider === "claude") {
+      if (["user", "assistant"].includes(record.type)) {
+        return { ended: true, limit: classifyLimitRecord(provider, record) };
+      }
+      continue;
+    }
+    if (provider === "agy") {
+      const limit = classifyLimitRecord(provider, record);
+      const ended =
+        limit?.kind === "usage-limit" && limit.attempt >= AGY_FINAL_ATTEMPT;
+      return { ended, limit };
+    }
   }
-  if (provider === "claude") {
-    const last = records.findLast((record) =>
-      ["user", "assistant"].includes(record.type),
-    );
-    return { ended: true, limit: classifyLimitRecord(provider, last) };
-  }
-  const last = records.at(-1);
-  const limit = classifyLimitRecord(provider, last);
-  // A capacity error that Agy recovered from is followed by a model response;
-  // one still at the end of the log is the provider's retry in progress.
-  const ended =
-    limit?.kind === "usage-limit" && limit.attempt >= AGY_FINAL_ATTEMPT;
-  return { ended, limit };
+  if (provider === "codex") return { ended: false, limit: null };
+  if (provider === "claude") return { ended: true, limit: null };
+  return { ended: false, limit: null };
 }
 
 function verdictOf(limit, ended) {
@@ -295,7 +307,7 @@ function verdictOf(limit, ended) {
  * `none` otherwise.
  */
 export function readSessionLimit(provider, file) {
-  const { ended, limit } = lastTurn(provider, parseLines(readTail(file)));
+  const { ended, limit } = lastTurn(provider, readTail(file));
   return { verdict: verdictOf(limit, ended), limit };
 }
 

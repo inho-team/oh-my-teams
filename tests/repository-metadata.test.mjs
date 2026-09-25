@@ -180,3 +180,43 @@ test("the legacy note points at paths that exist", () => {
     );
   }
 });
+
+test("the version policy does not hardcode a specific major version", () => {
+  const agents = fs.readFileSync(path.join(root, "AGENTS.md"), "utf8");
+  const section = agents.match(/# 버전 정책\r?\n\r?\n([^#]+)/);
+  assert.ok(section, "AGENTS.md must have a version policy section");
+  assert.ok(
+    !/\d+\.x\.x/.test(section[1]),
+    "the version policy should not specify a major version like 1.x.x",
+  );
+});
+
+test("examples are parseable and workflow role conforms to schema", () => {
+  const schemaDir = path.join(root, "plugins/oh-my-teams/schemas");
+  const exampleDir = path.join(root, "plugins/oh-my-teams/examples");
+
+  for (const name of fs.readdirSync(exampleDir)) {
+    if (!name.endsWith(".json")) continue;
+    assert.doesNotThrow(() => {
+      JSON.parse(fs.readFileSync(path.join(exampleDir, name), "utf8"));
+    }, `${name} is not valid JSON`);
+  }
+
+  // Custom manual checks since ajv cannot be added
+  // Workflow schema check:
+  const workflowSchema = JSON.parse(
+    fs.readFileSync(path.join(schemaDir, "workflow.schema.json"), "utf8"),
+  );
+  const workflowExample = JSON.parse(
+    fs.readFileSync(path.join(exampleDir, "workflow.json"), "utf8"),
+  );
+
+  const allowedRoles =
+    workflowSchema.properties.tasks.items.properties.role.enum;
+  for (const task of workflowExample.tasks) {
+    assert.ok(
+      allowedRoles.includes(task.role),
+      `workflow.json uses role '${task.role}' which is not in enum [${allowedRoles.join(", ")}]`,
+    );
+  }
+});

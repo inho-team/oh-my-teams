@@ -1184,6 +1184,25 @@ export function saveOrg(file, org, { update = false, expectedRevision } = {}) {
 }
 
 /**
+ * Formats a provider and model for display.
+ *
+ * @param {string|null|undefined} provider - Provider name.
+ * @param {string|null|undefined} model - Model name, or null/undefined for host-default.
+ * @returns {string} The formatted string.
+ */
+export function displayModel(provider, model) {
+  const providerNames = {
+    claude: "Claude Code",
+    agy: "Agy",
+    codex: "OpenCodex",
+  };
+  const p =
+    providerNames[provider] || (provider ? String(provider) : "Unknown");
+  const m = model ? String(model) : "host-default";
+  return `${p} ${m}`;
+}
+
+/**
  * Renders a deterministic text tree for an organization configuration.
  *
  * @param {object} org - Valid organization document.
@@ -1200,7 +1219,7 @@ export function chart(org) {
     lines.push(
       `${"  ".repeat(depth)}${role.toUpperCase()}: ${binding.profile}` +
         ` | ${profile.subscription}` +
-        ` | ${profile.provider}/${profile.model ?? "host-default"}` +
+        ` | ${displayModel(profile.provider, profile.model)}` +
         ` | effort=${profile.effort ?? "provider-default"}` +
         ` | slots=${binding.concurrency}`,
     );
@@ -1212,7 +1231,8 @@ export function chart(org) {
   visit(ROOT_ROLE, 0);
   for (const [role, profiles] of Object.entries(org.advisors ?? {})) {
     const models = profiles.map(
-      (id) => `${id} (${org.profiles[id].model ?? "host-default"})`,
+      (id) =>
+        `${id} (${displayModel(org.profiles[id].provider, org.profiles[id].model)})`,
     );
     lines.push(`ADVISOR for ${role.toUpperCase()}: ${models.join(", ")}`);
   }
