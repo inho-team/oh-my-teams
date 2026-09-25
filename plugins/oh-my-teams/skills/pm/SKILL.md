@@ -15,7 +15,7 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 
 - 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 이사에게 결정을 요청한다.
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
-- `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-handoff`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다.
+- `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-handoff`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다. attempt의 호출 한도를 늘려야 하면 `workflow-allowance`를, 검토 없이 정산된 task를 수동으로 되돌려야 하면 `workflow-reopen`을, 이미 굳힌 통합 task에 검사를 더해야 하면 `workflow-integration-checks`를 쓴다. 세 명령 모두 승인자(`approvedBy`)와 사유(`reason`)를 요구하며 근거를 이사에게 보고한다.
 - 이번 실행의 PL·Senior·Junior를 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. Agy 터미널이고 이사가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, worker를 기다릴 때에는 heartbeat를 걸러 주는 `supervision-wait`를 쓰고, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
@@ -118,7 +118,7 @@ node <runtime> workflow-depth --id <workflow> --state <pm-state> --revision <rea
 
 task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../examples/acceptance.json) 형식으로 원래 목표의 모든 기준을 확인하고 `accept`를 기록한다. PM 수용은 구현자의 완료 주장이나 Orca accepted settlement와 다르다. 기존 사용자 위임은 재사용하지만 PR·머지·배포·외부 발송 권한을 acceptance 기록에서 새로 만들지 않는다.
 
-다중 작업은 [`../../examples/workflow.json`](../../examples/workflow.json)처럼 workflow 전체 budget과 동시 실행·review 대기 한도를 먼저 정한다. **task가 둘 이상이면 같은 요청에 `integrationTask`를 반드시 포함한다.** 통합은 자동으로 필수가 되는데 생성 뒤에는 추가할 수 없어, 빠뜨리면 모든 task를 수용해도 `integration-pending`에서 닫히지 않는다. task가 하나이고 `integrationTask`가 없는 workflow는 통합이 필요 없으므로, 그 task가 `accepted`가 된 뒤 `--repo`·`--report` 없이 `workflow-accept`로 닫는다. 재개 시 running attempt의 실제 실행 상태를 대조하며 상태 불명은 새 worker를 만드는 근거가 아니다.
+다중 작업은 [`../../examples/workflow.json`](../../examples/workflow.json)처럼 workflow 전체 budget과 동시 실행·review 대기 한도를 먼저 정한다. **task가 둘 이상이면 같은 요청에 `integrationTask`를 반드시 포함한다.** 통합은 자동으로 필수가 되는데 생성 뒤에는 추가할 수 없어, 빠뜨리면 모든 task를 수용해도 `integration-pending`에서 닫히지 않는다. task가 하나이고 `integrationTask`가 없는 workflow는 통합이 필요 없으므로, 그 task가 `accepted`가 된 뒤 `--repo`·`--report` 없이 `workflow-accept`로 닫는다. 재개 시 running attempt의 실제 실행 상태를 대조하며 상태 불명은 새 worker를 만드는 근거가 아니다. 굳힌 뒤에 검사를 더 넣어야 함을 뒤늦게 알게 되면 통합을 새로 만들지 않고 아직 수용 전인 통합 task에 `workflow-integration-checks`로 검사만 덧붙인다. 기존 검사의 순서와 `checkIndexes`는 그대로 유지되며, 이미 `accepted`된 통합에는 적용되지 않는다.
 
 필수 검토가 `changes-requested`나 `inconclusive`로 끝나거나 열린 finding을 남기면, 그것은 실패가 아니므로 `workflow-retry`가 아니라 검토 반려 루프로 처리한다.
 
@@ -132,6 +132,13 @@ node <runtime> workflow-rework --id <workflowId> --state <pm-state> --revision <
 ```
 
 workflow 밖에서 수정을 진행하고 로그 파일에만 경위를 남기지 않는다. 그렇게 하면 gate가 수용되어도 task는 `submitted`에 머문다.
+
+검토 반려가 아니라 검토 요구 없이 정산된 task(`submitted` 또는 `reviewed`)를 PM이 수동으로 되돌려야 할 때는 `workflow-rework`가 아니라 `workflow-allowance`나 `workflow-reopen`을 쓴다. `workflow-rework`는 반려한 검토가 있다는 전제로 같은 attempt를 이어가지만, 수동 override에는 그 전제가 없으므로 `workflow-reopen`은 `workflow-retry`처럼 새 attempt를 열어 전체 예산(시도·호출)을 소비하고, 옛 실행에 달린 리뷰는 새 `implementationExecutionId`와 맞지 않아 자연스럽게 재검토를 요구하게 만든다. `accepted` task나 실행 중인 task는 거부된다. 같은 attempt 안에서 호출 한도만 부족하면 새 attempt를 열지 않고 `workflow-allowance`로 그 한도만 늘린다.
+
+```text
+node <runtime> workflow-reopen --id <workflowId> --state <pm-state> --revision <n> --reopen <reopen.json>
+node <runtime> workflow-allowance --id <workflowId> --state <pm-state> --revision <n> --allowance <allowance.json>
+```
 
 실패는 `failure-classify` 결과의 next owner/action으로 보낸다. 분류는 report의 `modelProof`, `failureClass`, `grounding.grounded`, 종료 코드로 결정되므로 이 신호를 failure 파일에 그대로 옮긴다. 실행 기반이 시작을 거부한 경우에는 그 코드를 해석하지 말고 `runtime`과 `code`에 원문 그대로 적는다(`"runtime": "orca", "code": "agent_unconfigured"`). 번역은 `failure-classify`가 수행한다. 신호가 없으면 `unknown`으로 떨어져 재시도까지 막힌다. 재시도 가능한 실패도 `workflow-retry`에 해결 근거를 기록하고 기존 attempt·전체 예산을 유지한다. `resolvedBy`는 분류가 지정한 `nextOwner`와 같아야 하며, `process-unknown`은 실제 종료를 확인한 뒤 `processExitConfirmed`를 함께 넣어야 재시도할 수 있다. 반복 가능한 교훈은 `lesson-record` 후보로만 저장하며 검증 없이 역할 skill을 바꾸지 않는다. 외부 이슈·알림은 명시적으로 활성화된 incident config 안에서만 받고, 중복·제안 한도·관찰 기간·무진전 중단을 적용한다.
 

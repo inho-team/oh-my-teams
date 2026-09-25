@@ -6,6 +6,12 @@ import { groupUsageByProfile } from "./usage.mjs";
 
 const OUTPUT_TAIL_LENGTH = 2000;
 
+/** Default per-check timeout `verify` uses when the caller names none. */
+export const DEFAULT_VERIFY_TIMEOUT_MS = 300000;
+
+/** Longest per-check timeout `verify` accepts from a caller. */
+export const MAX_VERIFY_TIMEOUT_MS = 1800000;
+
 /**
  * Executes Git against an explicit repository and normalizes text output.
  *
@@ -80,10 +86,19 @@ async function workspaceContents(repo) {
  * @param {string} baseRef - Trusted base ref or commit.
  * @param {string[][]} commands - Acceptance commands as argv arrays.
  * @param {string} environment - Toolchain/fixture environment fingerprint.
- * @returns {Promise<object>} HEAD, base, tree, commands, and runtime fingerprint.
+ * @param {number} [timeoutMs=DEFAULT_VERIFY_TIMEOUT_MS] - Per-check timeout that
+ *   is part of the fingerprint, so evidence run under a different timeout never
+ *   reuses a cache entry it was not actually produced under.
+ * @returns {Promise<object>} HEAD, base, tree, commands, timeout, and runtime fingerprint.
  * @throws {Error} For invalid commands, environment, Git, or unsafe paths.
  */
-export async function fingerprint(repo, baseRef, commands, environment) {
+export async function fingerprint(
+  repo,
+  baseRef,
+  commands,
+  environment,
+  timeoutMs = DEFAULT_VERIFY_TIMEOUT_MS,
+) {
   assert(
     typeof environment === "string" && environment.trim(),
     "Explicit environment fingerprint required " +
@@ -102,6 +117,7 @@ export async function fingerprint(repo, baseRef, commands, environment) {
     tree: hash(await workspaceContents(repo)),
     commands,
     environment,
+    timeoutMs,
     platform: process.platform,
     node: process.version,
   };
@@ -137,14 +153,36 @@ function reusableEvidence(cached, key, commandCount) {
  *
  * @param {string} repo - Git workspace to verify.
  * @param {object} options - Base, commands, environment, store, and timeout.
+ * @param {number} [options.timeoutMs=DEFAULT_VERIFY_TIMEOUT_MS] - Per-check
+ *   timeout in `1..MAX_VERIFY_TIMEOUT_MS` milliseconds. Part of the fingerprint,
+ *   so evidence produced under one timeout never reuses another's cache entry.
  * @returns {Promise<object>} Durable evidence record with logs and fingerprint.
- * @throws {Error} For invalid input, Git failure, or command spawn failure.
+ * @throws {Error} For invalid input, an out-of-range timeout, Git failure, or
+ *   command spawn failure.
  */
 export async function verify(
   repo,
-  { baseRef = "HEAD", commands, environment, store, timeoutMs = 300000 },
+  {
+    baseRef = "HEAD",
+    commands,
+    environment,
+    store,
+    timeoutMs = DEFAULT_VERIFY_TIMEOUT_MS,
+  },
 ) {
-  const before = await fingerprint(repo, baseRef, commands, environment);
+  assert(
+    Number.isInteger(timeoutMs) &&
+      timeoutMs > 0 &&
+      timeoutMs <= MAX_VERIFY_TIMEOUT_MS,
+    `verify timeoutMs must be 1..${MAX_VERIFY_TIMEOUT_MS}`,
+  );
+  const before = await fingerprint(
+    repo,
+    baseRef,
+    commands,
+    environment,
+    timeoutMs,
+  );
   const key = hash(before);
   const evidenceFile = path.join(store, `${key}.json`);
   if (fs.existsSync(evidenceFile)) {
@@ -175,7 +213,13 @@ export async function verify(
     if (result.timedOut || result.overflow) break;
   }
 
-  const after = await fingerprint(repo, baseRef, commands, environment);
+  const after = await fingerprint(
+    repo,
+    baseRef,
+    commands,
+    environment,
+    timeoutMs,
+  );
   const unchanged = hash(after) === key;
   const status =
     unchanged &&
@@ -201,16 +245,30 @@ export async function verify(
  * Revalidates stored evidence against current source and trusted acceptance input.
  *
  * @param {string} repo - Current Git workspace.
- * @param {object} evidence - Previously recorded passing evidence.
+ * @param {object} evidence - Previously recorded evidence.
  * @param {string} baseRef - Current trusted base reference.
  * @param {object} [expected] - Optional trusted task with checks/environment.
+ * @param {object} [options] - Validation strictness.
+ * @param {boolean} [options.requirePassed=true] - When `false`, failed evidence
+ *   is accepted as long as its bindings, hashes, and logs are still intact; a
+ *   rejected review is real evidence even though the checks it ran did not pass.
  * @returns {Promise<true>} `true` only when every binding and log still matches.
- * @throws {Error} When evidence is failed, stale, weakened, or tampered with.
+ * @throws {Error} When evidence is missing/stale/weakened/tampered, or (when
+ *   `requirePassed` is `true`) did not pass.
  */
-export async function validateEvidence(repo, evidence, baseRef, expected) {
+export async function validateEvidence(
+  repo,
+  evidence,
+  baseRef,
+  expected,
+  { requirePassed = true } = {},
+) {
   assert(
-    evidence?.schemaVersion === 1 && evidence.status === "passed",
-    "Evidence did not pass",
+    evidence?.schemaVersion === 1 &&
+      (requirePassed
+        ? evidence.status === "passed"
+        : ["passed", "failed"].includes(evidence.status)),
+    requirePassed ? "Evidence did not pass" : "Evidence missing or malformed",
   );
   if (expected) {
     assert(
@@ -223,7 +281,7 @@ export async function validateEvidence(repo, evidence, baseRef, expected) {
   assert(
     Array.isArray(evidence.checks) &&
       evidence.checks.length > 0 &&
-      evidence.checks.every(checkSucceeded),
+      (!requirePassed || evidence.checks.every(checkSucceeded)),
     "Failed or missing checks",
   );
 
@@ -232,14 +290,16 @@ export async function validateEvidence(repo, evidence, baseRef, expected) {
     baseRef,
     evidence.fingerprint.commands,
     evidence.fingerprint.environment,
+    evidence.fingerprint.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
   );
   assert(
     hash(current) === evidence.key &&
       hash(evidence.fingerprint) === evidence.key,
-    "Stale evidence: head, base, tree, commands or environment changed",
+    "Stale evidence: head, base, tree, commands, environment or timeout changed",
   );
   assert(
-    evidence.checks.length === current.commands.length &&
+    (evidence.checks.length === current.commands.length ||
+      (!requirePassed && evidence.checks.length < current.commands.length)) &&
       evidence.checks.every(
         (check, index) =>
           JSON.stringify(check.argv) ===

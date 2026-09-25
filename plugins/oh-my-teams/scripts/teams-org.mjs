@@ -84,6 +84,9 @@ import {
   handoffTask,
   reworkTask,
   setWorkflowDepth,
+  increaseCallAllowance,
+  reopenTask,
+  extendIntegrationChecks,
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
@@ -244,7 +247,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   advise --org FILE --brief FILE --repo DIR --state DIR --role ROLE
          --kind plan|design|review|unblock [--profile PROFILE]
          (read-only advisor call; spends one slot of policy.adviceBudget)
-  verify --task FILE --repo DIR --state DIR
+  verify --task FILE --repo DIR --state DIR [--timeout-ms N]
+        (per-command timeout; default 300000, max 1800000; recorded in the
+        evidence fingerprint so differing timeouts never share a cache entry)
   merge-check --evidence FILE --task TRUSTED_TASK --repo DIR --base REF
               [--report FILE --state DIR]
   review-record --task FILE --report FILE --review FILE --repo DIR --state DIR
@@ -266,6 +271,17 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   workflow-rework --id ID --state DIR --revision N --rework FILE
                   (attaches the corrected execution after a review asked for changes)
   workflow-depth --id ID --state DIR --revision N --change FILE
+  workflow-allowance --id ID --state DIR --revision N --allowance FILE
+                     (raises the callAllowance of a reserved or running attempt;
+                     the increase must fit inside the workflow's unreserved
+                     call budget)
+  workflow-reopen --id ID --state DIR --revision N --reopen FILE
+                  (manually reopens a submitted or reviewed task by opening a
+                  new attempt; requires approver and reason, spends budget)
+  workflow-integration-checks --id ID --state DIR --revision N --checks FILE
+                              (appends checks to an already-frozen, not yet
+                              accepted integration task without touching the
+                              existing ones)
   handoff-checkpoint --state DIR --workflow-id ID --workflow-task ID --file FILE
                      [--repo DIR]
                      (validates the checkpoint sections and records HEAD of
@@ -439,7 +455,7 @@ export const ALLOWED_OPTIONS = {
   draft: ["org", "task", "repo", "kind"],
   assist: ["org", "task", "repo", "state", "role", "kind", "profile"],
   advise: ["org", "brief", "repo", "state", "role", "kind", "profile"],
-  verify: ["task", "repo", "state"],
+  verify: ["task", "repo", "state", "timeout-ms"],
   "merge-check": ["evidence", "task", "repo", "base", "report", "state"],
   aggregate: ["expected", "report"],
   "review-record": ["task", "report", "review", "repo", "state"],
@@ -457,6 +473,9 @@ export const ALLOWED_OPTIONS = {
   "workflow-handoff": ["id", "state", "revision", "handoff"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
+  "workflow-allowance": ["id", "state", "revision", "allowance"],
+  "workflow-reopen": ["id", "state", "revision", "reopen"],
+  "workflow-integration-checks": ["id", "state", "revision", "checks"],
   "handoff-checkpoint": [
     "state",
     "workflow-id",
@@ -560,6 +579,9 @@ export const REQUIRED_OPTIONS = {
   "workflow-handoff": ["id", "state", "revision", "handoff"],
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
+  "workflow-allowance": ["id", "state", "revision", "allowance"],
+  "workflow-reopen": ["id", "state", "revision", "reopen"],
+  "workflow-integration-checks": ["id", "state", "revision", "checks"],
   "handoff-checkpoint": ["state", "workflow-id", "workflow-task", "file"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
@@ -1599,11 +1621,16 @@ async function executeCommand(args) {
       );
     case "verify": {
       const task = validateTask(readJSON(args.task));
+      const timeoutMs =
+        args["timeout-ms"] === undefined
+          ? undefined
+          : Number(args["timeout-ms"]);
       return verify(path.resolve(args.repo), {
         commands: task.checks,
         baseRef: task.baseRef,
         environment: task.environment,
         store: path.join(path.resolve(args.state), "evidence"),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
     }
     case "review-record":
@@ -1718,6 +1745,27 @@ async function executeCommand(args) {
         args.id,
         Number(args.revision),
         readJSON(args.change),
+      );
+    case "workflow-allowance":
+      return increaseCallAllowance(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.allowance),
+      );
+    case "workflow-reopen":
+      return reopenTask(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.reopen),
+      );
+    case "workflow-integration-checks":
+      return extendIntegrationChecks(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.checks),
       );
     case "failure-classify": {
       const input = withRuntimeSignal(

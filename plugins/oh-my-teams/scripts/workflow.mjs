@@ -135,6 +135,18 @@ function validateGraph(tasks) {
   for (const id of byId.keys()) visit(id);
 }
 
+// A test file added after the workflow froze its integration contract could
+// let a later run report success without the original suite ever running it.
+// The pattern matches this repository's own test file naming convention.
+const TEST_FILE_PATTERN = /\.test\.mjs$/;
+
+async function trackedTestFiles(repo) {
+  const files = (await git(repo, ["ls-files", "-z"]))
+    .split("\0")
+    .filter(Boolean);
+  return files.filter((file) => TEST_FILE_PATTERN.test(file)).sort();
+}
+
 async function freezeTasks(request, baseDir, repo) {
   const sourceTasks = request.tasks.map((item) =>
     validateTask(readJSON(path.resolve(baseDir, item.file))),
@@ -260,6 +272,9 @@ export async function createWorkflow(
       ]),
     };
   }
+  const testFilesAtCreation = integrationTask
+    ? await trackedTestFiles(repo)
+    : undefined;
   const directory = workflowDirectory(stateDir, request.id);
 
   return withWorkflowUpdate(stateDir, request.id, () => {
@@ -287,6 +302,7 @@ export async function createWorkflow(
       required: tasks.length > 1 || Boolean(integrationTask),
       taskHash: integrationTask ? taskHash(integrationTask) : null,
       decision: null,
+      ...(integrationTask ? { testFilesAtCreation } : {}),
     };
     if (integrationTask)
       writeJSON(path.join(directory, "integration-task.json"), integrationTask);
@@ -624,7 +640,10 @@ function acceptWithoutIntegration(stateDir, id, expectedRevision) {
  * Accepts a workflow, against its frozen integration contract when it has one.
  *
  * A workflow whose integration is not required closes once every task is
- * accepted, and needs no checkout or integration report.
+ * accepted, and needs no checkout or integration report. When the frozen
+ * integration task recorded its test-file roster at creation, a `.test.mjs`
+ * file tracked at acceptance time but absent from that roster is recorded as
+ * a non-blocking warning on the decision rather than silently accepted.
  *
  * @param {string} stateDir - PM worktree store.
  * @param {string} id - Workflow identifier.
@@ -674,6 +693,21 @@ export async function acceptWorkflowIntegration(
     gates.state === "accepted",
     "Integration checks, review and PM acceptance required",
   );
+  // A state saved before this check existed has no roster to compare against;
+  // reading it must not fail, so the warning is simply skipped for it.
+  let testFileWarning;
+  if (Array.isArray(snapshot.state.integration.testFilesAtCreation)) {
+    const known = new Set(snapshot.state.integration.testFilesAtCreation);
+    const added = (await trackedTestFiles(repo)).filter(
+      (file) => !known.has(file),
+    );
+    if (added.length > 0) {
+      testFileWarning = {
+        type: "test-files-added-after-workflow-creation",
+        files: added,
+      };
+    }
+  }
   return withWorkflowUpdate(stateDir, id, () => {
     const { state, dir } = readWorkflow(stateDir, id);
     assert(
@@ -684,6 +718,7 @@ export async function acceptWorkflowIntegration(
       runId: report.runId,
       evidenceKey: report.evidence.key,
       decisionId: gates.gates["outcome-accepted"].decisionId,
+      ...(testFileWarning ? { warnings: [testFileWarning] } : {}),
       componentResults: Object.fromEntries(
         Object.entries(state.tasks).map(([taskId, item]) => [
           taskId,
@@ -704,6 +739,108 @@ export async function acceptWorkflowIntegration(
     state.revision += 1;
     saveWorkflowState(stateDir, id, state);
     return state;
+  });
+}
+
+function validateExtendChecksInput(input) {
+  assert(
+    input?.schemaVersion === 1 && WORKFLOW_ID_PATTERN.test(input.eventId ?? ""),
+    "Integration check extension requires schemaVersion=1 and eventId",
+  );
+  assert(
+    Array.isArray(input.checks) &&
+      input.checks.length > 0 &&
+      input.checks.every(
+        (command) =>
+          Array.isArray(command) &&
+          command.length > 0 &&
+          command.every(
+            (argument) => typeof argument === "string" && argument.length > 0,
+          ),
+      ),
+    "Integration check extension requires the new check argv arrays to append",
+  );
+  assert(
+    typeof input.approvedBy === "string" &&
+      input.approvedBy.trim() &&
+      typeof input.reason === "string" &&
+      input.reason.trim(),
+    "Integration check extension requires an approver and reason",
+  );
+}
+
+/**
+ * Appends new checks to an already-frozen integration task without touching
+ * any check it already had.
+ *
+ * The existing checks stay at their original indexes, so every acceptance
+ * criterion that names one by `checkIndexes` keeps pointing at the same
+ * command; only the new commands are appended after them. The task's stored
+ * `taskHash` is recomputed and written to `state.integration.taskHash`, which
+ * is what {@link acceptWorkflowIntegration} compares the frozen file against,
+ * so the extended contract becomes the one acceptance verifies against.
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - Event id, checks to append, approver and reason.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, there is no integration task, it
+ *   was already accepted, or the resulting task fails validation.
+ */
+export function extendIntegrationChecks(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    validateExtendChecksInput(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+    assert(
+      state.integration?.required,
+      "This workflow has no frozen integration task",
+    );
+    assert(
+      !state.integration.decision,
+      "Integration already accepted; checks cannot change after acceptance",
+    );
+
+    const file = path.join(dir, "integration-task.json");
+    assert(fs.existsSync(file), "Frozen integration task required");
+    const task = validateTask(readJSON(file));
+    assert(
+      state.integration.taskHash === taskHash(task),
+      "Integration contract changed outside this command",
+    );
+
+    const updated = { ...task, checks: [...task.checks, ...input.checks] };
+    validateTask(updated);
+    const nextHash = taskHash(updated);
+    writeJSON(file, updated);
+
+    state.integration.taskHash = nextHash;
+    state.integration.checksExtensions = [
+      ...(state.integration.checksExtensions ?? []),
+      {
+        addedChecks: input.checks,
+        approvedBy: input.approvedBy,
+        reason: input.reason,
+        recordedAt: new Date().toISOString(),
+      },
+    ];
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "integration-checks-extended",
+      addedChecks: input.checks,
+      taskHash: nextHash,
+      approvedBy: input.approvedBy,
+      reason: input.reason,
+    });
+    state.revision += 1;
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
   });
 }
 
@@ -994,6 +1131,104 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
     state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return state;
+  });
+}
+
+function validateAllowanceInput(input) {
+  assert(
+    input?.schemaVersion === 1 &&
+      WORKFLOW_ID_PATTERN.test(input.eventId ?? "") &&
+      typeof input.taskId === "string" &&
+      input.taskId.trim() &&
+      typeof input.attemptId === "string" &&
+      input.attemptId.trim(),
+    "Allowance increase requires schemaVersion=1, eventId, taskId and attemptId",
+  );
+  assert(
+    Number.isInteger(input.allowance) && input.allowance > 0,
+    "Allowance increase requires a positive integer allowance",
+  );
+  assert(
+    typeof input.approvedBy === "string" &&
+      input.approvedBy.trim() &&
+      typeof input.reason === "string" &&
+      input.reason.trim(),
+    "Allowance increase requires an approver and reason",
+  );
+}
+
+/**
+ * Raises a reserved or running attempt's call allowance within budget headroom.
+ *
+ * The increase is bounded by {@link availableCalls}, the pool no other
+ * reservation already claims, so growing one attempt can never spend calls
+ * another attempt is holding. A `workflow-rework` blocked by an exhausted
+ * allowance is expected to pass once the raised allowance is attached.
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - Event id, task, attempt, new allowance, approver and reason.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, the attempt is not reserved or
+ *   running, the new allowance does not exceed the current one, or it exceeds
+ *   the workflow's unreserved call budget.
+ */
+export function increaseCallAllowance(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    validateAllowanceInput(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+
+    const item = state.tasks[input.taskId];
+    assert(
+      item && occupiesSlot(item) && item.attemptId === input.attemptId,
+      `Task ${input.taskId} has no reserved or running attempt ${input.attemptId}`,
+    );
+    const attempt = item.attempts.find(
+      (candidate) => candidate.id === input.attemptId,
+    );
+    assert(attempt, "Attempt history missing");
+    assert(
+      input.allowance > attempt.callAllowance,
+      `New allowance ${input.allowance} must exceed the current allowance ${attempt.callAllowance}`,
+    );
+    const increase = input.allowance - attempt.callAllowance;
+    assert(
+      increase <= availableCalls(state),
+      `Allowance increase of ${increase} exceeds the workflow's unreserved call budget`,
+    );
+
+    const from = attempt.callAllowance;
+    attempt.callAllowance = input.allowance;
+    attempt.allowanceHistory = [
+      ...(attempt.allowanceHistory ?? []),
+      {
+        from,
+        to: input.allowance,
+        approvedBy: input.approvedBy,
+        reason: input.reason,
+        recordedAt: new Date().toISOString(),
+      },
+    ];
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "call-allowance-increased",
+      taskId: input.taskId,
+      attemptId: input.attemptId,
+      from,
+      to: input.allowance,
+      approvedBy: input.approvedBy,
+      reason: input.reason,
+    });
+    state.revision += 1;
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
   });
 }
 
@@ -1449,6 +1684,90 @@ export function retryTask(stateDir, id, expectedRevision, input) {
     state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return state;
+  });
+}
+
+function validateReopenInput(input) {
+  assert(
+    input?.schemaVersion === 1 &&
+      WORKFLOW_ID_PATTERN.test(input.eventId ?? "") &&
+      typeof input.taskId === "string" &&
+      input.taskId.trim(),
+    "Reopen requires schemaVersion=1, eventId and taskId",
+  );
+  assert(
+    typeof input.approvedBy === "string" &&
+      input.approvedBy.trim() &&
+      typeof input.reason === "string" &&
+      input.reason.trim(),
+    "Reopen requires an approver and reason",
+  );
+}
+
+/**
+ * Returns a settled task to `pending` so a fresh attempt can run it.
+ *
+ * Unlike {@link reworkTask}, which continues the same attempt within its
+ * existing call allowance because a review sent it back, a reopen is a manual
+ * override with no review requirement: it opens a new attempt and so spends
+ * the full attempt and call budget checks a first dispatch would. Any review
+ * recorded against the old attempt's execution id no longer satisfies this
+ * task's review requirement once a new execution attaches, so accepting the
+ * reopened work always needs a fresh review.
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - Event id, task, approver and reason.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, the task is not `submitted` or
+ *   `reviewed`, or the workflow's attempt or call budget is exhausted.
+ */
+export function reopenTask(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    validateReopenInput(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+
+    const item = state.tasks[input.taskId];
+    assert(
+      item && ["submitted", "reviewed"].includes(item.state),
+      `Task ${input.taskId} is ${item?.state ?? "unknown"}; only a settled task ` +
+        "awaiting review or acceptance can be reopened",
+    );
+    assert(
+      state.budget.attemptsUsed < state.budget.maxAttempts &&
+        state.budget.callsUsed < state.budget.maxCalls,
+      "Workflow budget exhausted",
+    );
+
+    item.rework.push({
+      fromAttempt: item.attemptId,
+      category: "manual-reopen",
+      approvedBy: input.approvedBy,
+      reason: input.reason,
+      recordedAt: new Date().toISOString(),
+    });
+    item.state = "pending";
+    item.attemptId = null;
+    item.execution = null;
+    item.acceptedResult = null;
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "task-reopened",
+      taskId: input.taskId,
+      approvedBy: input.approvedBy,
+      reason: input.reason,
+    });
+    state.revision += 1;
+    state.status = deriveWorkflowStatus(state);
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
   });
 }
 
