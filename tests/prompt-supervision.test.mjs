@@ -51,8 +51,13 @@ const screens = Object.fromEntries(
 );
 // The folder the trust captures were taken in; Codex and Claude are answered
 // only when the screen names the worktree the role was launched in.
-const ROLE_WORKTREE =
-  "/private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp.6Kiqw25mrE";
+// `path.resolve` matches what `recordLaunch` stores in the launch ledger: on
+// POSIX this literal is already absolute and resolve is a no-op, but on
+// Windows resolve adds the drive letter the ledger would also add, so the
+// fake terminal's raw worktreePath and the ledger's resolved one agree.
+const ROLE_WORKTREE = path.resolve(
+  "/private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp.6Kiqw25mrE",
+);
 const example = path.resolve("plugins/oh-my-teams/examples/organization.json");
 const RUN = "run_pm";
 const PM = "term_pm";
