@@ -577,48 +577,80 @@ const USER_CONFIG_TEXT = new RegExp(
 );
 const USER_CONFIG_UNDER_HOME = new RegExp(`^${USER_CONFIG_REL}`);
 const CREDENTIAL_FILE =
-  /(^|\/)(\.env(\.[\w.-]+)?|id_rsa|id_ed25519|\.netrc|\.git-credentials|credentials\.json)$/;
-const inside = (dir, target) =>
-  target === dir || target.startsWith(dir + path.sep);
+  /(^|[\\/])(\.env(\.[\w.-]+)?|id_rsa|id_ed25519|\.netrc|\.git-credentials|credentials\.json)$/;
+
+// Windows reports a role's paths with backslashes and ignores case, so scope
+// comparisons pick `path.win32` and fold case there instead of assuming
+// POSIX; `pathWithin` in usage-sources.mjs follows the same rule.
+function pathLib(platform) {
+  return platform === "win32" ? path.win32 : path.posix;
+}
+const foldCase = (value, platform) =>
+  platform === "win32" ? value.toLowerCase() : value;
+// A word "looks like a path" when it has a separator, a home marker or a
+// leading `.`/`..`/`.env`. Windows also spells an absolute path with a drive
+// letter and no `/` at all (`C:\Users\x`), so win32 additionally counts a
+// backslash and a leading drive letter as path indicators.
+const looksLikePath = (text, platform) =>
+  platform === "win32"
+    ? /[/~$\\]|^[A-Za-z]:|^\.\.?$|^\.env/.test(text)
+    : /[/~$]|^\.\.?$|^\.env/.test(text);
+// Rewrites a lib-relative path to the forward-slash spelling every task
+// contract and the config-directory patterns are written in.
+const toContractPath = (value, lib) => value.split(lib.sep).join("/");
+
+function inside(dir, target, platform = process.platform) {
+  const lib = pathLib(platform);
+  const a = foldCase(dir, platform);
+  const b = foldCase(target, platform);
+  return b === a || b.startsWith(a + lib.sep);
+}
 
 // Turns a word into a path when it looks like one; `named` says the caller
 // already knows it is a path. `unresolved` is set when the word cannot be
 // pinned to one absolute path without the shell.
-function pathOf(word, { cwd, home }, named = false) {
+function pathOf(
+  word,
+  { cwd, home, platform = process.platform },
+  named = false,
+) {
+  const lib = pathLib(platform);
   const text = String(word)
     .replace(/^[<>]+/, "")
     .replace(/^--?[\w-]+=/, "");
-  if (!named && !/[/~$]|^\.\.?$|^\.env/.test(text)) return null;
+  if (!named && !looksLikePath(text, platform)) return null;
   const expanded = text.replace(
     /^(~|\$HOME|\$\{HOME\})(?=\/|$)/,
     home ?? "\u0000",
   );
   const unresolved =
-    /[$*?[\]{}\u0000]/.test(expanded) || (!path.isAbsolute(expanded) && !cwd);
+    /[$*?[\]{}\u0000]/.test(expanded) || (!lib.isAbsolute(expanded) && !cwd);
   return {
     text,
     unresolved,
-    abs: unresolved ? null : path.resolve(cwd ?? "/", expanded),
+    abs: unresolved ? null : lib.resolve(cwd ?? "/", expanded),
   };
 }
 
 function zoneOf(target, scope) {
+  const platform = scope.platform ?? process.platform;
+  const lib = pathLib(platform);
   if (
     target.abs &&
     scope.worktree &&
-    inside(path.resolve(scope.worktree), target.abs)
+    inside(lib.resolve(scope.worktree), target.abs, platform)
   )
     return "worktree";
   if (
     target.abs &&
     scope.ownerCheckout &&
-    inside(path.resolve(scope.ownerCheckout), target.abs)
+    inside(lib.resolve(scope.ownerCheckout), target.abs, platform)
   )
     return "owner-checkout";
   if (
     target.abs &&
     (scope.otherWorktrees ?? []).some((dir) =>
-      inside(path.resolve(dir), target.abs),
+      inside(lib.resolve(dir), target.abs, platform),
     )
   )
     return "other-worktree";
@@ -626,11 +658,18 @@ function zoneOf(target, scope) {
 }
 
 function forbiddenPath(target, scope) {
+  const platform = scope.platform ?? process.platform;
+  const lib = pathLib(platform);
   const rel =
-    target.abs && scope.home && inside(path.resolve(scope.home), target.abs)
-      ? path.relative(scope.home, target.abs)
+    target.abs &&
+    scope.home &&
+    inside(lib.resolve(scope.home), target.abs, platform)
+      ? toContractPath(lib.relative(scope.home, target.abs), lib)
       : "";
-  if (USER_CONFIG_TEXT.test(target.text) || USER_CONFIG_UNDER_HOME.test(rel))
+  if (
+    USER_CONFIG_TEXT.test(target.text) ||
+    USER_CONFIG_UNDER_HOME.test(foldCase(rel, platform))
+  )
     return "user-config-path";
   if (
     CREDENTIAL_FILE.test(target.text) ||
@@ -644,12 +683,14 @@ function forbiddenPath(target, scope) {
 }
 
 const normalizeEntry = (entry) => String(entry).replace(/^\.\//, "");
-function allowedFile(rel, entries) {
+function allowedFile(rel, entries, platform = process.platform) {
+  const target = foldCase(rel, platform);
   return entries
     .map(normalizeEntry)
+    .map((entry) => foldCase(entry, platform))
     .some(
       (entry) =>
-        rel === entry || (entry.endsWith("/") && rel.startsWith(entry)),
+        target === entry || (entry.endsWith("/") && target.startsWith(entry)),
     );
 }
 
@@ -667,29 +708,32 @@ function allowedFile(rel, entries) {
  *
  * @param {{command?: string, cwd?: string, paths?: string[]}} request - What the approval asks to run or write.
  * @param {{worktree?: string, ownerCheckout?: string, otherWorktrees?: string[], home?: string,
- *   allowedFiles?: string[], checks?: Array<string[]|string>}} scope - The role's worktree and the task contract's files and checks.
+ *   allowedFiles?: string[], checks?: Array<string[]|string>, platform?: string}} scope - The role's worktree,
+ *   the task contract's files and checks, and the path rules to judge them by (`process.platform` when omitted).
  * @returns {{verdict: string, reasons: Array<{rule: string, detail: string}>, passed: string[]}} `allow`, `deny` or `escalate`, with the rules that decided it.
  */
 export function judgeCommandScope(request, scope) {
   const ctx = scope ?? {};
+  const platform = ctx.platform ?? process.platform;
+  const lib = pathLib(platform);
   const command =
     typeof request?.command === "string" ? request.command.trim() : "";
   const cwd = request?.cwd ?? null;
   // A relative working folder cannot be resolved against itself.
   const cwdTarget = cwd
-    ? (pathOf(cwd, { cwd: null, home: ctx.home }) ?? {
+    ? (pathOf(cwd, { cwd: null, home: ctx.home, platform }) ?? {
         text: cwd,
         abs: null,
         unresolved: true,
       })
     : null;
   const explicit = (request?.paths ?? [])
-    .map((item) => pathOf(item, { cwd, home: ctx.home }, true))
+    .map((item) => pathOf(item, { cwd, home: ctx.home, platform }, true))
     .filter(Boolean);
   const words = segments(command).flat();
   const targets = [
     ...words
-      .map((word) => pathOf(word, { cwd, home: ctx.home }))
+      .map((word) => pathOf(word, { cwd, home: ctx.home, platform }))
       .filter(Boolean),
     ...explicit,
   ];
@@ -726,7 +770,7 @@ export function judgeCommandScope(request, scope) {
       "판정할 명령이나 경로가 화면에서 확인되지 않았습니다.",
     );
   if (
-    (command || explicit.some((target) => !path.isAbsolute(target.text))) &&
+    (command || explicit.some((target) => !lib.isAbsolute(target.text))) &&
     !cwd
   )
     note(
@@ -734,7 +778,10 @@ export function judgeCommandScope(request, scope) {
       "명령을 실행할 폴더를 알 수 없어 범위를 판정할 수 없습니다.",
     );
   if (cwd && ctx.worktree) {
-    if (!cwdTarget.abs || !inside(path.resolve(ctx.worktree), cwdTarget.abs))
+    if (
+      !cwdTarget.abs ||
+      !inside(lib.resolve(ctx.worktree), cwdTarget.abs, platform)
+    )
       note(
         "cwd-outside-worktree",
         `실행 폴더 "${cwd}"가 역할 워크트리 안인지 확인되지 않았습니다.`,
@@ -771,8 +818,12 @@ export function judgeCommandScope(request, scope) {
       );
     else if (
       !allowedFile(
-        path.relative(path.resolve(ctx.worktree), target.abs),
+        toContractPath(
+          lib.relative(lib.resolve(ctx.worktree), target.abs),
+          lib,
+        ),
         ctx.allowedFiles ?? [],
+        platform,
       )
     )
       note(

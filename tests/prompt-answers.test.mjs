@@ -622,6 +622,84 @@ test("a worktree nested inside the owner checkout is not mistaken for the owner 
   );
 });
 
+// Windows reports a role's paths with a drive letter, backslash separators
+// and no case distinction; `platform: "win32"` on the scope picks
+// `path.win32` and folds case there, so every request judged above on the
+// POSIX form of SCOPE must reach the same verdict on this Windows form.
+const WIN_SCOPE = {
+  ...SCOPE,
+  platform: "win32",
+  worktree: "C:\\Users\\x\\orca\\workspaces\\p\\feat-a",
+  ownerCheckout: "C:\\Users\\x\\orca\\p",
+  otherWorktrees: ["C:\\Users\\x\\orca\\workspaces\\p\\feat-b"],
+  home: "C:\\Users\\x",
+};
+const winAt = (request) =>
+  judgeCommandScope({ cwd: WIN_SCOPE.worktree, ...request }, WIN_SCOPE);
+
+test("a Windows-style scope with a drive letter, backslashes and mixed case judges the same requests the POSIX form above allows, denies or escalates", () => {
+  for (const paths of [
+    ["src\\a.mjs"],
+    [`${WIN_SCOPE.worktree}\\tests\\a.test.mjs`],
+    ["docs\\plan\\x.md"],
+    ["tests\\fixtures\\prompt-screens\\a.json"],
+    [".\\src\\a.mjs"],
+    // Windows ignores case in both the worktree and the contract's files.
+    ["SRC/A.MJS"],
+    [`${WIN_SCOPE.worktree.toUpperCase()}\\SRC\\A.MJS`],
+  ]) {
+    assert.equal(winAt({ paths }).verdict, "allow", paths[0]);
+  }
+
+  const forbidden = {
+    "owner checkout file": { paths: ["C:\\Users\\x\\orca\\p\\src\\a.mjs"] },
+    "other worktree file": {
+      paths: ["C:\\Users\\x\\orca\\workspaces\\p\\feat-b\\src\\a.mjs"],
+    },
+    "claude settings by absolute path": {
+      paths: ["C:\\Users\\x\\.claude\\settings.json"],
+    },
+    "relative path reaching the home config": {
+      paths: ["..\\..\\..\\..\\.claude\\settings.json"],
+    },
+    "ssh key": { paths: ["~\\.ssh\\id_ed25519"] },
+    "env file variant": { paths: ["src\\.env.local"] },
+  };
+  for (const [name, request] of Object.entries(forbidden)) {
+    const result = judgeCommandScope(
+      { cwd: WIN_SCOPE.worktree, ...request },
+      WIN_SCOPE,
+    );
+    assert.equal(
+      result.verdict,
+      "deny",
+      `${name}: ${JSON.stringify(result.reasons)}`,
+    );
+    assert.deepEqual(result.passed, [], name);
+  }
+
+  assert.equal(winAt({ paths: ["src\\b.mjs"] }).verdict, "escalate");
+  assert.equal(winAt({ paths: ["..\\elsewhere\\a.mjs"] }).verdict, "escalate");
+
+  // A worktree nested inside the owner checkout is still not mistaken for it.
+  const nested = {
+    ...WIN_SCOPE,
+    worktree: "C:\\Users\\x\\orca\\p\\.wt\\feat-a",
+  };
+  assert.equal(
+    judgeCommandScope({ cwd: nested.worktree, paths: ["src\\a.mjs"] }, nested)
+      .verdict,
+    "allow",
+  );
+  assert.equal(
+    judgeCommandScope(
+      { cwd: nested.worktree, paths: ["C:\\Users\\x\\orca\\p\\src\\a.mjs"] },
+      nested,
+    ).verdict,
+    "deny",
+  );
+});
+
 // No approval screen was captured, so these choices and keys are synthetic.
 const KEY = { name: "Enter", send: { text: "", enter: true } };
 const ONCE = { label: "Allow this request", grant: "once", key: KEY };
