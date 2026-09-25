@@ -35,7 +35,7 @@ origin/main을 --no-ff로 병합한 뒤, 수치 문서 충돌에서 통합 브�
 
 **병합 이력의 후속 (2998611부터 최종 통합 HEAD까지)**
 
-이 문서를 처음 쓴 뒤에도 통합 브랜치는 origin/main을 두 차례 더 병합했습니다. 병합 순서는 2998611(win32 홈 축약 표시 뒤 백슬래시를 경계로 인식하도록 고친 d41ac13을 병합) → 8d39c92(origin/main의 e94e1bf를 --no-ff로 병합, PR #109·#104, 충돌 여섯 개) → 5547c19(POSIX 대조가 호스트 플랫폼과 무관하게 판정되도록 고친 58b5f62를 병합) → a9eb390(origin/main의 2b30907을 병합, PR #112, 충돌 네 개)입니다. **a9eb390(a9eb3903ea820078d087a4ae6c977d3db65b2c06)이 이 통합 브랜치의 최종 HEAD입니다.**
+이 문서를 처음 쓴 뒤에도 통합 브랜치는 origin/main을 두 차례 더 병합했습니다. 병합 순서는 2998611(win32 홈 축약 표시 뒤 백슬래시를 경계로 인식하도록 고친 d41ac13을 병합) → 8d39c92(origin/main의 e94e1bf를 --no-ff로 병합, PR #109·#104, 충돌 여섯 개) → 5547c19(POSIX 대조가 호스트 플랫폼과 무관하게 판정되도록 고친 58b5f62를 병합) → a9eb390(origin/main의 2b30907을 병합, PR #112, 충돌 네 개)입니다. **a9eb390(a9eb3903ea820078d087a4ae6c977d3db65b2c06)은 코드(.mjs)와 테스트를 바꾼 마지막 커밋입니다.** 그 뒤에 병합되는 통합 기록 문서 커밋들은 이 코드 트리의 검사 결과를 그대로 물려받으면서도, 각자의 HEAD에서 CI가 다시 돌았습니다. 최종 통합 HEAD와 그 HEAD에서 돌아간 CI run 번호는 PM이 이사에게 보내는 close-ready 신호와 PR 본문에 적습니다.
 
 두 차례의 origin/main 병합에서 나온 충돌은 성격이 둘로 나뉩니다. `npm run sync`가 관리하는 docs/CODE_QUALITY.md·docs/PLAN_STATUS.md·docs/SAFETY_AUDIT.md의 충돌은 어느 한쪽 내용을 고르지 않고 구조만 병합한 뒤 npm run sync를 실행해 정본에서 값을 다시 채웠습니다. 반면 실질 충돌(1차 병합의 plugins/oh-my-teams/scripts/launch-matrix.mjs, tests/launch-matrix.test.mjs, plugins/oh-my-teams/references/orca-runtime.md, 2차 병합의 plugins/oh-my-teams/skills/pm/SKILL.md)은 양쪽 브랜치의 내용을 모두 보존했습니다.
 
@@ -104,7 +104,9 @@ PR #105의 첫 CI(run 36148381078, head 53e46c2)에서 windows-latest만 실패�
 
 ### 최종 CI 결과와 통합 HEAD의 대응
 
-run 36167579068은 headSha a9eb3903ea820078d087a4ae6c977d3db65b2c06에서 attempt 1로 돌아 재실행 없이 conclusion success를 얻었습니다. statusCheckRollup 길이는 3으로 verify(ubuntu-latest)·verify(macos-latest)·verify(windows-latest)가 모두 success였습니다(created 2026-09-25T17:30:42Z, updated 2026-09-25T17:33:00Z). 즉 통합 HEAD a9eb390과 CI run 36167579068이 대응합니다. 이사가 병합 전에 run의 headSha를 병합할 HEAD와 대조하므로, 이 대응 관계를 여기에 남깁니다.
+run 36167579068은 headSha a9eb3903ea820078d087a4ae6c977d3db65b2c06(a9eb390, 코드와 테스트를 바꾼 마지막 커밋)에서 attempt 1로 돌아 재실행 없이 conclusion success를 얻었습니다. statusCheckRollup 길이는 3으로 verify(ubuntu-latest)·verify(macos-latest)·verify(windows-latest)가 모두 success였습니다(created 2026-09-25T17:30:42Z, updated 2026-09-25T17:33:00Z).
+
+a9eb390 뒤에 이 문서를 고친 커밋 c98ec52는 문서만 바꾸었으므로 코드와 테스트의 검사 결과를 a9eb390에서 그대로 물려받습니다. 그 HEAD에서도 CI가 다시 돌아 run 36170817611이 attempt 1로 세 플랫폼 모두 success였습니다(created 2026-09-25T18:01:47Z, updated 18:04:03Z). 즉 run 36167579068은 head a9eb390에, run 36170817611은 head c98ec52에 대응합니다. 이사가 병합 전에 run의 headSha를 병합할 HEAD와 대조하므로, 이 대응 관계를 여기에 남깁니다. 이 문서를 고치는 커밋은 그 뒤에도 하나 더 생기므로, 최종 통합 HEAD와 그 HEAD에서 돌아간 CI run 번호는 PM이 이사에게 보내는 close-ready 신호와 PR 본문에 적습니다.
 
 이 run에서 세 플랫폼의 테스트 선언 수는 모두 746건으로 같았습니다. ubuntu와 macOS는 pass 743·fail 0·skip 3·todo 0이었고, windows는 pass 734·fail 0·skip 12·todo 0이었습니다. macOS와 ubuntu가 건너뛴 3건("a health check on Windows ends the launcher's child, not only the launcher", "a healthy responder outside the launcher's process tree is refused", "a health body naming another pid than the listener is refused")은 windows-latest에서 SKIP 표시 없이 각각 ok 57, ok 369, ok 371로 통과했습니다. windows가 건너뛴 12건은 모두 POSIX 전용 사유(the fake runtime uses POSIX scripts 8건, descendant proof needs POSIX process groups 3건, Windows has no process groups 1건)였고, ubuntu에서는 그 12건이 하나도 건너뛰어지지 않았습니다. 따라서 746건 가운데 세 플랫폼 전부에서 건너뛰어진 테스트는 없습니다.
 
