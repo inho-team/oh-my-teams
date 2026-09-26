@@ -27,6 +27,7 @@ import { removedSkillNames } from "./removed-skills.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const examples = path.join(root, "plugins/oh-my-teams/examples");
 const skills = path.join(root, "plugins/oh-my-teams/skills");
+const references = path.join(root, "plugins/oh-my-teams/references");
 
 const readSkill = (name) =>
   fs.readFileSync(path.join(skills, name, "SKILL.md"), "utf8");
@@ -1293,10 +1294,10 @@ test("pm, pl and status skills route a stopped role's question through the super
 });
 
 test("roadmap canon exists and has one official source", () => {
-  const roadmapPath = path.join(root, "docs", "ROADMAP.md");
+  const canonicalPath = path.join(references, "roadmap.md");
   assert.ok(
-    fs.existsSync(roadmapPath),
-    "docs/ROADMAP.md must exist as the single source of truth",
+    fs.existsSync(canonicalPath),
+    "plugins/oh-my-teams/references/roadmap.md must exist as the single source of truth",
   );
 });
 

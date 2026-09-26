@@ -1,6 +1,6 @@
 ---
 name: roadmap
-description: 로드맵을 읽고 phase 정본을 갱신하며 모든 역할이 작성 규칙을 따르도록 한다. 규칙 자체는 다시 적지 않고 reference를 참조한다.
+description: 로드맵을 읽고 phase 정본을 갱신하는 절차를 담는다. 작성 규칙은 reference에만 정의되어 있으며 스킬 문서에는 링크로만 가리킨다.
 ---
 
 # 로드맵
@@ -13,10 +13,10 @@ description: 로드맵을 읽고 phase 정본을 갱신하며 모든 역할이 �
 
 ## 로드맵 갱신
 
-로드맵을 갱신할 때는 다음을 따른다.
+로드맵을 갱신할 때는 [`../../references/roadmap.md`](../../references/roadmap.md)가 정한 규칙을 따른다. 각 절의 세부 내용은 다음과 같다.
 
-- 로드맵 본문(`docs/ROADMAP.md`)은 이사만 고친다. PM은 자기 phase가 가리키는 하위 문서만 고치고 로드맵 본문은 건드리지 않는다. 이 규칙은 [`../../references/roadmap.md`](../../references/roadmap.md)의 「권한」 절에 정의되어 있다.
-- phase에 들어가는 내용과 적지 않는 내용을 구분하는 기준은 [`../../references/roadmap.md`](../../references/roadmap.md)의 「로드맵에 적어도 되는 것」과 「로드맵에 적지 않는 것」 절을 따른다.
+- 권한(로드맵 본문 소유권 및 갱신 책임)은 [`../../references/roadmap.md`](../../references/roadmap.md)의 「권한」 절에 정의되어 있다.
+- phase에 들어가는 내용과 적지 않는 내용을 구분하는 기준은 「로드맵에 적어도 되는 것」과 「로드맵에 적지 않는 것」 절을 따른다.
 - phase를 만들거나 상태를 바꿀 때 합리화 차단표를 참조하여 규칙을 벗어나지 않도록 한다.
 
 ## 로드맵 링크 확인
