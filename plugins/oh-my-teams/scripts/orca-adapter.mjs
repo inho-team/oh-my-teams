@@ -426,19 +426,44 @@ const IDLE_PROBE_MS = 20000;
 
 const BLOCK_PROBE_MS = 3000;
 
-// Reads terminal diagnostics when idle check fails. Returns null if reading fails.
+// Reads terminal diagnostics when idle check fails. Always returns an object,
+// never null: a read failure is recorded via `diagnosticsError` (or
+// `screenFieldMissing`) instead, so it never replaces the original idle
+// failure this attaches to.
+//
+// The `--screen --json` envelope carries the screen at `result.terminal.tail`
+// with `result.terminal.source`, the same shape role-terminal.mjs's
+// readScreen and prompt-supervision.mjs's readTerminalScreen read. Only a
+// `source` of "screen" is a rendered screen; a stream source can still hold a
+// stale startup line (e.g. Agy's "not signed in" banner) after the terminal
+// is actually ready, so that case is recorded as no screen plus the source
+// received rather than trusted.
 async function readTerminalDiagnostics(orca, terminal, { cwd, execute }) {
   try {
     const screen = await execute(
       [orca, "terminal", "read", "--terminal", terminal, "--screen", "--json"],
       { cwd, timeoutMs: 10000 },
     );
-    let screenData = null;
+    let screenLines = null;
+    let screenSource = null;
     let screenFailed = false;
+    let screenFieldMissing = false;
+    let screenTopLevelKeys;
     if (screen.code === 0) {
       try {
         const parsed = JSON.parse(screen.stdout);
-        screenData = parsed.result?.screen ?? null;
+        const terminalField = parsed.result?.terminal;
+        if (terminalField && Array.isArray(terminalField.tail)) {
+          screenSource = terminalField.source ?? null;
+          screenLines = screenSource === "screen" ? terminalField.tail : null;
+        } else {
+          // The response did not carry the shape this adapter reads. Recording
+          // this distinctly (rather than a silently empty screen) is what let
+          // this bug be caught: an earlier version read a field, `result.screen`,
+          // that no Orca response actually returns.
+          screenFieldMissing = true;
+          screenTopLevelKeys = Object.keys(parsed.result ?? parsed ?? {});
+        }
       } catch {
         // Ignore JSON parse errors
       }
@@ -464,16 +489,14 @@ async function readTerminalDiagnostics(orca, terminal, { cwd, execute }) {
       listFailed = true;
     }
 
-    // If any read failed, record that fact
-    if (screenFailed || listFailed) {
-      return {
-        screen: screenData,
-        terminalState,
-        diagnosticsError: true,
-      };
+    const diagnostics = { screen: screenLines, screenSource, terminalState };
+    if (screenFieldMissing) {
+      diagnostics.screenFieldMissing = true;
+      diagnostics.screenTopLevelKeys = screenTopLevelKeys;
     }
-
-    return { screen: screenData, terminalState };
+    // If any read failed, record that fact
+    if (screenFailed || listFailed) diagnostics.diagnosticsError = true;
+    return diagnostics;
   } catch (error) {
     // Record the error so the failure includes diagnostic failure
     return {
@@ -687,7 +710,9 @@ async function assertTerminalIdle(
  *   used to attach a `matrix-mismatch` signal when the post-launch refusal contradicts the
  *   predicted `supervised-terminal` path.
  * @returns {Promise<{terminal: string, idle: true}>} The idle terminal.
- * @throws {Error} Carrying the translated signal when the terminal is not idle.
+ * @throws {Error} Carrying the translated signal when the terminal is not idle,
+ *   plus a `diagnostics` field (the `--screen` screen, the `terminal list` row,
+ *   or a record of the diagnostic read itself failing) for the failed attempt.
  */
 export async function checkTerminalIdle(
   terminal,
