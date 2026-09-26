@@ -351,6 +351,30 @@ export function readScreenLimit(provider, lines) {
   return { verdict: "none", limit: null };
 }
 
+const OVERLOAD_SCREEN_PATTERN = /API Error: 529 Overloaded/;
+
+/**
+ * Reads Claude's own 529 overloaded error from the bottom of a terminal screen.
+ *
+ * The sentence is Claude's own error text and no other provider prints it, so
+ * this takes no provider argument the way {@link readScreenLimit} does. The
+ * verdict is kept out of that function's capacity routing on purpose: a
+ * capacity verdict there resolves to `retry`, an automatic same-profile retry,
+ * but a turn that ended on a 529 cannot be judged safe to resend without
+ * seeing how far the turn got, so it is reported upward instead of resent
+ * (see references/orca-runtime.md, "무응답 worker 감독").
+ *
+ * @param {string[]} lines - Screen lines, oldest first.
+ * @returns {boolean} Whether the screen ends on Claude's 529 overloaded error.
+ */
+export function readScreenOverload(lines) {
+  const text = lines
+    .slice(-SCREEN_LINES)
+    .map((line) => line.trim())
+    .join(" ");
+  return OVERLOAD_SCREEN_PATTERN.test(text);
+}
+
 /**
  * Checks whether a terminal worker stopped on a usage limit.
  *
@@ -361,7 +385,10 @@ export function readScreenLimit(provider, lines) {
  * @param {string} [options.workflowTask] - Workflow task ID, used to find Agy sessions.
  * @param {() => Promise<string[]>} [options.readScreen] - Reads the worker's screen when no session log is found.
  * @param {object} [options.homes] - Provider homes.
- * @returns {Promise<object>} Verdict, limit, and the evidence it came from.
+ * @returns {Promise<object>} Verdict, limit, and the evidence it came from. When
+ * the evidence is the worker's screen and the provider is `claude`, an
+ * `overload` boolean reports whether that screen ends on the 529 error, so a
+ * caller can escalate on it without waiting for `verdict` to resolve.
  * @throws {Error} When the provider is unknown or the worktree does not exist.
  */
 export async function workerLimitCheck({
@@ -386,10 +413,12 @@ export async function workerLimitCheck({
     };
   }
   if (readScreen) {
+    const lines = await readScreen();
     return {
       provider,
       source: "screen",
-      ...readScreenLimit(provider, await readScreen()),
+      ...readScreenLimit(provider, lines),
+      ...(provider === "claude" ? { overload: readScreenOverload(lines) } : {}),
     };
   }
   return { provider, source: "none", verdict: "unknown", limit: null };

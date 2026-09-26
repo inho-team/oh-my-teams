@@ -23,6 +23,7 @@ import {
 import { releaseKickoff } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
   acquireResource,
+  directorWatch,
   parseMeminfo,
   parseVmStat,
   queryPmLiveness,
@@ -865,6 +866,86 @@ test("findPmTerminal takes the latest PM launch only while Orca still lists it",
     }),
     undefined,
   );
+});
+
+// ─── directorWatch provider-overload judgement ───────────────────────────────
+
+function orcaEnvelope(result) {
+  return { code: 0, stdout: JSON.stringify({ ok: true, result }) };
+}
+
+test("directorWatch reports provider-overloaded from the PM's own terminal screen", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: async () =>
+      orcaEnvelope({
+        terminal: {
+          source: "screen",
+          tail: ["> continue", "API Error: 529 Overloaded"],
+        },
+      }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "provider-overloaded");
+});
+
+test("directorWatch reports none when the PM screen was read but does not show the 529 sentence", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: async () =>
+      orcaEnvelope({
+        terminal: { source: "screen", tail: ["Ready for input."] },
+      }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "none");
+});
+
+test("directorWatch reports unknown instead of guessing when the PM terminal cannot be found", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  // No PM launch was ever recorded, so findPmTerminal cannot resolve a handle.
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [],
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+});
+
+test("directorWatch reports unknown instead of guessing when the PM screen cannot be read", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    // No `source: "screen"` in the envelope means the screen could not be
+    // confirmed as the live one, the same failure readTerminalScreen reports
+    // for a worker.
+    execute: async () => orcaEnvelope({ terminal: { source: "buffer" } }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
 });
 
 test("replySignal reports that no PM terminal was found instead of claiming delivery", async (t) => {

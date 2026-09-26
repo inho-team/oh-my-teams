@@ -65,6 +65,15 @@ const LIVENESS = new Set(["live", "unverifiable", "exited"]);
  * stall is escalated, the same stall is not escalated again until the worker
  * shows new activity.
  *
+ * A worker whose screen ended on Claude's 529 overloaded error is escalated
+ * immediately, the same way `agentWait` is: waiting out `progressCheckMs` or
+ * `unansweredLimit` first would spend the whole supervision timeout on a
+ * cause that is already known, and this worker is not asked to continue on
+ * its own, because a second "계속" sent into a turn that may already be
+ * partway through it is a duplicate the worker is not allowed to receive
+ * twice, and how far a turn got before a 529 cannot be judged from the
+ * outside (see references/orca-runtime.md, "무응답 worker 감독").
+ *
  * @param {object} observation - Current facts about the worker.
  * @param {string} observation.liveness - `live`, `unverifiable` or `exited`.
  * @param {string} [observation.lastActivityAt] - Last heartbeat, message or output change.
@@ -74,6 +83,8 @@ const LIVENESS = new Set(["live", "unverifiable", "exited"]);
  * @param {string} [observation.escalatedAt] - When this stall was last escalated.
  * @param {string} [observation.escalatedReason] - Reason that escalation reported.
  * @param {object|null} [observation.agentWait] - `worker-show` evidence of a human prompt.
+ * @param {boolean} [observation.providerOverload=false] - `worker-limit-check`'s
+ *   `overload` evidence that the worker's screen ended on Claude's 529 error.
  * @param {object} observation.policy - Result of `supervisionPolicy`.
  * @returns {object} Action, reason, silence in minutes, and the user-facing label.
  * @throws {Error} When liveness, the clock or the policy is missing or unknown.
@@ -87,6 +98,7 @@ export function nextSupervisionAction({
   escalatedAt,
   escalatedReason,
   agentWait = null,
+  providerOverload = false,
   policy,
 }) {
   if (!LIVENESS.has(liveness)) {
@@ -133,6 +145,11 @@ export function nextSupervisionAction({
     return reported("waiting-on-human-prompt")
       ? decide("wait", "already-escalated")
       : decide("escalate", "waiting-on-human-prompt", { readOutput: true });
+  }
+  if (providerOverload) {
+    return reported("provider-overloaded")
+      ? decide("wait", "already-escalated")
+      : decide("escalate", "provider-overloaded", { readOutput: true });
   }
   if (!Number.isNaN(escalated) && (Number.isNaN(last) || last <= escalated)) {
     return decide("wait", "already-escalated");

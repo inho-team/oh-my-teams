@@ -16,7 +16,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 - 사용자와 목표·수용 기준·전달 방식을 확정하고, 확정한 내용을 브리프로 써서 PM에게 인계한다.
 - 여러 kickoff를 동시에 감독하고, PM의 결정 요청(`director-signal --kind decision`)에 결정을 내린다.
 - `director-inbox --org <project>/.omt/organization.json`으로 미처리 신호를 조회하고, `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`로 결정을 기록하고 PM 터미널에 전달하며, `director-ack --org <project>/.omt/organization.json --signal <id>`으로 수신을 확인한다.
-- `director-watch --org <project>/.omt/organization.json`으로 kickoff별 신호·슬롯 점유·여유 메모리·PM liveness를 한 번에 조회한다.
+- `director-watch --org <project>/.omt/organization.json`으로 kickoff별 신호·슬롯 점유·여유 메모리·PM liveness·PM 화면의 provider 과부하 여부를 한 번에 조회한다.
 - 무거운 작업 전에 `resource-acquire --org <project>/.omt/organization.json --worktree <pm> --kind test|worker|build --note ...`로 자원 슬롯을 확보하고, 작업이 끝나면 `resource-release --org <project>/.omt/organization.json --slot <slotId>`로 해제한다.
 - `close`로 성공한 kickoff를 전달·병합·정리하고, `disband`로 실패하거나 취소된 kickoff를 해체한다.
 - 주인 브랜치 병합 여부를 결정한다.
@@ -60,7 +60,9 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 - `director-inbox --org <project>/.omt/organization.json`: 미처리 신호 조회
 - `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`: 결정을 기록하고 PM 터미널에 전달한다. `--text`의 본문은 두괄식 첫 줄(결정)로 시작한다. PM 터미널은 `role-terminal`이 남긴 가장 최근의 PM 실행 기록으로 찾으며, Orca가 그 터미널을 같은 워크트리에 띄우고 있을 때만 보낸다. 결과가 `notified: false`이면 결정은 inbox에만 기록된 것이므로, PM 터미널을 확인해 직접 전달한다
 - `director-ack --org <project>/.omt/organization.json --signal <id>`: 수신 확인
-- `director-watch --org <project>/.omt/organization.json`: kickoff별 신호·슬롯 점유·여유 메모리·PM liveness 요약 조회
+- `director-watch --org <project>/.omt/organization.json`: kickoff별 신호·슬롯 점유·여유 메모리·PM liveness·PM 화면의 provider 과부하 여부 요약 조회
+
+`director-watch` 결과의 kickoff마다 `providerOverload` 필드가 온다. PM 터미널을 찾아 화면을 읽을 수 있었고 그 화면이 Claude의 `API Error: 529 Overloaded`로 끝나 있으면 `provider-overloaded`이고, 화면을 읽었지만 그 문장이 없으면 `none`이며, PM 터미널을 찾지 못했거나 화면을 읽지 못했으면 `unknown`이다. `unknown`은 과부하가 아니라는 뜻이 아니라 판정할 근거가 없다는 뜻이므로, PM 자신이 사용자에게 `blocked`로 보고하기 전이라도 이사가 이 값으로 PM의 상태를 먼저 짐작할 수 있다.
 
 `progress` 신호는 알림용이므로 보낼 때 수신 확인된 상태(`autoAcknowledged: true`)로 기록되고, `director-inbox`와 `director-watch`의 미처리 목록에 남지 않는다. 같은 워크트리에서 새 `close-ready`가 오면 이전의 미처리 `close-ready`는 `superseded` 상태가 되고 `supersededBy`에 새 신호 ID가 적힌다. `kickoff-release`는 그 kickoff에 남은 미처리 신호를 `closed` 상태(`closedBy: "kickoff-release"`)로 정리하며, 다른 kickoff의 신호는 건드리지 않는다.
 
