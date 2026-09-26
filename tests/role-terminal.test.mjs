@@ -18,6 +18,7 @@ import {
   launchLine,
   openRoleTerminal,
   roleTitle,
+  trustedWorkspaceMatches,
   trustQuestion,
   untouchedShell,
   workerTerminal,
@@ -879,6 +880,57 @@ test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", as
   );
 });
 
+test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 supervised-terminal이 아니라 headless로 거부된다", async () => {
+  // #46/agy-win-untrusted-path: 규칙 순서 구멍 수정 확인.
+  // 옛 순서에서는 플랫폼을 보지 않는 규칙 3(agent-trust-workspace)이 먼저 걸려 win32에서도
+  // 터미널 생성까지 진행했다(docs/plan/agy-terminal-path.md의 2026-09-18 r3-c1 실측이 이 증상을
+  // 확인했다). 새 규칙(2-1)이 win32 + agy를 신뢰 상태와 무관하게 headless로 먼저 걸러낸다.
+  const org = example();
+  const gemini = roleCommand(org, "senior");
+
+  for (const trustRecordExists of [false, "unknown"]) {
+    const orcaCalls = [];
+    const execute = async (argv) => {
+      orcaCalls.push(argv);
+      return { code: 0, stdout: "{}" };
+    };
+    await assert.rejects(
+      openRoleTerminal({
+        worktree: "id:repo::C:/new-wt",
+        command: gemini,
+        executable: "orca",
+        execute,
+        platform: "win32",
+        shell: "posix",
+        trustRecordExists,
+        allowUnverified: false,
+        settleMs: 5,
+        readyMs: 20,
+        pollMs: 1,
+      }),
+      (err) => {
+        assert.match(err.message, /headless/, "headless 거부 메시지 포함");
+        assert.match(
+          err.message,
+          /agy-headless-no-trust/,
+          "새 규칙의 reason 코드 포함",
+        );
+        assert.equal(
+          err.matrixRefusal?.path,
+          "headless",
+          `trustRecordExists=${trustRecordExists}일 때 headless로 거부해야 한다`,
+        );
+        return true;
+      },
+    );
+    assert.equal(
+      orcaCalls.length,
+      0,
+      `trustRecordExists=${trustRecordExists}일 때 터미널 생성을 호출하지 않아야 한다`,
+    );
+  }
+});
+
 test("role-terminal CLI allow-unverified 옵션 처리", () => {
   // finding: missing-cli-verification-option
   // ALLOWED_OPTIONS에 allow-unverified가 등록되어 있어야 한다
@@ -1000,6 +1052,36 @@ test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
   assert.equal(env3.trustRecordExists, "unknown");
   assert.equal(env3.skipDangerousModePermissionPrompt, "unknown");
   assert.equal(env3.codexTrustRecordExists, "unknown");
+});
+
+test("trustedWorkspaceMatches: win32은 대소문자·구분자 차이를 정규화하고 다른 플랫폼은 정확 일치를 유지한다", () => {
+  // PM 지시로 판단한 추가 과제(작업 계약 files 목록엔 없음): NTFS는 대소문자를 구분하지 않고
+  // 경로 구분자가 `/`와 `\`로 섞일 수 있으므로, win32에서만 정규화 비교를 적용한다.
+  assert.equal(
+    trustedWorkspaceMatches("C:\\Users\\wt", "c:/Users/wt", "win32"),
+    true,
+    "win32: 대소문자와 구분자 차이를 같은 경로로 인식해야 한다",
+  );
+  assert.equal(
+    trustedWorkspaceMatches("C:/Users/wt/", "C:/Users/wt", "win32"),
+    true,
+    "win32: 끝 구분자 차이를 같은 경로로 인식해야 한다",
+  );
+  assert.equal(
+    trustedWorkspaceMatches("C:/Users/other", "C:/Users/wt", "win32"),
+    false,
+    "win32: 실제로 다른 경로는 여전히 불일치로 판정해야 한다",
+  );
+  assert.equal(
+    trustedWorkspaceMatches("/Users/wt", "/users/wt", "darwin"),
+    false,
+    "darwin: 대소문자 차이를 정규화하지 않고 기존처럼 정확 일치를 유지해야 한다",
+  );
+  assert.equal(
+    trustedWorkspaceMatches("/Users/wt", "/Users/wt", "linux"),
+    true,
+    "linux: 완전히 같은 경로는 여전히 일치해야 한다",
+  );
 });
 
 test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", async () => {

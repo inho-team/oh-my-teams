@@ -179,10 +179,12 @@ const SUPERVISED_TRUST_ACTION =
  * 각 규칙은 `{ match(params): boolean, result: MatrixResult }` 형태입니다.
  *
  * 설계 3절의 표 순서를 그대로 따릅니다(Orca 1.4.210 실측으로 7번을 삭제하고 10번을 확장, #104;
- * 신뢰 기록 없는 Agy·Codex는 supervised-terminal로 바뀌어 감독자가 답함, #105):
- * 복합 명령 Windows Agy → 신뢰 없음(Agy, 감독자가 답함) → 신뢰 없음(Codex, 감독자가 답함) →
+ * 신뢰 기록 없는 Agy·Codex는 supervised-terminal로 바뀌어 감독자가 답함, #105;
+ * Windows Agy는 신뢰 상태를 확인하기 전에 headless로 먼저 걸러냄, #46/agy-win-untrusted-path):
+ * 복합 명령 Windows Agy → Windows Agy(신뢰 상태 무관, headless) →
+ * 신뢰 없음(Agy, 남은 건 POSIX뿐, 감독자가 답함) → 신뢰 없음(Codex, 감독자가 답함) →
  * Claude skipPrompt=false → Claude win32 skipPrompt=true →
- * Agy gemini win32/powershell → Agy win32/powershell(다른 계열) →
+ * Agy gemini win32/powershell(신뢰 있음) → Agy win32/powershell(다른 계열, 신뢰 있음) →
  * Agy POSIX(모델 계열 무관) → Claude POSIX skipPrompt=true →
  * Codex 신뢰 있음 → 나머지
  *
@@ -209,9 +211,45 @@ const MATRIX_RULES = [
       evidence: "source-derived",
     },
   },
+  // 2-1. Agy / win32 / 신뢰 상태가 true로 확인되지 않음(false 또는 unknown) → headless
+  //
+  // #46이 내린 결론은 "Windows의 Agy는 감독 터미널로 시작되지 않는다"이며 신뢰 상태를
+  // 조건으로 달지 않는다. 그런데 옛 순서는 신뢰 기록이 있을 때만 이 결론(규칙 8·9)을
+  // 적용했고, 신뢰 기록이 없거나 확인되지 않으면 플랫폼을 보지 않는 규칙 3(agent-trust-workspace,
+  // supervised-terminal)에 먼저 걸렸다. `role-terminal.mjs`의 `readLaunchEnvironment`는
+  // trustedWorkspaces를 정확 일치로 판정하므로 새로 만든 워크트리는 정의상 항상
+  // trustRecordExists가 false이고, 이 조합은 드문 구멍이 아니라 Windows에서 Agy 역할을
+  // 처음 여는 기본 경로였다. 이 규칙을 규칙 3보다 앞에 두어 신뢰 상태를 확인하기 전에
+  // win32 + agy를 먼저 headless로 걸러낸다.
+  //
+  // 확인한 것: `docs/plan/agy-terminal-path.md`의 2026-09-18 r3-c1 실측(Windows 11,
+  // Orca 1.4.204, Antigravity CLI 1.2.5)은 신뢰 기록이 없는 새 워크트리에서 gemini Agy가
+  // 터미널을 열기도 전에 agent-trust-workspace로 거부됨을 실측으로 확인했다(옛 규칙 순서의
+  // 증상 재현). `docs/plan/headless-runtime.md`의 2026-09-17 Windows 검증은 신뢰 기록이
+  // 없는 새 임시 Git 저장소에서 headless-start로 같은 Agy(gemini) 역할을 실행해, 신뢰
+  // 질문에 막히지 않고 파일 작성과 커밋까지 `done`으로 끝냄을 실측으로 확인했다.
+  // 확인하지 못한 것: 그 headless 검증 워크트리의 trustRecordExists 값이 정확히 false였는지
+  // unknown이었는지(당시 기록은 "임시 Git 저장소"라고만 적었다), headless 프로세스가 신뢰
+  // 질문을 아예 띄우지 않는지 아니면 `--dangerously-skip-permissions`로 넘기는지의 메커니즘,
+  // 그리고 Windows에서 Agy 자체가 trustedWorkspaces에 기록하는 경로 표기. 규칙 8·9와 같은
+  // 이유로(#104: 근거였던 Orca 1.4.204 판정 규칙이 1.4.210에서 교체되었고 재검증할 Windows
+  // 머신이 없음) evidence는 verified로 올리지 않는다.
+  {
+    match: ({ runner, platform, trustRecordExists }) =>
+      runner === "agy" && platform === "win32" && trustRecordExists !== true,
+    result: {
+      path: "headless",
+      reason: ["agy-headless-no-trust"],
+      nextOwner: "-",
+      nextAction:
+        "신뢰 기록이 없거나 확인되지 않아도 Windows의 Agy는 감독 터미널을 열지 않고 headless 경로를 대신 사용합니다.",
+      evidence: "unverified",
+    },
+  },
   // 3. Agy / - / 신뢰 기록 없음 → supervised-terminal
   // 폴더 신뢰 질문은 터미널이 열린 뒤에 화면에 나타나며, 감독자(PM 또는 그 역할을 시작한 PL)가
   // prompt-answer 명령으로 분류기를 거쳐 한 번 답합니다. 사람이 그 터미널에서 답하는 경로가 아닙니다.
+  // win32는 규칙 2-1이 먼저 걸러내므로, 이 규칙은 실질적으로 POSIX(darwin·linux)에만 적용됩니다.
   {
     match: ({ runner, trustRecordExists }) =>
       runner === "agy" && !trustRecordExists,
