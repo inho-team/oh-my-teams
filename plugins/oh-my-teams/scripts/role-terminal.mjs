@@ -34,9 +34,11 @@ import {
 } from "./prompt-supervision.mjs";
 import {
   checkTerminalIdle,
+  findActiveDispatch,
   runOrcaJson,
   selectOrcaExecutable,
 } from "./orca-adapter.mjs";
+import { assertFailureSignal } from "./execution.mjs";
 import {
   predictLaunchPath,
   VERIFIED_ORCA_VERSION,
@@ -1032,17 +1034,29 @@ export function freshContextDecision(launches, request) {
 /**
  * Clears a Claude role terminal's conversation before it is handed new work.
  *
- * The terminal must be idle first, since `/clear` typed into a busy session
- * would wait behind its current turn. After `/clear` the same idle wait runs
- * again, so the task is dispatched only once the cleared session is ready.
+ * A Dispatch left on the terminal is checked for first (#84): a terminal
+ * `worker-list` still shows `dispatched` there holds a Run whose context
+ * `/clear` would drop out from under it, so nothing is sent and the caller is
+ * told which Dispatch and task remain. When that check itself cannot be
+ * decided, `/clear` is skipped rather than guessed, and the caller is told
+ * clearing was skipped rather than refused: the run continues into the same,
+ * uncleared terminal, matching the freshContextDecision it already reached.
+ *
+ * Once no Dispatch is in the way, the terminal must be idle before `/clear` is
+ * typed, since it would otherwise wait behind the current turn. After `/clear`
+ * the same idle wait runs again, so the task is dispatched only once the
+ * cleared session is ready.
  *
  * @param {object} options - Clear options.
  * @param {string} options.terminal - Terminal handle to clear.
  * @param {string} [options.executable] - Orca executable.
  * @param {string} [options.cwd] - Directory the Orca commands run from.
  * @param {Function} [options.execute=run] - Injectable command runner.
- * @returns {Promise<{cleared: true, terminal: string}>} The cleared terminal.
- * @throws {Error} Carrying the idle check's signal when the terminal is not idle.
+ * @returns {Promise<{cleared: boolean, terminal: string, reason?: string}>}
+ *   `cleared: false` with `reason: "active-dispatch-unknown"` when the
+ *   preflight check could not decide; otherwise the cleared terminal.
+ * @throws {Error} Carrying a `not-started` signal when an active Dispatch is
+ *   found, or the idle check's signal when the terminal is not idle.
  */
 export async function clearRoleTerminal({
   terminal,
@@ -1051,6 +1065,32 @@ export async function clearRoleTerminal({
   execute = run,
 }) {
   const orca = selectOrcaExecutable(executable);
+  const activeDispatch = await findActiveDispatch(terminal, {
+    executable: orca,
+    cwd,
+    execute,
+  });
+  if (activeDispatch.status === "active") {
+    const message =
+      `Terminal ${terminal} already has an active dispatch ` +
+      `(${activeDispatch.dispatchId} for task ${activeDispatch.taskId}); not sending /clear so its context is not lost. ` +
+      `Confirm with "orca orchestration worker-show --dispatch ${activeDispatch.dispatchId}", then clear it with ` +
+      `"orca orchestration worker-abandon --dispatch ${activeDispatch.dispatchId}" before starting here again.`;
+    const error = new Error(message);
+    error.signal = assertFailureSignal({
+      kind: "not-started",
+      code: "active_dispatch",
+      message,
+    });
+    error.activeDispatch = {
+      dispatchId: activeDispatch.dispatchId,
+      taskId: activeDispatch.taskId,
+    };
+    throw error;
+  }
+  if (activeDispatch.status === "unknown") {
+    return { cleared: false, terminal, reason: "active-dispatch-unknown" };
+  }
   await checkTerminalIdle(terminal, { executable: orca, cwd, execute });
   await runOrcaJson(
     orca,

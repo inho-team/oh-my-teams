@@ -165,6 +165,94 @@ async function readScreen(orca, terminal, execute) {
 }
 
 /**
+ * Judges a `worker-start` hand-off that came back `ready` without `turn_started`.
+ *
+ * `worker-start` types Orca's own preamble around the approved spec or task
+ * text, not that text itself (confirmed against this task's own start
+ * receipt: the screen held Orca's preamble, never the literal spec), so
+ * `judgeDelivery`'s exact-text comparison would read that preamble as
+ * `foreign-input` and refuse to press Enter on a delivery that is in fact
+ * only unsubmitted. The Dispatch's task id is the one anchor both the
+ * receipt and the screen name unchanged, and Orca's own preamble states it
+ * verbatim (e.g. "Your task ID is: task_..."), so it stands in for the text
+ * match here: Enter follows only when that id turns up inside the input
+ * box's own text, never merely because the box holds something. A box that
+ * holds text naming no task id could be another dispatch's leftover input or
+ * someone typing by hand, so `judgeDelivery`'s `foreign-input` reasoning
+ * still applies to that case; without the exact approved text to compare
+ * against, the anchor either turns up or it does not, and the verdict for
+ * "does not" is `unclear` rather than `foreign-input`, since the caller must
+ * withhold Enter exactly the same way regardless of which is true.
+ *
+ * @param {object} facts - What is known after the start.
+ * @param {string[]} facts.stages - `result.prompt.stages` from the worker receipt.
+ * @param {string[]} [facts.screen] - Screen lines, oldest first.
+ * @param {string | null} [facts.taskId] - The Dispatch's task id, when known.
+ * @returns {{outcome: string, reason: string, enter: boolean}} One of
+ *   `DELIVERY_OUTCOMES` except `foreign-input` and `failed`.
+ */
+export function judgeWorkerStartDelivery({ stages, screen, taskId }) {
+  if ((stages ?? []).includes("turn_started")) {
+    return verdict("submitted", "turn-started");
+  }
+  const line = inputLine(screen);
+  if (!line) return verdict("unclear", "no-input-box-on-screen");
+  if (line.text) {
+    return taskId && squeeze(line.text).includes(squeeze(taskId))
+      ? verdict("unsubmitted", "text-in-box")
+      : verdict("unclear", "text-in-box-without-task-id");
+  }
+  const above = squeeze((screen ?? []).slice(0, line.index).join(""));
+  if (taskId && above.includes(squeeze(taskId))) {
+    return verdict("already-started", "task-id-in-transcript");
+  }
+  return verdict("unclear", "empty-box-without-task-id");
+}
+
+/**
+ * Confirms a `worker-start` hand-off by reading the terminal's screen once
+ * and, when `judgeWorkerStartDelivery` finds the task still sitting
+ * unsubmitted, pressing Enter exactly once.
+ *
+ * @param {object} options - Confirmation options.
+ * @param {string} options.orca - Orca executable.
+ * @param {string} options.terminal - Terminal handle worker-start reused.
+ * @param {string[]} options.stages - `result.prompt.stages` from the worker receipt.
+ * @param {string | null} [options.taskId] - The Dispatch's task id, when known.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<{outcome: string, reason: string, enterSent: boolean, error?: string}>}
+ *   The verdict and whether Enter was sent; `error` keeps Orca's own text when the send failed.
+ */
+export async function confirmWorkerSubmission({
+  orca,
+  terminal,
+  stages,
+  taskId,
+  execute = run,
+}) {
+  const screen = await readScreen(orca, terminal, execute);
+  const judged = judgeWorkerStartDelivery({ stages, screen, taskId });
+  if (!judged.enter) {
+    return { outcome: judged.outcome, reason: judged.reason, enterSent: false };
+  }
+  try {
+    await runOrcaJson(
+      orca,
+      ["terminal", "send", "--terminal", terminal, "--text", "", "--enter"],
+      { execute },
+    );
+    return { outcome: judged.outcome, reason: judged.reason, enterSent: true };
+  } catch (caught) {
+    return {
+      outcome: judged.outcome,
+      reason: judged.reason,
+      enterSent: false,
+      error: caught.message,
+    };
+  }
+}
+
+/**
  * Sends a prompt with Enter and reports whether it was really submitted.
  *
  * The text is sent once, with `--wait-submit`. When the receipt does not prove

@@ -5,6 +5,7 @@ import {
   assertWorkerReceipt,
   assertWorkspaceReceipt,
 } from "./execution.mjs";
+import { confirmWorkerSubmission } from "./prompt-submission.mjs";
 
 /**
  * Neutral routing hints for the codes this Orca contract actually returns.
@@ -729,6 +730,71 @@ export async function checkTerminalIdle(
 }
 
 /**
+ * Looks up whether a terminal already holds a Dispatch nobody has closed.
+ *
+ * `worker-list` is the only source consulted: a terminal's `tui-idle` says
+ * nothing about a Dispatch left dangling on it, and `/clear` on a terminal
+ * still bound to one would drop that Dispatch's context out from under it.
+ * A call that fails, an envelope without a `workers` array, or a Dispatch
+ * whose `dispatchStatus` is neither settled (`completed`, `failed`) nor
+ * confirmed active (`dispatched`) all count as `unknown`, since only the
+ * documented `--status` vocabulary (`task-update --help`) is trusted to mean
+ * settled. A `page.hasMore` truncation with no match on this page counts the
+ * same way, since a later page could still hold the terminal's Dispatch.
+ *
+ * @param {string} terminal - Terminal handle to check.
+ * @param {object} [options={}] - Executable, cwd, and injectable runner.
+ * @param {string} [options.executable] - Orca executable.
+ * @param {string} [options.cwd] - Directory the Orca command runs from.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<{status: "active" | "clear" | "unknown", dispatchId?: string, taskId?: string | null}>}
+ *   `active` names the Dispatch; `clear` means none is bound; `unknown` means
+ *   the terminal's Dispatch could not be determined either way.
+ */
+export async function findActiveDispatch(
+  terminal,
+  { executable, cwd, execute = run } = {},
+) {
+  assert(terminal, "A terminal handle is required");
+  const selected = selectOrcaExecutable(executable);
+  let envelope;
+  try {
+    envelope = await runOrcaJson(
+      selected,
+      ["orchestration", "worker-list", "--limit", "100"],
+      { cwd, execute },
+    );
+  } catch {
+    return { status: "unknown" };
+  }
+  const workers = envelope.result?.workers;
+  if (!Array.isArray(workers)) return { status: "unknown" };
+  const matches = workers.filter(
+    (worker) =>
+      worker.agentTerminalHandle === terminal ||
+      worker.resource?.terminalHandle === terminal,
+  );
+  const active = matches.find(
+    (worker) => worker.dispatchStatus === "dispatched",
+  );
+  if (active) {
+    return {
+      status: "active",
+      dispatchId: active.dispatchId,
+      taskId: active.taskId ?? null,
+    };
+  }
+  const unresolved = matches.some(
+    (worker) => !["completed", "failed"].includes(worker.dispatchStatus),
+  );
+  const pagedPastMatch =
+    matches.length === 0 && envelope.result?.page?.hasMore === true;
+  return unresolved || pagedPastMatch
+    ? { status: "unknown" }
+    : { status: "clear" };
+}
+
+/**
  * Hands a task to a terminal with `dispatch --inject`, outside supervision.
  *
  * This is the exception path for a role whose terminal Orca cannot supervise,
@@ -856,14 +922,18 @@ export async function injectTask(
  *
  * A reused terminal is first checked for `tui-idle`, the condition Orca waits
  * for before injecting, and one that never reports it is refused without
- * calling `worker-start`.
+ * calling `worker-start`. When that same terminal comes back `ready` without
+ * `turn_started`, `confirmWorkerSubmission` (prompt-submission.mjs) reads its
+ * screen once and presses Enter at most once, and the result rides along as
+ * the receipt's `submission` field.
  *
  * @param {string} repo - Worktree the coordinator issues the command from.
  * @param {object} options - Task selection, placement, and launch options.
  * @param {object} [options.matrixPrediction] - Result of `predictLaunchPath` for the reused
  *   terminal, used to attach a `matrix-mismatch` signal when the post-launch refusal contradicts
  *   the predicted `supervised-terminal` path.
- * @returns {Promise<object>} Worker receipt satisfying the execution port.
+ * @returns {Promise<object>} Worker receipt satisfying the execution port, with a `submission`
+ *   field added only for a reused terminal whose `ready` receipt lacked `turn_started`.
  * @throws {Error} When the arguments are invalid, a reused terminal is not
  * idle, or no receipt came back. The thrown error carries a translated
  * `signal` whenever Orca named a cause.
@@ -962,6 +1032,24 @@ export async function startWorker(
   const stage = result.failedStage
     ? `Orca worker-start stopped at stage ${result.failedStage}`
     : undefined;
+  // A reused terminal that Orca reports ready without `turn_started` may
+  // still hold the task unsubmitted at the prompt (#87); a fresh terminal
+  // from `--agent` never showed this, so only the reused-terminal path is
+  // confirmed here, mirroring the `--terminal`-only idle check above.
+  let submission;
+  if (
+    terminal &&
+    ready &&
+    !(result.prompt?.stages ?? []).includes("turn_started")
+  ) {
+    submission = await confirmWorkerSubmission({
+      orca: selected,
+      terminal,
+      stages: result.prompt?.stages ?? [],
+      taskId: result.taskId ?? null,
+      execute,
+    });
+  }
   return assertWorkerReceipt({
     executable: selected,
     discovery,
@@ -978,6 +1066,7 @@ export async function startWorker(
     failure: ready
       ? null
       : translateUnverifiableState(result.state, result.lastError ?? stage),
+    ...(submission ? { submission } : {}),
   });
 }
 
