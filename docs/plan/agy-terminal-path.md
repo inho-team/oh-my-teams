@@ -355,3 +355,49 @@ function Maa(e){return e===`>`||/^>\s+[a-z][a-z-]*\s+mode:\s/i.test(e)}
 
 에이전트 식별도 화면 문자열이 아니라 `antigravity:{detectCmd:"agy", …}`처럼 실행 명령을 기준으로 삼는다.
 
+## launch-matrix 규칙 순서 수정 (2026-09-26, `agy-win-untrusted-path`)
+
+`launch-matrix.mjs`의 규칙 순서가 플랫폼을 보지 않는 규칙 3(`runner==="agy" && !trustRecordExists` →
+`supervised-terminal`)을 win32 전용 규칙 8·9(`headless`)보다 먼저 평가했다. 새로 만든 워크트리는
+정의상 항상 신뢰 기록이 없으므로(`readLaunchEnvironment`는 정확 일치로 신뢰를 판정한다), 이
+구멍은 Windows에서 Agy 역할을 처음 여는 기본 경로에 걸렸고 「기준 9 실측 결과」 절의 `r3-c1`
+행이 그 증상을 실측으로 확인한 바 있다(새 워크트리, Agy 신뢰 없음, `role-terminal`이 터미널
+생성 전 `[agent-trust-workspace]`로 거부). 이는 「#46 판정」 절의 결론("Windows에서 Agy Gemini
+역할의 감독 터미널 경로는 사용할 수 없다")과 모순되는 동작이었다.
+
+규칙 2와 3 사이에 `runner === "agy" && platform === "win32" && trustRecordExists !== true` →
+`headless` 규칙(2-1)을 추가해, 신뢰 상태를 확인하기 전에 win32 + agy를 먼저 걸러내도록
+고쳤다. `!trustRecordExists`(엄격 false만 잡음) 대신 `trustRecordExists !== true`를 조건으로
+써서, `trustRecordExists === "unknown"`인 경우도 명시적으로 headless로 보낸다(기존에는 문자열
+`"unknown"`이 truthy라서 규칙 8·9의 `&& trustRecordExists` 체크를 우연히 통과했을 뿐, 의도가
+코드에 드러나 있지 않았다).
+
+**확인한 것**: `docs/plan/headless-runtime.md`의 2026-09-17 Windows 검증은 신뢰 기록이 없는
+새 임시 Git 저장소에서 `headless-start`로 Agy(gemini) 역할을 실행해, 신뢰 질문에 막히지 않고
+파일 작성과 커밋까지 `done`으로 끝냄을 실측으로 확인했다.
+
+**확인하지 못한 것**: 그 headless 검증 워크트리의 `trustRecordExists` 값이 정확히 `false`였는지
+`unknown`이었는지(당시 기록은 "임시 Git 저장소"라고만 적었다), headless 프로세스가 신뢰 질문을
+아예 띄우지 않는지 아니면 `--dangerously-skip-permissions`로 넘기는지의 메커니즘, Windows에서
+Agy 자체가 trustedWorkspaces에 기록하는 경로 표기. 규칙 8·9와 같은 이유로(근거였던 Orca
+1.4.204 판정 규칙이 위 「Orca 1.4.210 재실측」 절에서 교체된 것이 확인되었고, 재검증할 Windows
+머신이 없음) 새 규칙의 `evidence`는 `verified`로 올리지 않고 `unverified`로 남긴다.
+
+### PM 지시로 판단한 추가 과제: `role-terminal.mjs`의 신뢰 기록 경로 비교(제거함)
+
+작업 계약 files 목록에는 없으나 PM이 명시적으로 범위를 확장해 판단을 지시했다. `readLaunchEnvironment`가
+`trusted.some((t) => String(t) === worktreePath)`로 신뢰 기록을 정확 일치 비교하던 부분을 검토했다.
+
+처음에는 win32에서만 대소문자·구분자를 정규화하는 `trustedWorkspaceMatches` 헬퍼를 구현했으나,
+독립 검토(`review-agy-win-1`, finding `trust-normalization-speculative-scope`)에서 최소 변경
+규율을 근거로 되돌리도록 판정받아 제거했다(`role-terminal.mjs`를 기준 커밋과 같게 되돌리고,
+관련 단위 테스트도 제거했다).
+
+**되돌린 이유**: 위 규칙 2-1이 이미 win32 + agy의 실행 경로 결정을 `trustRecordExists` 값과
+무관하게 만들었으므로, 이 정규화는 판정 결과를 하나도 바꾸지 않고 진단·로그 목적에만 기여했다.
+Windows에서 Agy가 실제로 `trustedWorkspaces`에 기록하는 경로 표기(대소문자·구분자)도 확인하지
+못한 채 만든 방어적 확장이었고, 같은 파일을 동시에 고치는 `fix/terminal-delivery-judgment`
+브랜치와의 병합 충돌 위험만 늘렸다. 경로 표기 차이(대소문자·구분자) 문제는 규칙 2-1로 판정
+결과에서 분리되었으므로 정규화를 두지 않았다. 앞으로 win32에서 신뢰 기록 값에 따라 갈리는
+규칙이 생기면 그때 정규화를 다시 판단한다.
+
