@@ -1,6 +1,6 @@
 ---
 name: roadmap
-description: 로드맵을 읽고 phase 정본을 갱신하는 절차를 담는다. 작성 규칙은 reference에만 정의되어 있으며 스킬 문서에는 링크로만 가리킨다.
+description: 로드맵을 읽고 phase 정본을 갱신하는 절차를 담는다. phase의 실제 구현이나 kickoff 진행은 다루지 않으며, 그 작업은 kickoff 스킬을 사용한다.
 ---
 
 # 로드맵
