@@ -7,6 +7,7 @@ import path from "node:path";
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   PERMISSION_BYPASS,
+  kickoffBriefPrompt,
   roleCommand,
 } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import {
@@ -16,6 +17,7 @@ import {
   commandTyping,
   freshContextDecision,
   launchLine,
+  locateCommand,
   openRoleTerminal,
   roleTitle,
   trustQuestion,
@@ -1012,6 +1014,66 @@ test("role-terminal CLI --brief 옵션 등록과 PM 전용 제약 (#86)", async 
       ]),
     /--brief.*pm/s,
   );
+});
+
+test("--brief로 연 터미널이 이미 첫 턴을 마친 화면에서도 ready 판정과 모델 대조가 끝난다 (#86)", async () => {
+  // finding: missing-fake-orca-regression-for-brief-launch-readiness
+  // 실측(2026-09-26, Claude Code v2.1.283, role-terminal --brief 실행 1회):
+  // openRoleTerminal이 settle() 뒤 화면을 읽었을 때, 첫 프롬프트 인자로 실은
+  // brief 지시는 이미 처리를 마친 상태(AGENTS.md를 읽고 응답한 뒤 입력창이
+  // 다시 비어 있는 상태)였다. 이 화면에는 셸이 typed한 명령 원문이 전혀
+  // 남아 있지 않아 locateCommand가 그 명령을 찾지 못했고, 화면은 배너 +
+  // 이미 끝난 첫 턴 + 빈 입력줄(`❯`)로 완전히 다시 그려져 있었다. 이 회귀
+  // 테스트는 그 화면을 그대로 재현해 ready 판정과 모델 대조가 이 경로에서
+  // 깨지지 않음을 고정한다.
+  const briefPath = "/tmp/omt-86-verify/brief.md";
+  const org = example();
+  // 실측과 같은 provider·모델(Claude, opus)로 맞춘다. example org의 기본
+  // pm 프로필은 model을 지정하지 않으므로, 대조 대상이 있도록 여기서만 채운다.
+  org.profiles["claude-current"].model = "opus";
+  const command = roleCommand(org, "pm", {
+    firstPrompt: kickoffBriefPrompt(briefPath),
+  });
+  assert.equal(command.modelRequested, "opus");
+
+  // 실제 관찰 화면(경로만 테스트 고정값으로 맞춤). 셸의 명령 echo는 전혀
+  // 없고, Claude Code 자신의 배너와 이미 완료된 첫 턴만 보인다.
+  const observedScreen = [
+    " ▐▛███▛█   Claude Code v2.1.283",
+    "▝▜██████▀  Opus 5.5 · Claude Max",
+    " ▝▝   ▝▝   ~/orca/workspaces/oh-my-teams/tdj-t6-handoff",
+    `❯ 인수 브리프 ${briefPath}를 읽고, 그 안에 확정된 목표로 Goal을 만들어 kick`,
+    "  off-bind까지 진행하십시오.",
+    "⏺ agents-md: no CLAUDE.md found; AGENTS.md loaded:",
+    "  /Users/jinsungkim/orca/workspaces/oh-my-teams/tdj-t6-handoff/AGENTS.md",
+    "  Read 1 file",
+    "⏺ 브리프 확인 완료",
+    "✻ Churned for 7s · done 4:02 PM",
+    "─".repeat(80),
+    "❯",
+    "─".repeat(80),
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent",
+  ];
+  const orca = fakeOrca([observedScreen]);
+  const opened = await openRoleTerminal({
+    worktree: "id:repo::/tmp/wt",
+    command,
+    execute: orca.execute,
+    ...fast,
+  });
+  // 명령을 화면에서 다시 찾지 못하는 경로(fully-redrawn TUI)를 지난다는
+  // 것을 먼저 확인한다: 그렇지 않다면 이 테스트는 실측 상황을 재현하지
+  // 못한 채 통과할 수 있다.
+  assert.equal(locateCommand(observedScreen, typedFor(command)), null);
+  assert.equal(opened.ready, true);
+  assert.equal(opened.submission, "orca");
+  assert.equal(opened.trust, "not-asked");
+  assert.equal(opened.status, undefined);
+  // screenCheck: "required"이 요구하는 모델 대조: 화면에 요청한 모델 이름이
+  // 여전히 남아 있어야 호출자가 대조할 수 있다.
+  assert.equal(opened.modelRequested, "opus");
+  assert.ok(opened.screen.some((line) => line.includes("Opus 5.5")));
+  assert.deepEqual(orca.sends(), []);
 });
 
 test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {

@@ -85,9 +85,14 @@ export const FIRST_PROMPT_ARG = Object.freeze({
  * The wording is the runtime's, not the caller's: a caller supplies only the
  * brief path, so no free text can ride into a role terminal's launch
  * argument. Passed through {@link roleCommand}'s `firstPrompt`, this becomes
- * part of the command the terminal is created with, so Claude Code or Codex
- * reads it as the session's own initial instruction rather than as
- * terminal-typed text a user must separately ask it to act on (#86).
+ * part of the command the terminal is created with. Confirmed for Claude Code
+ * (v2.1.283, observed 2026-09-26 through `role-terminal --brief`): the
+ * session's first user message carries this text with `promptSource:
+ * "typed"` and no `<pasted_content>` wrapping, so Claude Code reads it as the
+ * session's real initial instruction rather than terminal-typed text a user
+ * must separately ask it to act on (#86). Codex and Agy were confirmed only by
+ * `--help` to accept a first-prompt argument; how that argument displays
+ * inside their own session has not been observed.
  *
  * @param {string} briefPath - Absolute path to the confirmed brief file.
  * @returns {string} The PM's first prompt.
