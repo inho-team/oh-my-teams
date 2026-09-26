@@ -17,13 +17,17 @@ import {
   parseModelChoice,
   draftOrganization,
 } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
-import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
+import {
+  roleCommand,
+  roleSpec,
+} from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import { PROMPT_ANSWER_REFUSALS } from "../plugins/oh-my-teams/scripts/prompt-supervision.mjs";
 import { removedSkillNames } from "./removed-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const examples = path.join(root, "plugins/oh-my-teams/examples");
 const skills = path.join(root, "plugins/oh-my-teams/skills");
+const references = path.join(root, "plugins/oh-my-teams/references");
 
 const readSkill = (name) =>
   fs.readFileSync(path.join(skills, name, "SKILL.md"), "utf8");
@@ -1287,4 +1291,46 @@ test("pm, pl and status skills route a stopped role's question through the super
   assert.match(readSkill("pm"), /`director-signal`로 이사에게 알린다/);
   assert.match(readSkill("pl"), /다른 PL의 하위 역할이나 PM의 워크트리 터미널/);
   assert.match(readSkill("status"), /`promptAnswers`/);
+});
+
+test("roadmap canon exists and has one official source", () => {
+  const canonicalPath = path.join(references, "roadmap.md");
+  assert.ok(
+    fs.existsSync(canonicalPath),
+    "plugins/oh-my-teams/references/roadmap.md must exist as the single source of truth",
+  );
+});
+
+test("roleSpec header injects roadmap reference into all role instructions", () => {
+  const org = readJSON(path.join(examples, "organization.json"));
+
+  const roadmapRefPath = path.join(references, "roadmap.md");
+  for (const role of ["pm", "pl", "senior", "junior"]) {
+    const spec = roleSpec(org, role, "# 작업\n\n테스트", {
+      orgFile: "/project/.omt/organization.json",
+    });
+    assert.ok(
+      spec.includes(`로드맵 규칙: ${roadmapRefPath}`),
+      `${role} specification header must inject the roadmap reference`,
+    );
+  }
+});
+
+test("each role skill links to roadmap reference", () => {
+  const roadmapRef = "../../references/roadmap.md";
+  const roles = {
+    director: true,
+    pm: true,
+    pl: true,
+    senior: true,
+    junior: true,
+  };
+
+  for (const role of Object.keys(roles)) {
+    const text = readSkill(role);
+    assert.ok(
+      text.includes(roadmapRef),
+      `${role} skill must link to roadmap reference`,
+    );
+  }
 });

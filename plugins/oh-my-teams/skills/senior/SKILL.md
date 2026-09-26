@@ -38,6 +38,8 @@ Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제
 
 ## 설계와 검토
 
+로드맵이나 phase 초안을 설계·검토할 때는 [`../../references/roadmap.md`](../../references/roadmap.md)의 규칙을 따르고, 구현이나 파일 경로 지정이 들어갔는지 판정하며, 들어갔으면 반려한다.
+
 검토에서 [불필요한 변경을 줄이는 규율](../../references/minimal-change.md)을 적용한다. 다음 다섯 가지를 finding 대상으로 삼는다: 요청하지 않은 리팩터링·이름 변경·포맷 변경, 변경 줄 밖의 정리, 추측성 확장(구현이 하나뿐인 추상화·아무도 설정하지 않는 설정값), 이미 있는 helper의 재구현, 요청하지 않은 주석·scaffolding. finding은 `examples/review.json`의 `criterion`·`finding` 형식을 그대로 쓰고 새 필드를 만들지 않는다.
 
 Senior는 보조 도구를 대안 탐색, 반례 수집과 검토 초안 작성에 쓸 수 있다. 그 결과는 구현 지시나 승인이 아니며, Senior가 의미와 근거를 검증한 뒤 자신의 판단으로 확정한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.

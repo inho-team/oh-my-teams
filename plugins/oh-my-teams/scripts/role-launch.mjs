@@ -580,6 +580,7 @@ export function roleSpec(
     // fixed set of values keeps the first line from claiming unverified success.
     "보고는 두괄식으로 쓴다. 첫 줄은 `완료`·`부분 완료`·`실패`·`차단` 가운데 확인한 증거가 받쳐 주는 판정과 그 근거 하나로 시작하고, 보고 대상이 내릴 결정이 있으면 둘째 줄에 적은 뒤 상세를 쓴다. 하위 역할에게 보내는 지시는 목표와 완료 조건을 먼저 쓴다.",
     `두괄식 기준 전문: ${path.join(referencesDir, "bluf.md")}`,
+    `로드맵 규칙: ${path.join(referencesDir, "roadmap.md")}`,
     "",
     readRoleCharter(role),
     "",

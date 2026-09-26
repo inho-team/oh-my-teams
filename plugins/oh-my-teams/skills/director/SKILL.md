@@ -51,6 +51,8 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 
 이후 이사는 조회와 종료를 담당하는 관제 자리로 남는다. Goal을 만들지 않고 Run도 바인딩하지 않는다.
 
+로드맵을 작성하거나 갱신할 때는 [`../../references/roadmap.md`](../../references/roadmap.md)가 정한 규칙을 따른다.
+
 ## 신호 수신과 결정
 
 PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]`로 이사에게 신호를 보낸다. 이사는 다음 명령으로 신호를 처리한다.
