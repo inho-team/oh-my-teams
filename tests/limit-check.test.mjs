@@ -14,6 +14,7 @@ import {
   classifyLimitRecord,
   findProviderSession,
   readScreenLimit,
+  readScreenOverload,
   workerLimitCheck,
 } from "../plugins/oh-my-teams/scripts/limit-check.mjs";
 import { classifyFailure } from "../plugins/oh-my-teams/scripts/failures.mjs";
@@ -233,6 +234,84 @@ test("a Claude worker's limit counts only while it is the last message", async (
     (await workerLimitCheck({ provider: "claude", worktree, homes })).verdict,
     "none",
   );
+});
+
+test("readScreenOverload finds Claude's 529 sentence only near the bottom of the screen", () => {
+  assert.equal(
+    readScreenOverload(["some earlier output", "API Error: 529 Overloaded"]),
+    true,
+  );
+  assert.equal(readScreenOverload(["Ready for input."]), false);
+  assert.equal(
+    readScreenOverload([
+      "API Error: 529 Overloaded",
+      ...Array.from({ length: 60 }, (_, index) => `line ${index}`),
+    ]),
+    false,
+  );
+});
+
+test("readScreenOverload is not fooled by a stale 529 line once a new turn has since produced output", () => {
+  // A supervisor already resent "계속" and the new turn is partway through
+  // producing output; the 529 sentence is still inside the 40-line window,
+  // but it is no longer what the screen currently ends on.
+  assert.equal(
+    readScreenOverload([
+      "API Error: 529 Overloaded",
+      "> 계속",
+      "새 턴의 출력 일부",
+    ]),
+    false,
+  );
+  // The turn is still running with no idle input box shown yet.
+  assert.equal(
+    readScreenOverload(["API Error: 529 Overloaded", "Thinking..."]),
+    false,
+  );
+});
+
+test("readScreenOverload still judges true when the screen only returned to its own idle prompt", () => {
+  // Claude Code redraws its empty input box once the turn ends; that alone is
+  // not new output, so the screen still ends on the 529 error.
+  assert.equal(readScreenOverload(["API Error: 529 Overloaded", "❯ "]), true);
+  assert.equal(
+    readScreenOverload(["API Error: 529 Overloaded", "──────", "❯"]),
+    true,
+  );
+});
+
+test("a Claude worker whose screen ends on the 529 error is reported without becoming a capacity retry", async (t) => {
+  const { worktree, homes } = box(t);
+  const overloaded = await workerLimitCheck({
+    provider: "claude",
+    worktree,
+    homes,
+    readScreen: async () => ["> continue", "API Error: 529 Overloaded"],
+  });
+  assert.equal(overloaded.source, "screen");
+  assert.equal(overloaded.overload, true);
+  // A 529 turn is reported upward, never turned into an automatic same-profile
+  // retry the way a capacity verdict would be.
+  assert.equal(overloaded.verdict, "none");
+
+  const clear = await workerLimitCheck({
+    provider: "claude",
+    worktree,
+    homes,
+    readScreen: async () => ["Ready for input."],
+  });
+  assert.equal(clear.overload, false);
+});
+
+test("the 529 sentence is only judged for Claude, per the task's provider scope", async (t) => {
+  const { worktree, homes } = box(t);
+  const codexScreen = await workerLimitCheck({
+    provider: "codex",
+    worktree,
+    homes,
+    readScreen: async () => ["API Error: 529 Overloaded"],
+  });
+  assert.equal("overload" in codexScreen, false);
 });
 
 test("an Agy worker is found by its brief and handed off only after its last retry", async (t) => {

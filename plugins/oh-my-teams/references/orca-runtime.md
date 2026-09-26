@@ -290,9 +290,9 @@ node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <
 
 대기 시간이 끝난 것은 완료나 실패의 근거가 아니지만, 아무것도 하지 않고 다시 기다리는 근거도 아니다. 감독 역할(PM, PL)은 대기 시간을 조직의 `policy.supervision.progressCheckMs`로 두고, 제한 시간이 지날 때마다 `worker_done`을 보내지 않은 worker 각각에 대해 다음을 수행한다. 값이 없는 조직은 기본값 15분(`900000`)과 `unansweredLimit` 2를 쓴다.
 
-1. `worker-list`로 liveness를, `worker-show --dispatch <id>`로 `observation.agentWait`를 조회한다.
-2. 관측 파일에 다음을 적어 `node <runtime> supervision-next --org <organization.json> --observation <observation.json>`을 실행한다. 마지막 heartbeat, 메시지, 출력 변화 가운데 가장 최근 시각은 `lastActivityAt`, 그 뒤로 답을 받지 못한 진행 요청 수는 `unansweredRequests`, 그 뒤로 수행한 확인 횟수는 `inspections`, 이 정체를 이미 상위에 보고했으면 그 시각은 `escalatedAt`, 그때 보고한 `reason`은 `escalatedReason`이다. 새 활동이 관측되면 세 값을 비운다. 진행 요청과 확인을 합한 횟수가 `unansweredLimit`에 이르면 보고로 넘어가므로, 상태를 확인할 수 없는 worker도 무한히 확인만 반복하지 않는다.
-3. 결과의 `action`대로 행동한다.
+1. `worker-list`로 liveness를, `worker-show --dispatch <id>`로 `observation.agentWait`를 조회한다. worker의 provider가 `claude`이면 대기 주기마다 아래 「사용 한도 handoff」 1단계의 `worker-limit-check`를 `--terminal <handle>`과 함께 실행해 `overload` 값도 함께 조회한다. `verdict`나 `inspect`/`escalate` 단계를 기다리지 않고 매 주기 확인하는 이유는, 이 정체 하나만 대기 시간을 다 채우고서야 보고되는 것을 막기 위해서이다.
+2. 관측 파일에 다음을 적어 `node <runtime> supervision-next --org <organization.json> --observation <observation.json>`을 실행한다. 마지막 heartbeat, 메시지, 출력 변화 가운데 가장 최근 시각은 `lastActivityAt`, 그 뒤로 답을 받지 못한 진행 요청 수는 `unansweredRequests`, 그 뒤로 수행한 확인 횟수는 `inspections`, 이 정체를 이미 상위에 보고했으면 그 시각은 `escalatedAt`, 그때 보고한 `reason`은 `escalatedReason`이다. 1단계에서 조회한 `overload`가 `true`이면 `providerOverload`에 그대로 옮긴다. 새 활동이 관측되면 세 값을 비운다. 진행 요청과 확인을 합한 횟수가 `unansweredLimit`에 이르면 보고로 넘어가므로, 상태를 확인할 수 없는 worker도 무한히 확인만 반복하지 않는다.
+3. 결과의 `action`대로 행동한다. `providerOverload`가 `true`이면 무응답 시간이나 진행 요청 횟수와 무관하게 곧바로 `escalate`가 되며, `reason`은 `provider-overloaded`이다.
 
 | action         | 행동                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -302,6 +302,8 @@ node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <
 | `escalate`     | `worker-read`의 제한된 출력, liveness, 무응답 시간과 보낸 요청을 증거로 붙여 상위에 보고한다. PL은 `orchestration send --type escalation`으로 PM에게, PM은 사용자에게 보고한다. `failureClassify`가 `true`이면 그 증거로 `failure-classify`를 실행한다. 보고한 시각을 `escalatedAt`으로, 판정의 `reason`을 `escalatedReason`으로 기록한다. 같은 종료나 같은 입력 대기는 다시 보고하지 않고, 보고한 뒤 사실이 바뀌었을 때만 다시 보고한다. |
 
 `escalate`의 `reason`이 `waiting-on-human-prompt`이면 사람을 기다리지 않고 먼저 `worker-read`로 화면을 확인한다. 화면이 폴더 신뢰처럼 캡처된 질문이면 「프롬프트 질문 답하기」 절의 `prompt-answer`로 감독자가 답하고 `terminal-idle-check`부터 다시 진행한다. 명령 승인처럼 분류기가 알아보지 못하는 화면은 `prompt-answer`가 키 없이 `escalate`로 끝낸다. 그 명령이 `escalate`나 `unresolved`를 돌려주거나 감독자 확인에서 거부되었을 때, 또는 사람이 정해야 하는 질문일 때에는 위 표의 `escalate` 행이 아니라 「프롬프트 질문 답하기」 절의 「사람이 필요한 경우」를 따른다. PL은 PM에게 `escalation`을 보내고, PM은 사람이 정해야 하는 것에 한해 `director-signal`로 이사에게 알린다.
+
+`escalate`의 `reason`이 `provider-overloaded`이면 worker의 터미널 화면이 Claude의 `API Error: 529 Overloaded`로 끝난 채 다음 입력을 기다리고 있다. 감독 역할은 "계속"이나 그와 같은 뜻의 입력을 자동으로 다시 보내지 않는다. 같은 요청을 두 번 보내지 않는 제약과, 529 직후의 turn이 어디까지 진행되었는지는 화면만으로 판정할 수 없다는 사정 때문이다. PL은 PM에게 `escalation`을 보내고, PM은 `director-signal`로 이사에게 알린다. 다시 보낼지는 보고를 받은 쪽이 정한다.
 
 이 판정은 재시도나 종료를 결정하지 않는다. 종료와 재시도는 위 「worker-start 실패 복구」와 `failure-classify` 결과를 따른다. `unverifiable` worker는 살아 있다고 간주하지 않고 확인이나 보고로 보낸다. 사용자에게 상태를 알릴 때 무응답 worker는 `진행 중`이 아니라 결과의 `display`대로 `무응답 N분`으로 적는다.
 
@@ -328,6 +330,8 @@ worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 
    | `wait`    | provider가 아직 스스로 재시도하고 있다. 아무것도 하지 않고 다음 감독 주기에 다시 판정한다.                                                                                    |
    | `none`    | 한도로 끝나지 않았다. 무응답 감독 절차를 그대로 따른다.                                                                                                                       |
    | `unknown` | 세션 기록도 화면도 읽지 못했다. 한도로 추정하지 않고 무응답 감독의 `inspect`나 `escalate`로 보낸다.                                                                           |
+
+   provider가 `claude`이고 화면을 읽었으면(`--terminal`을 넘겼으면) 결과에 `overload` 값이 함께 온다. 이 값은 `verdict`와 별개이며 `verdict`가 `none`이어도 `true`일 수 있다. Claude의 `API Error: 529 Overloaded`는 provider의 용량 부족(`retry`, 잠시 뒤 같은 프로필로 자동 재시도)과 다른 경로를 타야 하므로 `verdict`에 섞이지 않는다. `overload`가 `true`이면 이 단계가 아니라 위 「무응답 worker 감독」 1단계로 돌아가 `providerOverload`를 관측 파일에 옮긴다. Director는 PM의 화면도 같은 문장으로 판정하므로, `director-watch` 결과의 kickoff마다 `providerOverload`가 `provider-overloaded`/`none`/`unknown` 가운데 하나로 함께 온다.
 
 3. **정산:** 한도에 걸린 터미널을 「worker-start 실패 복구」의 2단계대로 `worker-stop`으로 멈추고, 종료를 확인하지 못하면 `worker-abandon`으로 봉인한다. 워크트리와 커밋은 지우지 않는다. 이어서 현재 attempt를 `workflow-settle`로 `failed` 정산한다. `failure`에는 `kind: "rate-limited"`, `limitKind: "usage-limit"`, 판정 결과를 옮긴 `message`와 `evidence`를 적는다. headless worker는 결과의 `outcome`이 `rate-limited`이고 `limitKind`가 함께 보고되므로, 그 값을 그대로 옮긴다.
 4. **경로 확인:** 정산한 task의 `failure.route.category`가 `capacity-handoff`이면 5단계로 간다. 조직 정책(`policy.onExhaustion`)이 `stop`이거나 남은 fallback이 없으면 `quota-exhausted`가 되며, 이때에는 handoff하지 않고 판정 결과의 `limit.resetsAt` 또는 `limit.resetsIn`을 붙여 이사에게 `blocked`로 보고한다.

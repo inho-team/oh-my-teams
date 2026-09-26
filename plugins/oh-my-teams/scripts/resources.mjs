@@ -20,7 +20,14 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
-import { listInbox, processLiveness } from "./director.mjs";
+import {
+  findPmLaunch,
+  findPmTerminal,
+  listInbox,
+  processLiveness,
+} from "./director.mjs";
+import { readTerminalScreen } from "./prompt-submission.mjs";
+import { readScreenOverload } from "./limit-check.mjs";
 
 /** Resource kinds that may be acquired. */
 export const RESOURCE_KINDS = Object.freeze(["test", "worker", "build"]);
@@ -295,16 +302,60 @@ export async function queryPmLiveness(entry, orcaExecutable, execute = run) {
   }
 }
 
+// The Director does not watch the PM's screen directly, so the same Claude
+// 529 sentence `readScreenOverload` reads off a worker's screen is read here
+// off the PM's own terminal instead, found the same way `replySignal` finds
+// it (`findPmTerminal`, reused rather than re-derived from the launch
+// ledger). The sentence is Claude's own error text, so it is read only when
+// `findPmLaunch` shows the PM's own launch record confirms `provider ===
+// "claude"`; the organization's current `pm` profile is not evidence of this,
+// because a fallback can move the PM to `codex` or `agy` after that launch.
+// A terminal that cannot be found, a screen `readTerminalScreen` cannot
+// confirm is the live screen, or any failure along the way (an Orca call
+// that cannot be parsed, the same failure `queryPmLiveness` guards against)
+// leaves the verdict "unknown": none of these is evidence the PM is or is
+// not overloaded, so none is reported as one, and none is allowed to fail
+// the rest of `directorWatch`.
+async function pmProviderOverload(orgFile, entry, options) {
+  try {
+    const launch = findPmLaunch(orgFile, entry.pm.path);
+    if (launch?.provider !== "claude") return "unknown";
+    const orcaExecutable = options.orcaExecutable ?? "orca";
+    const terminal = await findPmTerminal(orgFile, entry.pm.path, {
+      orcaExecutable,
+      listTerminals: options.listTerminals,
+    });
+    if (!terminal) return "unknown";
+    const screen = await readTerminalScreen(
+      orcaExecutable,
+      terminal,
+      options.execute,
+    );
+    if (!screen.ok) return "unknown";
+    return readScreenOverload(screen.lines) ? "provider-overloaded" : "none";
+  } catch {
+    return "unknown";
+  }
+}
+
 /**
  * Summarises signals, resource slots, free memory, and PM liveness together.
  *
  * PM liveness queries that fail are preserved as `"unverifiable"` rather than
- * concluded as alive or terminated.
+ * concluded as alive or terminated. `providerOverload` is `"provider-overloaded"`
+ * only when the PM's own launch record confirms it runs `claude` and its
+ * terminal screen was read and ends on Claude's 529 overloaded error,
+ * `"none"` when the provider is confirmed `claude` and that screen was read
+ * but does not, and `"unknown"` otherwise: the provider is not confirmed
+ * `claude`, the PM's terminal could not be found, its screen could not be
+ * read, or the lookup itself failed.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {object} [options] - Optional overrides.
  * @param {string} [options.orcaExecutable] - Orca binary path.
  * @param {Function} [options.freeMemory] - Injectable free-memory reporter.
+ * @param {Function} [options.listTerminals] - Injectable async Orca terminal lister, for tests.
+ * @param {Function} [options.execute] - Injectable command runner for the PM screen read.
  * @returns {Promise<object>} Watch report with signals, slots, memory, and kickoffs.
  */
 export async function directorWatch(orgFile, options = {}) {
@@ -321,6 +372,11 @@ export async function directorWatch(orgFile, options = {}) {
       );
       const pmSlots = slots.filter((s) => s.worktreeId === entry.pm.worktreeId);
       const liveness = await queryPmLiveness(entry, options.orcaExecutable);
+      const providerOverload = await pmProviderOverload(
+        orgFile,
+        entry,
+        options,
+      );
       return {
         worktreeId: entry.pm.worktreeId,
         goal: entry.goal,
@@ -328,6 +384,7 @@ export async function directorWatch(orgFile, options = {}) {
         signals: pmSignals,
         slots: pmSlots,
         pmLiveness: liveness,
+        providerOverload,
       };
     }),
   );

@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { assert } from "./core.mjs";
 import { RESET_IN_PATTERN } from "./providers/shared.mjs";
+import { inputLine, SEPARATOR_ROW } from "./prompt-submission.mjs";
 
 /** Providers whose session records this module can read. */
 export const LIMIT_PROVIDERS = Object.freeze(["claude", "codex", "agy"]);
@@ -351,6 +352,58 @@ export function readScreenLimit(provider, lines) {
   return { verdict: "none", limit: null };
 }
 
+const OVERLOAD_SCREEN_PATTERN = /API Error: 529 Overloaded/;
+
+// Rows are treated as carrying no new turn once they are blank or, per
+// SEPARATOR_ROW, drawn only from rule/box characters; anything else after the
+// 529 line is a sign the turn moved on.
+function decorativeOnly(rows) {
+  return rows.every((row) => !row || SEPARATOR_ROW.test(row));
+}
+
+/**
+ * Reads Claude's own 529 overloaded error from the bottom of a terminal screen.
+ *
+ * The sentence is Claude's own error text and no other provider prints it, so
+ * this takes no provider argument the way {@link readScreenLimit} does. The
+ * verdict is kept out of that function's capacity routing on purpose: a
+ * capacity verdict there resolves to `retry`, an automatic same-profile retry,
+ * but a turn that ended on a 529 cannot be judged safe to resend without
+ * seeing how far the turn got, so it is reported upward instead of resent
+ * (see references/orca-runtime.md, "무응답 worker 감독").
+ *
+ * A 529 sentence still on screen does not by itself mean the turn is still
+ * stuck there: the window keeps the last {@link SCREEN_LINES} rows regardless
+ * of how much happened since, so the sentence can be true but stale. This is
+ * only true when nothing after the last 529 line shows a new turn already
+ * running: `inputLine` (prompt-submission.mjs) locates the screen's own idle
+ * input box, reused rather than re-derived here, and an empty box with
+ * nothing but decoration around it means the screen never moved past the
+ * error. An input box holding text, any row of new output between the error
+ * and that box, or no box at all while non-decorative rows follow the error,
+ * each mean the turn has since produced something the caller has not seen.
+ *
+ * @param {string[]} lines - Screen lines, oldest first.
+ * @returns {boolean} Whether the screen still ends, with nothing new since,
+ *   on Claude's 529 overloaded error.
+ */
+export function readScreenOverload(lines) {
+  const rows = lines.slice(-SCREEN_LINES).map((line) => line.trim());
+  const overloadAt = rows.findLastIndex((row) =>
+    OVERLOAD_SCREEN_PATTERN.test(row),
+  );
+  if (overloadAt === -1) return false;
+  const box = inputLine(rows);
+  if (box && box.index > overloadAt) {
+    return (
+      !box.text &&
+      decorativeOnly(rows.slice(overloadAt + 1, box.index)) &&
+      decorativeOnly(box.below)
+    );
+  }
+  return decorativeOnly(rows.slice(overloadAt + 1));
+}
+
 /**
  * Checks whether a terminal worker stopped on a usage limit.
  *
@@ -361,7 +414,10 @@ export function readScreenLimit(provider, lines) {
  * @param {string} [options.workflowTask] - Workflow task ID, used to find Agy sessions.
  * @param {() => Promise<string[]>} [options.readScreen] - Reads the worker's screen when no session log is found.
  * @param {object} [options.homes] - Provider homes.
- * @returns {Promise<object>} Verdict, limit, and the evidence it came from.
+ * @returns {Promise<object>} Verdict, limit, and the evidence it came from. When
+ * the evidence is the worker's screen and the provider is `claude`, an
+ * `overload` boolean reports whether that screen ends on the 529 error, so a
+ * caller can escalate on it without waiting for `verdict` to resolve.
  * @throws {Error} When the provider is unknown or the worktree does not exist.
  */
 export async function workerLimitCheck({
@@ -386,10 +442,12 @@ export async function workerLimitCheck({
     };
   }
   if (readScreen) {
+    const lines = await readScreen();
     return {
       provider,
       source: "screen",
-      ...readScreenLimit(provider, await readScreen()),
+      ...readScreenLimit(provider, lines),
+      ...(provider === "claude" ? { overload: readScreenOverload(lines) } : {}),
     };
   }
   return { provider, source: "none", verdict: "unknown", limit: null };
