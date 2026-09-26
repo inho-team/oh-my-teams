@@ -879,6 +879,57 @@ test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", as
   );
 });
 
+test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 supervised-terminal이 아니라 headless로 거부된다", async () => {
+  // #46/agy-win-untrusted-path: 규칙 순서 구멍 수정 확인.
+  // 옛 순서에서는 플랫폼을 보지 않는 규칙 3(agent-trust-workspace)이 먼저 걸려 win32에서도
+  // 터미널 생성까지 진행했다(docs/plan/agy-terminal-path.md의 2026-09-18 r3-c1 실측이 이 증상을
+  // 확인했다). 새 규칙(2-1)이 win32 + agy를 신뢰 상태와 무관하게 headless로 먼저 걸러낸다.
+  const org = example();
+  const gemini = roleCommand(org, "senior");
+
+  for (const trustRecordExists of [false, "unknown"]) {
+    const orcaCalls = [];
+    const execute = async (argv) => {
+      orcaCalls.push(argv);
+      return { code: 0, stdout: "{}" };
+    };
+    await assert.rejects(
+      openRoleTerminal({
+        worktree: "id:repo::C:/new-wt",
+        command: gemini,
+        executable: "orca",
+        execute,
+        platform: "win32",
+        shell: "posix",
+        trustRecordExists,
+        allowUnverified: false,
+        settleMs: 5,
+        readyMs: 20,
+        pollMs: 1,
+      }),
+      (err) => {
+        assert.match(err.message, /headless/, "headless 거부 메시지 포함");
+        assert.match(
+          err.message,
+          /agy-headless-no-trust/,
+          "새 규칙의 reason 코드 포함",
+        );
+        assert.equal(
+          err.matrixRefusal?.path,
+          "headless",
+          `trustRecordExists=${trustRecordExists}일 때 headless로 거부해야 한다`,
+        );
+        return true;
+      },
+    );
+    assert.equal(
+      orcaCalls.length,
+      0,
+      `trustRecordExists=${trustRecordExists}일 때 터미널 생성을 호출하지 않아야 한다`,
+    );
+  }
+});
+
 test("role-terminal CLI allow-unverified 옵션 처리", () => {
   // finding: missing-cli-verification-option
   // ALLOWED_OPTIONS에 allow-unverified가 등록되어 있어야 한다
@@ -1295,7 +1346,8 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
       }),
     (error) => error.signal?.code === "timeout",
   );
-  assert.equal(busy.length, 1);
+  // Idle check fails. Diagnostics (read, list) are collected.
+  assert.equal(busy.length, 3, "wait + read + list for diagnostics");
 });
 
 test("worker-start accepts the task identity and purpose that decide a clear", () => {

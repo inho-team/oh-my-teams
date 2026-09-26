@@ -779,6 +779,25 @@ async function resolveAndCheckDrift(orgFile, org, launch) {
   return { modelResolved: currentResolved, warnings };
 }
 
+// Extends the existing "message, then a JSON signal+receipt block" CLI error
+// convention with the idle-check diagnostics (screen, terminal-list state, or
+// a record that reading either failed) an Orca refusal may carry, so
+// terminal-idle-check and worker-start's idle rejection print them instead of
+// only the translated message reaching main()'s catch.
+function withOrcaFailureDetail(error) {
+  if (!error.signal && !error.diagnostics) return error;
+  error.message = `${error.message}\n${JSON.stringify(
+    {
+      signal: error.signal ?? null,
+      receipt: error.receipt ?? null,
+      diagnostics: error.diagnostics ?? null,
+    },
+    null,
+    2,
+  )}`;
+  return error;
+}
+
 // The receipt is returned whether or not the start reached `ready`, because a
 // start that failed still names the Dispatch and the resources someone has to
 // reclaim. A refusal that produced no Dispatch throws, and its neutral signal
@@ -929,12 +948,7 @@ async function startSupervisedWorker(args) {
     ) {
       return injectFallback(args, org, run, launch, error.signal);
     }
-    error.message = `${error.message}\n${JSON.stringify(
-      { signal: error.signal, receipt: error.receipt ?? null },
-      null,
-      2,
-    )}`;
-    throw error;
+    throw withOrcaFailureDetail(error);
   }
 }
 
@@ -1515,11 +1529,15 @@ async function executeCommand(args) {
           );
         }
       }
-      return checkTerminalIdle(args.terminal, {
-        executable: args.orca,
-        cwd: process.cwd(),
-        matrixPrediction,
-      });
+      try {
+        return await checkTerminalIdle(args.terminal, {
+          executable: args.orca,
+          cwd: process.cwd(),
+          matrixPrediction,
+        });
+      } catch (error) {
+        throw withOrcaFailureDetail(error);
+      }
     }
     case "prompt-answer":
       return answerPrompt({

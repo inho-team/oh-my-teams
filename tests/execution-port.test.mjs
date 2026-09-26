@@ -312,11 +312,31 @@ test("launch arguments the runtime rejects are refused before the call", async (
 });
 
 // Answers `terminal wait` with `wait` and everything else with `start`.
-const orcaVerbs = ({ wait, start = orcaReceipt("ready") }) => {
+const orcaVerbs = ({
+  wait,
+  start = orcaReceipt("ready"),
+  read = {
+    code: 0,
+    stdout: JSON.stringify({ ok: true, result: { screen: {} } }),
+  },
+  list = {
+    code: 0,
+    stdout: JSON.stringify({ ok: true, result: { terminals: [] } }),
+  },
+}) => {
   const calls = [];
   const execute = async (argv) => {
     calls.push(argv);
-    const answer = argv[1] === "terminal" ? wait : { stdout: start };
+    let answer = { stdout: start };
+    if (argv[1] === "terminal") {
+      if (argv[2] === "wait") {
+        answer = wait;
+      } else if (argv[2] === "read") {
+        answer = read;
+      } else if (argv[2] === "list") {
+        answer = list;
+      }
+    }
     return { code: 0, stderr: "", timedOut: false, ...answer };
   };
   return { calls, execute };
@@ -385,7 +405,12 @@ test("a terminal that never reports idle is refused before any Dispatch", async 
         return true;
       },
     );
-    assert.equal(calls.length, 1, "worker-start is never called");
+    // Idle check fails without calling worker-start. Diagnostics (read, list)
+    // are collected.
+    assert.equal(calls.length, 3, "wait + read + list for diagnostics");
+    assert.ok(calls[0].includes("wait"));
+    assert.ok(calls[1].includes("read"));
+    assert.ok(calls[2].includes("list"));
   }
 
   // Any other wait failure keeps Orca's own code instead of this route.
@@ -412,7 +437,9 @@ test("a terminal that never reports idle is refused before any Dispatch", async 
       return true;
     },
   );
-  assert.equal(missing.calls.length, 1);
+  // Idle check fails without calling worker-start. Diagnostics (read, list)
+  // are collected.
+  assert.equal(missing.calls.length, 3, "wait + read + list for diagnostics");
 });
 
 test("a terminal held at a prompt is refused before any Dispatch", async () => {
@@ -457,7 +484,12 @@ test("a terminal held at a prompt is refused before any Dispatch", async () => {
       return true;
     },
   );
-  assert.equal(blocked.calls.length, 1, "worker-start is never called");
+  // Idle check fails without calling worker-start. Diagnostics (read, list)
+  // are collected.
+  assert.equal(blocked.calls.length, 3, "wait + read + list for diagnostics");
+  assert.ok(blocked.calls[0].includes("wait"));
+  assert.ok(blocked.calls[1].includes("read"));
+  assert.ok(blocked.calls[2].includes("list"));
 
   // A reason that happens to match a hinted code gains no route, and a wait
   // that names no reason is not described as a prompt.
