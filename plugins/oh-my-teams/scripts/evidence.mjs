@@ -42,8 +42,16 @@ function validateCommands(commands) {
   );
 }
 
-async function workspaceContents(repo) {
-  const tracked = (await git(repo, ["ls-files", "-z"]))
+async function changedWorkspaceFiles(repo) {
+  // `git diff --name-only HEAD` compares the working tree directly to HEAD
+  // (bypassing the index), so it names a tracked path only when its actual
+  // content, presence, or mode differs from what HEAD committed. Crucially,
+  // it applies the same clean/smudge normalization Git used at checkout, so
+  // a file that autocrlf converted to CRLF on disk but did not otherwise
+  // touch reports as unchanged here, exactly like `git status` would (#63).
+  const diffedFromHead = (
+    await git(repo, ["diff", "--name-only", "-z", "HEAD"])
+  )
     .split("\0")
     .filter(Boolean);
   const untracked = (
@@ -51,15 +59,31 @@ async function workspaceContents(repo) {
   )
     .split("\0")
     .filter(Boolean);
-  const files = [...new Set([...tracked, ...untracked])]
-    // PM state is excluded whatever its spelling: on a
-    // case-insensitive filesystem ".OMT/" is the same directory, and it would
-    // otherwise reach inside() and be rejected as a forbidden segment.
-    .filter((file) => !/^\.(omt|orca)\//i.test(file))
-    .sort();
+  return (
+    [...new Set([...diffedFromHead, ...untracked])]
+      // PM state is excluded whatever its spelling: on a
+      // case-insensitive filesystem ".OMT/" is the same directory, and it would
+      // otherwise reach inside() and be rejected as a forbidden segment.
+      .filter((file) => !/^\.(omt|orca)\//i.test(file))
+      .sort()
+  );
+}
 
-  return files.map((relative) => {
-    // One tracked entry must not abort the whole fingerprint. `inside` resolves
+// `HEAD^{tree}` names HEAD's tree object straight out of Git's object
+// database. Two worktrees on the same commit always get the same tree id no
+// matter how core.autocrlf checked their tracked files out on disk, because
+// CRLF-vs-LF is a checkout-time transform that never touches the object
+// database (#63, brief criterion 1). Only paths Git itself reports as
+// differing from HEAD -- edits, deletions, and untracked non-ignored files --
+// are hashed from their current on-disk bytes below, because those are real
+// content this verify run tested against, not a checkout artifact of content
+// HEAD already has recorded. This also means an untracked file or a tracked
+// edit still changes the key (brief criterion 2): both always appear in
+// `changedWorkspaceFiles`, tree id or not.
+async function workspaceContents(repo) {
+  const treeId = await git(repo, ["rev-parse", "HEAD^{tree}"]);
+  const changed = (await changedWorkspaceFiles(repo)).map((relative) => {
+    // One entry must not abort the whole fingerprint. `inside` resolves
     // symlinks, so a link pointing outside the repository used to throw here
     // and take verify, gateCheck and validateEvidence down with it. An entry
     // that cannot be contained is recorded as unreadable, which still changes
@@ -74,9 +98,15 @@ async function workspaceContents(repo) {
     return [
       relative,
       exists ? hash(fs.readFileSync(file).toString("base64")) : null,
+      // File mode stays in the fingerprint (#63 decision 3): a changed or
+      // untracked path can genuinely lose or gain an execute bit, which is
+      // worth catching, and for every unchanged tracked path the mode never
+      // reaches this line at all -- it already lives inside `treeId` exactly
+      // as Git recorded it, immune to what this filesystem reports.
       exists ? fs.statSync(file).mode : null,
     ];
   });
+  return { treeId, changed };
 }
 
 /**
@@ -150,6 +180,33 @@ export async function fingerprint(
   result.platform = process.platform;
   result.node = process.version;
   return result;
+}
+
+// Exactly the top-level keys fingerprint() can ever produce, in the order
+// tests/workflow-runtime-gaps.test.mjs pins them in. `timeoutMs` is only
+// present on both sides or neither, since validateEvidence recomputes
+// `current` with the same `includeTimeout` shape `evidence.fingerprint` has.
+const FINGERPRINT_FIELDS = [
+  "head",
+  "base",
+  "tree",
+  "commands",
+  "environment",
+  "timeoutMs",
+  "platform",
+  "node",
+];
+
+// Named per-field comparison for the "Stale evidence" rejection (#63 brief
+// criterion 4): a caller retrying after a rejection needs to know which of
+// head/base/tree/commands/environment/timeoutMs/platform/node moved, instead
+// of only learning that the whole-object hash no longer matches.
+function differingFingerprintFields(current, stored) {
+  return FINGERPRINT_FIELDS.filter(
+    (field) =>
+      (Object.hasOwn(current, field) || Object.hasOwn(stored, field)) &&
+      JSON.stringify(current[field]) !== JSON.stringify(stored[field]),
+  );
 }
 
 function checkSucceeded(check) {
@@ -338,10 +395,24 @@ export async function validateEvidence(
     evidence.fingerprint.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS,
     { includeTimeout },
   );
+  // Evidence recorded under the pre-#63 `tree` algorithm gets no legacy
+  // pass-through here, unlike `timeoutMs` above: that omission is a marker
+  // this code can see on the stored object itself, but the old and new tree
+  // algorithms both produce an opaque 64-hex-char string under the same
+  // `tree` key, with no stored marker telling them apart. Reproducing the old
+  // algorithm "for compatibility" would mean permanently keeping alive the
+  // very checkout-order sensitivity this task removes, so old evidence is
+  // treated as genuinely stale and is re-verified once (#63 decision 5).
+  const changedFields = differingFingerprintFields(
+    current,
+    evidence.fingerprint,
+  );
   assert(
     hash(current) === evidence.key &&
       hash(evidence.fingerprint) === evidence.key,
-    "Stale evidence: head, base, tree, commands, environment or timeout changed",
+    changedFields.length
+      ? `Stale evidence: ${changedFields.join(", ")} changed`
+      : "Stale evidence: recorded fingerprint no longer matches its key",
   );
   assert(
     (evidence.checks.length === current.commands.length ||
