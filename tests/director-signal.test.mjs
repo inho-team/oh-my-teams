@@ -1199,6 +1199,176 @@ test("notifyDirectorSignal defers a blocked backlog, then bundles and delivers i
   assert.deepEqual(fourthResult.bundled, [fourth.id]);
 });
 
+// ─── notifyDirectorSignal: sent-but-unconfirmed is never resent (#82, review-1 finding director-signal-resend-conflates-unsent-and-unconfirmed) ──
+
+test("notifyDirectorSignal never re-bundles a signal deliverPrompt already tried but could not confirm", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "attempted once",
+  });
+  // Accepted but nothing on screen decides it: deliverPrompt actually ran
+  // (the screen was not blocked), so the keys may already have reached the
+  // Director even though the outcome is "unclear", not "submitted".
+  const unclearOrca = orcaNotify([["input_accepted"]], []);
+  const firstResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    first.record,
+    "orca",
+    unclearOrca.execute,
+  );
+  assert.equal(firstResult.notified, false);
+  assert.equal(firstResult.deferred, undefined);
+  assert.equal(unclearOrca.textSends().length, 1);
+  assert.equal(readSignal(orgFile, first.id).notify.sent, true);
+  assert.equal(readSignal(orgFile, first.id).notify.notified, false);
+
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "second signal",
+  });
+  const clearOrca = orcaNotify([["input_accepted", "turn_started"]], []);
+  const secondResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    second.record,
+    "orca",
+    clearOrca.execute,
+  );
+  assert.equal(secondResult.notified, true);
+  // The unconfirmed-but-attempted first signal is never bundled again.
+  assert.deepEqual(secondResult.bundled, [second.id]);
+  const sends = clearOrca.textSends();
+  assert.equal(sends.length, 1);
+  const sentText = sends[0][sends[0].indexOf("--text") + 1];
+  assert.doesNotMatch(sentText, /attempted once/);
+  assert.match(sentText, /second signal/);
+  // The first signal is never retried automatically, but it stays pending
+  // and visible in director-inbox so the Director can still see and answer it.
+  assert.equal(readSignal(orgFile, first.id).notify.notified, false);
+  assert.equal(readSignal(orgFile, first.id).status, "pending");
+  assert.ok(listInbox(orgFile).signals.some((s) => s.id === first.id));
+});
+
+// ─── notifyDirectorSignal: overlapping calls never both send (#82, review-1 finding director-signal-backlog-read-race) ──
+
+test("notifyDirectorSignal defers instead of double-sending when a second call for the same worktree overlaps the first", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "first",
+  });
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "second",
+  });
+
+  const orca = orcaNotify([["input_accepted", "turn_started"]], []);
+  // Gates the first call's own screen read so it stays inside notifyTerminal
+  // (past its own claim, which is synchronous) while the second call starts,
+  // the way a first `director-signal` process still inside deliverPrompt's
+  // wait-submit window overlaps a second one starting.
+  let releaseFirst;
+  const gate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const slowExecute = async (argv, options) => {
+    await gate;
+    return orca.execute(argv, options);
+  };
+
+  const firstPromise = notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    first.record,
+    "orca",
+    slowExecute,
+  );
+  const secondResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    second.record,
+    "orca",
+    orca.execute,
+  );
+  assert.equal(secondResult.notified, false);
+  assert.equal(secondResult.deferred, true);
+  assert.equal(secondResult.notifyError, "backlog-claimed");
+  assert.deepEqual(secondResult.bundled, []);
+  // The second call never touched the terminal at all.
+  assert.equal(orca.calls.length, 0);
+
+  releaseFirst();
+  const firstResult = await firstPromise;
+  assert.equal(firstResult.notified, true);
+  // The first call claimed the whole backlog up front, so it bundles both.
+  assert.deepEqual(
+    firstResult.bundled.slice().sort(),
+    [first.id, second.id].sort(),
+  );
+  assert.equal(orca.textSends().length, 1);
+  const sentText =
+    orca.textSends()[0][orca.textSends()[0].indexOf("--text") + 1];
+  assert.match(sentText, /first/);
+  assert.match(sentText, /second/);
+  assert.equal(readSignal(orgFile, first.id).notify.notified, true);
+  assert.equal(readSignal(orgFile, second.id).notify.notified, true);
+});
+
+test("notifyDirectorSignal reclaims a batch left in-flight by a dead owner", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+  const stuck = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "orphaned attempt",
+  });
+  // Simulate a claim left behind by a process that has since exited: a pid
+  // this host can prove dead, the same shape resources.mjs uses for its own
+  // dead-owner slot reclaim.
+  const file = path.join(
+    path.dirname(orgFile),
+    "director",
+    "inbox",
+    `${stuck.id}.json`,
+  );
+  writeJSON(file, {
+    ...readJSON(file),
+    notify: {
+      inFlight: true,
+      claimedAt: new Date(0).toISOString(),
+      owner: { pid: 2147483647, hostname: os.hostname() },
+    },
+  });
+
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "new attempt",
+  });
+  const orca = orcaNotify([["input_accepted", "turn_started"]], []);
+  const result = await notifyDirectorSignal(
+    orgFile,
+    second.entry,
+    second.record,
+    "orca",
+    orca.execute,
+  );
+  assert.equal(result.notified, true);
+  assert.deepEqual(result.bundled.slice().sort(), [second.id, stuck.id].sort());
+});
+
 test("replySignal reports how far the PM notification got", async (t) => {
   const { orgFile, worktreeId, dir } = makeProject(t);
   const pmPath = path.join(dir, "pm-worktree");
