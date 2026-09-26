@@ -144,12 +144,24 @@ export function judgeDelivery({ receipt, screen, text }) {
   return verdict("foreign-input", "box-holds-other-text");
 }
 
-// Only a rendered screen may earn an Enter. When Orca cannot render one it
-// answers with `source: "screen-unavailable"` and returns accumulated output,
-// where repainted lines pile up as fragments; a host that predates the field
-// leaves `source` out. Neither shows what the input box holds, so both count
-// as an empty screen and the judgement falls to `unclear`.
-async function readScreen(orca, terminal, execute) {
+/**
+ * Reads a terminal's screen once, telling a genuinely empty screen apart from
+ * one Orca could not render. When Orca cannot render a screen it answers with
+ * a non-`"screen"` source and returns accumulated output instead, where
+ * repainted lines pile up as fragments; a host that predates the field leaves
+ * `source` out entirely. Neither case shows what is currently on screen, so
+ * both come back `ok: false`, and a caller that must not guess from an empty
+ * line list (director.mjs's notification gate, which has to tell "nothing to
+ * read" apart from "the screen is genuinely empty") checks `ok` before
+ * trusting `lines`.
+ *
+ * @param {string} orca - Orca executable.
+ * @param {string} terminal - Terminal handle to read.
+ * @param {Function} [execute] - Injectable command runner.
+ * @returns {Promise<{ok: boolean, lines: string[]}>} Screen lines, oldest
+ *   first; `lines` is always `[]` when `ok` is false.
+ */
+export async function readTerminalScreen(orca, terminal, execute) {
   try {
     const read = await runOrcaJson(
       orca,
@@ -157,11 +169,19 @@ async function readScreen(orca, terminal, execute) {
       { execute },
     );
     const { source, tail } = read.result?.terminal ?? {};
-    return source === "screen" ? (tail ?? []) : [];
+    return source === "screen"
+      ? { ok: true, lines: tail ?? [] }
+      : { ok: false, lines: [] };
   } catch {
-    // An unreadable screen decides nothing; the judgement falls to `unclear`.
-    return [];
+    return { ok: false, lines: [] };
   }
+}
+
+// This module's own judgement does not need the ok/not-ok distinction: an
+// unreadable screen already falls through to `judgeDelivery`'s "unclear"
+// verdict the same as a genuinely empty one, so only `lines` is used here.
+async function readScreen(orca, terminal, execute) {
+  return (await readTerminalScreen(orca, terminal, execute)).lines;
 }
 
 /**

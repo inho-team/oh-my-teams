@@ -22,7 +22,7 @@ description: kickoff 안에서 개발 요청을 계획·배정하고 검증·통
 - 조직이 PM에게 자문자를 허용했으면 계획 확정, 최종 수용, 반복 실패 같은 결정 관문에서만 자기 역할로 `advise`를 호출한다.
 - 조직이 실험 Jev 판단을 켰으면 `supervision-wait`·`supervision-next`·`role-terminal`·`failure-classify`에 [`../../references/jev.md`](../../references/jev.md)가 정한 `--state`(와 `--org`·`--dispatch`)를 함께 넘긴다. 명령의 결과는 바뀌지 않으므로 기록을 읽거나 판단 근거로 쓰지 않는다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행한다.
-- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다. `--text`의 본문은 두괄식 첫 줄(판정 또는 결정 요청)로 시작한다. progress 신호는 이사의 미처리 목록에 남지 않는 알림이므로 답을 기다리지 않는다. HEAD가 바뀌어 완료 준비 신호를 다시 보내면 이전 신호는 자동으로 대체된다.
+- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다. `--text`의 본문은 두괄식 첫 줄(판정 또는 결정 요청)로 시작한다. progress 신호는 이사의 미처리 목록에 남지 않는 알림이므로 답을 기다리지 않는다. HEAD가 바뀌어 완료 준비 신호를 다시 보내면 이전 신호는 자동으로 대체된다. 이사 터미널이 선택 창이나 질문 화면을 띄우고 있어서 이번 신호가 곧바로 전달되지 않을 수 있는데, 이는 정상 동작이므로 PM이 따로 재전송할 필요가 없다. 다음번 `director-signal` 호출이 미배달 신호를 자동으로 묶어서 다시 전달하며, 자세한 내용은 [director 스킬](../director/SKILL.md)의 「신호 수신과 결정」 절을 따른다.
 - 무거운 작업(테스트·빌드·무거운 worker) 전에 자원 슬롯을 확보하고 작업이 끝나면 해제한다. 슬롯을 얻는 명령은 이사 스킬의 권한 절을 참조한다.
 
 ### 책임
