@@ -383,24 +383,21 @@ Agy 자체가 trustedWorkspaces에 기록하는 경로 표기. 규칙 8·9와 �
 1.4.204 판정 규칙이 위 「Orca 1.4.210 재실측」 절에서 교체된 것이 확인되었고, 재검증할 Windows
 머신이 없음) 새 규칙의 `evidence`는 `verified`로 올리지 않고 `unverified`로 남긴다.
 
-### PM 지시로 판단한 추가 과제: `role-terminal.mjs`의 신뢰 기록 경로 비교
+### PM 지시로 판단한 추가 과제: `role-terminal.mjs`의 신뢰 기록 경로 비교(제거함)
 
 작업 계약 files 목록에는 없으나 PM이 명시적으로 범위를 확장해 판단을 지시했다. `readLaunchEnvironment`가
 `trusted.some((t) => String(t) === worktreePath)`로 신뢰 기록을 정확 일치 비교하던 부분을 검토했다.
 
-**판단**: 위 규칙 2-1을 적용하면 win32 + agy의 실행 경로 결정 자체는 `trustRecordExists`
-값과 무관해진다(항상 `headless`). 그러나 이 값은 진단·로그 목적으로는 여전히 의미가 있고,
-Windows NTFS는 대소문자를 구분하지 않으며 경로 구분자가 `/`와 `\`로 섞여 기록될 수 있으므로,
-정확 일치 비교는 실제 파일시스템 시맨틱과 다르게 false 오탐을 낼 수 있다고 판단했다. 부작용
-위험이 낮다고 보고(비교 로직만 바꾸고 판정 결과에는 영향이 없음) `trustedWorkspaceMatches(recorded,
-worktreePath, platform)` 헬퍼를 새로 만들어 win32에서만 정규화 비교(소문자화, `\`→`/`, 끝
-구분자 제거)를 적용하고, 다른 플랫폼은 기존 정확 일치를 그대로 유지하도록 구현했다.
+처음에는 win32에서만 대소문자·구분자를 정규화하는 `trustedWorkspaceMatches` 헬퍼를 구현했으나,
+독립 검토(`review-agy-win-1`, finding `trust-normalization-speculative-scope`)에서 최소 변경
+규율을 근거로 되돌리도록 판정받아 제거했다(`role-terminal.mjs`를 기준 커밋과 같게 되돌리고,
+관련 단위 테스트도 제거했다).
 
-**확인한 것**: NTFS의 대소문자 비구분과 `/`·`\` 혼용 가능성은 Windows 파일시스템의 일반적인
-시맨틱이다. 기존 `launch-matrix.test.mjs`·`role-terminal.test.mjs`를 전수 검사해, win32 +
-agy + `trustRecordExists:false`를 특정 경로로 단언하는 기존 테스트가 없어 회귀 위험이 낮음을
-확인했다.
-
-**확인하지 못한 것**: Windows에서 Agy CLI가 실제로 `trustedWorkspaces`에 기록하는 경로 표기가
-정확히 어떤 형태인지(대소문자, 구분자, 끝 슬래시 유무)는 Windows 머신이 없어 실측하지 못했다.
+**되돌린 이유**: 위 규칙 2-1이 이미 win32 + agy의 실행 경로 결정을 `trustRecordExists` 값과
+무관하게 만들었으므로, 이 정규화는 판정 결과를 하나도 바꾸지 않고 진단·로그 목적에만 기여했다.
+Windows에서 Agy가 실제로 `trustedWorkspaces`에 기록하는 경로 표기(대소문자·구분자)도 확인하지
+못한 채 만든 방어적 확장이었고, 같은 파일을 동시에 고치는 `fix/terminal-delivery-judgment`
+브랜치와의 병합 충돌 위험만 늘렸다. 경로 표기 차이(대소문자·구분자) 문제는 규칙 2-1로 판정
+결과에서 분리되었으므로 정규화를 두지 않았다. 앞으로 win32에서 신뢰 기록 값에 따라 갈리는
+규칙이 생기면 그때 정규화를 다시 판단한다.
 

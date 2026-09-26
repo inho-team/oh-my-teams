@@ -18,7 +18,6 @@ import {
   launchLine,
   openRoleTerminal,
   roleTitle,
-  trustedWorkspaceMatches,
   trustQuestion,
   untouchedShell,
   workerTerminal,
@@ -1052,36 +1051,6 @@ test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
   assert.equal(env3.trustRecordExists, "unknown");
   assert.equal(env3.skipDangerousModePermissionPrompt, "unknown");
   assert.equal(env3.codexTrustRecordExists, "unknown");
-});
-
-test("trustedWorkspaceMatches: win32은 대소문자·구분자 차이를 정규화하고 다른 플랫폼은 정확 일치를 유지한다", () => {
-  // PM 지시로 판단한 추가 과제(작업 계약 files 목록엔 없음): NTFS는 대소문자를 구분하지 않고
-  // 경로 구분자가 `/`와 `\`로 섞일 수 있으므로, win32에서만 정규화 비교를 적용한다.
-  assert.equal(
-    trustedWorkspaceMatches("C:\\Users\\wt", "c:/Users/wt", "win32"),
-    true,
-    "win32: 대소문자와 구분자 차이를 같은 경로로 인식해야 한다",
-  );
-  assert.equal(
-    trustedWorkspaceMatches("C:/Users/wt/", "C:/Users/wt", "win32"),
-    true,
-    "win32: 끝 구분자 차이를 같은 경로로 인식해야 한다",
-  );
-  assert.equal(
-    trustedWorkspaceMatches("C:/Users/other", "C:/Users/wt", "win32"),
-    false,
-    "win32: 실제로 다른 경로는 여전히 불일치로 판정해야 한다",
-  );
-  assert.equal(
-    trustedWorkspaceMatches("/Users/wt", "/users/wt", "darwin"),
-    false,
-    "darwin: 대소문자 차이를 정규화하지 않고 기존처럼 정확 일치를 유지해야 한다",
-  );
-  assert.equal(
-    trustedWorkspaceMatches("/Users/wt", "/Users/wt", "linux"),
-    true,
-    "linux: 완전히 같은 경로는 여전히 일치해야 한다",
-  );
 });
 
 test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", async () => {

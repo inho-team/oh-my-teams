@@ -44,33 +44,6 @@ import {
 } from "./launch-matrix.mjs";
 
 /**
- * 신뢰 기록의 한 항목이 지금 확인하려는 워크트리를 가리키는지 판정합니다.
- *
- * win32에서는 NTFS가 대소문자를 구분하지 않고, 경로 구분자로 `/`와 `\`가 섞여 기록될 수
- * 있습니다(예: Agy CLI가 기록한 경로와 Orca가 넘긴 워크트리 경로의 표기가 다른 경우).
- * 이 판정 자체는 launch-matrix.mjs의 win32 판정 결과를 바꾸지 않습니다(#46/agy-win-untrusted-path
- * 규칙 2-1이 win32의 Agy를 신뢰 상태와 무관하게 headless로 먼저 걸러내기 때문입니다). 다만
- * 이 값은 진단·로그 목적으로 여전히 계산되므로, win32의 실제 파일시스템 시맨틱과 다르게 false
- * 오탐이 나지 않도록 정규화 비교를 적용합니다. win32가 아니면 기존과 같은 정확 일치를 유지합니다.
- *
- * @param {string} recorded - trustedWorkspaces 배열의 한 항목.
- * @param {string} worktreePath - 신뢰 여부를 확인할 워크트리 경로.
- * @param {string} [platform=process.platform] - 비교 기준 플랫폼(테스트용 주입).
- * @returns {boolean} 두 경로가 같은 워크트리를 가리키면 true.
- */
-export function trustedWorkspaceMatches(
-  recorded,
-  worktreePath,
-  platform = process.platform,
-) {
-  const recordedPath = String(recorded);
-  if (platform !== "win32") return recordedPath === worktreePath;
-  const normalize = (value) =>
-    String(value).replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-  return normalize(recordedPath) === normalize(worktreePath);
-}
-
-/**
  * 실제 환경에서 매트릭스 입력값을 읽습니다.
  *
  * 알 수 없는 값은 낙관적 기본값 대신 `unknown`으로 반환합니다.
@@ -141,7 +114,7 @@ export async function readLaunchEnvironment({
     if (
       worktreePath &&
       Array.isArray(trusted) &&
-      trusted.some((t) => trustedWorkspaceMatches(t, worktreePath, platform))
+      trusted.some((t) => String(t) === worktreePath)
     ) {
       trustRecordExists = true;
     } else if (Array.isArray(trusted)) {

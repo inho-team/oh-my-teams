@@ -228,12 +228,20 @@ const MATRIX_RULES = [
   // 증상 재현). `docs/plan/headless-runtime.md`의 2026-09-17 Windows 검증은 신뢰 기록이
   // 없는 새 임시 Git 저장소에서 headless-start로 같은 Agy(gemini) 역할을 실행해, 신뢰
   // 질문에 막히지 않고 파일 작성과 커밋까지 `done`으로 끝냄을 실측으로 확인했다.
+  // 또한 확인한 것: `plugins/oh-my-teams/scripts/headless.mjs`의 `PROVIDERS.agy.command`
+  // (163번째 줄)는 headless 경로가 agy CLI를 실행할 때 `--dangerously-skip-permissions`
+  // 플래그를 실제로 넘긴다는 것을 소스로 보여준다.
   // 확인하지 못한 것: 그 headless 검증 워크트리의 trustRecordExists 값이 정확히 false였는지
-  // unknown이었는지(당시 기록은 "임시 Git 저장소"라고만 적었다), headless 프로세스가 신뢰
-  // 질문을 아예 띄우지 않는지 아니면 `--dangerously-skip-permissions`로 넘기는지의 메커니즘,
-  // 그리고 Windows에서 Agy 자체가 trustedWorkspaces에 기록하는 경로 표기. 규칙 8·9와 같은
-  // 이유로(#104: 근거였던 Orca 1.4.204 판정 규칙이 1.4.210에서 교체되었고 재검증할 Windows
-  // 머신이 없음) evidence는 verified로 올리지 않는다.
+  // unknown이었는지(당시 기록은 "임시 Git 저장소"라고만 적었다), 그리고 위 플래그가 폴더
+  // 신뢰 질문까지 억제하는지의 메커니즘(플래그의 존재 자체는 확인했으나 그 효과 범위는
+  // 확인하지 못했다), Windows에서 Agy 자체가 trustedWorkspaces에 기록하는 경로 표기.
+  // 규칙 8·9와 같은 이유로(#104: 근거였던 Orca 1.4.204 판정 규칙이 1.4.210에서 교체되었고
+  // 재검증할 Windows 머신이 없음) evidence는 verified로 올리지 않는다.
+  //
+  // 경로 표기 차이(대소문자·구분자) 문제는 이 규칙이 이미 판정 결과에서 분리했으므로,
+  // `role-terminal.mjs`의 신뢰 기록 비교에 정규화를 두지 않았다(독립 검토 finding
+  // trust-normalization-speculative-scope에 따라 되돌림). 앞으로 win32에서 신뢰 기록 값에
+  // 따라 갈리는 규칙이 생기면 그때 정규화를 다시 판단한다.
   {
     match: ({ runner, platform, trustRecordExists }) =>
       runner === "agy" && platform === "win32" && trustRecordExists !== true,
