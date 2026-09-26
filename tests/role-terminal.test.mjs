@@ -1018,26 +1018,34 @@ test("role-terminal CLI --brief 옵션 등록과 PM 전용 제약 (#86)", async 
 
 test("--brief로 연 터미널이 이미 첫 턴을 마친 화면에서도 ready 판정과 모델 대조가 끝난다 (#86)", async () => {
   // finding: missing-fake-orca-regression-for-brief-launch-readiness
-  // 실측(2026-09-26, Claude Code v2.1.283, role-terminal --brief 실행 1회):
-  // openRoleTerminal이 settle() 뒤 화면을 읽었을 때, 첫 프롬프트 인자로 실은
-  // brief 지시는 이미 처리를 마친 상태(AGENTS.md를 읽고 응답한 뒤 입력창이
-  // 다시 비어 있는 상태)였다. 이 화면에는 셸이 typed한 명령 원문이 전혀
-  // 남아 있지 않아 locateCommand가 그 명령을 찾지 못했고, 화면은 배너 +
-  // 이미 끝난 첫 턴 + 빈 입력줄(`❯`)로 완전히 다시 그려져 있었다. 이 회귀
-  // 테스트는 그 화면을 그대로 재현해 ready 판정과 모델 대조가 이 경로에서
-  // 깨지지 않음을 고정한다.
+  // 이 화면 구조(셸이 typed한 명령 원문이 전혀 남지 않고, 첫 프롬프트 인자로
+  // 실은 brief 지시가 이미 처리를 마친 채 배너 + 완료된 첫 턴 + 빈 입력줄
+  // (`❯`)로 완전히 다시 그려진 상태)는 2026-09-26 role-terminal --brief 확인
+  // 1회에서 실제로 관찰됐다. 다만 그 확인은 --worktree 인자 오류로 이 t6
+  // 워크트리가 아니라 PM 워크트리(terminal-delivery-judgment, 당시 HEAD
+  // a05fd92)에서 실행됐고, 화면 원문 그대로는 checkpoint.md에 남기지 않았다
+  // (자세한 경위는 docs/plan/handoff-instruction-verification.md 「실제
+  // Orca에서 확인한 절차와 결과」). checkpoint.md가 그 확인에서 실제로 기록한
+  // 것은 첫 프롬프트가 붙여넣기 표시 없는 일반 입력줄로 나타났다는 것뿐이므로,
+  // 아래 fixture 중 이 형태(❯ 인수 브리프 ...)와 명령을 화면에서 다시 찾지
+  // 못하는 구조만 그 관찰에 근거하고, 배너 문구·워크트리 표시줄·AGENTS.md
+  // 경로·"Churned for 7s" 같은 나머지 세부 텍스트는 그 구조를 재현하기 위해
+  // 이 테스트가 임의로 채운 예시값이며 실측이 아니다. 이 회귀 테스트는 그
+  // 구조를 재현해 ready 판정과 모델 대조가 이 경로에서 깨지지 않음을 고정한다.
   const briefPath = "/tmp/omt-86-verify/brief.md";
   const org = example();
-  // 실측과 같은 provider·모델(Claude, opus)로 맞춘다. example org의 기본
-  // pm 프로필은 model을 지정하지 않으므로, 대조 대상이 있도록 여기서만 채운다.
+  // provider·모델(Claude, opus)은 관찰된 확인과 맞춘 임의값이다. example org의
+  // 기본 pm 프로필은 model을 지정하지 않으므로, 대조 대상이 있도록 여기서만 채운다.
   org.profiles["claude-current"].model = "opus";
   const command = roleCommand(org, "pm", {
     firstPrompt: kickoffBriefPrompt(briefPath),
   });
   assert.equal(command.modelRequested, "opus");
 
-  // 실제 관찰 화면(경로만 테스트 고정값으로 맞춤). 셸의 명령 echo는 전혀
-  // 없고, Claude Code 자신의 배너와 이미 완료된 첫 턴만 보인다.
+  // 이 fixture의 워크트리 표시줄·AGENTS.md 경로는 관찰된 확인이 실제로 열린
+  // PM 워크트리(terminal-delivery-judgment)가 아니라, 이 테스트가 화면 구조를
+  // 보여주기 위해 채운 임의의 경로다. 셸의 명령 echo가 전혀 없고 Claude Code
+  // 자신의 배너와 이미 완료된 첫 턴만 보인다는 구조만 관찰과 일치시켰다.
   const observedScreen = [
     " ▐▛███▛█   Claude Code v2.1.283",
     "▝▜██████▀  Opus 5.5 · Claude Max",
