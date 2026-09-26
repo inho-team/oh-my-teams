@@ -229,7 +229,7 @@
 - (a): `provider: "unsupported"`, `warning: "input was accepted, but this provider cannot report delivery. Inspect the terminal before retrying."` — 같은 시점 `--screen` 대조 결과 명령이 실제로 실행되어 Antigravity CLI 배너가 떠 있었으므로, 이 경고는 실제 미전달을 뜻하지 않았습니다.
 - (b): 경고 없이 `accepted: true`로 반환되었고, 화면 대조 결과도 정상 실행되었습니다.
 
-> **참고(PM 전달, 이 워커가 직접 관측하지 않음)**: PM은 "이사"가 이 경고 문구의 의미(제출은 대기열에 들어가 있을 뿐 유실이 아니라는 취지)를 화면과 여러 차례 대조해 확인했다는 자료(`director-evidence-t4b.md`)를 scratchpad 경로로 전달했습니다. 이 자료를 처음 받았을 때 "PM도 방금 이 워커에게 지시를 보낼 때 같은 경고가 붙었다"는 문장이 이 워커의 `orca orchestration check` 수신 기록(당시 0건)과 맞지 않아 사용자에게 불일치를 보고했고, 이후 PM이 오케스트레이션 채널(메시지 `msg_03cf96f8c0f1`)로 두 자료 모두 PM이 보낸 것이 맞다고 확인하며 "PM도 경고 1건씩"이라는 문장은 PM 자신의 관측이라고 밝혔습니다. 그래도 이 자료의 구체적 주장(경고가 항상 정상 전달을 의미한다는 것)은 이 워커가 소스나 재현으로 직접 검증한 것이 아니므로, 위 (a)(b)처럼 이 워커가 직접 받은 응답과 직접 대조한 화면만 사실로 적고 이 문단은 "PM 전달" 출처로만 남깁니다.
+> **참고(PM 전달, 이 워커가 직접 관측하지 않음)**: PM은 이사가 같은 수신 터미널(PM 터미널)에 연달아 두 차례 보낸 `terminal send` 결과를 대조한 자료(`director-evidence-t4b.md`)를 scratchpad 경로로 전달했습니다. 첫 번째 호출은 `provider: unsupported`, `delivery observation: unsupported`, 경고 `input was accepted, but this provider cannot report delivery. Inspect the terminal before retrying.`였고, 두 번째 호출은 `provider: claude`, `delivery observation: supported`, 경고 `input was accepted but no turn start was observed, so the Enter may have been swallowed.`였습니다. 두 번 모두 화면 대조 결과 본문은 전달되어 있었습니다. 그래도 이 자료의 구체적 주장(경고가 항상 정상 전달을 의미한다는 것)은 이 워커가 소스나 재현으로 직접 검증한 것이 아니므로, 위 (a)(b)처럼 이 워커가 직접 받은 응답과 직접 대조한 화면만 사실로 적고 이 문단은 "PM 전달" 출처로만 남깁니다.
 
 ### 2.4 원시 데이터
 
@@ -278,7 +278,7 @@
 
 | 전이 대상 | 관측 결과 |
 |---|---|
-| `agentIdentity`가 처음 붙는 시점 | **포착하지 못함.** 터미널 생성 및 명령 전송 뒤 첫 샘플(약 8~11초 뒤)에 이미 `antigravity`로 붙어 있었습니다. 관측 간격(60초)이 부착 시점보다 길어 "붙는 순간"은 창 밖에 있었습니다. |
+| `agentIdentity`가 처음 붙는 시점 | **포착하지 못함.** 터미널 생성 및 명령 전송 뒤 첫 샘플(약 8~11초 뒤)에 이미 `antigravity`로 붙어 있었습니다. 관측 간격(실측 평균 약 76초)이 부착 시점보다 길어 "붙는 순간"은 창 밖에 있었습니다. |
 | tui-idle 판정이 바뀌는 시점 | **관측되지 않음.** 43분 51초 동안 (a)(b)(c) 모두 단 한 번도 `satisfied`로 바뀌지 않았습니다. |
 | 화면 변화 | **관측되지 않음.** `screenHash`와 `lastOutputAt`이 35개 샘플 내내 완전히 고정이었습니다. |
 | 대조군(c)이 (a)(b)와 같은 상태가 되는 시점(지난 관측: 29분 뒤) | **재현되지 않음.** (c)는 처음부터 끝까지 `agentIdentity: null`을 유지했고, (a)(b)와 구분되는 상태(둘 다 `agentIdentity: antigravity`, tui-idle은 셋 다 `timeout`으로 동일)를 유지했습니다. |
@@ -287,7 +287,8 @@
 
 지난 관측(`/Users/jinsungkim/orca/oh-my-teams/.omt/history/supervised-prompt-answers-w3/agy-tui-idle-observation.md`)은 화면 변화 없이 `agentIdentity`가 도중에 새로 붙고 tui-idle 판정이 뒤바뀌는 현상, 그리고 29분 뒤 대조군도 같은 상태가 되는 현상을 보고했습니다. 이번 관측은:
 
-- **재현됨**: 대조군(순수 idle 셸)조차 tui-idle을 43분 51초 동안 한 번도 만족하지 못한다는, 문제 A의 핵심 증상 자체는 재현되었습니다.
+- **재현됨**: `agentIdentity`가 부착되고((a)(b) 모두 첫 샘플부터 `antigravity`) 화면 대조로도 Antigravity CLI 배너와 프롬프트가 준비 상태임을 확인한 (a)(b)가 43분 51초 동안 tui-idle을 한 번도 만족하지 못했다는 점에서, 문제 A의 핵심 증상(브리프 13번, 지난 관측 기록이 서술하는 대로 agentIdentity가 붙고 화면이 준비 상태인 터미널이 tui-idle을 보고하지 않는 현상)은 (a)(b)에서 재현되었습니다.
+- 대조군(c)은 계약(1.json 지시 2번)이 정의한 대로 에이전트가 없는 빈 셸이므로, tui-idle이 원래 만족되어야 하는 대상인지는 이 문서만으로 판단할 수 없습니다(브리프 13번이 명시하듯 OMT에는 tui-idle 판정 로직이 없어 Orca 내부 기준을 알 수 없음). (c) 역시 43분 51초 동안 `timeout`을 유지했다는 사실은 기준선 결과로만 남기며, 그 기대값(에이전트가 없는 셸에서 tui-idle이 만족되어야 하는지)은 이번 관측으로 확인하지 못했습니다.
 - **재현되지 않음**: `agentIdentity`가 관측 도중 새로 붙는 현상, tui-idle 판정이 도중에 뒤바뀌는 현상, 대조군이 일정 시간 뒤 다른 상태로 바뀌는 현상은 이번 관측 창(43분 51초) 안에서 나타나지 않았습니다.
 - 두 관측의 직접 비교는 표본 간격(지난 관측은 미상, 이번은 약 76초)과 관측 시작 시점(agy 실행 직후 vs 알 수 없음)이 달라 조건이 완전히 같지 않다는 한계가 있습니다.
 
@@ -302,12 +303,13 @@
 3. **대조군이 지난 관측처럼 29분 뒤 상태를 바꾸는지**: 이번에는 재현되지 않았습니다(위 비교 참고). 환경·시점 차이 때문인지 원래 비결정적인 현상인지는 이 관측만으로 확인할 수 없습니다.
 4. **단일 시점 스냅숏의 한계**: PM이 전달한 참고 자료(§2.7의 2번)는 이사가 화면 상태를 최소 30초 이상 지속 관찰한 뒤 판정하라고 지시했다고 전합니다. 이번 관측은 60초 간격의 순간 스냅숏이므로, 두 스냅숏 사이에 있었을 수 있는 짧은 화면 변화(예: 로그인 화면이 잠깐 떴다 사라지는 경우)는 포착하지 못했을 수 있습니다.
 5. **`terminal send` 경고의 일반적 의미**: 위 2.3의 (a)에서 받은 경고 하나만 직접 확인했고, 그 외의 경우(예: 실제로 입력이 유실되는 경우가 있는지)는 이번 관측 범위 밖입니다.
+6. **수집기 대기 시간(5000ms)과 런타임 대기 시간(20000ms)의 차이**: `collect-v2.mjs`의 `classifyWait`는 매 표본마다 `orca terminal wait --for tui-idle --timeout-ms 5000`을 호출하지만, 실제 런타임이 쓰는 대기 시간은 `orca-adapter.mjs:425`의 `IDLE_PROBE_MS = 20000`으로 4배 깁니다. 각 표본의 대기 호출이 5초에서 끝나므로, 실제 운영에서 20초 대기라면 만족으로 판정될 수 있는 5~20초 사이의 일시적 상태가 이번 35개 표본 어디에도 걸리지 않았을 가능성이 있어, "43분 51초 동안 한 번도 satisfied가 나오지 않았다"는 결론이 20초 대기 기준의 실제 판정과 다를 수 있습니다.
 
 ### 2.7 참고: PM이 전달한 다른 관측 (이 워커가 직접 관측하지 않음)
 
-PM이 이사로부터 전달받아 넘겨준 자료이며, PM이 오케스트레이션 채널(`msg_03cf96f8c0f1`)로 출처를 직접 확인했습니다. 다만 아래 항목은 본 관측과 시점·환경이 다르고, 이 워커가 원자료나 재현 절차를 소스 수준에서 직접 확인하지는 못했으므로 §2.5·§2.6의 결론에는 반영하지 않았습니다. 계약(브리프 기준 12·13) 범위를 넓히는 근거로도 쓰지 않습니다.
+PM이 이사로부터 전달받아 넘겨준 자료입니다. 다만 아래 항목은 본 관측과 시점·환경이 다르고, 이 워커가 원자료나 재현 절차를 소스 수준에서 직접 확인하지는 못했으므로 §2.5·§2.6의 결론에는 반영하지 않았습니다. 계약(브리프 기준 12·13) 범위를 넓히는 근거로도 쓰지 않습니다.
 
-1. **`terminal send` 경고의 의미(이사 전달)**: 이사가 화면과 일곱 차례 대조한 바로는, "input was accepted, but this provider cannot report delivery" 류 경고가 나타나도 같은 시각 화면에 입력이 제출 대기열에 있었거나 이미 반영되어 있었고, 일곱 번 모두 결국 전달되었다고 합니다. `--retry-request <id> --wait-submit <초>`로 재확인하면 같은 요청 ID는 프롬프트를 다시 보내지 않고 receipt만 재생한다고 합니다. tui-idle timeout과는 다른 현상이라는 점도 함께 전달되었습니다.
+1. **`terminal send` 경고의 의미(이사 전달)**: 이사가 화면과 일곱 차례 대조해 확인한 것은 "input was accepted but no turn start was observed, so the Enter may have been swallowed." 경고였습니다. 같은 시각 화면에는 "Messages to be submitted after next tool call (press esc to interrupt and send immediately)" 아래에 본문이 대기열에 있었거나 이미 반영되어 있었고, 일곱 번 모두 결국 전달되었다고 합니다. 이후 PM 터미널에 연달아 보낸 보충 확인 두 차례 가운데 두 번째도 같은 "no turn start" 경고였으므로, 이 경고에 대한 확인은 모두 여덟 차례입니다. "input was accepted, but this provider cannot report delivery. Inspect the terminal before retrying."(provider: unsupported) 경고는 그 보충 확인의 첫 번째 한 건에서만 나타났고, 그때도 화면 대조 결과 본문은 전달되어 있었습니다. `--retry-request <id> --wait-submit <초>`로 재확인하면 같은 요청 ID는 프롬프트를 다시 보내지 않고 receipt만 재생한다고 합니다. 두 경고 모두 tui-idle timeout과는 다른 현상이라는 점도 함께 전달되었습니다.
 2. **다른 kickoff의 Agy 로그인 화면 오판(darwin, 미검증)**: 폴더 신뢰 처리 전 Agy 역할 터미널이 "Select login method" 화면을 보였는데 실제 인증은 유효했다고 합니다(같은 계정의 다른 역할이 같은 시각 정상 기동). 이사 스스로도 "신뢰 미처리가 원인"이라는 판단은 소스로 확인하지 않은 추론이라고 밝혔다고 합니다. 단일 화면 스냅숏만으로 상태를 판정하는 방식의 신뢰도 한계를 보여주는 사례로만 인용합니다.
 3. **darwin에서도 Agy tui-idle이 오지 않는 현상(새 발견 아님, 출처: 이슈 #102)**: 이 현상은 이미 이슈 #102로 등록되어 있고, 이사가 그 이슈에 폴더 신뢰를 처리하고 화면이 정상이어도 tui-idle이 오지 않는 사례(gemini-3.8-flash-high 포함, darwin Agy 역할 두 개: Gemini 3.1 Pro (High), Gemini 3.8 Flash (High))를 댓글로 남겼다고 합니다. 문제 A가 Windows에 국한되지 않을 수 있다는 정황을 뒷받침하지만, 이 문서의 관측 대상(darwin, Antigravity CLI, gpt-oss-120b-medium)과 모델·역할이 달라 직접 비교하지는 않았고, 새로 발견한 사실이 아니라 #102에 이미 기록된 사례로 인용합니다.
 
