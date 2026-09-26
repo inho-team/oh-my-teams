@@ -111,15 +111,33 @@ export function missingPhaseFields(body) {
   );
 }
 
+/** Extensions that mark a backtick span as a file path rather than a command
+ * name, an option flag, or an identifier like `PH-01` or `DOCS-09`.
+ */
+const PATH_LIKE_EXTENSIONS = "mjs|cjs|js|ts|tsx|jsx|json|md|mdx|yml|yaml|sh";
+
+/** A backtick span that names a file: at least one path character before the
+ * dot, so a bare extension mention like `.mjs` does not match.
+ */
+const FILE_PATH_PATTERN = new RegExp(
+  `^[\\w./-]*[\\w-]\\.(?:${PATH_LIKE_EXTENSIONS})$`,
+);
+
 /** Find implementation leaking into a roadmap document.
  *
  * Three shapes count as a leak: a fenced code block, text that reads like a
- * function or method signature, and a backtick-wrapped path that is not
+ * function or method signature, and a backtick-wrapped file path that is not
  * inside a markdown link. Every markdown link is stripped before the other
  * two checks run, so a link's own brackets and target text never count as a
  * signature or an unlinked path; the backtick checks also stay within a
  * single line, so a fence's paired triple backticks cannot be mistaken for
  * an inline code span that happens to contain parentheses.
+ *
+ * A backtick span counts as an unlinked path only when it ends in a
+ * recognized file extension, whether or not it also has a `/` in it, so a
+ * single-segment file name like `role-terminal.mjs` is caught the same way
+ * as `scripts/role-terminal.mjs`. A command name, an option flag, or an
+ * identifier such as `PH-01` carries no such extension and is left alone.
  *
  * @param {string} markdown roadmap document text
  * @returns {string[]} one label per kind of leak found, without duplicates
@@ -137,7 +155,7 @@ export function implementationLeaks(markdown) {
     leaks.push("signature");
   }
   const hasUnlinkedPath = [...withoutLinks.matchAll(/`([^`\n]*)`/g)].some(
-    (match) => match[1].includes("/"),
+    (match) => FILE_PATH_PATTERN.test(match[1]),
   );
   if (hasUnlinkedPath) leaks.push("unlinked-path");
   return leaks;

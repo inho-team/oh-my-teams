@@ -99,7 +99,18 @@ test("a path in backticks without a markdown link is reported as a leak", () => 
   assert.deepEqual(implementationLeaks(fixture), ["unlinked-path"]);
 });
 
+test("a single-segment file name in backticks without a markdown link is reported as a leak", () => {
+  const fixture = "이 문서를 본다: `role-terminal.mjs`.";
+  assert.deepEqual(implementationLeaks(fixture), ["unlinked-path"]);
+});
+
 test("a path in backticks inside a markdown link is not reported as a leak", () => {
   const fixture = "[`scripts/metadata.mjs`](../scripts/metadata.mjs)를 본다.";
+  assert.deepEqual(implementationLeaks(fixture), []);
+});
+
+test("a command name, an option flag, or an identifier in backticks is not reported as a leak", () => {
+  const fixture =
+    "`npm run lint`를 실행하고 `--dispatch-id`를 넘기면 `PH-01`과 `DOCS-01` 항목을 확인한다.";
   assert.deepEqual(implementationLeaks(fixture), []);
 });

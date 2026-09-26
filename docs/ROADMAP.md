@@ -60,7 +60,7 @@ phase의 진행 상태는 이 표에만 적는다. 다른 자리에는 상태를
 
 **주의사항.**
 
-- 1차 감사 보고서는 `role-terminal.mjs` 한 곳만 지적했으나, `dependencies.mjs`·`prompt-submission.mjs`·`teams-org.mjs`·`prompt-supervision.mjs`도 모두 같은 방식으로 Orca 실행 어댑터를 직접 import하고 있어(2026-09-18 기준), 판정 결과가 한 파일에만 그치지 않는다.
+- 1차 감사 보고서는 [`role-terminal.mjs`](../plugins/oh-my-teams/scripts/role-terminal.mjs) 한 곳만 지적했으나, [`dependencies.mjs`](../plugins/oh-my-teams/scripts/dependencies.mjs)·[`prompt-submission.mjs`](../plugins/oh-my-teams/scripts/prompt-submission.mjs)·[`teams-org.mjs`](../plugins/oh-my-teams/scripts/teams-org.mjs)·[`prompt-supervision.mjs`](../plugins/oh-my-teams/scripts/prompt-supervision.mjs)도 모두 같은 방식으로 Orca 실행 어댑터를 직접 import하고 있어(2026-09-18 기준), 판정 결과가 한 파일에만 그치지 않는다.
 - [`AGENTS.md`](../AGENTS.md)의 "어댑터를 거치지 않는 직접 호출 금지" 규칙은 [2차 감사 보고서](plan/omt-audit-2026-09-r2.md)의 `DOCS-02` 수정으로 추가됐을 뿐, `LAUNCH-02`를 이 규칙에 맞춰 다시 판정한 근거는 아직 기록되지 않았다.
 - [2차 감사 보고서](plan/omt-audit-2026-09-r2.md)의 「다음 kickoff 우선순위」 반영 현황에는 `LAUNCH-02`가 아예 등장하지 않는다. 같은 우선순위 묶음의 나머지 항목(`DOCS-01`~`DOCS-03`)은 수정됐다고 적혀 있어, `LAUNCH-02`만 처리도 기각도 되지 않은 채 남아 있다.
 
@@ -74,4 +74,4 @@ phase의 진행 상태는 이 표에만 적는다. 다른 자리에는 상태를
 **비목표.**
 
 - 이 phase에서 코드를 직접 고치지 않는다. 판정과 다음 kickoff로 넘길 범위를 정하는 것까지만 한다.
-- `adapters.mjs`의 포트 구조 자체를 다시 설계하지 않는다.
+- [`adapters.mjs`](../plugins/oh-my-teams/scripts/adapters.mjs)의 포트 구조 자체를 다시 설계하지 않는다.
