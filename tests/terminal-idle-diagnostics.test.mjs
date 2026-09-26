@@ -27,6 +27,14 @@ function tempDir(t) {
 // actually returns (confirmed against a live shell terminal before writing
 // this fixture), so the diagnostics path is exercised against a real shape
 // rather than an invented one.
+// `--orca` names one executable, and Windows cannot spawn this shebang
+// script without a shell, so the two CLI-path tests stay POSIX only. The
+// diagnostics they print are built by the adapter tests in this file, which inject
+// `execute` and run on every platform.
+const posixOnly = {
+  skip: process.platform === "win32" && "the fake Orca is a POSIX script",
+};
+
 function writeFakeOrca(dir, terminal) {
   const file = path.join(dir, "fake-orca.mjs");
   fs.writeFileSync(
@@ -295,79 +303,87 @@ test("default wait is 20000 ms", async () => {
   assert.equal(waitCall[timeoutIndex + 1], "20000");
 });
 
-test("the terminal-idle-check CLI prints diagnostics instead of only the translated message", async (t) => {
-  const dir = tempDir(t);
-  const fakeOrca = writeFakeOrca(dir, "term_cli_1");
+test(
+  "the terminal-idle-check CLI prints diagnostics instead of only the translated message",
+  posixOnly,
+  async (t) => {
+    const dir = tempDir(t);
+    const fakeOrca = writeFakeOrca(dir, "term_cli_1");
 
-  await assert.rejects(
-    main([
-      "terminal-idle-check",
-      "--terminal",
-      "term_cli_1",
-      "--orca",
-      fakeOrca,
-    ]),
-    (error) => {
-      assert.match(error.message, /did not report tui-idle within 20000ms/);
-      const [firstLine, ...rest] = error.message.split("\n");
-      assert.match(firstLine, /did not report tui-idle/);
-      const detail = JSON.parse(rest.join("\n"));
-      assert.equal(detail.signal.code, "timeout");
-      assert.equal(detail.diagnostics.screenSource, "screen");
-      assert.deepEqual(detail.diagnostics.screen, [
-        "Welcome to the Antigravity CLI.",
-        "You are not signed in.",
-        "> ",
-      ]);
-      assert.equal(detail.diagnostics.terminalState.agentIdentity, "agy");
-      assert.equal(detail.diagnostics.terminalState.status, "running");
-      assert.equal(
-        detail.diagnostics.terminalState.lastOutputAt,
-        "2026-09-26T00:00:00Z",
-      );
-      return true;
-    },
-  );
-});
+    await assert.rejects(
+      main([
+        "terminal-idle-check",
+        "--terminal",
+        "term_cli_1",
+        "--orca",
+        fakeOrca,
+      ]),
+      (error) => {
+        assert.match(error.message, /did not report tui-idle within 20000ms/);
+        const [firstLine, ...rest] = error.message.split("\n");
+        assert.match(firstLine, /did not report tui-idle/);
+        const detail = JSON.parse(rest.join("\n"));
+        assert.equal(detail.signal.code, "timeout");
+        assert.equal(detail.diagnostics.screenSource, "screen");
+        assert.deepEqual(detail.diagnostics.screen, [
+          "Welcome to the Antigravity CLI.",
+          "You are not signed in.",
+          "> ",
+        ]);
+        assert.equal(detail.diagnostics.terminalState.agentIdentity, "agy");
+        assert.equal(detail.diagnostics.terminalState.status, "running");
+        assert.equal(
+          detail.diagnostics.terminalState.lastOutputAt,
+          "2026-09-26T00:00:00Z",
+        );
+        return true;
+      },
+    );
+  },
+);
 
-test("worker-start's idle rejection also prints diagnostics through the CLI", async (t) => {
-  const dir = tempDir(t);
-  const fakeOrca = writeFakeOrca(dir, "term_cli_2");
-  const orgFile = path.join(dir, "organization.json");
-  writeJSON(
-    orgFile,
-    readJSON(
-      new URL(
-        "../plugins/oh-my-teams/examples/organization.json",
-        import.meta.url,
-      ),
-    ),
-  );
-
-  await assert.rejects(
-    main([
-      "worker-start",
-      "--repo",
-      dir,
-      "--org",
+test(
+  "worker-start's idle rejection also prints diagnostics through the CLI",
+  posixOnly,
+  async (t) => {
+    const dir = tempDir(t);
+    const fakeOrca = writeFakeOrca(dir, "term_cli_2");
+    const orgFile = path.join(dir, "organization.json");
+    writeJSON(
       orgFile,
-      "--role",
-      "pl",
-      "--spec",
-      "이어서 한다",
-      "--terminal",
-      "term_cli_2",
-      "--orca",
-      fakeOrca,
-    ]),
-    (error) => {
-      assert.match(error.message, /did not report tui-idle within 20000ms/);
-      const [, ...rest] = error.message.split("\n");
-      const detail = JSON.parse(rest.join("\n"));
-      assert.equal(detail.signal.code, "timeout");
-      assert.equal(detail.diagnostics.screenSource, "screen");
-      assert.equal(detail.diagnostics.terminalState.agentIdentity, "agy");
-      return true;
-    },
-  );
-});
+      readJSON(
+        new URL(
+          "../plugins/oh-my-teams/examples/organization.json",
+          import.meta.url,
+        ),
+      ),
+    );
+
+    await assert.rejects(
+      main([
+        "worker-start",
+        "--repo",
+        dir,
+        "--org",
+        orgFile,
+        "--role",
+        "pl",
+        "--spec",
+        "이어서 한다",
+        "--terminal",
+        "term_cli_2",
+        "--orca",
+        fakeOrca,
+      ]),
+      (error) => {
+        assert.match(error.message, /did not report tui-idle within 20000ms/);
+        const [, ...rest] = error.message.split("\n");
+        const detail = JSON.parse(rest.join("\n"));
+        assert.equal(detail.signal.code, "timeout");
+        assert.equal(detail.diagnostics.screenSource, "screen");
+        assert.equal(detail.diagnostics.terminalState.agentIdentity, "agy");
+        return true;
+      },
+    );
+  },
+);
