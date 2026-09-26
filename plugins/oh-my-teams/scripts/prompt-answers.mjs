@@ -323,7 +323,12 @@ const TRUST_QUESTION_ANYWHERE =
 const TRUST_SELECTED_ANYWHERE = /^\s*[>❯]\s*Yes, I trust this folder\s*$/;
 
 /**
- * Reports whether a folder trust question is still on the screen.
+ * Reports whether Agy's folder trust question is still on the screen.
+ *
+ * This function recognizes only Agy's trust question ("Do you trust the contents
+ * of this project?" with "Yes, I trust this folder" selected). It must not be
+ * used to judge Claude's or Codex's trust questions, which have different
+ * wording and require different handling. For those CLIs, use `classifyPromptScreen`.
  *
  * This is not the "may be answered" check of `classifyPromptScreen`, which
  * also requires the question to be the live screen with nothing below it. A
@@ -333,9 +338,9 @@ const TRUST_SELECTED_ANYWHERE = /^\s*[>❯]\s*Yes, I trust this folder\s*$/;
  * exactly as the check did before the classifier existed.
  *
  * @param {string[]} lines - Screen lines, oldest first.
- * @returns {boolean} True when the question text and a selected "Yes, I trust this folder" row are both present.
+ * @returns {boolean} True when Agy's question text and selected "Yes, I trust this folder" row are both present.
  */
-export function trustQuestionVisible(lines) {
+export function agyTrustQuestionVisible(lines) {
   const rows = lines ?? [];
   return (
     rows.some((line) => TRUST_QUESTION_ANYWHERE.test(line)) &&

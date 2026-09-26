@@ -15,7 +15,7 @@ import {
   classifyPromptScreen,
   decideApproval,
   judgeCommandScope,
-  trustQuestionVisible,
+  agyTrustQuestionVisible,
 } from "../plugins/oh-my-teams/scripts/prompt-answers.mjs";
 import { trustQuestion } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 
@@ -286,6 +286,30 @@ test("role-terminal's trustQuestion still answers Agy alone", () => {
     false,
   );
   assert.equal(trustQuestion(undefined), false);
+});
+
+test("agyTrustQuestionVisible recognizes Agy trust questions only", () => {
+  assert.equal(
+    agyTrustQuestionVisible(screen("agy-1.2.7-folder-trust-default")),
+    true,
+  );
+  assert.equal(
+    agyTrustQuestionVisible(screen("agy-1.2.7-folder-trust-changed")),
+    false,
+  );
+  assert.equal(
+    agyTrustQuestionVisible(screen("codex-0.155.1-folder-trust-default")),
+    false,
+  );
+  assert.equal(
+    agyTrustQuestionVisible(screen("claude-2.1.278-folder-trust-default")),
+    false,
+  );
+  assert.equal(
+    agyTrustQuestionVisible(screen("claude-2.1.278-folder-trust-changed")),
+    false,
+  );
+  assert.equal(agyTrustQuestionVisible(undefined), false);
 });
 
 test("screens that were not captured classify as unknown and are never answered", () => {
@@ -936,21 +960,21 @@ test("a trust question still on the screen is visible even when it is no longer 
   // The old check read the question text and the selected row anywhere, and
   // only the Agy capture has both, so that is the screen it can be shown on.
   const live = screen("agy-1.2.7-folder-trust-default");
-  assert.equal(trustQuestionVisible(live), true);
+  assert.equal(agyTrustQuestionVisible(live), true);
   // Lines drawn below the choices make it unanswerable but not gone.
   const below = [...live, "  something drawn below the question"];
   assert.equal(classifyPromptScreen(below, { cli: "agy" }).action, "none");
-  assert.equal(trustQuestionVisible(below), true);
+  assert.equal(agyTrustQuestionVisible(below), true);
   // The question text alone, or the selected row alone, is not the question.
   assert.equal(
-    trustQuestionVisible(live.filter((line) => !/Do you trust/.test(line))),
+    agyTrustQuestionVisible(live.filter((line) => !/Do you trust/.test(line))),
     false,
   );
   assert.equal(
-    trustQuestionVisible(
+    agyTrustQuestionVisible(
       swap(live, "> Yes, I trust this folder", "  Yes, I trust this folder"),
     ),
     false,
   );
-  assert.equal(trustQuestionVisible(undefined), false);
+  assert.equal(agyTrustQuestionVisible(undefined), false);
 });
