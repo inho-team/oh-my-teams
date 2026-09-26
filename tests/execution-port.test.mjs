@@ -573,7 +573,9 @@ const submissionFixture = (screen, extra = {}) => {
 };
 
 test("a ready worker-start reused terminal missing turn_started presses Enter once on an unsubmitted prompt (#87)", async () => {
-  const { calls, execute } = submissionFixture(["> some preamble text"]);
+  const { calls, execute } = submissionFixture([
+    "> some preamble naming task_1",
+  ]);
   const receipt = await startOrcaWorker("/repo", {
     task: "task_1",
     terminal: "term_1",
@@ -587,6 +589,27 @@ test("a ready worker-start reused terminal missing turn_started presses Enter on
   });
   assert.equal(calls.filter((argv) => argv[2] === "send").length, 1);
   assert.equal(calls.filter((argv) => argv[2] === "worker-start").length, 1);
+});
+
+test("a foreign-input box on a reused terminal is left unclear, never mistaken for the task's own prompt (#87)", async () => {
+  // The reused terminal's input box holds text that names no task id: it
+  // could be another dispatch's leftover, or someone typing by hand.
+  // Pressing Enter would submit that text as if it were this hand-off.
+  const { calls, execute } = submissionFixture([
+    "> some other terminal's leftover text",
+  ]);
+  const receipt = await startOrcaWorker("/repo", {
+    task: "task_1",
+    terminal: "term_1",
+    discovery,
+    execute,
+  });
+  assert.deepEqual(receipt.submission, {
+    outcome: "unclear",
+    reason: "text-in-box-without-task-id",
+    enterSent: false,
+  });
+  assert.equal(calls.filter((argv) => argv[2] === "send").length, 0);
 });
 
 test("an empty input box naming the task id is read as already started, with no Enter (#87)", async () => {

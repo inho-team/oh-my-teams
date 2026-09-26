@@ -25,8 +25,10 @@ import {
 } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 import {
   ALLOWED_OPTIONS,
+  freshenTerminal,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { findActiveDispatch } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import {
   readLaunches,
   recordLaunch,
@@ -1449,6 +1451,117 @@ test("clearRoleTerminal skips /clear, without refusing, when an active dispatch 
     cleared: false,
     terminal: "term_1",
     reason: "active-dispatch-unknown",
+  });
+  assert.deepEqual(
+    calls.map((argv) => argv.slice(1, 3).join(" ")),
+    ["orchestration worker-list"],
+  );
+});
+
+test("findActiveDispatch counts an unresolved dispatch status as unknown, never as clear", async () => {
+  // A worker matching the terminal sits in "pending" (not yet "dispatched",
+  // not "completed" or "failed" either): the documented status vocabulary
+  // does not say the Dispatch is settled, so /clear must not be assumed safe.
+  const execute = async () => ({
+    code: 0,
+    stderr: "",
+    timedOut: false,
+    stdout: JSON.stringify({
+      ok: true,
+      result: {
+        workers: [
+          {
+            dispatchId: "ctx_pending",
+            taskId: "task_pending",
+            dispatchStatus: "pending",
+            agentTerminalHandle: "term_1",
+          },
+        ],
+      },
+    }),
+  });
+  const result = await findActiveDispatch("term_1", {
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, { status: "unknown" });
+});
+
+test("findActiveDispatch counts a truncated page with no match on it as unknown, never as clear", async () => {
+  // No worker on this page names the terminal, but page.hasMore says a later
+  // page might still hold its Dispatch: "clear" would be a guess.
+  const execute = async () => ({
+    code: 0,
+    stderr: "",
+    timedOut: false,
+    stdout: JSON.stringify({
+      ok: true,
+      result: {
+        workers: [
+          {
+            dispatchId: "ctx_other",
+            taskId: "task_other",
+            dispatchStatus: "dispatched",
+            agentTerminalHandle: "term_2",
+          },
+        ],
+        page: { hasMore: true },
+      },
+    }),
+  });
+  const result = await findActiveDispatch("term_1", {
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, { status: "unknown" });
+});
+
+test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/reason, not the decision's guess (#84)", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-freshen-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, ".omt", "organization.json");
+  recordLaunch(
+    orgFile,
+    {
+      via: "worker-start",
+      role: "senior",
+      provider: "claude",
+      terminal: "term_1",
+      workflowId: "wf",
+      workflowTaskId: "task-a",
+    },
+    "2026-09-21T00:00:00.000Z",
+  );
+
+  const calls = [];
+  // worker-list fails, so findActiveDispatch (and clearRoleTerminal after it)
+  // cannot decide whether an active Dispatch stands in the way.
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "worker-list") throw new Error("connection reset");
+    throw new Error(`unexpected call ${argv[2]}`);
+  };
+
+  const freshContext = await freshenTerminal(
+    { org: orgFile, terminal: "term_1", orca: "orca", repo: dir },
+    { provider: "claude" },
+    {
+      workflowId: "wf",
+      workflowTaskId: "task-b",
+      orcaTaskId: null,
+      purpose: null,
+    },
+    execute,
+  );
+
+  // freshContextDecision alone would have called this a plain "different-task"
+  // clear; clearRoleTerminal's own active-dispatch-unknown reason must survive
+  // the merge into what worker-start hands back as freshContext.
+  assert.deepEqual(freshContext, {
+    clear: true,
+    reason: "active-dispatch-unknown",
+    previousLaunchAt: "2026-09-21T00:00:00.000Z",
+    cleared: false,
   });
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),

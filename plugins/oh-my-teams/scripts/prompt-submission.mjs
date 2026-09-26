@@ -173,8 +173,16 @@ async function readScreen(orca, terminal, execute) {
  * `judgeDelivery`'s exact-text comparison would read that preamble as
  * `foreign-input` and refuse to press Enter on a delivery that is in fact
  * only unsubmitted. The Dispatch's task id is the one anchor both the
- * receipt and the screen name unchanged, so it stands in for the text match
- * here; a `foreign-input` verdict is accordingly never reached.
+ * receipt and the screen name unchanged, and Orca's own preamble states it
+ * verbatim (e.g. "Your task ID is: task_..."), so it stands in for the text
+ * match here: Enter follows only when that id turns up inside the input
+ * box's own text, never merely because the box holds something. A box that
+ * holds text naming no task id could be another dispatch's leftover input or
+ * someone typing by hand, so `judgeDelivery`'s `foreign-input` reasoning
+ * still applies to that case; without the exact approved text to compare
+ * against, the anchor either turns up or it does not, and the verdict for
+ * "does not" is `unclear` rather than `foreign-input`, since the caller must
+ * withhold Enter exactly the same way regardless of which is true.
  *
  * @param {object} facts - What is known after the start.
  * @param {string[]} facts.stages - `result.prompt.stages` from the worker receipt.
@@ -189,7 +197,11 @@ export function judgeWorkerStartDelivery({ stages, screen, taskId }) {
   }
   const line = inputLine(screen);
   if (!line) return verdict("unclear", "no-input-box-on-screen");
-  if (line.text) return verdict("unsubmitted", "text-in-box");
+  if (line.text) {
+    return taskId && squeeze(line.text).includes(squeeze(taskId))
+      ? verdict("unsubmitted", "text-in-box")
+      : verdict("unclear", "text-in-box-without-task-id");
+  }
   const above = squeeze((screen ?? []).slice(0, line.index).join(""));
   if (taskId && above.includes(squeeze(taskId))) {
     return verdict("already-started", "task-id-in-transcript");

@@ -10,6 +10,7 @@ import {
   definedRoles,
   readJSON,
   ROOT_ROLE,
+  run as runOrcaCommand,
   saveOrg,
   supervisionPolicy,
   validateOrg,
@@ -952,11 +953,34 @@ async function startSupervisedWorker(args) {
   }
 }
 
-// A Claude terminal that last worked on something else starts the new task
-// from an empty conversation, so it does not resend the previous task's
-// history on every call. The decision reads the launch ledger; a ledger that
-// cannot be read clears nothing, as before this rule existed.
-async function freshenTerminal(args, launch, identity) {
+/**
+ * Decides whether a reused terminal's conversation is cleared before a new
+ * task is handed to it, and carries out that clear.
+ *
+ * A Claude terminal that last worked on something else starts the new task
+ * from an empty conversation, so it does not resend the previous task's
+ * history on every call. The decision reads the launch ledger; a ledger that
+ * cannot be read clears nothing, as before this rule existed. `clearRoleTerminal`
+ * itself may decline to clear (an active Dispatch it cannot settle either
+ * way), so its own `cleared`/`reason` overrides the decision's when they
+ * disagree, rather than assuming the clear happened; the merged result is
+ * what `worker-start` returns verbatim as its own `freshContext` field.
+ *
+ * @param {object} args - Parsed CLI arguments for `worker-start`.
+ * @param {object} launch - Resolved role launch, read for `launch.provider`.
+ * @param {object} identity - Workflow/task/purpose identity being started.
+ * @param {Function} [execute=run] - Injectable command runner, threaded
+ *   through to `clearRoleTerminal`.
+ * @returns {Promise<{clear: boolean, reason: string, cleared: boolean,
+ *   previousLaunchAt?: string}>} The freshness decision merged with what
+ *   clearing actually did.
+ */
+export async function freshenTerminal(
+  args,
+  launch,
+  identity,
+  execute = runOrcaCommand,
+) {
   let launches = [];
   try {
     launches = readLaunches(args.org);
@@ -969,13 +993,11 @@ async function freshenTerminal(args, launch, identity) {
     ...identity,
   });
   if (!decision.clear) return { cleared: false, ...decision };
-  // clearRoleTerminal itself may decline to clear (an active Dispatch it
-  // cannot settle either way), so its own `cleared`/`reason` overrides the
-  // decision's when they disagree, rather than assuming the clear happened.
   const outcome = await clearRoleTerminal({
     terminal: args.terminal,
     executable: args.orca,
     cwd: path.resolve(args.repo),
+    execute,
   });
   return {
     ...decision,
