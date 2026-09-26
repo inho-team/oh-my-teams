@@ -5,10 +5,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { writeJSON, readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   findPmTerminal,
   notifyDirector,
+  notifyDirectorSignal,
   sendSignal,
   listInbox,
   replySignal,
@@ -31,6 +33,20 @@ import {
 const exampleOrg = readJSON(
   new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
 );
+
+// A real captured Claude Code AskUserQuestion screen (#82's regression case),
+// not a screen invented for this test file.
+const askUserScreen = JSON.parse(
+  fs.readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "fixtures",
+      "prompt-screens",
+      "claude-2.1.278-askuser-default.json",
+    ),
+    "utf8",
+  ),
+).lines;
 
 // Creates a temporary project directory with organization.json and a registered
 // kickoff entry for a PM worktree. Returns { dir, orgFile, worktreeId }.
@@ -970,11 +986,13 @@ function orcaNotify(answers, screen = []) {
       }),
     };
   };
+  // Matched by the argument in the "--text" position, not by scanning the
+  // whole call for a substring, so a bundled multi-signal message counts too.
   const textSends = () =>
     calls.filter(
       (call) =>
         call[1] === "send" &&
-        call.includes(NOTE_TEXT) &&
+        call[call.indexOf("--text") + 1] !== "" &&
         !call.includes("--retry-request"),
     );
   const enters = () =>
@@ -1046,10 +1064,139 @@ test("notifyDirector keeps Orca's failure text and does not resend", async () =>
   assert.match(result.notifyError, /terminal_not_writable: pane is closed/);
   assert.equal(result.delivery.outcome, "failed");
   assert.equal(result.delivery.requestId, null);
-  assert.equal(orca.calls.length, 1);
+  // One screen read ahead of the send that then fails.
+  assert.equal(orca.calls.length, 2);
   assert.deepEqual(await notifyDirector({}, NOTE, "orca", orca.execute), {
     notified: false,
   });
+});
+
+// ─── notifyDirector defers when the Director's screen cannot take input (#82) ──
+
+test("notifyDirector defers without sending when a selection window is on screen", async () => {
+  const orca = orcaNotify([["input_accepted", "turn_started"]], askUserScreen);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.notifyError, "blocked-by-user-question");
+  // Only the screen read happened; no Enter, no text.
+  assert.equal(orca.calls.length, 1);
+  assert.equal(orca.textSends().length, 0);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirector proceeds on a screen with a working indicator (not blocked)", async () => {
+  // classifyPromptScreen only recognizes trust and AskUserQuestion screens;
+  // anything else, busy or idle, is "unknown" and does not defer the send.
+  const busyScreen = [RULE, "❯", "✻ Working…", RULE];
+  const orca = orcaNotify([["input_accepted", "turn_started"]], busyScreen);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, true);
+  assert.equal(result.deferred, undefined);
+  assert.equal(result.delivery.outcome, "submitted");
+});
+
+test("notifyDirector proceeds on an idle, empty-prompt screen (not blocked)", async () => {
+  const idleScreen = [RULE, "❯", RULE, "  ⏵⏵ bypass permissions on"];
+  const orca = orcaNotify([["input_accepted", "turn_started"]], idleScreen);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, true);
+  assert.equal(result.deferred, undefined);
+  assert.equal(result.delivery.outcome, "submitted");
+});
+
+// ─── notifyDirectorSignal: defer, bundle once clear, never resend (#82, ac-3) ──
+
+test("notifyDirectorSignal defers a blocked backlog, then bundles and delivers it once the screen clears, without resending", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+
+  const blocked = orcaNotify(
+    [["input_accepted", "turn_started"]],
+    askUserScreen,
+  );
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "step 1 done",
+  });
+  const firstResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    first.record,
+    "orca",
+    blocked.execute,
+  );
+  assert.equal(firstResult.notified, false);
+  assert.equal(firstResult.deferred, true);
+  assert.deepEqual(firstResult.bundled, [first.id]);
+
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "step 2 done",
+  });
+  const secondResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    second.record,
+    "orca",
+    blocked.execute,
+  );
+  assert.equal(secondResult.notified, false);
+  assert.deepEqual(
+    secondResult.bundled.slice().sort(),
+    [first.id, second.id].sort(),
+  );
+  // Both attempts only ever read the blocked screen; nothing was typed.
+  assert.equal(blocked.calls.length, 2);
+  assert.equal(blocked.textSends().length, 0);
+
+  const clear = orcaNotify([["input_accepted", "turn_started"]], []);
+  const third = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "step 3 done",
+  });
+  const thirdResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    third.record,
+    "orca",
+    clear.execute,
+  );
+  assert.equal(thirdResult.notified, true);
+  assert.deepEqual(
+    thirdResult.bundled.slice().sort(),
+    [first.id, second.id, third.id].sort(),
+  );
+  const sends = clear.textSends();
+  assert.equal(sends.length, 1);
+  const sentText = sends[0][sends[0].indexOf("--text") + 1];
+  assert.match(sentText, /step 1 done/);
+  assert.match(sentText, /step 2 done/);
+  assert.match(sentText, /step 3 done/);
+
+  assert.equal(readSignal(orgFile, first.id).notify.notified, true);
+  assert.equal(readSignal(orgFile, second.id).notify.notified, true);
+  assert.equal(readSignal(orgFile, third.id).notify.notified, true);
+
+  // A later signal's own attempt never re-bundles ones already delivered.
+  const fourth = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "step 4 done",
+  });
+  const fourthOrca = orcaNotify([["input_accepted", "turn_started"]], []);
+  const fourthResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    fourth.record,
+    "orca",
+    fourthOrca.execute,
+  );
+  assert.deepEqual(fourthResult.bundled, [fourth.id]);
 });
 
 test("replySignal reports how far the PM notification got", async (t) => {

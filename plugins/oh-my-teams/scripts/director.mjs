@@ -20,6 +20,8 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
+import { runOrcaJson } from "./orca-adapter.mjs";
+import { classifyPromptScreen } from "./prompt-answers.mjs";
 import { deliverPrompt } from "./prompt-submission.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
 
@@ -186,11 +188,55 @@ export function closeKickoffSignals(orgFile, worktreeId, reason) {
   });
 }
 
-// Sends one notification into a terminal and keeps how far it got. `notified`
+// Reads a terminal's screen once, telling a genuinely empty screen apart from
+// one Orca could not render. `ok: false` covers both a non-"screen" source
+// (Orca's own accumulated-output fallback) and a failed call, since neither
+// shows what is currently on screen; the caller must then treat the terminal's
+// state as unclear rather than guessing from an empty line list.
+async function readTerminalScreen(orca, terminal, execute) {
+  try {
+    const read = await runOrcaJson(
+      orca,
+      ["terminal", "read", "--terminal", terminal, "--screen"],
+      { execute },
+    );
+    const { source, tail } = read.result?.terminal ?? {};
+    return source === "screen"
+      ? { ok: true, lines: tail ?? [] }
+      : { ok: false, lines: [] };
+  } catch {
+    return { ok: false, lines: [] };
+  }
+}
+
+// Sends one notification into a terminal and keeps how far it got. Before
+// anything is typed, the terminal's own screen is read and classified with
+// `classifyPromptScreen` (reused from prompt-answers.mjs, no new screen
+// judgement): a folder-trust question or a Claude `AskUserQuestion` screen
+// means the terminal cannot safely take this input, and an unreadable screen
+// means the state cannot be judged at all, so both come back `deferred: true`
+// without a single key being sent. Only once the screen is clear does the
+// existing accepted-vs-submitted judgement in `deliverPrompt` run. `notified`
 // is true only once the input was submitted or is already being handled, so an
 // input Orca merely accepted is not reported as delivered. Orca's own error
 // text and warnings are kept as they came, and nothing is sent twice.
 async function notifyTerminal(orca, terminal, text, execute) {
+  const screen = await readTerminalScreen(orca, terminal, execute);
+  if (!screen.ok) {
+    return {
+      notified: false,
+      deferred: true,
+      notifyError: "screen-unavailable",
+    };
+  }
+  const asked = classifyPromptScreen(screen.lines);
+  if (asked.kind === "trust" || asked.kind === "user-question") {
+    return {
+      notified: false,
+      deferred: true,
+      notifyError: `blocked-by-${asked.kind}`,
+    };
+  }
   const result = await deliverPrompt({ orca, terminal, text, execute });
   const { delivered, error, ...delivery } = result;
   return {
@@ -203,19 +249,24 @@ async function notifyTerminal(orca, terminal, text, execute) {
 /**
  * Delivers a terminal notification to the Director after writing the signal.
  *
- * Call after `sendSignal`. The notification counts as delivered only when the
+ * Call after `sendSignal`. Before anything is sent, the Director's screen is
+ * read and classified: a folder-trust question or an `AskUserQuestion`
+ * screen, or a screen that cannot be read at all, defers the notification
+ * (`notified: false, deferred: true`) without pressing a single key. Once the
+ * screen is clear, the notification counts as delivered only when the
  * Director's agent started its turn or took the input; an input Orca accepted
  * but nobody submitted comes back as `notified: false`. `delivery` carries the
  * outcome, the receipt stages and the request ID, and `notifyError` keeps
  * Orca's own error text. The text is never sent a second time: the follow-up
  * calls replay the same request ID, and one bare Enter follows only when the
- * text is seen waiting in the input box. The record on disk is unaffected.
+ * text is seen waiting in the input box. The record on disk is unaffected;
+ * `notifyDirectorSignal` is the entry point that also persists and retries.
  *
  * @param {object} entry - Kickoff registry entry.
  * @param {object} record - Signal record returned by `sendSignal`.
  * @param {string} [orcaExecutable] - Orca binary path.
  * @param {Function} [execute] - Injectable command runner.
- * @returns {Promise<{notified: boolean, notifyError?: string, delivery?: object}>} Notification result.
+ * @returns {Promise<{notified: boolean, deferred?: boolean, notifyError?: string, delivery?: object}>} Notification result.
  */
 export async function notifyDirector(
   entry,
@@ -231,6 +282,95 @@ export async function notifyDirector(
     `[omt] ${record.kind} from ${record.worktreeId}: ${record.text}`,
     execute,
   );
+}
+
+// Signals for a worktree that have not yet reached the Director's terminal: a
+// pending decision/blocked/close-ready, or a progress signal (auto-acknowledged
+// on arrival, so `status` alone would hide it), whose last notification attempt
+// did not confirm delivery. A signal the Director already replied to or
+// acknowledged by hand is left out, since that already proves it was seen.
+function undeliveredSignals(orgFile, worktreeId) {
+  return readInbox(orgFile).filter(
+    (record) =>
+      record.worktreeId === worktreeId &&
+      (record.status === "pending" || record.autoAcknowledged === true) &&
+      record.notify?.notified !== true,
+  );
+}
+
+// Stamps every record of a notification attempt with its outcome, so a
+// signal already confirmed delivered is never retried, and one still deferred
+// keeps waiting for the next attempt. Records superseded or closed since the
+// attempt started are left untouched.
+function recordNotifyOutcome(orgFile, records, outcome) {
+  withFileLock(inboxLock(orgFile), () => {
+    for (const record of records) {
+      const file = path.join(inboxDir(orgFile), `${record.id}.json`);
+      if (!fs.existsSync(file)) continue;
+      writeJSON(file, {
+        ...readJSON(file),
+        notify: outcome.notified
+          ? { notified: true, notifiedAt: outcome.at }
+          : {
+              notified: false,
+              deferredAt: outcome.at,
+              ...(outcome.notifyError
+                ? { notifyError: outcome.notifyError }
+                : {}),
+            },
+      });
+    }
+  });
+}
+
+/**
+ * Delivers a signal to the Director's terminal together with every earlier
+ * signal for the same PM worktree that has not yet reached it (a decision,
+ * `blocked`, or `close-ready` still pending, or a `progress` signal never
+ * confirmed delivered), bundled into one message. This is the resend path for
+ * a signal `notifyDirector` had to defer: call it again from `director-signal`
+ * the next time that Director is signalled, and once its screen is no longer
+ * blocked by a question, the whole backlog goes out together. A signal is
+ * marked delivered only once `notified` comes back true, so it is never sent
+ * twice; a deferred attempt leaves every record in the batch exactly as
+ * undelivered as it already was.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} entry - Kickoff registry entry naming the Director terminal.
+ * @param {object} record - Signal record just written by `sendSignal`.
+ * @param {string} [orcaExecutable] - Orca binary path.
+ * @param {Function} [execute] - Injectable command runner.
+ * @returns {Promise<{notified: boolean, deferred?: boolean, notifyError?: string, delivery?: object, bundled: string[]}>}
+ *   Notification result; `bundled` lists every signal id the message carried.
+ */
+export async function notifyDirectorSignal(
+  orgFile,
+  entry,
+  record,
+  orcaExecutable,
+  execute = run,
+) {
+  const handle = entry.director?.terminalHandle;
+  if (!handle) return { notified: false, bundled: [] };
+  const backlog = undeliveredSignals(orgFile, record.worktreeId).filter(
+    (older) => older.id !== record.id,
+  );
+  const batch = [...backlog, record];
+  const text = batch
+    .map((item) => `[omt] ${item.kind} from ${item.worktreeId}: ${item.text}`)
+    .join("\n");
+  const sent = await notifyTerminal(
+    orcaExecutable ?? "orca",
+    handle,
+    text,
+    execute,
+  );
+  recordNotifyOutcome(orgFile, batch, {
+    notified: sent.notified,
+    notifyError: sent.notifyError,
+    at: new Date().toISOString(),
+  });
+  return { ...sent, bundled: batch.map((item) => item.id) };
 }
 
 /**

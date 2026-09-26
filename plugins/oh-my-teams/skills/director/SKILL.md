@@ -64,6 +64,8 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 
 `progress` 신호는 알림용이므로 보낼 때 수신 확인된 상태(`autoAcknowledged: true`)로 기록되고, `director-inbox`와 `director-watch`의 미처리 목록에 남지 않는다. 같은 워크트리에서 새 `close-ready`가 오면 이전의 미처리 `close-ready`는 `superseded` 상태가 되고 `supersededBy`에 새 신호 ID가 적힌다. `kickoff-release`는 그 kickoff에 남은 미처리 신호를 `closed` 상태(`closedBy: "kickoff-release"`)로 정리하며, 다른 kickoff의 신호는 건드리지 않는다.
 
+`director-signal`은 신호를 기록한 뒤 이사 터미널에 알리는 것도 함께 시도한다. 이때 이사의 화면을 먼저 읽어서, 화면이 폴더 신뢰 질문이나 Claude Code의 AskUserQuestion 선택 창을 보여주고 있거나 화면 자체를 읽을 수 없으면 Enter와 텍스트를 전혀 보내지 않고 그 신호를 미배달 상태로 남긴다. 화면이 그런 질문 화면이 아니면(작업 중이든 입력을 기다리는 중이든 구분하지 않는다) 알림을 전달한다. 같은 PM 워크트리에 이사 터미널로 아직 닿지 않은 신호가 있으면(대기 중인 `decision`·`blocked`·`close-ready`, 또는 배달이 아직 확인되지 않은 `progress`), 다음번 `director-signal` 호출이 그 신호들을 이번 신호와 함께 한 메시지로 묶어서 다시 보낸다. 이미 배달이 확인된 신호(`notify.notified: true`)는 이 묶음에 다시 포함되지 않으므로 같은 신호가 두 번 전달되지 않는다. 재발송은 이사의 화면 상태를 따로 감시해서 이루어지는 것이 아니라, PM이 다음 신호를 보내는 시점에 맞물려 시도된다는 점에 유의한다. 배달 여부는 각 신호 레코드의 `notify` 필드(`{notified: true, notifiedAt}` 또는 `{notified: false, deferredAt, notifyError}`)에 남으며, `director-inbox`로 언제든 확인할 수 있다.
+
 `close-ready` 신호는 `close`의 입력(통합 워크트리·HEAD)과 연결된다. 신호가 있는데 HEAD가 다르면 거부하고, 신호가 없으면 경고한 뒤 진행한다. 신호가 없는 경우는 신호 통로가 생기기 전에 등록된 kickoff를 종료할 수 있도록 남겨 둔 호환 경로다.
 
 ## 종료

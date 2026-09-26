@@ -135,7 +135,7 @@ import {
 import {
   acknowledgeSignal,
   listInbox,
-  notifyDirector,
+  notifyDirectorSignal,
   readSignal,
   replySignal,
   sendSignal,
@@ -313,7 +313,12 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   director-signal --org FILE --worktree ID --kind decision|close-ready|blocked|progress
                   --text TEXT [--head SHA --source DIR] [--orca EXECUTABLE]
                   (writes a structured record to .omt/director/inbox/; notifies
-                  the director terminal when the registry entry names one)
+                  the director terminal when the registry entry names one. The
+                  notification is skipped without sending a key when the
+                  director's screen shows a selection window or a trust
+                  question, or cannot be read at all; any earlier signal still
+                  undelivered for the same worktree is bundled into the same
+                  message, and a signal marked delivered is never sent again)
   director-inbox --org FILE
                  (lists pending signals; progress signals are stored
                  acknowledged, and a newer close-ready supersedes an older one)
@@ -1985,7 +1990,12 @@ async function executeCommand(args) {
         head: args.head,
         source: args.source,
       });
-      const notification = await notifyDirector(entry, record, args.orca);
+      const notification = await notifyDirectorSignal(
+        args.org,
+        entry,
+        record,
+        args.orca,
+      );
       return { signaled, id, ...notification };
     }
     case "director-inbox":

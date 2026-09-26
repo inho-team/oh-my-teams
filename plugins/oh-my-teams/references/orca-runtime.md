@@ -221,6 +221,8 @@ node <runtime> prompt-answer --org <organization.json> --terminal <handle> --wor
 
 `scripts/prompt-submission.mjs`의 `deliverPrompt`가 전달을 다음 순서로 확인하며, `director-signal`의 이사 알림과 `director-reply`의 PM 알림이 이를 쓴다. 손으로 보낼 때에도 같은 순서를 따른다.
 
+**전달 전 화면 확인(#82).** `director-signal`의 이사 알림과 `director-reply`의 PM 알림은 아래 순서로 넘어가기 전에 대상 터미널의 화면을 먼저 읽어서, 위 「프롬프트 질문 답하기」 절이 쓰는 것과 같은 `classifyPromptScreen`으로 판정한다. 화면이 폴더 신뢰 질문이나 Claude Code의 AskUserQuestion 선택 창을 보여주고 있으면, 또는 화면 자체를 읽을 수 없으면(응답의 `source`가 `screen`이 아니거나 호출이 실패하면) Enter와 텍스트를 전혀 보내지 않고 `notified: false, deferred: true`를 돌려주며 `notifyError`에 `blocked-by-trust`·`blocked-by-user-question`·`screen-unavailable` 가운데 하나를 남긴다. 그 밖의 화면(작업 중이든 입력을 기다리는 중이든 분류기는 이 둘을 구분하지 않는다)에서만 아래 1번부터 이어간다. `director-signal`은 이렇게 미뤄진 신호를 신호 레코드의 `notify` 필드(`{notified: false, deferredAt, notifyError}`)에 남기고, 같은 PM 워크트리에 이사 터미널로 아직 닿지 않은 신호가 있으면 다음번 `director-signal` 호출이 그 신호들을 이번 신호와 함께 한 메시지로 묶어서 다시 시도한다. 이미 배달이 확인된 신호(`notify.notified: true`)는 다시 묶이지 않으므로 같은 신호가 두 번 전달되지 않는다.
+
 1. `--wait-submit <초>`를 붙여 텍스트를 한 번만 보낸다. `stages`에 `turn_started`가 있으면 제출된 것이다(`submitted`).
 2. 없으면 `terminal read --screen`으로 화면을 읽고 입력 상자를 본다. 입력 상자는 화면 맨 아래에서 `❯`, `›`, `>`로 시작하는 줄이다. 응답의 `source`가 `screen`일 때에만 그 화면을 믿는다. Orca가 화면을 그리지 못하면 `screen-unavailable`과 함께 누적 출력을 돌려주는데, 여기에는 반복해 그린 줄이 조각으로 쌓여 있어서 입력 상자의 내용을 알 수 없다. `source`가 `screen-unavailable`이거나 응답에 없으면 빈 화면으로 취급하고 `unclear`로 판정한다.
 
