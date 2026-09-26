@@ -1304,13 +1304,13 @@ test("roadmap canon exists and has one official source", () => {
 test("roleSpec header injects roadmap reference into all role instructions", () => {
   const org = readJSON(path.join(examples, "organization.json"));
 
+  const roadmapRefPath = path.join(references, "roadmap.md");
   for (const role of ["pm", "pl", "senior", "junior"]) {
     const spec = roleSpec(org, role, "# 작업\n\n테스트", {
       orgFile: "/project/.omt/organization.json",
     });
-    assert.match(
-      spec,
-      /로드맵 규칙: .*references\/roadmap\.md/,
+    assert.ok(
+      spec.includes(`로드맵 규칙: ${roadmapRefPath}`),
       `${role} specification header must inject the roadmap reference`,
     );
   }
