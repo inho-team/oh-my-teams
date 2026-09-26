@@ -23,7 +23,7 @@ import path from "node:path";
 import { assert, run } from "./core.mjs";
 import {
   classifyPromptScreen,
-  trustQuestionVisible,
+  agyTrustQuestionVisible,
 } from "./prompt-answers.mjs";
 import {
   PROMPT_ANSWER_REFUSALS,
@@ -894,7 +894,7 @@ export async function openRoleTerminal({
   });
   let { handle, seen, submission } = first;
   const asking = (lines) =>
-    trustQuestionVisible(lines) ||
+    agyTrustQuestionVisible(lines) ||
     questionOnScreen(lines, {
       cli: command.provider,
       worktree: first.placed ?? expectedWorktree ?? undefined,
