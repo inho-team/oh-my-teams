@@ -1,7 +1,7 @@
 # Codex 역할 터미널의 업데이트 알림 화면 처리 방법 확인
 
 작성일: 2026-09-26
-상태: 부분 확인 (t5-codex-update-prompt) — 설정 키의 존재와 수용은 확인했으나, 업데이트 알림 화면 자체를 없애는 효과는 로그인 화면에 막혀 여전히 미확인이다. 다음 단계는 PM의 판단을 기다린다(§1-4).
+상태: 완료 (t5-codex-update-prompt) — 설정 키의 존재와 수용에 더해, 업데이트 알림 화면을 없애는 효과 자체를 임시 `CODEX_HOME`에 실측 형식의 `version.json`을 배치하는 방법으로 실제 화면에서 A/B로 확인했다(§1-5).
 환경: macOS 24.6.0(Darwin), codex-cli 0.157.0(`/opt/homebrew/bin/codex` → `@openai/codex` npm 패키지, 네이티브 바이너리 `.../codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex`)
 관측 근거: `/Users/jinsungkim/orca/oh-my-teams/.omt/history/supervised-prompt-answers-w3/signal-progress-12.txt` 5절 (Codex 0.155.1의 "✨ Update available! 0.155.1 -> 0.157.0" 화면, 기본 선택은 "1. Update now (runs npm install -g @openai/codex)")
 
@@ -92,9 +92,67 @@ $ tmux new-session -d -s codex_t6 -x 220 -y 50 "env CODEX_HOME=/tmp/cdx.3EY5tb c
 
 **결론:** 화면 소거 효과는 이번 재조사에서도 실측하지 못했다. 새로 확인한 것은 (i) 인증 전에는 업데이트 확인 결과를 담은 로컬 캐시 파일이 없다는 것과 (ii) 대화형 실행도 로그인 화면에 막혀 플래그 유무로 화면을 비교할 방법이 없다는 것이다. 더 새 Codex 판이 나오거나 안전하게 인증된 세션을 관찰할 방법이 생기기 전까지는 이 불확실성이 남는다.
 
+### 1-5. PM이 지시한 세 번째 재조사: `version.json`을 미리 배치해 인증 없이 화면을 재현
+
+PM은 네이티브 바이너리 문자열에 `version.json`이라는 파일 이름과 `struct VersionInfo with 3 elements`(필드 `latest_version`·`last_checked_at`·`dismissed_version`)가 있다는 점을 근거로, 이 파일을 임시 `CODEX_HOME`에 미리 넣어 두면 인증 전에도 화면을 재현할 수 있는지 시험하라고 지시했다. §1-4까지는 인증 전에 이 파일이 저절로 생기지 않는다는 것만 확인했을 뿐, 미리 넣어 두는 경우는 시험하지 않았었다.
+
+**바이너리 근거 재확인.** PM이 제시한 문자열을 이번 세션에서도 `strings -a`로 독립적으로 재확인했다. `latest_version`·`last_checked_at`·`dismissed_version`·`struct VersionInfo with 3 elements`가 여러 지점에서 같은 순서로 붙어 등장했고, `version.json`·`version request timed out`·`update configuration is locally consistent`·`latest version status: newer version is available`도 확인했다. `UpdateAvailableHistoryCell` 구조체 근처에도 `latest_version`·`update_action`이 등장해, 이 값이 실제 알림 화면 렌더링에 쓰인다는 근거가 되었다.
+
+**정확한 경로와 스키마는 추측하지 않고 실측했다.** 먼저 `codex exec`(비대화형)에 `RUST_LOG=debug`를 붙여 실행했으나, 표준오류 로그 어디에도 `version.json`이나 `VersionInfo` 관련 문구가 없었다. 즉 `codex exec` 경로는 업데이트 확인 로직 자체를 타지 않는다(§3의 `headless-codex-exec-missing-flag` finding과 일치하는 관찰이다). 다음으로 대화형 `codex`를 짧은 임시 `CODEX_HOME`(`/tmp/cdx.XXXXXX`)에서 플래그 없이 tmux로 띄우고 로그인 화면에서 멈춘 뒤 닫았는데, 그 사이에 `codex`가 스스로 `$CODEX_HOME/version.json`을 만들어 두었다:
+
+```
+$ cat /tmp/cdx.zfDFTS/version.json
+{"latest_version":"0.157.1","last_checked_at":"2026-09-26T05:57:35.956310Z","dismissed_version":null}
+```
+
+이로써 파일 경로는 `$CODEX_HOME/version.json`(하위 디렉터리 아님)이고, 필드는 스네이크 케이스 `latest_version`(문자열, 세미버 형식)·`last_checked_at`(UTC, 마이크로초까지 있는 RFC 3339 문자열)·`dismissed_version`(무시한 판이 없으면 JSON `null`)이라는 것이 추측이 아니라 실측으로 확정됐다. 덧붙여, 이 시점의 설치본(0.157.0)보다 실제로 더 새 판(0.157.1)이 나와 있다는 사실도 이 실측 과정에서 드러났다(플래그와 무관하게 확인된 사실이며, 아래 A/B 비교에는 재현성을 위해 임의로 더 높은 판 번호를 썼다).
+
+**A/B 비교.** 같은 임시 `CODEX_HOME`에서 `version.json`을 아래 내용으로 매 실행 전 다시 쓴 뒤(두 실행의 조건을 동일하게 맞추기 위해), tmux pty로 두 번 띄워 첫 화면 원문을 기록했다.
+
+```
+{"latest_version":"0.999.0","last_checked_at":"<실행 직전 UTC 시각, RFC 3339>","dismissed_version":null}
+```
+
+플래그 없이 실행(`CODEX_HOME=/tmp/cdx.zfDFTS codex`), 약 6초 대기 후 화면:
+
+```
+  Update available · 0.157.0 → 0.999.0
+  Release notes: https://github.com/openai/codex/releases/latest
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+
+  enter continue · esc skip
+```
+
+`version.json`을 동일 내용으로 재작성한 뒤 `--config check_for_update_on_startup=false`를 붙여 실행(`role-launch.mjs`가 실제로 붙이는 것과 같은 형태, `--strict-config` 없이), 약 6초 대기 후 화면:
+
+```
+  Welcome to Codex, OpenAI's command-line coding agent
+
+  Sign in with ChatGPT to use Codex as part of your paid plan
+  or connect an API key for usage-based billing
+
+> 1. Sign in with ChatGPT
+     Usage included with Plus, Pro, Business, and Enterprise plans
+
+  2. Sign in with Device Code
+     Sign in from another device with a one-time code
+
+  3. Provide your own API key
+     Pay for what you use
+
+  Press enter to continue
+```
+
+두 실행 모두 `version.json`의 `latest_version`이 설치본보다 높은 값으로 동일했는데도, 플래그가 없을 때는 "Update available" 화면이 로그인 화면보다 먼저 떴고, 플래그가 있을 때는 이 화면이 전혀 나타나지 않고 곧바로 로그인 화면으로 넘어갔다. 두 실행 모두 어떤 항목도 선택하지 않고("Update now"를 포함해 아무 키도 보내지 않고) `tmux kill-session`으로 닫았으며, 이 임시 `CODEX_HOME`이 띄운 `app-server-daemon` 프로세스 두 개도 확인 직후 종료하고 디렉터리를 지웠다. 로그인은 어떤 시점에도 하지 않았고, `~/.codex` 아래 파일은 읽거나 쓰거나 복사하지 않았다.
+
+**결론:** `--config check_for_update_on_startup=false`가 "Update available" 화면 자체를 실제로 없앤다는 것을 이번 재조사에서 실측으로 확인했다. ac-1(업데이트 알림 화면을 만난 Codex 역할 터미널이 사람의 개입 없이 진행)과 ac-2(택한 방법을 실제 설치본에서 확인)가 요구하는 "화면" 증거를 이제 확보했으며, §1-3·§1-4가 남겼던 공백(설정 키의 존재만 확인했을 뿐 소거 효과는 미확인)은 해소됐다.
+
 ## 2. 선택한 방법과 이유
 
-명령줄 오버라이드로 화면을 사전에 억제하는 방법을 PM이 정한 순서 1번(화면을 아예 띄우지 않는 방법)에 따라 택했다. 다만 "실재를 확인했다"는 것은 `check_for_update_on_startup`이 `ConfigToml`의 유효한 최상위 필드로 존재하고 `-c` 오버라이드가 그 값을 오류 없이 받아들인다는 사실을 가리키며(§1-1, §1-2), 그 값이 "✨ Update available!" 화면을 실제로 없애는 효과까지 확인했다는 뜻은 아니다(§1-3, §1-4). 분류기(`prompt-answers.mjs`)에 이 화면을 새로 추가하는 2번 경로는, 관측 근거 5절이 이미 "unknown으로 두는 것이 의도된 동작"이라고 명시했고 1번 방법의 설정 키 자체는 확인됐으므로 쓰지 않았다.
+명령줄 오버라이드로 화면을 사전에 억제하는 방법을 PM이 정한 순서 1번(화면을 아예 띄우지 않는 방법)에 따라 택했다. `check_for_update_on_startup`이 `ConfigToml`의 유효한 최상위 필드로 존재하고 `-c` 오버라이드가 그 값을 오류 없이 받아들인다는 사실(§1-1, §1-2)에 더해, 이 값을 `false`로 주면 "Update available" 화면 자체가 실제로 나타나지 않는다는 효과까지 §1-5에서 임시 `CODEX_HOME`에 `version.json`을 배치한 A/B 비교로 실측했다. 분류기(`prompt-answers.mjs`)에 이 화면을 새로 추가하는 2번 경로는, 관측 근거 5절이 이미 "unknown으로 두는 것이 의도된 동작"이라고 명시했고 1번 방법의 효과가 실측으로 확인됐으므로 쓰지 않았다.
 
 ## 3. 변경한 파일
 
@@ -106,4 +164,4 @@ $ tmux new-session -d -s codex_t6 -x 220 -y 50 "env CODEX_HOME=/tmp/cdx.3EY5tb c
 
 ## 4. 검증에 쓴 임시 자원과 정리
 
-모든 시험은 임시 `CODEX_HOME`(워크트리 밖의 OS 임시 디렉터리)에서 실행했고 사용자의 `~/.codex/config.toml`·`~/.codex/auth.json`은 읽거나 쓰지 않았다. §1-4의 대화형 재조사에서는 스크래치패드 하위 경로가 유닉스 소켓 경로 길이 제한에 걸려 `mktemp -d /tmp/cdx.XXXXXX`로 만든 더 짧은 임시 `CODEX_HOME`을 대신 썼다. `npm install -g`, `codex update`, 대화형 화면에서 "Update now"나 로그인 옵션 선택은 어떤 시점에도 실행하지 않았다. 시험용 임시 `CODEX_HOME` 디렉터리(`/private/tmp/.../scratchpad/codex-home-*`와 `/tmp/cdx.*` 모두), 로컬 프록시 실험용 스크립트, `tmux` 세션(`codex_noflag`·`codex_t2`~`codex_t6`), 백그라운드로 뜬 `codex`/`app-server-daemon` 프로세스는 확인 직후 모두 지우고 종료했다.
+모든 시험은 임시 `CODEX_HOME`(워크트리 밖의 OS 임시 디렉터리)에서 실행했고 사용자의 `~/.codex/config.toml`·`~/.codex/auth.json`은 읽거나 쓰지 않았다. §1-4·§1-5의 대화형 재조사에서는 스크래치패드 하위 경로가 유닉스 소켓 경로 길이 제한에 걸려 `mktemp -d /tmp/cdx.XXXXXX`로 만든 더 짧은 임시 `CODEX_HOME`을 대신 썼다. §1-5에서 이 임시 `CODEX_HOME` 안에 직접 쓴 `version.json`은 이번 시험만을 위한 파일이며 `~/.codex`와는 무관하다. `npm install -g`, `codex update`, 대화형 화면에서 "Update now"나 로그인 옵션 선택은 어떤 시점에도 실행하지 않았다. 시험용 임시 `CODEX_HOME` 디렉터리(`/private/tmp/.../scratchpad/codex-home-*`와 `/tmp/cdx.*` 모두), 로컬 프록시 실험용 스크립트, `tmux` 세션(`codex_noflag`·`codex_t2`~`codex_t6`·§1-5의 `cdx-A-*`·`cdx-B-*`), 이 임시 `CODEX_HOME`들이 띄운 `codex`/`app-server-daemon` 프로세스(§1-5에서는 종료 후에도 백그라운드에 남은 데몬 두 개를 PID로 직접 `kill`했다)는 확인 직후 모두 지우고 종료했다.
