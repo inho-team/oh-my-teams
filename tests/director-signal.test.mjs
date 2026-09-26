@@ -826,12 +826,12 @@ test("queryPmLiveness asks Orca for worker-list with the given executable", asyn
 
 // ─── PM terminal discovery and available memory ─────────────────────────────
 
-function recordPmLaunch(orgFile, worktreePath, terminal) {
+function recordPmLaunch(orgFile, worktreePath, terminal, provider = "claude") {
   const file = path.join(path.dirname(orgFile), "usage", "launches.jsonl");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(
     file,
-    `${JSON.stringify({ schemaVersion: 1, via: "role-terminal", role: "pm", worktreePath, terminal })}\n`,
+    `${JSON.stringify({ schemaVersion: 1, via: "role-terminal", role: "pm", worktreePath, terminal, provider })}\n`,
   );
 }
 
@@ -946,6 +946,84 @@ test("directorWatch reports unknown instead of guessing when the PM screen canno
 
   const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
   assert.equal(kickoff.providerOverload, "unknown");
+});
+
+// findPmTerminal reads the launch ledger's own provider field (fixed at
+// launch time), never the organization's current pm profile, which a
+// fallback can move to another provider after that launch.
+async function watchesUnconfirmedProviderScreen(t, provider) {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", provider);
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: async () =>
+      orcaEnvelope({
+        terminal: {
+          source: "screen",
+          tail: ["> continue", "API Error: 529 Overloaded"],
+        },
+      }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+}
+
+test("directorWatch does not judge a 529 sentence on a PM launched as codex", async (t) => {
+  await watchesUnconfirmedProviderScreen(t, "codex");
+});
+
+test("directorWatch does not judge a 529 sentence on a PM launched as agy", async (t) => {
+  await watchesUnconfirmedProviderScreen(t, "agy");
+});
+
+test("directorWatch does not judge a 529 sentence when no PM launch was ever recorded", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  // No recordPmLaunch call: the ledger has no launch for this PM path at all.
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: async () =>
+      orcaEnvelope({
+        terminal: {
+          source: "screen",
+          tail: ["> continue", "API Error: 529 Overloaded"],
+        },
+      }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+});
+
+test("directorWatch keeps every kickoff's own report when one PM terminal lookup breaks", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+
+  // Simulates orcaTerminals' JSON.parse throwing on a truncated `orca
+  // terminal list --json` answer: the failure surfaces at the same seam,
+  // whichever line inside the lookup actually throws.
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => {
+      throw new SyntaxError("Unexpected end of JSON input");
+    },
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+  // The rest of directorWatch's report is unaffected by the one kickoff's failure.
+  assert.equal(typeof report.freeMemoryBytes, "number");
+  assert.equal(kickoff.pmLiveness, "unverifiable");
 });
 
 test("replySignal reports that no PM terminal was found instead of claiming delivery", async (t) => {

@@ -303,7 +303,7 @@ node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <
 
 `escalate`의 `reason`이 `waiting-on-human-prompt`이면 사람을 기다리지 않고 먼저 `worker-read`로 화면을 확인한다. 화면이 폴더 신뢰처럼 캡처된 질문이면 「프롬프트 질문 답하기」 절의 `prompt-answer`로 감독자가 답하고 `terminal-idle-check`부터 다시 진행한다. 명령 승인처럼 분류기가 알아보지 못하는 화면은 `prompt-answer`가 키 없이 `escalate`로 끝낸다. 그 명령이 `escalate`나 `unresolved`를 돌려주거나 감독자 확인에서 거부되었을 때, 또는 사람이 정해야 하는 질문일 때에는 위 표의 `escalate` 행이 아니라 「프롬프트 질문 답하기」 절의 「사람이 필요한 경우」를 따른다. PL은 PM에게 `escalation`을 보내고, PM은 사람이 정해야 하는 것에 한해 `director-signal`로 이사에게 알린다.
 
-`escalate`의 `reason`이 `provider-overloaded`이면 worker의 터미널 화면이 Claude의 `API Error: 529 Overloaded`로 끝난 채 다음 입력을 기다리고 있다. 감독 역할은 "계속"이나 그와 같은 뜻의 입력을 자동으로 다시 보내지 않는다. 같은 요청을 두 번 보내지 않는 제약과, 529 직후의 turn이 어디까지 진행되었는지는 화면만으로 판정할 수 없다는 사정 때문이다. PL은 PM에게, PM은 사용자에게 그대로 보고하고, 다시 보낼지는 보고를 받은 쪽이 정한다.
+`escalate`의 `reason`이 `provider-overloaded`이면 worker의 터미널 화면이 Claude의 `API Error: 529 Overloaded`로 끝난 채 다음 입력을 기다리고 있다. 감독 역할은 "계속"이나 그와 같은 뜻의 입력을 자동으로 다시 보내지 않는다. 같은 요청을 두 번 보내지 않는 제약과, 529 직후의 turn이 어디까지 진행되었는지는 화면만으로 판정할 수 없다는 사정 때문이다. PL은 PM에게 `escalation`을 보내고, PM은 `director-signal`로 이사에게 알린다. 다시 보낼지는 보고를 받은 쪽이 정한다.
 
 이 판정은 재시도나 종료를 결정하지 않는다. 종료와 재시도는 위 「worker-start 실패 복구」와 `failure-classify` 결과를 따른다. `unverifiable` worker는 살아 있다고 간주하지 않고 확인이나 보고로 보낸다. 사용자에게 상태를 알릴 때 무응답 worker는 `진행 중`이 아니라 결과의 `display`대로 `무응답 N분`으로 적는다.
 

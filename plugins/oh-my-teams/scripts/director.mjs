@@ -598,21 +598,22 @@ async function orcaTerminals(orcaExecutable) {
 }
 
 /**
- * Finds the Orca terminal currently running the PM of a PM worktree.
+ * Finds the most recent recorded launch of the PM in a PM worktree.
  *
- * The agent inside a terminal rewrites its title, so the `[PM]` tag is not a
- * reliable marker; the launch ledger records which terminal role-terminal
- * opened for the PM. The latest such launch wins, and it counts only while
- * Orca still lists that terminal in the same worktree.
+ * The launch ledger is the only record of what a PM terminal was actually
+ * opened with (`role-terminal`'s `provider` field, fixed at launch time), as
+ * opposed to the organization's current `pm` profile, which a fallback can
+ * change afterward. Callers that need to know the PM's provider, not just its
+ * terminal, read this record rather than assume the organization's present
+ * configuration still describes what is running.
  *
  * @param {string} orgFile - Organization JSON path whose ledger is read.
  * @param {string} pmPath - PM worktree path recorded in the kickoff registry.
- * @param {object} [options] - `orcaExecutable`, or an injectable `listTerminals`.
- * @returns {Promise<string | undefined>} The terminal handle, or undefined.
+ * @returns {object | undefined} The latest matching launch line, or undefined.
  */
-export async function findPmTerminal(orgFile, pmPath, options = {}) {
+export function findPmLaunch(orgFile, pmPath) {
   const target = path.resolve(pmPath);
-  const launch = readLaunches(orgFile)
+  return readLaunches(orgFile)
     .filter(
       (record) =>
         record.role === "pm" &&
@@ -621,6 +622,24 @@ export async function findPmTerminal(orgFile, pmPath, options = {}) {
         path.resolve(record.worktreePath) === target,
     )
     .at(-1);
+}
+
+/**
+ * Finds the Orca terminal currently running the PM of a PM worktree.
+ *
+ * The agent inside a terminal rewrites its title, so the `[PM]` tag is not a
+ * reliable marker; the launch ledger records which terminal role-terminal
+ * opened for the PM ({@link findPmLaunch}). The latest such launch wins, and
+ * it counts only while Orca still lists that terminal in the same worktree.
+ *
+ * @param {string} orgFile - Organization JSON path whose ledger is read.
+ * @param {string} pmPath - PM worktree path recorded in the kickoff registry.
+ * @param {object} [options] - `orcaExecutable`, or an injectable `listTerminals`.
+ * @returns {Promise<string | undefined>} The terminal handle, or undefined.
+ */
+export async function findPmTerminal(orgFile, pmPath, options = {}) {
+  const target = path.resolve(pmPath);
+  const launch = findPmLaunch(orgFile, pmPath);
   if (!launch) return undefined;
   const list =
     options.listTerminals ??

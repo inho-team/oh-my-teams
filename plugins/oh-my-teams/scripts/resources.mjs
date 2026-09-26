@@ -20,7 +20,12 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
-import { findPmTerminal, listInbox, processLiveness } from "./director.mjs";
+import {
+  findPmLaunch,
+  findPmTerminal,
+  listInbox,
+  processLiveness,
+} from "./director.mjs";
 import { readTerminalScreen } from "./prompt-submission.mjs";
 import { readScreenOverload } from "./limit-check.mjs";
 
@@ -301,24 +306,36 @@ export async function queryPmLiveness(entry, orcaExecutable, execute = run) {
 // 529 sentence `readScreenOverload` reads off a worker's screen is read here
 // off the PM's own terminal instead, found the same way `replySignal` finds
 // it (`findPmTerminal`, reused rather than re-derived from the launch
-// ledger). A terminal that cannot be found, or a screen `readTerminalScreen`
-// cannot confirm is the live screen, leaves the verdict "unknown": neither
-// case is evidence the PM is or is not overloaded, so neither is reported as
-// one.
+// ledger). The sentence is Claude's own error text, so it is read only when
+// `findPmLaunch` shows the PM's own launch record confirms `provider ===
+// "claude"`; the organization's current `pm` profile is not evidence of this,
+// because a fallback can move the PM to `codex` or `agy` after that launch.
+// A terminal that cannot be found, a screen `readTerminalScreen` cannot
+// confirm is the live screen, or any failure along the way (an Orca call
+// that cannot be parsed, the same failure `queryPmLiveness` guards against)
+// leaves the verdict "unknown": none of these is evidence the PM is or is
+// not overloaded, so none is reported as one, and none is allowed to fail
+// the rest of `directorWatch`.
 async function pmProviderOverload(orgFile, entry, options) {
-  const orcaExecutable = options.orcaExecutable ?? "orca";
-  const terminal = await findPmTerminal(orgFile, entry.pm.path, {
-    orcaExecutable,
-    listTerminals: options.listTerminals,
-  });
-  if (!terminal) return "unknown";
-  const screen = await readTerminalScreen(
-    orcaExecutable,
-    terminal,
-    options.execute,
-  );
-  if (!screen.ok) return "unknown";
-  return readScreenOverload(screen.lines) ? "provider-overloaded" : "none";
+  try {
+    const launch = findPmLaunch(orgFile, entry.pm.path);
+    if (launch?.provider !== "claude") return "unknown";
+    const orcaExecutable = options.orcaExecutable ?? "orca";
+    const terminal = await findPmTerminal(orgFile, entry.pm.path, {
+      orcaExecutable,
+      listTerminals: options.listTerminals,
+    });
+    if (!terminal) return "unknown";
+    const screen = await readTerminalScreen(
+      orcaExecutable,
+      terminal,
+      options.execute,
+    );
+    if (!screen.ok) return "unknown";
+    return readScreenOverload(screen.lines) ? "provider-overloaded" : "none";
+  } catch {
+    return "unknown";
+  }
 }
 
 /**
@@ -326,10 +343,12 @@ async function pmProviderOverload(orgFile, entry, options) {
  *
  * PM liveness queries that fail are preserved as `"unverifiable"` rather than
  * concluded as alive or terminated. `providerOverload` is `"provider-overloaded"`
- * only when the PM's own terminal screen was read and ends on Claude's 529
- * overloaded error, `"none"` when that screen was read and does not, and
- * `"unknown"` when the PM's terminal could not be found or its screen could
- * not be read.
+ * only when the PM's own launch record confirms it runs `claude` and its
+ * terminal screen was read and ends on Claude's 529 overloaded error,
+ * `"none"` when the provider is confirmed `claude` and that screen was read
+ * but does not, and `"unknown"` otherwise: the provider is not confirmed
+ * `claude`, the PM's terminal could not be found, its screen could not be
+ * read, or the lookup itself failed.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {object} [options] - Optional overrides.

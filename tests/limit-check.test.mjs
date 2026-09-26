@@ -251,6 +251,35 @@ test("readScreenOverload finds Claude's 529 sentence only near the bottom of the
   );
 });
 
+test("readScreenOverload is not fooled by a stale 529 line once a new turn has since produced output", () => {
+  // A supervisor already resent "계속" and the new turn is partway through
+  // producing output; the 529 sentence is still inside the 40-line window,
+  // but it is no longer what the screen currently ends on.
+  assert.equal(
+    readScreenOverload([
+      "API Error: 529 Overloaded",
+      "> 계속",
+      "새 턴의 출력 일부",
+    ]),
+    false,
+  );
+  // The turn is still running with no idle input box shown yet.
+  assert.equal(
+    readScreenOverload(["API Error: 529 Overloaded", "Thinking..."]),
+    false,
+  );
+});
+
+test("readScreenOverload still judges true when the screen only returned to its own idle prompt", () => {
+  // Claude Code redraws its empty input box once the turn ends; that alone is
+  // not new output, so the screen still ends on the 529 error.
+  assert.equal(readScreenOverload(["API Error: 529 Overloaded", "❯ "]), true);
+  assert.equal(
+    readScreenOverload(["API Error: 529 Overloaded", "──────", "❯"]),
+    true,
+  );
+});
+
 test("a Claude worker whose screen ends on the 529 error is reported without becoming a capacity retry", async (t) => {
   const { worktree, homes } = box(t);
   const overloaded = await workerLimitCheck({

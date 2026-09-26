@@ -43,7 +43,8 @@ export const DELIVERY_OUTCOMES = Object.freeze([
 const squeeze = (text) => String(text ?? "").replace(/[\s'"]+/g, "");
 
 const INPUT_ROW = /^\s*[❯›>](?:\s+(.*))?$/;
-const SEPARATOR_ROW = /^[\s─━═\-_]*$/;
+/** A row with no content: blank, or drawn only from rule/box characters. */
+export const SEPARATOR_ROW = /^[\s─━═\-_]*$/;
 const CONTINUATION_ROW = /^\s{2,}\S/;
 // Rows an agent draws under its input box: a rule and a status line or two.
 const MAX_ROWS_BELOW_INPUT = 2;

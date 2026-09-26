@@ -62,7 +62,7 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 - `director-ack --org <project>/.omt/organization.json --signal <id>`: 수신 확인
 - `director-watch --org <project>/.omt/organization.json`: kickoff별 신호·슬롯 점유·여유 메모리·PM liveness·PM 화면의 provider 과부하 여부 요약 조회
 
-`director-watch` 결과의 kickoff마다 `providerOverload` 필드가 온다. PM 터미널을 찾아 화면을 읽을 수 있었고 그 화면이 Claude의 `API Error: 529 Overloaded`로 끝나 있으면 `provider-overloaded`이고, 화면을 읽었지만 그 문장이 없으면 `none`이며, PM 터미널을 찾지 못했거나 화면을 읽지 못했으면 `unknown`이다. `unknown`은 과부하가 아니라는 뜻이 아니라 판정할 근거가 없다는 뜻이므로, PM 자신이 사용자에게 `blocked`로 보고하기 전이라도 이사가 이 값으로 PM의 상태를 먼저 짐작할 수 있다.
+`director-watch` 결과의 kickoff마다 `providerOverload` 필드가 온다. PM의 launch 기록이 `claude`로 실행되었음을 확인해 주고, 그 PM 터미널을 찾아 화면을 읽을 수 있었고, 그 화면이 Claude의 `API Error: 529 Overloaded`로 끝나 있으면 `provider-overloaded`이다. 같은 조건에서 그 문장이 없으면 `none`이다. 그 밖의 모든 경우, 즉 launch 기록이 `claude`임을 확인해 주지 못했거나(PM이 codex·agy로 기록되었거나 기록 자체가 없는 경우 포함), PM 터미널을 찾지 못했거나, 화면을 읽지 못한 경우에는 `unknown`이다. `unknown`은 과부하가 아니라는 뜻이 아니라 판정할 근거가 없다는 뜻이므로, PM 자신이 사용자에게 `blocked`로 보고하기 전이라도 이사가 `provider-overloaded`일 때에는 이 값으로 PM의 상태를 먼저 짐작할 수 있다.
 
 `progress` 신호는 알림용이므로 보낼 때 수신 확인된 상태(`autoAcknowledged: true`)로 기록되고, `director-inbox`와 `director-watch`의 미처리 목록에 남지 않는다. 같은 워크트리에서 새 `close-ready`가 오면 이전의 미처리 `close-ready`는 `superseded` 상태가 되고 `supersededBy`에 새 신호 ID가 적힌다. `kickoff-release`는 그 kickoff에 남은 미처리 신호를 `closed` 상태(`closedBy: "kickoff-release"`)로 정리하며, 다른 kickoff의 신호는 건드리지 않는다.
 
