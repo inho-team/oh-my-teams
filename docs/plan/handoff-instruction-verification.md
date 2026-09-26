@@ -1,0 +1,62 @@
+# PM 인계 지시의 판정 설계 (이슈 #86)
+
+## 목적
+
+이사가 PM을 띄우며 건네는 인계 지시(브리프 경로)를 PM이 사용자에게 다시 확인하지 않고 실행하되, 등록부에 없는 터미널이나 다른 브리프 경로를 담은 텍스트는 계속 지시로 따르지 않게 한다. 이 문서는 이 목표를 이루기 위해 검토한 세 가지 선택지와 그 비교 근거, 채택한 구현을 정리한다.
+
+## 문제
+
+Claude Code와 Codex는 터미널에 긴 텍스트를 그대로 typed하면 이를 붙여넣기(`<pasted_content>`)로 판정한다. 붙여넣은 텍스트는 사용자가 직접 타이핑한 지시가 아니므로, 에이전트는 그 안의 지시를 사용자가 직접 요청한 것으로 간주하지 않고 실행을 보류한다. 이사가 PM 세션을 연 뒤 브리프 경로를 담은 문장을 `terminal send`로 그 세션에 보내면, PM 쪽 화면에는 이 문장이 붙여넣기로 나타나므로 PM이 그 지시를 곧바로 따르지 않는 문제가 생긴다.
+
+## 검토한 세 가지 선택지
+
+### 선택지 1: 첫 프롬프트를 CLI 인자로 전달 (채택)
+
+`role-terminal`이 PM 세션을 여는 셸 명령 자체에 브리프 경로를 담은 문장을 인자로 포함시킨다. Claude Code와 Codex는 `claude [prompt]`, `codex [PROMPT]`처럼 첫 프롬프트를 위치 인자로 받는데, 이렇게 실행 명령의 인자로 들어간 텍스트는 붙여넣기가 아니라 세션의 진짜 초기 지시로 처리된다. Agy는 `--prompt-interactive`(별칭 `-i`) 플래그로 첫 프롬프트를 받는다. 세 provider 모두 설치본의 `--help`로 이 인자·플래그의 존재를 확인했다.
+
+이 선택지는 pasted_content 판정 자체를 피하므로 이사가 PM을 처음 띄우는 경로에는 가장 확실하다. 다만 이미 실행 중인 CLI에는 실행 시점 인자를 추가로 넘길 수 없으므로, PM이 이미 뜬 뒤 도착하는 후속 인계 지시에는 쓸 수 없다.
+
+**구현**: `role-launch.mjs`의 `kickoffBriefPrompt(briefPath)`가 자유 텍스트가 아니라 고정 템플릿 문장(브리프 경로만 채움)을 만들고, `roleCommand`가 `firstPrompt` 옵션으로 이를 받아 `FIRST_PROMPT_ARG`에 확인된 provider에만 인자로 붙인다. `teams-org.mjs`의 `role-terminal` 명령이 `--brief <경로>`를 받아 이 흐름을 잇는다.
+
+**provider별 확인**
+
+| provider | 지원 방식 | 확인 |
+|---|---|---|
+| claude | 위치 인자 (`claude [prompt]`) | `claude --help`로 확인 |
+| codex | 위치 인자 (`codex [PROMPT]`) | `codex --help`로 확인 |
+| agy | `--prompt-interactive`(`-i`) 플래그 | `agy --help`로 확인 |
+
+세 provider 모두 설치본에서 확인했으므로, 확인하지 못해 이 인자를 붙이지 않는 provider는 지금 조직 파일에는 없다. 다른 provider가 조직에 추가되면 `FIRST_PROMPT_ARG`에 없는 provider로 `--brief`를 요청한 `role-terminal`은 그 자리에서 거부되고, 브리프는 터미널을 연 뒤 `terminal send`로 보내는 기존 경로로 돌아간다.
+
+### 선택지 2: 등록부 대조 (보조 규칙)
+
+첫 프롬프트를 인자로 받지 못하는 provider와, PM이 이미 떠 있는 상태에서 받은 후속 인계 지시에는 등록부 대조를 보조 규칙으로 쓴다. 붙여 넣은 텍스트로 도착한 인계 지시는, `kickoff-show`로 조회한 이 워크트리의 kickoff에 적힌 `director.terminalHandle`과 브리프 경로가 지시에 적힌 값과 같을 때에만 이사의 지시로 본다.
+
+등록 순서(이사가 4단계에서 PM 세션을 연 뒤 5단계에서 `kickoff-claim`으로 등록한다) 때문에, PM이 막 뜬 시점에는 등록부에 아직 아무 값도 없다. 따라서 이 선택지는 PM의 최초 기동에는 근본적으로 쓸 수 없고, PM이 이미 등록을 마친 뒤에 도착하는 후속 인계 지시에만 적용한다.
+
+**구현**: `kickoff-registry.mjs`의 `verifyHandoffClaim(orgFile, { worktreeId, directorTerminal, brief })`가 등록부의 값과 주어진 값을 대조해 `matched`, `mismatch`, `not-registered`, `no-director-recorded` 가운데 하나를 판정으로 돌려준다. `teams-org.mjs`의 `kickoff-handoff-verify` CLI 명령이 이 판정을 감싼다. `pm/SKILL.md`는 이 명령의 사용법과, 대조 시점에 등록부에 값이 없으면 이사에게 `progress`로 알리고 지시를 따르지 않는다는 규칙만 적고, 판정 로직 자체는 런타임 함수를 참조할 뿐 다시 적지 않는다.
+
+### 선택지 3: 인계 지시 단축 (근거로 삼지 않음)
+
+브리프 경로 문장을 아주 짧게 줄이면 붙여넣기로 판정되지 않을 가능성이 있다는 발상이다. 하지만 붙여넣기 판정은 텍스트의 길이가 아니라 입력 경로(터미널에 실제로 타이핑되었는지, 클립보드에서 붙여졌는지)로 결정되므로, 짧은 텍스트도 여전히 붙여넣기로 판정될 수 있다. 이 보장 부재 때문에 이 선택지는 근거로 삼지 않는다.
+
+## 채택한 구현
+
+1. **`role-launch.mjs`**: `FIRST_PROMPT_ARG`(provider별 지원 방식), `kickoffBriefPrompt(briefPath)`(고정 템플릿), `roleCommand`의 `firstPrompt` 옵션(확인된 provider에만 인자를 붙이고, 확인되지 않은 provider에는 assert로 거부).
+2. **`kickoff-registry.mjs`**: `verifyHandoffClaim(orgFile, { worktreeId, directorTerminal, brief })`.
+3. **`teams-org.mjs`**: `role-terminal`이 `--brief`를 받아 `kickoffBriefPrompt`로 만든 `firstPrompt`를 `roleCommand`에 넘기고, `command.role`이 `pm`이 아니면 거부한다. `kickoff-handoff-verify` CLI 명령이 `verifyHandoffClaim`을 감싼다.
+4. **문서**: `references/orca-runtime.md`의 `PM 실행` 절, `references/kickoff-registry.md`의 인계 절차 4단계, `skills/director/SKILL.md`의 4단계 문구가 `--brief` 방식을 반영하도록 갱신했다. `skills/pm/SKILL.md`에 「인계 지시 확인」 절을 새로 추가해, 최초 기동 시 `--brief`로 받은 첫 프롬프트는 사용자 추가 확인 없이 따르고, 후속 붙여넣기 인계 지시는 `kickoff-handoff-verify`의 `match` 결과로만 판정한다는 규칙을 적었다.
+
+## 사용자 설정 파일에 기대지 않음 (ac-3)
+
+이 구현은 `~/.claude`, `~/.codex`, Agy 설정 파일을 읽거나 쓰지 않는다. 첫 프롬프트는 실행 명령 자체의 인자이고, 등록부 대조는 프로젝트 워크트리 안의 `.omt/organization.json`만 읽는다. 사용자 전역 `CLAUDE.md`의 역할 worker 예외는 이 worker 세션이 작업을 진행할 권한의 근거일 뿐, PM이 인계 지시를 신뢰하는 근거로 코드나 문서 어디에도 참조하지 않는다.
+
+## 실제 Orca에서 확인하는 절차
+
+아래 절차는 실제 Orca와 Claude PM으로 `--brief` 경로를 확인하기 위한 준비이며, 실행 자체는 PM이 조율한다.
+
+1. 임시 조직 파일과 워크트리로 kickoff를 하나 연다(`orca worktree create`로 실제 자식 워크트리를 만들고, 그 안에 `.omt/organization.json`을 이번 확인용으로 구성한다).
+2. 브리프 파일을 하나 써 두고, `node <runtime> role-terminal --org <org> --role pm --worktree id:<worktreeId> --brief <브리프 경로>`를 실행한다.
+3. **기대 관찰**: 명령 결과의 `command`(또는 `argv`)에 브리프 경로를 담은 문장이 실행 명령 자체의 마지막 인자로 들어 있어야 한다. 실제로 연 터미널 화면에서는, 세션이 시작되며 그 문장이 붙여넣기 표시 없이 초기 프롬프트로 나타나야 한다.
+4. **성공 판정**: 화면에 표시된 초기 프롬프트가 붙여넣기(`Pasted text` 등)로 표시되지 않고, PM이 그 문장을 스스로 확인 없이 브리프를 읽는 절차로 곧바로 넘어간다.
+5. **실패 판정**: 초기 프롬프트가 붙여넣기로 표시되거나, PM이 그 지시를 실행하기 전에 사용자 확인을 요구하면 실패로 본다. 이 경우 어떤 화면이 나왔는지와 원문 오류를 근거로 남기고, 임의로 다른 판정 규칙을 만들지 않는다(제약 준수).

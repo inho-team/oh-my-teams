@@ -18,6 +18,7 @@ import {
 } from "./core.mjs";
 import {
   assertWorktreeUnshared,
+  kickoffBriefPrompt,
   launchBinding,
   PERMISSION_BYPASS,
   selectedWorktreePath,
@@ -119,6 +120,7 @@ import {
   recordDelivery,
   registerKickoff,
   releaseKickoff,
+  verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
 import {
   readLaunches,
@@ -346,6 +348,7 @@ export const ALLOWED_OPTIONS = {
   validate: ["org"],
   "kickoff-claim": ["org", "from"],
   "kickoff-show": ["org", "worktree"],
+  "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
@@ -435,6 +438,7 @@ export const ALLOWED_OPTIONS = {
     "state",
     "orca",
     "allow-unverified",
+    "brief",
   ],
   "host-defaults": ["project", "codex-home"],
   "usage-report": [
@@ -539,6 +543,7 @@ export const REQUIRED_OPTIONS = {
   validate: ["org"],
   "kickoff-claim": ["org", "from"],
   "kickoff-show": ["org"],
+  "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
@@ -1368,6 +1373,12 @@ async function executeCommand(args) {
       }
       return result;
     }
+    case "kickoff-handoff-verify":
+      return verifyHandoffClaim(args.org, {
+        worktreeId: args.worktree,
+        directorTerminal: args["director-terminal"],
+        brief: args.brief,
+      });
     case "kickoff-bind":
       return bindKickoffRun(args.org, {
         worktreeId: args.worktree,
@@ -1604,10 +1615,18 @@ async function executeCommand(args) {
         "--profile requires --workflow-id, --state and --workflow-task",
       );
       const { org, run: runCtx } = launchContext(args);
-      const command = roleCommand(org, args.role, runCtx);
+      const firstPrompt =
+        args.brief === undefined
+          ? undefined
+          : kickoffBriefPrompt(path.resolve(args.brief));
+      const command = roleCommand(org, args.role, { ...runCtx, firstPrompt });
       assert(
         !command.runner,
         "An explicit OpenCodex runner is supported by headless-start only; role-terminal cannot run it as native Codex",
+      );
+      assert(
+        firstPrompt === undefined || command.role === "pm",
+        "--brief hands over an incoming-brief prompt, which only makes sense for the pm role this terminal launches",
       );
       const target = selectedWorktreePath(args.worktree, process.cwd());
       if (target) assertNotKickoffOwner(target, `starting ${command.role}`);

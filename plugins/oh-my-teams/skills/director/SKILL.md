@@ -40,7 +40,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 1. `kickoff-show`로 등록된 kickoff를 확인하고, 같은 목표가 이미 진행 중이면 재개하도록 안내한다.
 2. 사용자에게 확인해야 하는 목표, 수용 기준, 비목표, 필수 검사와 전달 범위를 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 한 번에 확정한다.
 3. 확정한 내용을 브리프 파일로 쓴다.
-4. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `PM 실행` 절에 따라 `role-terminal`로 PM 세션을 열고 브리프 경로를 전달한다.
+4. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `PM 실행` 절에 따라 `role-terminal --brief <브리프 경로>`로 브리프 경로를 실은 채로 PM 세션을 연다.
 5. `kickoff-claim`으로 등록하고, 자기 식별자(터미널 핸들과 주인 체크아웃 경로)를 요청 파일의 `director`에 적는다. 필드 이름은 정확히 다음과 같다.
 
    ```json

@@ -26,6 +26,7 @@ import {
 import {
   ALLOWED_OPTIONS,
   freshenTerminal,
+  main,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { findActiveDispatch } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
@@ -973,6 +974,43 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
       ]),
     /Missing value/,
     "allow-unverified에 값이 없으면 parseArgs가 에러를 던져야 한다",
+  );
+});
+
+test("role-terminal CLI --brief 옵션 등록과 PM 전용 제약 (#86)", async (t) => {
+  // finding: handoff-instruction-not-pasted-content (이슈 #86)
+  // --brief는 role-terminal이 여는 명령 자체의 인자로 브리프 경로를 실어, 그
+  // 문장이 붙여넣기(pasted_content)가 아니라 세션의 진짜 첫 지시로 읽히게 한다.
+  assert.ok(
+    ALLOWED_OPTIONS["role-terminal"].includes("brief"),
+    "role-terminal ALLOWED_OPTIONS에 brief가 있어야 한다",
+  );
+
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-role-terminal-brief-"),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, "organization.json");
+  fs.writeFileSync(orgFile, JSON.stringify(example()));
+  const briefFile = path.join(dir, "brief.md");
+  fs.writeFileSync(briefFile, "goal, acceptance criteria, non-goals\n");
+
+  // 브리프를 실은 첫 프롬프트는 이사가 PM을 인계할 때 쓰는 개념이므로, PM이
+  // 아닌 역할에 --brief를 주면 role-terminal이 그 자리에서 거부한다.
+  await assert.rejects(
+    () =>
+      main([
+        "role-terminal",
+        "--org",
+        orgFile,
+        "--role",
+        "senior",
+        "--worktree",
+        "current",
+        "--brief",
+        briefFile,
+      ]),
+    /--brief.*pm/s,
   );
 });
 

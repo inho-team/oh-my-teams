@@ -18,6 +18,8 @@ import {
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import {
   assertWorktreeUnshared,
+  FIRST_PROMPT_ARG,
+  kickoffBriefPrompt,
   launchBinding,
   PERMISSION_BYPASS,
   readRoleCharter,
@@ -379,6 +381,58 @@ test("only Claude role commands carry --autocompact, set by policy.claudeAutoCom
     org.policy.claudeAutoCompact = bad;
     assert.throws(() => validateOrg(org), /claudeAutoCompact/, String(bad));
   }
+});
+
+test("roleCommand builds the fixed brief prompt kickoffBriefPrompt made, provider by provider (#86)", () => {
+  // Text typed into a terminal is pasted_content the model won't act on
+  // without asking the user first. Baking the brief into the launch command
+  // itself makes it the session's own initial argument instead.
+  const org = example();
+  const briefPath = "/repo/.omt/kickoffs/brief.md";
+  const prompt = kickoffBriefPrompt(briefPath);
+  assert.match(prompt, new RegExp(briefPath.replace(/\//g, "\\/")));
+
+  // Claude and Codex take the prompt as their own trailing positional
+  // argument, confirmed against `claude --help` / `codex --help` (#86).
+  const claude = roleCommand(org, "pm", { firstPrompt: prompt });
+  assert.equal(claude.argv.at(-1), prompt);
+  assert.equal(claude.argv.at(-2), "250k");
+
+  org.roles.pm.profile = "codex-terra";
+  const codex = roleCommand(org, "pm", { firstPrompt: prompt });
+  assert.equal(codex.argv.at(-1), prompt);
+  assert.equal(codex.argv.at(-2), "check_for_update_on_startup=false");
+
+  // Agy takes it as an explicit flag's value instead, confirmed against
+  // `agy --help` (#86).
+  org.roles.pm.profile = "agy-opus";
+  const agy = roleCommand(org, "pm", { firstPrompt: prompt });
+  assert.deepEqual(agy.argv.slice(-2), ["--prompt-interactive", prompt]);
+
+  // A Korean sentence with spaces is not a SAFE_TOKEN, so the printed
+  // command quotes it like any other argument carrying shell-special text.
+  assert.ok(agy.command.includes(`'${prompt}'`), agy.command);
+});
+
+test("FIRST_PROMPT_ARG lists only the providers confirmed against their installed CLI's --help (#86)", () => {
+  // Every provider with an interactive Orca agent (ORCA_LAUNCH: claude, codex,
+  // agy) happens to also be confirmed here today, so no schema-valid org
+  // profile can reach roleCommand's "no confirmed first-prompt argument"
+  // refusal (ollama, the one other launchable-through-`work` provider, is
+  // rejected earlier by launchableProfile for having no interactive agent at
+  // all). This pins the confirmed set so adding a provider here still
+  // requires reading that provider's own --help output (#86) rather than
+  // inheriting an entry by proximity.
+  assert.deepEqual(FIRST_PROMPT_ARG, {
+    claude: "positional",
+    codex: "positional",
+    agy: "flag",
+  });
+});
+
+test("kickoffBriefPrompt refuses an empty brief path", () => {
+  assert.throws(() => kickoffBriefPrompt(""), /non-empty brief path/);
+  assert.throws(() => kickoffBriefPrompt("   "), /non-empty brief path/);
 });
 
 test("every role skill states its authority, responsibility and limits", () => {
