@@ -1325,13 +1325,13 @@ test("notifyDirectorSignal defers instead of double-sending when a second call f
   assert.equal(readSignal(orgFile, second.id).notify.notified, true);
 });
 
-test("notifyDirectorSignal reclaims a batch left in-flight by a dead owner", async (t) => {
+test("notifyDirectorSignal never resends a batch left in-flight by a dead owner, and settles it as unconfirmed instead", async (t) => {
   const { orgFile, worktreeId } = makeProject(t, {
     withDirectorTerminal: true,
   });
   const stuck = sendSignal(orgFile, {
     worktreeId,
-    kind: "progress",
+    kind: "decision",
     text: "orphaned attempt",
   });
   // Simulate a claim left behind by a process that has since exited: a pid
@@ -1366,7 +1366,77 @@ test("notifyDirectorSignal reclaims a batch left in-flight by a dead owner", asy
     orca.execute,
   );
   assert.equal(result.notified, true);
-  assert.deepEqual(result.bundled.slice().sort(), [second.id, stuck.id].sort());
+  // The dead owner's signal is never reclaimed for a fresh send; only the new
+  // signal goes out.
+  assert.deepEqual(result.bundled, [second.id]);
+  assert.equal(orca.textSends().length, 1);
+  const sentText =
+    orca.textSends()[0][orca.textSends()[0].indexOf("--text") + 1];
+  assert.doesNotMatch(sentText, /orphaned attempt/);
+  assert.match(sentText, /new attempt/);
+  // Its outcome is settled as unconfirmed, the same shape as an attempt that
+  // ran but could not confirm submission, so it never comes back into the
+  // auto-resend backlog.
+  const settled = readSignal(orgFile, stuck.id);
+  assert.equal(settled.notify.notified, false);
+  assert.equal(settled.notify.sent, true);
+  assert.equal(settled.notify.notifyError, "owner-exited-before-confirming");
+  assert.equal(settled.status, "pending");
+  assert.ok(listInbox(orgFile).signals.some((s) => s.id === stuck.id));
+});
+
+test("notifyDirectorSignal sends a new signal and leaves a signal stuck under an unverifiable owner untouched", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+  const stuck = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "claimed on another host",
+  });
+  // A claim recorded by a different hostname: `processLiveness` can never
+  // confirm this pid is dead (it does not even check), so it always reports
+  // "unverifiable" and this claim would never clear on its own.
+  const file = path.join(
+    path.dirname(orgFile),
+    "director",
+    "inbox",
+    `${stuck.id}.json`,
+  );
+  writeJSON(file, {
+    ...readJSON(file),
+    notify: {
+      inFlight: true,
+      claimedAt: new Date(0).toISOString(),
+      owner: { pid: 4321, hostname: "some-other-host" },
+    },
+  });
+  const before = readSignal(orgFile, stuck.id);
+
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "unaffected new signal",
+  });
+  const orca = orcaNotify([["input_accepted", "turn_started"]], []);
+  const result = await notifyDirectorSignal(
+    orgFile,
+    second.entry,
+    second.record,
+    "orca",
+    orca.execute,
+  );
+  // The new signal is delivered on its own; the stuck one is never bundled.
+  assert.equal(result.notified, true);
+  assert.deepEqual(result.bundled, [second.id]);
+  assert.equal(orca.textSends().length, 1);
+  const sentText =
+    orca.textSends()[0][orca.textSends()[0].indexOf("--text") + 1];
+  assert.doesNotMatch(sentText, /claimed on another host/);
+  assert.match(sentText, /unaffected new signal/);
+  // The stuck signal's own claim is left exactly as it was: not resent, not
+  // settled, still visible as an unresolved claim in director-inbox.
+  assert.deepEqual(readSignal(orgFile, stuck.id), before);
 });
 
 test("replySignal reports how far the PM notification got", async (t) => {

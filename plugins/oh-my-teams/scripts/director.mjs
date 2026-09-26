@@ -280,7 +280,9 @@ export async function notifyDirector(
 // `deliverPrompt` (screen unreadable or blocked by a question) stays eligible
 // here; one where `deliverPrompt` ran but came back unsubmitted, unclear,
 // foreign-input, or failed is not, because resending it could run the same
-// work twice if the original keys did in fact reach the agent. That signal
+// work twice if the original keys did in fact reach the agent. A signal
+// `claimBatch` found claimed by an owner it could prove dead is settled the
+// same way, for the same reason (see `finalizeUnconfirmedClaim`). Either kind
 // stays pending and keeps showing up in director-inbox, just never
 // auto-bundled again. A signal the Director already replied to or
 // acknowledged by hand is left out too, since that already proves it was seen.
@@ -322,45 +324,62 @@ function recordNotifyOutcome(orgFile, records, outcome) {
   });
 }
 
-// Claims every signal `notifyDirectorSignal` is about to try to deliver (the
-// undelivered backlog plus the signal just written) so that an overlapping
-// call for the same worktree — e.g. one started while an earlier call is
-// still inside `deliverPrompt`'s wait-submit window — sees them as busy and
-// defers instead of running its own `notifyTerminal` on the same content.
-// Claiming and the terminal I/O that follows are deliberately not one lock
-// hold: holding the inbox lock across a send would also block `sendSignal`,
-// which needs the same lock just to record a new signal. Instead the claim
-// records this process as the owner (pid + hostname, same shape
-// `processLiveness` already reads for resources.mjs's dead-owner slot
-// reclaim) and `recordNotifyOutcome` clears it again once the attempt is
-// over, whatever it decided. A claim left behind by a process that exited
-// mid-send is reclaimed the same way: `processLiveness` reports its pid dead,
-// so recovery does not depend on a fixed timeout. A live or unverifiable
-// owner still counts as busy, per "when it cannot be judged, do not send".
-// The one gap this cannot close is a crash strictly between `deliverPrompt`
-// actually typing the text and `recordNotifyOutcome` persisting that fact;
-// that signal is indistinguishable from one that was never attempted and may
-// be resent. That window is far narrower than the race this replaces (two
-// live calls reading the same backlog and both sending), so it is accepted
-// rather than solved with a lock held for the whole send.
+// Claims every signal `notifyDirectorSignal` is about to try to deliver: the
+// undelivered backlog plus the signal just written, both read fresh from disk
+// (not from the `record` argument alone) so this call also sees a claim an
+// overlapping call already placed on that very signal — e.g. one started
+// while an earlier call is still inside `deliverPrompt`'s wait-submit window.
+// A signal already claimed by an owner that is alive or cannot be judged
+// (`processLiveness` returns anything but `"dead"`) is left exactly as it is:
+// still claimed, not resent, and not counted as claimable, per "when it
+// cannot be judged, do not send". This is what keeps two overlapping live
+// calls for the same worktree from both sending the same content (see the
+// "overlaps the first" test) — and, unlike the previous all-or-nothing
+// version, it no longer holds back the rest of the batch: the signal just
+// written and any other backlog signal that is not itself stuck this way are
+// claimed and sent normally, so one signal parked under an owner this host
+// can never prove dead (for instance, one recorded on a different host, since
+// `processLiveness` always reports a foreign hostname as "unverifiable") only
+// ever stalls that one signal, not the whole worktree's notifications.
 //
-// Returns `null`, writing nothing, when any signal in the batch is already
-// claimed by an owner that is not provably dead.
+// A signal claimed by an owner `processLiveness` *can* prove dead is handled
+// differently again: `finalizeUnconfirmedClaim` settles it in place rather
+// than reclaiming it for a fresh send, because the same crash-window gap
+// `notifyTerminal` already lives with (see its own comment) makes "the prior
+// attempt already typed this text" indistinguishable from "it never ran" —
+// resending here would risk the very double-send this whole scheme exists to
+// avoid. Claiming and the terminal I/O that follows are deliberately not one
+// lock hold: holding the inbox lock across a send would also block
+// `sendSignal`, which needs the same lock just to record a new signal.
+// Instead the claim records this process as the owner (pid + hostname, same
+// shape `processLiveness` already reads for resources.mjs's dead-owner slot
+// reclaim) and `recordNotifyOutcome` clears it again once the attempt is
+// over, whatever it decided.
+//
+// Returns `null`, writing nothing but any dead-owner finalization above, when
+// nothing in the batch is claimable — e.g. the signal just written was itself
+// already swept into a still-live overlapping call's claim.
 function claimBatch(orgFile, worktreeId, record) {
   return withFileLock(inboxLock(orgFile), () => {
-    const backlog = undeliveredSignals(orgFile, worktreeId).filter(
-      (older) => older.id !== record.id,
-    );
-    const batch = [...backlog, record];
-    const busy = batch.some(
-      (item) =>
-        item.notify?.inFlight === true &&
-        processLiveness(item.notify.owner) !== "dead",
-    );
-    if (busy) return null;
+    const pending = undeliveredSignals(orgFile, worktreeId);
+    const batch = pending.some((item) => item.id === record.id)
+      ? pending
+      : [...pending, record];
     const claimedAt = new Date().toISOString();
-    const owner = { pid: process.pid, hostname: THIS_HOST };
+    const claimable = [];
     for (const item of batch) {
+      if (item.notify?.inFlight !== true) {
+        claimable.push(item);
+        continue;
+      }
+      if (processLiveness(item.notify.owner) === "dead") {
+        finalizeUnconfirmedClaim(orgFile, item.id, claimedAt);
+      }
+      // "alive" or "unverifiable": leave the existing claim exactly as it is.
+    }
+    if (claimable.length === 0) return null;
+    const owner = { pid: process.pid, hostname: THIS_HOST };
+    for (const item of claimable) {
       const file = path.join(inboxDir(orgFile), `${item.id}.json`);
       if (!fs.existsSync(file)) continue;
       writeJSON(file, {
@@ -368,7 +387,35 @@ function claimBatch(orgFile, worktreeId, record) {
         notify: { inFlight: true, claimedAt, owner },
       });
     }
-    return batch;
+    return claimable;
+  });
+}
+
+// Settles a signal whose in-flight claim belongs to an owner `processLiveness`
+// can prove dead, instead of reclaiming it into a fresh send attempt. The
+// owner may have crashed strictly between `deliverPrompt` typing the text and
+// `recordNotifyOutcome` persisting that fact (the same residual gap
+// `notifyTerminal` documents), which makes this signal indistinguishable from
+// one already sent, so it is recorded the same way `notifyTerminal` records
+// an attempt it could not confirm (`sent: true, notified: false`) rather than
+// tried again. `undeliveredSignals` already treats that shape as settled, so
+// this permanently drops the signal out of the auto-resend backlog; a
+// `decision`/`blocked`/`close-ready` record stays `pending` regardless and
+// keeps showing in director-inbox and director-watch, and the Director can
+// tell this case apart from an ordinary unconfirmed attempt by its
+// `notifyError`. Called from inside `claimBatch`'s own lock hold, so it writes
+// directly instead of re-acquiring a lock it already holds.
+function finalizeUnconfirmedClaim(orgFile, id, at) {
+  const file = path.join(inboxDir(orgFile), `${id}.json`);
+  if (!fs.existsSync(file)) return;
+  writeJSON(file, {
+    ...readJSON(file),
+    notify: {
+      notified: false,
+      sent: true,
+      deferredAt: at,
+      notifyError: "owner-exited-before-confirming",
+    },
   });
 }
 
@@ -384,10 +431,15 @@ function claimBatch(orgFile, worktreeId, record) {
  * together. A signal is marked delivered only once `notified` comes back
  * true, so it is never sent twice; a deferred attempt leaves every record in
  * the batch exactly as undelivered as it already was. `claimBatch` also
- * guards against two overlapping calls for the same worktree both sending: an
- * overlapping call sees the batch already claimed and returns
- * `deferred: true, notifyError: "backlog-claimed"` without touching the
- * terminal at all.
+ * guards against two overlapping calls for the same worktree both sending: a
+ * signal an overlapping live call already claimed is left out of this call's
+ * batch instead of being resent, and if that leaves nothing claimable at all
+ * (e.g. this very signal was itself swept into the other call's claim), the
+ * result is `deferred: true, notifyError: "backlog-claimed"` without
+ * touching the terminal. A signal claimed by an owner this host can prove
+ * dead is settled in place (never resent, see `finalizeUnconfirmedClaim`)
+ * rather than blocking the rest of the batch, so one signal parked under a
+ * stuck or unverifiable claim never stalls the other signals in it.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {object} entry - Kickoff registry entry naming the Director terminal.
@@ -395,8 +447,8 @@ function claimBatch(orgFile, worktreeId, record) {
  * @param {string} [orcaExecutable] - Orca binary path.
  * @param {Function} [execute] - Injectable command runner.
  * @returns {Promise<{notified: boolean, deferred?: boolean, sent?: boolean, notifyError?: string, delivery?: object, bundled: string[]}>}
- *   Notification result; `bundled` lists every signal id the message carried
- *   (empty when the batch was claimed by an overlapping call instead).
+ *   Notification result; `bundled` lists every signal id the message actually
+ *   carried (empty when nothing in the batch was claimable).
  */
 export async function notifyDirectorSignal(
   orgFile,
