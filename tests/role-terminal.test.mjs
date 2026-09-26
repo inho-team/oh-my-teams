@@ -1295,7 +1295,8 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
       }),
     (error) => error.signal?.code === "timeout",
   );
-  assert.equal(busy.length, 1);
+  // Idle check fails. Diagnostics (read, list) are collected.
+  assert.equal(busy.length, 3, "wait + read + list for diagnostics");
 });
 
 test("worker-start accepts the task identity and purpose that decide a clear", () => {

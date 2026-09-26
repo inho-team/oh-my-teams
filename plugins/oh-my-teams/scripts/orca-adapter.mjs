@@ -426,6 +426,63 @@ const IDLE_PROBE_MS = 20000;
 
 const BLOCK_PROBE_MS = 3000;
 
+// Reads terminal diagnostics when idle check fails. Returns null if reading fails.
+async function readTerminalDiagnostics(orca, terminal, { cwd, execute }) {
+  try {
+    const screen = await execute(
+      [orca, "terminal", "read", "--terminal", terminal, "--screen", "--json"],
+      { cwd, timeoutMs: 10000 },
+    );
+    let screenData = null;
+    let screenFailed = false;
+    if (screen.code === 0) {
+      try {
+        const parsed = JSON.parse(screen.stdout);
+        screenData = parsed.result?.screen ?? null;
+      } catch {
+        // Ignore JSON parse errors
+      }
+    } else {
+      screenFailed = true;
+    }
+
+    const list = await execute([orca, "terminal", "list", "--json"], {
+      cwd,
+      timeoutMs: 10000,
+    });
+    let terminalState = null;
+    let listFailed = false;
+    if (list.code === 0) {
+      try {
+        const parsed = JSON.parse(list.stdout);
+        const terminals = parsed.result?.terminals ?? [];
+        terminalState = terminals.find((t) => t.handle === terminal) ?? null;
+      } catch {
+        // Ignore JSON parse errors
+      }
+    } else {
+      listFailed = true;
+    }
+
+    // If any read failed, record that fact
+    if (screenFailed || listFailed) {
+      return {
+        screen: screenData,
+        terminalState,
+        diagnosticsError: true,
+      };
+    }
+
+    return { screen: screenData, terminalState };
+  } catch (error) {
+    // Record the error so the failure includes diagnostic failure
+    return {
+      diagnosticsError: true,
+      message: String(error.message).slice(0, 100),
+    };
+  }
+}
+
 // Runs `terminal wait --for tui-idle` and reads the envelope Orca returns.
 // Orca reports the timeout in its JSON envelope; whether it also exits
 // non-zero is not relied on, so the envelope is read before the exit code.
@@ -517,6 +574,7 @@ async function assertTerminalIdle(
     execute,
     timeoutMs: IDLE_PROBE_MS,
   });
+
   if (!waited.timedOut && envelope?.ok === false) {
     if (envelope.error?.code === "timeout") {
       // `timeout` means "not idle" only for this wait, so the route is chosen
@@ -530,13 +588,23 @@ async function assertTerminalIdle(
           "which Orca worker-start waits for before handing over a task; no Dispatch was created. " +
           "Do not repeat the start (references/orca-runtime.md)",
       });
-      throw orcaError(refused.message, refused, envelope);
+      const error = orcaError(refused.message, refused, envelope);
+      error.diagnostics = await readTerminalDiagnostics(orca, terminal, {
+        cwd,
+        execute,
+      });
+      throw error;
     }
     const failed = translateOrcaFailure(
       envelope.error?.code,
       envelope.error?.message,
     );
-    throw orcaError(JSON.stringify(envelope), failed, envelope);
+    const error = orcaError(JSON.stringify(envelope), failed, envelope);
+    error.diagnostics = await readTerminalDiagnostics(orca, terminal, {
+      cwd,
+      execute,
+    });
+    throw error;
   }
   const wait = envelope?.result?.wait;
   if (!waited.timedOut && wait?.satisfied === false) {
@@ -580,18 +648,28 @@ async function assertTerminalIdle(
           ? ` (matrix-prediction-failure: predicted supervised-terminal for ${reason})`
           : ""),
     });
-    throw orcaError(refused.message, refused, envelope);
+    const error = orcaError(refused.message, refused, envelope);
+    error.diagnostics = await readTerminalDiagnostics(orca, terminal, {
+      cwd,
+      execute,
+    });
+    throw error;
   }
   if (waited.code !== 0 || waited.timedOut || !envelope) {
     const detail =
       waited.stderr || waited.stdout || "Orca terminal wait failed";
-    throw orcaError(
+    const error = orcaError(
       detail,
       translateOrcaFailure(
         waited.timedOut ? "start_unknown" : "runtime_error",
         detail,
       ),
     );
+    error.diagnostics = await readTerminalDiagnostics(orca, terminal, {
+      cwd,
+      execute,
+    });
+    throw error;
   }
 }
 
