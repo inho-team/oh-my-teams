@@ -186,3 +186,31 @@ test("evidence recorded under the pre-#63 tree algorithm is rejected as stale, n
     /Stale evidence: tree changed/,
   );
 });
+
+test("when several fingerprint fields move at once, validateEvidence names every one of them", async (t) => {
+  const dir = await seededRepo(t);
+  const store = fs.mkdtempSync(path.join(os.tmpdir(), "omt-eol-store-"));
+  t.after(() => fs.rmSync(store, { recursive: true, force: true }));
+
+  const evidence = await verify(dir, {
+    baseRef: "HEAD",
+    commands,
+    environment,
+    store,
+    timeoutMs: 60000,
+  });
+  assert.equal(evidence.status, "passed");
+
+  fs.writeFileSync(path.join(dir, "line-ending.txt"), "committed change\n");
+  assert.equal(
+    (await run(["git", "commit", "-am", "move"], { cwd: dir })).code,
+    0,
+  );
+
+  // A new commit moves head and, because baseRef is HEAD, base as well; the
+  // committed edit also moves tree. The message lists all three in field order.
+  await assert.rejects(
+    () => validateEvidence(dir, evidence, "HEAD"),
+    /Stale evidence: head, base, tree changed$/,
+  );
+});
