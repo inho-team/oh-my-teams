@@ -290,6 +290,8 @@ test("the PM command carries the model the PM profile pins", () => {
     "gpt-5.6-terra",
     "--config",
     "model_reasoning_effort=high",
+    "--config",
+    "check_for_update_on_startup=false",
   ]);
 
   org.roles.pm.profile = "claude-current";
@@ -310,6 +312,42 @@ test("the PM command carries the model the PM profile pins", () => {
     "--model",
     "claude-opus-4-6-thinking",
   ]);
+});
+
+test("every Codex role command disables the startup update check, other providers get no such flag", () => {
+  // A role terminal has nobody to answer Codex's own-update nag, whose
+  // default selection runs `npm install -g`
+  // (docs/plan/codex-update-check.md). `check_for_update_on_startup` is a
+  // real ConfigToml field on the installed CLI, confirmed with
+  // `codex exec --strict-config -c check_for_update_on_startup=false`.
+  const org = example();
+  org.roles.pm.profile = "codex-terra";
+  assert.deepEqual(roleCommand(org, "pm").argv.slice(-2), [
+    "--config",
+    "check_for_update_on_startup=false",
+  ]);
+
+  // codex-luna has no model_reasoning_effort, so the flag must not depend on
+  // the effort branch running first.
+  org.roles.pm.profile = "codex-luna";
+  assert.deepEqual(roleCommand(org, "pm").argv, [
+    "codex",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--model",
+    "gpt-5.6-luna",
+    "--config",
+    "check_for_update_on_startup=false",
+  ]);
+
+  for (const profile of ["claude-current", "agy-opus"]) {
+    org.roles.pm.profile = profile;
+    assert.ok(
+      !roleCommand(org, "pm").argv.includes(
+        "check_for_update_on_startup=false",
+      ),
+      profile,
+    );
+  }
 });
 
 test("only Claude role commands carry --autocompact, set by policy.claudeAutoCompact", () => {
@@ -568,6 +606,8 @@ test("a terminal is opened and handed work only for a role the run holds", async
     "--dangerously-bypass-approvals-and-sandbox",
     "--model",
     "gpt-5.5",
+    "--config",
+    "check_for_update_on_startup=false",
   ]);
   await assert.rejects(
     () => main(["role-command", "--role", "senior", ...common]),

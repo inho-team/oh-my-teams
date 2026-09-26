@@ -440,6 +440,16 @@ export function roleCommand(
         : ["--effort", profile.effort]),
     );
   }
+  if (profile.provider === "codex") {
+    // No one watches a role terminal to answer Codex's own-update nag
+    // ("1. Update now" runs `npm install -g`, selected by default), and the
+    // classifier leaves that screen at kind=unknown/action=none by design
+    // (docs/plan/codex-update-check.md). `check_for_update_on_startup` is a
+    // real ConfigToml field, confirmed against the installed CLI with
+    // `codex exec --strict-config -c check_for_update_on_startup=false`, so
+    // this skips the startup check instead of writing to config.toml.
+    argv.push("--config", "check_for_update_on_startup=false");
+  }
   const runner = profile.runner
     ? {
         kind: profile.runner.kind,
