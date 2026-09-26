@@ -3,9 +3,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   DELIVERY_OUTCOMES,
+  confirmWorkerSubmission,
   deliverPrompt,
   inputLine,
   judgeDelivery,
+  judgeWorkerStartDelivery,
   readSendReceipt,
 } from "../plugins/oh-my-teams/scripts/prompt-submission.mjs";
 
@@ -409,4 +411,112 @@ test("a rendered screen still decides an Enter", async () => {
   const result = await deliver(orca);
   assert.equal(result.enterSent, true);
   assert.equal(orca.enters().length, 1);
+});
+
+// worker-start types its own preamble, not the approved spec or task text, so
+// judgeWorkerStartDelivery anchors on the task id instead of an exact match.
+test("a worker-start hand-off is judged by its task id, never by its own preamble text (#87)", () => {
+  const stages = ["input_accepted"];
+  assert.deepEqual(
+    judgeWorkerStartDelivery({
+      stages: ["input_accepted", "turn_started"],
+      screen: [],
+      taskId: "task_1",
+    }),
+    { outcome: "submitted", reason: "turn-started", enter: false },
+  );
+  assert.deepEqual(
+    judgeWorkerStartDelivery({ stages, screen: [], taskId: "task_1" }),
+    { outcome: "unclear", reason: "no-input-box-on-screen", enter: false },
+  );
+  assert.deepEqual(
+    judgeWorkerStartDelivery({
+      stages,
+      screen: ["❯ some Orca preamble around the spec"],
+      taskId: "task_1",
+    }),
+    { outcome: "unsubmitted", reason: "text-in-box", enter: true },
+  );
+  assert.deepEqual(
+    judgeWorkerStartDelivery({
+      stages,
+      screen: ["handed off task_1", "❯"],
+      taskId: "task_1",
+    }),
+    {
+      outcome: "already-started",
+      reason: "task-id-in-transcript",
+      enter: false,
+    },
+  );
+  assert.deepEqual(
+    judgeWorkerStartDelivery({ stages, screen: ["❯"], taskId: "task_1" }),
+    { outcome: "unclear", reason: "empty-box-without-task-id", enter: false },
+  );
+  // No taskId at all: an empty box never counts as already-started by luck.
+  assert.deepEqual(
+    judgeWorkerStartDelivery({ stages, screen: ["❯"], taskId: null }),
+    { outcome: "unclear", reason: "empty-box-without-task-id", enter: false },
+  );
+});
+
+test("confirmWorkerSubmission reads the screen once and presses Enter at most once (#87)", async () => {
+  const fakeConfirm = (screen) => {
+    const calls = [];
+    const execute = async (argv) => {
+      calls.push(argv.slice(1, -1));
+      if (argv[2] === "read") {
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            result: { terminal: { source: "screen", tail: screen } },
+          }),
+        };
+      }
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          result: { send: { accepted: true } },
+        }),
+      };
+    };
+    return { calls, execute };
+  };
+
+  const unsubmitted = fakeConfirm(["❯ preamble"]);
+  const pressed = await confirmWorkerSubmission({
+    orca: "orca",
+    terminal: "term_1",
+    stages: ["input_accepted"],
+    taskId: "task_1",
+    execute: unsubmitted.execute,
+  });
+  assert.deepEqual(pressed, {
+    outcome: "unsubmitted",
+    reason: "text-in-box",
+    enterSent: true,
+  });
+  assert.equal(
+    unsubmitted.calls.filter((call) => call[1] === "send").length,
+    1,
+  );
+
+  const alreadyStarted = fakeConfirm(["handed off task_1", "❯"]);
+  const untouched = await confirmWorkerSubmission({
+    orca: "orca",
+    terminal: "term_1",
+    stages: ["input_accepted"],
+    taskId: "task_1",
+    execute: alreadyStarted.execute,
+  });
+  assert.deepEqual(untouched, {
+    outcome: "already-started",
+    reason: "task-id-in-transcript",
+    enterSent: false,
+  });
+  assert.deepEqual(alreadyStarted.calls, [
+    ["terminal", "read", "--terminal", "term_1", "--screen"],
+  ]);
 });

@@ -969,12 +969,19 @@ async function freshenTerminal(args, launch, identity) {
     ...identity,
   });
   if (!decision.clear) return { cleared: false, ...decision };
-  await clearRoleTerminal({
+  // clearRoleTerminal itself may decline to clear (an active Dispatch it
+  // cannot settle either way), so its own `cleared`/`reason` overrides the
+  // decision's when they disagree, rather than assuming the clear happened.
+  const outcome = await clearRoleTerminal({
     terminal: args.terminal,
     executable: args.orca,
     cwd: path.resolve(args.repo),
   });
-  return { cleared: true, ...decision };
+  return {
+    ...decision,
+    cleared: outcome.cleared,
+    ...(outcome.cleared ? {} : { reason: outcome.reason }),
+  };
 }
 
 // A role run as a non-interactive process gets the same checks a terminal

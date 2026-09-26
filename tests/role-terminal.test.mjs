@@ -1296,13 +1296,22 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
     ok: true,
     result: { wait: { satisfied: true } },
   });
+  const noActiveDispatch = JSON.stringify({
+    ok: true,
+    result: { workers: [] },
+  });
   const execute = async (argv) => {
     calls.push(argv);
     return {
       code: 0,
       stderr: "",
       timedOut: false,
-      stdout: argv[2] === "wait" ? idle : '{"ok":true}',
+      stdout:
+        argv[2] === "wait"
+          ? idle
+          : argv[2] === "worker-list"
+            ? noActiveDispatch
+            : '{"ok":true}',
     };
   };
   const result = await clearRoleTerminal({
@@ -1313,9 +1322,14 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
   assert.deepEqual(result, { cleared: true, terminal: "term_1" });
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
-    ["terminal wait", "terminal send", "terminal wait"],
+    [
+      "orchestration worker-list",
+      "terminal wait",
+      "terminal send",
+      "terminal wait",
+    ],
   );
-  assert.deepEqual(calls[1], [
+  assert.deepEqual(calls[2], [
     "orca",
     "terminal",
     "send",
@@ -1327,7 +1341,8 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
     "--json",
   ]);
 
-  // A busy terminal is refused before /clear is typed into it.
+  // A busy terminal is refused before /clear is typed into it, but only once
+  // no active Dispatch stands in the way.
   const busy = [];
   await assert.rejects(
     () =>
@@ -1336,6 +1351,14 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
         executable: "orca",
         execute: async (argv) => {
           busy.push(argv);
+          if (argv[2] === "worker-list") {
+            return {
+              code: 0,
+              stderr: "",
+              timedOut: false,
+              stdout: noActiveDispatch,
+            };
+          }
           return {
             code: 0,
             stderr: "",
@@ -1346,8 +1369,91 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
       }),
     (error) => error.signal?.code === "timeout",
   );
-  // Idle check fails. Diagnostics (read, list) are collected.
-  assert.equal(busy.length, 3, "wait + read + list for diagnostics");
+  // The active-dispatch check (worker-list) runs before the idle wait (#84);
+  // when the idle check fails, read and list are collected as diagnostics.
+  assert.deepEqual(
+    busy.map((argv) => argv.slice(1, 3).join(" ")),
+    [
+      "orchestration worker-list",
+      "terminal wait",
+      "terminal read",
+      "terminal list",
+    ],
+  );
+});
+
+test("clearRoleTerminal refuses /clear on a terminal with an active dispatch, without sending it (#84)", async () => {
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "worker-list") {
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: JSON.stringify({
+          ok: true,
+          result: {
+            workers: [
+              {
+                dispatchId: "ctx_active",
+                taskId: "task_active",
+                dispatchStatus: "dispatched",
+                agentTerminalHandle: "term_1",
+              },
+            ],
+          },
+        }),
+      };
+    }
+    throw new Error(`unexpected call ${argv[2]}`);
+  };
+  await assert.rejects(
+    () =>
+      clearRoleTerminal({ terminal: "term_1", executable: "orca", execute }),
+    (error) => {
+      assert.equal(error.signal?.kind, "not-started");
+      assert.equal(error.signal?.code, "active_dispatch");
+      assert.match(error.message, /ctx_active/);
+      assert.match(error.message, /task_active/);
+      assert.deepEqual(error.activeDispatch, {
+        dispatchId: "ctx_active",
+        taskId: "task_active",
+      });
+      return true;
+    },
+  );
+  // Only the lookup ran; /clear was never typed into the busy terminal.
+  assert.deepEqual(
+    calls.map((argv) => argv.slice(1, 3).join(" ")),
+    ["orchestration worker-list"],
+  );
+});
+
+test("clearRoleTerminal skips /clear, without refusing, when an active dispatch cannot be determined (#84)", async () => {
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "worker-list") {
+      const err = new Error("connection reset");
+      throw err;
+    }
+    throw new Error(`unexpected call ${argv[2]}`);
+  };
+  const result = await clearRoleTerminal({
+    terminal: "term_1",
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, {
+    cleared: false,
+    terminal: "term_1",
+    reason: "active-dispatch-unknown",
+  });
+  assert.deepEqual(
+    calls.map((argv) => argv.slice(1, 3).join(" ")),
+    ["orchestration worker-list"],
+  );
 });
 
 test("worker-start accepts the task identity and purpose that decide a clear", () => {
