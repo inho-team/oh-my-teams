@@ -7,6 +7,7 @@ import path from "node:path";
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   PERMISSION_BYPASS,
+  kickoffBriefPrompt,
   roleCommand,
 } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import {
@@ -16,6 +17,7 @@ import {
   commandTyping,
   freshContextDecision,
   launchLine,
+  locateCommand,
   openRoleTerminal,
   roleTitle,
   trustQuestion,
@@ -26,6 +28,7 @@ import {
 import {
   ALLOWED_OPTIONS,
   freshenTerminal,
+  main,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { findActiveDispatch } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
@@ -974,6 +977,111 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
     /Missing value/,
     "allow-unverified에 값이 없으면 parseArgs가 에러를 던져야 한다",
   );
+});
+
+test("role-terminal CLI --brief 옵션 등록과 PM 전용 제약 (#86)", async (t) => {
+  // finding: handoff-instruction-not-pasted-content (이슈 #86)
+  // --brief는 role-terminal이 여는 명령 자체의 인자로 브리프 경로를 실어, 그
+  // 문장이 붙여넣기(pasted_content)가 아니라 세션의 진짜 첫 지시로 읽히게 한다.
+  assert.ok(
+    ALLOWED_OPTIONS["role-terminal"].includes("brief"),
+    "role-terminal ALLOWED_OPTIONS에 brief가 있어야 한다",
+  );
+
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-role-terminal-brief-"),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, "organization.json");
+  fs.writeFileSync(orgFile, JSON.stringify(example()));
+  const briefFile = path.join(dir, "brief.md");
+  fs.writeFileSync(briefFile, "goal, acceptance criteria, non-goals\n");
+
+  // 브리프를 실은 첫 프롬프트는 이사가 PM을 인계할 때 쓰는 개념이므로, PM이
+  // 아닌 역할에 --brief를 주면 role-terminal이 그 자리에서 거부한다.
+  await assert.rejects(
+    () =>
+      main([
+        "role-terminal",
+        "--org",
+        orgFile,
+        "--role",
+        "senior",
+        "--worktree",
+        "current",
+        "--brief",
+        briefFile,
+      ]),
+    /--brief.*pm/s,
+  );
+});
+
+test("--brief로 연 터미널이 이미 첫 턴을 마친 화면에서도 ready 판정과 모델 대조가 끝난다 (#86)", async () => {
+  // finding: missing-fake-orca-regression-for-brief-launch-readiness
+  // 이 화면 구조(셸이 typed한 명령 원문이 전혀 남지 않고, 첫 프롬프트 인자로
+  // 실은 brief 지시가 이미 처리를 마친 채 배너 + 완료된 첫 턴 + 빈 입력줄
+  // (`❯`)로 완전히 다시 그려진 상태)는 2026-09-26 role-terminal --brief 확인
+  // 1회에서 실제로 관찰됐다. 다만 그 확인은 --worktree 인자 오류로 이 t6
+  // 워크트리가 아니라 PM 워크트리(terminal-delivery-judgment, 당시 HEAD
+  // a05fd92)에서 실행됐고, 화면 원문 그대로는 checkpoint.md에 남기지 않았다
+  // (자세한 경위는 docs/plan/handoff-instruction-verification.md 「실제
+  // Orca에서 확인한 절차와 결과」). checkpoint.md가 그 확인에서 실제로 기록한
+  // 것은 첫 프롬프트가 붙여넣기 표시 없는 일반 입력줄로 나타났다는 것뿐이므로,
+  // 아래 fixture 중 이 형태(❯ 인수 브리프 ...)와 명령을 화면에서 다시 찾지
+  // 못하는 구조만 그 관찰에 근거하고, 배너 문구·워크트리 표시줄·AGENTS.md
+  // 경로·"Churned for 7s" 같은 나머지 세부 텍스트는 그 구조를 재현하기 위해
+  // 이 테스트가 임의로 채운 예시값이며 실측이 아니다. 이 회귀 테스트는 그
+  // 구조를 재현해 ready 판정과 모델 대조가 이 경로에서 깨지지 않음을 고정한다.
+  const briefPath = "/tmp/omt-86-verify/brief.md";
+  const org = example();
+  // provider·모델(Claude, opus)은 관찰된 확인과 맞춘 임의값이다. example org의
+  // 기본 pm 프로필은 model을 지정하지 않으므로, 대조 대상이 있도록 여기서만 채운다.
+  org.profiles["claude-current"].model = "opus";
+  const command = roleCommand(org, "pm", {
+    firstPrompt: kickoffBriefPrompt(briefPath),
+  });
+  assert.equal(command.modelRequested, "opus");
+
+  // 이 fixture의 워크트리 표시줄·AGENTS.md 경로는 관찰된 확인이 실제로 열린
+  // PM 워크트리(terminal-delivery-judgment)가 아니라, 이 테스트가 화면 구조를
+  // 보여주기 위해 채운 임의의 경로다. 셸의 명령 echo가 전혀 없고 Claude Code
+  // 자신의 배너와 이미 완료된 첫 턴만 보인다는 구조만 관찰과 일치시켰다.
+  const observedScreen = [
+    " ▐▛███▛█   Claude Code v2.1.283",
+    "▝▜██████▀  Opus 5.5 · Claude Max",
+    " ▝▝   ▝▝   ~/orca/workspaces/oh-my-teams/tdj-t6-handoff",
+    `❯ 인수 브리프 ${briefPath}를 읽고, 그 안에 확정된 목표로 Goal을 만들어 kick`,
+    "  off-bind까지 진행하십시오.",
+    "⏺ agents-md: no CLAUDE.md found; AGENTS.md loaded:",
+    "  /Users/jinsungkim/orca/workspaces/oh-my-teams/tdj-t6-handoff/AGENTS.md",
+    "  Read 1 file",
+    "⏺ 브리프 확인 완료",
+    "✻ Churned for 7s · done 4:02 PM",
+    "─".repeat(80),
+    "❯",
+    "─".repeat(80),
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent",
+  ];
+  const orca = fakeOrca([observedScreen]);
+  const opened = await openRoleTerminal({
+    worktree: "id:repo::/tmp/wt",
+    command,
+    execute: orca.execute,
+    ...fast,
+  });
+  // 명령을 화면에서 다시 찾지 못하는 경로(fully-redrawn TUI)를 지난다는
+  // 것을 먼저 확인한다: 그렇지 않다면 이 테스트는 실측 상황을 재현하지
+  // 못한 채 통과할 수 있다.
+  assert.equal(locateCommand(observedScreen, typedFor(command)), null);
+  assert.equal(opened.ready, true);
+  assert.equal(opened.submission, "orca");
+  assert.equal(opened.trust, "not-asked");
+  assert.equal(opened.status, undefined);
+  // screenCheck: "required"이 요구하는 모델 대조: 화면에 요청한 모델 이름이
+  // 여전히 남아 있어야 호출자가 대조할 수 있다.
+  assert.equal(opened.modelRequested, "opus");
+  assert.ok(opened.screen.some((line) => line.includes("Opus 5.5")));
+  assert.deepEqual(orca.sends(), []);
 });
 
 test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {

@@ -271,6 +271,53 @@ export function listKickoffs(orgFile, worktreeId) {
 }
 
 /**
+ * Compares a claimed handoff (director terminal and brief path) against the
+ * registry entry for a PM worktree.
+ *
+ * A director's later instruction can arrive at an already-running PM as
+ * terminal-typed text indistinguishable from an outsider's paste (#86). The
+ * registry entry's `director.terminalHandle` and `brief` are written only by
+ * `kickoff-claim`, which only the director runs, so a claim matching both is
+ * treated as the director's; anything else — including a worktree the
+ * registry has not bound yet, whose director-signal target is not settled —
+ * is not.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} claim - Values the pasted-in text asserts about itself.
+ * @param {string} claim.worktreeId - PM worktree the check runs for.
+ * @param {string} claim.directorTerminal - Terminal handle the text claims as the director's.
+ * @param {string} claim.brief - Brief path the text claims.
+ * @returns {{match: boolean, reason: string, claimed: object, expected?: object}}
+ *   `expected` is present only once a registry entry with a director exists.
+ */
+export function verifyHandoffClaim(
+  orgFile,
+  { worktreeId, directorTerminal, brief },
+) {
+  assert(worktreeId, "verifyHandoffClaim needs worktreeId");
+  assert(directorTerminal, "verifyHandoffClaim needs directorTerminal");
+  assert(brief, "verifyHandoffClaim needs brief");
+  const claimed = {
+    directorTerminal,
+    brief: path.resolve(brief),
+  };
+  const { kickoffs } = listKickoffs(orgFile, worktreeId);
+  const entry = kickoffs[0];
+  if (!entry) return { match: false, reason: "not-registered", claimed };
+  if (!entry.director?.terminalHandle) {
+    return { match: false, reason: "no-director-recorded", claimed };
+  }
+  const expected = {
+    directorTerminal: entry.director.terminalHandle,
+    brief: path.resolve(entry.brief),
+  };
+  const match =
+    expected.directorTerminal === claimed.directorTerminal &&
+    expected.brief === claimed.brief;
+  return { match, reason: match ? "matched" : "mismatch", claimed, expected };
+}
+
+/**
  * Registers a kickoff for a PM worktree.
  *
  * Any number of kickoffs may run in one project, each supervised from its own

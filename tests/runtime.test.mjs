@@ -2647,3 +2647,62 @@ test("kickoff-show command includes pm.modelDisplay", async (t) => {
     "Claude Code claude-3-5-sonnet-20240620",
   );
 });
+
+test("kickoff-handoff-verify CLI command reports whether a pasted claim matches the registry (#86)", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-kickoff-verify-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, "org.json");
+  const brief = path.join(dir, "brief.md");
+  fs.writeFileSync(brief, "goal, acceptance criteria, non-goals\n");
+  const claim = {
+    schemaVersion: 1,
+    organizationRevision: 1,
+    goal: "kickoff test",
+    brief,
+    createdAt: new Date().toISOString(),
+    runId: null,
+    director: { terminalHandle: "term_director", checkoutPath: dir },
+    pm: { worktreeId: "pm-wt", path: "x", stateDir: "x" },
+  };
+  const regDir = path.join(dir, "kickoffs");
+  fs.mkdirSync(regDir, { recursive: true });
+  fs.writeFileSync(path.join(regDir, "pm-wt.json"), JSON.stringify(claim));
+
+  const runtime = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
+  const matched = await run([
+    process.execPath,
+    runtime,
+    "kickoff-handoff-verify",
+    "--org",
+    orgFile,
+    "--worktree",
+    "pm-wt",
+    "--director-terminal",
+    "term_director",
+    "--brief",
+    brief,
+  ]);
+  assert.equal(matched.code, 0, matched.stderr);
+  assert.deepEqual(JSON.parse(matched.stdout), {
+    match: true,
+    reason: "matched",
+    claimed: { directorTerminal: "term_director", brief: path.resolve(brief) },
+    expected: { directorTerminal: "term_director", brief: path.resolve(brief) },
+  });
+
+  const mismatched = await run([
+    process.execPath,
+    runtime,
+    "kickoff-handoff-verify",
+    "--org",
+    orgFile,
+    "--worktree",
+    "pm-wt",
+    "--director-terminal",
+    "term_outsider",
+    "--brief",
+    brief,
+  ]);
+  assert.equal(mismatched.code, 0, mismatched.stderr);
+  assert.equal(JSON.parse(mismatched.stdout).match, false);
+});
