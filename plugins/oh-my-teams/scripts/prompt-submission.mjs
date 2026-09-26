@@ -43,7 +43,8 @@ export const DELIVERY_OUTCOMES = Object.freeze([
 const squeeze = (text) => String(text ?? "").replace(/[\s'"]+/g, "");
 
 const INPUT_ROW = /^\s*[❯›>](?:\s+(.*))?$/;
-const SEPARATOR_ROW = /^[\s─━═\-_]*$/;
+/** A row with no content: blank, or drawn only from rule/box characters. */
+export const SEPARATOR_ROW = /^[\s─━═\-_]*$/;
 const CONTINUATION_ROW = /^\s{2,}\S/;
 // Rows an agent draws under its input box: a rule and a status line or two.
 const MAX_ROWS_BELOW_INPUT = 2;
@@ -144,12 +145,24 @@ export function judgeDelivery({ receipt, screen, text }) {
   return verdict("foreign-input", "box-holds-other-text");
 }
 
-// Only a rendered screen may earn an Enter. When Orca cannot render one it
-// answers with `source: "screen-unavailable"` and returns accumulated output,
-// where repainted lines pile up as fragments; a host that predates the field
-// leaves `source` out. Neither shows what the input box holds, so both count
-// as an empty screen and the judgement falls to `unclear`.
-async function readScreen(orca, terminal, execute) {
+/**
+ * Reads a terminal's screen once, telling a genuinely empty screen apart from
+ * one Orca could not render. When Orca cannot render a screen it answers with
+ * a non-`"screen"` source and returns accumulated output instead, where
+ * repainted lines pile up as fragments; a host that predates the field leaves
+ * `source` out entirely. Neither case shows what is currently on screen, so
+ * both come back `ok: false`, and a caller that must not guess from an empty
+ * line list (director.mjs's notification gate, which has to tell "nothing to
+ * read" apart from "the screen is genuinely empty") checks `ok` before
+ * trusting `lines`.
+ *
+ * @param {string} orca - Orca executable.
+ * @param {string} terminal - Terminal handle to read.
+ * @param {Function} [execute] - Injectable command runner.
+ * @returns {Promise<{ok: boolean, lines: string[]}>} Screen lines, oldest
+ *   first; `lines` is always `[]` when `ok` is false.
+ */
+export async function readTerminalScreen(orca, terminal, execute) {
   try {
     const read = await runOrcaJson(
       orca,
@@ -157,10 +170,106 @@ async function readScreen(orca, terminal, execute) {
       { execute },
     );
     const { source, tail } = read.result?.terminal ?? {};
-    return source === "screen" ? (tail ?? []) : [];
+    return source === "screen"
+      ? { ok: true, lines: tail ?? [] }
+      : { ok: false, lines: [] };
   } catch {
-    // An unreadable screen decides nothing; the judgement falls to `unclear`.
-    return [];
+    return { ok: false, lines: [] };
+  }
+}
+
+// This module's own judgement does not need the ok/not-ok distinction: an
+// unreadable screen already falls through to `judgeDelivery`'s "unclear"
+// verdict the same as a genuinely empty one, so only `lines` is used here.
+async function readScreen(orca, terminal, execute) {
+  return (await readTerminalScreen(orca, terminal, execute)).lines;
+}
+
+/**
+ * Judges a `worker-start` hand-off that came back `ready` without `turn_started`.
+ *
+ * `worker-start` types Orca's own preamble around the approved spec or task
+ * text, not that text itself (confirmed against this task's own start
+ * receipt: the screen held Orca's preamble, never the literal spec), so
+ * `judgeDelivery`'s exact-text comparison would read that preamble as
+ * `foreign-input` and refuse to press Enter on a delivery that is in fact
+ * only unsubmitted. The Dispatch's task id is the one anchor both the
+ * receipt and the screen name unchanged, and Orca's own preamble states it
+ * verbatim (e.g. "Your task ID is: task_..."), so it stands in for the text
+ * match here: Enter follows only when that id turns up inside the input
+ * box's own text, never merely because the box holds something. A box that
+ * holds text naming no task id could be another dispatch's leftover input or
+ * someone typing by hand, so `judgeDelivery`'s `foreign-input` reasoning
+ * still applies to that case; without the exact approved text to compare
+ * against, the anchor either turns up or it does not, and the verdict for
+ * "does not" is `unclear` rather than `foreign-input`, since the caller must
+ * withhold Enter exactly the same way regardless of which is true.
+ *
+ * @param {object} facts - What is known after the start.
+ * @param {string[]} facts.stages - `result.prompt.stages` from the worker receipt.
+ * @param {string[]} [facts.screen] - Screen lines, oldest first.
+ * @param {string | null} [facts.taskId] - The Dispatch's task id, when known.
+ * @returns {{outcome: string, reason: string, enter: boolean}} One of
+ *   `DELIVERY_OUTCOMES` except `foreign-input` and `failed`.
+ */
+export function judgeWorkerStartDelivery({ stages, screen, taskId }) {
+  if ((stages ?? []).includes("turn_started")) {
+    return verdict("submitted", "turn-started");
+  }
+  const line = inputLine(screen);
+  if (!line) return verdict("unclear", "no-input-box-on-screen");
+  if (line.text) {
+    return taskId && squeeze(line.text).includes(squeeze(taskId))
+      ? verdict("unsubmitted", "text-in-box")
+      : verdict("unclear", "text-in-box-without-task-id");
+  }
+  const above = squeeze((screen ?? []).slice(0, line.index).join(""));
+  if (taskId && above.includes(squeeze(taskId))) {
+    return verdict("already-started", "task-id-in-transcript");
+  }
+  return verdict("unclear", "empty-box-without-task-id");
+}
+
+/**
+ * Confirms a `worker-start` hand-off by reading the terminal's screen once
+ * and, when `judgeWorkerStartDelivery` finds the task still sitting
+ * unsubmitted, pressing Enter exactly once.
+ *
+ * @param {object} options - Confirmation options.
+ * @param {string} options.orca - Orca executable.
+ * @param {string} options.terminal - Terminal handle worker-start reused.
+ * @param {string[]} options.stages - `result.prompt.stages` from the worker receipt.
+ * @param {string | null} [options.taskId] - The Dispatch's task id, when known.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<{outcome: string, reason: string, enterSent: boolean, error?: string}>}
+ *   The verdict and whether Enter was sent; `error` keeps Orca's own text when the send failed.
+ */
+export async function confirmWorkerSubmission({
+  orca,
+  terminal,
+  stages,
+  taskId,
+  execute = run,
+}) {
+  const screen = await readScreen(orca, terminal, execute);
+  const judged = judgeWorkerStartDelivery({ stages, screen, taskId });
+  if (!judged.enter) {
+    return { outcome: judged.outcome, reason: judged.reason, enterSent: false };
+  }
+  try {
+    await runOrcaJson(
+      orca,
+      ["terminal", "send", "--terminal", terminal, "--text", "", "--enter"],
+      { execute },
+    );
+    return { outcome: judged.outcome, reason: judged.reason, enterSent: true };
+  } catch (caught) {
+    return {
+      outcome: judged.outcome,
+      reason: judged.reason,
+      enterSent: false,
+      error: caught.message,
+    };
   }
 }
 

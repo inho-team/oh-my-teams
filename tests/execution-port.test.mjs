@@ -524,6 +524,150 @@ test("a terminal held at a prompt is refused before any Dispatch", async () => {
   }
 });
 
+// Answers `terminal wait` idle, `worker-start` with a ready receipt lacking
+// `turn_started`, `terminal read` with the given screen, and `terminal send`
+// as accepted; anything else fails the test loudly instead of hanging.
+const submissionFixture = (screen, extra = {}) => {
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "wait") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          result: { wait: { satisfied: true } },
+        }),
+      };
+    }
+    if (argv[2] === "worker-start") {
+      return {
+        code: 0,
+        stdout: orcaReceipt("ready", {
+          prompt: { stages: ["input_accepted"] },
+          ...extra,
+        }),
+      };
+    }
+    if (argv[2] === "read") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          result: { terminal: { source: "screen", tail: screen } },
+        }),
+      };
+    }
+    if (argv[2] === "send") {
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          result: { send: { accepted: true } },
+        }),
+      };
+    }
+    throw new Error(`unexpected call ${argv.slice(1, 3).join(" ")}`);
+  };
+  return { calls, execute };
+};
+
+test("a ready worker-start reused terminal missing turn_started presses Enter once on an unsubmitted prompt (#87)", async () => {
+  const { calls, execute } = submissionFixture([
+    "> some preamble naming task_1",
+  ]);
+  const receipt = await startOrcaWorker("/repo", {
+    task: "task_1",
+    terminal: "term_1",
+    discovery,
+    execute,
+  });
+  assert.deepEqual(receipt.submission, {
+    outcome: "unsubmitted",
+    reason: "text-in-box",
+    enterSent: true,
+  });
+  assert.equal(calls.filter((argv) => argv[2] === "send").length, 1);
+  assert.equal(calls.filter((argv) => argv[2] === "worker-start").length, 1);
+});
+
+test("a foreign-input box on a reused terminal is left unclear, never mistaken for the task's own prompt (#87)", async () => {
+  // The reused terminal's input box holds text that names no task id: it
+  // could be another dispatch's leftover, or someone typing by hand.
+  // Pressing Enter would submit that text as if it were this hand-off.
+  const { calls, execute } = submissionFixture([
+    "> some other terminal's leftover text",
+  ]);
+  const receipt = await startOrcaWorker("/repo", {
+    task: "task_1",
+    terminal: "term_1",
+    discovery,
+    execute,
+  });
+  assert.deepEqual(receipt.submission, {
+    outcome: "unclear",
+    reason: "text-in-box-without-task-id",
+    enterSent: false,
+  });
+  assert.equal(calls.filter((argv) => argv[2] === "send").length, 0);
+});
+
+test("an empty input box naming the task id is read as already started, with no Enter (#87)", async () => {
+  const { calls, execute } = submissionFixture(["working on task_1", ">"]);
+  const receipt = await startOrcaWorker("/repo", {
+    task: "task_1",
+    terminal: "term_1",
+    discovery,
+    execute,
+  });
+  assert.deepEqual(receipt.submission, {
+    outcome: "already-started",
+    reason: "task-id-in-transcript",
+    enterSent: false,
+  });
+  assert.equal(calls.filter((argv) => argv[2] === "send").length, 0);
+});
+
+test("a screen that decides nothing is left unclear, never repeated (#87)", async () => {
+  const { calls, execute } = submissionFixture([">"]);
+  const receipt = await startOrcaWorker("/repo", {
+    task: "task_1",
+    terminal: "term_1",
+    discovery,
+    execute,
+  });
+  assert.deepEqual(receipt.submission, {
+    outcome: "unclear",
+    reason: "empty-box-without-task-id",
+    enterSent: false,
+  });
+  assert.equal(calls.filter((argv) => argv[2] === "send").length, 0);
+  assert.equal(calls.filter((argv) => argv[2] === "worker-start").length, 1);
+});
+
+test("a receipt already carrying turn_started is never re-checked (#87)", async () => {
+  const { calls, execute } = orcaVerbs({
+    wait: {
+      stdout: JSON.stringify({
+        ok: true,
+        result: { wait: { satisfied: true } },
+      }),
+    },
+    start: orcaReceipt("ready", {
+      prompt: { stages: ["input_accepted", "turn_started"] },
+    }),
+  });
+  const receipt = await startOrcaWorker("/repo", {
+    task: "task_1",
+    terminal: "term_1",
+    discovery,
+    execute,
+  });
+  assert.equal(receipt.submission, undefined);
+  // Only the idle wait and worker-start ran; no screen read, no Enter.
+  assert.equal(calls.length, 2);
+});
+
 test("the local adapter reports an exited worker and never claims liveness", async () => {
   const stdout = JSON.stringify({
     result: "done",

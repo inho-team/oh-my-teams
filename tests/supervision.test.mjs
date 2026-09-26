@@ -227,6 +227,32 @@ test("a worker parked on a human prompt is escalated rather than nudged", () => 
   assert.equal(result.reason, "waiting-on-human-prompt");
 });
 
+test("a worker whose screen ended on Claude's 529 error is escalated before the timeout, not nudged", () => {
+  // Recent activity would normally mean `wait`, but a 529 turn is reported the
+  // moment it is observed rather than after progressCheckMs or the
+  // unansweredLimit is spent, the same way `agentWait` bypasses both.
+  const result = next({
+    liveness: "live",
+    lastActivityAt: minutesAgo(1),
+    providerOverload: true,
+  });
+  assert.equal(result.action, "escalate");
+  assert.equal(result.reason, "provider-overloaded");
+});
+
+test("a 529 escalation already reported is not reported every period", () => {
+  const escalatedAt = minutesAgo(10);
+  const reported = next({
+    liveness: "live",
+    lastActivityAt: minutesAgo(1),
+    providerOverload: true,
+    escalatedAt,
+    escalatedReason: "provider-overloaded",
+  });
+  assert.equal(reported.action, "wait");
+  assert.equal(reported.reason, "already-escalated");
+});
+
 test("no observation ever yields an automatic retry or stop", () => {
   const actions = new Set();
   for (const liveness of ["live", "unverifiable", "exited"]) {

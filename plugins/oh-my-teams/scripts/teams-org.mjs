@@ -10,6 +10,7 @@ import {
   definedRoles,
   readJSON,
   ROOT_ROLE,
+  run as runOrcaCommand,
   saveOrg,
   supervisionPolicy,
   validateOrg,
@@ -17,6 +18,7 @@ import {
 } from "./core.mjs";
 import {
   assertWorktreeUnshared,
+  kickoffBriefPrompt,
   launchBinding,
   PERMISSION_BYPASS,
   selectedWorktreePath,
@@ -118,6 +120,7 @@ import {
   recordDelivery,
   registerKickoff,
   releaseKickoff,
+  verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
 import {
   readLaunches,
@@ -134,7 +137,7 @@ import {
 import {
   acknowledgeSignal,
   listInbox,
-  notifyDirector,
+  notifyDirectorSignal,
   readSignal,
   replySignal,
   sendSignal,
@@ -312,7 +315,12 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   director-signal --org FILE --worktree ID --kind decision|close-ready|blocked|progress
                   --text TEXT [--head SHA --source DIR] [--orca EXECUTABLE]
                   (writes a structured record to .omt/director/inbox/; notifies
-                  the director terminal when the registry entry names one)
+                  the director terminal when the registry entry names one. The
+                  notification is skipped without sending a key when the
+                  director's screen shows a selection window or a trust
+                  question, or cannot be read at all; any earlier signal still
+                  undelivered for the same worktree is bundled into the same
+                  message, and a signal marked delivered is never sent again)
   director-inbox --org FILE
                  (lists pending signals; progress signals are stored
                  acknowledged, and a newer close-ready supersedes an older one)
@@ -340,6 +348,7 @@ export const ALLOWED_OPTIONS = {
   validate: ["org"],
   "kickoff-claim": ["org", "from"],
   "kickoff-show": ["org", "worktree"],
+  "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
@@ -429,6 +438,7 @@ export const ALLOWED_OPTIONS = {
     "state",
     "orca",
     "allow-unverified",
+    "brief",
   ],
   "host-defaults": ["project", "codex-home"],
   "usage-report": [
@@ -533,6 +543,7 @@ export const REQUIRED_OPTIONS = {
   validate: ["org"],
   "kickoff-claim": ["org", "from"],
   "kickoff-show": ["org"],
+  "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
@@ -952,11 +963,34 @@ async function startSupervisedWorker(args) {
   }
 }
 
-// A Claude terminal that last worked on something else starts the new task
-// from an empty conversation, so it does not resend the previous task's
-// history on every call. The decision reads the launch ledger; a ledger that
-// cannot be read clears nothing, as before this rule existed.
-async function freshenTerminal(args, launch, identity) {
+/**
+ * Decides whether a reused terminal's conversation is cleared before a new
+ * task is handed to it, and carries out that clear.
+ *
+ * A Claude terminal that last worked on something else starts the new task
+ * from an empty conversation, so it does not resend the previous task's
+ * history on every call. The decision reads the launch ledger; a ledger that
+ * cannot be read clears nothing, as before this rule existed. `clearRoleTerminal`
+ * itself may decline to clear (an active Dispatch it cannot settle either
+ * way), so its own `cleared`/`reason` overrides the decision's when they
+ * disagree, rather than assuming the clear happened; the merged result is
+ * what `worker-start` returns verbatim as its own `freshContext` field.
+ *
+ * @param {object} args - Parsed CLI arguments for `worker-start`.
+ * @param {object} launch - Resolved role launch, read for `launch.provider`.
+ * @param {object} identity - Workflow/task/purpose identity being started.
+ * @param {Function} [execute=run] - Injectable command runner, threaded
+ *   through to `clearRoleTerminal`.
+ * @returns {Promise<{clear: boolean, reason: string, cleared: boolean,
+ *   previousLaunchAt?: string}>} The freshness decision merged with what
+ *   clearing actually did.
+ */
+export async function freshenTerminal(
+  args,
+  launch,
+  identity,
+  execute = runOrcaCommand,
+) {
   let launches = [];
   try {
     launches = readLaunches(args.org);
@@ -969,12 +1003,17 @@ async function freshenTerminal(args, launch, identity) {
     ...identity,
   });
   if (!decision.clear) return { cleared: false, ...decision };
-  await clearRoleTerminal({
+  const outcome = await clearRoleTerminal({
     terminal: args.terminal,
     executable: args.orca,
     cwd: path.resolve(args.repo),
+    execute,
   });
-  return { cleared: true, ...decision };
+  return {
+    ...decision,
+    cleared: outcome.cleared,
+    ...(outcome.cleared ? {} : { reason: outcome.reason }),
+  };
 }
 
 // A role run as a non-interactive process gets the same checks a terminal
@@ -1334,6 +1373,12 @@ async function executeCommand(args) {
       }
       return result;
     }
+    case "kickoff-handoff-verify":
+      return verifyHandoffClaim(args.org, {
+        worktreeId: args.worktree,
+        directorTerminal: args["director-terminal"],
+        brief: args.brief,
+      });
     case "kickoff-bind":
       return bindKickoffRun(args.org, {
         worktreeId: args.worktree,
@@ -1570,10 +1615,18 @@ async function executeCommand(args) {
         "--profile requires --workflow-id, --state and --workflow-task",
       );
       const { org, run: runCtx } = launchContext(args);
-      const command = roleCommand(org, args.role, runCtx);
+      const firstPrompt =
+        args.brief === undefined
+          ? undefined
+          : kickoffBriefPrompt(path.resolve(args.brief));
+      const command = roleCommand(org, args.role, { ...runCtx, firstPrompt });
       assert(
         !command.runner,
         "An explicit OpenCodex runner is supported by headless-start only; role-terminal cannot run it as native Codex",
+      );
+      assert(
+        firstPrompt === undefined || command.role === "pm",
+        "--brief hands over an incoming-brief prompt, which only makes sense for the pm role this terminal launches",
       );
       const target = selectedWorktreePath(args.worktree, process.cwd());
       if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
@@ -1956,7 +2009,12 @@ async function executeCommand(args) {
         head: args.head,
         source: args.source,
       });
-      const notification = await notifyDirector(entry, record, args.orca);
+      const notification = await notifyDirectorSignal(
+        args.org,
+        entry,
+        record,
+        args.orca,
+      );
       return { signaled, id, ...notification };
     }
     case "director-inbox":

@@ -20,7 +20,8 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
-import { deliverPrompt } from "./prompt-submission.mjs";
+import { classifyPromptScreen } from "./prompt-answers.mjs";
+import { deliverPrompt, readTerminalScreen } from "./prompt-submission.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
 
 /** Signal kinds PM may send to the Director. */
@@ -186,15 +187,48 @@ export function closeKickoffSignals(orgFile, worktreeId, reason) {
   });
 }
 
-// Sends one notification into a terminal and keeps how far it got. `notified`
-// is true only once the input was submitted or is already being handled, so an
-// input Orca merely accepted is not reported as delivered. Orca's own error
-// text and warnings are kept as they came, and nothing is sent twice.
+// Sends one notification into a terminal and keeps how far it got. Before
+// anything is typed, the terminal's own screen is read with
+// `readTerminalScreen` (reused from prompt-submission.mjs, so the two modules
+// never diverge on what counts as "the screen could not be read") and
+// classified with `classifyPromptScreen` (reused from prompt-answers.mjs, no
+// new screen judgement): a folder-trust question or a Claude
+// `AskUserQuestion` screen means the terminal cannot safely take this input,
+// and an unreadable screen means the state cannot be judged at all, so both
+// come back `deferred: true, sent: false` without a single key being sent.
+// Only once the screen is clear does the existing accepted-vs-submitted
+// judgement in `deliverPrompt` run; from that point on `sent` is true
+// regardless of the outcome, because a call that reaches `deliverPrompt` may
+// already have typed the text before failing or going unconfirmed, and a
+// caller must not treat "not proven delivered" as "safe to retry from
+// scratch". `notified` is true only once the input was submitted or is
+// already being handled, so an input Orca merely accepted is not reported as
+// delivered. Orca's own error text and warnings are kept as they came, and
+// nothing is sent twice.
 async function notifyTerminal(orca, terminal, text, execute) {
+  const screen = await readTerminalScreen(orca, terminal, execute);
+  if (!screen.ok) {
+    return {
+      notified: false,
+      deferred: true,
+      sent: false,
+      notifyError: "screen-unavailable",
+    };
+  }
+  const asked = classifyPromptScreen(screen.lines);
+  if (asked.kind === "trust" || asked.kind === "user-question") {
+    return {
+      notified: false,
+      deferred: true,
+      sent: false,
+      notifyError: `blocked-by-${asked.kind}`,
+    };
+  }
   const result = await deliverPrompt({ orca, terminal, text, execute });
   const { delivered, error, ...delivery } = result;
   return {
     notified: delivered,
+    sent: true,
     ...(delivered ? {} : { notifyError: error ?? result.reason }),
     delivery,
   };
@@ -203,19 +237,24 @@ async function notifyTerminal(orca, terminal, text, execute) {
 /**
  * Delivers a terminal notification to the Director after writing the signal.
  *
- * Call after `sendSignal`. The notification counts as delivered only when the
+ * Call after `sendSignal`. Before anything is sent, the Director's screen is
+ * read and classified: a folder-trust question or an `AskUserQuestion`
+ * screen, or a screen that cannot be read at all, defers the notification
+ * (`notified: false, deferred: true`) without pressing a single key. Once the
+ * screen is clear, the notification counts as delivered only when the
  * Director's agent started its turn or took the input; an input Orca accepted
  * but nobody submitted comes back as `notified: false`. `delivery` carries the
  * outcome, the receipt stages and the request ID, and `notifyError` keeps
  * Orca's own error text. The text is never sent a second time: the follow-up
  * calls replay the same request ID, and one bare Enter follows only when the
- * text is seen waiting in the input box. The record on disk is unaffected.
+ * text is seen waiting in the input box. The record on disk is unaffected;
+ * `notifyDirectorSignal` is the entry point that also persists and retries.
  *
  * @param {object} entry - Kickoff registry entry.
  * @param {object} record - Signal record returned by `sendSignal`.
  * @param {string} [orcaExecutable] - Orca binary path.
  * @param {Function} [execute] - Injectable command runner.
- * @returns {Promise<{notified: boolean, notifyError?: string, delivery?: object}>} Notification result.
+ * @returns {Promise<{notified: boolean, deferred?: boolean, sent?: boolean, notifyError?: string, delivery?: object}>} Notification result.
  */
 export async function notifyDirector(
   entry,
@@ -231,6 +270,220 @@ export async function notifyDirector(
     `[omt] ${record.kind} from ${record.worktreeId}: ${record.text}`,
     execute,
   );
+}
+
+// Signals for a worktree that have not yet reached the Director's terminal: a
+// pending decision/blocked/close-ready, or a progress signal (auto-acknowledged
+// on arrival, so `status` alone would hide it), whose last notification attempt
+// did not confirm delivery *and* never actually typed anything (`notify.sent`
+// is not `true`). A signal `notifyTerminal` had to defer before calling
+// `deliverPrompt` (screen unreadable or blocked by a question) stays eligible
+// here; one where `deliverPrompt` ran but came back unsubmitted, unclear,
+// foreign-input, or failed is not, because resending it could run the same
+// work twice if the original keys did in fact reach the agent. A signal
+// `claimBatch` found claimed by an owner it could prove dead is settled the
+// same way, for the same reason (see `finalizeUnconfirmedClaim`). Either kind
+// stays pending and keeps showing up in director-inbox, just never
+// auto-bundled again. A signal the Director already replied to or
+// acknowledged by hand is left out too, since that already proves it was seen.
+function undeliveredSignals(orgFile, worktreeId) {
+  return readInbox(orgFile).filter(
+    (record) =>
+      record.worktreeId === worktreeId &&
+      (record.status === "pending" || record.autoAcknowledged === true) &&
+      record.notify?.notified !== true &&
+      record.notify?.sent !== true,
+  );
+}
+
+// Stamps every record of a notification attempt with its outcome, so a
+// signal already confirmed delivered is never retried, and one still deferred
+// keeps waiting for the next attempt (unless `sent` is true — see
+// `undeliveredSignals`). This also clears any claim `claimBatch` left on the
+// record, since `notify` is replaced outright. Records superseded or closed
+// since the attempt started are left untouched.
+function recordNotifyOutcome(orgFile, records, outcome) {
+  withFileLock(inboxLock(orgFile), () => {
+    for (const record of records) {
+      const file = path.join(inboxDir(orgFile), `${record.id}.json`);
+      if (!fs.existsSync(file)) continue;
+      writeJSON(file, {
+        ...readJSON(file),
+        notify: outcome.notified
+          ? { notified: true, notifiedAt: outcome.at }
+          : {
+              notified: false,
+              sent: outcome.sent === true,
+              deferredAt: outcome.at,
+              ...(outcome.notifyError
+                ? { notifyError: outcome.notifyError }
+                : {}),
+            },
+      });
+    }
+  });
+}
+
+// Claims every signal `notifyDirectorSignal` is about to try to deliver: the
+// undelivered backlog plus the signal just written, both read fresh from disk
+// (not from the `record` argument alone) so this call also sees a claim an
+// overlapping call already placed on that very signal — e.g. one started
+// while an earlier call is still inside `deliverPrompt`'s wait-submit window.
+// A signal already claimed by an owner that is alive or cannot be judged
+// (`processLiveness` returns anything but `"dead"`) is left exactly as it is:
+// still claimed, not resent, and not counted as claimable, per "when it
+// cannot be judged, do not send". This is what keeps two overlapping live
+// calls for the same worktree from both sending the same content (see the
+// "overlaps the first" test) — and, unlike the previous all-or-nothing
+// version, it no longer holds back the rest of the batch: the signal just
+// written and any other backlog signal that is not itself stuck this way are
+// claimed and sent normally, so one signal parked under an owner this host
+// can never prove dead (for instance, one recorded on a different host, since
+// `processLiveness` always reports a foreign hostname as "unverifiable") only
+// ever stalls that one signal, not the whole worktree's notifications.
+//
+// A signal claimed by an owner `processLiveness` *can* prove dead is handled
+// differently again: `finalizeUnconfirmedClaim` settles it in place rather
+// than reclaiming it for a fresh send, because the same crash-window gap
+// `notifyTerminal` already lives with (see its own comment) makes "the prior
+// attempt already typed this text" indistinguishable from "it never ran" —
+// resending here would risk the very double-send this whole scheme exists to
+// avoid. Claiming and the terminal I/O that follows are deliberately not one
+// lock hold: holding the inbox lock across a send would also block
+// `sendSignal`, which needs the same lock just to record a new signal.
+// Instead the claim records this process as the owner (pid + hostname, same
+// shape `processLiveness` already reads for resources.mjs's dead-owner slot
+// reclaim) and `recordNotifyOutcome` clears it again once the attempt is
+// over, whatever it decided.
+//
+// Returns `null`, writing nothing but any dead-owner finalization above, when
+// nothing in the batch is claimable — e.g. the signal just written was itself
+// already swept into a still-live overlapping call's claim.
+function claimBatch(orgFile, worktreeId, record) {
+  return withFileLock(inboxLock(orgFile), () => {
+    const pending = undeliveredSignals(orgFile, worktreeId);
+    const batch = pending.some((item) => item.id === record.id)
+      ? pending
+      : [...pending, record];
+    const claimedAt = new Date().toISOString();
+    const claimable = [];
+    for (const item of batch) {
+      if (item.notify?.inFlight !== true) {
+        claimable.push(item);
+        continue;
+      }
+      if (processLiveness(item.notify.owner) === "dead") {
+        finalizeUnconfirmedClaim(orgFile, item.id, claimedAt);
+      }
+      // "alive" or "unverifiable": leave the existing claim exactly as it is.
+    }
+    if (claimable.length === 0) return null;
+    const owner = { pid: process.pid, hostname: THIS_HOST };
+    for (const item of claimable) {
+      const file = path.join(inboxDir(orgFile), `${item.id}.json`);
+      if (!fs.existsSync(file)) continue;
+      writeJSON(file, {
+        ...readJSON(file),
+        notify: { inFlight: true, claimedAt, owner },
+      });
+    }
+    return claimable;
+  });
+}
+
+// Settles a signal whose in-flight claim belongs to an owner `processLiveness`
+// can prove dead, instead of reclaiming it into a fresh send attempt. The
+// owner may have crashed strictly between `deliverPrompt` typing the text and
+// `recordNotifyOutcome` persisting that fact (the same residual gap
+// `notifyTerminal` documents), which makes this signal indistinguishable from
+// one already sent, so it is recorded the same way `notifyTerminal` records
+// an attempt it could not confirm (`sent: true, notified: false`) rather than
+// tried again. `undeliveredSignals` already treats that shape as settled, so
+// this permanently drops the signal out of the auto-resend backlog; a
+// `decision`/`blocked`/`close-ready` record stays `pending` regardless and
+// keeps showing in director-inbox and director-watch, and the Director can
+// tell this case apart from an ordinary unconfirmed attempt by its
+// `notifyError`. Called from inside `claimBatch`'s own lock hold, so it writes
+// directly instead of re-acquiring a lock it already holds.
+function finalizeUnconfirmedClaim(orgFile, id, at) {
+  const file = path.join(inboxDir(orgFile), `${id}.json`);
+  if (!fs.existsSync(file)) return;
+  writeJSON(file, {
+    ...readJSON(file),
+    notify: {
+      notified: false,
+      sent: true,
+      deferredAt: at,
+      notifyError: "owner-exited-before-confirming",
+    },
+  });
+}
+
+/**
+ * Delivers a signal to the Director's terminal together with every earlier
+ * signal for the same PM worktree that has not yet reached it (a decision,
+ * `blocked`, or `close-ready` still pending, or a `progress` signal never
+ * confirmed delivered — and never one `deliverPrompt` already attempted, see
+ * `undeliveredSignals`), bundled into one message. This is the resend path
+ * for a signal `notifyDirector` had to defer: call it again from
+ * `director-signal` the next time that Director is signalled, and once its
+ * screen is no longer blocked by a question, the whole backlog goes out
+ * together. A signal is marked delivered only once `notified` comes back
+ * true, so it is never sent twice; a deferred attempt leaves every record in
+ * the batch exactly as undelivered as it already was. `claimBatch` also
+ * guards against two overlapping calls for the same worktree both sending: a
+ * signal an overlapping live call already claimed is left out of this call's
+ * batch instead of being resent, and if that leaves nothing claimable at all
+ * (e.g. this very signal was itself swept into the other call's claim), the
+ * result is `deferred: true, notifyError: "backlog-claimed"` without
+ * touching the terminal. A signal claimed by an owner this host can prove
+ * dead is settled in place (never resent, see `finalizeUnconfirmedClaim`)
+ * rather than blocking the rest of the batch, so one signal parked under a
+ * stuck or unverifiable claim never stalls the other signals in it.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} entry - Kickoff registry entry naming the Director terminal.
+ * @param {object} record - Signal record just written by `sendSignal`.
+ * @param {string} [orcaExecutable] - Orca binary path.
+ * @param {Function} [execute] - Injectable command runner.
+ * @returns {Promise<{notified: boolean, deferred?: boolean, sent?: boolean, notifyError?: string, delivery?: object, bundled: string[]}>}
+ *   Notification result; `bundled` lists every signal id the message actually
+ *   carried (empty when nothing in the batch was claimable).
+ */
+export async function notifyDirectorSignal(
+  orgFile,
+  entry,
+  record,
+  orcaExecutable,
+  execute = run,
+) {
+  const handle = entry.director?.terminalHandle;
+  if (!handle) return { notified: false, bundled: [] };
+  const batch = claimBatch(orgFile, record.worktreeId, record);
+  if (!batch) {
+    return {
+      notified: false,
+      deferred: true,
+      notifyError: "backlog-claimed",
+      bundled: [],
+    };
+  }
+  const text = batch
+    .map((item) => `[omt] ${item.kind} from ${item.worktreeId}: ${item.text}`)
+    .join("\n");
+  const sent = await notifyTerminal(
+    orcaExecutable ?? "orca",
+    handle,
+    text,
+    execute,
+  );
+  recordNotifyOutcome(orgFile, batch, {
+    notified: sent.notified,
+    sent: sent.sent,
+    notifyError: sent.notifyError,
+    at: new Date().toISOString(),
+  });
+  return { ...sent, bundled: batch.map((item) => item.id) };
 }
 
 /**
@@ -345,21 +598,22 @@ async function orcaTerminals(orcaExecutable) {
 }
 
 /**
- * Finds the Orca terminal currently running the PM of a PM worktree.
+ * Finds the most recent recorded launch of the PM in a PM worktree.
  *
- * The agent inside a terminal rewrites its title, so the `[PM]` tag is not a
- * reliable marker; the launch ledger records which terminal role-terminal
- * opened for the PM. The latest such launch wins, and it counts only while
- * Orca still lists that terminal in the same worktree.
+ * The launch ledger is the only record of what a PM terminal was actually
+ * opened with (`role-terminal`'s `provider` field, fixed at launch time), as
+ * opposed to the organization's current `pm` profile, which a fallback can
+ * change afterward. Callers that need to know the PM's provider, not just its
+ * terminal, read this record rather than assume the organization's present
+ * configuration still describes what is running.
  *
  * @param {string} orgFile - Organization JSON path whose ledger is read.
  * @param {string} pmPath - PM worktree path recorded in the kickoff registry.
- * @param {object} [options] - `orcaExecutable`, or an injectable `listTerminals`.
- * @returns {Promise<string | undefined>} The terminal handle, or undefined.
+ * @returns {object | undefined} The latest matching launch line, or undefined.
  */
-export async function findPmTerminal(orgFile, pmPath, options = {}) {
+export function findPmLaunch(orgFile, pmPath) {
   const target = path.resolve(pmPath);
-  const launch = readLaunches(orgFile)
+  return readLaunches(orgFile)
     .filter(
       (record) =>
         record.role === "pm" &&
@@ -368,6 +622,24 @@ export async function findPmTerminal(orgFile, pmPath, options = {}) {
         path.resolve(record.worktreePath) === target,
     )
     .at(-1);
+}
+
+/**
+ * Finds the Orca terminal currently running the PM of a PM worktree.
+ *
+ * The agent inside a terminal rewrites its title, so the `[PM]` tag is not a
+ * reliable marker; the launch ledger records which terminal role-terminal
+ * opened for the PM ({@link findPmLaunch}). The latest such launch wins, and
+ * it counts only while Orca still lists that terminal in the same worktree.
+ *
+ * @param {string} orgFile - Organization JSON path whose ledger is read.
+ * @param {string} pmPath - PM worktree path recorded in the kickoff registry.
+ * @param {object} [options] - `orcaExecutable`, or an injectable `listTerminals`.
+ * @returns {Promise<string | undefined>} The terminal handle, or undefined.
+ */
+export async function findPmTerminal(orgFile, pmPath, options = {}) {
+  const target = path.resolve(pmPath);
+  const launch = findPmLaunch(orgFile, pmPath);
   if (!launch) return undefined;
   const list =
     options.listTerminals ??

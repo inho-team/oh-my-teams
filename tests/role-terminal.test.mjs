@@ -7,6 +7,7 @@ import path from "node:path";
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   PERMISSION_BYPASS,
+  kickoffBriefPrompt,
   roleCommand,
 } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import {
@@ -16,6 +17,7 @@ import {
   commandTyping,
   freshContextDecision,
   launchLine,
+  locateCommand,
   openRoleTerminal,
   roleTitle,
   trustQuestion,
@@ -25,8 +27,11 @@ import {
 } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 import {
   ALLOWED_OPTIONS,
+  freshenTerminal,
+  main,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { findActiveDispatch } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import {
   readLaunches,
   recordLaunch,
@@ -974,6 +979,111 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
   );
 });
 
+test("role-terminal CLI --brief 옵션 등록과 PM 전용 제약 (#86)", async (t) => {
+  // finding: handoff-instruction-not-pasted-content (이슈 #86)
+  // --brief는 role-terminal이 여는 명령 자체의 인자로 브리프 경로를 실어, 그
+  // 문장이 붙여넣기(pasted_content)가 아니라 세션의 진짜 첫 지시로 읽히게 한다.
+  assert.ok(
+    ALLOWED_OPTIONS["role-terminal"].includes("brief"),
+    "role-terminal ALLOWED_OPTIONS에 brief가 있어야 한다",
+  );
+
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-role-terminal-brief-"),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, "organization.json");
+  fs.writeFileSync(orgFile, JSON.stringify(example()));
+  const briefFile = path.join(dir, "brief.md");
+  fs.writeFileSync(briefFile, "goal, acceptance criteria, non-goals\n");
+
+  // 브리프를 실은 첫 프롬프트는 이사가 PM을 인계할 때 쓰는 개념이므로, PM이
+  // 아닌 역할에 --brief를 주면 role-terminal이 그 자리에서 거부한다.
+  await assert.rejects(
+    () =>
+      main([
+        "role-terminal",
+        "--org",
+        orgFile,
+        "--role",
+        "senior",
+        "--worktree",
+        "current",
+        "--brief",
+        briefFile,
+      ]),
+    /--brief.*pm/s,
+  );
+});
+
+test("--brief로 연 터미널이 이미 첫 턴을 마친 화면에서도 ready 판정과 모델 대조가 끝난다 (#86)", async () => {
+  // finding: missing-fake-orca-regression-for-brief-launch-readiness
+  // 이 화면 구조(셸이 typed한 명령 원문이 전혀 남지 않고, 첫 프롬프트 인자로
+  // 실은 brief 지시가 이미 처리를 마친 채 배너 + 완료된 첫 턴 + 빈 입력줄
+  // (`❯`)로 완전히 다시 그려진 상태)는 2026-09-26 role-terminal --brief 확인
+  // 1회에서 실제로 관찰됐다. 다만 그 확인은 --worktree 인자 오류로 이 t6
+  // 워크트리가 아니라 PM 워크트리(terminal-delivery-judgment, 당시 HEAD
+  // a05fd92)에서 실행됐고, 화면 원문 그대로는 checkpoint.md에 남기지 않았다
+  // (자세한 경위는 docs/plan/handoff-instruction-verification.md 「실제
+  // Orca에서 확인한 절차와 결과」). checkpoint.md가 그 확인에서 실제로 기록한
+  // 것은 첫 프롬프트가 붙여넣기 표시 없는 일반 입력줄로 나타났다는 것뿐이므로,
+  // 아래 fixture 중 이 형태(❯ 인수 브리프 ...)와 명령을 화면에서 다시 찾지
+  // 못하는 구조만 그 관찰에 근거하고, 배너 문구·워크트리 표시줄·AGENTS.md
+  // 경로·"Churned for 7s" 같은 나머지 세부 텍스트는 그 구조를 재현하기 위해
+  // 이 테스트가 임의로 채운 예시값이며 실측이 아니다. 이 회귀 테스트는 그
+  // 구조를 재현해 ready 판정과 모델 대조가 이 경로에서 깨지지 않음을 고정한다.
+  const briefPath = "/tmp/omt-86-verify/brief.md";
+  const org = example();
+  // provider·모델(Claude, opus)은 관찰된 확인과 맞춘 임의값이다. example org의
+  // 기본 pm 프로필은 model을 지정하지 않으므로, 대조 대상이 있도록 여기서만 채운다.
+  org.profiles["claude-current"].model = "opus";
+  const command = roleCommand(org, "pm", {
+    firstPrompt: kickoffBriefPrompt(briefPath),
+  });
+  assert.equal(command.modelRequested, "opus");
+
+  // 이 fixture의 워크트리 표시줄·AGENTS.md 경로는 관찰된 확인이 실제로 열린
+  // PM 워크트리(terminal-delivery-judgment)가 아니라, 이 테스트가 화면 구조를
+  // 보여주기 위해 채운 임의의 경로다. 셸의 명령 echo가 전혀 없고 Claude Code
+  // 자신의 배너와 이미 완료된 첫 턴만 보인다는 구조만 관찰과 일치시켰다.
+  const observedScreen = [
+    " ▐▛███▛█   Claude Code v2.1.283",
+    "▝▜██████▀  Opus 5.5 · Claude Max",
+    " ▝▝   ▝▝   ~/orca/workspaces/oh-my-teams/tdj-t6-handoff",
+    `❯ 인수 브리프 ${briefPath}를 읽고, 그 안에 확정된 목표로 Goal을 만들어 kick`,
+    "  off-bind까지 진행하십시오.",
+    "⏺ agents-md: no CLAUDE.md found; AGENTS.md loaded:",
+    "  /Users/jinsungkim/orca/workspaces/oh-my-teams/tdj-t6-handoff/AGENTS.md",
+    "  Read 1 file",
+    "⏺ 브리프 확인 완료",
+    "✻ Churned for 7s · done 4:02 PM",
+    "─".repeat(80),
+    "❯",
+    "─".repeat(80),
+    "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent",
+  ];
+  const orca = fakeOrca([observedScreen]);
+  const opened = await openRoleTerminal({
+    worktree: "id:repo::/tmp/wt",
+    command,
+    execute: orca.execute,
+    ...fast,
+  });
+  // 명령을 화면에서 다시 찾지 못하는 경로(fully-redrawn TUI)를 지난다는
+  // 것을 먼저 확인한다: 그렇지 않다면 이 테스트는 실측 상황을 재현하지
+  // 못한 채 통과할 수 있다.
+  assert.equal(locateCommand(observedScreen, typedFor(command)), null);
+  assert.equal(opened.ready, true);
+  assert.equal(opened.submission, "orca");
+  assert.equal(opened.trust, "not-asked");
+  assert.equal(opened.status, undefined);
+  // screenCheck: "required"이 요구하는 모델 대조: 화면에 요청한 모델 이름이
+  // 여전히 남아 있어야 호출자가 대조할 수 있다.
+  assert.equal(opened.modelRequested, "opus");
+  assert.ok(opened.screen.some((line) => line.includes("Opus 5.5")));
+  assert.deepEqual(orca.sends(), []);
+});
+
 test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
   // finding: optimistic-matrix-defaults
   // 환경 읽기 함수는 주입 가능한 실행기와 홈 디렉터리를 받아 결정적으로 동작해야 한다.
@@ -1296,13 +1406,22 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
     ok: true,
     result: { wait: { satisfied: true } },
   });
+  const noActiveDispatch = JSON.stringify({
+    ok: true,
+    result: { workers: [] },
+  });
   const execute = async (argv) => {
     calls.push(argv);
     return {
       code: 0,
       stderr: "",
       timedOut: false,
-      stdout: argv[2] === "wait" ? idle : '{"ok":true}',
+      stdout:
+        argv[2] === "wait"
+          ? idle
+          : argv[2] === "worker-list"
+            ? noActiveDispatch
+            : '{"ok":true}',
     };
   };
   const result = await clearRoleTerminal({
@@ -1313,9 +1432,14 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
   assert.deepEqual(result, { cleared: true, terminal: "term_1" });
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
-    ["terminal wait", "terminal send", "terminal wait"],
+    [
+      "orchestration worker-list",
+      "terminal wait",
+      "terminal send",
+      "terminal wait",
+    ],
   );
-  assert.deepEqual(calls[1], [
+  assert.deepEqual(calls[2], [
     "orca",
     "terminal",
     "send",
@@ -1327,7 +1451,8 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
     "--json",
   ]);
 
-  // A busy terminal is refused before /clear is typed into it.
+  // A busy terminal is refused before /clear is typed into it, but only once
+  // no active Dispatch stands in the way.
   const busy = [];
   await assert.rejects(
     () =>
@@ -1336,6 +1461,14 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
         executable: "orca",
         execute: async (argv) => {
           busy.push(argv);
+          if (argv[2] === "worker-list") {
+            return {
+              code: 0,
+              stderr: "",
+              timedOut: false,
+              stdout: noActiveDispatch,
+            };
+          }
           return {
             code: 0,
             stderr: "",
@@ -1346,8 +1479,202 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
       }),
     (error) => error.signal?.code === "timeout",
   );
-  // Idle check fails. Diagnostics (read, list) are collected.
-  assert.equal(busy.length, 3, "wait + read + list for diagnostics");
+  // The active-dispatch check (worker-list) runs before the idle wait (#84);
+  // when the idle check fails, read and list are collected as diagnostics.
+  assert.deepEqual(
+    busy.map((argv) => argv.slice(1, 3).join(" ")),
+    [
+      "orchestration worker-list",
+      "terminal wait",
+      "terminal read",
+      "terminal list",
+    ],
+  );
+});
+
+test("clearRoleTerminal refuses /clear on a terminal with an active dispatch, without sending it (#84)", async () => {
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "worker-list") {
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: JSON.stringify({
+          ok: true,
+          result: {
+            workers: [
+              {
+                dispatchId: "ctx_active",
+                taskId: "task_active",
+                dispatchStatus: "dispatched",
+                agentTerminalHandle: "term_1",
+              },
+            ],
+          },
+        }),
+      };
+    }
+    throw new Error(`unexpected call ${argv[2]}`);
+  };
+  await assert.rejects(
+    () =>
+      clearRoleTerminal({ terminal: "term_1", executable: "orca", execute }),
+    (error) => {
+      assert.equal(error.signal?.kind, "not-started");
+      assert.equal(error.signal?.code, "active_dispatch");
+      assert.match(error.message, /ctx_active/);
+      assert.match(error.message, /task_active/);
+      assert.deepEqual(error.activeDispatch, {
+        dispatchId: "ctx_active",
+        taskId: "task_active",
+      });
+      return true;
+    },
+  );
+  // Only the lookup ran; /clear was never typed into the busy terminal.
+  assert.deepEqual(
+    calls.map((argv) => argv.slice(1, 3).join(" ")),
+    ["orchestration worker-list"],
+  );
+});
+
+test("clearRoleTerminal skips /clear, without refusing, when an active dispatch cannot be determined (#84)", async () => {
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "worker-list") {
+      const err = new Error("connection reset");
+      throw err;
+    }
+    throw new Error(`unexpected call ${argv[2]}`);
+  };
+  const result = await clearRoleTerminal({
+    terminal: "term_1",
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, {
+    cleared: false,
+    terminal: "term_1",
+    reason: "active-dispatch-unknown",
+  });
+  assert.deepEqual(
+    calls.map((argv) => argv.slice(1, 3).join(" ")),
+    ["orchestration worker-list"],
+  );
+});
+
+test("findActiveDispatch counts an unresolved dispatch status as unknown, never as clear", async () => {
+  // A worker matching the terminal sits in "pending" (not yet "dispatched",
+  // not "completed" or "failed" either): the documented status vocabulary
+  // does not say the Dispatch is settled, so /clear must not be assumed safe.
+  const execute = async () => ({
+    code: 0,
+    stderr: "",
+    timedOut: false,
+    stdout: JSON.stringify({
+      ok: true,
+      result: {
+        workers: [
+          {
+            dispatchId: "ctx_pending",
+            taskId: "task_pending",
+            dispatchStatus: "pending",
+            agentTerminalHandle: "term_1",
+          },
+        ],
+      },
+    }),
+  });
+  const result = await findActiveDispatch("term_1", {
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, { status: "unknown" });
+});
+
+test("findActiveDispatch counts a truncated page with no match on it as unknown, never as clear", async () => {
+  // No worker on this page names the terminal, but page.hasMore says a later
+  // page might still hold its Dispatch: "clear" would be a guess.
+  const execute = async () => ({
+    code: 0,
+    stderr: "",
+    timedOut: false,
+    stdout: JSON.stringify({
+      ok: true,
+      result: {
+        workers: [
+          {
+            dispatchId: "ctx_other",
+            taskId: "task_other",
+            dispatchStatus: "dispatched",
+            agentTerminalHandle: "term_2",
+          },
+        ],
+        page: { hasMore: true },
+      },
+    }),
+  });
+  const result = await findActiveDispatch("term_1", {
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, { status: "unknown" });
+});
+
+test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/reason, not the decision's guess (#84)", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-freshen-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, ".omt", "organization.json");
+  recordLaunch(
+    orgFile,
+    {
+      via: "worker-start",
+      role: "senior",
+      provider: "claude",
+      terminal: "term_1",
+      workflowId: "wf",
+      workflowTaskId: "task-a",
+    },
+    "2026-09-21T00:00:00.000Z",
+  );
+
+  const calls = [];
+  // worker-list fails, so findActiveDispatch (and clearRoleTerminal after it)
+  // cannot decide whether an active Dispatch stands in the way.
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "worker-list") throw new Error("connection reset");
+    throw new Error(`unexpected call ${argv[2]}`);
+  };
+
+  const freshContext = await freshenTerminal(
+    { org: orgFile, terminal: "term_1", orca: "orca", repo: dir },
+    { provider: "claude" },
+    {
+      workflowId: "wf",
+      workflowTaskId: "task-b",
+      orcaTaskId: null,
+      purpose: null,
+    },
+    execute,
+  );
+
+  // freshContextDecision alone would have called this a plain "different-task"
+  // clear; clearRoleTerminal's own active-dispatch-unknown reason must survive
+  // the merge into what worker-start hands back as freshContext.
+  assert.deepEqual(freshContext, {
+    clear: true,
+    reason: "active-dispatch-unknown",
+    previousLaunchAt: "2026-09-21T00:00:00.000Z",
+    cleared: false,
+  });
+  assert.deepEqual(
+    calls.map((argv) => argv.slice(1, 3).join(" ")),
+    ["orchestration worker-list"],
+  );
 });
 
 test("worker-start accepts the task identity and purpose that decide a clear", () => {

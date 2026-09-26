@@ -18,6 +18,7 @@ import {
   registerKickoff,
   registryDirectory,
   releaseKickoff,
+  verifyHandoffClaim,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 
 const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
@@ -150,6 +151,75 @@ test("each PM binds its own Run, and only once", (t) => {
     () => bindKickoffRun(fixture.org, { worktreeId: "wt-x", runId: "run-x" }),
     /supervises no registered kickoff/,
   );
+});
+
+test("a pasted handoff claim is trusted only when it matches the registered director (#86)", (t) => {
+  const fixture = project(t);
+  // Nothing registered yet: the director just opened role-terminal --brief,
+  // and kickoff-claim (step 5) has not run. A claim cannot be verified, and
+  // must not be treated as a match just because nothing contradicts it.
+  assert.deepEqual(
+    verifyHandoffClaim(fixture.org, {
+      worktreeId: "wt-a",
+      directorTerminal: "term_director",
+      brief: fixture.brief,
+    }),
+    {
+      match: false,
+      reason: "not-registered",
+      claimed: {
+        directorTerminal: "term_director",
+        brief: path.resolve(fixture.brief),
+      },
+    },
+  );
+
+  // Registered, but by an entry written before director support existed
+  // (or without one recorded): still nothing to compare the claim against.
+  registerKickoff(fixture.org, claimFor(fixture, "wt-a"));
+  assert.equal(
+    verifyHandoffClaim(fixture.org, {
+      worktreeId: "wt-a",
+      directorTerminal: "term_director",
+      brief: fixture.brief,
+    }).reason,
+    "no-director-recorded",
+  );
+
+  registerKickoff(fixture.org, {
+    ...claimFor(fixture, "wt-b"),
+    director: { terminalHandle: "term_director", checkoutPath: fixture.dir },
+  });
+
+  // Someone else's terminal, or a different brief: not the director's claim.
+  assert.equal(
+    verifyHandoffClaim(fixture.org, {
+      worktreeId: "wt-b",
+      directorTerminal: "term_outsider",
+      brief: fixture.brief,
+    }).reason,
+    "mismatch",
+  );
+  const otherBrief = path.join(fixture.dir, "other-brief.md");
+  fs.writeFileSync(otherBrief, "a different goal\n");
+  assert.equal(
+    verifyHandoffClaim(fixture.org, {
+      worktreeId: "wt-b",
+      directorTerminal: "term_director",
+      brief: otherBrief,
+    }).reason,
+    "mismatch",
+  );
+
+  // Both the terminal handle and the brief path (resolved, not compared as
+  // literal strings) match the registry entry the director itself wrote.
+  const matched = verifyHandoffClaim(fixture.org, {
+    worktreeId: "wt-b",
+    directorTerminal: "term_director",
+    brief: path.join(fixture.dir, ".", "brief.md"),
+  });
+  assert.equal(matched.match, true);
+  assert.equal(matched.reason, "matched");
 });
 
 test("ending one kickoff archives it and leaves the others running", (t) => {

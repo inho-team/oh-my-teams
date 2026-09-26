@@ -5,10 +5,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { writeJSON, readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   findPmTerminal,
   notifyDirector,
+  notifyDirectorSignal,
   sendSignal,
   listInbox,
   replySignal,
@@ -21,6 +23,7 @@ import {
 import { releaseKickoff } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
   acquireResource,
+  directorWatch,
   parseMeminfo,
   parseVmStat,
   queryPmLiveness,
@@ -31,6 +34,20 @@ import {
 const exampleOrg = readJSON(
   new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
 );
+
+// A real captured Claude Code AskUserQuestion screen (#82's regression case),
+// not a screen invented for this test file.
+const askUserScreen = JSON.parse(
+  fs.readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "fixtures",
+      "prompt-screens",
+      "claude-2.1.278-askuser-default.json",
+    ),
+    "utf8",
+  ),
+).lines;
 
 // Creates a temporary project directory with organization.json and a registered
 // kickoff entry for a PM worktree. Returns { dir, orgFile, worktreeId }.
@@ -809,12 +826,12 @@ test("queryPmLiveness asks Orca for worker-list with the given executable", asyn
 
 // ─── PM terminal discovery and available memory ─────────────────────────────
 
-function recordPmLaunch(orgFile, worktreePath, terminal) {
+function recordPmLaunch(orgFile, worktreePath, terminal, provider = "claude") {
   const file = path.join(path.dirname(orgFile), "usage", "launches.jsonl");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(
     file,
-    `${JSON.stringify({ schemaVersion: 1, via: "role-terminal", role: "pm", worktreePath, terminal })}\n`,
+    `${JSON.stringify({ schemaVersion: 1, via: "role-terminal", role: "pm", worktreePath, terminal, provider })}\n`,
   );
 }
 
@@ -849,6 +866,164 @@ test("findPmTerminal takes the latest PM launch only while Orca still lists it",
     }),
     undefined,
   );
+});
+
+// ─── directorWatch provider-overload judgement ───────────────────────────────
+
+function orcaEnvelope(result) {
+  return { code: 0, stdout: JSON.stringify({ ok: true, result }) };
+}
+
+test("directorWatch reports provider-overloaded from the PM's own terminal screen", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: async () =>
+      orcaEnvelope({
+        terminal: {
+          source: "screen",
+          tail: ["> continue", "API Error: 529 Overloaded"],
+        },
+      }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "provider-overloaded");
+});
+
+test("directorWatch reports none when the PM screen was read but does not show the 529 sentence", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: async () =>
+      orcaEnvelope({
+        terminal: { source: "screen", tail: ["Ready for input."] },
+      }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "none");
+});
+
+test("directorWatch reports unknown instead of guessing when the PM terminal cannot be found", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  // No PM launch was ever recorded, so findPmTerminal cannot resolve a handle.
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [],
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+});
+
+test("directorWatch reports unknown instead of guessing when the PM screen cannot be read", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    // No `source: "screen"` in the envelope means the screen could not be
+    // confirmed as the live one, the same failure readTerminalScreen reports
+    // for a worker.
+    execute: async () => orcaEnvelope({ terminal: { source: "buffer" } }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+});
+
+// findPmTerminal reads the launch ledger's own provider field (fixed at
+// launch time), never the organization's current pm profile, which a
+// fallback can move to another provider after that launch.
+async function watchesUnconfirmedProviderScreen(t, provider) {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", provider);
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: async () =>
+      orcaEnvelope({
+        terminal: {
+          source: "screen",
+          tail: ["> continue", "API Error: 529 Overloaded"],
+        },
+      }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+}
+
+test("directorWatch does not judge a 529 sentence on a PM launched as codex", async (t) => {
+  await watchesUnconfirmedProviderScreen(t, "codex");
+});
+
+test("directorWatch does not judge a 529 sentence on a PM launched as agy", async (t) => {
+  await watchesUnconfirmedProviderScreen(t, "agy");
+});
+
+test("directorWatch does not judge a 529 sentence when no PM launch was ever recorded", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  // No recordPmLaunch call: the ledger has no launch for this PM path at all.
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: async () =>
+      orcaEnvelope({
+        terminal: {
+          source: "screen",
+          tail: ["> continue", "API Error: 529 Overloaded"],
+        },
+      }),
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+});
+
+test("directorWatch keeps every kickoff's own report when one PM terminal lookup breaks", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+
+  // Simulates orcaTerminals' JSON.parse throwing on a truncated `orca
+  // terminal list --json` answer: the failure surfaces at the same seam,
+  // whichever line inside the lookup actually throws.
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => {
+      throw new SyntaxError("Unexpected end of JSON input");
+    },
+  });
+
+  const kickoff = report.kickoffs.find((k) => k.worktreeId === worktreeId);
+  assert.equal(kickoff.providerOverload, "unknown");
+  // The rest of directorWatch's report is unaffected by the one kickoff's failure.
+  assert.equal(typeof report.freeMemoryBytes, "number");
+  assert.equal(kickoff.pmLiveness, "unverifiable");
 });
 
 test("replySignal reports that no PM terminal was found instead of claiming delivery", async (t) => {
@@ -970,11 +1145,13 @@ function orcaNotify(answers, screen = []) {
       }),
     };
   };
+  // Matched by the argument in the "--text" position, not by scanning the
+  // whole call for a substring, so a bundled multi-signal message counts too.
   const textSends = () =>
     calls.filter(
       (call) =>
         call[1] === "send" &&
-        call.includes(NOTE_TEXT) &&
+        call[call.indexOf("--text") + 1] !== "" &&
         !call.includes("--retry-request"),
     );
   const enters = () =>
@@ -1046,10 +1223,379 @@ test("notifyDirector keeps Orca's failure text and does not resend", async () =>
   assert.match(result.notifyError, /terminal_not_writable: pane is closed/);
   assert.equal(result.delivery.outcome, "failed");
   assert.equal(result.delivery.requestId, null);
-  assert.equal(orca.calls.length, 1);
+  // One screen read ahead of the send that then fails.
+  assert.equal(orca.calls.length, 2);
   assert.deepEqual(await notifyDirector({}, NOTE, "orca", orca.execute), {
     notified: false,
   });
+});
+
+// ─── notifyDirector defers when the Director's screen cannot take input (#82) ──
+
+test("notifyDirector defers without sending when a selection window is on screen", async () => {
+  const orca = orcaNotify([["input_accepted", "turn_started"]], askUserScreen);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.notifyError, "blocked-by-user-question");
+  // Only the screen read happened; no Enter, no text.
+  assert.equal(orca.calls.length, 1);
+  assert.equal(orca.textSends().length, 0);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirector proceeds on a screen with a working indicator (not blocked)", async () => {
+  // classifyPromptScreen only recognizes trust and AskUserQuestion screens;
+  // anything else, busy or idle, is "unknown" and does not defer the send.
+  const busyScreen = [RULE, "❯", "✻ Working…", RULE];
+  const orca = orcaNotify([["input_accepted", "turn_started"]], busyScreen);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, true);
+  assert.equal(result.deferred, undefined);
+  assert.equal(result.delivery.outcome, "submitted");
+});
+
+test("notifyDirector proceeds on an idle, empty-prompt screen (not blocked)", async () => {
+  const idleScreen = [RULE, "❯", RULE, "  ⏵⏵ bypass permissions on"];
+  const orca = orcaNotify([["input_accepted", "turn_started"]], idleScreen);
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, true);
+  assert.equal(result.deferred, undefined);
+  assert.equal(result.delivery.outcome, "submitted");
+});
+
+// ─── notifyDirectorSignal: defer, bundle once clear, never resend (#82, ac-3) ──
+
+test("notifyDirectorSignal defers a blocked backlog, then bundles and delivers it once the screen clears, without resending", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+
+  const blocked = orcaNotify(
+    [["input_accepted", "turn_started"]],
+    askUserScreen,
+  );
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "step 1 done",
+  });
+  const firstResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    first.record,
+    "orca",
+    blocked.execute,
+  );
+  assert.equal(firstResult.notified, false);
+  assert.equal(firstResult.deferred, true);
+  assert.deepEqual(firstResult.bundled, [first.id]);
+
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "step 2 done",
+  });
+  const secondResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    second.record,
+    "orca",
+    blocked.execute,
+  );
+  assert.equal(secondResult.notified, false);
+  assert.deepEqual(
+    secondResult.bundled.slice().sort(),
+    [first.id, second.id].sort(),
+  );
+  // Both attempts only ever read the blocked screen; nothing was typed.
+  assert.equal(blocked.calls.length, 2);
+  assert.equal(blocked.textSends().length, 0);
+
+  const clear = orcaNotify([["input_accepted", "turn_started"]], []);
+  const third = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "step 3 done",
+  });
+  const thirdResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    third.record,
+    "orca",
+    clear.execute,
+  );
+  assert.equal(thirdResult.notified, true);
+  assert.deepEqual(
+    thirdResult.bundled.slice().sort(),
+    [first.id, second.id, third.id].sort(),
+  );
+  const sends = clear.textSends();
+  assert.equal(sends.length, 1);
+  const sentText = sends[0][sends[0].indexOf("--text") + 1];
+  assert.match(sentText, /step 1 done/);
+  assert.match(sentText, /step 2 done/);
+  assert.match(sentText, /step 3 done/);
+
+  assert.equal(readSignal(orgFile, first.id).notify.notified, true);
+  assert.equal(readSignal(orgFile, second.id).notify.notified, true);
+  assert.equal(readSignal(orgFile, third.id).notify.notified, true);
+
+  // A later signal's own attempt never re-bundles ones already delivered.
+  const fourth = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "step 4 done",
+  });
+  const fourthOrca = orcaNotify([["input_accepted", "turn_started"]], []);
+  const fourthResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    fourth.record,
+    "orca",
+    fourthOrca.execute,
+  );
+  assert.deepEqual(fourthResult.bundled, [fourth.id]);
+});
+
+// ─── notifyDirectorSignal: sent-but-unconfirmed is never resent (#82, review-1 finding director-signal-resend-conflates-unsent-and-unconfirmed) ──
+
+test("notifyDirectorSignal never re-bundles a signal deliverPrompt already tried but could not confirm", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "attempted once",
+  });
+  // Accepted but nothing on screen decides it: deliverPrompt actually ran
+  // (the screen was not blocked), so the keys may already have reached the
+  // Director even though the outcome is "unclear", not "submitted".
+  const unclearOrca = orcaNotify([["input_accepted"]], []);
+  const firstResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    first.record,
+    "orca",
+    unclearOrca.execute,
+  );
+  assert.equal(firstResult.notified, false);
+  assert.equal(firstResult.deferred, undefined);
+  assert.equal(unclearOrca.textSends().length, 1);
+  assert.equal(readSignal(orgFile, first.id).notify.sent, true);
+  assert.equal(readSignal(orgFile, first.id).notify.notified, false);
+
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "second signal",
+  });
+  const clearOrca = orcaNotify([["input_accepted", "turn_started"]], []);
+  const secondResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    second.record,
+    "orca",
+    clearOrca.execute,
+  );
+  assert.equal(secondResult.notified, true);
+  // The unconfirmed-but-attempted first signal is never bundled again.
+  assert.deepEqual(secondResult.bundled, [second.id]);
+  const sends = clearOrca.textSends();
+  assert.equal(sends.length, 1);
+  const sentText = sends[0][sends[0].indexOf("--text") + 1];
+  assert.doesNotMatch(sentText, /attempted once/);
+  assert.match(sentText, /second signal/);
+  // The first signal is never retried automatically, but it stays pending
+  // and visible in director-inbox so the Director can still see and answer it.
+  assert.equal(readSignal(orgFile, first.id).notify.notified, false);
+  assert.equal(readSignal(orgFile, first.id).status, "pending");
+  assert.ok(listInbox(orgFile).signals.some((s) => s.id === first.id));
+});
+
+// ─── notifyDirectorSignal: overlapping calls never both send (#82, review-1 finding director-signal-backlog-read-race) ──
+
+test("notifyDirectorSignal defers instead of double-sending when a second call for the same worktree overlaps the first", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+  const first = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "first",
+  });
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "second",
+  });
+
+  const orca = orcaNotify([["input_accepted", "turn_started"]], []);
+  // Gates the first call's own screen read so it stays inside notifyTerminal
+  // (past its own claim, which is synchronous) while the second call starts,
+  // the way a first `director-signal` process still inside deliverPrompt's
+  // wait-submit window overlaps a second one starting.
+  let releaseFirst;
+  const gate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const slowExecute = async (argv, options) => {
+    await gate;
+    return orca.execute(argv, options);
+  };
+
+  const firstPromise = notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    first.record,
+    "orca",
+    slowExecute,
+  );
+  const secondResult = await notifyDirectorSignal(
+    orgFile,
+    first.entry,
+    second.record,
+    "orca",
+    orca.execute,
+  );
+  assert.equal(secondResult.notified, false);
+  assert.equal(secondResult.deferred, true);
+  assert.equal(secondResult.notifyError, "backlog-claimed");
+  assert.deepEqual(secondResult.bundled, []);
+  // The second call never touched the terminal at all.
+  assert.equal(orca.calls.length, 0);
+
+  releaseFirst();
+  const firstResult = await firstPromise;
+  assert.equal(firstResult.notified, true);
+  // The first call claimed the whole backlog up front, so it bundles both.
+  assert.deepEqual(
+    firstResult.bundled.slice().sort(),
+    [first.id, second.id].sort(),
+  );
+  assert.equal(orca.textSends().length, 1);
+  const sentText =
+    orca.textSends()[0][orca.textSends()[0].indexOf("--text") + 1];
+  assert.match(sentText, /first/);
+  assert.match(sentText, /second/);
+  assert.equal(readSignal(orgFile, first.id).notify.notified, true);
+  assert.equal(readSignal(orgFile, second.id).notify.notified, true);
+});
+
+test("notifyDirectorSignal never resends a batch left in-flight by a dead owner, and settles it as unconfirmed instead", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+  const stuck = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "orphaned attempt",
+  });
+  // Simulate a claim left behind by a process that has since exited: a pid
+  // this host can prove dead, the same shape resources.mjs uses for its own
+  // dead-owner slot reclaim.
+  const file = path.join(
+    path.dirname(orgFile),
+    "director",
+    "inbox",
+    `${stuck.id}.json`,
+  );
+  writeJSON(file, {
+    ...readJSON(file),
+    notify: {
+      inFlight: true,
+      claimedAt: new Date(0).toISOString(),
+      owner: { pid: 2147483647, hostname: os.hostname() },
+    },
+  });
+
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "new attempt",
+  });
+  const orca = orcaNotify([["input_accepted", "turn_started"]], []);
+  const result = await notifyDirectorSignal(
+    orgFile,
+    second.entry,
+    second.record,
+    "orca",
+    orca.execute,
+  );
+  assert.equal(result.notified, true);
+  // The dead owner's signal is never reclaimed for a fresh send; only the new
+  // signal goes out.
+  assert.deepEqual(result.bundled, [second.id]);
+  assert.equal(orca.textSends().length, 1);
+  const sentText =
+    orca.textSends()[0][orca.textSends()[0].indexOf("--text") + 1];
+  assert.doesNotMatch(sentText, /orphaned attempt/);
+  assert.match(sentText, /new attempt/);
+  // Its outcome is settled as unconfirmed, the same shape as an attempt that
+  // ran but could not confirm submission, so it never comes back into the
+  // auto-resend backlog.
+  const settled = readSignal(orgFile, stuck.id);
+  assert.equal(settled.notify.notified, false);
+  assert.equal(settled.notify.sent, true);
+  assert.equal(settled.notify.notifyError, "owner-exited-before-confirming");
+  assert.equal(settled.status, "pending");
+  assert.ok(listInbox(orgFile).signals.some((s) => s.id === stuck.id));
+});
+
+test("notifyDirectorSignal sends a new signal and leaves a signal stuck under an unverifiable owner untouched", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+  const stuck = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "claimed on another host",
+  });
+  // A claim recorded by a different hostname: `processLiveness` can never
+  // confirm this pid is dead (it does not even check), so it always reports
+  // "unverifiable" and this claim would never clear on its own.
+  const file = path.join(
+    path.dirname(orgFile),
+    "director",
+    "inbox",
+    `${stuck.id}.json`,
+  );
+  writeJSON(file, {
+    ...readJSON(file),
+    notify: {
+      inFlight: true,
+      claimedAt: new Date(0).toISOString(),
+      owner: { pid: 4321, hostname: "some-other-host" },
+    },
+  });
+  const before = readSignal(orgFile, stuck.id);
+
+  const second = sendSignal(orgFile, {
+    worktreeId,
+    kind: "progress",
+    text: "unaffected new signal",
+  });
+  const orca = orcaNotify([["input_accepted", "turn_started"]], []);
+  const result = await notifyDirectorSignal(
+    orgFile,
+    second.entry,
+    second.record,
+    "orca",
+    orca.execute,
+  );
+  // The new signal is delivered on its own; the stuck one is never bundled.
+  assert.equal(result.notified, true);
+  assert.deepEqual(result.bundled, [second.id]);
+  assert.equal(orca.textSends().length, 1);
+  const sentText =
+    orca.textSends()[0][orca.textSends()[0].indexOf("--text") + 1];
+  assert.doesNotMatch(sentText, /claimed on another host/);
+  assert.match(sentText, /unaffected new signal/);
+  // The stuck signal's own claim is left exactly as it was: not resent, not
+  // settled, still visible as an unresolved claim in director-inbox.
+  assert.deepEqual(readSignal(orgFile, stuck.id), before);
 });
 
 test("replySignal reports how far the PM notification got", async (t) => {

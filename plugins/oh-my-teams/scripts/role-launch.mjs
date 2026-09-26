@@ -58,6 +58,58 @@ export const PERMISSION_BYPASS = Object.freeze({
 });
 
 /**
+ * How each provider's installed CLI takes an initial prompt as its own
+ * argument, confirmed against that CLI's own `--help` (#86) rather than
+ * assumed:
+ *
+ * - `claude --help`: `Usage: claude [options] [command] [prompt]` — a
+ *   trailing positional argument.
+ * - `codex --help`: `Usage: codex [OPTIONS] [PROMPT]` — same shape.
+ * - `agy --help`: `-i, --prompt-interactive` — "Run an initial prompt
+ *   interactively and continue the session", a flag that takes the prompt.
+ *
+ * A provider with no entry here gets no first-prompt argument from
+ * {@link roleCommand}; guessing the flag for an unconfirmed CLI could
+ * silently drop the brief or break the launch, so `roleCommand` refuses
+ * instead of guessing.
+ */
+export const FIRST_PROMPT_ARG = Object.freeze({
+  claude: "positional",
+  codex: "positional",
+  agy: "flag",
+});
+
+/**
+ * Builds the fixed-wording first prompt for a director's PM handoff.
+ *
+ * The wording is the runtime's, not the caller's: a caller supplies only the
+ * brief path, so no free text can ride into a role terminal's launch
+ * argument. Passed through {@link roleCommand}'s `firstPrompt`, this becomes
+ * part of the command the terminal is created with. Confirmed for Claude Code
+ * (v2.1.283, observed 2026-09-26 through `role-terminal --brief`): the
+ * session's first user message carries this text with `promptSource:
+ * "typed"` and no `<pasted_content>` wrapping, so Claude Code reads it as the
+ * session's real initial instruction rather than terminal-typed text a user
+ * must separately ask it to act on (#86). Codex and Agy were confirmed only by
+ * `--help` to accept a first-prompt argument; how that argument displays
+ * inside their own session has not been observed.
+ *
+ * @param {string} briefPath - Absolute path to the confirmed brief file.
+ * @returns {string} The PM's first prompt.
+ * @throws {Error} When `briefPath` is empty.
+ */
+export function kickoffBriefPrompt(briefPath) {
+  assert(
+    typeof briefPath === "string" && briefPath.trim(),
+    "kickoffBriefPrompt needs a non-empty brief path",
+  );
+  return (
+    `인수 브리프 ${briefPath.trim()}를 읽고, 그 안에 확정된 목표로 Goal을 만들어 ` +
+    "kickoff-bind까지 진행하십시오."
+  );
+}
+
+/**
  * Roles each role may start as supervised workers, before folding.
  *
  * Only PM and PL create Dispatches. Senior hands its implementation scope back
@@ -402,14 +454,19 @@ function shellToken(token) {
  * @param {object} [run={}] - Run context.
  * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
  * @param {string} [run.profile] - Fallback profile a workflow handoff named.
+ * @param {string} [run.firstPrompt] - Initial prompt to pass as the launched
+ *   command's own argument, built with {@link kickoffBriefPrompt} rather than
+ *   free text. Only added when the profile's provider has a confirmed entry
+ *   in {@link FIRST_PROMPT_ARG}.
  * @returns {object} Role, profile, argv, shell command, requested model and
  *   the Claude `--autocompact` value (null for other providers).
- * @throws {Error} When the role is not held or the profile cannot be launched.
+ * @throws {Error} When the role is not held, the profile cannot be launched,
+ *   or `firstPrompt` is given for a provider with no confirmed argument.
  */
 export function roleCommand(
   requestedOrg,
   requestedRole,
-  { roles, profile: handoffProfile } = {},
+  { roles, profile: handoffProfile, firstPrompt } = {},
 ) {
   const org = validateOrg(requestedOrg);
   assert(
@@ -440,6 +497,16 @@ export function roleCommand(
         : ["--effort", profile.effort]),
     );
   }
+  if (profile.provider === "codex") {
+    // No one watches a role terminal to answer Codex's own-update nag
+    // ("1. Update now" runs `npm install -g`, selected by default), and the
+    // classifier leaves that screen at kind=unknown/action=none by design
+    // (docs/plan/codex-update-check.md). `check_for_update_on_startup` is a
+    // real ConfigToml field, confirmed against the installed CLI with
+    // `codex exec --strict-config -c check_for_update_on_startup=false`, so
+    // this skips the startup check instead of writing to config.toml.
+    argv.push("--config", "check_for_update_on_startup=false");
+  }
   const runner = profile.runner
     ? {
         kind: profile.runner.kind,
@@ -460,6 +527,20 @@ export function roleCommand(
   const autoCompact =
     profile.provider === "claude" ? claudeAutoCompact(org) : null;
   if (autoCompact) argv.push("--autocompact", autoCompact);
+  if (firstPrompt !== undefined) {
+    assert(
+      typeof firstPrompt === "string" && firstPrompt.trim(),
+      `Role ${role}: firstPrompt must be a non-empty string`,
+    );
+    const support = FIRST_PROMPT_ARG[profile.provider];
+    assert(
+      support,
+      `Role ${role} profile ${profileId} uses ${profile.provider}, whose installed CLI has no confirmed ` +
+        "first-prompt argument (references/orca-runtime.md); hand the brief over with terminal send instead",
+    );
+    if (support === "positional") argv.push(firstPrompt);
+    else argv.push("--prompt-interactive", firstPrompt);
+  }
   return {
     role,
     profile: profileId,
