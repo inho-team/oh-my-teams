@@ -473,6 +473,45 @@ test("hasValidAcceptance returns false, without throwing, once the declared resu
   );
 });
 
+test("hasValidAcceptance returns false once the workspace's actual Git HEAD moves past the accepted resultHead, even when the caller re-declares that same resultHead", async (t) => {
+  const fixture = kickoff(t);
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
+
+  await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
+  await auditChecked(
+    fixture.org,
+    fixture.worktreeId,
+    "outcome",
+    [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ],
+    auditorEnv(fixture.auditorHandle),
+  );
+  await auditAccept(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo, auditorEnv(fixture.auditorHandle));
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    true,
+  );
+
+  // A new commit lands after acceptance. The ledger, the declared resultHead
+  // argument, and the evidence backing the binding are all unchanged, so a
+  // stored `acceptance.boundHash` comparison alone cannot tell this case
+  // apart from a still-valid acceptance — only comparing the declared
+  // resultHead against the workspace's actual *current* HEAD catches a
+  // caller re-declaring an old, no-longer-current resultHead to keep
+  // reusing a stale acceptance.
+  fs.writeFileSync(path.join(fixture.dir, "later.txt"), "later work\n");
+  git(fixture.dir, ["add", "-A"]);
+  git(fixture.dir, ["commit", "-q", "-m", "later work"]);
+
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    false,
+  );
+});
+
 test("requirementsPresent refuses a declared head that does not match the workspace's actual Git HEAD", async (t) => {
   const fixture = kickoff(t);
   const presentationSource = path.join(fixture.dir, "presentation.txt");
