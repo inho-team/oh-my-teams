@@ -1,6 +1,7 @@
 /** Auditor checkpoints: objection/response/ruling records and acceptance gates. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +28,10 @@ const exampleOrg = new URL(
   import.meta.url,
 );
 
+// A plausible-looking commit id that is guaranteed not to be any fixture's
+// actual HEAD, for the forged/stale-head counterexamples below.
+const FORGED_HEAD = "0".repeat(40);
+
 // One equal-scope criterion needs no narrower confirmation, so no more of the
 // ledger draft/confirm flow (tested in its own file) is needed here.
 function minimalRequirements(worktreeId) {
@@ -39,12 +44,31 @@ function minimalRequirements(worktreeId) {
   };
 }
 
+function git(dir, args) {
+  return execFileSync("git", args, { cwd: dir }).toString().trim();
+}
+
+// A real Git repository with one commit, independent of the workspaceBinding
+// adapter under test — resultHead/head assertions must be checked against an
+// actual `git rev-parse HEAD`, not an arbitrary string a test made up.
+function initRepo(dir) {
+  git(dir, ["init", "-q"]);
+  git(dir, ["config", "user.email", "auditor-test@example.com"]);
+  git(dir, ["config", "user.name", "Auditor Test"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "fixture repo\n");
+  git(dir, ["add", "-A"]);
+  git(dir, ["commit", "-q", "-m", "init"]);
+  return git(dir, ["rev-parse", "HEAD"]);
+}
+
 // A registered kickoff with a director, a bound Run, and a launched auditor
 // terminal — enough identity plumbing for every verifiedAuditor/verifiedPm/
-// verifiedDirector check these tests exercise to pass.
+// verifiedDirector check these tests exercise to pass. `dir` doubles as the
+// Git workspace resultHead/head claims are checked against.
 function kickoff(t, worktreeId = "wt-1") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const head = initRepo(dir);
   const org = path.join(dir, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(org), { recursive: true });
   fs.copyFileSync(exampleOrg, org);
@@ -70,7 +94,7 @@ function kickoff(t, worktreeId = "wt-1") {
     terminal: auditorHandle,
     stateDir: entry.pm.stateDir,
   });
-  return { dir, org, brief, worktreeId, entry, auditorHandle, pmHandle };
+  return { dir, repo: dir, head, org, brief, worktreeId, entry, auditorHandle, pmHandle };
 }
 
 const auditorEnv = (handle) => ({ ORCA_TERMINAL_HANDLE: handle });
@@ -92,7 +116,7 @@ const pmIdentity = (fixture) => ({
 });
 
 async function objectAndResolve(fixture, { resultHead, evidencePath }) {
-  auditObjection(
+  await auditObjection(
     fixture.org,
     fixture.worktreeId,
     {
@@ -102,6 +126,7 @@ async function objectAndResolve(fixture, { resultHead, evidencePath }) {
       description: "criterion c1 does not look delivered",
       rebuttalRequested: "show where it is delivered",
       resultHead,
+      repo: fixture.repo,
     },
     auditorEnv(fixture.auditorHandle),
   );
@@ -120,7 +145,7 @@ async function objectAndResolve(fixture, { resultHead, evidencePath }) {
   );
   assert.equal(recorded, true);
   const responseId = audit.checkpoints.outcome.responses.at(-1).id;
-  auditRuling(
+  await auditRuling(
     fixture.org,
     fixture.worktreeId,
     {
@@ -140,8 +165,8 @@ test("outcome objection -> PM response -> persuaded ruling -> checked -> accept"
   const evidencePath = "evidence.txt";
   fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
 
-  await objectAndResolve(fixture, { resultHead: "head-1", evidencePath });
-  auditChecked(
+  await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
+  await auditChecked(
     fixture.org,
     fixture.worktreeId,
     "outcome",
@@ -151,15 +176,19 @@ test("outcome objection -> PM response -> persuaded ruling -> checked -> accept"
     ],
     auditorEnv(fixture.auditorHandle),
   );
-  const { accepted } = auditAccept(
+  const { accepted } = await auditAccept(
     fixture.org,
     fixture.worktreeId,
     "outcome",
-    "head-1",
+    fixture.head,
+    fixture.repo,
     auditorEnv(fixture.auditorHandle),
   );
   assert.equal(accepted, true);
-  assert.equal(hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", "head-1"), true);
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    true,
+  );
 });
 
 test("hasValidAcceptance refuses once a cited response evidence file changes, same HEAD and fingerprint", async (t) => {
@@ -167,8 +196,8 @@ test("hasValidAcceptance refuses once a cited response evidence file changes, sa
   const evidencePath = "evidence.txt";
   fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
 
-  await objectAndResolve(fixture, { resultHead: "head-1", evidencePath });
-  auditChecked(
+  await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
+  await auditChecked(
     fixture.org,
     fixture.worktreeId,
     "outcome",
@@ -178,13 +207,19 @@ test("hasValidAcceptance refuses once a cited response evidence file changes, sa
     ],
     auditorEnv(fixture.auditorHandle),
   );
-  auditAccept(fixture.org, fixture.worktreeId, "outcome", "head-1", auditorEnv(fixture.auditorHandle));
-  assert.equal(hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", "head-1"), true);
+  await auditAccept(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo, auditorEnv(fixture.auditorHandle));
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    true,
+  );
 
   // Same HEAD, same ledger, same presentations: the binding does not move,
   // but the file the response cited no longer hashes to what was recorded.
   fs.writeFileSync(path.join(fixture.dir, evidencePath), "swapped\n");
-  assert.equal(hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", "head-1"), false);
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    false,
+  );
 });
 
 test("hasValidAcceptance refuses once a new unresolved objection is raised after acceptance", async (t) => {
@@ -192,8 +227,8 @@ test("hasValidAcceptance refuses once a new unresolved objection is raised after
   const evidencePath = "evidence.txt";
   fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
 
-  await objectAndResolve(fixture, { resultHead: "head-1", evidencePath });
-  auditChecked(
+  await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
+  await auditChecked(
     fixture.org,
     fixture.worktreeId,
     "outcome",
@@ -203,14 +238,17 @@ test("hasValidAcceptance refuses once a new unresolved objection is raised after
     ],
     auditorEnv(fixture.auditorHandle),
   );
-  auditAccept(fixture.org, fixture.worktreeId, "outcome", "head-1", auditorEnv(fixture.auditorHandle));
-  assert.equal(hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", "head-1"), true);
+  await auditAccept(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo, auditorEnv(fixture.auditorHandle));
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    true,
+  );
 
   // A fresh objection, with no response or ruling yet, leaves the binding
   // untouched (auditObjection recomputes it, but nothing about the ledger,
   // result HEAD, or evidence changed) while the checkpoint substantively
   // regresses to unresolved.
-  auditObjection(
+  await auditObjection(
     fixture.org,
     fixture.worktreeId,
     {
@@ -219,11 +257,15 @@ test("hasValidAcceptance refuses once a new unresolved objection is raised after
       kind: "mismatch",
       description: "a second look raises a new concern",
       rebuttalRequested: "address this too",
-      resultHead: "head-1",
+      resultHead: fixture.head,
+      repo: fixture.repo,
     },
     auditorEnv(fixture.auditorHandle),
   );
-  assert.equal(hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", "head-1"), false);
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    false,
+  );
 });
 
 test("path B: a presentation after acceptance invalidates it, and re-audit + re-accept succeeds without deadlock", async (t) => {
@@ -231,8 +273,8 @@ test("path B: a presentation after acceptance invalidates it, and re-audit + re-
   const evidencePath = "evidence.txt";
   fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
 
-  await objectAndResolve(fixture, { resultHead: "head-1", evidencePath });
-  auditChecked(
+  await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
+  await auditChecked(
     fixture.org,
     fixture.worktreeId,
     "outcome",
@@ -242,27 +284,34 @@ test("path B: a presentation after acceptance invalidates it, and re-audit + re-
     ],
     auditorEnv(fixture.auditorHandle),
   );
-  auditAccept(fixture.org, fixture.worktreeId, "outcome", "head-1", auditorEnv(fixture.auditorHandle));
-  assert.equal(hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", "head-1"), true);
+  await auditAccept(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo, auditorEnv(fixture.auditorHandle));
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    true,
+  );
 
   // A later presentation moves the outcome binding's evidenceFingerprint,
   // which invalidates the acceptance without any objection ever having been
   // withdrawn or re-raised.
   const presentationSource = path.join(fixture.dir, "presentation.txt");
   fs.writeFileSync(presentationSource, "shown to the user\n");
-  requirementsPresent(fixture.org, fixture.worktreeId, {
+  await requirementsPresent(fixture.org, fixture.worktreeId, {
     criterionId: "c1",
-    head: "head-1",
+    head: fixture.head,
+    repo: fixture.repo,
     source: presentationSource,
     userQuote: "yes, that matches",
     outcome: "confirmed",
   });
-  assert.equal(hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", "head-1"), false);
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    false,
+  );
 
   // Re-auditing (checked coverage still holds, the objection is still
   // persuaded on its latest response) and re-accepting must succeed — the
   // stale old acceptance must not itself block recording the new one.
-  auditChecked(
+  await auditChecked(
     fixture.org,
     fixture.worktreeId,
     "outcome",
@@ -272,15 +321,19 @@ test("path B: a presentation after acceptance invalidates it, and re-audit + re-
     ],
     auditorEnv(fixture.auditorHandle),
   );
-  const { accepted } = auditAccept(
+  const { accepted } = await auditAccept(
     fixture.org,
     fixture.worktreeId,
     "outcome",
-    "head-1",
+    fixture.head,
+    fixture.repo,
     auditorEnv(fixture.auditorHandle),
   );
   assert.equal(accepted, true);
-  assert.equal(hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", "head-1"), true);
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    true,
+  );
 
   // The superseded acceptance is kept as history, not erased.
   const record = readAudit(fixture.org, fixture.worktreeId).checkpoints.outcome;
@@ -289,7 +342,7 @@ test("path B: a presentation after acceptance invalidates it, and re-audit + re-
 
 test("ruling history is preserved across a not-persuaded then a persuaded verdict on a stronger response", async (t) => {
   const fixture = kickoff(t);
-  auditObjection(
+  await auditObjection(
     fixture.org,
     fixture.worktreeId,
     {
@@ -298,7 +351,8 @@ test("ruling history is preserved across a not-persuaded then a persuaded verdic
       kind: "gap",
       description: "criterion c1 does not look delivered",
       rebuttalRequested: "show where it is delivered",
-      resultHead: "head-1",
+      resultHead: fixture.head,
+      repo: fixture.repo,
     },
     auditorEnv(fixture.auditorHandle),
   );
@@ -319,7 +373,7 @@ test("ruling history is preserved across a not-persuaded then a persuaded verdic
     pmIdentity(fixture),
   );
   const weakResponseId = weakResponse.audit.checkpoints.outcome.responses.at(-1).id;
-  auditRuling(
+  await auditRuling(
     fixture.org,
     fixture.worktreeId,
     {
@@ -346,7 +400,7 @@ test("ruling history is preserved across a not-persuaded then a persuaded verdic
     pmIdentity(fixture),
   );
   const strongResponseId = strongResponse.audit.checkpoints.outcome.responses.at(-1).id;
-  auditRuling(
+  await auditRuling(
     fixture.org,
     fixture.worktreeId,
     {
@@ -363,4 +417,76 @@ test("ruling history is preserved across a not-persuaded then a persuaded verdic
   assert.equal(record.rulings.length, 2);
   assert.equal(record.rulings[0].verdict, "not-persuaded");
   assert.equal(record.rulings[1].verdict, "persuaded");
+});
+
+test("auditAccept refuses a resultHead that does not match the workspace's actual Git HEAD", async (t) => {
+  const fixture = kickoff(t);
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
+
+  await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
+  await auditChecked(
+    fixture.org,
+    fixture.worktreeId,
+    "outcome",
+    [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ],
+    auditorEnv(fixture.auditorHandle),
+  );
+
+  await assert.rejects(
+    auditAccept(fixture.org, fixture.worktreeId, "outcome", FORGED_HEAD, fixture.repo, auditorEnv(fixture.auditorHandle)),
+    /does not match the actual Git HEAD/,
+  );
+});
+
+test("hasValidAcceptance returns false, without throwing, once the declared resultHead no longer matches the actual Git HEAD", async (t) => {
+  const fixture = kickoff(t);
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
+
+  await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
+  await auditChecked(
+    fixture.org,
+    fixture.worktreeId,
+    "outcome",
+    [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ],
+    auditorEnv(fixture.auditorHandle),
+  );
+  await auditAccept(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo, auditorEnv(fixture.auditorHandle));
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", fixture.head, fixture.repo),
+    true,
+  );
+
+  // A caller asking about a HEAD other than what the repo is actually at
+  // (stale claim, or a forged one) must be told the acceptance does not hold
+  // for it — a plain `false`, never a thrown error.
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "outcome", FORGED_HEAD, fixture.repo),
+    false,
+  );
+});
+
+test("requirementsPresent refuses a declared head that does not match the workspace's actual Git HEAD", async (t) => {
+  const fixture = kickoff(t);
+  const presentationSource = path.join(fixture.dir, "presentation.txt");
+  fs.writeFileSync(presentationSource, "shown to the user\n");
+
+  await assert.rejects(
+    requirementsPresent(fixture.org, fixture.worktreeId, {
+      criterionId: "c1",
+      head: FORGED_HEAD,
+      repo: fixture.repo,
+      source: presentationSource,
+      userQuote: "yes, that matches",
+      outcome: "confirmed",
+    }),
+    /does not match the actual Git HEAD/,
+  );
 });

@@ -20,7 +20,7 @@ import {
   inside,
   readJSON,
   run,
-  withFileLock,
+  withAsyncFileLock,
   writeJSON,
 } from "./core.mjs";
 import { canonicalize, readReference } from "./contracts.mjs";
@@ -29,6 +29,7 @@ import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
 import { assertDirectorAuthority } from "./delivery.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
 import { runOrcaJson } from "./orca-adapter.mjs";
+import { workspaceBinding } from "./evidence.mjs";
 
 /** Checkpoints a kickoff's requirements ledger is audited at. */
 export const CHECKPOINTS = Object.freeze(["brief", "outcome"]);
@@ -51,7 +52,7 @@ function auditFile(orgFile, worktreeId) {
 function withAudit(orgFile, worktreeId, callback) {
   const directory = path.join(path.dirname(path.resolve(orgFile)), "audits");
   fs.mkdirSync(directory, { recursive: true });
-  return withFileLock(
+  return withAsyncFileLock(
     path.join(directory, ".lock"),
     () => callback(readAudit(orgFile, worktreeId)),
     "Audit record update in progress; read it again",
@@ -140,18 +141,37 @@ export function evidenceFingerprint(ledger, outcomeCheckpoint) {
 /**
  * Computes the binding a checkpoint's objections/responses/rulings apply to.
  *
+ * For "outcome", `resultHead` is not trusted as given: it must match the
+ * actual current Git HEAD of `repo`, read through the same
+ * `evidence.mjs#workspaceBinding` adapter `fingerprint()` uses. Without this,
+ * a caller could bind (and later re-validate) an outcome checkpoint against a
+ * stale or fabricated head that no longer describes the real workspace.
+ *
  * @param {string} checkpoint - "brief" or "outcome".
  * @param {object} ledger - Confirmed requirements ledger.
  * @param {object} audit - Full audit record (for the outcome fingerprint).
  * @param {string} [resultHead] - Result HEAD; required for "outcome".
- * @returns {object} `{ledgerHash}` for brief, `{ledgerHash, resultHead, evidenceFingerprint}` for outcome.
+ * @param {string} [repo] - Workspace `resultHead` is checked against; required for "outcome".
+ * @returns {Promise<object>} `{ledgerHash}` for brief, `{ledgerHash, resultHead, evidenceFingerprint}` for outcome.
+ * @throws {Error} When `resultHead` does not match the workspace's actual HEAD.
  */
-export function computeBinding(checkpoint, ledger, audit, resultHead) {
+export async function computeBinding(checkpoint, ledger, audit, resultHead, repo) {
   const ledgerHashValue = computeLedgerHash(ledger);
   if (checkpoint === "brief") return { ledgerHash: ledgerHashValue };
   assert(
     typeof resultHead === "string" && resultHead.trim(),
     "resultHead is required to compute the outcome checkpoint binding",
+  );
+  assert(
+    typeof repo === "string" && repo.trim(),
+    "repo is required to verify resultHead against the workspace's actual HEAD",
+  );
+  const { head: actualHead } = await workspaceBinding(repo);
+  assert(
+    actualHead && actualHead === resultHead,
+    `Declared resultHead ${resultHead} does not match the actual Git HEAD ` +
+      `${actualHead ?? "(not a Git workspace)"} of ${repo}; ` +
+      "a stale or forged head cannot bind an outcome checkpoint",
   );
   return {
     ledgerHash: ledgerHashValue,
@@ -268,14 +288,15 @@ export async function verifiedPm(
  * @param {string} request.description - What is wrong.
  * @param {string} request.rebuttalRequested - What would resolve it.
  * @param {string} [request.resultHead] - Result HEAD; required for "outcome".
+ * @param {string} [request.repo] - Workspace `resultHead` is checked against; required for "outcome".
  * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
- * @returns {{recorded: boolean, audit: object}} Updated audit record.
+ * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails or the request is malformed.
  */
-export function auditObjection(
+export async function auditObjection(
   orgFile,
   worktreeId,
-  { checkpoint, target, kind, description, rebuttalRequested, resultHead },
+  { checkpoint, target, kind, description, rebuttalRequested, resultHead, repo },
   env = process.env,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
@@ -292,9 +313,9 @@ export function auditObjection(
   }
   verifiedAuditor(orgFile, worktreeId, env);
   const ledger = requireLedger(orgFile, worktreeId);
-  return withAudit(orgFile, worktreeId, (audit) => {
+  return withAudit(orgFile, worktreeId, async (audit) => {
     const record = audit.checkpoints[checkpoint];
-    record.binding = computeBinding(checkpoint, ledger, audit, resultHead);
+    record.binding = await computeBinding(checkpoint, ledger, audit, resultHead, repo);
     record.objections = [
       ...record.objections,
       {
@@ -383,10 +404,10 @@ export async function auditResponse(
  * @param {string} request.verdict - "persuaded" or "not-persuaded".
  * @param {string} request.reason - Why.
  * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
- * @returns {{recorded: boolean, audit: object}} Updated audit record.
+ * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails, or the ruling targets a stale response.
  */
-export function auditRuling(
+export async function auditRuling(
   orgFile,
   worktreeId,
   { checkpoint, objectionId, respondedAgainst, verdict, reason },
@@ -431,9 +452,9 @@ export function auditRuling(
  * @param {string} checkpoint - "brief" or "outcome".
  * @param {{type: string, id: string}[]} checked - Items checked.
  * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
- * @returns {{recorded: boolean, audit: object}} Updated audit record.
+ * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  */
-export function auditChecked(orgFile, worktreeId, checkpoint, checked, env = process.env) {
+export async function auditChecked(orgFile, worktreeId, checkpoint, checked, env = process.env) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
     Array.isArray(checked) &&
@@ -527,12 +548,13 @@ function checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint) {
  * @param {object} options.ledger - Confirmed requirements ledger.
  * @param {string} options.ownerRoot - Owner project root, for evidence containment.
  * @param {string} [options.resultHead] - Result HEAD; required for "outcome".
- * @returns {{accepted: boolean, currentBinding: object, reasons: string[]}} Result.
+ * @param {string} [options.repo] - Workspace `resultHead` is checked against; required for "outcome".
+ * @returns {Promise<{accepted: boolean, currentBinding: object, reasons: string[]}>} Result.
  */
-export function auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead }) {
+export async function auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead, repo }) {
   const record = audit.checkpoints[checkpoint];
   const reasons = checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint);
-  const currentBinding = computeBinding(checkpoint, ledger, audit, resultHead);
+  const currentBinding = await computeBinding(checkpoint, ledger, audit, resultHead, repo);
   return { accepted: reasons.length === 0, currentBinding, reasons };
 }
 
@@ -544,17 +566,18 @@ export function auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
  * @param {string} checkpoint - "brief" or "outcome".
  * @param {string} [resultHead] - Result HEAD; required for "outcome".
+ * @param {string} [repo] - Workspace `resultHead` is checked against; required for "outcome".
  * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
- * @returns {{accepted: boolean, audit: object}} Updated audit record.
+ * @returns {Promise<{accepted: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When any B.4 condition fails, naming every reason.
  */
-export function auditAccept(orgFile, worktreeId, checkpoint, resultHead, env = process.env) {
+export async function auditAccept(orgFile, worktreeId, checkpoint, resultHead, repo, env = process.env) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   verifiedAuditor(orgFile, worktreeId, env);
   const ledger = requireLedger(orgFile, worktreeId);
   const ownerRoot = ownerProject(orgFile);
-  return withAudit(orgFile, worktreeId, (audit) => {
-    const check = auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead });
+  return withAudit(orgFile, worktreeId, async (audit) => {
+    const check = await auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead, repo });
     assert(check.accepted, `Checkpoint ${checkpoint} cannot be accepted: ${check.reasons.join("; ")}`);
     const record = audit.checkpoints[checkpoint];
     // A prior acceptance made stale by a later presentation or amendment
@@ -596,9 +619,10 @@ export function auditAccept(orgFile, worktreeId, checkpoint, resultHead, env = p
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
  * @param {string} checkpoint - "brief" or "outcome".
  * @param {string} [resultHead] - Result HEAD; required for "outcome".
- * @returns {boolean} Whether the checkpoint currently has a valid acceptance.
+ * @param {string} [repo] - Workspace `resultHead` is checked against; required for "outcome".
+ * @returns {Promise<boolean>} Whether the checkpoint currently has a valid acceptance.
  */
-export function hasValidAcceptance(orgFile, worktreeId, checkpoint, resultHead) {
+export async function hasValidAcceptance(orgFile, worktreeId, checkpoint, resultHead, repo) {
   const ledger = readLedger(orgFile, worktreeId);
   if (!ledger) return false;
   const audit = readAudit(orgFile, worktreeId);
@@ -607,7 +631,14 @@ export function hasValidAcceptance(orgFile, worktreeId, checkpoint, resultHead) 
   const ownerRoot = ownerProject(orgFile);
   const reasons = checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint);
   if (reasons.length > 0) return false;
-  const currentBinding = computeBinding(checkpoint, ledger, audit, resultHead);
+  let currentBinding;
+  try {
+    currentBinding = await computeBinding(checkpoint, ledger, audit, resultHead, repo);
+  } catch {
+    // A stale or forged resultHead must make an existing acceptance invalid,
+    // not throw — this is the plain-boolean gate contract callers rely on.
+    return false;
+  }
   return record.acceptance.boundHash === canonicalHash(currentBinding);
 }
 

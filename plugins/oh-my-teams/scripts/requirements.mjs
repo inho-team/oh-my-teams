@@ -17,10 +17,12 @@ import {
   hash,
   inside,
   readJSON,
+  withAsyncFileLock,
   withFileLock,
   writeJSON,
 } from "./core.mjs";
 import { canonicalize } from "./contracts.mjs";
+import { workspaceBinding } from "./evidence.mjs";
 
 const SCOPES = ["equal", "narrower"];
 const FIDELITY_STATUSES = ["met", "unmet"];
@@ -71,7 +73,7 @@ function withDrafts(orgFile, callback) {
 function withLedgers(orgFile, callback) {
   const directory = path.join(projectRoot(orgFile), "requirements");
   fs.mkdirSync(directory, { recursive: true });
-  return withFileLock(
+  return withAsyncFileLock(
     path.join(directory, ".lock"),
     callback,
     "Requirements ledger update in progress; read it again",
@@ -453,20 +455,26 @@ export function requirementsConfirm(orgFile, worktreeId, { criterionId, userQuot
  * @param {object} request - Presentation to record.
  * @param {string} request.criterionId - Criterion presented.
  * @param {string} request.head - Result HEAD the presentation reflects.
+ * @param {string} request.repo - Workspace `head` is checked against.
  * @param {string} request.source - Local file path copied into evidence storage.
  * @param {string} request.userQuote - What the user said in response.
  * @param {string} request.outcome - "confirmed" or "rejected".
- * @returns {{presented: boolean, ledger: object}} Updated ledger.
- * @throws {Error} When the criterion is unknown, evidence cannot be read, or fields are missing.
+ * @returns {Promise<{presented: boolean, ledger: object}>} Updated ledger.
+ * @throws {Error} When the criterion is unknown, evidence cannot be read, fields are missing,
+ *   or `head` does not match the workspace's actual Git HEAD.
  */
-export function requirementsPresent(
+export async function requirementsPresent(
   orgFile,
   worktreeId,
-  { criterionId, head, source, userQuote, outcome },
+  { criterionId, head, repo, source, userQuote, outcome },
 ) {
   assert(
     typeof head === "string" && head.trim(),
     "head is required for a presentation",
+  );
+  assert(
+    typeof repo === "string" && repo.trim(),
+    "repo is required to verify head against the workspace's actual HEAD",
   );
   assert(
     PRESENTATION_OUTCOMES.includes(outcome),
@@ -479,6 +487,13 @@ export function requirementsPresent(
   assert(
     typeof source === "string" && fs.existsSync(source),
     "Presentation evidence source must exist",
+  );
+  const { head: actualHead } = await workspaceBinding(repo);
+  assert(
+    actualHead && actualHead === head,
+    `Declared head ${head} does not match the actual Git HEAD ` +
+      `${actualHead ?? "(not a Git workspace)"} of ${repo}; ` +
+      "a stale or forged head cannot be presented as the current result",
   );
   return withLedgers(orgFile, () => {
     const file = ledgerFile(orgFile, worktreeId);
@@ -515,17 +530,29 @@ export function requirementsPresent(
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree the ledger belongs to.
- * @param {{head: string, recordedBy: string, items: object[]}} request - Fidelity check to record.
- * @returns {{recorded: boolean, ledger: object}} Updated ledger.
- * @throws {Error} When items do not cover every statement/criterion exactly once.
+ * @param {{head: string, repo: string, recordedBy: string, items: object[]}} request - Fidelity check to record.
+ * @returns {Promise<{recorded: boolean, ledger: object}>} Updated ledger.
+ * @throws {Error} When items do not cover every statement/criterion exactly once, or `head`
+ *   does not match the workspace's actual Git HEAD.
  */
-export function requirementsFidelity(orgFile, worktreeId, { head, recordedBy, items }) {
+export async function requirementsFidelity(orgFile, worktreeId, { head, repo, recordedBy, items }) {
   assert(typeof head === "string" && head.trim(), "head is required");
+  assert(
+    typeof repo === "string" && repo.trim(),
+    "repo is required to verify head against the workspace's actual HEAD",
+  );
   assert(
     typeof recordedBy === "string" && recordedBy.trim(),
     "recordedBy is required",
   );
   assert(Array.isArray(items) && items.length > 0, "fidelity items required");
+  const { head: actualHead } = await workspaceBinding(repo);
+  assert(
+    actualHead && actualHead === head,
+    `Declared head ${head} does not match the actual Git HEAD ` +
+      `${actualHead ?? "(not a Git workspace)"} of ${repo}; ` +
+      "a stale or forged head cannot bind a fidelity check",
+  );
   for (const item of items) {
     assert(
       item && ["statement", "criterion"].includes(item.type) && item.id,
