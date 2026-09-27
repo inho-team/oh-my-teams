@@ -30,7 +30,7 @@ import {
 } from "./role-launch.mjs";
 import { openDirectorTerminal } from "./director-terminal.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
-import { fetchModelCatalog } from "./model-catalog.mjs";
+import { fetchModelCatalog, revalidateModelChoices } from "./model-catalog.mjs";
 import {
   assertNotKickoffOwner,
   deliverKickoff,
@@ -251,6 +251,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                (queries claude, codex and agy for the model catalog each
                currently offers; a provider that cannot be read comes back
                unavailable with a reason instead of a stale or default model)
+  model-catalog-revalidate --selections FILE [--codex-home DIR]
+               (verification-only: re-fetches the catalog and checks each
+               selection in FILE against it, without saving anything)
   usage-report --org FILE [--worktree ID | --all] [--state DIR]
                [--place ROLE=DIR ...] [--claude-home DIR] [--codex-home DIR]
                [--agy-home DIR] [--write] [--json]
@@ -463,6 +466,7 @@ export const ALLOWED_OPTIONS = {
   ],
   "host-defaults": ["project", "codex-home"],
   "model-catalog": ["codex-home"],
+  "model-catalog-revalidate": ["selections", "codex-home"],
   "usage-report": [
     "org",
     "worktree",
@@ -626,6 +630,7 @@ export const REQUIRED_OPTIONS = {
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
   "model-catalog": [],
+  "model-catalog-revalidate": ["selections"],
   "usage-report": ["org"],
   "supervision-next": ["org", "observation"],
   "supervision-wait": ["run"],
@@ -1760,6 +1765,13 @@ async function executeCommand(args) {
       return fetchModelCatalog({
         codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
       });
+    case "model-catalog-revalidate": {
+      const selections = readJSON(args.selections);
+      const catalog = await fetchModelCatalog({
+        codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+      });
+      return revalidateModelChoices(catalog, selections);
+    }
     case "usage-report":
       return reportUsage(args);
     case "supervision-next": {
