@@ -4,50 +4,53 @@
 
 실제 구현과 제안 계약을 구분하여, OMT 역할의 권한과 런타임 근거를 기술합니다.
 
-- **director**: `plugins/oh-my-teams/skills/director/SKILL.md`에 정의. `plugins/oh-my-teams/scripts/teams-org.mjs`의 `directorRequest`(2134줄)는 런타임 시작 인자 생성 기능일 뿐 결정 실행이 아닙니다. 실제 결정 신호 처리는 `kickoff-release` 등의 명령과 `delivery.mjs`로 수행합니다. 런타임 테스트는 `tests/director-role.test.mjs`, `tests/director-signal.test.mjs`.
-- **pm**: `plugins/oh-my-teams/skills/pm/SKILL.md`에 정의. `plugins/oh-my-teams/scripts/workflow.mjs`의 `createWorkflow`(262줄), `reserveExecution`(1011줄)로 작업 흐름을 통제. 또한 `plugins/oh-my-teams/scripts/gates.mjs`의 `acceptOutcome`(436줄)은 PM 전용(decider.kind === "pm")으로 최종 승인을 수행합니다. 테스트는 `tests/workflow-runtime-gaps.test.mjs`.
-- **pl**: `plugins/oh-my-teams/skills/pl/SKILL.md`에 정의. `plugins/oh-my-teams/scripts/workflow.mjs`의 `handoffTask`(1857줄) 등을 사용. `scripts/core.mjs`의 `depthRoles`(108줄)는 실행 역할 목록일 뿐 Orca 중첩 worker 깊이를 제한하는 런타임 기능이 아닙니다(실제 깊이 제한은 Orca가 관리하며 PL 스킬 계약으로 통제함). 테스트는 `tests/role-dispatch.test.mjs`.
-- **senior**: `plugins/oh-my-teams/skills/senior/SKILL.md`에 정의. `plugins/oh-my-teams/scripts/gates.mjs`의 `recordReview`(378줄)로 검토(review)를 기록합니다. (승인은 PM의 권한임). 자신이 설계/작성한 코드를 스스로 독립 승인할 수 없음. 테스트는 `tests/safety-net.test.mjs`, `tests/advise.test.mjs`.
-- **junior**: `plugins/oh-my-teams/skills/junior/SKILL.md`에 정의. 배정 파일 내 로직 작성 및 단위 테스트. 범위 변경 불가. 테스트는 `tests/legacy-intern.test.mjs`.
+- **director**: `plugins/oh-my-teams/skills/director/SKILL.md`에 정의. `plugins/oh-my-teams/scripts/teams-org.mjs`의 `directorRequest`(2134줄)는 런타임 시작 인자 생성 기능일 뿐 결정 실행이 아닙니다. 실제 결정 신호 처리는 `director-reply`, `director-watch` 등의 명령과 `delivery.mjs`로 수행합니다. 검증 항목은 `tests/director-role.test.mjs`의 `assertDirectorAuthority succeeds from the director checkout path`, `tests/director-signal.test.mjs`의 `directorWatch reports provider-overloaded from the PM's own terminal screen` 등입니다.
+- **pm**: `plugins/oh-my-teams/skills/pm/SKILL.md`에 정의. `plugins/oh-my-teams/scripts/workflow.mjs`의 `createWorkflow`(262줄), `reserveExecution`(1011줄)로 작업 흐름을 통제. 또한 `plugins/oh-my-teams/scripts/gates.mjs`의 `acceptOutcome`(436줄)은 PM 전용(`decider.kind === "pm"`)으로 최종 승인을 수행합니다. 검증 항목은 `tests/workflow-runtime-gaps.test.mjs`의 workflow 상태 갱신 테스트입니다.
+- **pl**: `plugins/oh-my-teams/skills/pl/SKILL.md`에 정의. `plugins/oh-my-teams/scripts/workflow.mjs`의 `handoffTask`(1857줄) 등을 사용. `scripts/core.mjs`의 `depthRoles`(108줄)는 실행 역할 목록일 뿐 Orca 중첩 worker 깊이를 제한하는 런타임 기능이 아닙니다(실제 깊이 제한은 Orca가 관리하며 PL 스킬 계약으로 통제함).
+- **senior**: `plugins/oh-my-teams/skills/senior/SKILL.md`에 정의. `plugins/oh-my-teams/scripts/gates.mjs`의 `recordReview`(378줄)로 검토(review)를 기록합니다. 자신이 설계/작성한 코드를 스스로 독립 승인할 수 없습니다. 검증 항목은 `tests/safety-net.test.mjs`의 `acceptOutcome requires decider.kind pm` 등입니다.
+- **junior**: `plugins/oh-my-teams/skills/junior/SKILL.md`에 정의. 배정 파일 내 로직 작성 및 단위 테스트. 범위 변경 불가.
 - **auditor**: 조직 파일(revision 16)에 선언되지 않은 제안 역할. 이슈 `#139` 브리프에 따라 독립 검증을 기획 중. **미구현 경계 명시:** 현행 런타임에는 auditor의 무논거 승인 차단기나 스킬이 구현되어 있지 않으므로, 이를 기설정된 런타임 차단기로 서술하지 않습니다.
 
 ## 2. 객체 소유와 상태 전이 경계
 
 OMT가 Orca의 소유 객체를 새로 관리하거나 생명주기 및 프로세스를 중복 복제하지 않도록 경계를 보존합니다.
 
-- **organization (조직)**: 정본 `.omt/organization.json`. 소유자 director. 생성/갱신 조건: `org-revise` 등 명령을 통한 director 권한입니다.
-- **brief (브리프)**: 정본 `.omt/briefs/`. 소유자 director. 생성/갱신 조건: director 권한으로 작성 및 갱신됩니다.
-- **Goal**: 정본은 Orca입니다. 소유자 Orca. 생성/갱신 조건: PM이 원래 인수 지시에서 생성하고 `kickoff-bind`와 연결할 뿐, 프로세스와 상태 전이(생성, 갱신, 종료) 및 권한은 전적으로 Orca에 따르며 OMT가 복제하지 않습니다.
-- **kickoff registry**: 정본 `.omt/kickoffs/`. 생성/갱신 조건: 생성과 바인딩은 PM이 주도하지만, `kickoff-release`와 `delivery` 상태 전이(종료, 정산, 회수)는 이사(director) 권한입니다.
-- **Run**: 정본은 Orca입니다. 소유자 Orca. PM이 workflow에 바인딩하여 실행을 추적합니다.
-- **workflow**: 정본 `.omt/workflows/`. 소유자 PM. 생성/갱신 조건: PM이 생성하고 상태(`pending`, `active`, `settled` 등 실제 JSON enum)를 갱신 및 보존합니다.
-- **Task**: 정본은 Orca입니다. 소유자 Orca. 상태 전이는 Orca가 관리합니다.
-- **Dispatch**: 정본은 Orca입니다. 소유자 Orca. 전이 주체는 Orca입니다.
-- **worker**: 정본은 Orca입니다. 소유자 Orca.
-- **resource slot**: 정본 `.omt/slots.json` (또는 인메모리 기록). 전역 관리. 갱신/종료 조건: 무거운 작업 전 worker가 `resource-acquire`로 획득하고 완료 직후 `resource-release`로 해제(반환)합니다.
-- **evidence (검증 증거)**: 정본 `.omt/evidence/`. 소유자 Senior/PL. 생성/갱신 조건: `gate-check`를 통한 checks 결과(pass/fail)와 `recordReview`의 review 결론(enum: `approved`, `changes-requested`, `inconclusive`)을 명확히 구분하여 객체 상태에 기록합니다.
+- **organization (조직)**: 정본 `.omt/organization.json`. 소유자 director. 생성/갱신 명령: `teams-org.mjs init`, `edit`, `preset`. (`org-revise` 명령은 존재하지 않습니다.)
+- **brief (브리프)**: 정본 `.omt/briefs/`. 소유자 director.
+- **Goal**: 정본 Orca 데이터베이스. PM이 원래 인수 지시에서 생성하고 `kickoff-bind`와 연결할 뿐, 생성·상태 전이·종료 권한은 전적으로 Orca가 가지며 OMT가 복제하지 않습니다.
+- **kickoff registry**: 정본 `.omt/kickoffs/` 디렉터리 내 개별 JSON(`[id].json`). 생성과 바인딩은 PM이 주도하지만, `kickoff-release`와 `kickoff-check-close-ready` 등 정산/회수 및 병합 권한은 이사(director)에게 있습니다.
+- **Run**: 정본 Orca 데이터베이스. PM이 workflow에 바인딩하여 사용합니다.
+- **workflow**: 정본 `.omt/workflows/`. 소유자 PM. 상태 enum(`ready`, `running`, `integration-pending`, `accepted`, `blocked`)을 PM이 `workflow.mjs` 모듈을 통해 갱신 및 보존합니다.
+- **Task**: 정본 Orca 데이터베이스. OMT는 Task 상태(`pending`, `reserved`, `running`, `submitted`, `review-pending`, `reviewed`, `failed`, `accepted`)를 추적합니다.
+- **Dispatch**: 정본 Orca 데이터베이스. 전이 주체는 Orca입니다.
+- **worker**: 정본 Orca 데이터베이스.
+- **resource slot**: 정본 `.omt/resources/` 디렉터리 내 개별 JSON. 인메모리가 아니며, 무거운 작업 전 `resource-acquire`로 획득(생성)하고 완료 직후 `resource-release`로 해제(삭제)합니다.
+- **evidence (검증 증거)**: 정본 `.omt/evidence/`. `verify` 명령을 실행하여 테스트/명령의 성공 여부(checks)를 증거로 생성합니다. `gate-check`가 생성하는 것이 아닙니다.
+- **review (검토 기록) 및 gate**: 정본 `.omt/reviews/`와 `.omt/gates/`. `recordReview`로 `approved`, `changes-requested`, `inconclusive` 결론을 생성하며, `gate-check`는 이를 기반으로 최종 관문 상태를 갱신합니다.
 - **audit/objection**: auditor가 추후 생성할 객체 (현재 미구현).
 - **.omt docs (설계/계획 문서)**: 정본 워크트리 내. 소유자 작성 역할.
-- **delivery**: 이사가 `scripts/delivery.mjs`로 최종 확인 후 병합합니다. 무권한 역할의 병합은 거부됩니다.
+- **delivery**: 이사가 `delivery` 명령으로 병합을 확인합니다.
 
 ## 3. 역할별 상태, 판단 근거, 보고 대상 및 권한
 
-여섯 역할(director, pm, pl, senior, junior, auditor)과 10개 상태(시작, 배정, 반려, 재작업, 정체, 오류, 사용자 결정 대기, 독립 작업, 검증, close)의 60개 조합에 대한 규약입니다.
-제안된 auditor는 미구현 역할이므로 동일 사건에 대한 권한은 없으나 향후 설계 행동 구분을 위해 명시합니다.
-PL은 통합 충돌을 스스로 고치지 단독 수정하지 않고 하위에 되돌리며, PM이 배정한 PL은 기본 깊이 1 제한에 따라 하위 worker를 직접 띄우지 못하므로 분할 계획을 PM에게 반환하여 PM이 평평하게 배정합니다.
+여섯 역할과 10개 상태 조합에 대한 규약입니다.
+제안된 auditor는 미구현 역할이나 설계 구분을 위해 명시합니다.
+PL은 통합 충돌을 직접 고쳐 쓰지 않고 담당자에게 되돌리며, 의미 검증이 필요한 변경은 Senior에게 이관합니다.
+Senior는 정체와 오류를 즉시 모두 상향 보고하는 대신, 예산 내에서 자체 대안 탐색과 재시도를 수행합니다.
+PM이 배정한 PL은 하위 worker를 띄우지 못하므로 분할 계획을 PM에게 반환하여 평평하게 배정합니다.
 
 | 역할 | 사건(상태) | 판단 근거 및 조건 | 다음 행동(담당) | 완료 확인 | 보고 대상 |
 |---|---|---|---|---|---|
-| **director** | 시작 | 브리프 확정 완료 | PM에게 kickoff 할당 (director) | registry 갱신 | 사용자(할당) |
-| **director** | 배정 | 하위 배정 권한 없음 | (진행 불가) | - | - |
-| **director** | 반려 | 거부 권한 없음 | (진행 불가) | - | - |
-| **director** | 재작업 | 직접 재작업 권한 없음 | (진행 불가) | - | - |
-| **director** | 정체 | 상태 정체 | (진행 불가) | - | - |
-| **director** | 오류 | 자체 오류 | (진행 불가) | - | - |
-| **director** | 사용자 결정 대기 | PM의 에스컬레이션 수신 | 4가지 경계 대조 후 결정 또는 질문 생성 (director) | 답변 수신 | 사용자 |
-| **director** | 독립 작업 | 독립 작업 권한 없음 | (진행 불가) | - | - |
-| **director** | 검증 | 직접 검증 권한 없음 | (진행 불가) | - | - |
-| **director** | close | 모든 정산 및 배포 준비 완료 | delivery 명령으로 main 병합 (director) | 병합 성공 | 사용자 |
+| **director** | 시작 | 브리프 확정 완료 | `kickoff-show`로 등록 확인 후 PM 세션 생성/할당 (director) | registry 갱신 | 사용자(할당) |
+| **director** | 배정 | 권한 없음 | (진행 불가 - 업무 배정은 PM 권한) | - | - |
+| **director** | 반려 | 권한 없음 | (진행 불가 - 통합/검토 반려는 하위 권한) | - | - |
+| **director** | 재작업 | 권한 없음 | (진행 불가) | - | - |
+| **director** | 정체 | `director-watch`로 정체 파악 | `provider-overloaded` 등 전역 정체 상태 확인 (director) | 상태 갱신 | 사용자 |
+| **director** | 오류 | PM이 해결 불가하여 상향 보고한 오류 | 원인 파악 및 사용자 협의 (director) | 에스컬레이션 | 사용자 |
+| **director** | 사용자 결정 대기 | PM의 에스컬레이션 수신 | 4가지 경계 대조 후 해당하면 사용자 질문, 아니면 `director-reply`로 직접 결정 (director) | 답변 수신 | 사용자 |
+| **director** | 독립 작업 | PM 결정 요청 대기 중 | 대기 중에도 다른 kickoff 감시(`director-watch`) 지속 (director) | 감시 완료 | - |
+| **director** | 검증 | PR 병합 전 검증 | `kickoff-check-close-ready` 및 `kickoff-merge-record`로 HEAD 대조 (director) | 통과 여부 | 사용자 |
+| **director** | close | 모든 정산 및 배포 준비 완료 | `close` 또는 `disband`로 kickoff 종료 및 병합 (director) | 병합 성공 | 사용자 |
 | **pm** | 시작 | 목표 브리프 수신 | workflow 생성 및 kickoff 바인딩 (pm) | 상태 갱신 | director |
 | **pm** | 배정 | 목표 분할/배정 | PL에게 분할 요청 또는 평평하게 배정 후 reserve/start (pm) | worker 실행 | director |
 | **pm** | 반려 | 통합 검토 반려 수신 | 파동 재설정 후 담당자 재지정 (pm) | 워크플로우 갱신 | director |
@@ -60,30 +63,30 @@ PL은 통합 충돌을 스스로 고치지 단독 수정하지 않고 하위에 
 | **pm** | close | 자체 close 불가 | (진행 불가, release는 director) | - | - |
 | **pl** | 시작 | 자체 시작 불가 | (진행 불가) | - | - |
 | **pl** | 배정 | PM으로부터 분할 요청 수신 | 분할 계획 반환하여 PM이 평평하게 배정 유도 (pl) | 계획 제출 | PM (상위) |
-| **pl** | 반려 | 통합 충돌 발생 | 충돌 직접 수정 금지, 충돌 파일 첨부하여 배정자에게 반환 (pl) | 반려 리포트 | PM (상위) |
+| **pl** | 반려 | 통합 충돌 발생 | 충돌 직접 수정 금지, 충돌 파일 첨부하여 당사자에게 되돌림 (pl) | 반려 리포트 | PM (상위) |
 | **pl** | 재작업 | 분할/통합 재작업 지시 수신 | 기존 분할 계획 수정 및 새 파동 제안 (pl) | 재작업 완료 | PM (상위) |
 | **pl** | 정체 | 통합 정체 파악 | 정체 원인 파악 후 해결 불가 시 에스컬레이션 (pl) | 보고 완료 | PM (상위) |
 | **pl** | 오류 | 통합 또는 worker 거부(중첩) | 분할 계획과 거부 원문을 첨부해 반환 (pl) | 반환 완료 | PM (상위) |
 | **pl** | 사용자 결정 대기 | 하위 에스컬레이션 수신 | 자체 해결 불가(경계 위반) 시 상향 보고 (pl) | 상향 전달 | PM (상위) |
 | **pl** | 독립 작업 | 계획/대안 탐색 중 | 통합 전용 별도 Orca 워크트리 구성 등 지속 (pl) | 구성 완료 | PM (상위) |
-| **pl** | 검증 | 하위 task 완료 | 통합 결과 verify 및 merge-check (pl) | 통과 확인 | PM (상위) |
+| **pl** | 검증 | 하위 task 완료 | 저위험 변경은 자동 검사, 의미 검증 필요한 변경은 Senior 이관. 이후 verify (pl) | 통과 확인 | PM (상위) |
 | **pl** | close | 통합 취합 완료 | 작업 ID/검증 키/변경 요약을 포함해 worker_done (pl) | 리포트 제출 | PM (상위) |
 | **senior** | 시작 | 자체 시작 불가 | (진행 불가) | - | - |
 | **senior** | 배정 | 설계/검토/구현 task 수신 | 인터페이스 설계 및 필수 검토(changes-requested/approved) 작성 (senior) | 설계/검토 제출 | 배정한 상위 역할 |
 | **senior** | 반려 | 산출물 결함 또는 검토 반려 수신 | 독단적 변경 거부 및 changes-requested 기록 (senior) | 거부 기록 | 배정한 상위 역할 |
 | **senior** | 재작업 | 반려 피드백 수신 | 대안 탐색 및 해당 결함 수정 (senior) | 결함 수정 | 배정한 상위 역할 |
-| **senior** | 정체 | 의존성 또는 결정 대기 | 기다리다 막히면 독단적 판단 없이 상태 상향 보고 (senior) | 보고 완료 | 배정한 상위 역할 |
-| **senior** | 오류 | 실행/구현 중 오류 | 원인 로그 캡처 및 거부 코드 첨부 상향 보고 (senior) | 에스컬레이션 | 배정한 상위 역할 |
+| **senior** | 정체 | 의존성 대기 | 즉시 보고하지 않고 자체 대안 탐색 및 예산 내 우회 시도, 모두 막히면 상향 보고 (senior) | 보고 완료 | 배정한 상위 역할 |
+| **senior** | 오류 | 실행/구현 중 오류 | 즉각 에스컬레이션 않고 자체 디버깅(변이 검사/재시도). 해결 불가 시 거부 코드 첨부 상향 보고 (senior) | 에스컬레이션 | 배정한 상위 역할 |
 | **senior** | 사용자 결정 대기 | 예외 상황 발생 | 범위 밖 결정 금지, 즉각 상향 보고 (senior) | 보고 완료 | 배정한 상위 역할 |
 | **senior** | 독립 작업 | 리뷰/설계 중 조사 필요 | assist 호출 등 다른 task 지속 (senior) | 조사 완료 | 배정한 상위 역할 |
-| **senior** | 검증 | 제출 전 검증 | 수용 기준 대조 후 자체 verify (자체 산출물 승인 금지) (senior) | verify 통과 | 배정한 상위 역할 |
+| **senior** | 검증 | 제출 전 검증 | 수용 기준 대조 후 자체 verify (자체 산출물 독립 승인 금지) (senior) | verify 통과 | 배정한 상위 역할 |
 | **senior** | close | 담당 범위 완료 | 실패 증거 누락 없이 worker_done 호출 (senior) | 완료 선언 | 배정한 상위 역할 |
 | **junior** | 시작 | 자체 시작 불가 | (진행 불가) | - | - |
 | **junior** | 배정 | 구체적 로직 구현 지시 수신 | 파일 편집 하네스 진입 및 코드 구현 (junior) | 코드 작성 | 배정한 상위 역할 |
 | **junior** | 반려 | 권한 밖 지시(범위 변경) 수신 | 자체 수정 불가, 거부 증거 상향 보고 (junior) | 거부 통지 | 배정한 상위 역할 |
 | **junior** | 재작업 | 결함 수정 지시 수신 | 지적 사항만 수용하여 수정 (junior) | 수정 완료 | 배정한 상위 역할 |
 | **junior** | 정체 | 지시 충돌 발생 | 억지 구현 중단 및 충돌 상태 상향 보고 (junior) | 보고 완료 | 배정한 상위 역할 |
-| **junior** | 오류 | 환경/단위 테스트 오류 | 원인 파악 불가 시 로그 캡처 후 상향 보고 (junior) | 에스컬레이션 | 배정한 상위 역할 |
+| **junior** | 오류 | 환경/단위 테스트 오류 | 자체 해결 불가 시 로그 캡처 후 상향 보고 (junior) | 에스컬레이션 | 배정한 상위 역할 |
 | **junior** | 사용자 결정 대기 | 결정 불가 상황 직면 | 억측 없이 상향 보고 (junior) | 보고 완료 | 배정한 상위 역할 |
 | **junior** | 독립 작업 | 코드 작성 중 | 주어진 제한된 범위 내 로직/단위테스트 지속 (junior) | 테스트 실행 | 배정한 상위 역할 |
 | **junior** | 검증 | 구현 완료 후 | 단위 테스트 실행 통과 여부 확인 (junior) | 테스트 통과 | 배정한 상위 역할 |
@@ -114,6 +117,8 @@ PL은 통합 충돌을 스스로 고치지 단독 수정하지 않고 하위에 
 
 - 위 네 경계에 해당하지 않는 범위 내의 판단(실행 깊이, 조직 프로필 내 모델 선택, 분할/순서, 재시도/재작업 범위, 임시 리소스 정리 등)은 무조건 상향 보고하지 않고 자율적으로 처리합니다.
 - 주도적 판단 후에는 그 **결정 내용, 근거, 판단이 틀렸을 때 되돌리는 방법(rollback)**을 해당 진행 보고나 문서의 지정 위치에 기록합니다.
+- 사용자나 상위 역할의 답을 대기하는 상태가 되더라도 전체 작업을 멈추지 않고, 당면한 대기 상태와 무관하게 진행할 수 있는 **독립 작업은 지속**하는 것을 운영 절차로 확립합니다.
+
 - 사용자나 상위 역할의 답을 대기하는 상태가 되더라도 전체 작업을 멈추지 않고, 당면한 대기 상태와 무관하게 진행할 수 있는 **독립 작업은 지속**하는 것을 운영 절차로 확립합니다.
 ## 5. 하위 역할의 주도적 행동 규약
 
