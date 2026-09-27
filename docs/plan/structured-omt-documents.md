@@ -226,52 +226,52 @@ omt-doc:<kickoffHash>/<workflowId|none>/<stageSlug>/<docType>/<localId>@r<revisi
 기존 두 선례를 그대로 계승한다.
 
 1. **append-only revision 파일**: task revision(`tasks/<taskId>/revisions/<revision>.json`, `workflow.mjs:304-313`)과 review/decision(`assert(!fs.existsSync(target))`, `gates.mjs:399-400`)이 보여주는 대로, 문서 갱신은 새 revision 파일을 추가할 뿐 기존 파일을 다시 쓰지 않는다. 경로는 `.../revisions/<n>.json`이다.
-2. **포인터 파일의 낙관적 동시성**: `saveOrg`의 `expectedRevision` 검사(`core.mjs:1157-1160`)를 계승해, 각 문서의 `current.json`(최신 revision 번호와 5번 항목이 정의하는 `committed` 상태를 담는 포인터)을 갱신할 때 호출자가 넘긴 `expectedRevision`이 현재 값과 다르면 거부한다. 이것이 "오래된 revision으로 덮어쓰지 않는다"(브리프 조건 6)는 요구를 만족시킨다.
+2. **포인터 파일의 낙관적 동시성**: `saveOrg`의 `expectedRevision` 검사(`core.mjs:1157-1160`)를 계승해, 각 문서의 `current.json`(최신 `revision` 번호와 그 revision 파일의 `hash`만 담는 포인터다. 5번 항목이 설명하듯 이 설계는 별도의 `committed` 게이트를 두지 않는다)을 갱신할 때 호출자가 넘긴 `expectedRevision`이 현재 값과 다르면 거부한다. 이것이 "오래된 revision으로 덮어쓰지 않는다"(브리프 조건 6)는 요구를 만족시킨다.
 3. **동시 갱신**: `withWorkflowUpdate`의 `.lock` 파일(`workflow-store.mjs:65-75`)과 `gates.mjs`의 `gates-write.lock`(`withAsyncFileLock`, `gates.mjs:379-382`)을 계승해, 문서별 디렉터리에 `.lock` 파일을 두고 갱신 임계구역을 감싼다.
 4. **부분 실패 후 원자성(문서 저장소 내부)**: `workflow-store.mjs`의 transaction 저널 패턴(`saveWorkflowState`가 `transaction.json`에 `{state, events}`를 먼저 쓰고 `recoverTransaction`이 반영 후 삭제, `workflow-store.mjs:12-27,122-134`)과 같은 구조(먼저-쓰고-반영-후-삭제하는 저널 파일)를 문서 저장에도 적용한다. 다만 `workflow-store.mjs`가 노출하는 `workflowDirectory`/`workflowStateFile`/`recoverTransaction` 함수 자체를 호출하지는 않는다. 이 함수들은 `WORKFLOW_ID_PATTERN`에 맞는 `workflowId`를 필수로 요구하며(`assert(typeof id === "string" && WORKFLOW_ID_PATTERN.test(id))`, `workflow-store.mjs:36-40`), `{state.json, events/}`라는 workflow 전용 레이아웃에 고정되어 있다. 반면 3.2절 공통 봉투는 `workflowId: null`을 허용하고, `01. 기획` 단계 문서(kickoff-brief-ref)는 workflow 생성 이전에 작성되므로 애초에 `workflowId`가 없다. 그러므로 문서 저장 헬퍼는 `workflow-store.mjs`와 **같은 저널 패턴**(임시 저널 파일 → 반영 → 삭제, 재개 시 저널 존재 여부로 미완료 반영을 재개)을 독립적으로 구현하되, `workflowId`가 있는 `03. 구현` 이후 문서는 그 저널을 workflow 디렉터리 안(`.omt/workflows/<id>/documents/...`)에 두어 기존 workflow `.lock`의 보호를 그대로 받고, `workflowId`가 없는 `01. 기획`/`02. 설계` 문서는 kickoff 디렉터리 자신의 `.lock`으로 보호되는 별도의 경량 저널을 둔다. 이는 AGENTS.md가 금지하는 "런타임 로직의 중복 선언"이 아니라 이미 검증된 저널 **구조**를 다른 범위에 다시 적용하는 것이며, 기존 함수를 호출할 수 없는 이유는 위에서 인용한 코드가 보여준다(finding `workflow-journal-not-reusable-for-non-workflow-docs`).
 5. **문서와 참조 객체 사이의 원자성**: 4번 항목은 문서 저장소 **내부**(자신의 revision 파일과 `current.json`)의 원자성만 다룬다. 3.2절이 정의하는 모든 `*Ref` 필드(`kickoffEntryRef`, `workflowRef`, `taskRef`, `attemptRefs[]`, `integrationTaskRef`, `reviewFileRef`, `decisionFileRef`, `evidenceRef`, `reportRef`, `directorSignalRef`, `kickoffArchiveRef`, `incidentRefs[]`, `lessonCandidateRefs[]`)는 예외 없이 **문서가 이미 존재하는 기존 객체를 가리키는 단방향**이다. 이 방향은 문서 자신의 append-only 쓰기(1번 항목) 안에서 완결된다. 참조 대상이 실제로 존재하고 3.6절이 요구하는 허용 상태에 있는지는 문서를 쓰기 **전에** 읽기 전용으로 검증하면 되고, 검증에 실패하면 문서 자체를 쓰지 않으므로 어떤 불일치도 남지 않는다. 따라서 이 방향에는 별도의 원자성 계약이 필요 없다.
 
-   원자성 문제가 실제로 남는 지점은 **역방향**, 즉 이미 존재하는 기존 객체가 새로 만든 문서를 가리켜야 하는 경우 하나뿐이다: 3.1절이 이미 정의한 대로 `06. 인도` 단계의 실질적 갱신은 delivery-ref 문서 자신이 아니라 kickoff 등록 항목의 `delivered` 필드(`kickoff-registry.mjs`)에서 일어나므로, delivery-ref 문서가 커밋된 뒤 kickoff 등록 항목이 그 문서를 가리키는 `delivered.docRef`를 채워야 한다. 이 지점이 두 개의 서로 다른 저장소(문서 저장소와 kickoff 등록부)에 걸친 쓰기이므로, 파일별 원자 쓰기(1번 항목의 append-only 파일, 4번 항목의 저널)는 각 저장소 **자신의** 쓰기만 원자로 만들 뿐 이 지점의 원자성을 보장하지 않는다.
+   이 단방향 원칙만으로는 조건 4를 충족하지 못한다는 것이 `design-independent-review-pl-7`의 판정이다(finding `document-write-reference-update-atomicity-unaddressed`). 문서가 기존 객체를 가리키는 것과 별개로, review/decision·kickoff 등록 항목처럼 문서로 옮겨진 지속 객체 자신도 자기를 문서화한 문서를 향한 검증 가능한 참조를 갖고 있어야 하며, write-once 구조(`gates.mjs:399-400`)는 "이미 쓴 레코드를 다시 쓰지 않는다"는 계약일 뿐 그 요구를 면제하지 않는다는 것이 이사 판정 1)의 핵심이다(pl-7 criterion `revision-integrity-compat`).
 
-   **참조 대상이 될 수 있는 기존 객체마다 실제로 있는 동시성 계약을 구분한다.**
+   이 설계는 **어떤 기존 객체에도 새 필드를 쓰지 않고** 이 요구를 충족한다. 참조를 **저장**하는 대신 **유도**하는 방법을 쓴다. 3.5절의 `docId`는 `<kickoffHash>/<workflowId|none>/<stageSlug>/<docType>/<localId>` 다섯 세그먼트로 구성되며, 앞 네 세그먼트는 항상 호출 맥락(3.11절의 kickoff-show/workflowStateFile 조회)만으로 결정된다. 마지막 세그먼트 `localId`를 대응하는 기존 객체 자신이 이미 갖고 있는 불변 필드로부터 결정적으로 계산하면, 그 객체는 아무것도 새로 쓰지 않고도 자기 대응 문서의 정확한 위치를 스스로 증명하는 참조를 이미 보존하고 있는 셈이 된다.
 
-   | 객체 종류 | 실제 동시성 계약 | 이 설계에서의 결론 |
+   **localId 결정 규칙(조건 4의 일반 해법).**
+
+   | docType | localId | 유도 근거 |
    |---|---|---|
-   | kickoff 등록 항목 | 자체 `revision`/CAS 필드가 없다(`registerKickoff`/`bindKickoffRun`은 `writeJSON(file, entry)`로 단순 덮어쓸 뿐 전제조건을 받지 않는다, `kickoff-registry.mjs:335-436`). `withRegistry`(`kickoff-registry.mjs:236-246`)가 등록부 디렉터리 전체를 감싸는 단일 `.lock`을 제공하고, `listKickoffs`(`kickoff-registry.mjs:257-270`)는 락 없이 각 항목 파일을 읽는다 | **유일한 역방향 갱신 대상**. 문서 revision을 이 객체의 `expectedRevision`으로 쓰지 않는다(애초에 그런 필드가 없다). 전제조건으로 **엔트리 파일의 콘텐츠 지문**(`sha256(raw file bytes)`)을 쓴다. 아래 커밋 계약 참고 |
-   | review/decision 레코드 | write-once다: `recordReviewLocked`가 `assert(!fs.existsSync(target))`로 같은 id의 재작성을 거부한다(`gates.mjs:399-400`). 모든 review/decision 쓰기는 `stateDir` 전체를 감싸는 단일 `gates-write.lock`을 공유한다(`withAsyncFileLock`, `gates.mjs:379-382`) | **역방향 필드를 추가하지 않는다.** write-once 구조는 "이미 쓴 파일에 나중에 필드를 채워 넣는" 요구와 구조적으로 충돌한다(파일이 이미 존재하면 재작성 자체가 거부된다). `04. 검토`/`05. 수용` 문서(`review-ref`/`acceptance-ref`)는 `reviewFileRef`/`decisionFileRef`로 review/decision을 가리키기만 하고, review/decision 레코드 쪽에는 문서를 가리키는 필드를 두지 않는다. 이 경로에서 `gates-write.lock`은 전혀 획득되지 않는다 |
-   | organization | `saveOrg`가 `expectedRevision` 기반 CAS를 이미 제공한다(`core.mjs:1157-1160`) | 이 설계에서 organization은 특정 문서의 `docId`를 담는 참조 필드를 갖지 않는다. 3.10절의 `documentSystemActivatedAt`은 정책 값이지 문서 참조가 아니다. **organization은 이 원자성 계약의 대상이 아니다.** 앞으로 organization이 특정 문서를 참조해야 하는 요구가 생기면 이미 있는 `expectedRevision` CAS를 그대로 쓰면 되고, 이 설계가 새로 정의할 것은 없다 |
+   | kickoff-brief-ref | 고정 상수 `"kickoff"` | `registerKickoff`가 같은 `worktreeId`(=`kickoffHash`)의 재등록을 거부하므로(`locateEntry`가 기존 항목을 찾으면 예외를 던진다, `kickoff-registry.mjs:340-347`) kickoffHash+workflowId=none 조합 아래 정확히 하나만 존재한다 |
+   | workflow-task-ref | task 자신의 `id` | task revision 파일 경로 자체가 이미 이 `id`로 문서를 구분한다(`workflow.mjs:304-313`) |
+   | integration-ref | 통합 task 자신의 `id` | 하위 task와 겹치지 않는 별도 id가 이미 보장된다(`workflow.mjs:278-279`) |
+   | review-ref | review 기록 자신의 `id` | 파일 경로 자체가 이미 이 `id`로 review를 구분한다(`reviewFile(stateDir, id)`, `gates.mjs:38-39`) |
+   | acceptance-ref | decision 기록 자신의 `id` | 파일 경로 자체가 이미 이 `id`로 decision을 구분한다(`decisionFile(stateDir, id)`, `gates.mjs:40-41`) |
+   | delivery-ref | kickoff 등록 항목의 `delivered.mergeCommit` | `recordDelivery`가 재배달 시도마다 `entry.delivered.head === verified.head`를 확인해 사실상 불변으로 고정한다(`kickoff-registry.mjs:632-644`) |
+   | closure-record | 고정 상수 `"closure"` | `releaseKickoff`이 성공하면 활성 등록부에서 엔트리를 지우므로(`fs.unlinkSync`, `kickoff-registry.mjs:720`) 같은 `worktreeId`로 다시 release를 시도해도 673행의 assert가 거부한다. closure-record는 이 kickoff 종료 1회에 대응하는 유일한 인스턴스다 |
 
-   **kickoff 등록 항목의 `delivered.docRef` 커밋 계약.**
+   review/decision 레코드는 이 규칙으로 **아무 필드도 새로 쓰지 않는다.** `04. 검토`/`05. 수용` 문서가 review/decision을 가리키는 것(`reviewFileRef`/`decisionFileRef`, 정방향)과, review/decision 레코드 자신의 `id`가 그 문서의 `localId`가 되어 대응 문서를 결정적으로 가리키는 것이 동시에 성립하므로, write-once 구조를 건드리지 않고도 조건 4를 만족한다. kickoff 등록 항목도 `delivered.docRef` 같은 새 필드를 쓰지 않는다. `recordDelivery`가 이미 쓰는 기존 필드 `entry.delivered.mergeCommit`(`kickoff-registry.mjs:636-644`)이 delivery-ref 문서의 `localId`이므로, 그 필드 자체가 이미 검증 가능한 참조다.
 
-   - **입력**: 커밋될 delivery-ref 문서의 `docId`와 `revision`, 그 revision 파일의 `sha256(raw file bytes)`(문서 hash), 대상 `worktreeId`, 갱신 직전에 읽은 등록 항목 파일 전체의 `sha256(raw file bytes)`(엔트리 지문).
-   - **커밋 순서**: (1) 문서 `.lock`(3번 항목)을 획득한다. 이 락은 (1)~(6) 전체를 감싸는 단일 임계구역이며, 커밋 순서 전체(등록부 락 유무와 무관하게)가 이 안에서 일어난다. (2) 문서 revision 파일을 append-only로 쓴다. (3) 문서의 `current.json`을 `{revision, hash, committed: false}`로 갱신한다. (4) 참조 갱신 의도 파일 `intent.json`을 문서 디렉터리 안에 쓴다: `{docId, docRevision, docHash, target: {kind: "kickoff-registry-entry", worktreeId, field: "delivered.docRef", expectedFingerprint}, value: "omt-doc:...@r<revision>"}`. (5) 문서 `.lock`을 쥔 채로 kickoff 등록부 `.lock`(`withRegistry`)을 추가로 획득한다(중첩 락, 항상 **문서 락 → 등록부 락** 순서이며 반대 순서로 두 락을 함께 잡는 경로는 이 설계 어디에도 없으므로 교착이 없다). 엔트리 파일을 다시 읽어 그 지문이 `expectedFingerprint`와 같은지 확인한다. 같으면 `delivered.docRef = value`를 채운 엔트리를 `writeJSON`으로 덮어쓰고 등록부 락을 해제한다. 다르면 등록부 락만 해제하고 거부한다(문서 자신은 이미 커밋 대기 상태로 안전하게 남는다). (6) (5)가 성공하면 `intent.json`을 삭제하고 문서의 `current.json`을 `committed: true`로 전환한 뒤 문서 `.lock`을 해제한다.
-   - **커밋 판정 지점**: 문서가 "존재한다"고 정본이 인정하는 시점은 (6)이 끝난 뒤, 즉 `current.json.committed === true`가 된 순간이다.
+   이로써 **문서와 참조 객체 사이에 두 번째 저장소를 갱신하는 쓰기가 이 설계 어디에도 없다.** 이전 판(커밋 `2a4824a`)이 제안한 엔트리 지문 CAS, `intent.json` 저널, "문서 락 → 등록부 락" 커밋 순서는 이 재설계로 전부 불필요해진다. 이사 판정 2)("(3) 이후 (4) 이전 중단 시 원래 입력을 어디서 복구하는지 증명하지 않는다")와 이사 판정 3)("(5) 성공 이후 자기 자신이 만든 지문 변화와 다른 세션의 경쟁 갱신을 하나의 절차로 구분하지 못한다")은 그 대상이 된 두 번째 쓰기 단계 자체가 사라지므로 더 이상 발생하지 않는다. 문서 저장소 내부의 원자성은 1~4번 항목(append-only, `expectedRevision` CAS, `.lock`, transaction 저널)만으로 완결되며, 이번 재설계는 그 위에 어떤 단계도 추가하지 않는다.
 
-   **(a) 미커밋 문서를 정본 조회에서 숨기는 계약.** `current.json.committed !== true`인 문서는 3.3절의 상태 전이 조회(`open → in-review → resolved`)와 3.6절 참조 무결성 검사의 "대상이 존재하는지" 판정에서 "존재하지 않음"과 동일하게 취급한다.
+   문서가 존재하는지는 `current.json`의 존재 여부만으로 판정한다(3.3절 상태 전이 조회, 3.6절 참조 무결성 검사 모두 동일). 4번 항목의 저널이 revision 파일과 `current.json` 쓰기를 하나의 원자 단위로 묶으므로(`workflow-store.mjs`의 `recoverTransaction`과 같은 패턴으로, 저널이 남아 있으면 다음 접근이 먼저 반영을 완결한 뒤 읽는다), 어떤 판독기도 그 둘 가운데 하나만 반영된 중간 상태를 보지 않는다. 그러므로 이 설계는 이전 판이 두었던 별도의 `committed` 불리언 게이트를 두지 않는다(2번 항목도 이를 반영해 수정했다). 그 게이트는 문서와 참조 객체 사이의 두 번째 저장소 쓰기가 끝나기를 기다리기 위한 장치였는데, 그런 두 번째 쓰기가 이 설계에는 없다.
 
-   **(b) 참조 검증과 revision 전이의 경쟁을 거부하는 계약.** (2)~(6) 전체가 문서 `.lock` 하나의 임계구역이므로, 같은 문서에 대한 새 revision 쓰기(2번 항목의 `expectedRevision` 갱신)는 이 임계구역이 열려 있는 동안 같은 `.lock`을 얻지 못해 거부되고 3번 항목이 정의한 재시도 안내를 받는다. "참조가 어떤 revision을 가리켜야 하는지 확정하는 구간"과 "문서에 새 revision을 추가하는 구간"이 같은 락으로 직렬화되어 있어 서로 어긋난 revision을 참조에 남기는 경쟁이 발생하지 않는다.
+   **organization과 조건 5.** organization은 이 규칙 어디에도 해당하지 않는다. 이 설계에서 organization을 가리키는 정형 문서가 없기 때문이다(2단계 참조 행렬, "정형 문서 대상: 아니오"). 조건 5는 organization이 문서를 참조해야 한다는 뜻이 아니라, organization을 읽는 역할이 자기 업무에 필요한 문서를 organization 없이도 찾을 수 있어야 한다는 뜻이다. 역할이 문서를 찾는 유일한 경로는 3.11절이 이미 정의한 절차(kickoff 등록부와 workflow 상태)이며, 이 경로 어디에도 organization.json 조회가 끼어들지 않는다. organization.json 자신은 프로젝트마다 정확히 하나만 존재하는 고정 경로(`<project>/.omt/organization.json`, `saveOrg`, `core.mjs:1142`)이므로 "위치"를 찾는 절차가 애초에 필요 없고, `revision`은 파일 자신의 필드(`core.mjs:1157-1160`)로 자기 서술적이다. organization은 조건 5를 이미 사소하게 만족하며, 이를 위해 새 참조 메커니즘을 추가할 필요가 없다.
 
-   **(c) 기존 정본 조회가 부분 참조를 받아들이지 않는 계약.** `listKickoffs`는 락 없이 읽으므로 `delivered.docRef`가 채워진 순간과 대응 문서가 `committed: true`가 되는 순간 사이(위 (5)와 (6) 사이) 그 필드를 읽을 수 있다. `listKickoffs`를 호출하는 모든 코드는 `delivered.docRef`가 가리키는 문서를 실제로 조회할 때 그 문서의 `current.json.committed`를 함께 확인하며, `false`면 `delivered.docRef`를 아직 없는 것과 동일하게(진행 중인 인도로) 취급한다. 이는 (a)와 같은 "미커밋은 미존재" 원칙을 등록부 쪽 읽기에도 그대로 적용하는 것이며, 새 조회 함수를 만들지 않고 기존 `listKickoffs`의 호출자에게 이 확인을 요구하는 한 줄의 계약으로 좁힌다.
+   **`releaseKickoff`·`cleanupKickoffBranches` 확장(이사 판정 4).** `entry.delivered`를 실제로 소비하는 모든 지점을 전수 확인했다(`grep -n "\.delivered\b" plugins/oh-my-teams/scripts/*.mjs`로 재현 가능): `delivery.mjs:193-203`(`deliverKickoff`의 멱등 재배달 확인), `kickoff-registry.mjs:632-635`(`recordDelivery`의 재배달 확인), `kickoff-registry.mjs:702-709`(`releaseKickoff`의 `completed` 종료 조건), `kickoff-registry.mjs:787-794`(`cleanupKickoffBranches`의 branch 삭제 대상 결정). 이 가운데 `releaseKickoff`과 `cleanupKickoffBranches`는 `listKickoffs`를 거치지 않고 `locateEntry`로 엔트리를 직접 읽으며(`releaseKickoff`, `kickoff-registry.mjs:672`), `entry.delivered`의 존재와 `head`/`mergeCommit`만 검사할 뿐 delivery-ref 문서의 커밋 여부를 전혀 조회하지 않는다. "listKickoffs 호출자"로 범위를 한정했던 이전 판이 이 두 함수를 놓친 정확한 원인이 이것이다.
 
-   **(d) reconciliation이 지속 근거만으로 복구·거부를 판정하는 계약.** 원래 프로세스와 입력이 사라진 새 세션은 문서 디렉터리와 등록부만 읽어 다음을 판정한다(브리프 조건 6·7).
+   두 함수를 다음과 같이 확장한다(런타임 변경 자체는 wave-2 대상이며, 이번 작업 파동은 그 명세만 정한다).
 
-   - `intent.json`이 있으면 그 `target`/`expectedFingerprint`/`value`를 그대로 입력 삼아 (5)부터 재개한다. 원래 입력을 다시 구성할 필요가 없다.
-   - `intent.json`이 없고 `current.json.committed === false`이며 등록 항목에 이미 `delivered.docRef === value`가 있으면, (5)는 이미 성공했고 (6)만 못 끝낸 것이므로 `committed: true`로 전환만 한다(멱등).
-   - `intent.json`이 없고 등록 항목에 `delivered.docRef`가 없거나 다른 문서를 가리키면, 이 문서로의 갱신 시도 자체가 (4) 이전에 중단된 것이므로 같은 입력으로 (4)부터 다시 시작한다.
-   - 등록 항목을 다시 읽었을 때 지문이 `expectedFingerprint`와 다르면(다른 변경이 그사이 반영됐으면) reconciliation은 자동으로 덮어쓰지 않고 거부해 배정자에게 보고한다. 오래된 지문으로 더 새로운 등록 항목 내용을 잘못 되돌리는 사고를 막기 위함이다.
+   - **`releaseKickoff` 확장**: `reason === "completed"`이고 `entry.delivery?.mode === "local-merge"`이고 `entry.delivered?.mergeCommit`이 있으면, 위 표의 규칙으로 유도한 `docId`의 문서가 `current.json`을 가졌는지(즉 커밋됐는지) 확인하는 조건을 기존 702-709행의 assert 바로 뒤에 추가한다. `force`로 우회할 수 있는 기존 패턴을 그대로 잇는다. `entry.delivered`가 아예 없으면(병합 전) 기존 assert가 이미 막고 있으므로 새 조건은 적용되지 않는다.
+   - **`cleanupKickoffBranches` 확장**: 787-794행에서 `deliveryRef`를 확정하기 직전에 같은 방식으로 유도한 `docId`의 문서가 존재하는지 확인한다. 존재하지 않으면 `deliveryRef`는 undefined로 남아 기존 "delivery.mode가 none이거나 delivered 기록이 없는 경우"와 같은 경로로 삭제를 skip한다(함수 설명이 이미 "확인할 수 없으면 skip, force하지 않는다"고 명시한다). `force`가 주어지면 기존 정책대로 우회한다.
+   - **`history/` 이관 이후**: `docId`는 kickoffHash(등록 시 고정)와 `mergeCommit`(재배달 시도로도 바뀌지 않는 값)만으로 계산되므로, kickoff이 활성 등록부에 있든 `history/`로 이관됐든 항상 같은 값을 가리킨다. 그러므로 `force`로 문서 미커밋 상태를 우회해 kickoff을 종료해도, delivery-ref 문서는 그 자리에서 나중에라도 독립적으로 완결될 수 있으며 "아카이브 이후 갱신 경로가 없다"는 문제 자체가 생기지 않는다. 다만 종료된 kickoff의 인도 문서가 미완결로 남았다는 사실은 감사 대상이므로, `07. 종료` closure-record의 `outcome` 필드(3.2절, 기존 필드)에 그 사실을 적어 이사가 확인할 수 있게 한다.
 
-   **중단 지점별 지속 상태·검증 결과·복구 결과.**
+   **읽기 시점별 판정 결과.** 두 번째 저장소 쓰기가 없으므로 "쓰다가 중단"되는 지점은 문서 저장소 내부(1~4번 항목)에만 있고, 그 재개 절차는 4번 항목이 이미 규정한 transaction 저널을 그대로 따른다(이 설계가 새로 정의할 것 없음, 브리프 조건 6·7이 요구하는 "등록부와 지속 근거만으로 완료·거부를 판정"도 이 저널만으로 충족된다). 이번 재설계가 새로 다루는 것은 문서가 아직 존재하지 않는 동안 기존 소비자가 무엇을 보는가이며, 이는 "언제 쓰다가 중단됐는가"가 아니라 "지금 읽을 때 어떤 상태인가"로 분기한다.
 
-   | 중단 지점 | 남는 지속 상태 | 정본 조회(문서 존재 여부, `listKickoffs`) | 상태 전이 | 복구 결과 |
+   | 시점 | 지속 상태 | `releaseKickoff`(completed 판정) | `cleanupKickoffBranches`(삭제 판정) | 새 세션의 판정 |
    |---|---|---|---|---|
-   | (1) 락 획득 전 | 없음 | 문서 미존재 | 불가 | 처음부터 재시도, 부작용 없음 |
-   | (2) 이후(revision 파일만 존재) | revision 파일 존재, `current.json` 미갱신 | 미존재(`current.json` 기준, (a)) | 불가 | 문서 락으로 보호되므로 같은 세션이면 (3)부터 재개, 다른 세션이면 락 해제 뒤 고아 revision 파일로 방치해도 무해(새 revision 번호로 다시 시도 가능) |
-   | (3) 이후(`current.json.committed=false`, `intent.json` 없음) | `current.json` 존재(`committed:false`), `intent.json` 없음 | 미존재((a)) | 불가 | (d) 3번째 규칙: `intent.json`이 없고 등록 항목에 참조가 없으므로 (4)부터 재개 |
-   | (4) 이후(`intent.json` 기록, 등록부 락 미획득) | 위와 동일 + `intent.json` 존재(`expectedFingerprint` 포함) | 미존재((a)). 등록 항목에는 아직 `delivered.docRef`가 없으므로 `listKickoffs`도 부분 참조를 보지 않는다 | 불가 | (d) 1번째 규칙: `intent.json`을 읽어 (5)부터 재개, 원래 입력 불필요 |
-   | (5) 진행 중, 지문 불일치 발견 | `intent.json` 존재, 등록부 미갱신 | 미존재((a)) 유지 | 불가 | (d) 4번째 규칙: 거부. `intent.json`에 실패 사유를 남기고 문서는 `committed:false`로 대기, 배정자에게 보고(자동 재시도로 낡은 값을 덮어쓰지 않는다) |
-   | (5) 성공 이후 (6) 이전(등록 항목 갱신됨, `intent.json` 미삭제) | 등록 항목에 `delivered.docRef` 존재(**참조는 있는데 문서는 미커밋인 역방향 상태**), `intent.json` 존재, `current.json.committed=false` | (c): `delivered.docRef`가 가리키는 문서의 `committed`가 `false`이므로 이 필드는 없는 것으로 취급 | 불가(문서 자신이 미커밋) | (d) 1번째 규칙: `intent.json`이 남아 있으므로 등록 항목 값이 이미 `value`와 같음을 확인하고 (6)으로 건너뜀(멱등) |
-   | (6) 진입, `intent.json` 삭제 후 `committed:true` 전환 전 | 등록 항목 갱신 완료, `intent.json` 없음, `current.json.committed=false` | (c) 적용, 여전히 없는 것으로 취급 | 불가 | (d) 2번째 규칙: 등록 항목의 `delivered.docRef === value`를 확인해 `committed:true`로 전환만 함(멱등, 데이터 손실 없음) |
-   | (6) 완료 | `current.json.committed=true`, `intent.json` 없음, 등록 항목 갱신 완료 | 존재로 판정, 참조 허용 | 허용(`open`으로 시작) | 해당 없음 |
+   | merge 전 | `entry.delivered` 없음 | 기존 702-709행 assert가 이미 거부(force 없이는) | `deliveryRef` 미확정, skip | 해당 없음(문서를 만들 근거인 `mergeCommit`이 아직 없다) |
+   | merge 완료, 문서 생성 시작 전 | `entry.delivered.mergeCommit` 존재, 문서 디렉터리 없음 | `docId`는 유도되지만 문서가 없어 거부(force 없이는) | `docId` 문서 없음, skip | 문서 생성 절차를 1번 항목의 append-only 쓰기부터 새로 시작 |
+   | revision 파일만 쓰임(4번 항목 저널 반영 전) | revision 파일 존재, `current.json` 없음 또는 이전 값 | 위와 동일하게 거부 | 위와 동일하게 skip | 4번 항목이 이미 정의한 transaction 저널 재개 절차를 그대로 따른다 |
+   | `current.json` 존재(문서 커밋 완료) | 문서 완전히 존재 | 이 조건은 통과(다른 조건도 만족해야 최종 허용) | `deliveryRef` 확정, 삭제 진행 | 완료로 판정, 추가 조치 없음 |
+   | `force`로 completed 강제 종료(문서 미존재인 채) | kickoff이 `history/`로 이관, `entry.delivered.mergeCommit`은 아카이브 엔트리에도 그대로 보존 | 강제 통과(감사 근거는 closure-record의 `outcome`) | 별도 판단(branch 삭제는 보통 close와 분리된 별도 호출) | `docId`는 이관 여부와 무관하게 그대로 유효, 문서는 독립적으로 나중에 완결 가능 |
 6. **작성자·시각·근거·이전 revision·사유**: 3.2절 공통 봉투의 `author`, `createdAt`, `reason`, `basedOnRevision` 필드가 이를 담는다.
 
 ### 3.8 product-canonical과 execution-instance 분리
@@ -342,7 +342,7 @@ Orca 자체의 Goal/Run/Task/Dispatch 판정, 정산 로직은 오케스트레�
 | 깨진 참조 | 존재하지 않는 `docId`를 가리키는 `*Ref`가 저장 시 거부된다 | 3.6절 |
 | 다른 kickoff 참조 | 다른 `kickoffHash`의 문서를 가리키는 참조가 거부된다 | 3.6절 |
 | 동시 갱신 | 같은 문서를 두 실행이 동시에 갱신할 때 하나만 성공하고 다른 하나는 재시도 안내를 받는다(락 경쟁) | 3.7절 |
-| 문서-참조 객체 원자성 | 문서 쓰기 직후 참조하는 쪽(kickoff 등록 항목/review 레코드) 갱신이 중단되어도, 재시도가 중복 오류 없이 참조를 완성하고 문서를 다시 만들지 않는다 | 3.7.5절 |
+| 문서-참조 객체 원자성 | 문서가 아직 커밋되지 않은 동안 `releaseKickoff`/`cleanupKickoffBranches`가 `force` 없이는 완료·삭제를 진행하지 않으며, `force`로 완료된 뒤에도 delivery-ref 문서의 `docId`가 그대로 유효해 나중에 독립적으로 완결할 수 있다 | 3.7.5절 |
 | 재개 | 등록부와 workflow state만으로 문서 디렉터리를 다시 찾아 이전 세션이 쓴 문서를 읽을 수 있다 | 3.11절 |
 
 ## 해결된 질문
@@ -362,7 +362,7 @@ Orca 자체의 Goal/Run/Task/Dispatch 판정, 정산 로직은 오케스트레�
 |---|---|---|
 | 문서 스키마 신설 | `plugins/oh-my-teams/schemas/document-envelope.schema.json` 및 폴더별 스키마(`integration-ref` 포함), `organization.schema.json`에 `documentSystemActivatedAt` 필드 추가 | Senior 1명 |
 | 문서 저장·조회·참조 무결성 런타임 모듈 신설 | `plugins/oh-my-teams/scripts/documents.mjs`(신규) | Senior 1명(스키마 담당과 동일인 권장) |
-| 기존 workflow/task/gates/kickoff-registry에 참조 필드 연결 | `workflow.mjs`, `gates.mjs`, `kickoff-registry.mjs`(각각 최소 훅만 추가) | Senior 1명(다른 인원, 기존 파일 소유권 충돌 방지) |
+| kickoff 등록부의 완료·정리 판정에 문서 커밋 확인 추가 | `kickoff-registry.mjs`(`releaseKickoff`/`cleanupKickoffBranches`에만 훅 추가, `workflow.mjs`·`gates.mjs`는 3.7절 5번 항목의 `localId` 유도 규칙이 기존 필드만 쓰므로 변경 불필요) | Senior 1명(다른 인원, 기존 파일 소유권 충돌 방지) |
 | orchestration 메시지 계약 구현 | `orchestration send`/`reply` 관련 스크립트, `bluf.md` 갱신 | 위 훅 담당 Senior와 동일인 |
 | 역할 스킬 갱신 | `plugins/oh-my-teams/skills/{director,pm,pl,senior,junior}/SKILL.md` | PL이 조율, 각 Senior가 자기 변경분의 스킬 절만 갱신 |
 | 회귀 테스트 | `plugins/oh-my-teams/tests/omt-documents.test.mjs`(신규) | Junior 초안 작성 후 담당 Senior가 검증 |
