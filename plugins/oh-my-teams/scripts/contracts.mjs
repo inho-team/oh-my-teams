@@ -240,7 +240,13 @@ export function validateTask(task) {
   return task;
 }
 
-function canonicalize(value) {
+/**
+ * Recursively sorts object keys so two equal values serialize identically.
+ *
+ * @param {unknown} value - Value to canonicalize before hashing.
+ * @returns {unknown} The same value with every object's keys sorted.
+ */
+export function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === "object") {
     return Object.fromEntries(
@@ -264,7 +270,16 @@ export function taskHash(task) {
   return hash(canonicalize(task));
 }
 
-function readReference(repo, reference, includeContent) {
+/**
+ * Opens a contract/context/evidence reference and checks its content hash.
+ *
+ * @param {string} repo - Workspace root used for the contained read.
+ * @param {{path: string, sha256: string}} reference - Reference to verify.
+ * @param {boolean} includeContent - Whether to return the file's text content.
+ * @returns {{path: string, sha256: string, content?: string}} Verified reference.
+ * @throws {Error} When the path escapes `repo` or the content hash is stale.
+ */
+export function readReference(repo, reference, includeContent) {
   const file = inside(repo, reference.path);
   const content = fs.readFileSync(file, "utf8");
   const actualHash = hash(content);

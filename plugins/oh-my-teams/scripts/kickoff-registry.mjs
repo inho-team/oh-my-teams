@@ -12,6 +12,11 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { closeKickoffSignals } from "./director.mjs";
+import {
+  confirmedLedgerFromClaim,
+  validateLedgerForClaim,
+  writeConfirmedLedger,
+} from "./requirements.mjs";
 
 /** Reasons a registered kickoff may be ended, in the order they end one. */
 export const RELEASE_REASONS = ["completed", "disbanded", "taken-over"];
@@ -49,6 +54,7 @@ const CLAIM_KEYS = [
   "selfPm",
   "director",
   "runId",
+  "requirements",
   "schemaVersion",
   "createdAt",
 ];
@@ -66,6 +72,24 @@ function text(value) {
  */
 export function ownerProject(orgFile) {
   return path.dirname(path.dirname(path.resolve(orgFile)));
+}
+
+// Validates a claim's embedded requirements draft against its own declared
+// director and persists the confirmed ledger. Runs inside registerKickoff's
+// withRegistry lock; writeConfirmedLedger performs no locking of its own.
+function withLedgerFromClaim(orgFile, claim, worktreeId) {
+  assert(
+    claim.requirements && typeof claim.requirements === "object",
+    "Claim requirements ledger required (requirements-draft + requirements-confirm --draft, " +
+      "then kickoff-claim carries it as claim.requirements)",
+  );
+  const requirements = validateLedgerForClaim(
+    { ...claim.requirements, worktreeId },
+    claim.director,
+  );
+  const ledger = confirmedLedgerFromClaim(requirements);
+  const written = writeConfirmedLedger(orgFile, worktreeId, ledger);
+  return written.ledgerHash;
 }
 
 function validateDelivery(delivery) {
@@ -214,6 +238,17 @@ export function validateEntry(stored) {
   }
   // Entries registered before delivery was recorded carry neither field.
   if (entry.delivery !== undefined) validateDelivery(entry.delivery);
+  // requirements is optional so a kickoff registered before the ledger existed
+  // (docs/plan/requirements-ledger-and-audit.md A.6) stays readable; the close
+  // gates, not this validator, refuse such a kickoff without a retrofit.
+  if (entry.requirements !== undefined) {
+    assert(
+      entry.requirements &&
+        typeof entry.requirements.ledgerHash === "string" &&
+        entry.requirements.ledgerHash.trim(),
+      "Kickoff requirements.ledgerHash required when requirements is present",
+    );
+  }
   assert(
     entry.delivered === undefined ||
       (text(entry.delivered?.head) && text(entry.delivered?.mergeCommit)),
@@ -377,6 +412,11 @@ export function registerKickoff(orgFile, request) {
       "Claim director.checkoutPath required when director is present " +
         "(form: director: {terminalHandle, checkoutPath})",
     );
+    // A new claim must carry an already-confirmed requirements draft
+    // (docs/plan/requirements-ledger-and-audit.md A.2/A.6); validation runs
+    // against the claim's own declared director, so no registry lookup is
+    // needed and the pre-registration deadlock never arises.
+    const claimedLedgerHash = withLedgerFromClaim(orgFile, claim, worktreeId);
     // Unknown keys are dropped when the entry is written. Renamed director
     // fields would then register no director and later authority checks would
     // warn and proceed, so the claim's sender is told which keys were ignored.
@@ -401,6 +441,7 @@ export function registerKickoff(orgFile, request) {
       },
       runId: claim.runId ?? null,
       organizationRevision: revision,
+      requirements: { ledgerHash: claimedLedgerHash },
       brief,
       delivery: {
         mode: claim.delivery.mode,

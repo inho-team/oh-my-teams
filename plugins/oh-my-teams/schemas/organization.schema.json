@@ -73,6 +73,20 @@
         "junior": { "$ref": "#/$defs/role" }
       }
     },
+    "auditor": {
+      "type": "object",
+      "$comment": "Optional out-of-ladder role that audits a kickoff's requirements ledger at the brief and outcome checkpoints (docs/plan/requirements-ledger-and-audit.md). Sits alongside roles/assistants/advisors, never inside roles.",
+      "additionalProperties": false,
+      "required": ["profile"],
+      "properties": {
+        "profile": { "type": "string", "minLength": 1 },
+        "fallbacks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
     "policy": {
       "type": "object",
       "required": [
