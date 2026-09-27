@@ -2,8 +2,8 @@
 
 - 작성일: 2026-09-27
 - 관련 이슈: [#139](https://github.com/inho-team/oh-my-teams/issues/139)
-- 관련 브리프: `.omt/briefs/139-auditor-2026-09-27.md`, 보충 계약 `t1-addendum-1.md`·`t1-addendum-2.md`·`t1-addendum-3.md`
-- 상태: 이사가 22:31판 초안을 반려(t1-addendum-3.md)한 뒤 8개 항목을 전부 반영해 다시 작성한 개정판. 구현은 이 문서를 커밋한 뒤 진행한다.
+- 관련 브리프: `.omt/briefs/139-auditor-2026-09-27.md`, 보충 계약 `t1-addendum-1.md`·`t1-addendum-2.md`·`t1-addendum-3.md`·`t1-addendum-4.md`
+- 상태: 이사가 22:31판 초안을 반려(t1-addendum-3.md)한 뒤 8개 항목을 전부 반영해 개정했고(HEAD 68eb78d), 그 개정판을 검토한 이사가 남은 모순 5개를 보충 계약 4로 지적해 해당 절만 다시 고쳤다. 구현은 이 문서를 커밋한 뒤 진행한다.
 
 ## 문제
 
@@ -29,6 +29,16 @@
 | 6. "실제 실행은 작업물에 포함 안 됨" 문구가 보충 계약 1과 모순 | B.9, G |
 | 7. `deliverKickoff` 본문 자체에 검사가 없음(선택적 gate 콜백 우회 가능) | A.5 |
 | 8. 호환 영향 설명이 부정확함 | C |
+
+이사는 이 개정판(68eb78d)에서 환경 신원+launch 기록, hash 연결, 빈 원장 거부, 실제 감사 실행 포함은 개선됐다고 확인했다(`t1-addendum-4.md`). 남은 모순 5개만 해당 절에서 다시 고쳤다.
+
+| 보충 계약 4 항목 | 대응 절 |
+|---|---|
+| 1. 순서와 fingerprint 모순(제시가 결과 감사를 무효화) | A.5([경로 A]/[경로 B]) |
+| 2. 응답 증거 재검증 누락 | B.3(evidenceFingerprint 확장), B.4(조건 6) |
+| 3. 브리프 감사 강제 위치가 틀림(`requirements-fidelity`는 구현 이후) | A.5(구현 착수 지점), B.5 |
+| 4. PM accept의 감사 요구가 교착을 만듦 | A.5, B.5(PM accept와 close-ready·최종 셋의 검토 대상 구분) |
+| 5. 감사 대상 kickoff 결정 방식이 틀림(`args.worktree`는 감사 워크트리) | B.2(`--state`로 결정) |
 
 ## 조사로 확정한 기존 코드 근거
 
@@ -186,53 +196,76 @@ confirmationTextHash(criterion, statements) = hash({
 | `requirements-retrofit` | director | `assertDirectorAuthority(entry,...)` | A.6 호환 경로 — 원장 없는 기존 kickoff에 실제 원장을 사후 구성(draft→confirm과 같은 검증을 거침, claim 후이므로 교착 없음) |
 | `requirements-show` | 누구나 | 없음 | 조회 전용 |
 
-### A.5 다섯 지점 전부에 하드코드(수용 기준 `compat-not-bypass`; 보충 계약 3 5·7항)
+### A.5 여섯 지점 전부에 하드코드(수용 기준 `compat-not-bypass`; 보충 계약 3 5·7항, 보충 계약 4 1·3·4항)
 
-조사로 확인했듯 다섯 지점 중 검사가 이미 생략 불가능하게 박혀 있는 곳은 PM `accept`(`gates.mjs` `acceptOutcomeLocked`) 하나뿐이다. 이번 설계는 **다섯 지점 모두**에 `assertLedgerCompleteForKickoff`(또는 그 단계에 맞는 부분 검사)를 **함수 본문에 무조건 실행되는 호출**로 추가한다 — 선택적 콜백이 아니다.
+조사로 확인했듯 원래 다섯 지점(PM `accept`, close-ready 발신, `kickoff-check-close-ready`, `deliverKickoff`, `kickoff-release completed`) 중 검사가 이미 생략 불가능하게 박혀 있는 곳은 PM `accept`(`gates.mjs` `acceptOutcomeLocked`) 하나뿐이다. 이번 설계는 그 다섯 지점에 더해, **구현 착수 지점**(`startSupervisedWorker`, `teams-org.mjs:823`)에도 브리프 감사 강제를 건다 — 총 여섯 지점 모두에 `assertLedgerCompleteForKickoff`(또는 그 단계에 맞는 부분 검사)를 **함수 본문에 무조건 실행되는 호출**로 추가한다. 선택적 콜백이 아니다.
 
-원장·감사(있으면)가 요구하는 전체 순서는 다음과 같다(보충 계약 2 6항의 순서를 그대로 따른다).
+**보충 계약 4 3항의 지적을 반영해 브리프 감사 강제 위치를 옮겼다**: `requirements-fidelity`는 구현이 이미 끝난 뒤에 실행되는 명령이므로, 거기서 브리프 감사 수용을 검사해도 "기준 확정·구현 착수 전에 감사를 강제"하지 못한다(이미 끝난 구현을 되돌릴 수 없다). 실제로 구현 착수를 만드는 코드는 `teams-org.mjs`의 `startSupervisedWorker`(823-…줄, `worker-start` CLI가 호출)이며, `assertWorktreeUnshared` 직후(854-859줄 부근)에 검사를 추가한다: `org.auditor`가 있고 이 배정이 이 kickoff에 속한 구현 역할(director·auditor가 아닌 워커, `identity.workflowId`/`args.worktree`로 kickoff를 식별)이면, 브리프 감사 수용(`boundHash === hash({ledgerHash})`)이 없는 한 배정 자체를 거부한다. 이는 `requirements-retrofit`(A.6)으로 원장을 사후 구성하는 기존 kickoff 경로와는 다른 검사다 — retrofit 대상 kickoff는 이미 진행 중인 워커 배정을 재검증하지 않고, 이 검사는 **이 기능 배포 이후 새로 이뤄지는 배정**에만 적용된다.
+
+원장·감사(있으면)가 요구하는 전체 순서는 다음과 같다(보충 계약 2 6항의 순서를 그대로 따르되, 제시 시점을 결과 감사 전후 두 경로로 명시한다 — 보충 계약 4 1항).
 
 ```
 kickoff-claim(원장 확정, ledgerHash 고정)
   └─▶ 브리프 감사(있으면, ledgerHash에만 묶임 — B.7)  ← 기준 확정 단계에서 진행
         │
         ▼
+  구현 착수: worker-start/role-terminal로 구현 역할(워커) 배정
+     ※ 하드코드 위치: startSupervisedWorker 본문, assertWorktreeUnshared 직후.
+       org.auditor가 있으면 브리프 감사 수용이 없는 배정을 거부한다(위 설명)
+        │
+        ▼
   구현 커밋들 (HEAD 전진)
         │
         ▼
   requirements-fidelity (PM 초안, {head, ledgerHash})
-     ※ org.auditor가 있으면 브리프 감사 수용이 안 돼 있으면 이 명령 자체가 거부된다
+        │
+        ├─▶ [경로 A] director: requirements-present + requirements-fidelity-confirm
+        │     을 결과 감사보다 먼저 끝낸다. 이 경우 아래 evidenceFingerprint(B.3)가
+        │     이미 그 제시를 포함한 값으로 고정된 채 결과 감사가 시작되므로,
+        │     이후 재무효화가 없다.
         │
         ▼
   결과 감사(있으면, {ledgerHash, resultHead, evidenceFingerprint}에 묶임 — B.3/B.7)
         │
         ▼
   PM accept (gates.mjs acceptOutcomeLocked)
-     ※ 하드코드 위치: gateCheck 호출 직후. org.auditor가 있으면 결과 감사에 미해결
-       (ruling 없음 또는 not-persuaded) 이의가 있으면 거부(보충 계약 2 4항)
+     ※ 하드코드 위치: gateCheck 호출 직후. **모든 task의 accept에 적용**: org.auditor가
+       있으면 결과 감사에 미해결(ruling 없음 또는 not-persuaded) 이의가 있으면 거부
+       (보충 계약 2 4항). 이 지점은 이의 유무만 보고 "결과 감사 acceptance 자체가
+       존재하는가"는 요구하지 않는다 — kickoff에 아직 완료할 task가 남아 있으면
+       결과 감사가 시작조차 안 됐을 수 있고, 여기서 acceptance 존재를 요구하면
+       첫 task조차 넘어가지 못하는 교착이 생긴다(보충 계약 4 4항). acceptance
+       존재 요구는 아래 close-ready 발신과 최종 세 게이트, 두 곳에만 건다.
         │
         ▼
   close-ready 신호 발신 (director.mjs sendSignal kind="close-ready")
-     ※ 하드코드 위치: SIGNAL_KINDS/중복pending 검사 직후. fidelity 초안이 현재
-       {head, ledgerHash}로 존재하는지, org.auditor가 있으면 결과 감사 수용이
-       유효한지(boundHash 일치) 확인한다. 아직 director의 제시·fidelity 확인은
-       요구하지 않는다(다음 단계이므로)
+     ※ 하드코드 위치: SIGNAL_KINDS/중복pending 검사 직후. org.auditor가 있으면
+       **여기서 처음으로** 결과 감사 acceptance가 실제로 존재하고 유효한지
+       (boundHash === hash(현재 {ledgerHash, resultHead, evidenceFingerprint}))
+       확인한다. [경로 A]를 거쳤다면 이 값은 이미 제시를 포함해 안정적이다.
+       [경로 A]를 거치지 않았다면(아직 제시가 없다면) 그 상태 그대로 발신은 허용한다
         │
         ▼
-  director: requirements-present(userVisible 기준마다) + requirements-fidelity-confirm
+  [경로 B] (아직 제시가 없었다면) director: requirements-present(userVisible
+  기준마다) + requirements-fidelity-confirm
+     ※ 이 제시가 evidenceFingerprint를 바꾸면(B.3), 방금 위에서 유효했던 결과 감사
+       acceptance가 즉시 무효가 된다(B.4 조건 5 — 생략하지 않는다). 이 경우
+       결과 감사를 다시 받아 재수용하고 close-ready도 다시 보내야 다음 단계를
+       통과한다. 재감사를 생략하는 지름길은 없다(보충 계약 4 1항)
         │
         ▼
   kickoff-check-close-ready / deliverKickoff / kickoff-release --reason completed
      ※ 세 곳 모두 하드코드 위치: 기존의 좁은 확인(head 비교, delivered 플래그 등)
-       직후. assertLedgerCloseReady(A.3, 제시+원문대조+예외 전부) 전부를 확인하고,
+       직후. assertLedgerCloseReady(A.3, 제시+원문대조+예외 전부)를 전부 확인하고,
        org.auditor가 있으면 브리프 감사 수용(boundHash={ledgerHash} 일치)과 결과
-       감사 수용(boundHash={ledgerHash,resultHead,evidenceFingerprint} 일치)도
-       함께 확인한다. deliverKickoff는 247줄의 선택적 gate 콜백과 별개로,
-       gate 호출 앞뒤 어디든 함수 본문에 이 호출을 무조건 추가한다 — gate가
-       생략돼도 이 호출은 생략되지 않는다.
+       감사 수용(boundHash={ledgerHash,resultHead,evidenceFingerprint} 일치 —
+       [경로 B]로 무효화됐다면 재수용 필요)을 **여기서 다시** 확인한다.
+       deliverKickoff는 247줄의 선택적 gate 콜백과 별개로, gate 호출 앞뒤 어디든
+       함수 본문에 이 호출을 무조건 추가한다 — gate가 생략돼도 이 호출은 생략
+       되지 않는다.
 ```
 
-이 순서는 보충 계약 3 5항의 "결과 감사 전에 close-ready를 요구하지 않는다"를 지키면서(결과 감사는 close-ready **이전**에 이미 끝나 있어야 하는 선행 조건이지, close-ready가 결과 감사를 요구하는 것이 아니다 — 순서가 자연스럽게 그렇게 되어 있다), 브리프 감사를 "기준 확정 단계"에 실질적으로 강제한다: `requirements-fidelity`(구현 이후 첫 기록)조차 브리프 감사 수용 없이는 시작할 수 없으므로, 브리프 감사를 결과 완료 직전까지 미루는 경로가 문서상의 권고가 아니라 코드로 막힌다.
+[경로 A]와 [경로 B] 어느 쪽을 택하든, 감사 acceptance의 binding 무효화 규칙(B.4 조건 5)을 생략하지 않는다는 점이 같다 — 다른 것은 오직 "제시가 언제 fingerprint에 반영되어 무효화를 촉발하는가"라는 시점뿐이다. 이 순서는 보충 계약 3 5항의 "결과 감사 전에 close-ready를 요구하지 않는다"도 그대로 지킨다.
 
 ### A.6 호환 정책(수용 기준 `compat-not-bypass`; 보충 계약 3 8항)
 
@@ -275,14 +308,20 @@ kickoff-claim(원장 확정, ledgerHash 고정)
 
 **`teams-org.mjs`의 `case "role-terminal"`(1612줄)에 auditor 전용 분기를 추가한다** — role-terminal.mjs 자신이 아니라 이 CLI 진입점에 추가하는 이유는, director 권한 검사와 worktree 분리 검사를 기존 어떤 역할도 거치지 않아 재사용할 기존 호출이 없기 때문이다.
 
+**보충 계약 4 5항 반영**: `args.worktree`는 이 auditor 터미널이 **새로 열릴** 위치이지, 검토 대상 kickoff의 PM worktree가 아니다 — 그 값으로 kickoff registry를 조회할 수 없다. 그래서 감사 대상 kickoff는 `--state <kickoff의 entry.pm.stateDir>`(아래 문단에서 launch ledger 귀속에 이미 쓰던 바로 그 인자)로 **먼저** 결정하고, `args.worktree`는 오직 "감사 터미널을 열 위치"로만 쓰며 분리 검사의 비교 대상이 된다. 두 개념(감사 대상 kickoff / 감사가 실행되는 워크트리)을 하나의 인자로 섞지 않는다.
+
 ```js
 if (command.role === AUDITOR_ROLE) {
-  const kickoff = /* args.worktree로 지목된 kickoff의 entry 조회 */;
+  assert(
+    command.state,
+    "role-terminal --role auditor requires --state <kickoff stateDir> to identify the kickoff under review",
+  );
+  const kickoff = findKickoffByStateDir(args.org, command.state); // entry.pm.stateDir 대조, args.worktree와 무관
   assertDirectorAuthority(kickoff, process.cwd(), "role-terminal --role auditor", false); // force 인자 없음, 우회 불가
   assert(
     !pathWithin(args.worktree, kickoff.pm.path) &&
       !kickoff.workers?.some((w) => pathWithin(args.worktree, w.path)),
-    "auditor terminal must not share a worktree with the kickoff being reviewed",
+    "auditor terminal (--worktree) must not share a worktree with the kickoff under review (--state)",
   );
 }
 // 이하 roleCommand→assertWorktreeUnshared→openRoleTerminal→recordLaunchSafely는
@@ -329,7 +368,7 @@ if (command.role === AUDITOR_ROLE) {
 }
 ```
 
-`checkpoints.brief.binding`은 원장 hash만 담는다(보충 계약 1: "브리프 감사는 계약(원장 hash)에만"). `checkpoints.outcome.binding`은 원장 hash·결과 HEAD·**항상 계산되는** `evidenceFingerprint`를 담는다 — 보충 계약 3 4항이 지적한 "`evidenceKey`를 null로 생략"하는 문제를 없애기 위해, `evidenceFingerprint`는 그 시점에 실제로 감사 대상인 증거 전체(fidelity 초안의 `items`와 그때까지의 `presentations`의 `evidence.sha256` 목록)를 `hash()`(core.mjs, taskHash와 같은 함수)로 묶은 값이며 항상 계산된다. 증거가 하나도 없는 상태에서는 빈 배열의 hash가 되므로, 이후 증거가 추가되면 이 값이 반드시 바뀌어 재감사를 강제한다.
+`checkpoints.brief.binding`은 원장 hash만 담는다(보충 계약 1: "브리프 감사는 계약(원장 hash)에만"). `checkpoints.outcome.binding`은 원장 hash·결과 HEAD·**항상 계산되는** `evidenceFingerprint`를 담는다 — 보충 계약 3 4항이 지적한 "`evidenceKey`를 null로 생략"하는 문제를 없애기 위해, `evidenceFingerprint`는 그 시점에 실제로 감사 대상인 증거 전체를 `hash()`(core.mjs, taskHash와 같은 함수)로 묶은 값이며 항상 계산된다. 묶는 대상은 세 가지다: fidelity 초안의 `items`, 그때까지의 `presentations`의 `evidence.sha256` 목록, 그리고 **`checkpoints.outcome`의 각 objection에 대한 가장 최근 response의 `evidenceRefs.sha256` 목록**(objectionId로 정렬) — 이 세 번째 항목이 보충 계약 4 2항이 지적한 결함(fingerprint가 응답 증거를 포함하지 않으면 `response.evidenceRefs`가 가리키는 실제 파일이 나중에 바뀌어도 감지되지 않는다)을 없앤다. 증거가 하나도 없는 상태에서는 빈 배열의 hash가 되므로, 이후 증거가 추가되거나 바뀌면 이 값이 반드시 바뀌어 재감사를 강제한다. `auditAccepted`(B.4)는 이 fingerprint를 **저장된 값과의 단순 비교로 신뢰하지 않고**, 저장된 각 `evidenceRefs.{path, sha256}`을 `inside()`로 다시 열어 파일의 현재 sha256을 재계산해 대조한 뒤에만 `evidenceFingerprint`를 유효한 것으로 취급한다(B.4 조건 6).
 
 `objections`·`responses`·`rulings`는 각각 `id`/`objectionId`/`respondedAgainst`로 연결된다. `raisedBy`/`respondedBy` 같은 자기선언 필드는 두지 않는다 — 신원은 **호출자의 `process.env.ORCA_TERMINAL_HANDLE`을 런타임이 매 호출마다 확인해서** 별도로 부여한다(B.6). 기록에는 신원 확인 결과만 요약해 남긴다(예: `verifiedCaller: "auditor"|"pm"|"director"`).
 
@@ -344,17 +383,20 @@ if (command.role === AUDITOR_ROLE) {
    - **호출자 신원**: 이 checkpoint의 모든 objection은 B.6이 확인한 "실제 auditor 터미널"에서 왔어야 하고, response는 checkpoint가 `brief`면 "실제 director"(assertDirectorAuthority 방식), `outcome`이면 "실제 PM"(verifySupervisor 방식)에서 왔어야 한다. ruling은 감사 신원에서만 와야 한다. 넷 중 하나라도 신원 확인에 실패하면 그 기록 자체가 append되지 못한다(사후에 auditAccepted가 거부하는 것이 아니라, B.6의 명령 자체가 그 시점에 거부한다).
    - **구현 실행과의 독립성**: `workflowContext.implementationExecutionId`(호출자가 제출하는 문자열이 아니라 `readWorkflow(stateDir, workflowId).state.tasks[taskId]`에서 `item.workerRunId ?? item.execution?.executionId`로 직접 읽은 값, `workflow.mjs:1559`와 같은 방식)와 감사 실행(B.6이 확인한 auditor terminalHandle)이 **애초에 서로 다른 차원의 식별자**이므로 값이 같을 수 없다는 점을 이용해 형식적으로 비교하지 않는다. 대신, response가 인용하는 커밋/증거가 실제로 `implementationExecutionId`가 만든 HEAD·산출물과 일치하는지를 `evidenceRefs`의 `{path, sha256}`를 `readReference`(contracts.mjs, `inside()` 기반 안전한 열기)로 열어 대조한다 — "구현자가 자기 자신을 감사·응답하지 못한다"는 요구는 신원 검증(위 항목)이 이미 감사=auditor, 응답=PM/director로 못박으므로 자동으로 만족되고, 이 항목은 "인용된 증거가 실제로 그 구현에서 나온 것인가"만 추가로 확인한다.
 5. **binding 무효화**: `checkpoint.acceptance`가 있으면 `acceptance.boundHash === hash(currentBinding)`이어야 유효하다. 원장(ledgerHash)·결과 HEAD·증거(evidenceFingerprint) 중 하나라도 바뀌면 `hash(currentBinding)`이 달라져 이전 수용이 즉시 무효가 된다.
+6. **응답 증거 재검증**(보충 계약 4 2항): `checkpoint`가 `outcome`이면, 판정에 쓰인 각 objection의 **가장 최근** response가 인용하는 `evidenceRefs`(B.3의 `{path, sha256}`)를 `inside(ownerRoot, path)`로 다시 열어 실제 파일의 sha256을 재계산하고, 저장된 `sha256`과 일치해야 한다. 하나라도 불일치하면(같은 HEAD·같은 저장된 fingerprint라도 응답 증거 파일 내용만 사후에 바뀐 경우) 거부한다 — `evidenceFingerprint`가 이미 그 sha256 목록을 포함하므로(B.3) 파일이 바뀌면 이 재검증과 5번의 binding 무효화가 함께 걸린다.
 
-`audit-accept`(감사 전용, B.6 인증)가 1~4를 확인한 뒤 `acceptance = { acceptedAt, boundHash: hash(currentBinding) }`을 기록한다.
+`audit-accept`(감사 전용, B.6 인증)가 1~6을 확인한 뒤 `acceptance = { acceptedAt, boundHash: hash(currentBinding) }`을 기록한다.
 
-### B.5 A의 다섯 지점에 추가(보충 계약 2, A.5의 순서 참조)
+### B.5 A의 여섯 지점에 추가(보충 계약 2, A.5의 순서 참조; 보충 계약 4 3·4항)
 
-`org.auditor`가 선언된 조직에서만, A.5에 그린 순서의 해당 지점마다 다음을 추가로 확인한다.
+`org.auditor`가 선언된 조직에서만, A.5에 그린 순서의 해당 지점마다 다음을 추가로 확인한다. **`requirements-fidelity`는 이 목록에서 뺐다** — 구현이 끝난 뒤에 실행되는 명령이라 여기서 검사해도 착수 자체를 막지 못한다는 것이 보충 계약 4 3항의 지적이었다. 대신 구현 착수 지점(`startSupervisedWorker`)이 이 강제를 맡는다.
 
-- **`requirements-fidelity`(PM 초안 시작)**: `checkpoints.brief.acceptance`가 존재하고 `boundHash === hash({ledgerHash})`. 없으면 이 명령 자체가 거부된다(브리프 감사를 뒤로 미루지 못하게 하는 실질적 강제, 보충 계약 3 5항).
-- **PM `accept`(`gates.mjs acceptOutcomeLocked`)**: `checkpoints.outcome`에 미해결 이의(ruling 없음 또는 최신 ruling이 not-persuaded)가 있으면 거부(보충 계약 2 4항). `gateCheck` 호출 직후 하드코드.
-- **close-ready 발신(`director.mjs sendSignal`)**: `checkpoints.outcome.acceptance`가 존재하고 `boundHash === hash({ledgerHash, resultHead: 현재 head, evidenceFingerprint: 현재 값})`이어야 한다. 없거나 무효면 close-ready 신호 자체를 보낼 수 없다.
-- **`kickoff-check-close-ready`/`deliverKickoff`/`kickoff-release --reason completed`(최종 셋)**: `checkpoints.brief.acceptance`(`boundHash === hash({ledgerHash})`)와 `checkpoints.outcome.acceptance`(위와 동일 조건)를 모두 다시 확인한다. close-ready 발신 이후 원장이나 결과가 바뀌면(예: 추가 커밋) 여기서 다시 막힌다.
+- **구현 착수(`startSupervisedWorker`, `worker-start`)**: 이 kickoff에 속한 구현 역할(워커) 배정이면 `checkpoints.brief.acceptance`가 존재하고 `boundHash === hash({ledgerHash})`여야 한다. 없으면 배정 자체가 거부된다 — 브리프 감사를 기준 확정·구현 착수 전에 강제하는 실질적 경계(보충 계약 3 5항, 보충 계약 4 3항).
+- **PM `accept`(`gates.mjs acceptOutcomeLocked`)**: **모든 task의 accept에 적용.** `checkpoints.outcome`에 미해결 이의(ruling 없음 또는 최신 ruling이 not-persuaded)가 있으면 거부(보충 계약 2 4항). `gateCheck` 호출 직후 하드코드. **이 지점은 `checkpoints.outcome.acceptance`(감사 수용 자체)의 존재를 요구하지 않는다** — kickoff에 남은 task가 있는 동안에는 결과 감사가 아직 시작되지 않았을 수 있고, 여기서 수용 존재를 요구하면 첫 task조차 통과하지 못하는 교착이 생기기 때문이다(보충 계약 4 4항). 감사 수용 자체의 존재 요구는 아래 두 지점에만 건다.
+- **close-ready 발신(`director.mjs sendSignal`)**: **여기서 처음으로** `checkpoints.outcome.acceptance`가 존재하고 `boundHash === hash({ledgerHash, resultHead: 현재 head, evidenceFingerprint: 현재 값})`이어야 한다. 없거나 무효면 close-ready 신호 자체를 보낼 수 없다.
+- **`kickoff-check-close-ready`/`deliverKickoff`/`kickoff-release --reason completed`(최종 셋)**: `checkpoints.brief.acceptance`(`boundHash === hash({ledgerHash})`)와 `checkpoints.outcome.acceptance`(위와 동일 조건)를 **다시** 확인한다. close-ready 발신 이후 원장·결과·제시가 바뀌면(A.5의 [경로 B]처럼 제시로 evidenceFingerprint가 바뀐 경우 포함) 여기서 다시 막힌다.
+
+이 네 지점(구현 착수·PM accept·close-ready 발신·최종 셋) 중 "감사 수용 자체의 존재"를 요구하는 것은 close-ready 발신과 최종 셋뿐이다 — PM accept는 진행 중인 이의만 막고, 구현 착수는 결과 감사가 아닌 브리프 감사만 요구한다. 이 구분이 보충 계약 4 4항이 요구한 "검토 대상을 분명히 하라"는 지적에 대한 답이다.
 
 `org.auditor`가 없으면 이 절의 검사는 전부 건너뛰고 A의 검사만 적용된다.
 
@@ -448,7 +490,7 @@ files 목록 밖에서 실제로 필요한 수정은 다음과 같다 — 전부
 - draft-confirm의 `--checkout`이 claim의 `director.checkoutPath`와 다르면 claim이 거부된다(A.2 교착 해소 검증).
 - criterion 문구를 `requirements-amend`로 바꾸면 이전 confirmation·presentation·fidelityCheck·exception이 전부(ledgerHash 불일치로) 무효가 된다.
 - equal 기준도 fidelity 완결성 검사에서 빠지지 않는다.
-- userVisible 기준의 제시 기록이 없거나, 워크트리 경로를 가리키거나(부정 픽스처), symlink로 ownerRoot 밖을 가리키거나(`inside()` 거부), sha256/head/ledgerHash가 다르거나, `outcome:"rejected"`면 다섯 게이트가 전부 거부한다.
+- userVisible 기준의 제시 기록이 없거나, 워크트리 경로를 가리키거나(부정 픽스처), symlink로 ownerRoot 밖을 가리키거나(`inside()` 거부), sha256/head/ledgerHash가 다르거나, `outcome:"rejected"`면 A.5의 원장 검사 지점(구현 착수 제외, 나머지 전부)이 거부한다.
 - 단순 `--force`로는 통과하지 못하고, 범위가 정확히 맞는 항목별 director 예외만 통과한다. 포괄 `scope` 값은 스키마에서 거부된다.
 - 원장 없는 새 claim은 거부된다.
 - 원장 없는 기존 항목은 `requirements-retrofit`이나 항목별 예외 없이 completed로 닫히지 않는다(호환 영향 테스트).
@@ -463,13 +505,16 @@ files 목록 밖에서 실제로 필요한 수정은 다음과 같다 — 전부
 - **브리프 감사 응답자 신원**: PM이나 하위 역할이 `audit-response`(brief)를 쓰면 거부된다. director만 응답할 수 있다.
 - **ruling 위조 거부**: PM·director가 `audit-ruling`을 쓰면 거부된다.
 - **신원 위조 거부(핵심 회귀)**: PM·director 세션이 `--terminal` 류의 인자로 감사 handle을 넘기려는 시도는 애초에 그런 인자가 없어 불가능함을 확인하고, PM·director의 실제 launch ledger 기록(role≠"auditor")으로는 `verifiedAuditor`가 통과하지 않음을 확인한다. 기록된 적 없는 임의 handle도 거부된다. (`ORCA_TERMINAL_HANDLE` 환경변수 자체를 조작하는 시나리오는 B.6의 한계로 문서화하고 테스트 대상에서 제외한다.)
-- director가 아니면 `role-terminal --role auditor`가 거부되고, 검토 대상 worktree와 같은 worktree로는 열리지 않는다. auditor fallback 프로필로 열 수 있다.
+- director가 아니면 `role-terminal --role auditor`가 거부되고, `--state`로 결정된 검토 대상 kickoff와 같은 worktree(`--worktree`)로는 열리지 않는다. auditor fallback 프로필로 열 수 있다.
 - `org.auditor`가 없는 조직은 브리프/결과 감사 게이트가 적용되지 않는다.
 - `audit-accept`가 director 받은함에 progress 신호를 남긴다.
-- **`requirements-fidelity`는 브리프 감사 수용 없이 시작할 수 없다**(A.5/B.5의 강제 검증).
-- **PM accept는 결과 감사 미해결 이의로 차단된다**(보충 계약 2 4·7항).
-- **close-ready 발신은 결과 감사 수용 없이 차단된다.**
-- **끝에서 끝까지 흐름**: `kickoff-claim` → 브리프 감사(objection→response(director)→ruling→accept) → 구현 커밋(브리프 감사 수용이 깨지지 않음을 확인) → `requirements-fidelity` → 결과 감사(objection→response(PM)→ruling→accept) → PM `accept` → close-ready 발신 → `requirements-present`/`requirements-fidelity-confirm`(director) → `kickoff-check-close-ready`/`deliverKickoff`/`kickoff-release --reason completed` 성공.
+- **`--state`(감사 대상 kickoff)와 `--worktree`(감사 터미널 위치)가 같은 값이면 `role-terminal --role auditor`가 거부된다**(보충 계약 4 5항 — 대상 식별과 실행 위치를 혼동하지 않는지 확인).
+- **구현 착수(`worker-start`)는 브리프 감사 수용 없이 이 kickoff의 워커를 배정할 수 없다**(A.5/B.5의 강제 검증이 `requirements-fidelity`가 아니라 여기서 걸림을 확인 — 보충 계약 4 3항). `requirements-fidelity` 자체는 브리프 감사 상태와 무관하게 실행된다는 것도 함께 확인한다(더 이상 거기서 검사하지 않으므로).
+- **PM accept는 결과 감사 미해결 이의로 차단된다**(보충 계약 2 4·7항)**, 그러나 감사 acceptance 자체가 아직 없다는 이유만으로는 차단되지 않는다**(여러 task가 있는 workflow에서 첫 task의 accept가 아직 시작되지 않은 결과 감사 때문에 교착되지 않음을 확인 — 보충 계약 4 4항).
+- **close-ready 발신은 결과 감사 수용 없이 차단된다**(감사 acceptance 존재를 처음으로 요구하는 지점이 여기임을 확인).
+- **응답 증거 재검증(회귀)**: 같은 HEAD·같은 저장된 `evidenceFingerprint` 상태에서 이전 response가 인용한 `evidenceRefs` 파일의 내용만 사후에 바꾸면, `audit-accept`(또는 이미 있던 `acceptance`를 소비하는 최종 게이트)가 거부한다(보충 계약 4 2항).
+- **끝에서 끝까지 흐름, 경로 A(제시 먼저)**: `kickoff-claim` → 브리프 감사(objection→response(director)→ruling→accept) → `worker-start`(브리프 감사 수용 확인) → 구현 커밋 → `requirements-fidelity` → `requirements-present`/`requirements-fidelity-confirm`(director) → 결과 감사(objection→response(PM)→ruling→accept, evidenceFingerprint가 이미 제시를 포함) → PM `accept` → close-ready 발신 → `kickoff-check-close-ready`/`deliverKickoff`/`kickoff-release --reason completed` 성공.
+- **끝에서 끝까지 흐름, 경로 B(제시 나중)**: 위와 같되 결과 감사·PM accept·close-ready 발신까지 제시 없이 마친 뒤, `requirements-present`로 제시를 추가하면 `evidenceFingerprint`가 바뀌어 기존 결과 감사 acceptance가 무효화되고(최종 셋이 거부), 결과 감사를 다시 받아 재수용한 뒤에야 최종 셋이 통과한다(보충 계약 4 1항).
 - `deliverKickoff`에 빈 `gate`(또는 `gate` 생략)를 넘겨도 원장·감사 검사는 여전히 실행되어 거부됨을 확인한다(보충 계약 3 7항의 회귀 방지 — 이것이 22:31판에서 빠졌던 핵심 테스트다).
 
 ## G. 남은 사항
