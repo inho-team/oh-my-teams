@@ -21,6 +21,20 @@ function readText(file) {
   }
 }
 
+/**
+ * Providers this module can resolve a host-default delegation for.
+ *
+ * A save path uses this list as the structural fact behind
+ * `adapterContractConfirmed` when it revalidates a `provider:default` profile:
+ * `codex` and `claude` are here because `resolveHostDefaults` has a branch for
+ * each; `agy` has none, so an Agy host-default can never be confirmed by this
+ * module and stays unsavable until a branch for it exists.
+ */
+export const HOST_DEFAULT_ADAPTER_PROVIDERS = Object.freeze([
+  "codex",
+  "claude",
+]);
+
 // Only a top-level key counts: the same key inside `[profiles.x]` applies only
 // when that profile is selected, which an Orca launch does not do.
 function topLevelTomlString(text, key) {
