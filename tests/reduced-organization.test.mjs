@@ -128,14 +128,15 @@ test("the single-subscription preset serializes roles and drops shared-quota fal
   assert.equal(validateOrg(organization), organization);
 });
 
-test("a models preset only re-routes the implementation roles that exist", () => {
+test("a models preset refuses to re-route roles and points to edit and model-catalog instead", () => {
   const org = reduced();
   org.profiles["agy-opus"].model = "claude-opus-4-6-thinking";
-  const { changes } = previewPreset(org, "opus-first");
-  assert.deepEqual(
-    changes.map((change) => change.role),
-    ["junior"],
+  const before = JSON.stringify(org);
+  assert.throws(
+    () => previewPreset(org, "opus-first"),
+    /no longer assigns fixed models, fallbacks, or advisors/,
   );
+  assert.equal(JSON.stringify(org), before);
 });
 
 test("a workflow folds task assignment and failure routing onto declared roles", async (t) => {

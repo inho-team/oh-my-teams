@@ -1,6 +1,6 @@
 # 계획 완료 상태
 
-- 점검일: 2026-09-16 (수치 재검증: 병렬 kickoff 등록부 반영)
+- 점검일: 2026-09-28 (수치 재검증: `model-catalog-w2b`가 저장 경로 재검증 연결을 반영)
 - 점검 대상: `docs/plan`의 계획 문서 3개와 현재 활성 코드·테스트·사용자 문서
 - 종합 상태: 계획에 포함된 제품 구현 단계는 모두 완료됐다. E3 실제 업무 검증과 반복 모델 비교는 구현 누락이 아니라 후속 운영 검증으로 남아 있다.
 
@@ -10,16 +10,16 @@
 |---|---|---|---|
 | [AI-native 에이전트 조직](plan/ai-native-agent-organization.md) | P0–P6 | task v2, review·acceptance gate, workflow 복구·예산, 실패 라우팅, incident·lesson 기능과 7개 로컬 eval 시나리오 | `research`, `design`, `integration` 전용 task kind는 현재 출시 범위가 아니며, 추가할 때 별도 계약이 필요하다. |
 | [oh my teams 이름 변경과 Orca 연동](plan/oh-my-teams-rename-and-orca-integration.md) | R0–R4 | package·marketplace·manifest의 기본 버전 1.6.0 일치(`tests/repository-metadata.test.mjs`가 검사), `plugins/orca` forwarding 진입점, Orca 1.4.200 discovery, 설치·CLI 회귀 테스트 | 이전 0.6.1은 rollback과 역사 보존 용도로만 유지한다. |
-| [공유 할당량 모델 라우팅](plan/shared-quota-model-routing.md) | P0–P4와 E1/E2 | 프리셋, pool 소진 차단, quota snapshot, 사용량 기록, 30회 라우팅 결과와 정리된 worktree | balanced는 잠정 권고다. E3 실제 업무 표본과 반복 비교가 있어야 영구 기본값을 판단할 수 있다. |
+| [공유 할당량 모델 라우팅](plan/shared-quota-model-routing.md) | P0–P4와 E1/E2 | 프리셋, pool 소진 차단, quota snapshot, 사용량 기록, 30회 라우팅 결과와 정리된 worktree | balanced는 잠정 권고다. E3 실제 업무 표본과 반복 비교가 있어야 영구 기본값을 판단할 수 있다. `model-catalog-w2b`([계약](plan/model-catalog.md)) 이후 `opus-first`·`balanced`·`advisor-codex`·`advisor-claude`는 이름과 history만 호환되고, 같은 실측 결과로 옮기려면 `model-catalog` 조회 후 `edit`로 직접 배정해야 한다. |
 
 ## 최종 검증
 
-2026-09-16 현재 작업 트리에서 다음 검증을 다시 실행했다.
+2026-09-28 현재 작업 트리에서 다음 검증을 다시 실행했다.
 
 | 명령 | 결과 |
 |---|---|
-| `npm test` | 869개 테스트가 모두 통과했다. |
-| `npm run quality` | 활성 `.mjs` 128개와 공개 export 447개를 검사했으며 지적 사항이 없었다. |
+| `npm test` | 903개 테스트가 모두 통과했다. |
+| `npm run quality` | 활성 `.mjs` 131개와 공개 export 459개를 검사했으며 지적 사항이 없었다. |
 | `npm run eval:organization` | 결정적 로컬 시나리오 11개가 모두 통과했다. |
 | `npm run format:check` | Prettier 기준으로 모든 대상 파일이 통과했다. |
 | README의 `validate`·`show` 예제 | 현재 예제 조직으로 정상 실행됐다. |

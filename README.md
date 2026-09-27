@@ -134,9 +134,9 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 
 ### 결성 질문과 기본값
 
-`form`은 네 역할(PM·PL·Senior·Junior)이 각각 어떤 모델을 쓸지만 묻고, 질문은 한 번으로 끝난다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 네 역할을 두고, 몇 개를 쓸지는 kickoff마다 PM이 실행 깊이로 정한다. 역할별 선택지는 PM에 Claude Fable·Opus·Codex Astra·Agy Gemini Pro, PL에 Claude Opus·Codex Sol·Agy Gemini Pro·Claude Sonnet·Codex Terra(5개), Senior에 Claude Sonnet·Codex Terra·Agy Gemini Pro·Agy Claude Opus, Junior에 Claude Haiku·Codex Luna·Agy Flash·Agy Claude Sonnet이 있으며, 그 밖의 모델은 자유 입력으로 받는다. Codex의 개별 모델 ID는 설치된 CLI의 `codex debug models`에서 읽어 질문 본문에 안내하며, 자유 입력 `codex:<id>`로 고른다.
+`form`은 네 역할(PM·PL·Senior·Junior)이 각각 어떤 모델을 쓸지만 묻고, 질문은 한 번으로 끝난다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 네 역할을 두고, 몇 개를 쓸지는 kickoff마다 PM이 실행 깊이로 정한다. 이 역할별 모델 질문은 기존 조직을 계속 결성할 수 있게 남겨 둔 호환 경로이며, 질문 자체를 없애는 결정은 적응형 팀 편성 kickoff의 다음 파동이 맡는다. 선택지는 미리 박아 둔 표가 아니라 묻기 직전에 실행한 `model-catalog` 조회 결과에서 만든다: 조회가 `"ok"`로 돌려준 실행기는 그 `models` 목록에서 역할의 성격에 맞는 몇 개를, 목록을 내지 못하는 실행기(예: `no-catalog-interface`인 Claude Code)는 통상적인 별칭에서 몇 개를 고르고, 그 밖의 모델은 자유 입력 `provider:model`로 받는다. Codex의 개별 모델 ID는 그 조회 자체가 설치된 CLI의 `codex debug models`를 실행해 얻은 것이므로 따로 확인하지 않고, 자유 입력 `codex:<id>`로도 고를 수 있다.
 
-묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번이 쓰는 provider 호출 수와 workflow attempt 하나에 배정되는 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓴다. 다만 Agy는 Gemini 모델에 기본 강도를 두지 않고 강도 없이 부르면 거부하므로, Gemini는 결성 때 Flash 3.8을 `medium`, Pro 3.1을 `high`로 정하고 결성 보고에 적는다. 보조 도구 호출은 허용하지 않는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
+묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번이 쓰는 provider 호출 수와 workflow attempt 하나에 배정되는 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓴다. 다만 Agy는 Gemini 모델에 기본 강도를 두지 않고 강도 없이 부르면 거부하므로, `model-catalog`가 돌려주는 Gemini id는 강도가 이미 포함되어 있어(예: `gemini-3.8-flash-medium`) 그 값을 그대로 쓰면 따로 정할 필요가 없다. 자유 입력으로 강도 없는 이름을 받았으면 보완한 강도를 결성 보고에 적는다. 보조 도구 호출은 허용하지 않는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
 
 ### 실행 깊이
 
@@ -175,11 +175,11 @@ Agy는 `gemini-3.8-flash-high`처럼 모델 ID 자체에 강도를 담는다. �
 
 역할마다 계정을 나눌 필요는 없다. 같은 구독으로 만든 프로필을 모델만 다르게 여러 개 두고 역할별로 배정하면, 구독 하나로 역할별 모델 티어를 구분할 수 있다. 이때 그 프로필들을 하나의 `pool`로 묶어야 한다. 런타임은 소진이 확인된 pool에 속한 프로필을 남은 대체 순서에서 건너뛰므로, pool이 없으면 이미 소진된 같은 계정으로 계속 시도하다가 호출 예산만 소모한다. `single-subscription` 프리셋은 모델을 바꾸지 않고, 선언된 모든 역할의 동시 인원을 1로 낮추며 같은 할당량을 쓰는 대체만 제거한다.
 
-`advisor-codex` 프리셋은 PM을 `gpt-5.6-sol`, PL·Senior를 `gpt-5.6-terra`, Junior를 `gpt-5.6-luna`로 옮기고 `gpt-6-astra`를 PM·PL·Senior의 자문자로 둔다. `advisor-claude` 프리셋은 같은 구조로 PM을 `opus`, PL·Senior를 `sonnet`, Junior를 `haiku`로 옮기고 `fable`을 자문자로 둔다. 두 프리셋 모두 이미 그 실행기에서 돌던 역할만 옮기고, 다른 실행기에 배정된 역할은 다른 할당량을 쓰므로 그대로 둔다. 조직에 없는 모델은 같은 실행기의 기존 프로필을 복사해 추가하므로 새 계정을 만들지 않는다.
+`advisor-codex`와 `advisor-claude`는 이전에 저장된 조직의 `modelPolicy.preset`과 history에서 계속 읽히는 이름이지만, 고정 모델을 역할·자문자에 자동으로 배정하던 동작은 제거되었다. 이 이름으로 `preset` 명령을 다시 실행하면 "no longer assigns fixed models, fallbacks, or advisors"로 거부되며 `edit`와 `model-catalog`로 옮기는 경로를 안내받는다. 특정 실행기로 역할이나 자문자를 옮기려면 `model-catalog`로 지금 확인 가능한 모델을 조회하고, 쓸 프로필을 사용자와 확인한 뒤 `edit`로 저장한다.
 
 역할도 네 개를 모두 둘 필요가 없다. PM만 필수이고 나머지 세 역할은 생략할 수 있으며, 남긴 역할의 상위 역할은 반드시 조직이 선언한 역할이어야 한다. 생략한 역할이 맡던 일은 `pm > pl > senior > junior` 서열을 따라 위로 올라가 선언된 가장 가까운 역할이 이어받는다. PM과 Junior만 둔 조직에서는 Senior가 맡던 검토와 PL이 맡던 실패 처리를 PM이 수행한다. 검토 요구사항은 요구된 역할보다 같거나 상위인 역할이 수행하면 충족되며, 구현과 다른 실행 주체여야 한다는 독립성 조건은 그대로 적용된다. 역할 이름 자체는 바꿀 수 없다. 구조는 [축소 조직 예제](plugins/oh-my-teams/examples/organization.single-subscription.json)에서 확인한다.
 
-`opus-first`는 Agy 역할을 Opus로 시작하는 평가 기준선이고, `balanced`는 Senior=Opus, Junior=Sonnet으로 나눈다. [6유형 실측](experiments/ROUTING_REPORT.md)에서는 balanced(당시에는 Intern=GPT-OSS를 포함한 구성)가 6/6을 통과하며 Opus-first보다 토큰 9.7%, 모델 시간 16.0%를 줄여 잠정 권고가 됐다. 1회 배치이므로 기존 조직에는 자동 적용하지 않으며 `preset` 명령은 변경되는 역할만 먼저 보여준다. 같은 공유 풀의 소진이 구조적으로 확인되면 그 풀의 다른 모델을 연쇄 호출하지 않는다. 구독의 실제 할당량 차감·가격은 토큰 수와 구분한다.
+`opus-first`와 `balanced`도 같은 이름 호환 규칙을 따른다. 이 두 이름은 [6유형 실측](experiments/ROUTING_REPORT.md)에서 Agy 역할을 Opus로 시작하는 구성과 Senior=Opus·Junior=Sonnet으로 나눈 구성을 가리켰고, 그 실측에서 balanced(당시에는 Intern=GPT-OSS를 포함한 구성)가 6/6을 통과하며 Opus-first보다 토큰 9.7%, 모델 시간 16.0%를 줄여 잠정 권고가 됐다는 기록은 남아 있다. 다만 이 두 이름으로 `preset`을 다시 실행해도 고정 모델을 자동으로 배정하지 않으며, 같은 실측 결과로 옮기려면 `model-catalog`로 지금 시점의 모델을 확인한 뒤 `edit`로 직접 배정한다. 같은 공유 풀의 소진이 구조적으로 확인되면 그 풀의 다른 모델을 연쇄 호출하지 않는다. 구독의 실제 할당량 차감·가격은 토큰 수와 구분한다.
 
 ### 실행기 어댑터와 로컬 Ollama
 
