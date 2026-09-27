@@ -188,11 +188,15 @@ export function closeKickoffSignals(orgFile, worktreeId, reason) {
 }
 
 // Sends one notification into a terminal and keeps how far it got. Before
-// anything is typed, the terminal's own screen is read with
-// `readTerminalScreen` (reused from prompt-submission.mjs, so the two modules
-// never diverge on what counts as "the screen could not be read") and
-// classified with `classifyPromptScreen` (reused from prompt-answers.mjs, no
-// new screen judgement): a folder-trust question or a Claude
+// anything is typed, the terminal's agentIdentity is verified using
+// `orca terminal list --json` to confirm it is an agent session. If
+// agentIdentity is null (shell-only) or cannot be determined, the notification
+// is deferred without sending anything and a notifyError is recorded. Once the
+// terminal is confirmed to be an agent session, the terminal's own screen is
+// read with `readTerminalScreen` (reused from prompt-submission.mjs, so the
+// two modules never diverge on what counts as "the screen could not be read")
+// and classified with `classifyPromptScreen` (reused from prompt-answers.mjs,
+// no new screen judgement): a folder-trust question or a Claude
 // `AskUserQuestion` screen means the terminal cannot safely take this input,
 // and an unreadable screen means the state cannot be judged at all, so both
 // come back `deferred: true, sent: false` without a single key being sent.
@@ -206,6 +210,59 @@ export function closeKickoffSignals(orgFile, worktreeId, reason) {
 // delivered. Orca's own error text and warnings are kept as they came, and
 // nothing is sent twice.
 async function notifyTerminal(orca, terminal, text, execute) {
+  let terminalRecord;
+  try {
+    const result = await execute([orca, "terminal", "list", "--json"], {
+      timeoutMs: 10000,
+    });
+    if (result.code !== 0) {
+      return {
+        notified: false,
+        deferred: true,
+        sent: false,
+        notifyError: "terminal-identity-unknown",
+      };
+    }
+    const payload = JSON.parse(result.stdout);
+    const listed = payload?.result?.terminals ?? payload?.terminals ?? payload;
+    const terminals = Array.isArray(listed) ? listed : [];
+    terminalRecord = terminals.find((t) => t?.handle === terminal);
+
+    if (!terminalRecord) {
+      return {
+        notified: false,
+        deferred: true,
+        sent: false,
+        notifyError: "terminal-identity-unknown",
+      };
+    }
+  } catch (error) {
+    return {
+      notified: false,
+      deferred: true,
+      sent: false,
+      notifyError: "terminal-identity-unknown",
+    };
+  }
+
+  if (terminalRecord.agentIdentity === null) {
+    return {
+      notified: false,
+      deferred: true,
+      sent: false,
+      notifyError: "shell-terminal",
+    };
+  }
+
+  if (!("agentIdentity" in terminalRecord)) {
+    return {
+      notified: false,
+      deferred: true,
+      sent: false,
+      notifyError: "terminal-identity-unknown",
+    };
+  }
+
   const screen = await readTerminalScreen(orca, terminal, execute);
   if (!screen.ok) {
     return {
@@ -237,18 +294,24 @@ async function notifyTerminal(orca, terminal, text, execute) {
 /**
  * Delivers a terminal notification to the Director after writing the signal.
  *
- * Call after `sendSignal`. Before anything is sent, the Director's screen is
- * read and classified: a folder-trust question or an `AskUserQuestion`
- * screen, or a screen that cannot be read at all, defers the notification
+ * Call after `sendSignal`. Before anything is sent, the Director's terminal is
+ * checked to confirm it is an agent session (using `orca terminal list --json`
+ * to inspect `agentIdentity`). If the terminal is a shell (agentIdentity is
+ * null) or the identity cannot be determined, the notification is deferred
  * (`notified: false, deferred: true`) without pressing a single key. Once the
- * screen is clear, the notification counts as delivered only when the
- * Director's agent started its turn or took the input; an input Orca accepted
- * but nobody submitted comes back as `notified: false`. `delivery` carries the
- * outcome, the receipt stages and the request ID, and `notifyError` keeps
- * Orca's own error text. The text is never sent a second time: the follow-up
- * calls replay the same request ID, and one bare Enter follows only when the
- * text is seen waiting in the input box. The record on disk is unaffected;
- * `notifyDirectorSignal` is the entry point that also persists and retries.
+ * terminal is confirmed to be an agent session, the Director's screen is read
+ * and classified: a folder-trust question or an `AskUserQuestion` screen, or a
+ * screen that cannot be read at all, defers the notification without pressing
+ * a single key. Once the screen is clear, the notification counts as delivered
+ * only when the Director's agent started its turn or took the input; an input
+ * Orca accepted but nobody submitted comes back as `notified: false`. `delivery`
+ * carries the outcome, the receipt stages and the request ID, and `notifyError`
+ * keeps Orca's own error text, with `shell-terminal` for shell-only terminals
+ * and `terminal-identity-unknown` for indeterminable terminals. The text is
+ * never sent a second time: the follow-up calls replay the same request ID, and
+ * one bare Enter follows only when the text is seen waiting in the input box.
+ * The record on disk is unaffected; `notifyDirectorSignal` is the entry point
+ * that also persists and retries.
  *
  * @param {object} entry - Kickoff registry entry.
  * @param {object} record - Signal record returned by `sendSignal`.
@@ -427,19 +490,23 @@ function finalizeUnconfirmedClaim(orgFile, id, at) {
  * `undeliveredSignals`), bundled into one message. This is the resend path
  * for a signal `notifyDirector` had to defer: call it again from
  * `director-signal` the next time that Director is signalled, and once its
- * screen is no longer blocked by a question, the whole backlog goes out
- * together. A signal is marked delivered only once `notified` comes back
- * true, so it is never sent twice; a deferred attempt leaves every record in
- * the batch exactly as undelivered as it already was. `claimBatch` also
- * guards against two overlapping calls for the same worktree both sending: a
- * signal an overlapping live call already claimed is left out of this call's
- * batch instead of being resent, and if that leaves nothing claimable at all
- * (e.g. this very signal was itself swept into the other call's claim), the
- * result is `deferred: true, notifyError: "backlog-claimed"` without
- * touching the terminal. A signal claimed by an owner this host can prove
- * dead is settled in place (never resent, see `finalizeUnconfirmedClaim`)
- * rather than blocking the rest of the batch, so one signal parked under a
- * stuck or unverifiable claim never stalls the other signals in it.
+ * terminal is confirmed to be an agent session and its screen is no longer
+ * blocked by a question, the whole backlog goes out together. If the
+ * terminal is a shell (agentIdentity is null) or the identity cannot be
+ * determined, signals stay deferred with `notifyError: "shell-terminal"` or
+ * `"terminal-identity-unknown"`. A signal is marked delivered only once
+ * `notified` comes back true, so it is never sent twice; a deferred attempt
+ * leaves every record in the batch exactly as undelivered as it already was.
+ * `claimBatch` also guards against two overlapping calls for the same
+ * worktree both sending: a signal an overlapping live call already claimed is
+ * left out of this call's batch instead of being resent, and if that leaves
+ * nothing claimable at all (e.g. this very signal was itself swept into the
+ * other call's claim), the result is `deferred: true, notifyError:
+ * "backlog-claimed"` without touching the terminal. A signal claimed by an
+ * owner this host can prove dead is settled in place (never resent, see
+ * `finalizeUnconfirmedClaim`) rather than blocking the rest of the batch, so
+ * one signal parked under a stuck or unverifiable claim never stalls the other
+ * signals in it.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {object} entry - Kickoff registry entry naming the Director terminal.
@@ -502,6 +569,17 @@ export function listInbox(orgFile) {
 
 /**
  * Records the Director's reply on a signal and attempts PM terminal delivery.
+ *
+ * The reply is always recorded on the signal file immediately, regardless of
+ * notification outcome, so it remains readable through director-inbox. The PM
+ * terminal is found from the launch ledger (if the PM was launched in a new
+ * terminal since the signal was written, it may not be located). Before
+ * sending, the PM terminal is confirmed to be an agent session (using
+ * agentIdentity); if the terminal is a shell or the identity cannot be
+ * determined, the reply is left in the signal record and `notified: false` is
+ * returned along with a notifyError. The signal record remains updated with
+ * the reply text, so the PM can read it through director-inbox even if the
+ * terminal notification fails.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {object} request - Reply request.
