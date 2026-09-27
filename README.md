@@ -13,6 +13,7 @@ Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / J
 | `adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존. 추론 강도·대체 순서·인원·보조 도구·별도 계정은 여기서 정함 |
 | `close` | 성공한 Goal의 PR/MR·병합·워크트리 정리와 완료 기록 처리 |
 | `disband` | 실패·취소된 실행 팀을 해체하고 복구 가능한 결과와 기록 보존 |
+| `director-terminal` | 새 이사 세션을 사용자가 보는 Orca 탭에 열고, 기존 이사가 감독하던 kickoff를 그 세션에 넘김 |
 
 Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한다. Codex에서는 플러그인의 해당 스킬을 호출하거나 같은 뜻으로 요청한다. `pm`은 kickoff 내부의 지휘 역할로 유지한다. 조직 구성 후 구독을 다시 묻지 않는다. 실행 중 작업은 시작 당시 조직 스냅샷을 유지한다.
 

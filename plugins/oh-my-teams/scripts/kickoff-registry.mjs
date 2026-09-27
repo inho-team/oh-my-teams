@@ -461,6 +461,59 @@ export function bindKickoffRun(orgFile, { worktreeId, runId }) {
   });
 }
 
+/**
+ * Moves every kickoff a director terminal supervises to a new terminal.
+ *
+ * A director session can be replaced, by a session of another provider or
+ * after its terminal was lost, while its kickoffs run on. `director-signal`
+ * notifies the terminal each entry's `director.terminalHandle` names, so until
+ * the entries point at the new session its PM's signals reach a closed
+ * terminal (#131). Only entries naming `from` change; `checkoutPath` is kept
+ * unless a new one is given.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} move - The handover.
+ * @param {string} move.from - Terminal handle the entries name now.
+ * @param {string} move.to - Terminal handle of the new director session.
+ * @param {string} [move.checkoutPath] - New owner checkout, when it changed.
+ * @returns {{reassigned: string[], unchanged: string[]}} PM worktree ids moved
+ *   and those that named another director.
+ * @throws {Error} When either handle is empty or both are the same.
+ */
+export function reassignDirector(orgFile, { from, to, checkoutPath }) {
+  assert(
+    text(from),
+    "reassignDirector needs the current director terminal handle",
+  );
+  assert(text(to), "reassignDirector needs the new director terminal handle");
+  assert(
+    from !== to,
+    "The new director terminal is the same as the current one",
+  );
+  return withRegistry(orgFile, () => {
+    const reassigned = [];
+    const unchanged = [];
+    for (const entry of listKickoffs(orgFile).kickoffs) {
+      if (entry.director?.terminalHandle !== from) {
+        unchanged.push(entry.pm.worktreeId);
+        continue;
+      }
+      const file = locateEntry(orgFile, entry.pm.worktreeId);
+      const moved = validateEntry({
+        ...entry,
+        director: {
+          ...entry.director,
+          terminalHandle: to,
+          ...(text(checkoutPath) ? { checkoutPath } : {}),
+        },
+      });
+      writeJSON(file, moved);
+      reassigned.push(entry.pm.worktreeId);
+    }
+    return { from, to, reassigned, unchanged };
+  });
+}
+
 // Runs a git command in the given repository, returning stdout on success.
 // Returns null when the command exits non-zero, so callers decide what to skip.
 function tryGit(repoDir, args) {

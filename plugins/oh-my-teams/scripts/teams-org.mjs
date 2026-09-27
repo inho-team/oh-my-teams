@@ -18,6 +18,8 @@ import {
 } from "./core.mjs";
 import {
   assertWorktreeUnshared,
+  directorBriefPrompt,
+  directorCommand,
   kickoffBriefPrompt,
   launchBinding,
   PERMISSION_BYPASS,
@@ -26,6 +28,7 @@ import {
   roleCommand,
   roleSpec,
 } from "./role-launch.mjs";
+import { openDirectorTerminal } from "./director-terminal.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
 import {
   assertNotKickoffOwner,
@@ -117,6 +120,7 @@ import {
   cleanupKickoffBranches,
   listKickoffs,
   ownerProject,
+  reassignDirector,
   recordDelivery,
   registerKickoff,
   releaseKickoff,
@@ -334,6 +338,18 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                    (releases an acquired resource slot)
   director-watch --org FILE [--orca EXECUTABLE]
                  (shows pending signals, slot usage, free memory, and PM liveness per kickoff)
+  director-command --org FILE (--profile ID | --provider claude|codex|agy [--model NAME] [--effort LEVEL])
+                   [--brief FILE]
+                   (prints the command a director session opens with; the director is
+                   the host session, not a role, so it takes a profile or an explicit provider)
+  director-terminal --org FILE (--profile ID | --provider claude|codex|agy [--model NAME] [--effort LEVEL])
+                    [--brief FILE] [--checkout DIR] [--from-terminal HANDLE] [--title TEXT]
+                    [--replace HANDLE] [--orca EXECUTABLE]
+                    (opens that command in a terminal the user can see: a vertical split of
+                    --from-terminal, by default the calling terminal from ORCA_TERMINAL_HANDLE,
+                    or a new tab in --checkout (default: the organization's project) when no
+                    terminal is given; a terminal Orca's UI does not adopt is closed and refused;
+                    --replace moves every kickoff that names that director terminal to the new one)
 
 Existing organizations are reused; init never asks for subscriptions again.
 No command automatically pushes, merges, deploys, publishes, or deletes.`;
@@ -531,6 +547,27 @@ export const ALLOWED_OPTIONS = {
   "resource-acquire": ["org", "worktree", "kind", "note", "owner-pid"],
   "resource-release": ["org", "slot"],
   "director-watch": ["org", "orca"],
+  "director-command": [
+    "org",
+    "profile",
+    "provider",
+    "model",
+    "effort",
+    "brief",
+  ],
+  "director-terminal": [
+    "org",
+    "profile",
+    "provider",
+    "model",
+    "effort",
+    "brief",
+    "checkout",
+    "from-terminal",
+    "title",
+    "replace",
+    "orca",
+  ],
 };
 
 /** Options each subcommand must receive, keyed by command name. */
@@ -625,6 +662,8 @@ export const REQUIRED_OPTIONS = {
   "resource-acquire": ["org", "worktree", "kind"],
   "resource-release": ["org", "slot"],
   "director-watch": ["org"],
+  "director-command": ["org"],
+  "director-terminal": ["org"],
 };
 
 /**
@@ -2054,9 +2093,61 @@ async function executeCommand(args) {
       }
       return watch;
     }
+    case "director-command":
+      return directorCommand(
+        validateOrg(readJSON(args.org)),
+        directorRequest(args),
+      );
+    case "director-terminal": {
+      const org = validateOrg(readJSON(args.org));
+      const request = directorRequest(args);
+      const command = directorCommand(org, request);
+      const checkout = path.resolve(args.checkout ?? ownerProject(args.org));
+      // The calling terminal is the one the user is looking at, so a split of
+      // it is visible; a terminal created in the owner checkout may not be.
+      const fromTerminal =
+        args["from-terminal"] ?? process.env.ORCA_TERMINAL_HANDLE ?? undefined;
+      const opened = await openDirectorTerminal({
+        checkout,
+        command,
+        title: args.title,
+        fromTerminal: fromTerminal || undefined,
+        executable: args.orca,
+      });
+      const reassigned =
+        opened.ready && args.replace
+          ? reassignDirector(args.org, {
+              from: args.replace,
+              to: opened.terminal,
+              checkoutPath: checkout,
+            })
+          : null;
+      return { ...opened, brief: request.brief ?? null, reassigned };
+    }
     default:
       throw new Error(`Unknown command: ${args.command}`);
   }
+}
+
+// What a director launch asks for: an organization profile or an explicit
+// provider, and the brief whose fixed-wording prompt becomes the first prompt.
+function directorRequest(args) {
+  assert(
+    args.profile !== undefined || args.provider !== undefined,
+    "director-command needs --profile ID or --provider claude|codex|agy [--model NAME] [--effort LEVEL]",
+  );
+  const brief = args.brief === undefined ? undefined : path.resolve(args.brief);
+  assert(
+    brief === undefined || fs.existsSync(brief),
+    `Brief not found: ${brief}`,
+  );
+  return {
+    profile: args.profile,
+    provider: args.provider,
+    model: args.model,
+    effort: args.effort,
+    ...(brief ? { brief, firstPrompt: directorBriefPrompt(brief) } : {}),
+  };
 }
 
 const BLOCKING_STATUSES = ["failed", "blocked"];
