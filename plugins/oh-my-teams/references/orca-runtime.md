@@ -277,6 +277,27 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --
 
 `role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model> --autocompact 250k`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort> --config check_for_update_on_startup=false`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. Codex 명령에 항상 붙는 `--config check_for_update_on_startup=false`는 설치본 확인 기록인 `docs/plan/codex-update-check.md`를 근거로 한다. Claude 명령의 `--autocompact`(Claude Code 2.1.221 이상)는 세션이 그 크기에 이르면 대화를 압축하게 해서, 오래 실행되는 역할이 매 호출마다 전체 기록을 다시 보내지 않게 한다. 값은 조직의 `policy.claudeAutoCompact`(100000~1000000 사이의 정수 토큰)이며, 없으면 250000을 쓰고 `"auto"`이면 플래그를 붙이지 않는다. Codex와 Agy 명령에는 붙이지 않는다. `--brief`는 이 두 인자 뒤, 명령의 맨 끝에 붙는다. Claude와 Codex에는 위치 인자로, Agy에는 `--prompt-interactive`(별칭 `-i`) 플래그로 붙는데, 이는 설치본의 `--help`로 확인한 지원이며 `role-launch.mjs`의 `FIRST_PROMPT_ARG`에 있다. 확인하지 못한 provider는 이 인자를 붙이지 않고 `role-terminal`이 그 자리에서 거부하므로, 그런 provider의 브리프는 여전히 터미널을 연 뒤 `terminal send`로 보낸다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 실은 채로 터미널을 연 뒤에는 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 이사에게 그대로 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 이사가 PM을 대신 맡지도 않는다. PM이 이미 뜬 뒤 붙여넣기로 도착하는 후속 인계 지시는 이 절이 다루지 않으며, PM 스킬의 인계 지시 확인 규칙과 `kickoff-handoff-verify` 명령을 따른다.
 
+## 이사 실행
+
+이사는 kickoff를 선언하는 호스트 세션이며 조직의 역할이 아니므로 `role-terminal`과 `role-command`는 `--role director`를 거부한다. 이사 세션을 열거나 교체하는 명령은 `director-terminal`이고, 그 명령이 여는 줄은 `director-command`가 만든다. 절차는 [director-terminal](../skills/director-terminal/SKILL.md)에 있으며, 여기에는 런타임이 강제하는 동작만 적는다.
+
+```text
+node <runtime> director-command --org <project>/.omt/organization.json (--profile <ID> | --provider claude|codex|agy [--model <모델>] [--effort <강도>]) [--brief <경로>]
+node <runtime> director-terminal --org <project>/.omt/organization.json (--profile <ID> | --provider claude|codex|agy [--model <모델>] [--effort <강도>]) [--brief <경로>] [--checkout <주인 체크아웃>] [--from-terminal <handle>] [--title <설명>] [--replace <옛 이사 터미널>] [--orca <실행 파일>]
+```
+
+`director-command`는 조직 프로필이나 명시한 실행기로 「PM 실행」 절의 `role-command`와 같은 규칙의 명령을 만든다. 권한 우회 플래그, 모델, 강도, Codex의 `check_for_update_on_startup=false`, Claude의 `--autocompact`가 같은 순서로 붙고, `--brief`가 있으면 `당신은 이 저장소의 이사입니다. 인수 브리프 <경로>를 전체 읽고 그 지시를 따르십시오.`라는 고정 문구가 첫 프롬프트로 끝에 붙는다. 명시한 실행기의 강도는 그 실행기가 등록한 값이어야 하고, OpenCodex runner 프로필은 터미널에 입력할 수 없으므로 거부한다.
+
+`director-terminal`은 다음을 한 번에 수행한다.
+
+1. **보이는 터미널을 만든다.** `--from-terminal`(생략하면 호출한 터미널의 `ORCA_TERMINAL_HANDLE`)이 있으면 그 터미널이 `--checkout`(생략하면 조직 파일의 프로젝트)에 있는지 `terminal show`로 확인한 뒤 `terminal split --direction vertical`로 같은 탭 안에 새 창을 만든다. 분할할 터미널이 없으면 `terminal create --worktree path:<체크아웃>`으로 새 탭을 만든다. 2026-09-27 macOS(Orca 앱 1.4.187, CLI 1.4.212)에서 주인 체크아웃에 `terminal create`로 만든 터미널은 정상적으로 동작하면서도 `orphaned: true`로 Orca 창에 탭이 생기지 않았고, 사용자가 보는 터미널을 분할한 창은 바로 보였다([#142](https://github.com/inho-team/oh-my-teams/issues/142)). 그래서 분할이 기본 경로다.
+2. **채택 여부를 먼저 확인한다.** 만든 직후 `terminal show`의 `orphaned`를 읽어 결과의 `visible`에 담는다. `orphaned: true`이면 아직 아무것도 입력하지 않은 빈 셸이므로 곧바로 `terminal close`로 닫고, 보이는 터미널에서 다시 실행하라는 문구와 함께 거부한다. 사용자가 볼 수 없는 이사는 열지 않는다.
+3. **명령을 입력하고 시작을 확인한다.** `terminal create --command`는 긴 명령에서 "Timed out waiting for terminal handle after creation"으로 실패했고 다른 호스트에서는 명령을 프롬프트에 남겨 두었으므로, 명령은 `terminal send --enter`로 보낸다. 이후는 「역할 터미널 열기」 2번과 3번 항목과 같다. 결과의 `submission`은 보낸 뒤 스스로 실행되었으면 `sent`, 프롬프트에 남아 Enter를 한 번 보냈으면 `enter-sent`다.
+4. **폴더 신뢰 질문에는 답하지 않는다.** 주인 체크아웃은 이 명령을 호출한 세션이 이미 일하고 있는 폴더이므로 신뢰 질문이 나오면 그것은 예외 상황이다. 질문 화면이면 `questioned: true`, `ready: false`, `status: "blocked"`로 돌려준다.
+5. **제목을 지정하고 등록부를 넘긴다.** 준비가 확인되면 `[Director] <체크아웃 이름>` 또는 `--title`의 설명으로 `terminal rename`을 실행한다. `--replace <옛 핸들>`이 있으면 등록부에서 `director.terminalHandle`이 그 값인 모든 kickoff를 새 터미널로 바꾸고(`checkoutPath`는 `--checkout`으로 갱신), 결과의 `reassigned`에 넘긴 워크트리와 넘기지 않은 워크트리를 적는다. `ready: false`이면 등록부를 바꾸지 않는다.
+
+이 명령은 실행 기록(`launches.jsonl`)에 줄을 남기지 않는다. 이사의 신원은 등록부의 `director` 항목이 정본이다.
+
 ## 무응답 worker 감독
 
 감독 역할(PM, PL)은 worker를 기다릴 때 원시 `check --wait` 대신 다음 명령을 쓴다.

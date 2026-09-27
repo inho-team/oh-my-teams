@@ -51,6 +51,8 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 
 이후 이사는 조회와 종료를 담당하는 관제 자리로 남는다. Goal을 만들지 않고 Run도 바인딩하지 않는다.
 
+이사 세션 자체를 새로 열거나 다른 실행기의 세션으로 바꿀 때, 또는 이사 터미널이 Orca 탭에서 사라졌을 때에는 [director-terminal](../director-terminal/SKILL.md)의 절차대로 `director-terminal --replace`로 새 세션을 열고 등록부의 `director.terminalHandle`을 넘긴다. Orca의 터미널 명령을 손으로 조합해 이사를 띄우지 않는다.
+
 로드맵을 작성하거나 갱신할 때는 [`../../references/roadmap.md`](../../references/roadmap.md)가 정한 규칙을 따른다.
 
 ## 신호 수신과 결정
