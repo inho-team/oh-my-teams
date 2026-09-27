@@ -60,7 +60,7 @@ grep -rn "writeJSON(\|writeFileSync(\|appendFileSync(\|renameSync(" plugins/oh-m
 | 32 | lesson candidate | `lessons.mjs:68` | `<stateDir>/lessons/candidates/<fingerprint>.json` | 없음 | **write-once**: 같은 지문이 이미 있으면 그대로 반환하고 다시 쓰지 않는다 |
 | 33 | quota 스냅샷 | `quota.mjs:170` | `<pm-state>/quota/<poolId>/<observedAt>.json` | 없음 | overwrite, 시각으로 파일이 나뉘는 관측 로그 |
 | 34 | usage 스냅샷(수동) | `usage-report.mjs:704` | `<project>/.omt/history/usage-<entry>-<createdAt>.json` | 없음 | `usage-report --write`를 줄 때만 생성되는 조회 스냅샷 |
-| 35 | OpenCodex 런타임 설치 상태 | `dependencies.mjs:462,465`(스테이징 manifest·lockfile), `:497`(검증 완료 manifest), `:507,509`(`runtimes/<fingerprint>` rename), `:511,516`(`active.json` 교체) | `os.homedir()/.omt/runtime/{active.json, runtimes/<fingerprint>/, locks/<fingerprint>.lock}`(경로 헬퍼 `runtimePaths`, `dependencies.mjs:84-93`; 기준 디렉터리는 `dependencies.mjs:643`) | 없음 | overwrite/rename 기반. **프로젝트 `.omt`가 아니라 사용자 홈 디렉터리의 `.omt/runtime`**이라는 점이 표의 다른 34개 행과 다르다 |
+| 35 | OpenCodex 런타임 설치 상태 | `dependencies.mjs:462,465`(스테이징 manifest·lockfile), `:497`(검증 완료 manifest), `:507,509`(`runtimes/<fingerprint>` rename), `:511,516`(`active.json` 교체) | `os.homedir()/.omt/runtime/opencodex/{active.json, runtimes/<fingerprint>/, locks/<fingerprint>.lock}`(경로 헬퍼 `runtimePaths(root)`가 `base = path.resolve(root, "opencodex")`를 세 경로 모두의 기준으로 삼음, `dependencies.mjs:84-93`; `root`는 항상 `defaultRuntimeRoot()`가 반환하는 `os.homedir()/.omt/runtime`, `dependencies.mjs:642-644`; 모든 호출부(`teams-org.mjs:1512,1515,1520,1526`, `headless-runner.mjs:190,212`, `providers.mjs:210-211`)가 같은 `root`를 넘겨 우회 경로가 없다) | 없음 | overwrite/rename 기반. **프로젝트 `.omt`가 아니라 사용자 홈 디렉터리의 `.omt/runtime/opencodex`**라는 점이 표의 다른 34개 행과 다르다 |
 
 ### 1.3 문서화 대상에서 제외하는 런타임 상태와 이유
 
@@ -75,7 +75,7 @@ grep -rn "writeJSON(\|writeFileSync(\|appendFileSync(\|renameSync(" plugins/oh-m
 | launch ledger(`usage-ledger.mjs:237`, `<orgDir>/usage/launches.jsonl`), prompt-answer 로그(`prompt-supervision.mjs:158`) | 역할 연결과 감독 재시도를 위한 append-only 관측 로그다. 사람이나 역할이 업무 산출물로 읽거나 참조하지 않고, `usage-report`가 집계 목적으로만 읽는다 |
 | provider 호출 원본 로그(`worker.mjs:240,745,944`의 `output.txt`/로그 파일) | report의 `log`/`logHash` 필드가 참조만 보존하며, 로그 자체는 report가 정본으로 삼는 실행 결과의 원재료일 뿐 업무 문서가 아니다 |
 | resource 슬롯(표 1.2의 #29) | 해제 시 즉시 삭제되는 임대 기록이며, 남아 있는 동안에도 "누가 자원을 쓰고 있는가"라는 실행 중 상태이지 업무 산출물이 아니다 |
-| OpenCodex 런타임 설치 상태(표 1.2의 #35) | 프로젝트 `.omt`가 아니라 사용자 홈(`os.homedir()/.omt/runtime`)에 있는 머신 전역 실행 환경 캐시다(`dependencies.mjs:643`). 특정 kickoff·workflow·organization에 속하지 않고 같은 머신의 모든 프로젝트가 공유하며, 어떤 역할도 이를 업무 산출물로 읽거나 참조하지 않고 오직 OpenCodex 기동 전 자동 검증에만 쓰인다 |
+| OpenCodex 런타임 설치 상태(표 1.2의 #35) | 프로젝트 `.omt`가 아니라 사용자 홈(`os.homedir()/.omt/runtime/opencodex`)에 있는 머신 전역 실행 환경 캐시다(`dependencies.mjs:84-93,642-644`). 특정 kickoff·workflow·organization에 속하지 않고 같은 머신의 모든 프로젝트가 공유하며, 어떤 역할도 이를 업무 산출물로 읽거나 참조하지 않고 오직 OpenCodex 기동 전 자동 검증에만 쓰인다 |
 
 ## 2단계: 참조 행렬
 
@@ -119,7 +119,7 @@ grep -rn "writeJSON(\|writeFileSync(\|appendFileSync(\|renameSync(" plugins/oh-m
 | 폴더 | 책임 | 주 정본 소유자 | 대응하는 기존 지속 객체 |
 |---|---|---|---|
 | `01. 기획` | 목표·수용 기준·범위를 확정하고 kickoff를 등록한다 | 이사(브리프), PM(kickoff 등록) | 브리프, kickoff 등록 항목 |
-| `02. 설계` | 구현 전에 계약을 문서로 확정하고 독립 검토를 받는다(이 문서 자체가 그 사례다) | 설계를 배정받은 Senior. `skills/pm/SKILL.md:46`의 "하위 역할이 하나라도 있으면 PM은 최종 산출물을 직접 작성하지 않는다"는 한계에 따라, PM은 이번 실행에 Senior가 없어 폴드-롤로 이어받을 때만 예외적으로 작성한다(3.4절 참고) | 없음(신규 문서 유형) |
+| `02. 설계` | 구현 전에 계약을 문서로 확정하고 독립 검토를 받는다(이 문서 자체가 그 사례다) | 설계를 배정받은 역할. `skills/pm/SKILL.md:46`이 정하는 조건은 "Senior 유무"가 아니라 "이번 실행에 하위 역할이 하나라도 있는지"이므로, PM은 이번 실행의 역할 목록에 Senior든 Junior든 하위 역할이 하나라도 있으면 직접 작성하지 않고 그 가운데 이 일을 맡을 수 있는 역할에게 먼저 배정한다. PM 직접 작성은 이번 실행에 하위 역할이 하나도 없을 때만 허용한다(3.4절 참고) | 없음(신규 문서 유형) |
 | `03. 구현` | workflow/task 계약과 execution/attempt 진행, 다중 task workflow의 통합 계약을 기록한다 | PM(workflow request), 실행 역할(attempt) | workflow request, task revisions, execution/attempt, integration task |
 | `04. 검토` | 독립 Senior가 구현을 검토한다 | 배정된 독립 Senior | review 기록 |
 | `05. 수용` | PM(또는 accepted-risk 권한자)이 최종 판정을 내린다 | PM | acceptance decision |
@@ -177,7 +177,7 @@ grep -rn "writeJSON(\|writeFileSync(\|appendFileSync(\|renameSync(" plugins/oh-m
 | 역할 | 작성 | 검토 | 수정 | 독립성 제약 |
 |---|---|---|---|---|
 | Director | `01. 기획`(kickoff-brief-ref), `07. 종료` | 없음(최종 `close`가 판정을 대체) | 자기가 쓴 문서만 | 이사만 `close`·병합을 수행한다는 조직 규칙을 그대로 따름 |
-| PM | `01. 기획`(kickoff 등록), `03. 구현`(workflow request), `05. 수용`. `02. 설계`는 원칙적으로 작성하지 않으며, 이번 실행에 Senior가 한 명도 없어 `foldRole`로 그 일을 이어받을 때만 예외적으로 작성한다(`skills/pm/SKILL.md:46`) | 없음 | 자기가 쓴 문서, `05. 수용`은 PM 전용 | `acceptOutcomeLocked`가 요구하는 대로 모든 필요 review가 끝나야 작성 가능 |
+| PM | `01. 기획`(kickoff 등록), `03. 구현`(workflow request), `05. 수용`. `02. 설계`는 `skills/pm/SKILL.md:46`("이번 실행에 하위 역할이 하나라도 있으면 PM은 최종 산출물을 직접 작성하지 않는다. 산출물은 그 일을 맡을 수 있는 가장 낮은 역할에게 배정한다")이 규정한 조건을 그대로 적용한다. 조건은 Senior의 유무가 아니라 "이번 실행에 하위 역할이 하나라도 있는지"이므로, Senior는 없지만 Junior만 있는 실행에서도 PM은 `02. 설계`를 직접 쓰지 않는다. 실제로 누가 맡는지(예: Junior가 초안을 쓰고 Senior 부재 시 PL·PM이 검토만 맡는지)는 이번 실행의 역할 목록과 각 역할 SKILL.md의 한계(`junior/SKILL.md`의 "구조를 이해해야 하는 설계 판단은 직접 결론 내리지 않는다")에 따라 배정 시점에 정해지며, 이 설계 문서는 배정 대상을 미리 고정하지 않는다. PM 직접 작성은 이번 실행의 역할 목록에 하위 역할이 하나도 없을 때만 허용한다 | 없음 | 자기가 쓴 문서, `05. 수용`은 PM 전용 | `acceptOutcomeLocked`가 요구하는 대로 모든 필요 review가 끝나야 작성 가능 |
 | PL | `03. 구현`(attempt 배정) | 없음(배정만) | 배정 관련 필드만 | Junior/Senior 산출물을 대신 승인하지 않음 |
 | Senior | `02. 설계`, `03. 구현`(자기 배정분), `04. 검토`(다른 실행의 산출물) | `04. 검토` | 자기가 작성한 문서만, 검토 문서는 배정된 Senior만 | `senior/SKILL.md`의 "자신이 설계·작성한 변경을 독립 검토로 승인하지 않는다"는 한계를 그대로 반영해, 같은 실행 신원이 작성자이자 검토자인 문서는 거부한다(`implementationExecutionId !== reviewer.executionId` 검사를 문서 계층에도 적용) |
 | Junior | `03. 구현`(배정된 구현) | 없음 | 자기가 작성한 문서만 | 검토·수용 문서를 절대 갱신하지 않음(`junior/SKILL.md`의 한계와 동일) |
@@ -190,13 +190,21 @@ grep -rn "writeJSON(\|writeFileSync(\|appendFileSync(\|renameSync(" plugins/oh-m
 
 ### 3.5 경로와 독립된 문서 식별자
 
-폴더 이름(`01. 기획` 등)은 사람이 읽기 위한 표시일 뿐이며, 식별자로 쓰지 않는다. 식별자는 workflow id와 같은 패턴(`WORKFLOW_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/`, `workflow-store.mjs:7`)을 그대로 계승한 ASCII 슬러그 세그먼트를 `/`로 이어 만든다. 콜론(`:`)은 Windows가 드라이브 문자 위치 밖에서 금지하는 문자이므로 식별자 어디에도 쓰지 않는다.
+**확정된 결정(PM, 2026-09-27).** 문서를 실제로 담는 디렉터리는 브리프 조건 3("`.omt` 아래에 `01. 기획`으로 시작하는 단계별 폴더가 결정적으로 생성되고")과 제약("단계별 폴더 이름은 사용자가 요청한 `01. 기획` 형식을 보존한다")에 따라 `01. 기획`부터 `07. 종료`까지, 3.1절 표가 정의한 폴더 이름 문자열 그 자체로 생성한다. 이 폴더 이름은 표시용 별칭이 아니라 실제 저장 경로의 세그먼트다.
+
+```
+.omt/documents/<kickoffHash>/<workflowId|none>/<폴더 이름>/<docType>/<localId>/
+```
+
+`<폴더 이름>`은 `01. 기획`, `02. 설계`, `03. 구현`, `04. 검토`, `05. 수용`, `06. 인도`, `07. 종료` 일곱 값 가운데 하나만 허용하며, 런타임이 소유한 `stageSlug → 폴더 이름` 매핑 테이블(3.8절의 product-canonical 자산)로만 결정한다. 이 매핑은 1:1 고정이고, 이 경로를 조립하는 코드는 문서 저장 헬퍼 하나뿐이다(AGENTS.md의 "어댑터를 거치지 않는 직접 호출 금지" 규칙).
+
+경로 문자열은 식별자로 쓰지 않는다. `docId`(논리 식별자, 참조 무결성 검사와 orchestration 메시지에 쓰는 값)는 폴더 이름 문자열을 담지 않고, workflow id와 같은 패턴(`WORKFLOW_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/`, `workflow-store.mjs:7`)을 그대로 계승한 ASCII 슬러그 세그먼트를 대신 쓴다. 콜론(`:`)은 Windows가 드라이브 문자 위치 밖에서 금지하는 문자이므로 식별자 어디에도 쓰지 않는다.
 
 ```
 docId = "<kickoffHash>/<workflowId|"none">/<stageSlug>/<docType>/<localId>"
 ```
 
-이 슬래시 구분 형식은 실제 저장 경로 `.omt/documents/<kickoffHash>/<workflowId|none>/<stageSlug>/<docType>/<localId>/`의 디렉터리 계층과 그대로 대응하므로, 파일 경로에 쓰일 때도 별도의 문자 치환이 필요 없다. `stageSlug`는 폴더 번호가 아니라 의미로 고정한다: `planning`, `design`, `implementation`, `review`, `acceptance`, `delivery`, `closure`. 런타임은 `stageSlug → 폴더 표시 이름`(`01. 기획` 등) 매핑 테이블을 하나만 소유하며, 폴더 표시 이름이 바뀌어도(예: 사용자가 한국어 표기를 조정) 기존 `docId`와 참조는 깨지지 않는다. 이 매핑 테이블은 3.9절의 이식성 요구와 3.8절의 product-canonical 자산에 속한다.
+`stageSlug`는 `planning`, `design`, `implementation`, `review`, `acceptance`, `delivery`, `closure`로 고정하며, **논리 식별자와 참조 검사에만** 쓰고 실제 저장 경로의 디렉터리 이름으로는 쓰지 않는다. 즉 논리 식별자는 항상 `stageSlug`를, 실제 파일 시스템 경로는 항상 폴더 이름을 쓰며, 문서 저장 헬퍼가 두 값을 매핑 테이블로 상호 변환하는 유일한 지점이다. 폴더 이름이 바뀌는 변경(예: 사용자가 한국어 표기를 조정)은 기존 디렉터리를 새 이름으로 옮기는 별도 마이그레이션을 동반해야 하지만, `docId`와 참조 문자열은 `stageSlug`만 담으므로 그 마이그레이션으로 깨지지 않는다.
 
 ### 3.6 참조 형식과 스코핑
 
@@ -218,24 +226,38 @@ omt-doc:<kickoffHash>/<workflowId|none>/<stageSlug>/<docType>/<localId>@r<revisi
 기존 두 선례를 그대로 계승한다.
 
 1. **append-only revision 파일**: task revision(`tasks/<taskId>/revisions/<revision>.json`, `workflow.mjs:304-313`)과 review/decision(`assert(!fs.existsSync(target))`, `gates.mjs:399-400`)이 보여주는 대로, 문서 갱신은 새 revision 파일을 추가할 뿐 기존 파일을 다시 쓰지 않는다. 경로는 `.../revisions/<n>.json`이다.
-2. **포인터 파일의 낙관적 동시성**: `saveOrg`의 `expectedRevision` 검사(`core.mjs:1157-1160`)를 계승해, 각 문서의 `current.json`(최신 revision 번호만 담는 포인터)을 갱신할 때 호출자가 넘긴 `expectedRevision`이 현재 값과 다르면 거부한다. 이것이 "오래된 revision으로 덮어쓰지 않는다"(브리프 조건 6)는 요구를 만족시킨다.
+2. **포인터 파일의 낙관적 동시성**: `saveOrg`의 `expectedRevision` 검사(`core.mjs:1157-1160`)를 계승해, 각 문서의 `current.json`(최신 revision 번호와 5번 항목이 정의하는 `committed` 상태를 담는 포인터)을 갱신할 때 호출자가 넘긴 `expectedRevision`이 현재 값과 다르면 거부한다. 이것이 "오래된 revision으로 덮어쓰지 않는다"(브리프 조건 6)는 요구를 만족시킨다.
 3. **동시 갱신**: `withWorkflowUpdate`의 `.lock` 파일(`workflow-store.mjs:65-75`)과 `gates.mjs`의 `gates-write.lock`(`withAsyncFileLock`, `gates.mjs:379-382`)을 계승해, 문서별 디렉터리에 `.lock` 파일을 두고 갱신 임계구역을 감싼다.
 4. **부분 실패 후 원자성(문서 저장소 내부)**: `workflow-store.mjs`의 transaction 저널 패턴(`saveWorkflowState`가 `transaction.json`에 `{state, events}`를 먼저 쓰고 `recoverTransaction`이 반영 후 삭제, `workflow-store.mjs:12-27,122-134`)과 같은 구조(먼저-쓰고-반영-후-삭제하는 저널 파일)를 문서 저장에도 적용한다. 다만 `workflow-store.mjs`가 노출하는 `workflowDirectory`/`workflowStateFile`/`recoverTransaction` 함수 자체를 호출하지는 않는다. 이 함수들은 `WORKFLOW_ID_PATTERN`에 맞는 `workflowId`를 필수로 요구하며(`assert(typeof id === "string" && WORKFLOW_ID_PATTERN.test(id))`, `workflow-store.mjs:36-40`), `{state.json, events/}`라는 workflow 전용 레이아웃에 고정되어 있다. 반면 3.2절 공통 봉투는 `workflowId: null`을 허용하고, `01. 기획` 단계 문서(kickoff-brief-ref)는 workflow 생성 이전에 작성되므로 애초에 `workflowId`가 없다. 그러므로 문서 저장 헬퍼는 `workflow-store.mjs`와 **같은 저널 패턴**(임시 저널 파일 → 반영 → 삭제, 재개 시 저널 존재 여부로 미완료 반영을 재개)을 독립적으로 구현하되, `workflowId`가 있는 `03. 구현` 이후 문서는 그 저널을 workflow 디렉터리 안(`.omt/workflows/<id>/documents/...`)에 두어 기존 workflow `.lock`의 보호를 그대로 받고, `workflowId`가 없는 `01. 기획`/`02. 설계` 문서는 kickoff 디렉터리 자신의 `.lock`으로 보호되는 별도의 경량 저널을 둔다. 이는 AGENTS.md가 금지하는 "런타임 로직의 중복 선언"이 아니라 이미 검증된 저널 **구조**를 다른 범위에 다시 적용하는 것이며, 기존 함수를 호출할 수 없는 이유는 위에서 인용한 코드가 보여준다(finding `workflow-journal-not-reusable-for-non-workflow-docs`).
-5. **문서와 참조 객체 사이의 원자성**: 4번 항목은 문서 저장소 **내부**(자신의 revision 파일과 `current.json`)의 원자성만 다룬다. 그러나 문서는 kickoff 등록 항목(`kickoff-registry.mjs`)이나 review/gate 레코드(`gates.mjs`)처럼 **이미 존재하는 별도 저장소**의 참조 필드에서도 인용된다. 예를 들어 `04. 검토` 문서가 만들어진 뒤 `gates.mjs`의 review 레코드가 그 `docId`를 참조 필드에 적어야 한다면, 두 저장소는 서로 다른 파일이므로 단일 트랜잭션으로 묶을 수 없다. 이 설계는 완전한 2단계 커밋을 새로 만들지 않고 다음 두 규칙으로 이 틈을 좁힌다. 첫째, 쓰기 순서를 고정한다: 항상 문서(참조되는 쪽)를 먼저 쓰고, 참조하는 기존 객체(kickoff 등록 항목, review/gate 레코드)를 그다음에 갱신한다. 그러면 중간 실패는 "문서는 있는데 아직 참조되지 않음"이라는, 다시 시도해도 안전한 상태만 남긴다("참조는 있는데 문서가 없음"이라는 깨진 상태는 발생하지 않는다). 둘째, 참조 갱신을 멱등하게 만든다: 참조하는 객체를 갱신하는 호출은 같은 `docId`를 다시 적어도 오류 없이 그대로 성공하도록 만들어, 실패 후 재시도가 항상 안전하게 한다. 참조가 실제로 반영되었는지 의심스러우면, 참조하는 쪽 객체를 다시 읽지 않고도 문서 디렉터리를 스캔해 재구성(reconciliation)할 수 있다는 점이 3.11절의 재개 절차와 같은 원리다.
+5. **문서와 참조 객체 사이의 어댑터 계약**: 4번 항목은 문서 저장소 **내부**(자신의 revision 파일과 `current.json`)의 원자성만 다룬다. 그러나 문서는 kickoff 등록 항목(`kickoff-registry.mjs`)이나 review/gate 레코드(`gates.mjs`)처럼 **이미 존재하는 별도 저장소**의 참조 필드에서도 인용된다. 예를 들어 `04. 검토` 문서가 만들어진 뒤 `gates.mjs`의 review 레코드가 그 `docId`를 참조 필드에 적어야 한다면, 두 저장소는 서로 다른 파일이므로 단일 트랜잭션으로 묶을 수 없다. 파일별 원자 쓰기(1번 항목의 append-only 파일, 4번 항목의 저널)는 각 저장소 **자신의** 쓰기만 원자로 만들 뿐, 두 저장소에 걸친 원자성을 보장하지 않는다. 이 설계는 완전한 분산 트랜잭션을 새로 만드는 대신, 문서 저장 헬퍼가 제공하는 좁은 어댑터 계약 하나로 이 틈을 좁힌다.
+
+   - **어댑터 입력**: 문서 페이로드, 참조 대상 저장소 식별자(예: `kickoff-registry.mjs`의 `worktreeId`, `gates.mjs`의 review id), 참조 필드에 적을 갱신 함수(예: `review.docRef = docId`)를 받는다.
+   - **커밋 순서**: (1) 문서 revision 파일을 append-only로 쓴다. (2) 문서의 `current.json`을 `committed: false`로 갱신한다(1번 항목의 revision 파일 자체는 이미 존재하지만, 아직 정본으로 조회되지 않는 잠정 상태로 만든다). (3) 참조하는 기존 객체(kickoff 등록 항목, review/gate 레코드)의 참조 필드를 갱신하며, 이때 문서의 `current.json`에서 읽은 `revision` 값을 참조 레코드의 `docRevision` 필드에 함께 적는다. (4) (3)이 성공하면 문서의 `current.json`을 다시 갱신해 `committed: true`로 전환한다.
+   - **커밋 판정 지점**: 문서가 "존재한다"고 정본이 인정하는 시점은 (4)가 끝난 뒤, 즉 `current.json.committed === true`가 된 순간이다. (1)~(3) 사이 어느 지점에서 중단되어도 문서는 아직 커밋되지 않은 상태로 남는다.
+
+   이 순서 위에 세 계약을 둔다(브리프 조건 6).
+
+   **(a) 미커밋 문서를 정본 조회에서 숨기는 계약.** `current.json.committed !== true`인 문서는 3.3절의 상태 전이 조회(`open → in-review → resolved`)와 3.6절 참조 무결성 검사의 "대상이 존재하는지" 판정에서 "존재하지 않음"과 동일하게 취급한다. 따라서 `committed: false`인 동안에는 그 문서를 가리키는 새 참조를 만들 수 없고, 그 문서에 대한 독립 검토도 시작되지 않는다. 이 판정은 문서 자신의 `current.json` 한 파일만 읽으면 되므로 별도 저장소 조회 없이 어댑터 계약 안에서 완결된다.
+
+   **(b) 참조 검증과 revision 전이의 경쟁을 거부하는 계약.** 위 (3)~(4)단계(참조 필드 갱신과 `committed` 전환)는 3.7 3번 항목이 이미 정의한 문서별 `.lock`으로 감싼 하나의 임계구역이다. 같은 문서에 대한 새 revision 쓰기(2번 항목의 `expectedRevision` 갱신)가 이 임계구역이 열려 있는 동안 들어오면 같은 `.lock`을 얻지 못해 거부되고, 호출자는 3번 항목이 정의한 재시도 안내를 받는다. 즉 "참조가 어떤 revision을 가리켜야 하는지 확정하는 구간"과 "문서에 새 revision을 추가하는 구간"은 같은 락으로 직렬화되어 있어 서로 어긋난 revision을 참조에 남기는 경쟁이 발생하지 않는다.
+
+   **(c) reconciliation과 expectedRevision을 결합하는 계약.** 재구성(문서 디렉터리 스캔)이 `committed: true`인 문서를 발견했는데 참조하는 쪽 객체에 그 문서를 가리키는 참조가 없거나 오래됐으면, 스캔이 읽은 `current.json.revision`을 그대로 참조 갱신 호출의 `docRevision`/`expectedRevision` 인자로 넘긴다. 참조하는 객체가 이미 그 문서를 가리키는 참조를 갖고 있으면, 그 참조에 기록된 `docRevision`과 스캔 결과의 `revision`을 비교한다. 같으면 앞선 시도가 이미 반영한 것이므로 멱등 성공으로 취급해 아무것도 다시 쓰지 않는다. 다르면(스캔 이후 더 새 revision이 쓰였다면) reconciliation은 참조를 자동으로 최신 값으로 덮어쓰지 않고 거부해 배정자에게 보고한다. 이는 오래된 스캔 결과가 더 새로운 참조를 잘못 되돌리는 사고를 막기 위함이다.
+
+   **복구 절차.** (1)~(4) 사이에 프로세스가 죽었을 때: `committed: false`로 남은 문서는 (a)에 따라 애초에 정본 조회에 보이지 않으므로 안전하게 방치되거나, 같은 작성자가 같은 입력으로 어댑터를 다시 호출해 (2)부터 재개한다(2번 항목의 `current.json` 갱신은 그 자체로 멱등하다). (3)이 부분적으로만 반영된 채(예: kickoff 등록 항목은 갱신됐지만 review 레코드는 아직인 다중 참조 갱신) 중단됐다면, 어댑터는 각 참조 대상마다 독립적으로 (c)의 `docRevision` 비교를 적용해 이미 반영된 대상은 건너뛰고 남은 대상만 마저 갱신한다. 이 복구는 새 트랜잭션 로그를 전제하지 않고 참조 레코드 자신이 이미 담고 있는 `docRevision` 필드만으로 판단하므로, 파일별 원자 쓰기의 조합만으로 전체 원자성을 만드는 것이 아니라 (a)의 가시성 통제와 (b)의 락 기반 직렬화, (c)의 revision 결합 검증을 함께 적용한 결과다.
 6. **작성자·시각·근거·이전 revision·사유**: 3.2절 공통 봉투의 `author`, `createdAt`, `reason`, `basedOnRevision` 필드가 이를 담는다.
 
 ### 3.8 product-canonical과 execution-instance 분리
 
 | 구분 | 속하는 것 | 저장 위치 |
 |---|---|---|
-| product-canonical(저장소 추적) | 문서 JSON 스키마(`schemas/document-*.schema.json`), `stageSlug ↔ 폴더 표시 이름` 매핑 테이블, 문서 저장 헬퍼 모듈, 이 설계 문서 | git 추적 대상 |
+| product-canonical(저장소 추적) | 문서 JSON 스키마(`schemas/document-*.schema.json`), `stageSlug ↔ 폴더 이름` 매핑 테이블, 문서 저장 헬퍼 모듈, 이 설계 문서 | git 추적 대상 |
 | execution-instance(`.omt`, git 제외) | kickoff별 실제 문서 인스턴스, `organization.json` 자체(정책 값은 배포마다 다를 수 있는 실행 상태), workflow/task/review/decision/evidence 등 표 1.2의 모든 파일 | `.omt/`(`.gitignore`로 제외됨을 `git check-ignore -v .omt/organization.json`으로 확인) |
 
 `organization.json`은 그 내용이 조직 전체의 정책을 담고 있어 정본처럼 보이지만, 실제로는 배포된 각 저장소의 `.omt/organization.json`이 로컬 실행 상태이며 git으로 추적되지 않는다. 정본은 그 값의 **형태**를 규정하는 `organization.schema.json`이며, 실제 값 자체는 execution-instance로 분류한다. 이 구분을 명시하지 않으면 "product-canonical vs execution-instance 분리"(브리프 조건)가 organization 객체에서 모호해진다.
 
 ### 3.9 macOS/Windows 폴더명 이식성
 
-`01. 기획`과 같은 표시 이름에는 Windows가 금지하는 문자(`< > : " / \ | ? *`)가 없으므로 파일 시스템 계층에서는 그대로 생성할 수 있다. 다만 macOS(APFS)는 파일명을 유니코드 NFD로 정규화해 저장하는 경우가 있어, git에 NFC로 커밋된 문자열과 파일 시스템이 반환하는 바이트 열이 다를 수 있다. 이 설계는 3.5절에서 식별자(`docId`)를 폴더 표시 이름 문자열과 완전히 분리했으므로, 정규화 불일치가 생겨도 참조 무결성이나 식별에는 영향을 주지 않는다. 폴더를 실제로 생성·조회하는 코드는 표시 이름을 비교할 때 항상 `String.prototype.normalize("NFC")`로 정규화한 뒤 비교하며, 이 생성·조회는 AGENTS.md가 요구하는 대로 지정된 파일 시스템 어댑터(`writeJSON`류)를 통해서만 수행한다.
+3.5절이 정한 대로 문서를 실제로 담는 디렉터리 이름은 `01. 기획`부터 `07. 종료`까지의 폴더 이름 그 자체이며, 실체 없는 표시용 계층이 아니다. 이 이름들에는 Windows가 금지하는 문자(`< > : " / \ | ? *`)가 없으므로 파일 시스템 계층에서 그대로 생성할 수 있다. 다만 macOS(APFS)는 파일명을 유니코드 NFD로 정규화해 저장하는 경우가 있어, git에 NFC로 커밋된 매핑 테이블의 문자열과 파일 시스템이 실제로 반환하는 바이트 열이 다를 수 있다. 이 설계는 3.5절에서 논리 식별자(`docId`)를 폴더 이름 문자열과 완전히 분리했으므로(`docId`는 항상 `stageSlug`만 담는다), 정규화 불일치가 생겨도 참조 무결성이나 식별에는 영향을 주지 않는다. 폴더를 실제로 생성·조회하는 코드는 매핑 테이블에서 가져온 폴더 이름을 비교할 때 항상 `String.prototype.normalize("NFC")`로 정규화한 뒤 비교하며, 이 생성·조회는 AGENTS.md가 요구하는 대로 지정된 파일 시스템 어댑터(`writeJSON`류)를 통해서만 수행한다.
 
 ### 3.10 호환·이전 정책
 
