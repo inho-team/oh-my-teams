@@ -14,6 +14,7 @@ import {
 import {
   bindKickoffRun,
   cleanupKickoffBranches,
+  kickoffEntryName,
   listKickoffs,
   registerKickoff,
   registryDirectory,
@@ -65,6 +66,11 @@ function claimFor(fixture, worktreeId) {
     // These tests are about the registry itself; delivery has its own tests.
     delivery: { mode: "none" },
     requirements: minimalRequirements(worktreeId),
+    // validateLedgerForClaim requires a registered director unconditionally,
+    // even for this equal-only ledger, so every claim needs one. The checkout
+    // is the test process's own cwd so kickoff-release's director-authority
+    // check (unrelated to what this file tests) passes without --force.
+    director: { terminalHandle: `term_director_${worktreeId}`, checkoutPath: process.cwd() },
   };
 }
 
@@ -75,9 +81,11 @@ const ids = (fixture) =>
 // not the claim's own {statements, criteria, confirmations} shape. Tests that
 // write an entry file directly, to stand in for one a pre-ledger release left
 // behind (A.6's compatibility path), drop the field entirely rather than
-// reshape it, since `requirements` is optional on an entry.
+// reshape it, since `requirements` is optional on an entry. `director` is
+// dropped too: a release that predates the ledger predates director support
+// as well, so an entry standing in for one never carries either field.
 function legacyEntryFor(fixture, worktreeId, extra = {}) {
-  const { requirements: _requirements, ...claim } = claimFor(fixture, worktreeId);
+  const { requirements: _requirements, director: _director, ...claim } = claimFor(fixture, worktreeId);
   return {
     schemaVersion: 1,
     ...claim,
@@ -207,7 +215,14 @@ test("a pasted handoff claim is trusted only when it matches the registered dire
 
   // Registered, but by an entry written before director support existed
   // (or without one recorded): still nothing to compare the claim against.
-  registerKickoff(fixture.org, claimFor(fixture, "wt-a"));
+  // registerKickoff always requires a requirements ledger, and a ledger
+  // always requires a director, so the only way left to produce a
+  // director-less entry is to write one directly, standing in for a release
+  // that predates director support (A.6's compatibility path).
+  writeJSON(
+    path.join(registryDirectory(fixture.org), `${kickoffEntryName("wt-a")}.json`),
+    legacyEntryFor(fixture, "wt-a"),
+  );
   assert.equal(
     verifyHandoffClaim(fixture.org, {
       worktreeId: "wt-a",

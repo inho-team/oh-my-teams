@@ -25,8 +25,10 @@ import {
 import {
   listKickoffs,
   cleanupKickoffBranches,
+  kickoffEntryName,
   recordDelivery,
   registerKickoff,
+  registryDirectory,
   releaseKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
@@ -99,6 +101,23 @@ function claimFor(fixture, worktreeId, directorOpts) {
     requirements: minimalRequirements(worktreeId),
     ...(directorOpts !== undefined ? { director: directorOpts } : {}),
   };
+}
+
+// A pre-ledger release wrote entries with neither `requirements` nor
+// `director`; registerKickoff can no longer produce one (a ledger-bearing
+// claim always requires a director), so tests standing in for that legacy
+// shape write the entry file directly rather than going through it.
+function writeLegacyEntry(fixture, worktreeId, extra = {}) {
+  const { requirements: _requirements, director: _director, ...claim } = claimFor(fixture, worktreeId);
+  const entryPath = path.join(registryDirectory(fixture.org), `${kickoffEntryName(worktreeId)}.json`);
+  fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+  writeJSON(entryPath, {
+    schemaVersion: 1,
+    ...claim,
+    runId: null,
+    createdAt: "2026-09-16T00:00:00.000Z",
+    ...extra,
+  });
 }
 
 // ─── 1. 역할 서열과 접힘 ────────────────────────────────────────────────────
@@ -208,10 +227,20 @@ test("validateOrg accepts existing organizations without director field", () => 
   assert.equal(ROLES.includes(DIRECTOR_ROLE), false);
 });
 
+test("a claim with a requirements ledger but no director is refused, even equal-only", (t) => {
+  const fixture = project(t);
+  // A ledger-bearing claim always requires a registered director, regardless
+  // of whether its criteria are all equal-scope (#139: an equal-only ledger
+  // must not become a way to skip director-only-command protection).
+  assert.throws(
+    () => registerKickoff(fixture.org, claimFor(fixture, "wt-legacy")),
+    /director\.checkoutPath is required/,
+  );
+});
+
 test("existing registry entries without director field list and release normally", (t) => {
   const fixture = project(t);
-  // director 없는 claim
-  registerKickoff(fixture.org, claimFor(fixture, "wt-legacy"));
+  writeLegacyEntry(fixture, "wt-legacy");
   const [entry] = listKickoffs(fixture.org).kickoffs;
   assert.equal(entry.pm.worktreeId, "wt-legacy");
   assert.equal(entry.director, undefined);
@@ -446,11 +475,9 @@ test("deliverKickoff warns and proceeds for legacy entry without director", asyn
   const fixture = project(t);
   const wrongDir = path.join(fixture.dir, "somewhere");
   fs.mkdirSync(wrongDir, { recursive: true });
-  const claim = {
-    ...claimFor(fixture, "wt-deliver-legacy"),
+  writeLegacyEntry(fixture, "wt-deliver-legacy", {
     delivery: { mode: "local-merge", branch: "main" },
-  };
-  registerKickoff(fixture.org, claim);
+  });
 
   const warnings = [];
   const originalWarn = console.warn;
@@ -532,7 +559,10 @@ test("launchContext director lookup is non-fatal when registry has no matching e
 
 test("checkCloseReady warns and returns legacy:true when no close-ready signal exists", (t) => {
   const fixture = project(t);
-  registerKickoff(fixture.org, claimFor(fixture, "wt-no-signal"));
+  registerKickoff(
+    fixture.org,
+    claimFor(fixture, "wt-no-signal", { checkoutPath: fixture.dir }),
+  );
 
   const warnings = [];
   const original = console.warn;
@@ -553,7 +583,10 @@ test("checkCloseReady warns and returns legacy:true when no close-ready signal e
 
 test("checkCloseReady throws when signal head does not match requested head", (t) => {
   const fixture = project(t);
-  registerKickoff(fixture.org, claimFor(fixture, "wt-head-mismatch"));
+  registerKickoff(
+    fixture.org,
+    claimFor(fixture, "wt-head-mismatch", { checkoutPath: fixture.dir }),
+  );
   sendSignal(fixture.org, {
     worktreeId: "wt-head-mismatch",
     kind: "close-ready",
@@ -574,7 +607,10 @@ test("checkCloseReady throws when signal head does not match requested head", (t
 
 test("checkCloseReady returns ready when signal head matches", (t) => {
   const fixture = project(t);
-  registerKickoff(fixture.org, claimFor(fixture, "wt-head-match"));
+  registerKickoff(
+    fixture.org,
+    claimFor(fixture, "wt-head-match", { checkoutPath: fixture.dir }),
+  );
   sendSignal(fixture.org, {
     worktreeId: "wt-head-match",
     kind: "close-ready",
@@ -837,7 +873,7 @@ test("kickoff-merge-record refuses an unmerged commit through the command line",
 
 test("checkCloseReady works for legacy kickoff without director record", (t) => {
   const fixture = project(t);
-  registerKickoff(fixture.org, claimFor(fixture, "wt-legacy-check"));
+  writeLegacyEntry(fixture, "wt-legacy-check");
 
   const warnings = [];
   const original = console.warn;
@@ -857,7 +893,7 @@ test("checkCloseReady works for legacy kickoff without director record", (t) => 
 
 test("assertDirectorAuthority warns and proceeds for legacy entry without director", (t) => {
   const fixture = project(t);
-  registerKickoff(fixture.org, claimFor(fixture, "wt-legacy-authority"));
+  writeLegacyEntry(fixture, "wt-legacy-authority");
   const [entry] = listKickoffs(fixture.org).kickoffs;
   assert.equal(entry.director, undefined);
 

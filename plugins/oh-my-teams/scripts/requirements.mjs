@@ -310,18 +310,20 @@ export function validateLedgerForClaim(requirements, director) {
   const { statements, criteria, confirmations = [] } = requirements;
   validateStatements(statements);
   validateCriteria(criteria, statements);
-  const narrowerCriteria = criteria.filter((item) => item.scope === "narrower");
-  // A claim with only equal-scope criteria needs no user confirmation and so
-  // no director checkout to validate one against; requiring a director here
-  // unconditionally would make every equal-only kickoff (the common case)
-  // depend on a field the claim schema treats as optional.
-  if (narrowerCriteria.length === 0) return requirements;
+  // A registered director is required unconditionally, even when this claim's
+  // criteria are all equal-scope and so need no narrower confirmation right
+  // now: skipping the check for an equal-only ledger would let a claim that
+  // carries a ledger but omits its director bypass director-only commands
+  // (present, confirm, fidelity-confirm, exception, audit-policy pin) that
+  // key off the same registry entry later, once a narrower criterion is
+  // added. A pre-ledger kickoff with no director at all is migrated through
+  // a separate, director-run retrofit procedure instead of this check.
   assert(
     director && typeof director.checkoutPath === "string" && director.checkoutPath.trim(),
-    "Claim director.checkoutPath is required to validate a narrower criterion's confirmation",
+    "Claim director.checkoutPath is required to validate the requirements ledger",
   );
   const directorPath = path.resolve(director.checkoutPath);
-  for (const criterion of narrowerCriteria) {
+  for (const criterion of criteria.filter((item) => item.scope === "narrower")) {
     const confirmation = confirmations.find(
       (item) => item.criterionId === criterion.id,
     );

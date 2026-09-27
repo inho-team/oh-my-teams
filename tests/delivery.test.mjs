@@ -89,6 +89,11 @@ async function kickoffProject(
     brief,
     delivery,
     requirements: minimalRequirements(worktreeId),
+    // validateLedgerForClaim requires a registered director unconditionally,
+    // even for this equal-only ledger. The checkout is the test process's own
+    // cwd so releaseKickoff's director-authority check passes without
+    // --force.
+    director: { terminalHandle: `term_director_${worktreeId}`, checkoutPath: process.cwd() },
   });
   return { project, org, worktree, worktreeId, head };
 }
@@ -108,6 +113,7 @@ test("a claim records how the brief delivers, and a branch where one is merged",
     brief: entry.brief,
     delivery,
     requirements: minimalRequirements("wt-2"),
+    director: { terminalHandle: "term_director_wt-2", checkoutPath: process.cwd() },
   });
   assert.throws(
     () => registerKickoff(fixture.org, claim(undefined)),
