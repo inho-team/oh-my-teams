@@ -34,7 +34,10 @@ export const CATALOG_PROVIDERS = Object.freeze(["claude", "codex", "agy"]);
  * `command-failed` covers a non-zero exit or a timeout; `unparseable` means
  * the command ran but its output was not the shape this reads; `empty-catalog`
  * means it parsed but named no usable model; `no-catalog-interface` means the
- * executor has no listing command to run in the first place.
+ * executor has no listing command to run in the first place; `execute-error`
+ * means the injected `execute` itself rejected or threw before any process
+ * result came back, which is a break of the `execute` contract rather than a
+ * command that ran and failed.
  */
 export const CATALOG_FAILURE_REASONS = Object.freeze([
   "not-installed",
@@ -42,6 +45,7 @@ export const CATALOG_FAILURE_REASONS = Object.freeze([
   "unparseable",
   "empty-catalog",
   "no-catalog-interface",
+  "execute-error",
 ]);
 
 function excerpt(text, max = 300) {
@@ -118,6 +122,20 @@ async function codexCatalog({ execute, env, home, codexHome }) {
   return ok("codex", source, models);
 }
 
+// A well-formed line is `<id>\t<display name>`; anything without a tab, or
+// with nothing before the tab, is not a model line, and null tells the
+// caller to reject the whole batch instead of silently dropping just that
+// line (a mis-shapen line signals the parser no longer understands the
+// output, not that one model happens to be missing).
+function parseAgyLine(line) {
+  const tabIndex = line.indexOf("\t");
+  if (tabIndex === -1) return null;
+  const id = line.slice(0, tabIndex).trim();
+  if (!id) return null;
+  const displayName = line.slice(tabIndex + 1).trim();
+  return { id, displayName: displayName || null, efforts: [] };
+}
+
 async function agyCatalog({ execute, env }) {
   const source = "agy models";
   const result = await execute(["agy", "models"], {
@@ -134,15 +152,23 @@ async function agyCatalog({ execute, env }) {
   }
   // Each stdout line is `<id>\t<display name>`; a progress line such as
   // "Fetching available models..." goes to stderr, not stdout (verified live).
-  const models = result.stdout
+  const lines = result.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [id, ...rest] = line.split("\t");
-      return { id, displayName: rest.join("\t").trim() || null, efforts: [] };
-    })
-    .filter((model) => model.id);
+    .filter(Boolean);
+  const models = [];
+  for (const line of lines) {
+    const parsed = parseAgyLine(line);
+    if (!parsed) {
+      return unavailable(
+        "agy",
+        "unparseable",
+        `agy models printed a line with no id/name separator: ${excerpt(line, 120)}`,
+        source,
+      );
+    }
+    models.push(parsed);
+  }
   if (models.length === 0) {
     return unavailable(
       "agy",
@@ -180,12 +206,33 @@ async function claudeCatalog({ execute, env }) {
   );
 }
 
+// A provider function normally resolves with an ok/unavailable entry itself,
+// but an injected `execute` that rejects or throws synchronously (rather than
+// resolving with a failed process result, as the real core.mjs `run` always
+// does) would otherwise reject the whole `Promise.all` below and take the
+// other, independently-succeeded providers down with it. Catching here keeps
+// each provider's outcome isolated no matter how its `execute` misbehaves.
+async function safeCatalog(provider, source, attempt) {
+  try {
+    return await attempt();
+  } catch (err) {
+    return unavailable(
+      provider,
+      "execute-error",
+      excerpt(err?.stack ?? err?.message ?? String(err)),
+      source,
+    );
+  }
+}
+
 /**
  * Queries every executor in {@link CATALOG_PROVIDERS} for its current model
  * catalog, in parallel and independently.
  *
  * One executor failing never blocks or alters another's result: each provider
- * function catches its own process outcome and returns its own entry.
+ * function catches its own process outcome, and a rejection or synchronous
+ * throw from the injected `execute` itself is also caught per-provider, so it
+ * never takes down the other providers' already-settled results.
  *
  * @param {object} [options={}] - Injectable environment for tests.
  * @param {Function} [options.execute=run] - Command runner.
@@ -203,29 +250,49 @@ export async function fetchModelCatalog({
   codexHome,
 } = {}) {
   const [claude, codex, agy] = await Promise.all([
-    claudeCatalog({ execute, env }),
-    codexCatalog({ execute, env, home, codexHome }),
-    agyCatalog({ execute, env }),
+    safeCatalog("claude", "claude --version", () =>
+      claudeCatalog({ execute, env }),
+    ),
+    safeCatalog("codex", "codex debug models", () =>
+      codexCatalog({ execute, env, home, codexHome }),
+    ),
+    safeCatalog("agy", "agy models", () => agyCatalog({ execute, env })),
   ]);
   return { claude, codex, agy };
 }
 
-/** Reasons {@link validateModelChoice} can reject a choice. */
+/**
+ * Reasons {@link validateModelChoice} can reject a choice.
+ *
+ * The first four judge the `choice` string against a well-formed catalog;
+ * `malformed-catalog` is different in kind, it means the catalog argument
+ * itself is not a usable {@link fetchModelCatalog} result (missing, not an
+ * object, or a provider entry whose `models` is not an array), which is a
+ * caller bug rather than anything the user typed.
+ */
 export const CHOICE_REJECTION_REASONS = Object.freeze([
   "malformed-choice",
   "unknown-provider",
   "provider-unavailable",
   "model-not-in-catalog",
+  "malformed-catalog",
 ]);
+
+function ownEntry(catalog, provider) {
+  return Object.hasOwn(catalog, provider) ? catalog[provider] : undefined;
+}
 
 /**
  * Validates a `provider:model` choice against a fetched catalog.
  *
  * This is the contract org-draft and adjust must call before persisting a
- * user's model choice; neither is wired to it yet. The four rejection reasons
- * are kept distinct so a caller can tell a typo from a model the catalog
- * simply does not (or no longer) list, from an executor it could not reach at
- * all.
+ * user's model choice; neither is wired to it yet. The four choice-shaped
+ * rejection reasons are kept distinct so a caller can tell a typo from a
+ * model the catalog simply does not (or no longer) list, from an executor it
+ * could not reach at all. Never throws: a `catalog` that is not a well-formed
+ * {@link fetchModelCatalog} result (null, a provider entry missing `models`,
+ * `models` not being an array, or a corrupt item inside it) is rejected with
+ * `malformed-catalog` instead of raising.
  *
  * @param {Record<string, object>} catalog - Result of {@link fetchModelCatalog}.
  * @param {string} choice - Value such as `codex:gpt-6-astra`.
@@ -244,7 +311,18 @@ export function validateModelChoice(catalog, choice) {
     };
   }
   const [, provider, model] = match;
-  const entry = catalog?.[provider];
+  if (
+    catalog === null ||
+    typeof catalog !== "object" ||
+    Array.isArray(catalog)
+  ) {
+    return {
+      ok: false,
+      reasonCode: "malformed-catalog",
+      reason: `Catalog must be a provider record, got: ${JSON.stringify(catalog ?? null)}`,
+    };
+  }
+  const entry = ownEntry(catalog, provider);
   if (!entry) {
     return {
       ok: false,
@@ -259,7 +337,19 @@ export function validateModelChoice(catalog, choice) {
       reason: entry.reason ?? `Provider ${provider} is unavailable`,
     };
   }
-  const found = entry.models.find((candidate) => candidate.id === model);
+  if (!Array.isArray(entry.models)) {
+    return {
+      ok: false,
+      reasonCode: "malformed-catalog",
+      reason: `Catalog entry for ${provider} has no models array`,
+    };
+  }
+  const found = entry.models.find(
+    (candidate) =>
+      candidate !== null &&
+      typeof candidate === "object" &&
+      candidate.id === model,
+  );
   if (!found) {
     return {
       ok: false,

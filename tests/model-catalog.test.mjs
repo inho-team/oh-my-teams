@@ -256,3 +256,134 @@ test("the failure-reason and rejection-reason vocabularies are stable and non-em
     CHOICE_REJECTION_REASONS.length,
   );
 });
+
+test("one executor's execute rejecting does not lose the other executors' already-settled results", async () => {
+  const execute = async (argv) => {
+    const key = argv.join(" ");
+    if (key === "codex debug models") {
+      throw new Error("simulated ECONNRESET from execute()");
+    }
+    return DEFAULT_RESPONSES[key];
+  };
+  // fetchModelCatalog itself must not reject: a broken execute for one
+  // provider is not allowed to take down claude/agy's independent results.
+  const catalog = await fetchModelCatalog({ execute });
+  assert.equal(catalog.codex.status, "unavailable");
+  assert.equal(catalog.codex.reasonCode, "execute-error");
+  assert.match(catalog.codex.reason, /simulated ECONNRESET/);
+  assert.equal(catalog.claude.status, "unavailable");
+  assert.equal(catalog.claude.reasonCode, "no-catalog-interface");
+  assert.equal(catalog.agy.status, "ok");
+  assert.ok(catalog.agy.models.length > 0);
+});
+
+test("a synchronous throw from execute is caught the same way a rejection is", async () => {
+  const execute = (argv) => {
+    const key = argv.join(" ");
+    if (key === "agy models") {
+      throw new Error("execute is not even async here");
+    }
+    return Promise.resolve(DEFAULT_RESPONSES[key]);
+  };
+  const catalog = await fetchModelCatalog({ execute });
+  assert.equal(catalog.agy.status, "unavailable");
+  assert.equal(catalog.agy.reasonCode, "execute-error");
+  assert.equal(catalog.codex.status, "ok");
+});
+
+test("an agy stdout line without an id/name separator is reported as unparseable, not silently dropped or absorbed as a model", async () => {
+  const catalog = await fetchModelCatalog({
+    execute: fakeExecute({
+      "agy models": {
+        code: 0,
+        stdout:
+          "gemini-3.1-pro-high\tGemini 3.1 Pro (High)\n" +
+          "Warning: model cache stale, retrying...\n" +
+          "gemini-3.1-pro-low\tGemini 3.1 Pro (Low)\n",
+        stderr: "",
+        timedOut: false,
+      },
+    }),
+  });
+  assert.equal(catalog.agy.status, "unavailable");
+  assert.equal(catalog.agy.reasonCode, "unparseable");
+  assert.match(catalog.agy.reason, /Warning: model cache stale/);
+  assert.deepEqual(catalog.agy.models, []);
+  // The malformed agy line must never surface as a fabricated "model".
+  assert.equal(catalog.codex.status, "ok");
+});
+
+test("an agy line with a tab but no id before it is rejected the same way", async () => {
+  const catalog = await fetchModelCatalog({
+    execute: fakeExecute({
+      "agy models": {
+        code: 0,
+        stdout: "\tNo id before this tab\n",
+        stderr: "",
+        timedOut: false,
+      },
+    }),
+  });
+  assert.equal(catalog.agy.status, "unavailable");
+  assert.equal(catalog.agy.reasonCode, "unparseable");
+});
+
+test("validateModelChoice rejects a malformed catalog argument instead of throwing", () => {
+  const wellFormedChoice = "codex:gpt-6-astra";
+
+  for (const badCatalog of [
+    null,
+    undefined,
+    "not-an-object",
+    42,
+    ["array", "not", "record"],
+  ]) {
+    const result = validateModelChoice(badCatalog, wellFormedChoice);
+    assert.equal(
+      result.ok,
+      false,
+      `expected rejection for catalog: ${JSON.stringify(badCatalog)}`,
+    );
+    assert.equal(result.reasonCode, "malformed-catalog");
+  }
+
+  for (const badEntry of [
+    { status: "ok" }, // models key missing entirely
+    { status: "ok", models: "not-an-array" },
+    { status: "ok", models: null },
+  ]) {
+    const result = validateModelChoice({ codex: badEntry }, wellFormedChoice);
+    assert.equal(result.ok, false);
+    assert.equal(result.reasonCode, "malformed-catalog");
+  }
+
+  // A corrupt item inside an otherwise well-formed models array must not
+  // crash the .find() lookup; it should just fail to match.
+  const corruptItemCatalog = {
+    codex: { status: "ok", models: [null, "not-an-object", 42] },
+  };
+  const corruptResult = validateModelChoice(
+    corruptItemCatalog,
+    wellFormedChoice,
+  );
+  assert.equal(corruptResult.ok, false);
+  assert.equal(corruptResult.reasonCode, "model-not-in-catalog");
+});
+
+test("validateModelChoice keeps rejecting inherited prototype-chain provider names safely", () => {
+  const catalog = {
+    codex: { status: "ok", models: [{ id: "gpt-6-astra" }] },
+  };
+  // "constructor" is the one JS-reserved property name this module's
+  // provider regex (lowercase only) can actually produce; Object.hasOwn
+  // must refuse to treat the inherited Object constructor as a real entry.
+  for (const provider of ["constructor", "hasownproperty", "valueof"]) {
+    const result = validateModelChoice(catalog, `${provider}:gpt-6-astra`);
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.reasonCode === "unknown-provider" ||
+        result.reasonCode === "malformed-choice",
+      `unexpected reasonCode for provider ${provider}: ${result.reasonCode}`,
+    );
+  }
+});
