@@ -8,6 +8,7 @@ import {
   chart,
   displayModel,
   definedRoles,
+  migrateLegacyOrg,
   readJSON,
   ROOT_ROLE,
   run as runOrcaCommand,
@@ -29,7 +30,11 @@ import {
   roleSpec,
 } from "./role-launch.mjs";
 import { openDirectorTerminal } from "./director-terminal.mjs";
-import { resolveHostDefaults } from "./host-defaults.mjs";
+import {
+  resolveHostDefaults,
+  HOST_DEFAULT_ADAPTER_PROVIDERS,
+} from "./host-defaults.mjs";
+import { fetchModelCatalog, revalidateModelChoices } from "./model-catalog.mjs";
 import {
   assertNotKickoffOwner,
   deliverKickoff,
@@ -246,6 +251,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                 (--profile opens the fallback a workflow-handoff recorded)
                 (the tab title is the role tag, e.g. [PM], then TEXT or the worktree)
   host-defaults [--project DIR] [--codex-home DIR]
+  model-catalog [--codex-home DIR]
+               (queries claude, codex and agy for the model catalog each
+               currently offers; a provider that cannot be read comes back
+               unavailable with a reason instead of a stale or default model)
+  model-catalog-revalidate --selections FILE [--codex-home DIR]
+               (verification-only: re-fetches the catalog and checks each
+               selection in FILE against it, without saving anything)
   usage-report --org FILE [--worktree ID | --all] [--state DIR]
                [--place ROLE=DIR ...] [--claude-home DIR] [--codex-home DIR]
                [--agy-home DIR] [--write] [--json]
@@ -356,10 +368,10 @@ No command automatically pushes, merges, deploys, publishes, or deletes.`;
 
 /** Options each subcommand accepts, keyed by command name. */
 export const ALLOWED_OPTIONS = {
-  "org-draft": ["name", "tiers", "models", "output"],
-  init: ["org", "from"],
-  edit: ["org", "from", "revision"],
-  preset: ["org", "name", "revision", "apply"],
+  "org-draft": ["name", "tiers", "models", "output", "codex-home"],
+  init: ["org", "from", "codex-home", "host-default"],
+  edit: ["org", "from", "revision", "codex-home", "host-default"],
+  preset: ["org", "name", "revision", "apply", "codex-home"],
   show: ["org", "state", "json"],
   validate: ["org"],
   "kickoff-claim": ["org", "from"],
@@ -457,6 +469,8 @@ export const ALLOWED_OPTIONS = {
     "brief",
   ],
   "host-defaults": ["project", "codex-home"],
+  "model-catalog": ["codex-home"],
+  "model-catalog-revalidate": ["selections", "codex-home"],
   "usage-report": [
     "org",
     "worktree",
@@ -619,6 +633,8 @@ export const REQUIRED_OPTIONS = {
   "role-command": ["org", "role"],
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
+  "model-catalog": [],
+  "model-catalog-revalidate": ["selections"],
   "usage-report": ["org"],
   "supervision-next": ["org", "observation"],
   "supervision-wait": ["run"],
@@ -723,7 +739,103 @@ function validateArgs(args) {
   }
 }
 
-function applyPreset(args) {
+/** Parses the comma-separated `--host-default` flag into a profile id list. */
+function parseHostDefaultIds(value) {
+  return value
+    ? value
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+    : [];
+}
+
+/**
+ * Revalidates every profile a save is about to persist against a freshly
+ * fetched model catalog, and refuses the save when any selection comes back
+ * not `savable`.
+ *
+ * `touched` is computed here, from a diff against `previousOrg`, never
+ * accepted from caller input: a profile absent from `previousOrg`, or whose
+ * `provider`/`model` differs from it, is touched; every other profile is not.
+ * This is what lets an unrelated policy, headcount, or name adjustment keep
+ * its untouched profiles eligible for {@link revalidateModelChoices}'s
+ * preservation path even when a different provider's fresh lookup fails,
+ * without a new or changed profile ever claiming that same preservation by
+ * asserting `touched: false` about itself. `explicitHostDefaultIds` is this
+ * save path's own record of which host-default profiles the caller's CLI
+ * input actually named; a touched host-default profile absent from that list
+ * is refused before the catalog is even fetched, so a new `provider:default`
+ * profile can never reach delegation by going through untouched instead.
+ * `adapterContractConfirmed` is decided here too, from the structural fact of
+ * {@link HOST_DEFAULT_ADAPTER_PROVIDERS}, never from caller input.
+ *
+ * @param {object} candidate - Organization revision about to be persisted.
+ * @param {object} [options={}] - Revalidation inputs.
+ * @param {object|null} [options.previousOrg=null] - Organization on disk
+ * before this save, or null for a fresh `init` or draft with no predecessor.
+ * @param {string[]} [options.explicitHostDefaultIds=[]] - Profile ids the
+ * caller's own CLI input named for host-default delegation.
+ * @param {string} [options.codexHome] - Codex home to fetch the catalog with.
+ * @param {Function} [options.execute] - Injectable command runner, threaded
+ *   through to `fetchModelCatalog` so tests can supply a fake catalog instead
+ *   of spawning the real claude/codex/agy executables.
+ * @returns {Promise<object>} The {@link revalidateModelChoices} receipt.
+ * @throws {Error} When a touched host-default profile was not named
+ * explicitly, or when any selection's `savable` comes back false.
+ */
+async function revalidateOrgForSave(
+  candidate,
+  { previousOrg = null, explicitHostDefaultIds = [], codexHome, execute } = {},
+) {
+  const unconfirmedHostDefaults = [];
+  const selections = Object.entries(candidate.profiles).map(([id, profile]) => {
+    const before = previousOrg?.profiles?.[id];
+    const touched =
+      !before ||
+      before.provider !== profile.provider ||
+      before.model !== profile.model;
+    const hostDefault = profile.model === null;
+    if (hostDefault && touched && !explicitHostDefaultIds.includes(id)) {
+      unconfirmedHostDefaults.push(id);
+    }
+    return hostDefault
+      ? {
+          key: id,
+          provider: profile.provider,
+          touched,
+          hostDefault: true,
+          adapterContractConfirmed: HOST_DEFAULT_ADAPTER_PROVIDERS.includes(
+            profile.provider,
+          ),
+        }
+      : {
+          key: id,
+          provider: profile.provider,
+          model: profile.model,
+          touched,
+          ...(profile.effort ? { effort: profile.effort } : {}),
+        };
+  });
+  assert(
+    unconfirmedHostDefaults.length === 0,
+    "New host-default profile(s) need an explicit --host-default: " +
+      `${unconfirmedHostDefaults.join(", ")}`,
+  );
+
+  const catalog = await fetchModelCatalog({ codexHome, execute });
+  const receipt = revalidateModelChoices(catalog, selections);
+  const rejected = receipt.selections.filter((entry) => !entry.savable);
+  assert(
+    rejected.length === 0,
+    "Save refused; the following profiles failed revalidation:\n" +
+      rejected
+        .map((entry) => `${entry.key}: ${entry.reason ?? entry.reasonCode}`)
+        .join("\n"),
+  );
+  return receipt;
+}
+
+async function applyPreset(args, execute) {
   const current = validateOrg(readJSON(args.org));
   assert(
     Number(args.revision) === current.revision,
@@ -733,11 +845,21 @@ function applyPreset(args) {
   if (!args.apply) {
     return { ...preview, organization: undefined, applied: false };
   }
+  const catalogReceipt = await revalidateOrgForSave(preview.organization, {
+    previousOrg: current,
+    codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+    execute,
+  });
   const saved = saveOrg(args.org, preview.organization, {
     update: true,
     expectedRevision: current.revision,
   });
-  return { ...preview, organization: saved.organization, applied: true };
+  return {
+    ...preview,
+    organization: saved.organization,
+    applied: true,
+    catalogReceipt,
+  };
 }
 
 function showOrganization(args) {
@@ -815,6 +937,10 @@ async function resolveAndCheckDrift(orgFile, org, launch) {
   const prev = lazyLaunchesBackward(orgFile).findLast(
     (l) => l.profile === launch.profile && typeof l.modelResolved === "string",
   );
+  // modelResolvedAtFormation is read only here, as the drift baseline before
+  // any launch has recorded its own modelResolved. It is an observation taken
+  // at formation time, never a selected model, and no other code path treats
+  // it as one; see docs/plan/model-catalog.md for the reasoning.
   const baseline = prev
     ? prev.modelResolved
     : org.profiles[launch.profile]?.modelResolvedAtFormation;
@@ -1352,7 +1478,7 @@ function supervisionWaitTimeout(args) {
   return supervisionPolicy(validateOrg(readJSON(args.org))).progressCheckMs;
 }
 
-async function writeDraft(args) {
+async function writeDraft(args, execute) {
   const output = path.resolve(args.output);
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
@@ -1374,31 +1500,86 @@ async function writeDraft(args) {
       `Warning: Failed to resolve Claude defaults: ${defaults.claude.error}\n`,
     );
   }
-  for (const profile of Object.values(organization.profiles)) {
+  // Observational only: resolveAndCheckDrift reads this back as its drift
+  // baseline, never as the profile's selected model (model stays null here).
+  const hostDefaultIds = [];
+  for (const [id, profile] of Object.entries(organization.profiles)) {
     if (profile.model === null) {
       profile.modelResolvedAtFormation =
         defaults[profile.provider]?.model ?? null;
+      hostDefaultIds.push(id);
     }
   }
+  const catalogReceipt = await revalidateOrgForSave(organization, {
+    explicitHostDefaultIds: hostDefaultIds,
+    codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+    execute,
+  });
   writeJSON(output, organization);
-  return { output, organization };
+  return { output, organization, catalogReceipt };
 }
 
-async function executeCommand(args) {
+/**
+ * Dispatches a parsed CLI command to its handler.
+ *
+ * @param {object} args - Parsed CLI arguments.
+ * @param {Function} [execute] - Injectable command runner, threaded through
+ *   to every save path's `revalidateOrgForSave` call so tests can supply a
+ *   fake model catalog instead of spawning the real executables. Real CLI
+ *   invocations never pass this; `fetchModelCatalog` falls back to spawning
+ *   the actual claude/codex/agy binaries.
+ * @returns {Promise<object|undefined>} The command's JSON-serializable result.
+ */
+export async function executeCommand(args, execute) {
   switch (args.command) {
     case "org-draft":
-      return await writeDraft(args);
-    case "init":
-      return fs.existsSync(args.org)
-        ? { created: false, organization: validateOrg(readJSON(args.org)) }
-        : saveOrg(args.org, readJSON(args.from));
-    case "edit":
-      return saveOrg(args.org, readJSON(args.from), {
-        update: true,
-        expectedRevision: Number(args.revision),
+      return await writeDraft(args, execute);
+    case "init": {
+      if (fs.existsSync(args.org)) {
+        return {
+          created: false,
+          organization: validateOrg(readJSON(args.org)),
+        };
+      }
+      const candidate = validateOrg(readJSON(args.from));
+      const catalogReceipt = await revalidateOrgForSave(candidate, {
+        explicitHostDefaultIds: parseHostDefaultIds(args["host-default"]),
+        codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+        execute,
       });
+      return { ...saveOrg(args.org, candidate), catalogReceipt };
+    }
+    case "edit": {
+      if (!fs.existsSync(args.org)) {
+        // No predecessor to diff or catalog to fetch for; saveOrg's own
+        // update-without-a-file assert is the right error here.
+        return saveOrg(args.org, readJSON(args.from), {
+          update: true,
+          expectedRevision: Number(args.revision),
+        });
+      }
+      const previousOrg = validateOrg(migrateLegacyOrg(readJSON(args.org)));
+      assert(
+        Number(args.revision) === previousOrg.revision,
+        "Organization changed; read it again before editing",
+      );
+      const candidate = validateOrg(readJSON(args.from));
+      const catalogReceipt = await revalidateOrgForSave(candidate, {
+        previousOrg,
+        explicitHostDefaultIds: parseHostDefaultIds(args["host-default"]),
+        codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+        execute,
+      });
+      return {
+        ...saveOrg(args.org, candidate, {
+          update: true,
+          expectedRevision: Number(args.revision),
+        }),
+        catalogReceipt,
+      };
+    }
     case "preset":
-      return applyPreset(args);
+      return await applyPreset(args, execute);
     case "show":
       return showOrganization(args);
     case "validate":
@@ -1749,6 +1930,17 @@ async function executeCommand(args) {
         project: args.project && path.resolve(args.project),
         codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
       });
+    case "model-catalog":
+      return fetchModelCatalog({
+        codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+      });
+    case "model-catalog-revalidate": {
+      const selections = readJSON(args.selections);
+      const catalog = await fetchModelCatalog({
+        codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+      });
+      return revalidateModelChoices(catalog, selections);
+    }
     case "usage-report":
       return reportUsage(args);
     case "supervision-next": {
