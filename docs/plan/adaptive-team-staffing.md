@@ -1,18 +1,32 @@
 # 적응형 팀 편성 첫 파동 설계 (Adaptive Staffing Design Wave 1)
 
-문서 revision: 6
+문서 revision: 7
+
+## 1. 개요 및 근거 조사
+
+새로운 동적 팀 구성(Adaptive Team Staffing) 기능을 설계하기 위해 현행 소스 코드의 상태를 정확히 대조하고 분석했습니다.
+
+| 조사 대상 | 파일 및 줄 번호 | 현행 구현 상태와 불변조건 |
+| :--- | :--- | :--- |
+| **조직 스키마 (역할 프로필)** | `plugins/oh-my-teams/schemas/organization.schema.json` (`#/$defs/role`) | `profile`과 `fallbacks` 필드로 역할별 프로필이 선언되어 있으나, task별 동적 모델 선택을 위한 카탈로그 연동 구조는 아직 없음. |
+| **구형 조직 거부 경계** | `plugins/oh-my-teams/scripts/core.mjs` (1091-1102줄) | `migrateLegacyOrg` 함수는 진행 중인 스냅샷만 이전하고, 살아있는(live) 조직 파일은 조용히 이전하지 않음. `validateOrg`가 구형 라이브 조직을 즉각 거부(`refuses it instead`)하는 불변조건을 유지. |
+| **워크플로 스냅샷 보존** | `plugins/oh-my-teams/scripts/workflow.mjs` (302줄) | kickoff 시 `writeJSON(..., "organization.json", org)`를 통해 프로필 스냅샷(`snapshot.organization`)을 불변으로 보존함. |
+| **스냅샷 소비 및 재개** | `plugins/oh-my-teams/scripts/teams-org.mjs` (1239줄) | `launchContext`가 재개 시 저장된 `snapshot.organization`을 정확히 소비하여 실행 문맥을 복원함. |
+| **정적 프로필 선택기** | `plugins/oh-my-teams/scripts/role-launch.mjs` (229-236줄) | `roleProfileId` 함수는 동적 상태 없이 정적으로 `org.roles[role].profile`을 읽어 반환하거나 `fallbacks` 배열 포함 여부만 확인함. |
+| **사용량 정규화와 null/unknown 경계** | `plugins/oh-my-teams/scripts/usage.mjs` (151-182줄) | `normalizeTokenUsage` 함수는 Agy 대화형 세션처럼 측정이 불가능한 사용량을 만났을 때 `null` 또는 숫자 계산의 조합을 반환하며, 측정 불가(`unknown`) 상태와 폴백 경계를 정밀하게 구분하는 표준화된 논리가 부족함. |
+| **초기 조직 생성** | `plugins/oh-my-teams/scripts/teams-org.mjs` (1391-1394줄) | `case "init"` 명령어로 조직을 생성하며, 이 과정이 `form` 스킬의 모델 질문 과정과 연동됨. |
 
 ## 1. 현행 구조 및 설계 계약
 
 현행 체계를 실제 파일과 함수명, 제약 조건 인용으로 설명하고, 제안하는 설계를 명확히 구분하여 서술합니다.
 
 ### 1.1 상설 조직 역할별 고정 모델 제거 (완료 조건 1)
-- **현행**: `plugins/oh-my-teams/schemas/organization.schema.json`에서 `roles` 객체 (구체적으로 `#/$defs/role_profile` 스키마 부분)는 `pm`, `pl`, `senior`, `junior` 각 역할에 대해 정적인 `profile` 문자열 식별자를 강제로 바인딩합니다.
+- **현행**: `plugins/oh-my-teams/schemas/organization.schema.json`에서 `roles` 객체 (구체적으로 `#/$defs/role` 스키마 부분)는 `pm`, `pl`, `senior`, `junior` 각 역할에 대해 정적인 `profile` 문자열 식별자를 강제로 바인딩합니다. (문서 작성 시 이전 버전에서 `#/$defs/role_profile`로 잘못 참조된 사항 수정)
 - **제안**: 상설 조직의 정본은 역할별 고정 모델표가 아닌, 사용 가능한 실행기와 구독 자원(`pool`), 허용 정책, 동시 실행 한도로 정의합니다. 사용자가 역할별 모델을 고르지 않게 변경합니다.
 
 ### 1.2 카탈로그 기반 조직 결성 (완료 조건 2)
-- **현행**: `plugins/oh-my-teams/skills/form/SKILL.md` (form 스킬)은 내장된 고정 목록이나 사용자 질문을 통해 모델을 배정하여 초기 `organization.json` 초안을 작성합니다.
-- **제안**: 조직 결성 스킬(`form`) 실행 시 설치된 모델 카탈로그와 인증 상태를 조회하여 사용 가능한 구독 자원만 확인합니다. 카탈로그 조회 실패를 내장 목록이나 임의 기본값으로 대체하지 않습니다. 이 변경은 선행 카탈로그 작업이 병합된 이후 두 번째 파동에서 적용됩니다.
+- **현행**: CLI의 `init` 명령(`plugins/oh-my-teams/scripts/teams-org.mjs`:1391)을 통해 조직을 생성할 때, `plugins/oh-my-teams/skills/form/SKILL.md` (`form` 스킬)이 내장된 고정 목록이나 사용자 질문을 통해 모델을 배정하여 초기 `organization.json` 초안을 작성하도록 돕습니다.
+- **제안**: CLI `init` 실행 시 혹은 조직 결성 스킬(`form`) 동작 시 설치된 모델 카탈로그와 인증 상태를 조회하여 사용 가능한 구독 자원만 확인합니다. 카탈로그 조회 실패를 내장 목록이나 임의 기본값으로 대체하지 않습니다. 이 변경은 선행 카탈로그 작업이 병합된 이후 두 번째 파동에서 적용됩니다.
 
 ### 1.3 이사의 PM 선택 (완료 조건 3)
 - **현행**: `plugins/oh-my-teams/scripts/teams-org.mjs`의 `launchContext` 함수는 워크플로 스냅샷이나 지정된 조직 파일을 단순히 반환할 뿐이며, 브리프 복잡도를 바탕으로 PM 프로필을 동적으로 결정하거나 그 결정을 기록하지 않습니다.
@@ -35,8 +49,8 @@
 - **제안**: PM이 최초 승인 자원보다 비싼 프로필이나 새 계정으로 승격하고자 할 때 이사의 결정이 필요합니다. 동일한 `pool`의 소진을 다른 프로필로 우회하지 않습니다.
 
 ### 1.8 스냅샷 보존 (완료 조건 8)
-- **현행**: `plugins/oh-my-teams/scripts/workflow.mjs` 및 `workflow-store.mjs`의 생성, 스냅샷, 재개, 전달 로직은 역할별 프로필 선택 결정이나 카탈로그 스냅샷을 불변으로 함께 보존하지 않습니다.
-- **제안**: kickoff와 워크플로는 선택 당시의 구독 자원 스냅샷, 카탈로그 근거, PM 선택 및 task별 역할 결정을 기록합니다. 재개 시 이 불변 스냅샷을 바탕으로 실제 실행 모델을 복원합니다.
+- **현행**: `plugins/oh-my-teams/scripts/workflow.mjs`(302줄)와 `teams-org.mjs`(1239줄)는 워크플로 시작 시 기존 프로필 스냅샷(`snapshot.organization`)을 불변으로 기록하고 재개 시 이를 소비합니다. 하지만 이 기록에는 신규 카탈로그의 스냅샷이나, 워크플로 task별로 동적으로 변경된 역할 선택 상태까지 보존되지는 않습니다.
+- **제안**: kickoff와 워크플로는 기존의 조직 스냅샷과 더불어, 선택 당시의 구독 자원(카탈로그) 스냅샷, PM 선택 및 task별 동적 역할 결정을 함께 기록합니다. 재개 시 이 불변 스냅샷을 바탕으로 실제 실행 모델을 복원합니다.
 
 ### 1.9 실질 토큰 효율 측정 (완료 조건 9)
 - **현행**: `plugins/oh-my-teams/scripts/usage.mjs`의 `normalizeTokenUsage` 함수는 Agy 대화형 세션처럼 측정이 불가능한 사용량을 다루는 정밀한 구별 기준이 부족합니다.
@@ -50,7 +64,7 @@
 - **제안**: 정상 선택, 역할 생략, 위험 상승 승격, 권한 없는 PM 자기 승격 시도 방어, 감사 독립성 위반 방어, 카탈로그 변경 및 조회 실패, `pool` 소진, 스냅샷 불변 재개, 구형 조직 호환 이전, 측정 불가 사용량의 구별 시나리오를 각각 검증하는 회귀 테스트를 작성합니다.
 
 ### 1.12 문서 일관성 (완료 조건 12)
-- **제안**: `form`, `adjust`, `kickoff`, 역할 명령, 조직 스키마와 사용자 문서가 새로운 계약을 일관되게 설명하도록 갱신합니다. 런타임에서 강제하는 선택 규칙을 스킬 문서에 중복하여 서술하지 않습니다.
+- **제안**: `form` 스킬, CLI의 `init` 명령, `adjust`, `kickoff`, 역할 명령, 조직 스키마와 사용자 문서가 새로운 계약을 일관되게 설명하도록 갱신합니다. 런타임에서 강제하는 선택 규칙을 스킬 문서에 중복하여 서술하지 않습니다.
 
 ### 1.13 Eval 평가 근거 (완료 조건 13)
 - **제안**: 구현 전후의 대표 시나리오에서 호출 수, 측정 가능한 토큰, 재작업 횟수, 선택된 역할을 비교하는 eval 자료를 생성합니다. 품질 기준을 낮춰 토큰 수치만 줄이는 결과는 수용하지 않습니다.
