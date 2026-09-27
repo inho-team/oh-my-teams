@@ -58,28 +58,33 @@ OMT가 지속하는 주요 객체의 소유자와 수명 주기를 Orca 생명 �
 
 ## 6. 다른 kickoff에서의 관측 사례 5가지
 
-현재 진행 중인 4개의 kickoff 사례들을 읽기 전용으로 분석하여 발견한 한계점과 새 계약 도입 시의 변화입니다.
+현재 진행 중인 4개의 kickoff 사례들을 읽기 전용으로 조사하여 식별한 구체적 관측 사례(ID, 시각, 근거)와 새 계약 도입 시의 대응입니다.
 
-1. **반복 시작 (139-auditor)**:
-   - 원인: 상태가 저장되지 않아 이전 세션의 검토 결과를 무시하고 처음부터 논의를 재시작하는 현상.
-   - 현재 대응: 수동으로 이전 문맥을 복사하여 주입.
-   - 새 계약: 정본 문서 revision을 읽고 해당 상태부터 주도적으로 재개하는 회복 규약을 적용합니다.
-2. **중복 메시지 (adaptive-team-staffing)**:
-   - 원인: 진행 상태 업데이트가 여러 worker 간에 중복으로 발송되어 피로도를 높임.
-   - 현재 대응: 중복을 무시하고 강제 진행.
-   - 새 계약: orchestration 메시지는 텍스트 복사 대신 정형 문서의 ID와 revision만 간결하게 참조하도록 변경합니다.
-3. **stalled Goal (dynamic-model-catalogs)**:
-   - 원인: 특정 모델 카탈로그 조회 실패 시 fallback 행동 없이 Goal이 무한정 정체됨.
-   - 현재 대응: 사용자가 수동으로 개입하여 모델을 강제 지정.
-   - 새 계약: 조회가 실패하면 구체적인 이유를 보고하고, 미리 정의된 안전한 호환 경로(명시적 조정)로 즉시 전환하여 프로세스를 유지합니다.
-4. **세션 유실 (structured-omt-documents)**:
-   - 원인: 임시 메모리나 터미널 텍스트에만 있던 설계 논의가 세션 재연결 시 소실됨.
-   - 현재 대응: 처음부터 다시 논의하여 설계서를 재작성.
-   - 새 계약: 모든 상태 전이는 `01. 기획` 등 `.omt` 아래의 객체와 정형 문서 갱신으로 반영되며, 재개 시 이를 즉시 읽어옵니다.
-5. **kickoff 간 의존성 혼선 (adaptive-team-staffing / dynamic-model-catalogs)**:
-   - 원인: 적응형 팀 편성이 아직 완성되지 않은 모델 카탈로그 조회를 맹목적으로 대기하여 두 작업 모두 차단됨.
-   - 현재 대응: 순환 의존성을 수동으로 끊고 우회.
-   - 새 계약: API 의존성은 명시적 계약을 통해 분리되며, 읽기 전용 스냅샷을 우선 사용하고 상대방의 완결 전에는 임의로 고정된 목록을 사용하지 않음으로써 교착 상태를 방지합니다.
+1. **tui-idle 거부 (adaptive-team-staffing)**:
+   - **ID/위치**: `attach-design-approved-1` (`.../events/000003-attach-design-approved-1.json`)
+   - **시각**: `2026-09-27T13:56:10.295Z`
+   - **근거**: `"refusal": {"kind": "execution-unconfigured", "code": "timeout", "message": "Terminal ... did not report tui-idle within 20000ms"}`
+   - **새 계약**: 터미널이 idle 상태를 제때 보고하지 않으면 기다리지 않고 구체적 장애 원인을 기록한 뒤 재할당이나 fallback 전략으로 주도적 전환합니다.
+2. **세션 유실 및 문서 누락 (adaptive-team-staffing)**:
+   - **ID/위치**: `settle-design-dispatch-1` (`.../events/000004-settle-design-dispatch-1.json`)
+   - **시각**: `2026-09-27T14:00:26.754Z`
+   - **근거**: `evidence` 필드 내 `"documentRevision": "missing", "acceptance": "not-accepted"`로 남음.
+   - **새 계약**: 모든 상태 전이는 문서 revision으로 기록하며, `missing`이 발생하면 이전 스냅샷부터 복구하는 회복 규약을 의무화합니다.
+3. **반복 시작 (dynamic-model-catalogs)**:
+   - **ID/위치**: `887d9471-7dae-4726-971f-6b3c32700846` (`.../plan/w1-rereview-start.json`)
+   - **시각**: 발견 시점 `2026-09-27T14:38:10.152Z` (이전 `2026-09-27T14:17:28.501Z`)
+   - **근거**: `"outcome": "already-started", "reason": "task-id-in-transcript"`로 중복 시작 감지됨.
+   - **새 계약**: 정본 문서와 Task ID를 읽고 중복 생성을 원천 차단하며, 진행 중인 세션으로 즉시 재결합합니다.
+4. **확인 불가 / stalled Goal 의심 (139-auditor)**:
+   - **ID/위치**: `supervision/obs.json`
+   - **시각**: `2026-09-27T13:27:10Z` (`lastActivityAt`)
+   - **근거**: `unansweredRequests: 0`이나 활동이 정지됨. 네이티브 Goal 상태는 내부에서 보이지 않으므로 'stalled'로 섣불리 단정하지 않고 '확인 불가'로 구분.
+   - **새 계약**: OMT 내부에서 프로세스를 감독하지 않으며, Orca 생명 주기를 따르되, 관측할 수 없는 상태에 의존하지 않고 명시된 orchestration 신호 기반으로만 진행을 재개합니다.
+5. **독립 검토 및 의존성 지연 (structured-omt-documents)**:
+   - **ID/위치**: `omt-docs-design` (`.../gates/omt-docs-design.json`)
+   - **시각**: 파일 내 `taskHash` 생성 시점
+   - **근거**: `"review-complete": {"status": "pending", "missing": ["design-independent-review"], "openFindings": ["pm-design-authorship-role-limit-conflict", ...]}` 상태로 계류됨.
+   - **새 계약**: 의존성이 충족되지 않아 블록된 경우, 수동 개입을 기다리지 않고 PM에게 에스컬레이션하여 다른 역할을 배정하거나 의존성 우회(임시 호환 목록)를 요청하도록 합니다.
 
 ## 7. 회복 규약
 
