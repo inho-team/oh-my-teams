@@ -189,14 +189,20 @@ export function closeKickoffSignals(orgFile, worktreeId, reason) {
 
 // Sends one notification into a terminal and keeps how far it got. Before
 // anything is typed, the terminal's agentIdentity is verified using
-// `orca terminal list --json` to confirm it is an agent session. If
-// agentIdentity is null (shell-only) or cannot be determined, the notification
-// is deferred without sending anything and a notifyError is recorded. Once the
-// terminal is confirmed to be an agent session, the terminal's own screen is
-// read with `readTerminalScreen` (reused from prompt-submission.mjs, so the
-// two modules never diverge on what counts as "the screen could not be read")
-// and classified with `classifyPromptScreen` (reused from prompt-answers.mjs,
-// no new screen judgement): a folder-trust question or a Claude
+// `orca terminal list --json` (via `orcaTerminals`, the same list-parsing
+// `findPmTerminal` uses, so the two never diverge on what counts as a
+// terminal record) to confirm it is an agent session. Only a non-empty string
+// agentIdentity counts as an agent session; `null` means a shell-only
+// terminal, and anything else (the field absent, the handle missing from the
+// list, the list itself unreadable, a non-string, or an empty string) cannot
+// be judged. Both cases defer the notification without sending anything and
+// record a notifyError: `shell-terminal` for the former, and
+// `terminal-identity-unknown` for the latter. Once the terminal is confirmed
+// to be an agent session, the terminal's own screen is read with
+// `readTerminalScreen` (reused from prompt-submission.mjs, so the two modules
+// never diverge on what counts as "the screen could not be read") and
+// classified with `classifyPromptScreen` (reused from prompt-answers.mjs, no
+// new screen judgement): a folder-trust question or a Claude
 // `AskUserQuestion` screen means the terminal cannot safely take this input,
 // and an unreadable screen means the state cannot be judged at all, so both
 // come back `deferred: true, sent: false` without a single key being sent.
@@ -212,31 +218,13 @@ export function closeKickoffSignals(orgFile, worktreeId, reason) {
 async function notifyTerminal(orca, terminal, text, execute) {
   let terminalRecord;
   try {
-    const result = await execute([orca, "terminal", "list", "--json"], {
-      timeoutMs: 10000,
-    });
-    if (result.code !== 0) {
-      return {
-        notified: false,
-        deferred: true,
-        sent: false,
-        notifyError: "terminal-identity-unknown",
-      };
-    }
-    const payload = JSON.parse(result.stdout);
-    const listed = payload?.result?.terminals ?? payload?.terminals ?? payload;
-    const terminals = Array.isArray(listed) ? listed : [];
+    const terminals = await orcaTerminals(orca, execute);
     terminalRecord = terminals.find((t) => t?.handle === terminal);
+  } catch {
+    terminalRecord = undefined;
+  }
 
-    if (!terminalRecord) {
-      return {
-        notified: false,
-        deferred: true,
-        sent: false,
-        notifyError: "terminal-identity-unknown",
-      };
-    }
-  } catch (error) {
+  if (!terminalRecord) {
     return {
       notified: false,
       deferred: true,
@@ -245,7 +233,8 @@ async function notifyTerminal(orca, terminal, text, execute) {
     };
   }
 
-  if (terminalRecord.agentIdentity === null) {
+  const identity = terminalRecord.agentIdentity;
+  if (identity === null) {
     return {
       notified: false,
       deferred: true,
@@ -254,7 +243,7 @@ async function notifyTerminal(orca, terminal, text, execute) {
     };
   }
 
-  if (!("agentIdentity" in terminalRecord)) {
+  if (typeof identity !== "string" || identity === "") {
     return {
       notified: false,
       deferred: true,
@@ -664,9 +653,12 @@ export async function replySignal(orgFile, request) {
 }
 
 // Lists Orca terminals as plain records; any failure yields an empty list so
-// that a missing Orca only skips notification.
-async function orcaTerminals(orcaExecutable) {
-  const result = await run([orcaExecutable, "terminal", "list", "--json"], {
+// that a missing Orca only skips notification. `execute` is the same
+// injectable command runner every other Orca call in this module takes, so
+// `notifyTerminal` and `findPmTerminal` parse one terminal-list response the
+// same way instead of each keeping its own copy.
+async function orcaTerminals(orcaExecutable, execute = run) {
+  const result = await execute([orcaExecutable, "terminal", "list", "--json"], {
     timeoutMs: 10000,
   });
   if (result.code !== 0) return [];

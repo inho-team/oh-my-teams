@@ -1103,8 +1103,16 @@ const NOTE_TEXT = "[omt] progress from wt-1: tests are green";
 function orcaNotify(answers, screen = [], terminals) {
   const calls = [];
   const queue = [...answers];
+  // Every handle the tests below address by default (the Director's own
+  // "term_director", a registry entry's "mock-handle", and a PM's "term_pm")
+  // comes back as a confirmed agent session unless a test overrides the list.
   const defaultTerminals =
-    terminals ?? (() => [{ handle: "term_director", agentIdentity: "claude" }]);
+    terminals ??
+    (() => [
+      { handle: "term_director", agentIdentity: "claude" },
+      { handle: "mock-handle", agentIdentity: "claude" },
+      { handle: "term_pm", agentIdentity: "claude" },
+    ]);
   const execute = async (argv, options) => {
     const args = argv.slice(1, -1);
     calls.push(args);
@@ -1334,8 +1342,12 @@ test("notifyDirectorSignal defers a blocked backlog, then bundles and delivers i
     secondResult.bundled.slice().sort(),
     [first.id, second.id].sort(),
   );
-  // Both attempts only ever read the blocked screen; nothing was typed.
-  assert.equal(blocked.calls.length, 2);
+  // Both attempts only ever list the terminal and read the blocked screen;
+  // nothing was typed.
+  assert.equal(blocked.calls.length, 4);
+  assert.ok(
+    blocked.calls.every((call) => call[1] === "list" || call[1] === "read"),
+  );
   assert.equal(blocked.textSends().length, 0);
 
   const clear = orcaNotify([["input_accepted", "turn_started"]], []);
@@ -1776,6 +1788,21 @@ test("notifyDirector defers when agentIdentity field is missing", async () => {
     [
       { handle: "term_director" }, // agentIdentity field is absent
     ],
+  );
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.sent, false);
+  assert.equal(result.notifyError, "terminal-identity-unknown");
+  assert.equal(orca.textSends().length, 0);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirector defers when agentIdentity is an empty string", async () => {
+  const orca = orcaNotify(
+    [],
+    [],
+    [{ handle: "term_director", agentIdentity: "" }],
   );
   const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
   assert.equal(result.notified, false);
