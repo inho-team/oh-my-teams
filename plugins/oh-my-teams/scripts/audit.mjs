@@ -464,31 +464,16 @@ function checkedCovers(checked, ledger) {
   );
 }
 
-/**
- * Checks whether a checkpoint's current state qualifies for a NEW acceptance
- * to be recorded (B.4, conditions 1-6: checked coverage, every objection
- * persuaded on its latest response, and — for "outcome" — every cited
- * response evidence file still hashing to what was cited). Re-verifies
- * evidence from disk rather than trusting a stored value, so a file changed
- * after the fact is caught (addendum 4 item 2).
- *
- * This is deliberately silent about whether an EXISTING acceptance is still
- * current — that is `hasValidAcceptance`'s job. Conflating the two created a
- * re-acceptance deadlock: once a binding changed, the stale old acceptance
- * would itself count as a reason to refuse recording the very re-acceptance
- * meant to replace it. A consuming gate must call `hasValidAcceptance`, not
- * this function, to decide whether to trust an already-recorded acceptance.
- *
- * @param {object} options - Check inputs.
- * @param {object} options.audit - Full audit record.
- * @param {string} options.checkpoint - "brief" or "outcome".
- * @param {object} options.ledger - Confirmed requirements ledger.
- * @param {string} options.ownerRoot - Owner project root, for evidence containment.
- * @param {string} [options.resultHead] - Result HEAD; required for "outcome".
- * @returns {{accepted: boolean, currentBinding: object, reasons: string[]}} Result.
- */
-export function auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead }) {
-  const record = audit.checkpoints[checkpoint];
+// The B.4 substantive conditions (1-6): checked coverage, every objection
+// persuaded on its latest response, and — for "outcome" — every cited
+// response evidence file still hashing to what was cited. Re-verifies
+// evidence from disk rather than trusting a stored value, so a file changed
+// after the fact is caught (addendum 4 item 2). Shared by `auditAccepted`
+// (deciding whether a NEW acceptance may be recorded) and
+// `hasValidAcceptance` (deciding whether an EXISTING one is still
+// trustworthy) — both need the same substantive re-check; only the latter
+// also compares against a stored acceptance.
+function checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint) {
   const reasons = [];
   if (!checkedCovers(record.checked, ledger)) {
     reasons.push("checked does not cover every current statement and criterion exactly once");
@@ -522,6 +507,31 @@ export function auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead
       }
     }
   }
+  return reasons;
+}
+
+/**
+ * Checks whether a checkpoint's current state qualifies for a NEW acceptance
+ * to be recorded (B.4, conditions 1-6).
+ *
+ * This is deliberately silent about whether an EXISTING acceptance is still
+ * current — that is `hasValidAcceptance`'s job. Conflating the two created a
+ * re-acceptance deadlock: once a binding changed, the stale old acceptance
+ * would itself count as a reason to refuse recording the very re-acceptance
+ * meant to replace it. A consuming gate must call `hasValidAcceptance`, not
+ * this function, to decide whether to trust an already-recorded acceptance.
+ *
+ * @param {object} options - Check inputs.
+ * @param {object} options.audit - Full audit record.
+ * @param {string} options.checkpoint - "brief" or "outcome".
+ * @param {object} options.ledger - Confirmed requirements ledger.
+ * @param {string} options.ownerRoot - Owner project root, for evidence containment.
+ * @param {string} [options.resultHead] - Result HEAD; required for "outcome".
+ * @returns {{accepted: boolean, currentBinding: object, reasons: string[]}} Result.
+ */
+export function auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead }) {
+  const record = audit.checkpoints[checkpoint];
+  const reasons = checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint);
   const currentBinding = computeBinding(checkpoint, ledger, audit, resultHead);
   return { accepted: reasons.length === 0, currentBinding, reasons };
 }
@@ -568,10 +578,19 @@ export function auditAccept(orgFile, worktreeId, checkpoint, resultHead, env = p
 /**
  * Checks whether a checkpoint's RECORDED acceptance is still current, without
  * throwing — for use by A.5's hard-coded gate points, which need a plain
- * boolean rather than a thrown reason list. This is the only place that
- * compares a stored `acceptance.boundHash` against the freshly recomputed
- * binding; `auditAccept` never re-derives this from `auditAccepted`, which
- * avoids the re-acceptance deadlock a stale acceptance would otherwise cause.
+ * boolean rather than a thrown reason list.
+ *
+ * Two things must both hold: the stored acceptance's `boundHash` must still
+ * match the freshly recomputed binding (an outcome's evidence fingerprint or
+ * a criterion's ledger hash moved since it was accepted), and the checkpoint
+ * must still pass the same B.4 substantive conditions `auditAccepted` checks
+ * before recording a new acceptance — otherwise an acceptance stays "valid"
+ * by binding alone even after its response evidence file was swapped for a
+ * different one at the same path, or after a new unresolved objection was
+ * raised without touching the binding. This is the only place that compares
+ * a stored `acceptance.boundHash` against the freshly recomputed binding;
+ * `auditAccept` never re-derives this from `auditAccepted`, which avoids the
+ * re-acceptance deadlock a stale acceptance would otherwise cause.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
@@ -585,6 +604,9 @@ export function hasValidAcceptance(orgFile, worktreeId, checkpoint, resultHead) 
   const audit = readAudit(orgFile, worktreeId);
   const record = audit.checkpoints[checkpoint];
   if (!record.acceptance) return false;
+  const ownerRoot = ownerProject(orgFile);
+  const reasons = checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint);
+  if (reasons.length > 0) return false;
   const currentBinding = computeBinding(checkpoint, ledger, audit, resultHead);
   return record.acceptance.boundHash === canonicalHash(currentBinding);
 }
