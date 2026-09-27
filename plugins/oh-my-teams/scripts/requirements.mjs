@@ -310,12 +310,18 @@ export function validateLedgerForClaim(requirements, director) {
   const { statements, criteria, confirmations = [] } = requirements;
   validateStatements(statements);
   validateCriteria(criteria, statements);
+  const narrowerCriteria = criteria.filter((item) => item.scope === "narrower");
+  // A claim with only equal-scope criteria needs no user confirmation and so
+  // no director checkout to validate one against; requiring a director here
+  // unconditionally would make every equal-only kickoff (the common case)
+  // depend on a field the claim schema treats as optional.
+  if (narrowerCriteria.length === 0) return requirements;
   assert(
     director && typeof director.checkoutPath === "string" && director.checkoutPath.trim(),
-    "Claim director.checkoutPath is required to validate the requirements ledger",
+    "Claim director.checkoutPath is required to validate a narrower criterion's confirmation",
   );
   const directorPath = path.resolve(director.checkoutPath);
-  for (const criterion of criteria.filter((item) => item.scope === "narrower")) {
+  for (const criterion of narrowerCriteria) {
     const confirmation = confirmations.find(
       (item) => item.criterionId === criterion.id,
     );

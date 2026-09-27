@@ -37,6 +37,20 @@ function project(t) {
   return { dir, org, brief };
 }
 
+// These tests are about the registry itself, not the requirements ledger
+// (which has its own tests), so every claim carries the smallest ledger that
+// passes validateLedgerForClaim: one equal-scope criterion needs no user
+// confirmation and so no director.checkoutPath to validate it against.
+function minimalRequirements(worktreeId) {
+  return {
+    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
+    criteria: [
+      { id: "c1", text: `deliver ${worktreeId}`, scope: "equal", userVisible: false, derivedFrom: ["s1"] },
+    ],
+    confirmations: [],
+  };
+}
+
 function claimFor(fixture, worktreeId) {
   const pm = path.join(fixture.dir, worktreeId);
   return {
@@ -50,11 +64,28 @@ function claimFor(fixture, worktreeId) {
     brief: fixture.brief,
     // These tests are about the registry itself; delivery has its own tests.
     delivery: { mode: "none" },
+    requirements: minimalRequirements(worktreeId),
   };
 }
 
 const ids = (fixture) =>
   listKickoffs(fixture.org).kickoffs.map((entry) => entry.pm.worktreeId);
+
+// A registry entry (as opposed to a claim) carries `requirements.ledgerHash`,
+// not the claim's own {statements, criteria, confirmations} shape. Tests that
+// write an entry file directly, to stand in for one a pre-ledger release left
+// behind (A.6's compatibility path), drop the field entirely rather than
+// reshape it, since `requirements` is optional on an entry.
+function legacyEntryFor(fixture, worktreeId, extra = {}) {
+  const { requirements: _requirements, ...claim } = claimFor(fixture, worktreeId);
+  return {
+    schemaVersion: 1,
+    ...claim,
+    runId: null,
+    createdAt: "2026-09-16T00:00:00.000Z",
+    ...extra,
+  };
+}
 
 test("the registry lives with the organization it serves", (t) => {
   const fixture = project(t);
@@ -310,12 +341,7 @@ test("no worktree id writes outside the registry", (t) => {
 
 test("an entry named after its id by an earlier release stays closable", (t) => {
   const fixture = project(t);
-  const entry = {
-    schemaVersion: 1,
-    ...claimFor(fixture, "wt-named"),
-    runId: null,
-    createdAt: "2026-09-16T00:00:00.000Z",
-  };
+  const entry = legacyEntryFor(fixture, "wt-named");
   const legacy = path.join(registryDirectory(fixture.org), "wt-named.json");
   writeJSON(legacy, entry);
 
@@ -410,12 +436,7 @@ test("two PMs each create a workflow in their own state", async (t) => {
 
 test("a lease left by the single-kickoff release becomes a registry entry", (t) => {
   const fixture = project(t);
-  const legacy = {
-    schemaVersion: 1,
-    ...claimFor(fixture, "wt-old"),
-    runId: "run-old",
-    createdAt: "2026-09-16T00:00:00.000Z",
-  };
+  const legacy = legacyEntryFor(fixture, "wt-old", { runId: "run-old" });
   writeJSON(path.join(fixture.dir, ".omt", "active-kickoff.json"), legacy);
 
   // The kickoff it recorded may still be running, and close needs to find it.
@@ -442,12 +463,7 @@ function beforeRename({ pm, selfPm, ...rest }) {
 
 test("an entry stored under the old coordinator key lists, binds and releases as pm", (t) => {
   const fixture = project(t);
-  const stored = beforeRename({
-    schemaVersion: 1,
-    ...claimFor(fixture, "wt-renamed"),
-    runId: null,
-    createdAt: "2026-09-16T00:00:00.000Z",
-  });
+  const stored = beforeRename(legacyEntryFor(fixture, "wt-renamed"));
   const legacyLease = path.join(fixture.dir, ".omt", "active-kickoff.json");
   writeJSON(legacyLease, stored);
 
@@ -479,13 +495,7 @@ test("registry files stored with the old keys read as pm before any write", (t) 
   fs.mkdirSync(directory, { recursive: true });
   const reason = "orca is not installed; the user approved supervising here";
   const old = (worktreeId, extra = {}) =>
-    beforeRename({
-      schemaVersion: 1,
-      ...claimFor(fixture, worktreeId),
-      runId: null,
-      createdAt: "2026-09-16T00:00:00.000Z",
-      ...extra,
-    });
+    beforeRename(legacyEntryFor(fixture, worktreeId, extra));
   // A hashed entry, and one an earlier release named after the id itself.
   const hashed = path.join(
     directory,

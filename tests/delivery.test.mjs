@@ -29,6 +29,20 @@ async function git(cwd, ...args) {
   return result.stdout.trim();
 }
 
+// These tests are about delivery, not the requirements ledger (which has its
+// own tests), so every claim carries the smallest ledger that passes
+// validateLedgerForClaim: one equal-scope criterion needs no user
+// confirmation and so no director.
+function minimalRequirements(worktreeId) {
+  return {
+    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
+    criteria: [
+      { id: "c1", text: `deliver ${worktreeId}`, scope: "equal", userVisible: false, derivedFrom: ["s1"] },
+    ],
+    confirmations: [],
+  };
+}
+
 // A project on main that owns an organization, and one kickoff worktree with
 // a committed result, like literacy-test's report branch.
 
@@ -74,6 +88,7 @@ async function kickoffProject(
     organizationRevision: JSON.parse(fs.readFileSync(org, "utf8")).revision,
     brief,
     delivery,
+    requirements: minimalRequirements(worktreeId),
   });
   return { project, org, worktree, worktreeId, head };
 }
@@ -92,6 +107,7 @@ test("a claim records how the brief delivers, and a branch where one is merged",
     organizationRevision: entry.organizationRevision,
     brief: entry.brief,
     delivery,
+    requirements: minimalRequirements("wt-2"),
   });
   assert.throws(
     () => registerKickoff(fixture.org, claim(undefined)),
