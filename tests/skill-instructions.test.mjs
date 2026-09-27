@@ -522,6 +522,10 @@ test("form asks for the four role models, and not for a ladder size", () => {
   assert.match(form, /PM·PL·Senior·Junior의 모델을 한꺼번에 묻는다/);
   assert.match(form, /몇 단계로 운영할지는 묻지 않는다/);
   assert.match(form, /묻지 않고 정하는 것/);
+  // The role-per-model question stays only for existing organizations; its
+  // removal belongs to the adaptive team-staffing kickoff's next wave.
+  assert.match(form, /기존 조직을 계속 결성할 수 있게 남겨 둔 호환 경로/);
+  assert.match(form, /적응형 팀 편성 kickoff의 다음 파동이 맡는다/);
   const draft = /node <runtime> org-draft([^\n`]*)/.exec(form);
   assert.ok(draft, "form must draft the organization");
   assert.doesNotMatch(draft[1], /--tiers/);
