@@ -1100,12 +1100,46 @@ const NOTE_TEXT = "[omt] progress from wt-1: tests are green";
 // Plays `orca terminal send` and `read`; `answers` is consumed in order and
 // the last one repeats. An answer is a stage list, or { code, stderr } for a
 // failed call.
-function orcaNotify(answers, screen = []) {
+function orcaNotify(answers, screen = [], terminals) {
   const calls = [];
   const queue = [...answers];
-  const execute = async (argv) => {
+  // Every handle the tests below address by default (the Director's own
+  // "term_director", a registry entry's "mock-handle", and a PM's "term_pm")
+  // comes back as a confirmed agent session unless a test overrides the list.
+  const defaultTerminals =
+    terminals ??
+    (() => [
+      { handle: "term_director", agentIdentity: "claude" },
+      { handle: "mock-handle", agentIdentity: "claude" },
+      { handle: "term_pm", agentIdentity: "claude" },
+    ]);
+  const execute = async (argv, options) => {
     const args = argv.slice(1, -1);
     calls.push(args);
+    if (args[1] === "list") {
+      if (
+        typeof defaultTerminals === "object" &&
+        !Array.isArray(defaultTerminals) &&
+        "code" in defaultTerminals
+      ) {
+        return {
+          code: defaultTerminals.code,
+          stdout: "",
+          stderr: defaultTerminals.stderr || "",
+        };
+      }
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          result: {
+            terminals:
+              typeof defaultTerminals === "function"
+                ? defaultTerminals()
+                : defaultTerminals,
+          },
+        }),
+      };
+    }
     if (args[1] === "read") {
       const tail = typeof screen === "function" ? screen(calls) : screen;
       return {
@@ -1223,8 +1257,8 @@ test("notifyDirector keeps Orca's failure text and does not resend", async () =>
   assert.match(result.notifyError, /terminal_not_writable: pane is closed/);
   assert.equal(result.delivery.outcome, "failed");
   assert.equal(result.delivery.requestId, null);
-  // One screen read ahead of the send that then fails.
-  assert.equal(orca.calls.length, 2);
+  // Terminal list, one screen read ahead of the send that then fails.
+  assert.equal(orca.calls.length, 3);
   assert.deepEqual(await notifyDirector({}, NOTE, "orca", orca.execute), {
     notified: false,
   });
@@ -1238,8 +1272,8 @@ test("notifyDirector defers without sending when a selection window is on screen
   assert.equal(result.notified, false);
   assert.equal(result.deferred, true);
   assert.equal(result.notifyError, "blocked-by-user-question");
-  // Only the screen read happened; no Enter, no text.
-  assert.equal(orca.calls.length, 1);
+  // Terminal list and screen read happened; no send.
+  assert.equal(orca.calls.length, 2);
   assert.equal(orca.textSends().length, 0);
   assert.equal(orca.enters().length, 0);
 });
@@ -1308,8 +1342,12 @@ test("notifyDirectorSignal defers a blocked backlog, then bundles and delivers i
     secondResult.bundled.slice().sort(),
     [first.id, second.id].sort(),
   );
-  // Both attempts only ever read the blocked screen; nothing was typed.
-  assert.equal(blocked.calls.length, 2);
+  // Both attempts only ever list the terminal and read the blocked screen;
+  // nothing was typed.
+  assert.equal(blocked.calls.length, 4);
+  assert.ok(
+    blocked.calls.every((call) => call[1] === "list" || call[1] === "read"),
+  );
   assert.equal(blocked.textSends().length, 0);
 
   const clear = orcaNotify([["input_accepted", "turn_started"]], []);
@@ -1611,7 +1649,9 @@ test("replySignal reports how far the PM notification got", async (t) => {
   const result = await replySignal(orgFile, {
     signalId: id,
     text: "go",
-    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    listTerminals: async () => [
+      { handle: "term_pm", worktreePath: pmPath, agentIdentity: "claude" },
+    ],
     execute: orca.execute,
   });
   assert.equal(result.replied, true);
@@ -1621,4 +1661,173 @@ test("replySignal reports how far the PM notification got", async (t) => {
   assert.equal(result.delivery.requestId, "req-7");
   assert.equal(result.record.reply, "go");
   assert.equal(orca.enters().length, 0);
+});
+
+// ─── Shell terminal: agentIdentity is null ─────────────────────────────────
+
+test("notifyDirector refuses a shell terminal and records why without sending", async () => {
+  const orca = orcaNotify(
+    [],
+    [],
+    [{ handle: "term_director", agentIdentity: null }],
+  );
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.sent, false);
+  assert.equal(result.notifyError, "shell-terminal");
+  // Only the terminal list read happened; no screen read, no send.
+  assert.equal(orca.calls.length, 1);
+  assert.deepEqual(orca.calls[0], ["terminal", "list"]);
+  assert.equal(orca.textSends().length, 0);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirectorSignal refuses a shell terminal and leaves signals in the backlog", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t, {
+    withDirectorTerminal: true,
+  });
+  const { id } = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "decide",
+  });
+
+  const orca = orcaNotify(
+    [],
+    [],
+    [{ handle: "term_director", agentIdentity: null }],
+  );
+  const entry = {
+    director: { terminalHandle: "term_director", checkoutPath: "/" },
+  };
+  const record = readSignal(orgFile, id);
+  const result = await notifyDirectorSignal(
+    orgFile,
+    entry,
+    record,
+    "orca",
+    orca.execute,
+  );
+
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.sent, false);
+  assert.equal(result.notifyError, "shell-terminal");
+  assert.deepEqual(result.bundled, [id]);
+  // Only the terminal list read happened; no send.
+  assert.equal(orca.calls.filter((c) => c[1] === "send").length, 0);
+  // Signal stays pending and undelivered.
+  const updated = readSignal(orgFile, id);
+  assert.equal(updated.status, "pending");
+  assert.equal(updated.notify?.notified, false);
+  assert.equal(updated.notify?.sent, false);
+  assert.equal(updated.notify?.notifyError, "shell-terminal");
+});
+
+test("replySignal refuses a shell PM terminal and leaves reply in record", async (t) => {
+  const { orgFile, worktreeId, dir } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+  const { id } = sendSignal(orgFile, {
+    worktreeId,
+    kind: "decision",
+    text: "?",
+  });
+  const orca = orcaNotify([], [], [{ handle: "term_pm", agentIdentity: null }]);
+  const result = await replySignal(orgFile, {
+    signalId: id,
+    text: "go",
+    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    execute: orca.execute,
+  });
+  assert.equal(result.replied, true);
+  assert.equal(result.record.reply, "go");
+  assert.equal(result.notified, false);
+  assert.equal(result.notifyError, "shell-terminal");
+  assert.equal(result.pmTerminal, "term_pm");
+  // No send attempt was made.
+  assert.equal(orca.textSends().length, 0);
+  // Reply is in the record for PM to read through director-inbox.
+  const signal = readSignal(orgFile, id);
+  assert.equal(signal.reply, "go");
+});
+
+// ─── Terminal identity unknown ─────────────────────────────────────────────
+
+test("notifyDirector defers when terminal list fails", async () => {
+  const orca = orcaNotify([], [], { code: 1, stderr: "orca not found" });
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.sent, false);
+  assert.equal(result.notifyError, "terminal-identity-unknown");
+  assert.equal(orca.textSends().length, 0);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirector defers when terminal handle is not in the list", async () => {
+  const orca = orcaNotify(
+    [],
+    [],
+    [{ handle: "term_other", agentIdentity: "claude" }],
+  );
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.sent, false);
+  assert.equal(result.notifyError, "terminal-identity-unknown");
+  assert.equal(orca.textSends().length, 0);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirector defers when agentIdentity field is missing", async () => {
+  const orca = orcaNotify(
+    [],
+    [],
+    [
+      { handle: "term_director" }, // agentIdentity field is absent
+    ],
+  );
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.sent, false);
+  assert.equal(result.notifyError, "terminal-identity-unknown");
+  assert.equal(orca.textSends().length, 0);
+  assert.equal(orca.enters().length, 0);
+});
+
+test("notifyDirector defers when agentIdentity is an empty string", async () => {
+  const orca = orcaNotify(
+    [],
+    [],
+    [{ handle: "term_director", agentIdentity: "" }],
+  );
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, false);
+  assert.equal(result.deferred, true);
+  assert.equal(result.sent, false);
+  assert.equal(result.notifyError, "terminal-identity-unknown");
+  assert.equal(orca.textSends().length, 0);
+  assert.equal(orca.enters().length, 0);
+});
+
+// ─── Agent terminal: proceeds as normal ──────────────────────────────────
+
+test("notifyDirector proceeds to send when terminal is confirmed as an agent", async () => {
+  const orca = orcaNotify(
+    [["input_accepted", "turn_started"]],
+    [],
+    [{ handle: "term_director", agentIdentity: "claude" }],
+  );
+  const result = await notifyDirector(withDirector, NOTE, "orca", orca.execute);
+  assert.equal(result.notified, true);
+  assert.equal(result.notifyError, undefined);
+  assert.equal(result.delivery.outcome, "submitted");
+  // Terminal list read + screen read + send.
+  assert.equal(orca.calls.length, 3);
+  assert.equal(orca.calls[0][1], "list");
+  assert.equal(orca.calls[1][1], "read");
+  assert.equal(orca.calls[2][1], "send");
 });
