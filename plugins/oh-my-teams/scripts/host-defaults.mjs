@@ -11,7 +11,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { run } from "./core.mjs";
+import { assert, run } from "./core.mjs";
 
 function readText(file) {
   try {
@@ -45,35 +45,104 @@ function readSettingsModel(file) {
   }
 }
 
-const rank = (model) =>
+/**
+ * Ranks a raw `codex debug models` entry so the lowest-priority listed model
+ * sorts first; a priority that is not a number sorts after every numbered one
+ * instead of making the whole order undefined.
+ *
+ * @param {object} model - Raw catalog entry with an optional `priority`.
+ * @returns {number} Sort key; lower runs first.
+ */
+export const codexModelRank = (model) =>
   Number.isFinite(model.priority) ? model.priority : Number.POSITIVE_INFINITY;
 
-async function codexDefault({ home, env, codexHome: explicitHome, execute }) {
-  const codexHome = explicitHome || env.CODEX_HOME || path.join(home, ".codex");
-  const configFile = path.join(codexHome, "config.toml");
-  const configured = topLevelTomlString(readText(configFile), "model");
+/**
+ * Resolves the Codex home a catalog or default-model lookup should read.
+ *
+ * Orca may launch Codex under its own `CODEX_HOME` instead of the user's, so
+ * an explicit override always wins over the environment and the home guess.
+ *
+ * @param {object} [options={}] - Resolution inputs.
+ * @param {string} [options.home=os.homedir()] - Fallback home directory.
+ * @param {NodeJS.ProcessEnv} [options.env=process.env] - Environment consulted for `CODEX_HOME`.
+ * @param {string} [options.codexHome] - Explicit override from a caller that sets its own.
+ * @returns {string} Codex home directory to read `config.toml` from and pass as `CODEX_HOME`.
+ */
+export function resolveCodexHome({
+  home = os.homedir(),
+  env = process.env,
+  codexHome,
+} = {}) {
+  return codexHome || env.CODEX_HOME || path.join(home, ".codex");
+}
+
+/**
+ * Runs `codex debug models` and returns its parsed catalog or a failure reason.
+ *
+ * Host-default resolution and the model-catalog command both need the raw
+ * entries this reads; each derives a different projection of them (the
+ * best-ranked listed slug versus every field a caller might display), so the
+ * process call and its JSON parsing live here once instead of twice.
+ *
+ * @param {object} [options={}] - Injectable environment for tests.
+ * @param {string} options.codexHome - Codex home to pass as `CODEX_HOME`.
+ * @param {NodeJS.ProcessEnv} [options.env=process.env] - Environment to read.
+ * @param {Function} [options.execute=run] - Command runner.
+ * @returns {Promise<{models: object[] | null, error: string | null, reasonCode: string | null}>}
+ * Raw catalog entries as `codex debug models` prints them, or a failure with
+ * a stable `reasonCode` of `not-installed`, `command-failed`, or `unparseable`.
+ */
+export async function fetchCodexModelCatalog({
+  codexHome,
+  env = process.env,
+  execute = run,
+} = {}) {
   const result = await execute(["codex", "debug", "models"], {
     timeoutMs: 60000,
     env: { ...process.env, ...env, CODEX_HOME: codexHome },
   });
-  let listed = [];
-  let error = null;
   if (result.timedOut) {
-    error = "codex debug models timed out";
-  } else if (result.code !== 0) {
-    error = result.stderr || result.stdout || "codex debug models failed";
-  } else {
-    try {
-      listed = JSON.parse(result.stdout)
-        .models.filter((model) => model.visibility === "list")
-        // A priority that is not a number sorts after every numbered one
-        // instead of making the whole order undefined.
-        .sort((left, right) => rank(left) - rank(right))
-        .map((model) => model.slug);
-    } catch {
-      error = "codex debug models did not return a JSON catalog";
-    }
+    return {
+      models: null,
+      error: "codex debug models timed out",
+      reasonCode: "command-failed",
+    };
   }
+  if (result.code !== 0) {
+    return {
+      models: null,
+      error: result.stderr || result.stdout || "codex debug models failed",
+      reasonCode: /ENOENT/.test(result.stderr ?? "")
+        ? "not-installed"
+        : "command-failed",
+    };
+  }
+  try {
+    const parsed = JSON.parse(result.stdout);
+    assert(Array.isArray(parsed.models), "no models array");
+    return { models: parsed.models, error: null, reasonCode: null };
+  } catch {
+    return {
+      models: null,
+      error: "codex debug models did not return a JSON catalog",
+      reasonCode: "unparseable",
+    };
+  }
+}
+
+async function codexDefault({ home, env, codexHome: explicitHome, execute }) {
+  const codexHome = resolveCodexHome({ home, env, codexHome: explicitHome });
+  const configFile = path.join(codexHome, "config.toml");
+  const configured = topLevelTomlString(readText(configFile), "model");
+  const { models: raw, error } = await fetchCodexModelCatalog({
+    codexHome,
+    env,
+    execute,
+  });
+  const listed = (raw ?? [])
+    .filter((model) => model.visibility === "list")
+    .sort((left, right) => codexModelRank(left) - codexModelRank(right))
+    .map((model) => model.slug);
   if (configured) {
     return {
       model: configured,

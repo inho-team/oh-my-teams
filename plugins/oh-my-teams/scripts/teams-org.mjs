@@ -30,6 +30,7 @@ import {
 } from "./role-launch.mjs";
 import { openDirectorTerminal } from "./director-terminal.mjs";
 import { resolveHostDefaults } from "./host-defaults.mjs";
+import { fetchModelCatalog } from "./model-catalog.mjs";
 import {
   assertNotKickoffOwner,
   deliverKickoff,
@@ -246,6 +247,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                 (--profile opens the fallback a workflow-handoff recorded)
                 (the tab title is the role tag, e.g. [PM], then TEXT or the worktree)
   host-defaults [--project DIR] [--codex-home DIR]
+  model-catalog [--codex-home DIR]
+               (queries claude, codex and agy for the model catalog each
+               currently offers; a provider that cannot be read comes back
+               unavailable with a reason instead of a stale or default model)
   usage-report --org FILE [--worktree ID | --all] [--state DIR]
                [--place ROLE=DIR ...] [--claude-home DIR] [--codex-home DIR]
                [--agy-home DIR] [--write] [--json]
@@ -457,6 +462,7 @@ export const ALLOWED_OPTIONS = {
     "brief",
   ],
   "host-defaults": ["project", "codex-home"],
+  "model-catalog": ["codex-home"],
   "usage-report": [
     "org",
     "worktree",
@@ -619,6 +625,7 @@ export const REQUIRED_OPTIONS = {
   "role-command": ["org", "role"],
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
+  "model-catalog": [],
   "usage-report": ["org"],
   "supervision-next": ["org", "observation"],
   "supervision-wait": ["run"],
@@ -1747,6 +1754,10 @@ async function executeCommand(args) {
     case "host-defaults":
       return resolveHostDefaults({
         project: args.project && path.resolve(args.project),
+        codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+      });
+    case "model-catalog":
+      return fetchModelCatalog({
         codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
       });
     case "usage-report":
