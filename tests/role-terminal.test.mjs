@@ -1174,6 +1174,61 @@ test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
   assert.equal(env3.codexTrustRecordExists, "unknown");
 });
 
+// B.6, decision B, item 2/3: readLaunchEnvironment의 감사 launch 분기는
+// orcaExecutable/execute를 통한 일반 Orca --version 조회를 완전히 건너뛰고
+// readOrcaVersion 콜백(전용 신뢰 실행기)만으로 orcaVersion을 채워야 하며,
+// skipAgyVersion=true일 때는 agy --version 조회 자체를 실행하지 않아야 한다.
+// execute를 PATH의 가짜 agy/orca를 흉내 내되 절대 호출되면 안 되는 지점으로
+// 주입해 두고, 실제로 호출되지 않았음을 spawn 기록으로 단언한다.
+test("readLaunchEnvironment: readOrcaVersion이 있으면 execute를 통한 orca --version을 실행하지 않고, skipAgyVersion이면 agy --version도 실행하지 않는다", async () => {
+  const { readLaunchEnvironment } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+
+  const executeCalls = [];
+  // 호출되면 즉시 기록만 남기고 실패를 반환한다: 이 execute가 절대 불리지
+  // 않는다는 것이 이 테스트의 단언이므로, 성공을 반환해도 무방하지만 실패로
+  // 두어 "우연히 orcaVersion/cliVersion이 채워져 통과하는" 거짓 양성을 막는다.
+  const forgedExecute = async (argv) => {
+    executeCalls.push(argv);
+    return { code: 1, stdout: "", stderr: "must never run" };
+  };
+  let readOrcaVersionCalls = 0;
+  const readOrcaVersion = async () => {
+    readOrcaVersionCalls += 1;
+    return "9.9.9";
+  };
+
+  const env = await readLaunchEnvironment({
+    worktreePath: "/nonexistent-auditor-worktree",
+    homedir: "/nonexistent-auditor-home",
+    orcaExecutable: "/tmp/forged-orca-for-omt-role-terminal-test",
+    execute: forgedExecute,
+    readOrcaVersion,
+    skipAgyVersion: true,
+  });
+
+  assert.equal(
+    readOrcaVersionCalls,
+    1,
+    "readOrcaVersion은 정확히 한 번 호출된다",
+  );
+  assert.equal(
+    env.orcaVersion,
+    "9.9.9",
+    "orcaVersion은 readOrcaVersion의 값을 따른다",
+  );
+  assert.equal(
+    env.cliVersion,
+    "unknown",
+    "skipAgyVersion이면 cliVersion은 unknown이다",
+  );
+  assert.deepEqual(
+    executeCalls,
+    [],
+    "orcaExecutable/agy를 향한 execute는 단 한 번도 호출되지 않는다",
+  );
+});
+
 test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", async () => {
   const { readLaunchEnvironment: readEnv } =
     await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");

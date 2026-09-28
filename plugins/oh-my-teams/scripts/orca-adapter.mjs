@@ -426,6 +426,47 @@ export async function runTrustedOrcaJson(args, options = {}) {
 }
 
 /**
+ * Reads the trusted Orca script's own `--version` output through the same
+ * trusted, allowlisted invocation `runTrustedOrcaJson` uses, so auditor
+ * launch's version probe cannot be redirected the way running
+ * `resolveTrustedOrcaScriptPath`'s resolved path through a plain, uninjected
+ * `execute` still could: the script's own `#!/usr/bin/env bash` shebang PATH
+ * search, `BASH_ENV`, and an inherited `HOME` all stay closed here exactly as
+ * they do for `runTrustedOrcaJson` (B.6, decision B).
+ *
+ * `--version` is not a JSON command, so this does not go through
+ * `interpretOrcaJsonResult`: it reads the same free-text version token
+ * `readLaunchEnvironment`'s own probe already parses.
+ *
+ * @param {object} [options] - Injection points, used only by tests; passed
+ *   through to `trustedOrcaExecute`. Production callers must never set these.
+ * @returns {Promise<string | null>} The parsed semantic version, or `null`
+ *   when the trusted script's output did not contain one.
+ * @throws {Error} For a validation failure from `trustedOrcaExecute`,
+ *   process failure, or timeout.
+ */
+export async function readTrustedOrcaVersion(options = {}) {
+  const invoke = trustedOrcaExecute(options);
+  const result = await invoke([
+    TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    "--version",
+  ]);
+  if (result.code !== 0 || result.timedOut) {
+    const detail = result.stderr || result.stdout || "Orca --version failed";
+    throw orcaError(
+      detail,
+      translateOrcaFailure(
+        result.timedOut ? "start_unknown" : "runtime_error",
+        detail,
+      ),
+    );
+  }
+  const text = String(result.stdout ?? "").trim();
+  const token = text.split(/\s+/).find((t) => /^\d+\.\d+\.\d+/.test(t));
+  return token ?? null;
+}
+
+/**
  * Captures CLI/runtime versions and the version-matched Orca guide hash.
  *
  * @param {string} [executable] - Explicit Orca executable, if already selected.

@@ -11,6 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  readTrustedOrcaVersion,
   resolveTrustedOrcaScriptPath,
   runOrcaJson,
   runTrustedOrcaJson,
@@ -443,6 +444,103 @@ test("runTrustedOrcaJson propagates trustedOrcaExecute's refusal when no trusted
         spawnExecute: async () => {
           spawnCalls += 1;
           return { code: 0, timedOut: false, stdout: "{}", stderr: "" };
+        },
+      }),
+    /No trusted Orca executable found/,
+  );
+  assert.equal(spawnCalls, 0);
+});
+
+// readTrustedOrcaVersion is the auditor launch's dedicated Orca `--version`
+// probe (B.6, decision B, item 2): it must build its invocation through the
+// same trustedOrcaExecute path as runTrustedOrcaJson, spawning
+// `/bin/bash --noprofile --norc <resolved script> --version` with the
+// placeholder discarded as argv[0], rather than run an auditor-branch
+// `versionExecutable` through a plain, uninjected execute.
+test("readTrustedOrcaVersion builds its invocation through trustedOrcaExecute, discards the placeholder argv[0], and parses the leading semver token", async () => {
+  const calls = [];
+  const spawnExecute = (argv, callOptions) => {
+    calls.push({ argv, callOptions });
+    return Promise.resolve({
+      code: 0,
+      timedOut: false,
+      stdout: "orca 4.2.1 (build abc123)\n",
+      stderr: "",
+    });
+  };
+  const version = await readTrustedOrcaVersion({
+    candidates: ["/usr/local/bin/orca"],
+    exists: () => true,
+    realpath: () => REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+    expectedRealpaths: REAL_DARWIN_REALPATHS,
+    userInfo: () => ({ homedir: "/Users/injected", username: "injected" }),
+    spawnExecute,
+  });
+  assert.equal(version, "4.2.1");
+  assert.equal(calls.length, 1);
+  const [{ argv }] = calls;
+  assert.deepEqual(argv, [
+    "/bin/bash",
+    "--noprofile",
+    "--norc",
+    REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+    "--version",
+  ]);
+});
+
+test("readTrustedOrcaVersion returns null when the trusted script's output carries no semver token", async () => {
+  const version = await readTrustedOrcaVersion({
+    candidates: ["/usr/local/bin/orca"],
+    exists: () => true,
+    realpath: () => REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+    expectedRealpaths: REAL_DARWIN_REALPATHS,
+    userInfo: () => ({ homedir: "/Users/injected", username: "injected" }),
+    spawnExecute: () =>
+      Promise.resolve({
+        code: 0,
+        timedOut: false,
+        stdout: "orca (unknown build)\n",
+        stderr: "",
+      }),
+  });
+  assert.equal(version, null);
+});
+
+test("readTrustedOrcaVersion throws on a non-zero exit or a timeout, rather than return a fabricated version", async () => {
+  await assert.rejects(
+    () =>
+      readTrustedOrcaVersion({
+        candidates: ["/usr/local/bin/orca"],
+        exists: () => true,
+        realpath: () => REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+        expectedRealpaths: REAL_DARWIN_REALPATHS,
+        userInfo: () => ({ homedir: "/Users/injected", username: "injected" }),
+        spawnExecute: () =>
+          Promise.resolve({
+            code: 1,
+            timedOut: false,
+            stdout: "",
+            stderr: "orca: command failed",
+          }),
+      }),
+    /orca: command failed/,
+  );
+});
+
+// runTrustedOrcaJson propagates trustedOrcaExecute's own refusal (no
+// candidate exists, or a realpath mismatch); readTrustedOrcaVersion must do
+// the same, never falling back to a caller-controlled versionExecutable.
+test("readTrustedOrcaVersion propagates trustedOrcaExecute's refusal when no trusted path exists, without spawning anything", async () => {
+  let spawnCalls = 0;
+  await assert.rejects(
+    () =>
+      readTrustedOrcaVersion({
+        platform: "darwin",
+        candidates: [],
+        exists: () => true,
+        spawnExecute: async () => {
+          spawnCalls += 1;
+          return { code: 0, timedOut: false, stdout: "orca 1.0.0", stderr: "" };
         },
       }),
     /No trusted Orca executable found/,

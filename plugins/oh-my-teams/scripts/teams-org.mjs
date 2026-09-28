@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Thin CLI adapter for the oh my teams domain modules. */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -91,6 +92,7 @@ import {
   discoverOrcaRuntime,
   findActiveDispatch,
   injectTask,
+  readTrustedOrcaVersion,
   reclaimWorktree,
   releaseWorker,
   resolveTrustedOrcaScriptPath,
@@ -2919,42 +2921,42 @@ export async function executeCommand(args, execute) {
       });
     }
     case "audit-response": {
-      // Neither the caller's terminal handle nor the Orca executable used to
-      // confirm it is taken from a CLI argument: verifiedPm reads
-      // ORCA_TERMINAL_HANDLE from process.env, exactly like verifiedAuditor
-      // does for the auditor role, and accepts no executable, execute, or
-      // factory override at all (not even for tests) — it always runs its
-      // `orchestration run-current` check through runTrustedOrcaJson, which
-      // validates the fixed trusted script (ignoring --orca,
-      // ORCA_CLI_COMMAND, and ORCA_DEV_REPO_ROOT) and then executes it
-      // directly with a pinned interpreter and an allowlisted child
-      // environment, so the script's own PATH search for `bash` and for the
-      // `dirname`/`readlink` it calls internally, BASH_ENV, and variables
-      // such as ORCA_USER_DATA_PATH or HOME cannot redirect what actually
-      // runs (B.6, decision B). A --terminal or --orca argument here could
-      // otherwise forge the PM identity the "outcome" checkpoint's response
-      // is bound to; since verifiedPm takes no such argument, this CLI
-      // command never has one to pass through in the first place, and
-      // neither does any other Node code that imports auditResponse or
-      // verifiedPm directly. What this closes is the caller's
-      // ability to redirect, through an argument, PATH, or an inherited
-      // environment variable, which executable answers this check or what
-      // that executable reads while doing so; it is not identity forgery: a
-      // caller sharing this OS user account can still set
-      // ORCA_TERMINAL_HANDLE itself and pass verifiedPm, until B.6's
-      // process-lineage binding lands, and the trusted script's own
-      // integrity (its app bundle, owned by that same OS user) is not
-      // verified either. callerCwd is always the real process.cwd(), for the
-      // same reason on the director path.
+      // Neither the caller's terminal handle, its working directory, nor the
+      // Orca executable used to confirm identity is taken from a CLI
+      // argument: verifiedDirector (brief) and verifiedPm (outcome) accept no
+      // callerCwd, environment, executable, execute, or factory override at
+      // all (not even for tests) — they always read process.cwd() and
+      // process.env directly, and verifiedPm's `orchestration run-current`
+      // check always runs through runTrustedOrcaJson, which validates the
+      // fixed trusted script (ignoring --orca, ORCA_CLI_COMMAND, and
+      // ORCA_DEV_REPO_ROOT) and then executes it directly with a pinned
+      // interpreter and an allowlisted child environment, so the script's own
+      // PATH search for `bash` and for the `dirname`/`readlink` it calls
+      // internally, BASH_ENV, and variables such as ORCA_USER_DATA_PATH or
+      // HOME cannot redirect what actually runs (B.6, decision B). A
+      // --terminal, --cwd, or --orca argument here could otherwise forge the
+      // director or PM identity a response is bound to; since auditResponse
+      // takes no such argument, this CLI command never has one to pass
+      // through in the first place, and neither does any other Node code
+      // that imports auditResponse, verifiedDirector, or verifiedPm
+      // directly. What this closes is the caller's ability to redirect,
+      // through an argument, PATH, or an inherited environment variable,
+      // which executable answers this check or what that executable reads
+      // while doing so; it is not identity forgery: a caller sharing this OS
+      // user account can still set ORCA_TERMINAL_HANDLE itself, or run this
+      // process from the director's own checkout, and pass these checks,
+      // until B.6's process-lineage binding lands, and the trusted script's
+      // own integrity (its app bundle, owned by that same OS user) is not
+      // verified either.
       const { checkpoint, objectionId, argument, evidenceRefs } = readJSON(
         args.from,
       );
-      return auditResponse(
-        args.org,
-        args.worktree,
-        { checkpoint, objectionId, argument, evidenceRefs },
-        { callerCwd: process.cwd() },
-      );
+      return auditResponse(args.org, args.worktree, {
+        checkpoint,
+        objectionId,
+        argument,
+        evidenceRefs,
+      });
     }
     case "audit-ruling": {
       const { checkpoint, objectionId, respondedAgainst, verdict, reason } =
@@ -3223,16 +3225,26 @@ export async function executeCommand(args, execute) {
       // whose handle downstream identity checks (verifiedAuditor) trust, so
       // neither the executable name nor what running it reads may be
       // caller-controlled (B.6, decision B). `auditorExecute` is passed only
-      // to openRoleTerminal, which runs nothing but Orca commands; it is
-      // deliberately not passed to readLaunchEnvironment below, which also
-      // runs `agy --version` through the same injected runner and would
-      // otherwise have that call silently replaced by the Orca script too.
-      // readLaunchEnvironment instead receives `versionExecutable`, the
-      // trusted script's resolved real path rather than the placeholder: the
-      // placeholder is deliberately not runnable on its own (it only means
-      // something paired with `auditorExecute`), so passing it here would
-      // make the version probe fail outright instead of just resolving
-      // through PATH like the placeholder's previous, runnable value did.
+      // to openRoleTerminal, which runs nothing but Orca commands.
+      // readLaunchEnvironment's own Orca `--version` probe is a separate
+      // spawn openRoleTerminal never sees, so the auditor branch below passes
+      // it `readOrcaVersion: readTrustedOrcaVersion`, which reruns the same
+      // trusted, allowlisted invocation `runTrustedOrcaJson` uses rather than
+      // running `versionExecutable`'s resolved path through a plain,
+      // uninjected `execute`: only the trusted invocation closes the
+      // script's own shebang PATH search, BASH_ENV, and an inherited HOME.
+      // `skipAgyVersion: true` also drops the auditor branch's `agy
+      // --version` probe entirely, rather than letting it run unconditionally
+      // against PATH before the launch even opens: cliVersion only affects
+      // launch-matrix's judgment when the launched runner is "agy"
+      // (launch-matrix.mjs), and the auditor profile here is Claude, so
+      // omitting it never changes the matrix result. `homedir` is likewise
+      // read from `os.userInfo()` rather than left at readLaunchEnvironment's
+      // own `os.homedir()` default, so the auditor branch's trust-record
+      // lookups cannot be redirected through an inherited HOME either. None
+      // of this applies outside the auditor branch: a non-auditor launch
+      // keeps its existing PATH-based Orca/agy version probes and homedir
+      // default unchanged.
       const {
         executable: auditorExecutable,
         execute: auditorExecute,
@@ -3243,6 +3255,13 @@ export async function executeCommand(args, execute) {
       const env = await readLaunchEnvironment({
         worktreePath: target ?? undefined,
         orcaExecutable: versionExecutable,
+        ...(auditorEntry
+          ? {
+              readOrcaVersion: () => readTrustedOrcaVersion(),
+              skipAgyVersion: true,
+              homedir: os.userInfo().homedir,
+            }
+          : {}),
       });
       const opened = await openRoleTerminal({
         worktree: args.worktree,

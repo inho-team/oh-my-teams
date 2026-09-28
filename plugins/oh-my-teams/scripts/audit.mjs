@@ -202,14 +202,18 @@ export async function computeBinding(
  * lineage that actually launched it is what B.6's design is meant to add;
  * until it lands, this remains an open gap.
  *
+ * This function takes no environment-override argument: unlike the prior
+ * revision, a caller importing this module directly has no option to pass
+ * a substitute environment for `process.env`, so a --terminal argument (or
+ * a Node-level override) can never stand in for the handle Orca actually set.
+ *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
- * @param {NodeJS.ProcessEnv} [env] - Environment to read the handle from.
  * @returns {string} The confirmed auditor terminal handle.
  * @throws {Error} When the handle is unset or was not launched as this kickoff's auditor.
  */
-export function verifiedAuditor(orgFile, worktreeId, env = process.env) {
-  const callerHandle = env.ORCA_TERMINAL_HANDLE;
+export function verifiedAuditor(orgFile, worktreeId) {
+  const callerHandle = process.env.ORCA_TERMINAL_HANDLE;
   assert(
     callerHandle,
     "ORCA_TERMINAL_HANDLE is not set, so the caller cannot be identified as the auditor",
@@ -233,22 +237,23 @@ export function verifiedAuditor(orgFile, worktreeId, env = process.env) {
  * checkout, reusing the same authority check `deliver` and `kickoff-release`
  * already enforce.
  *
+ * This function takes no working-directory argument: unlike the prior
+ * revision, a caller importing this module directly has no option to pass a
+ * substitute `callerCwd` naming the director's checkout while running
+ * somewhere else. `assertDirectorAuthority` always sees this process's own,
+ * real `process.cwd()`.
+ *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
- * @param {string} [callerCwd] - Caller's working directory.
  * @returns {object} The kickoff's registry entry.
  * @throws {Error} When the caller is not at the director's checkout.
  */
-export function verifiedDirector(
-  orgFile,
-  worktreeId,
-  callerCwd = process.cwd(),
-) {
+export function verifiedDirector(orgFile, worktreeId) {
   const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
   assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
   assertDirectorAuthority(
     entry,
-    callerCwd,
+    process.cwd(),
     "audit-response (brief checkpoint)",
     false,
   );
@@ -303,14 +308,17 @@ export function isPmBoundToRun(bound, callerHandle, runId) {
  * lineage that actually launched it is what B.6's design is meant to add
  * next; until it lands this remains an open gap.
  *
+ * This function takes no environment-override argument either: like
+ * `verifiedAuditor`, a caller importing this module directly has no option to
+ * pass a substitute environment for `process.env`.
+ *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
- * @param {NodeJS.ProcessEnv} [env] - Environment to read the handle from.
  * @returns {Promise<object>} The kickoff's registry entry.
  * @throws {Error} When the caller is not bound to this kickoff's Run as PM.
  */
-export async function verifiedPm(orgFile, worktreeId, env = process.env) {
-  const callerHandle = env.ORCA_TERMINAL_HANDLE;
+export async function verifiedPm(orgFile, worktreeId) {
+  const callerHandle = process.env.ORCA_TERMINAL_HANDLE;
   assert(
     callerHandle,
     "ORCA_TERMINAL_HANDLE is not set, so the caller cannot be identified as the PM",
@@ -354,7 +362,6 @@ export async function verifiedPm(orgFile, worktreeId, env = process.env) {
  * @param {string} request.rebuttalRequested - What would resolve it.
  * @param {string} [request.resultHead] - Result HEAD; required for "outcome".
  * @param {string} [request.repo] - Workspace `resultHead` is checked against; required for "outcome".
- * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails or the request is malformed.
  */
@@ -370,7 +377,6 @@ export async function auditObjection(
     resultHead,
     repo,
   },
-  env = process.env,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
@@ -387,7 +393,7 @@ export async function auditObjection(
       `Objection ${name} required`,
     );
   }
-  verifiedAuditor(orgFile, worktreeId, env);
+  verifiedAuditor(orgFile, worktreeId);
   const ledger = requireLedger(orgFile, worktreeId);
   return withAudit(orgFile, worktreeId, async (audit) => {
     const record = audit.checkpoints[checkpoint];
@@ -427,12 +433,6 @@ export async function auditObjection(
  * @param {string} request.objectionId - Objection being answered.
  * @param {string} request.argument - Substantive argument, not a bare claim of completion.
  * @param {{path: string, sha256: string}[]} request.evidenceRefs - Cited evidence.
- * @param {object} [identity] - Non-identity inputs for `verifiedDirector`
- *   (`callerCwd` for the director path). Any other field, such as an
- *   `orca`/`execute` override, is ignored: `verifiedPm`, used for the
- *   "outcome" checkpoint, accepts no such override, so a caller cannot
- *   substitute a forged executable, runner, or `run-current` result here.
- * @param {NodeJS.ProcessEnv} [env] - Environment the PM identity is read from.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails, the objection is unknown, or fields are missing.
  */
@@ -440,8 +440,6 @@ export async function auditResponse(
   orgFile,
   worktreeId,
   { checkpoint, objectionId, argument, evidenceRefs },
-  identity = {},
-  env = process.env,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
@@ -458,9 +456,9 @@ export async function auditResponse(
     "Response evidenceRefs required: at least one {path, sha256}",
   );
   if (checkpoint === "brief") {
-    verifiedDirector(orgFile, worktreeId, identity.callerCwd);
+    verifiedDirector(orgFile, worktreeId);
   } else {
-    await verifiedPm(orgFile, worktreeId, env);
+    await verifiedPm(orgFile, worktreeId);
   }
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];
@@ -495,7 +493,6 @@ export async function auditResponse(
  * @param {string} request.respondedAgainst - Response id the ruling addresses; must be the latest.
  * @param {string} request.verdict - "persuaded" or "not-persuaded".
  * @param {string} request.reason - Why.
- * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails, or the ruling targets a stale response.
  */
@@ -503,7 +500,6 @@ export async function auditRuling(
   orgFile,
   worktreeId,
   { checkpoint, objectionId, respondedAgainst, verdict, reason },
-  env = process.env,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
@@ -511,7 +507,7 @@ export async function auditRuling(
     `Ruling verdict must be one of ${VERDICTS.join("/")}`,
   );
   assert(typeof reason === "string" && reason.trim(), "Ruling reason required");
-  verifiedAuditor(orgFile, worktreeId, env);
+  verifiedAuditor(orgFile, worktreeId);
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];
     const latest = latestResponse(record, objectionId);
@@ -546,16 +542,9 @@ export async function auditRuling(
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
  * @param {string} checkpoint - "brief" or "outcome".
  * @param {{type: string, id: string}[]} checked - Items checked.
- * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  */
-export async function auditChecked(
-  orgFile,
-  worktreeId,
-  checkpoint,
-  checked,
-  env = process.env,
-) {
+export async function auditChecked(orgFile, worktreeId, checkpoint, checked) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
     Array.isArray(checked) &&
@@ -565,7 +554,7 @@ export async function auditChecked(
       ),
     "checked must be a {type, id} array",
   );
-  verifiedAuditor(orgFile, worktreeId, env);
+  verifiedAuditor(orgFile, worktreeId);
   return withAudit(orgFile, worktreeId, (audit) => {
     audit.checkpoints[checkpoint].checked = checked;
     const file = auditFile(orgFile, worktreeId);
@@ -697,7 +686,6 @@ export async function auditAccepted({
  * @param {string} checkpoint - "brief" or "outcome".
  * @param {string} [resultHead] - Result HEAD; required for "outcome".
  * @param {string} [repo] - Workspace `resultHead` is checked against; required for "outcome".
- * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
  * @returns {Promise<{accepted: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When any B.4 condition fails, naming every reason.
  */
@@ -707,10 +695,9 @@ export async function auditAccept(
   checkpoint,
   resultHead,
   repo,
-  env = process.env,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
-  verifiedAuditor(orgFile, worktreeId, env);
+  verifiedAuditor(orgFile, worktreeId);
   const ledger = requireLedger(orgFile, worktreeId);
   const ownerRoot = ownerProject(orgFile);
   return withAudit(orgFile, worktreeId, async (audit) => {

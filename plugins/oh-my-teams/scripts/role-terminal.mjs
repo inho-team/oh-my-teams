@@ -53,10 +53,17 @@ import {
  *
  * @param {object} options - 주입 가능한 의존성.
  * @param {string} [options.worktreePath] - 신뢰 여부를 확인할 워크트리 경로.
- * @param {string} [options.orcaExecutable] - Orca 실행 파일 경로.
+ * @param {string} [options.orcaExecutable] - Orca 실행 파일 경로. `readOrcaVersion`이 있으면 무시됩니다.
  * @param {string} [options.homedir=os.homedir()] - 홈 디렉터리 (테스트용 주입).
  * @param {string} [options.codexHome] - Codex 설정 디렉터리 (테스트용 주입, 미지정 시 CODEX_HOME 환경변수 또는 ~/.codex 사용).
  * @param {Function} [options.execute=run] - 명령 실행기 (테스트용 주입).
+ * @param {() => Promise<string | null>} [options.readOrcaVersion] - Orca 버전을
+ *   전용 신뢰 실행기로 읽는 함수(감사 launch 전용, B.6 decision B). 지정하면
+ *   `orcaExecutable`과 일반 `execute` 대신 이 함수만으로 Orca 버전을 읽습니다.
+ * @param {boolean} [options.skipAgyVersion=false] - true면 agy 버전 조회를
+ *   실행하지 않고 cliVersion을 "unknown"으로 둡니다(감사 launch 전용). agy
+ *   조회는 판독 결과가 판정에 쓰이기 전에 PATH의 agy를 무조건 실행하므로,
+ *   감사 프로필이 agy가 아닌 launch에서는 그 실행 자체가 불필요한 위험입니다.
  * @returns {Promise<object>} 환경 값 객체.
  */
 export async function readLaunchEnvironment({
@@ -65,6 +72,8 @@ export async function readLaunchEnvironment({
   homedir = os.homedir(),
   codexHome,
   execute = run,
+  readOrcaVersion,
+  skipAgyVersion = false,
 } = {}) {
   const platform = process.platform;
   const shell = platform === "win32" ? "powershell" : "posix";
@@ -73,32 +82,43 @@ export async function readLaunchEnvironment({
   // Orca 버전 읽기
   let orcaVersion = "unknown";
   try {
-    const selected = selectOrcaExecutable(orcaExecutable);
-    const result = await execute([selected, "--version"], { timeoutMs: 10000 });
-    if (result.code === 0) {
-      const ver = String(result.stdout ?? "")
-        .trim()
-        .split(/\s+/)
-        .find((t) => /^\d+\.\d+\.\d+/.test(t));
+    if (readOrcaVersion) {
+      const ver = await readOrcaVersion();
       if (ver) orcaVersion = ver;
+    } else {
+      const selected = selectOrcaExecutable(orcaExecutable);
+      const result = await execute([selected, "--version"], {
+        timeoutMs: 10000,
+      });
+      if (result.code === 0) {
+        const ver = String(result.stdout ?? "")
+          .trim()
+          .split(/\s+/)
+          .find((t) => /^\d+\.\d+\.\d+/.test(t));
+        if (ver) orcaVersion = ver;
+      }
     }
   } catch (error) {
     launchErrors.push(error);
   }
 
-  // Agy CLI 버전 읽기
+  // Agy CLI 버전 읽기 (감사 launch에서는 skipAgyVersion으로 생략)
   let cliVersion = "unknown";
-  try {
-    const result = await execute(["agy", "--version"], { timeoutMs: 10000 });
-    if (result.code === 0) {
-      const ver = String(result.stdout ?? "")
-        .trim()
-        .split(/\s+/)
-        .find((t) => /^\d+\.\d+\.\d+/.test(t));
-      if (ver) cliVersion = ver;
+  if (!skipAgyVersion) {
+    try {
+      const result = await execute(["agy", "--version"], {
+        timeoutMs: 10000,
+      });
+      if (result.code === 0) {
+        const ver = String(result.stdout ?? "")
+          .trim()
+          .split(/\s+/)
+          .find((t) => /^\d+\.\d+\.\d+/.test(t));
+        if (ver) cliVersion = ver;
+      }
+    } catch (error) {
+      launchErrors.push(error);
     }
-  } catch (error) {
-    launchErrors.push(error);
   }
 
   // Agy 신뢰 기록: ~/.gemini/antigravity-cli/settings.json의 trustedWorkspaces
