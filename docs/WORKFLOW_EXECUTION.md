@@ -45,3 +45,17 @@ checkout에서 고정 계약의 report·review·PM acceptance를 준비한 뒤
 수용한다. 이 명령은 현재 source의 검증과 gate를 다시 확인하고 하위 task
 revision·attempt·수용 결과 ID 집합을 통합 결정에 기록한다. `workflow-resume`은
 과거 통합 결과를 현재 소스 검증 없이 재수용하지 않는다.
+
+## 정형 문서에 대한 gate 확인
+
+호출자가 `gateCheck`/`recordReview`/`acceptOutcome`(`gates.mjs`)에 `kickoffHash`와
+`workflowId`를 옵션으로 넘기면, `review-complete`/`outcome-accepted` gate는
+승인된 review·수용 decision 기록만으로는 통과하지 않고, 대응하는 `04. 검토`
+review-ref 문서와 `05. 수용` acceptance-ref 문서(`docs/plan/structured-omt-documents.md`
+3.2·3.7절)가 그 kickoff·workflow 소유로 커밋되어 있는지까지 확인한다. 문서가
+아직 커밋되지 않았거나 다른 kickoff·workflow 소유이면 review/decision 기록 자체는
+그대로 유지된 채 해당 gate만 `pending`으로 남는다. `kickoffHash`를 넘기지 않는
+호출자는 이 확인을 받지 않고 기존과 같은 review/decision 전용 판정을 그대로
+유지한다. `acceptWorkflowIntegration`(`workflow.mjs`)은 이 워크플로 자신의 `id`를
+`gateCheck`의 `workflowId`로 그대로 전달하고, `kickoffHash`는 호출자가 넘긴 값을
+그대로 전달할 뿐 스스로 계산하지 않는다.

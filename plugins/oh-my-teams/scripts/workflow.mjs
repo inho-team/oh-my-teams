@@ -666,6 +666,9 @@ function acceptWithoutIntegration(stateDir, id, expectedRevision) {
  * @param {number} expectedRevision - Revision observed before verification.
  * @param {string} [repo] - Final integration checkout, when integration is required.
  * @param {object} [report] - Report for the frozen integration task, when required.
+ * @param {object} [options] - Document ownership forwarded to `gateCheck`, unchanged otherwise.
+ * @param {string} [options.kickoffHash] - See `gates.mjs`'s `gateCheck` `options.kickoffHash`;
+ *   this workflow's own `id` is always forwarded as `gateCheck`'s `options.workflowId`.
  * @returns {Promise<object>} Accepted workflow bound to integration and task results.
  * @throws {Error} On missing contract, stale evidence, incomplete review or changed state.
  */
@@ -675,6 +678,7 @@ export async function acceptWorkflowIntegration(
   expectedRevision,
   repo,
   report,
+  { kickoffHash } = {},
 ) {
   const snapshot = readWorkflow(stateDir, id);
   assert(
@@ -704,7 +708,10 @@ export async function acceptWorkflowIntegration(
     ),
     "All component tasks must be accepted first",
   );
-  const gates = await gateCheck(repo, task, report, stateDir);
+  const gates = await gateCheck(repo, task, report, stateDir, {
+    kickoffHash,
+    workflowId: id,
+  });
   assert(
     gates.state === "accepted",
     "Integration checks, review and PM acceptance required",
