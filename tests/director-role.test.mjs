@@ -1,4 +1,7 @@
 /** Covers the director role: ladder placement, launch refusal, header, registry, and close authority. */
+import { after } from "node:test";
+import { getTemplateProject, cleanupTemplates } from "./template-factory.mjs";
+after(() => cleanupTemplates());
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -13,9 +16,11 @@ import {
   ACTIVE_ROLES,
   ROLES,
   ROOT_ROLE,
+  fileSha256,
   foldRole,
   readJSON,
   resolveRole,
+  run,
   writeJSON,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
@@ -28,6 +33,7 @@ import {
 import { ROLE_TITLE_TAGS } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 import {
   listKickoffs,
+  bindKickoffRun,
   cleanupKickoffBranches,
   kickoffEntryName,
   recordDelivery,
@@ -35,6 +41,7 @@ import {
   registryDirectory,
   releaseKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { recordLaunch } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import {
   assertDirectorAuthority,
   checkCloseReady,
@@ -48,8 +55,16 @@ import {
 import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import {
   ACCEPTED_RISK_AUTHORITIES,
+  acceptOutcome,
   validateReviewInput,
 } from "../plugins/oh-my-teams/scripts/gates.mjs";
+import {
+  auditAccept,
+  auditChecked,
+  auditObjection,
+} from "../plugins/oh-my-teams/scripts/audit.mjs";
+import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
+import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import {
   deliveryRefDocId,
   resolveKickoffHash,
@@ -1136,4 +1151,341 @@ test("director and close skills describe the close-ready check as the runtime ru
     assert.match(text, /다르면 거부하고, 신호가 없으면 경고한 뒤 진행/);
     assert.doesNotMatch(text, /신호가 없거나[^.]*거부/);
   }
+});
+
+// ─── 10. Worker 경로 원장·감사 게이트 회귀(#139) ────────────────────────────
+// assertKickoffCloseReady(A.5/B.5)는 orgFile/worktreeId만 받고 호출자의 역할을
+// 구분하지 않으므로, PL/Senior/Junior 계보와 단일 Worker 계보 모두 같은
+// checkCloseReady/deliverKickoff/acceptOutcome 경로를 탄다. 아래 두 테스트는
+// 새 Worker/auditor 조직(organization.three-tier.json)으로 이 사실을 직접
+// 재현한다.
+
+function gitCmd(cwd, ...args) {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+// gapTask와 동일한 최소 task v2 fixture: tests/auditor.test.mjs의 gapTask와
+// 의도적으로 같은 모양을 쓴다(리뷰 요구 없음, 단일 통과 체크 하나).
+function workerGapTask(worktreeId) {
+  return {
+    schemaVersion: 2,
+    revision: 1,
+    kind: "edit",
+    id: `worker-gap-${worktreeId}`,
+    goal: `deliver ${worktreeId}`,
+    instruction: "no-op",
+    nonGoals: [],
+    constraints: [],
+    files: ["docs/report.md"],
+    checks: [[process.execPath, "-e", "process.exit(0)"]],
+    acceptance: [
+      { id: "check", description: "check", method: "check", checkIndexes: [0] },
+    ],
+    dependencies: [],
+    contractRefs: [],
+    contextRefs: [],
+    openQuestions: [],
+    reviewRequirements: [],
+    environment: "test",
+    baseRef: "HEAD",
+    risk: "low",
+  };
+}
+
+// 세 계층(PL/Senior/Junior) 대신 pm/worker만 선언한 organization.three-tier.json에
+// org.auditor를 얹고, 실제 git 오너 프로젝트와 그 kickoff worktree를 구성한다.
+// deliverKickoff이 오너 브랜치에 실제로 병합하는 경로까지 확인해야 하므로
+// tests/delivery.test.mjs의 kickoffProject와 같은 실제 git worktree 구조를 쓴다.
+async function workerAuditedProject(t, worktreeId) {
+  const root = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-worker-audit-")),
+  );
+  t.after(() =>
+    fs.rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    }),
+  );
+  const project = path.join(root, "project");
+  fs.cpSync(await getTemplateProject(), project, { recursive: true });
+  const org = path.join(project, ".omt", "organization.json");
+  fs.mkdirSync(path.dirname(org), { recursive: true });
+  const threeTier = readJSON(
+    new URL(
+      "../plugins/oh-my-teams/examples/organization.three-tier.json",
+      import.meta.url,
+    ),
+  );
+  threeTier.auditor = { profile: "codex-default" };
+  writeJSON(org, threeTier);
+  const brief = path.join(project, ".omt", "brief.md");
+  fs.writeFileSync(brief, "전달 범위: main에 커밋한다.\n");
+
+  const worktree = path.join(root, "kick");
+  gitCmd(project, "worktree", "add", "-q", "-b", "kick", worktree);
+  fs.mkdirSync(path.join(worktree, "docs"));
+  fs.writeFileSync(path.join(worktree, "docs", "report.md"), "report\n");
+  gitCmd(worktree, "add", ".");
+  gitCmd(worktree, "commit", "-q", "-m", "report");
+  const head = gitCmd(worktree, "rev-parse", "HEAD");
+
+  registerKickoff(org, {
+    goal: `deliver ${worktreeId}`,
+    pm: {
+      worktreeId,
+      path: worktree,
+      stateDir: path.join(worktree, ".omt"),
+    },
+    organizationRevision: readJSON(org).revision,
+    brief,
+    delivery: { mode: "local-merge", branch: "main" },
+    requirements: minimalRequirements(org, worktreeId),
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath: process.cwd(),
+    },
+  });
+  bindKickoffRun(org, { worktreeId, runId: `run-${worktreeId}` });
+  const [entry] = listKickoffs(org, worktreeId).kickoffs;
+  const auditorHandle = `term_auditor_${worktreeId}`;
+  recordLaunch(org, {
+    via: "role-terminal",
+    role: AUDITOR_ROLE,
+    terminal: auditorHandle,
+    stateDir: entry.pm.stateDir,
+  });
+
+  return { project, org, worktree, worktreeId, head, entry, auditorHandle };
+}
+
+async function withOrcaHandle(handle, fn) {
+  const previous = process.env.ORCA_TERMINAL_HANDLE;
+  process.env.ORCA_TERMINAL_HANDLE = handle;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env.ORCA_TERMINAL_HANDLE;
+    else process.env.ORCA_TERMINAL_HANDLE = previous;
+  }
+}
+
+test("Worker 경로: 원장 미완결과 감사 outcome 미해결 이의는 close-ready·deliver·task accept를 모두 거부한다", async (t) => {
+  const fixture = await workerAuditedProject(t, "wt-worker-gap");
+
+  // 원장이 아직 fidelity-confirm되지 않은 상태: PL/Senior/Junior 조직과 똑같이
+  // close-ready/deliver 모두 assertKickoffCloseReady에서 거부된다.
+  await assert.rejects(
+    () =>
+      checkCloseReady({
+        orgFile: fixture.org,
+        worktreeId: fixture.worktreeId,
+        head: fixture.head,
+        repo: fixture.worktree,
+      }),
+    /No director-confirmed fidelity check exists/,
+  );
+  await assert.rejects(
+    () =>
+      deliverKickoff({
+        orgFile: fixture.org,
+        worktreeId: fixture.worktreeId,
+        source: fixture.worktree,
+        head: fixture.head,
+      }),
+    /No director-confirmed fidelity check exists/,
+  );
+
+  // 원장을 close-ready로 만든다.
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: fixture.head,
+    repo: fixture.worktree,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "report.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(fixture.org, fixture.worktreeId, process.cwd());
+
+  // 원장은 이제 close-ready지만 org.auditor가 선언돼 있고 brief 수용이 아직
+  // 없으므로 여전히 거부된다.
+  await assert.rejects(
+    () =>
+      checkCloseReady({
+        orgFile: fixture.org,
+        worktreeId: fixture.worktreeId,
+        head: fixture.head,
+        repo: fixture.worktree,
+      }),
+    /Brief audit acceptance is missing or no longer valid/,
+  );
+
+  // brief만 수용하고 outcome에는 미해결 이의를 남긴다.
+  const checked = [
+    { type: "statement", id: "s1" },
+    { type: "criterion", id: "c1" },
+  ];
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditChecked(fixture.org, fixture.worktreeId, "brief", checked),
+  );
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditAccept(fixture.org, fixture.worktreeId, "brief"),
+  );
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.worktree,
+    }),
+  );
+
+  await assert.rejects(
+    () =>
+      checkCloseReady({
+        orgFile: fixture.org,
+        worktreeId: fixture.worktreeId,
+        head: fixture.head,
+        repo: fixture.worktree,
+      }),
+    /Outcome audit acceptance is missing or no longer valid/,
+  );
+  await assert.rejects(
+    () =>
+      deliverKickoff({
+        orgFile: fixture.org,
+        worktreeId: fixture.worktreeId,
+        source: fixture.worktree,
+        head: fixture.head,
+      }),
+    /Outcome audit acceptance is missing or no longer valid/,
+  );
+
+  // task 단위 accept(gates.mjs acceptOutcome)도 같은 미해결 이의로 거부된다:
+  // kickoff 레벨 게이트뿐 아니라 task 레벨 게이트도 Worker 경로에서 똑같이 탄다.
+  const stateDir = path.join(fixture.worktree, ".omt");
+  const task = workerGapTask(fixture.worktreeId);
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.worktree, evidencePath), "proof\n");
+  const report = {
+    taskId: task.id,
+    taskHash: taskHash(task),
+    taskRevision: task.revision,
+    runId: "worker-gap-run",
+    evidence: await verify(fixture.worktree, {
+      baseRef: task.baseRef,
+      commands: task.checks,
+      environment: task.environment,
+      store: path.join(stateDir, "evidence"),
+    }),
+  };
+  const decision = {
+    schemaVersion: 1,
+    id: "accept-worker-gap",
+    decider: { kind: "pm", executionId: "pm-worker-1" },
+    criteria: ["check"],
+    basis: "Check passed",
+  };
+  await assert.rejects(
+    () =>
+      acceptOutcome(fixture.worktree, task, report, decision, stateDir, {
+        orgFile: fixture.org,
+        worktreeId: fixture.worktreeId,
+      }),
+    /outcome audit checkpoint has an unresolved objection/,
+  );
+});
+
+test("Worker 경로: 원장 close-ready와 감사 brief·outcome 수용을 모두 마치면 task accept부터 deliver까지 end-to-end로 통과한다", async (t) => {
+  const fixture = await workerAuditedProject(t, "wt-worker-ok");
+
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: fixture.head,
+    repo: fixture.worktree,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "report.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(fixture.org, fixture.worktreeId, process.cwd());
+
+  const checked = [
+    { type: "statement", id: "s1" },
+    { type: "criterion", id: "c1" },
+  ];
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditChecked(fixture.org, fixture.worktreeId, "brief", checked),
+  );
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditAccept(fixture.org, fixture.worktreeId, "brief"),
+  );
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditChecked(fixture.org, fixture.worktreeId, "outcome", checked),
+  );
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditAccept(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      fixture.head,
+      fixture.worktree,
+    ),
+  );
+
+  const stateDir = path.join(fixture.worktree, ".omt");
+  const task = workerGapTask(fixture.worktreeId);
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.worktree, evidencePath), "proof\n");
+  const report = {
+    taskId: task.id,
+    taskHash: taskHash(task),
+    taskRevision: task.revision,
+    runId: "worker-ok-run",
+    evidence: await verify(fixture.worktree, {
+      baseRef: task.baseRef,
+      commands: task.checks,
+      environment: task.environment,
+      store: path.join(stateDir, "evidence"),
+    }),
+  };
+  const decision = {
+    schemaVersion: 1,
+    id: "accept-worker-ok",
+    decider: { kind: "pm", executionId: "pm-worker-2" },
+    criteria: ["check"],
+    basis: "Check passed",
+  };
+  const { decision: recorded } = await acceptOutcome(
+    fixture.worktree,
+    task,
+    report,
+    decision,
+    stateDir,
+    { orgFile: fixture.org, worktreeId: fixture.worktreeId },
+  );
+  assert.equal(recorded.status, "accepted");
+
+  const closeReady = await checkCloseReady({
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    head: fixture.head,
+    repo: fixture.worktree,
+  });
+  assert.equal(closeReady.ready, true);
+
+  const delivered = await deliverKickoff({
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  });
+  assert.equal(delivered.merged, true);
+  assert.equal(gitCmd(fixture.project, "rev-parse", "HEAD^2"), fixture.head);
+  assert.ok(fs.existsSync(path.join(fixture.project, "docs", "report.md")));
 });
