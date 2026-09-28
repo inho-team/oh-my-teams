@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams `02. 설계` design-contract document v1",
+  "$comment": "docs/plan/structured-omt-documents.md 3.2 (02. 설계 row). The design does not define a localId derivation rule for design-contract (3.7 item 7's table covers every other doc type but this one), so docId keeps the generic 3.5 shape without pinning a localId pattern.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "docId",
+    "stage",
+    "kickoffId",
+    "workflowId",
+    "revision",
+    "state",
+    "author",
+    "createdAt",
+    "basedOnRevision",
+    "reason",
+    "problemStatement",
+    "decisions",
+    "openQuestions",
+    "reviewRequirementRef"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "docId": { "type": "string", "minLength": 1 },
+    "stage": { "const": "design" },
+    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflowId": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+      ]
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": {
+      "enum": ["open", "in-review", "resolved"],
+      "$comment": "3.3: only `approved` review conclusions move this to resolved; `changes-requested`/`inconclusive` return it to open."
+    },
+    "author": { "$ref": "#/$defs/author" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "basedOnRevision": {
+      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "problemStatement": { "type": "string", "minLength": 1 },
+    "decisions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "$comment": "Array-of-strings, matching the nonGoals/constraints convention (task.schema.json) and how this same design document records its own confirmed decisions as prose."
+    },
+    "openQuestions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reviewRequirementRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "requirementId"],
+      "properties": {
+        "taskId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "requirementId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        }
+      },
+      "$comment": "Points at one entry of the governing task's own reviewRequirements[] (task.schema.json $defs.review), not at another structured document."
+    }
+  },
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": { "enum": ["director", "pm", "pl", "senior", "junior"] },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
