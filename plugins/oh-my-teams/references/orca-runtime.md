@@ -412,3 +412,41 @@ node <runtime> usage-report --org <project>/.omt/organization.json --all
 - **측정되지 않는 것**: Agy 대화형 세션은 토큰 사용량이 어디에도 기록되지 않는다. 이런 세션은 `measured: false`, `reason: "agy-interactive-usage-not-recorded"`로 표시하고 토큰은 `null`로 둔다. 단계 수(`steps`)만 보조 지표로 보여 준다. 사용량 비교가 중요한 kickoff에서는 Agy 역할을 `role-terminal` 대신 `headless-start`로 실행한다. headless 결과에는 사용량이 담긴다. 다만 Agy의 stream-json에서 사용량이 담기는 위치는 아직 실제 출력으로 확인하지 않았으므로, 결과 이벤트의 중첩 위치와 최상위를 모두 읽는다.
 - **해석**: 역할별 점유율(`share`)은 측정된 세션의 prompt와 output 토큰만으로 계산한다. 측정된 세션이 없는 역할은 0%가 아니라 `unmeasured`이며, `coverage`가 몇 개 세션 위에서 계산했는지 알린다. prompt 토큰은 Claude에서 캐시 읽기·생성을 포함한 합, Codex에서 캐시를 포함해 보고된 입력, Agy에서 보고된 `input_tokens`다. Agy의 `input_tokens`가 캐시 읽기를 포함하는지는 확인되지 않았다. Claude headless의 `costUsd`는 CLI가 계산한 API 환산 추정치이며 구독 요금이 아니다. 요청 모델과 보고 모델이 다르면 `mismatches`에 적는다.
 - **호출 한도와의 관계**: 조직의 `policy.maxCalls`는 `work` 한 번과 workflow attempt 하나가 쓰는 provider 호출 수를 제한하고, workflow의 `budget.maxCalls`는 그 workflow 전체의 호출 예산이다. 둘 다 대화형 역할 터미널의 턴을 세지 않으므로, 대화형 역할이 쓴 양은 이 보고서로만 확인한다.
+
+## 정형 `.omt` 문서 CLI
+
+구조화된 `.omt` 문서(docId, revision, 잠금)를 다루는 런타임 로직은 `documents.mjs`가 소유하며, `teams-org.mjs`는 그 함수를 그대로 감싼 네 명령만 노출한다.
+
+```text
+node <runtime> doc-resolve-kickoff --org <project>/.omt/organization.json --worktree <pm-worktree-id>
+node <runtime> doc-id --kickoff-hash <hex64> [--workflow-id <id>] --stage <stageSlug> --doc-type <docType> --local-id <localId> [--revision <n>]
+node <runtime> doc-show --state <pm-worktree>/.omt --doc-id <docId>
+node <runtime> doc-save --state <pm-worktree>/.omt --doc <envelope.json> [--expected-revision <n>] [--refs <ref1,ref2,...>]
+```
+
+- `doc-resolve-kickoff`은 `resolveKickoffHash(orgFile, worktreeId)`를 그대로 호출해 `{ kickoffHash }`를 반환한다. worktree가 지배하는 활성 kickoff이 없으면 오류로 거부하며, release된 kickoff의 문서는 이 명령이 아니라 그 kickoff의 closure-record `kickoffId`로 직접 조립한다.
+- `doc-id`는 `buildDocId`/`buildDocRef`를 감싼 순수 빌더다. 파일시스템에 접근하지 않으며, `--revision`을 주면 응답에 `docRef`도 함께 담는다. `--workflow-id`를 생략하면 kickoff 범위 문서(`workflowId: null`, docId의 두 번째 segment는 `none`)를 만든다.
+- `doc-show`는 `documentState(stateDir, docId)`의 필드(`exists`, 존재할 때 `revision`/`hash`/`state`/`kickoffId`/`workflowId`)에 더해, 문서의 실제 폴더 경로를 `path` 필드로 함께 반환한다. 이 경로는 `documents.mjs`의 비공개 `documentDirectory` 공식(`<stateDir>/documents/<kickoffHash>/<workflowId ?? "none">/<stageFolderName(stageSlug)>/<docType>/<localId>`)을 그대로 재구현한 것이며, 이 조립 공식은 design 3.5절이 고정한 공개 계약이므로 재구현이 안전하다.
+- `doc-save`는 저장 전에 `assertDocumentAuthority`로 design 3.4절의 작성 권한·독립성을 검사한 뒤 `saveDocument(stateDir, doc, { expectedRevision, refs })`를 호출한다. `--doc`은 전체 envelope JSON 파일 경로이며, `--refs`는 검증할 `omt-doc:` 문서 참조만 쉼표로 구분해 전달한다. `saveDocument`가 호출하는 `validateReference`는 `omt-doc:`으로 시작하지 않는 참조를 즉시 거부하므로, legacy 참조(`validateLegacyRef`, org 인자가 필요한 별도 export 함수)는 이 옵션으로 검증되지 않는다.
+- `assertDocumentAuthority`는 design 3.4절 표를 stage/docType 조합별 허용 역할 표로 옮겨 `doc.author.role`을 검사하고(표에 없는 조합, 예: `06. 인도`의 `delivery-ref`는 표가 어느 역할에도 배정하지 않아 제한하지 않는다), 이미 존재하는 문서를 갱신할 때는 그 문서의 첫 revision을 쓴 실행만 다음 revision을 쓸 수 있는지 확인한다(`05. 수용`은 "PM 전용"일 뿐 특정 PM 실행에 고정되지 않으므로 예외이고, PL은 "배정 관련 필드만" 수정할 수 있어 문서 전체를 자기 것으로 고정하는 이 검사에서 예외다). `review/review-ref` 문서는 본문의 `reviewFileRef`가 `stateDir` 안의 실제 review 기록을 가리키면 그 기록의 `implementationExecutionId`가 이 문서의 `author.executionId`와 같은지 검사해, 같은 실행이 구현과 검토를 모두 맡은 문서를 거부한다(review.schema.json이 이미 강제하는 독립성 검사를 문서 계층에도 얹은 것). `design/design-contract`는 PM이 이번 실행에 하위 역할이 없을 때만 직접 쓸 수 있다는 조건이 있지만, `doc-save`는 이번 실행의 역할 목록을 알 방법이 없어 그 조건을 판정하지 않고 PM 작성을 허용한다.
+
+## `review-record`/`gate-check`/`accept`/`merge-check`/`workflow-accept`의 `--org` 판정 절차
+
+다섯 명령은 선택 인자 `--org <organization.json>`(`workflow-accept` 제외 넷은 `--workflow-id`도 선택)을 받는다. `--org`를 주면 명령은 gate 평가 **전에** 다음 판정을 스스로 계산해 `gates.mjs`/`workflow.mjs`에 넘긴다(design 3.7절 5번 항목, `classifyKickoffEntry`를 `teams-org.mjs`가 재구현).
+
+1. `listKickoffs(--org)`에서 `entry.pm.stateDir`가 `path.resolve(--state)`와 일치하는 kickoff 항목을 찾는다. 못 찾으면 즉시 거부한다(release되어 이관됐거나 등록 자체가 없는 경우).
+2. 찾은 항목이 `registrationSeq`를 가지면 **current**다. 이때 `kickoffHash`(entry로부터 계산)를 반드시 넘기고, `--workflow-id`를 받았으면 그 값도 함께 넘긴다. 이후 해당 gate는 `review-ref`/`acceptance-ref` 문서가 그 kickoffHash·workflowId 아래 커밋되어야만 통과한다.
+3. `registrationSeq`가 없고 조직의 `documentSystemActivatedAt`이 없거나 항목의 `createdAt`보다 뒤이면 **legacy**다. `kickoffHash`를 넘기지 않아 이전(문서 검사 없는) review/decision 전용 판정으로 되돌아간다.
+4. `registrationSeq`가 없는데 활성화 시각을 지났으면 **integrity-failure**다. 판정이 불명확하므로 gate를 평가하지 않고 명령 자체를 거부한다. `--org`로 준 조직 파일을 읽지 못했을 때도 같게 거부한다.
+
+`--org`를 주지 않으면 이 판정은 전혀 실행되지 않고 기존 review/decision 전용 동작을 그대로 유지한다(하위 호환). `workflow-accept`는 `--workflow-id`를 받지 않는데, `acceptWorkflowIntegration`이 자신의 workflow `id`를 그대로 workflowId로 쓰기 때문이다. `kickoff-branch-cleanup`은 이미 필수이던 `--org`를 `cleanupKickoffBranches`의 `orgFile`로도 전달해, 등록부의 `delivery.mode`가 `local-merge`/`pull-request`이고 병합 커밋이 기록된 항목의 브랜치 삭제를, legacy면 기존처럼 git 내용만으로, current면 `delivery-ref` 문서 소유권까지 확인하고, integrity-failure면 `--force` 없이는 건너뛴다.
+
+## 등록부와 참조만으로 재개하는 절차
+
+세션이 끊긴 뒤 재개할 때는 부모 대화를 복사하지 않고 위 명령들로 필요한 문서를 결정적으로 다시 찾는다(design 3.11절).
+
+1. `kickoff-show`로 그 PM worktree가 지배하는 활성 kickoff의 `worktreeId`를 확인하고, `doc-resolve-kickoff`로 `kickoffHash`를 얻는다.
+2. `workflow-status`로 workflow 상태를 읽어 `workflowId`와 진행 중인 `taskId`를 얻는다.
+3. `doc-id`로 `docId`를 조립하고 `doc-show`로 해당 문서의 현재 revision과 경로를 확인한다.
+
+등록부에 "마지막으로 참조한 문서" 같은 별도 색인을 추가하지 않으며, `resolveKickoffHash`는 활성 등록부만 조회하므로 release된 kickoff의 문서에는 이 절차를 쓰지 않고 그 kickoff의 closure-record `kickoffId`를 직접 쓴다.

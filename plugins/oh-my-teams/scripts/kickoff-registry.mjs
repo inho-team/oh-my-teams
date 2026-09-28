@@ -151,17 +151,23 @@ export function kickoffHashFor(entry) {
   );
 }
 
-// Classifies an entry against the structured document system's activation
-// boundary (structured-omt-documents.md 3.7 item 5, 3.10). An entry with a
-// registrationSeq is "current" regardless of the boundary. One without it is
-// "legacy" (registrationSeq absence is expected) when documentSystemActivatedAt
-// is unset or later than entry.createdAt, the same comparison validateLegacyRef
-// uses (documents.mjs); otherwise the entry was registered after activation and
-// should have a registrationSeq but does not, which is an "integrity-failure",
-// not a legacy one. Passing org as undefined (the orgFile-less default for
-// cleanupKickoffBranches) always resolves a registrationSeq-less entry to
-// "legacy", matching that function's documented no-orgFile contract.
-function classifyKickoffEntry(entry, org) {
+/**
+ * Classifies an entry against the structured document system's activation
+ * boundary (structured-omt-documents.md 3.7 item 5, 3.10). An entry with a
+ * registrationSeq is "current" regardless of the boundary. One without it is
+ * "legacy" (registrationSeq absence is expected) when documentSystemActivatedAt
+ * is unset or later than entry.createdAt, the same comparison validateLegacyRef
+ * uses (documents.mjs); otherwise the entry was registered after activation and
+ * should have a registrationSeq but does not, which is an "integrity-failure",
+ * not a legacy one. Passing org as undefined (the orgFile-less default for
+ * cleanupKickoffBranches) always resolves a registrationSeq-less entry to
+ * "legacy", matching that function's documented no-orgFile contract.
+ *
+ * @param {object} entry - Registry entry to classify.
+ * @param {object} [org] - Parsed organization.json, for `documentSystemActivatedAt`.
+ * @returns {"current"|"legacy"|"integrity-failure"} The entry's classification.
+ */
+export function classifyKickoffEntry(entry, org) {
   if (entry.registrationSeq !== undefined) return "current";
   const activatedAt = org?.documentSystemActivatedAt;
   return !activatedAt || entry.createdAt < activatedAt
