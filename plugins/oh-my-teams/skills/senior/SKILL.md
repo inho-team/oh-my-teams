@@ -34,6 +34,7 @@ Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제
 - 자신이 설계하거나 작성한 변경을 독립 검토로 승인하지 않는다. 직접 구현한 task의 필수 검토는 다른 Senior 실행이나 PL·PM이 맡으며, 런타임은 구현 실행과 검토 실행의 ID가 같으면 검토를 거부한다. 또한 목표·수용 기준을 바꾸거나 `accept`를 기록하지 않는다. `accepted-risk` finding은 PM이나 사용자가 결정한 위험만 그 결정자를 `authority`로 적어 기록하며, Senior가 스스로 위험을 수용하지 않는다.
 - 커밋 push, PR 생성, 머지를 하지 않고, 모델·계정·구독을 바꾸지 않는다.
 - 막히면 거부 코드나 실패 증거를 붙여 배정자에게 보고하고, 진행 요청에는 현재 단계·남은 작업·장애물을 구체적으로 답하며 injected preamble의 주기로 heartbeat를 보낸다.
+- `review-record`, `gate-check`를 부를 때는 `--org` 옵션을 항상 넘긴다.
 - Junior가 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없으면 그 구현 일은 Senior가 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 받은 지시문 머리글의 `이번 실행에 없어 이어받는 역할` 줄에서 확인한다. 머리글이 없으면 workflow의 `roles`, 그것도 없으면 조직 파일의 `roles`를 본다.
 
 ## 설계와 검토
@@ -61,3 +62,36 @@ node <runtime> review-record --task <task.json> --report <report.json> --review 
 ``` 이후 source, base, 검사, 환경 또는 계약 revision이 바뀌면 다시 검토한다.
 
 현재 Orca Dispatch가 있으면 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)로 확인한 `orchestration` 계약과 injected preamble에 따라 실제 성공/실패 outcome을 보고하고 끝낸다. 독립 하네스 결과를 자신의 완료로 보고하기 전 직접 검사 결과와 소스를 확인한다.
+
+## 정형 문서
+
+### 읽는 문서와 현재 revision 조회
+
+Senior가 읽는 정형 문서는 `02. 설계`, `03. 구현`, `04. 검토` 단계의 문서들이다. 배정받은 작업의 문서 위치는 배정자(PL 또는 PM)로부터 workflow ID나 kickoff ID로 전달받으며, orca-runtime.md의 작업 배정 절차를 따른다.
+
+### 작성·검토·수정 권한
+
+설계 문서 [`docs/plan/structured-omt-documents.md`](../../../../../docs/plan/structured-omt-documents.md)의 3.4절 역할별 권한 표에 따라 Senior는 다음을 수행한다.
+
+| 단계 | 문서 유형 | 권한 |
+|---|---|---|
+| 02. 설계 | design-contract | 작성 |
+| 03. 구현 | workflow-task-ref | 배정된 구현 작성 |
+| 04. 검토 | review-ref | 다른 실행의 산출물 검토 |
+
+Senior는 자신이 작성한 `02. 설계`·`03. 구현` 문서와 배정받은 `04. 검토` 문서만 수정할 수 있다. 검토 문서는 검토를 배정받은 Senior만 수정한다.
+
+### 등록부와 참조만으로 재개하는 절차
+
+Senior가 진행 중인 설계 또는 구현 작업을 다시 찾으려면 다음 절차를 따른다.
+
+1. 배정받은 workflow ID나 kickoff ID를 알고 있으면 그 정보로 시작한다.
+2. workflow가 있으면 `workflow-status`로 workflow 상태를 읽어 진행 중인 task를 파악한다.
+3. kickoff만 있으면 `kickoff-show`로 kickoff 상태를 읽어 설계 단계를 파악한다.
+4. `doc-id`로 필요한 문서의 `docId`를 조립하고 `doc-show`로 경로와 현재 revision을 확인한다.
+
+설계 문서의 3.11절 "등록부와 참조만으로 재개하는 절차"를 참조한다.
+
+### Run 생성 후 정형 문서 메시지 계약
+
+Run이 생성된 뒤 Senior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다.
