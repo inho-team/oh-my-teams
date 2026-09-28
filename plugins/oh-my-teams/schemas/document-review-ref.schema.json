@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams `04. 검토` review-ref document v1",
+  "$comment": "docs/plan/structured-omt-documents.md 3.2 (04. 검토 row), 3.7 item 7 (localId = review record's own id), 3.7 contract B (this doc type is written only after the backing review already carries its conclusion, so it is recorded resolved from the start).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "docId",
+    "stage",
+    "kickoffId",
+    "workflowId",
+    "revision",
+    "state",
+    "author",
+    "createdAt",
+    "basedOnRevision",
+    "reason",
+    "reviewFileRef",
+    "conclusion",
+    "criteriaRefs"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "docId": { "type": "string", "minLength": 1 },
+    "stage": { "const": "review" },
+    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflowId": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+      ]
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": {
+      "const": "resolved",
+      "$comment": "3.7 contract B: review-ref is written from the review record's already-final `conclusion`, never as a draft."
+    },
+    "author": { "$ref": "#/$defs/author" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "basedOnRevision": {
+      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "reviewFileRef": {
+      "$ref": "#/$defs/ref",
+      "$comment": "Points at `<stateDir>/reviews/<id>.json` (gates.mjs), write-once."
+    },
+    "conclusion": {
+      "enum": ["approved", "changes-requested", "inconclusive"],
+      "$comment": "review.schema.json vocabulary, reused per 3.3."
+    },
+    "criteriaRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "$comment": "Ids from the backing review record's criteria[] (review.schema.json)."
+    }
+  },
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": { "enum": ["director", "pm", "pl", "senior", "junior"] },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

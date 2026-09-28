@@ -539,7 +539,18 @@ export function trustQuestion(lines) {
   );
 }
 
-async function settle(orca, handle, execute) {
+/**
+ * Waits briefly for a terminal's interface to go idle.
+ *
+ * Not idle yet is not a failure: the screen read afterwards is what a caller
+ * judges, so a timeout is swallowed.
+ *
+ * @param {string} orca - Selected Orca executable.
+ * @param {string} handle - Terminal handle.
+ * @param {Function} [execute=run] - Injectable command runner.
+ * @returns {Promise<void>} Resolves once the wait returns or times out.
+ */
+export async function settleTerminal(orca, handle, execute = run) {
   try {
     await runOrcaJson(
       orca,
@@ -569,7 +580,18 @@ async function readScreen(orca, handle, execute) {
   return read.result?.terminal?.tail ?? [];
 }
 
-async function observe(orca, handle, command, execute) {
+/**
+ * Reads a terminal's screen and judges where the launch command stands.
+ *
+ * @param {string} orca - Selected Orca executable.
+ * @param {string} handle - Terminal handle.
+ * @param {string} command - Shell command the terminal was given.
+ * @param {Function} [execute=run] - Injectable command runner.
+ * @returns {Promise<{screen: string[], pending: boolean, typing: boolean, started: boolean}>}
+ *   The screen, and whether the command waits at the prompt, is still being
+ *   echoed, or an agent has drawn its interface.
+ */
+export async function observeLaunch(orca, handle, command, execute = run) {
   const screen = await readScreen(orca, handle, execute);
   return {
     screen,
@@ -701,10 +723,10 @@ async function launchOnce({
 
   const until = async (budgetMs, done = (seen) => seen.started) => {
     const deadline = Date.now() + budgetMs;
-    let seen = await observe(orca, handle, typed, execute);
+    let seen = await observeLaunch(orca, handle, typed, execute);
     while (!done(seen) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
-      seen = await observe(orca, handle, typed, execute);
+      seen = await observeLaunch(orca, handle, typed, execute);
     }
     return seen;
   };
@@ -731,8 +753,8 @@ async function launchOnce({
   if (seen.started) {
     // The interface may still be drawing its header; let it settle so the
     // returned screen shows the model the caller must compare.
-    await settle(orca, handle, execute);
-    seen = await observe(orca, handle, typed, execute);
+    await settleTerminal(orca, handle, execute);
+    seen = await observeLaunch(orca, handle, typed, execute);
     if (answerTrust) {
       const answered = await answerTrustQuestion({
         orca,
@@ -746,8 +768,8 @@ async function launchOnce({
       ({ trust, records: promptAnswers, worktree: placed } = answered);
       trustRefusal = answered.refusal ?? null;
       if (promptAnswers.some((record) => record.sent)) {
-        await settle(orca, handle, execute);
-        seen = await observe(orca, handle, typed, execute);
+        await settleTerminal(orca, handle, execute);
+        seen = await observeLaunch(orca, handle, typed, execute);
       }
     }
   }
@@ -859,7 +881,7 @@ export async function openRoleTerminal({
     allowUnverified,
     allowUnverifiedApproval,
   });
-  if (matrixResult.path === "blocked" || matrixResult.path === "headless") {
+  if (matrixResult.path === "blocked") {
     const err = new Error(
       `Role ${command.role} (profile=${command.profile}, runner=${command.provider}, platform=${platform}, shell=${shell}) ` +
         `launch refused by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,

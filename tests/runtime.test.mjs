@@ -1009,87 +1009,46 @@ test("task v2 prompt and report bind goal, acceptance, revision and immutable ha
     taskV2,
   );
 });
-test("model presets preview only changed roles and never mutate an existing organization", () => {
+test("model and tiers presets refuse to reassign, and never mutate an existing organization", () => {
   const org = clone(),
-    before = JSON.stringify(org),
-    balanced = previewPreset(org, "balanced");
+    before = JSON.stringify(org);
+  for (const name of [
+    "opus-first",
+    "balanced",
+    "advisor-codex",
+    "advisor-claude",
+  ]) {
+    assert.throws(
+      () => previewPreset(org, name),
+      /no longer assigns fixed models, fallbacks, or advisors/,
+    );
+    assert.throws(() => previewPreset(org, name), /edit/);
+    assert.throws(() => previewPreset(org, name), /model-catalog/);
+  }
   assert.equal(JSON.stringify(org), before);
-  assert.deepEqual(
-    balanced.changes.map((change) => change.role),
-    ["senior", "junior"],
-  );
-  assert.equal(balanced.organization.roles.pm.profile, org.roles.pm.profile);
-  assert.equal(balanced.organization.roles.pl.profile, org.roles.pl.profile);
-  assert.equal(balanced.organization.roles.senior.profile, "agy-opus");
-  assert.equal(balanced.organization.roles.junior.profile, "agy-sonnet");
 });
-test("presets pin one slot per shared-pool role and keep each fallback chain to what they name", () => {
-  const org = clone();
-  for (const name of ["balanced", "opus-first"]) {
-    const preview = previewPreset(org, name);
-    assert.equal(preview.organization.roles.intern, undefined);
-    for (const role of ["senior", "junior"]) {
+test("the removed presets carry no fixed model, fallback, or advisor table to fall back on", async () => {
+  const { PRESETS } =
+    await import("../plugins/oh-my-teams/scripts/presets.mjs");
+  for (const [name, preset] of Object.entries(PRESETS)) {
+    if (preset.kind === "policy") continue;
+    for (const field of ["models", "fallbacks", "concurrency", "advisor"]) {
       assert.equal(
-        preview.organization.roles[role].concurrency,
-        1,
-        `${name}/${role} must hold a single shared-pool slot`,
+        Object.hasOwn(preset, field),
+        false,
+        `${name} still carries a ${field} table`,
       );
     }
   }
-  // Balanced escalates Sonnet implementation to Opus once and nothing further;
-  // Opus judgment and opus-first have no fallback to spend another quota on.
-  const balanced = previewPreset(org, "balanced").organization.roles;
-  assert.deepEqual(balanced.junior.fallbacks, ["agy-opus"]);
-  assert.deepEqual(balanced.senior.fallbacks, []);
-  const opusFirst = previewPreset(org, "opus-first").organization.roles;
-  assert.deepEqual(opusFirst.senior.fallbacks, []);
-  assert.deepEqual(opusFirst.junior.fallbacks, []);
 });
-test("presets lacking provider metadata throw when generating model or tier changes", async () => {
+test("a policy preset still previews and pins one slot per shared-pool role", () => {
   const org = clone();
-  const { PRESETS } =
-    await import("../plugins/oh-my-teams/scripts/presets.mjs");
-
-  for (const [name, preset] of Object.entries(PRESETS)) {
-    if (preset.kind === "models" || preset.kind === "tiers") {
-      assert.ok(preset.provider, `Preset ${name} missing provider metadata`);
-    }
+  const preview = previewPreset(org, "single-subscription");
+  assert.equal(preview.organization.roles.intern, undefined);
+  for (const role of Object.keys(org.roles)) {
+    assert.equal(preview.organization.roles[role].concurrency, 1);
   }
-
-  const original = PRESETS["opus-first"].provider;
-  PRESETS["opus-first"].provider = undefined;
-  assert.throws(
-    () => previewPreset(org, "opus-first"),
-    /Preset missing provider metadata/,
-  );
-  PRESETS["opus-first"].provider = original;
-});
-test("presets match provider as well as model to prevent Claude Code profiles from masking Agy profiles", () => {
-  const org = clone();
-  org.profiles["claude-opus-spoof"] = {
-    provider: "claude",
-    command: ["claude", "--profile", "test"],
-    model: "claude-opus-4-6-thinking",
-    account: "test",
-    subscription: "test",
-    concurrency: 1,
-  };
-  org.profiles["claude-sonnet-spoof"] = {
-    provider: "claude",
-    command: ["claude", "--profile", "test"],
-    model: "claude-sonnet-4-6",
-    account: "test",
-    subscription: "test",
-    concurrency: 1,
-  };
-
-  const opusFirst = previewPreset(org, "opus-first").organization;
-  assert.equal(opusFirst.roles.senior.profile, "agy-opus");
-  assert.equal(opusFirst.roles.junior.profile, "agy-opus");
-
-  const balanced = previewPreset(org, "balanced").organization;
-  assert.equal(balanced.roles.senior.profile, "agy-opus");
-  assert.equal(balanced.roles.junior.profile, "agy-sonnet");
+  assert.equal(preview.organization.modelPolicy.preset, "single-subscription");
 });
 test("provider print timeout expires before the runtime kills the call", () => {
   for (const timeoutMs of [60000, 300000, 600000]) {
@@ -1970,7 +1929,8 @@ test("workflow retry preserves attempts and cumulative budget", async (t) => {
     runId: "run-r2",
     taskId: "orca-r2",
     dispatchId: "dispatch-r2",
-    worktreeId: "wt-r2",
+    // A retry is a new attempt, but it stays in the proven role worktree.
+    worktreeId: "wt-r1",
   };
   const second = attachExecution(stateDir, request.id, 6, {
     schemaVersion: 1,

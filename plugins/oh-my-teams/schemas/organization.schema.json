@@ -14,6 +14,11 @@
     "schemaVersion": { "const": 1 },
     "revision": { "type": "integer", "minimum": 1 },
     "name": { "type": "string", "minLength": 1 },
+    "documentSystemActivatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "$comment": "docs/plan/structured-omt-documents.md 3.10: ISO time the structured .omt document system was activated for this organization. Deliberately omitted from `required` so organizations saved before wave-2 remain valid; review/decision/evidence files created before this field is set are legacyRef targets, and files created after it is set must have a matching structured document (3.10 판정 근거)."
+    },
     "modelPolicy": {
       "type": "object",
       "required": ["preset", "revision"],

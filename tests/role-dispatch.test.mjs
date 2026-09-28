@@ -200,7 +200,7 @@ test("a named account or a path command cannot be launched as a plain name", () 
   // login it has, so worker-start refuses it and points at headless-start.
   assert.throws(
     () => resolveRoleLaunch(org, "junior", {}, { terminal: "t1" }),
-    /runs through the opencodex runner; worker-start cannot hand it .* headless-start/,
+    /runs through the opencodex runner; there is no supported interactive Orca terminal path/,
   );
 });
 
@@ -227,7 +227,7 @@ test("role-command refuses to print a native command for a runner profile", asyn
   fs.writeFileSync(orgFile, JSON.stringify(org));
   await assert.rejects(
     () => main(["role-command", "--org", orgFile, "--role", "junior"]),
-    /headless-start only; role-command would print a native Codex command/,
+    /no interactive Orca terminal path; role-command would print a native Codex command/,
   );
 });
 

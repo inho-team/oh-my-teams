@@ -6,6 +6,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   assert,
+  hash,
   readJSON,
   validateOrg,
   withFileLock,
@@ -18,6 +19,11 @@ import {
   validateLedgerForClaim,
   writeConfirmedLedger,
 } from "./requirements.mjs";
+// documents.mjs imports listKickoffs/kickoffHashFor from this module back, a
+// circular import documents.mjs's module doc explains is safe here because
+// every use on both sides happens inside a function body, never at either
+// module's own top level (3.7 item 4).
+import { deliveryRefDocId, documentState } from "./documents.mjs";
 
 /** Reasons a registered kickoff may be ended, in the order they end one. */
 export const RELEASE_REASONS = ["completed", "disbanded", "taken-over"];
@@ -148,6 +154,63 @@ function entryFile(orgFile, worktreeId) {
   return path.join(registryDirectory(orgFile), `${entryName(worktreeId)}.json`);
 }
 
+/**
+ * Computes the `kickoffHash` a registry entry's structured documents live
+ * under (docs/plan/structured-omt-documents.md 3.7 items 5 and 7, contract A).
+ *
+ * Combines the entry's `worktreeId`, `createdAt`, and `registrationSeq` so
+ * that releasing a kickoff and registering a new one at the same worktree,
+ * even within the same millisecond, never reuses the previous instance's hash.
+ *
+ * @param {object} entry - Validated registry entry; must carry `registrationSeq`.
+ * @returns {string} 64-character hex `kickoffHash`.
+ * @throws {Error} When the entry predates `registrationSeq` (registered before this feature shipped).
+ */
+export function kickoffHashFor(entry) {
+  assert(
+    Number.isInteger(entry?.registrationSeq) && entry.registrationSeq >= 1,
+    "Kickoff entry has no registrationSeq; it predates the structured document system",
+  );
+  return hash(
+    `${entry.pm.worktreeId}\u0000${entry.createdAt}\u0000${entry.registrationSeq}`,
+  );
+}
+
+/**
+ * Classifies an entry against the structured document system's activation
+ * boundary (structured-omt-documents.md 3.7 item 5, 3.10). An entry with a
+ * registrationSeq is "current" regardless of the boundary. One without it is
+ * "legacy" (registrationSeq absence is expected) when documentSystemActivatedAt
+ * is unset or later than entry.createdAt, the same comparison validateLegacyRef
+ * uses (documents.mjs); otherwise the entry was registered after activation and
+ * should have a registrationSeq but does not, which is an "integrity-failure",
+ * not a legacy one. Passing org as undefined (the orgFile-less default for
+ * cleanupKickoffBranches) always resolves a registrationSeq-less entry to
+ * "legacy", matching that function's documented no-orgFile contract.
+ *
+ * @param {object} entry - Registry entry to classify.
+ * @param {object} [org] - Parsed organization.json, for `documentSystemActivatedAt`.
+ * @returns {"current"|"legacy"|"integrity-failure"} The entry's classification.
+ */
+export function classifyKickoffEntry(entry, org) {
+  if (entry.registrationSeq !== undefined) return "current";
+  const activatedAt = org?.documentSystemActivatedAt;
+  return !activatedAt || entry.createdAt < activatedAt
+    ? "legacy"
+    : "integrity-failure";
+}
+
+// Issues the next registrationSeq from <project>/.omt/kickoffs/.sequence.json,
+// reusing writeJSON's atomic replace. Callers must already hold the registry
+// lock (withRegistry), since the project-wide serialization it provides is
+// what turns "same millisecond" registrations into a total order (3.7 item 7).
+function nextRegistrationSeq(orgFile) {
+  const seqFile = path.join(registryDirectory(orgFile), ".sequence.json");
+  const next = fs.existsSync(seqFile) ? readJSON(seqFile).next : 1;
+  writeJSON(seqFile, { next: next + 1 });
+  return next;
+}
+
 // Finds the stored entry for a PM worktree, including one an earlier release
 // named after the id itself, so kickoffs registered before stay closable.
 function locateEntry(orgFile, worktreeId) {
@@ -209,6 +272,13 @@ export function validateEntry(stored) {
   assert(
     entry.runId === null || text(entry.runId),
     "Kickoff runId must be a run identifier or null",
+  );
+  // Entries registered before the structured document system (wave-2) carry
+  // no registrationSeq at all; kickoffHashFor refuses those instead.
+  assert(
+    entry.registrationSeq === undefined ||
+      (Number.isInteger(entry.registrationSeq) && entry.registrationSeq >= 1),
+    "Kickoff registrationSeq must be a positive integer when present",
   );
   const pm = entry.pm;
   assert(pm && typeof pm === "object", "Kickoff pm required");
@@ -314,7 +384,9 @@ export function listKickoffs(orgFile, worktreeId) {
   const directory = registryDirectory(orgFile);
   const names = fs.existsSync(directory) ? fs.readdirSync(directory) : [];
   const kickoffs = names
-    .filter((name) => name.endsWith(".json"))
+    // ".sequence.json" holds the registrationSeq counter, not an entry; entry
+    // file names (digests or LEGACY_ENTRY_NAME) never start with a dot.
+    .filter((name) => name.endsWith(".json") && !name.startsWith("."))
     .map((name) => validateEntry(readJSON(path.join(directory, name))))
     .filter((entry) => !worktreeId || entry.pm.worktreeId === worktreeId)
     // File names are digests, so order by the id they stand for.
@@ -482,6 +554,7 @@ export function registerKickoff(orgFile, request) {
             },
           }),
       createdAt: new Date().toISOString(),
+      registrationSeq: nextRegistrationSeq(orgFile),
     });
     writeJSON(file, entry);
     return {
@@ -551,6 +624,59 @@ export function recordAuditorLaunch(
     });
     writeJSON(file, updated);
     return { recorded: true, file, entry: updated };
+  });
+}
+
+/**
+ * Moves every kickoff a director terminal supervises to a new terminal.
+ *
+ * A director session can be replaced, by a session of another provider or
+ * after its terminal was lost, while its kickoffs run on. `director-signal`
+ * notifies the terminal each entry's `director.terminalHandle` names, so until
+ * the entries point at the new session its PM's signals reach a closed
+ * terminal (#131). Only entries naming `from` change; `checkoutPath` is kept
+ * unless a new one is given.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} move - The handover.
+ * @param {string} move.from - Terminal handle the entries name now.
+ * @param {string} move.to - Terminal handle of the new director session.
+ * @param {string} [move.checkoutPath] - New owner checkout, when it changed.
+ * @returns {{reassigned: string[], unchanged: string[]}} PM worktree ids moved
+ *   and those that named another director.
+ * @throws {Error} When either handle is empty or both are the same.
+ */
+export function reassignDirector(orgFile, { from, to, checkoutPath }) {
+  assert(
+    text(from),
+    "reassignDirector needs the current director terminal handle",
+  );
+  assert(text(to), "reassignDirector needs the new director terminal handle");
+  assert(
+    from !== to,
+    "The new director terminal is the same as the current one",
+  );
+  return withRegistry(orgFile, () => {
+    const reassigned = [];
+    const unchanged = [];
+    for (const entry of listKickoffs(orgFile).kickoffs) {
+      if (entry.director?.terminalHandle !== from) {
+        unchanged.push(entry.pm.worktreeId);
+        continue;
+      }
+      const file = locateEntry(orgFile, entry.pm.worktreeId);
+      const moved = validateEntry({
+        ...entry,
+        director: {
+          ...entry.director,
+          terminalHandle: to,
+          ...(text(checkoutPath) ? { checkoutPath } : {}),
+        },
+      });
+      writeJSON(file, moved);
+      reassigned.push(entry.pm.worktreeId);
+    }
+    return { from, to, reassigned, unchanged };
   });
 }
 
@@ -774,6 +900,49 @@ export async function releaseKickoff(
       `Kickoff was to merge into ${entry.delivery?.branch}, which deliver has not recorded; ` +
         "run deliver first, or pass --force with the user's decision",
     );
+    // A merge was recorded: the kickoff is not truly complete until its own
+    // 06. 인도 delivery-ref document is committed too (docs/plan/
+    // structured-omt-documents.md 3.7 item 5's releaseKickoff extension).
+    // Entries registered before the structured document system was activated
+    // (the same documentSystemActivatedAt-vs-createdAt boundary 3.10 uses for
+    // legacyRef) are legacy and skip this check entirely, like the legacy
+    // director warning above. An entry with no registrationSeq that was
+    // registered after activation is instead an integrity-failure: normal
+    // registration always assigns one, so its absence is a corrupted or
+    // hand-edited entry, not a legacy one, and is not let through silently.
+    if (
+      reason === "completed" &&
+      entry.delivery?.mode === "local-merge" &&
+      entry.delivered?.mergeCommit
+    ) {
+      const org = validateOrg(readJSON(orgFile));
+      const classification = classifyKickoffEntry(entry, org);
+      assert(
+        classification !== "integrity-failure" || force,
+        `Kickoff was registered at ${entry.createdAt}, after documentSystemActivatedAt ` +
+          `(${org.documentSystemActivatedAt}), but has no registrationSeq; normal registration ` +
+          "always assigns one, so completion is refused as a corrupted entry unless the user " +
+          "decides to force it",
+      );
+      if (classification === "current") {
+        const kickoffHash = kickoffHashFor(entry);
+        const docId = deliveryRefDocId(
+          kickoffHash,
+          entry.delivered.mergeCommit,
+        );
+        const state = documentState(entry.pm.stateDir, docId);
+        assert(
+          state.exists || force,
+          `Kickoff delivered ${entry.delivered.mergeCommit} but its 06. 인도 delivery-ref document ` +
+            "is not committed yet; write it before completing, or pass --force with the user's decision",
+        );
+        assert(
+          !state.exists || state.kickoffId === kickoffHash || force,
+          `delivery-ref document at ${docId} belongs to a different kickoff; ` +
+            "pass --force with the user's decision if this is expected",
+        );
+      }
+    }
     const archived = path.join(
       path.dirname(registryDirectory(orgFile)),
       "history",
@@ -811,6 +980,12 @@ export async function releaseKickoff(
  *   remote share the same name; each is tried independently).
  * @param {string} [request.remoteName="origin"] - Git remote to push the
  *   deletions to. Pass an empty string to skip remote deletion.
+ * @param {string} [request.orgFile] - Organization JSON path, used to read
+ *   `documentSystemActivatedAt` for the legacy-vs-integrity-failure boundary
+ *   (structured-omt-documents.md 3.7 item 5). Optional; when omitted, an
+ *   entry with no `registrationSeq` is always treated as legacy. When given
+ *   but unreadable, the call is refused before any branch is checked or
+ *   deleted, and `force` does not bypass that refusal.
  * @returns {{deleted: string[], skipped: string[], errors: string[]}} Result.
  */
 export function cleanupKickoffBranches({
@@ -820,6 +995,7 @@ export function cleanupKickoffBranches({
   remoteName = "origin",
   callerCwd = process.cwd(),
   force = false,
+  orgFile,
 }) {
   assert(
     typeof projectDir === "string" && projectDir,
@@ -827,6 +1003,8 @@ export function cleanupKickoffBranches({
   );
   assert(entry && typeof entry === "object", "registry entry required");
   assert(Array.isArray(branches), "branches must be an array");
+  const org =
+    orgFile === undefined ? undefined : validateOrg(readJSON(orgFile));
 
   // Authority check: same policy as releaseKickoff.
   // Entries without a director record predate this feature; allowed with warning.
@@ -850,16 +1028,40 @@ export function cleanupKickoffBranches({
   const errors = [];
 
   // Determine the delivery target reference against which to verify content.
+  // A merge/PR commit is confirmed only once its 06. 인도 delivery-ref document
+  // is also committed and owned by this kickoff (structured-omt-documents.md
+  // 3.7 item 5's cleanupKickoffBranches extension); otherwise deliveryRef stays
+  // undefined and every branch is skipped below, same as "no delivered record".
+  // force bypasses the document check, matching releaseKickoff's policy. A
+  // legacy entry (registrationSeq absent because it predates activation, or
+  // because no orgFile was given to learn the boundary at all) keeps the
+  // pre-existing, document-check-free behavior. An integrity-failure entry
+  // (registrationSeq absent despite activation) cannot compute a kickoffHash,
+  // so it is treated as unowned: skipped without force, bypassed with it,
+  // exactly like a "current" entry whose delivery-ref document is missing.
   let deliveryRef;
-  if (entry.delivery?.mode === "local-merge" && entry.delivered?.mergeCommit) {
-    deliveryRef = entry.delivered.mergeCommit;
-  } else if (
-    entry.delivery?.mode === "pull-request" &&
+  if (
+    (entry.delivery?.mode === "local-merge" ||
+      entry.delivery?.mode === "pull-request") &&
     entry.delivered?.mergeCommit
   ) {
-    deliveryRef = entry.delivered.mergeCommit;
+    const classification = classifyKickoffEntry(entry, org);
+    if (classification === "legacy") {
+      deliveryRef = entry.delivered.mergeCommit;
+    } else {
+      let owned = false;
+      if (classification === "current") {
+        const kickoffHash = kickoffHashFor(entry);
+        const docId = deliveryRefDocId(
+          kickoffHash,
+          entry.delivered.mergeCommit,
+        );
+        const state = documentState(entry.pm.stateDir, docId);
+        owned = state.exists && state.kickoffId === kickoffHash;
+      }
+      if (owned || force) deliveryRef = entry.delivered.mergeCommit;
+    }
   }
-  // delivery.mode === "none" or no delivered record: deliveryRef stays undefined.
 
   for (const branch of branches) {
     if (!branch || typeof branch !== "string") continue;

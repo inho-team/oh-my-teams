@@ -68,8 +68,17 @@ function astraLedOrg() {
   return validateOrg(org);
 }
 
+// The advisor-codex preset used to build this shape by reassigning Astra's org
+// onto Sol/Terra/Luna models and an advisor allowlist; that reassignment is
+// gone (see the preset tests below), so advise()'s own tests set the
+// allowlist directly instead of routing through the retired preset.
 function advisedOrg(budget) {
-  const org = previewPreset(astraLedOrg(), "advisor-codex").organization;
+  const org = astraLedOrg();
+  org.advisors = {
+    pm: ["codex-gpt-6-astra"],
+    pl: ["codex-gpt-6-astra"],
+    senior: ["codex-gpt-6-astra"],
+  };
   if (budget) org.policy.adviceBudget = budget;
   return validateOrg(org);
 }
@@ -103,76 +112,31 @@ function response(payload) {
   };
 }
 
-test("the Codex advisor preset moves Astra from PM to an advisor for the planning roles", () => {
+test("the advisor-codex and advisor-claude presets refuse to reassign roles or advisors", () => {
   const org = astraLedOrg();
-  const preview = previewPreset(org, "advisor-codex");
-  const roles = preview.organization.roles;
-  const model = (role) =>
-    preview.organization.profiles[roles[role].profile].model;
-  assert.equal(model("pm"), "gpt-5.6-sol");
-  assert.equal(model("pl"), "gpt-5.6-terra");
-  assert.equal(model("senior"), "gpt-5.6-terra");
-  assert.equal(model("junior"), "gpt-5.6-luna");
-  assert.equal(roles.intern, undefined);
-  assert.deepEqual(preview.organization.advisors, {
-    pm: ["codex-gpt-6-astra"],
-    pl: ["codex-gpt-6-astra"],
-    senior: ["codex-gpt-6-astra"],
-  });
-  assert.deepEqual(preview.addedProfiles, []);
-  assert.deepEqual(
-    preview.changes.map((change) => change.role),
-    ["pm", "pl"],
-  );
-  assert.equal(preview.organization.modelPolicy.preset, "advisor-codex");
-  assert.equal(org.roles.pm.profile, "codex-gpt-6-astra", "input untouched");
-  assert.match(
-    chart(preview.organization),
-    /ADVISOR for PM: codex-gpt-6-astra/,
-  );
+  const before = JSON.stringify(org);
+  for (const name of ["advisor-codex", "advisor-claude"]) {
+    assert.throws(
+      () => previewPreset(org, name),
+      /no longer assigns fixed models, fallbacks, or advisors/,
+    );
+    assert.throws(() => previewPreset(org, name), /edit/);
+    assert.throws(() => previewPreset(org, name), /model-catalog/);
+  }
+  // Neither the roles nor the profiles the preset used to rewrite were touched.
+  assert.equal(JSON.stringify(org), before);
+  assert.equal(org.roles.pm.profile, "codex-gpt-6-astra");
 });
 
-test("a tiers preset adds a missing model only by copying an account the org already has", () => {
+test("an organization saved under the retired advisor-codex preset still validates", () => {
   const org = astraLedOrg();
-  delete org.profiles["codex-gpt-5-6-sol"];
-  org.roles.pl.profile = "codex-gpt-5-6-terra";
-  const preview = previewPreset(validateOrg(org), "advisor-codex");
-  assert.deepEqual(
-    preview.addedProfiles.map(({ id, model }) => ({ id, model })),
-    [{ id: "codex-gpt-5-6-sol", model: "gpt-5.6-sol" }],
-  );
-  const added = preview.organization.profiles["codex-gpt-5-6-sol"];
-  assert.equal(added.pool, "codex-current");
-  assert.equal(added.account, "current");
-  assert.equal(preview.organization.roles.pm.profile, "codex-gpt-5-6-sol");
-});
-
-test("a tiers preset leaves roles on another provider and its quota alone", () => {
-  const org = astraLedOrg();
-  org.pools["agy-current"] = { label: "Agy current account" };
-  org.profiles["agy-flash"] = {
-    provider: "agy",
-    command: ["agy"],
-    account: "current",
-    subscription: "Agy (current account)",
-    model: "gemini-3.8-flash-medium",
-    pool: "agy-current",
+  org.advisors = { pm: ["codex-gpt-6-astra"] };
+  const saved = {
+    ...org,
+    modelPolicy: { preset: "advisor-codex", revision: 1 },
   };
-  org.roles.junior.profile = "agy-flash";
-  const preview = previewPreset(validateOrg(org), "advisor-codex");
-  assert.equal(preview.organization.roles.junior.profile, "agy-flash");
-  assert.ok(!preview.changes.some((change) => change.role === "junior"));
-  assert.equal(
-    preview.organization.roles.senior.profile,
-    "codex-gpt-5-6-terra",
-  );
-});
-
-test("a tiers preset refuses a provider the organization has no account for", () => {
-  assert.throws(
-    () => previewPreset(astraLedOrg(), "advisor-claude"),
-    /needs an existing claude profile/,
-  );
+  assert.equal(validateOrg(saved), saved);
+  assert.match(chart(saved), /ADVISOR for PM: codex-gpt-6-astra/);
 });
 
 test("advice is persisted with its slot, decision, and verified citations", async (t) => {

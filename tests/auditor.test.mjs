@@ -777,15 +777,10 @@ test("accept refuses while the outcome audit checkpoint has an unresolved object
 
   await assert.rejects(
     () =>
-      acceptOutcome(
-        fixture.repo,
-        task,
-        report,
-        decision,
-        stateDir,
-        fixture.org,
-        fixture.worktreeId,
-      ),
+      acceptOutcome(fixture.repo, task, report, decision, stateDir, {
+        orgFile: fixture.org,
+        worktreeId: fixture.worktreeId,
+      }),
     /outcome audit checkpoint has an unresolved objection/,
   );
 
@@ -829,8 +824,7 @@ test("accept refuses while the outcome audit checkpoint has an unresolved object
     report,
     decision,
     stateDir,
-    fixture.org,
-    fixture.worktreeId,
+    { orgFile: fixture.org, worktreeId: fixture.worktreeId },
   );
   assert.equal(recorded.status, "accepted");
 });

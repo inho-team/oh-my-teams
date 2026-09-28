@@ -19,6 +19,7 @@ import {
   definedRoles,
   DIRECTOR_ROLE,
   foldRole,
+  PROVIDER_EFFORTS,
   ROLES,
   ROOT_ROLE,
   validateOrg,
@@ -367,13 +368,12 @@ export function resolveRoleLaunch(
   const profileId = roleProfileId(org, role, handoffProfile);
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
-  // A runner profile reaches its fixed account only through the runner, which
-  // headless-start verifies. Handing it to an interactive terminal would run
-  // whatever Codex login that terminal has, and nothing would record it.
+  // A runner profile reaches its fixed account only through its runner. An
+  // interactive terminal would instead run whichever Codex login it has.
   assert(
     !profile.runner,
     `Role ${role} profile ${profileId} runs through the ${profile.runner?.kind} runner; ` +
-      "worker-start cannot hand it to an interactive terminal, so start it with headless-start",
+      "there is no supported interactive Orca terminal path for that profile",
   );
   const { agent, via } = ORCA_LAUNCH[profile.provider];
   assert(
@@ -441,64 +441,21 @@ function shellToken(token) {
   return `'${token}'`;
 }
 
-/**
- * Builds the interactive CLI command that opens a role with its saved model.
- *
- * `orca worktree create --agent` has no model option, so the PM is
- * opened with this command through `role-terminal`. Every other role is opened
- * the same way before `worker-start --terminal` hands it a task. The command
- * runs tools without approval prompts, since no one can answer them in a role
- * terminal.
- *
- * The role must be one the run holds. A terminal opened for a role the run
- * folds elsewhere would run that role's model while `worker-start` hands it
- * the work of the role it folded onto.
- *
- * @param {object} requestedOrg - Organization document.
- * @param {string} requestedRole - Role to launch.
- * @param {object} [run={}] - Run context.
- * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
- * @param {string} [run.profile] - Fallback profile a workflow handoff named.
- * @param {string} [run.firstPrompt] - Initial prompt to pass as the launched
- *   command's own argument, built with {@link kickoffBriefPrompt} rather than
- *   free text. Only added when the profile's provider has a confirmed entry
- *   in {@link FIRST_PROMPT_ARG}.
- * @returns {object} Role, profile, argv, shell command, requested model and
- *   the Claude `--autocompact` value (null for other providers).
- * @throws {Error} When the role is not held, the profile cannot be launched,
- *   or `firstPrompt` is given for a provider with no confirmed argument.
- */
-export function roleCommand(
-  requestedOrg,
-  requestedRole,
-  { roles, profile: handoffProfile, firstPrompt } = {},
-) {
-  const org = validateOrg(requestedOrg);
-  assert(
-    requestedRole !== DIRECTOR_ROLE,
-    "이사는 kickoff를 선언한 호스트 세션 자체이며 감독 worker나 역할 터미널로 띄우는 대상이 아니다. " +
-      "PM 터미널을 열려면 role-command를 사용하되 role에 pm을 지정하라.",
-  );
-  let role;
-  if (requestedRole === AUDITOR_ROLE) {
-    // The auditor is out-of-ladder (core.mjs's AUDITOR_ROLE doc): it never
-    // folds, holds no run depth, and is not among activeRoles, so it skips
-    // both checks a declared role in ROLES goes through above.
-    assert(
-      org.auditor,
-      "This organization has no auditor configured (org.auditor)",
-    );
-    role = AUDITOR_ROLE;
-  } else {
-    role = foldRole(activeRoles(org, roles), requestedRole);
-    assertHeldRole(org, roles, requestedRole, role);
-  }
-  const profileId = roleProfileId(org, role, handoffProfile);
-  const profile = org.profiles[profileId];
-  launchableProfile(role, profileId, profile);
+/** Executable each provider's interactive CLI is installed as on PATH. */
+const PROVIDER_EXECUTABLES = Object.freeze({
+  claude: "claude",
+  codex: "codex",
+  agy: "agy",
+});
+
+// Assembles the interactive command a launchable profile opens with: the
+// bypass flag, model, effort, Codex's update-check override, Claude's
+// autocompact window and the first prompt. Shared by the role and director
+// commands so both type the same line into a terminal.
+function profileArgv(org, label, profileId, profile, firstPrompt) {
   assert(
     BARE_COMMAND.test(profile.command[0]),
-    `Role ${role} profile ${profileId} must name a bare executable name on PATH, not ${profile.command[0]}`,
+    `${label} profile ${profileId} must name a bare executable name on PATH, not ${profile.command[0]}`,
   );
   const argv = [...profile.command];
   // Only a bare command reaches here, so the flag is never given twice, which
@@ -547,21 +504,18 @@ export function roleCommand(
   if (firstPrompt !== undefined) {
     assert(
       typeof firstPrompt === "string" && firstPrompt.trim(),
-      `Role ${role}: firstPrompt must be a non-empty string`,
+      `${label}: firstPrompt must be a non-empty string`,
     );
     const support = FIRST_PROMPT_ARG[profile.provider];
     assert(
       support,
-      `Role ${role} profile ${profileId} uses ${profile.provider}, whose installed CLI has no confirmed ` +
+      `${label} profile ${profileId} uses ${profile.provider}, whose installed CLI has no confirmed ` +
         "first-prompt argument (references/orca-runtime.md); hand the brief over with terminal send instead",
     );
     if (support === "positional") argv.push(firstPrompt);
     else argv.push("--prompt-interactive", firstPrompt);
   }
   return {
-    role,
-    profile: profileId,
-    provider: profile.provider,
     argv,
     command: argv.map(shellToken).join(" "),
     permissionBypass: bypass ?? null,
@@ -569,6 +523,168 @@ export function roleCommand(
     effortRequested: profile.effort ?? null,
     ...(runner ? { runner } : {}),
     autoCompact,
+  };
+}
+
+/**
+ * Builds the interactive CLI command that opens a role with its saved model.
+ *
+ * `orca worktree create --agent` has no model option, so the PM is
+ * opened with this command through `role-terminal`. Every other role is opened
+ * the same way before `worker-start --terminal` hands it a task. The command
+ * runs tools without approval prompts, since no one can answer them in a role
+ * terminal.
+ *
+ * The role must be one the run holds. A terminal opened for a role the run
+ * folds elsewhere would run that role's model while `worker-start` hands it
+ * the work of the role it folded onto.
+ *
+ * @param {object} requestedOrg - Organization document.
+ * @param {string} requestedRole - Role to launch.
+ * @param {object} [run={}] - Run context.
+ * @param {string[]} [run.roles] - Roles the run uses, when it recorded them.
+ * @param {string} [run.profile] - Fallback profile a workflow handoff named.
+ * @param {string} [run.firstPrompt] - Initial prompt to pass as the launched
+ *   command's own argument, built with {@link kickoffBriefPrompt} rather than
+ *   free text. Only added when the profile's provider has a confirmed entry
+ *   in {@link FIRST_PROMPT_ARG}.
+ * @returns {object} Role, profile, argv, shell command, requested model and
+ *   the Claude `--autocompact` value (null for other providers).
+ * @throws {Error} When the role is not held, the profile cannot be launched,
+ *   or `firstPrompt` is given for a provider with no confirmed argument.
+ */
+export function roleCommand(
+  requestedOrg,
+  requestedRole,
+  { roles, profile: handoffProfile, firstPrompt } = {},
+) {
+  const org = validateOrg(requestedOrg);
+  assert(
+    requestedRole !== DIRECTOR_ROLE,
+    "이사는 kickoff를 선언한 호스트 세션 자체이며 감독 worker나 역할 터미널로 띄우는 대상이 아니다. " +
+      "이사 세션을 열려면 director-command·director-terminal을, PM 터미널을 열려면 role-command를 사용하되 role에 pm을 지정하라.",
+  );
+  let role;
+  if (requestedRole === AUDITOR_ROLE) {
+    // The auditor is out-of-ladder (core.mjs's AUDITOR_ROLE doc): it never
+    // folds, holds no run depth, and is not among activeRoles, so it skips
+    // both checks a declared role in ROLES goes through above.
+    assert(
+      org.auditor,
+      "This organization has no auditor configured (org.auditor)",
+    );
+    role = AUDITOR_ROLE;
+  } else {
+    role = foldRole(activeRoles(org, roles), requestedRole);
+    assertHeldRole(org, roles, requestedRole, role);
+  }
+  const profileId = roleProfileId(org, role, handoffProfile);
+  const profile = org.profiles[profileId];
+  launchableProfile(role, profileId, profile);
+  return {
+    role,
+    profile: profileId,
+    provider: profile.provider,
+    ...profileArgv(org, `Role ${role}`, profileId, profile, firstPrompt),
+  };
+}
+
+/**
+ * Builds the fixed-wording first prompt for a new director session.
+ *
+ * As with {@link kickoffBriefPrompt}, the caller supplies only the brief path,
+ * so no free text rides into the command a terminal is opened with. The brief
+ * is where the previous director, or the user, wrote what this director
+ * inherits.
+ *
+ * @param {string} briefPath - Absolute path to the director's brief file.
+ * @returns {string} The director's first prompt.
+ * @throws {Error} When `briefPath` is empty.
+ */
+export function directorBriefPrompt(briefPath) {
+  assert(
+    typeof briefPath === "string" && briefPath.trim(),
+    "directorBriefPrompt needs a non-empty brief path",
+  );
+  return (
+    `당신은 이 저장소의 이사입니다. 인수 브리프 ${briefPath.trim()}를 전체 읽고 ` +
+    "그 지시를 따르십시오."
+  );
+}
+
+/**
+ * Builds the interactive CLI command that opens a director session.
+ *
+ * The director is the host session that declares kickoffs, not an
+ * organization role, so it has no role profile of its own (#141). The command
+ * comes either from one of the organization's profiles (`profile`) or from an
+ * explicit provider, model and effort, for an organization that holds no
+ * profile of the wanted provider. Either way it is assembled exactly like a
+ * role command: bypass flag, model, effort and, when a brief is given, the
+ * first prompt from {@link directorBriefPrompt}.
+ *
+ * @param {object} requestedOrg - Organization document.
+ * @param {object} [request={}] - What to open.
+ * @param {string} [request.profile] - Organization profile to launch.
+ * @param {string} [request.provider] - Provider, when no profile is named.
+ * @param {string} [request.model] - Model for an explicit provider.
+ * @param {string} [request.effort] - Effort for an explicit provider.
+ * @param {string} [request.firstPrompt] - Prompt from {@link directorBriefPrompt}.
+ * @returns {object} Role `director`, profile, argv, shell command, requested
+ *   model and effort.
+ * @throws {Error} When both or neither of profile and provider are given, the
+ *   profile is unknown or not launchable, the effort is not one the provider
+ *   registers, or the profile runs through an OpenCodex runner.
+ */
+export function directorCommand(
+  requestedOrg,
+  { profile: profileId, provider, model, effort, firstPrompt } = {},
+) {
+  const org = validateOrg(requestedOrg);
+  let id;
+  let profile;
+  if (profileId !== undefined) {
+    assert(
+      provider === undefined && model === undefined && effort === undefined,
+      "directorCommand takes either a profile or a provider with model and effort, not both",
+    );
+    profile = org.profiles[profileId];
+    assert(profile, `Organization has no profile ${profileId}`);
+    id = profileId;
+  } else {
+    assert(
+      Object.hasOwn(PROVIDER_EXECUTABLES, provider),
+      `Director provider must be one of ${Object.keys(PROVIDER_EXECUTABLES).join(", ")}, not ${provider}`,
+    );
+    assert(
+      model === undefined || (typeof model === "string" && model.trim()),
+      "Director model must be a non-empty string when given",
+    );
+    assert(
+      effort === undefined || PROVIDER_EFFORTS[provider].includes(effort),
+      `Director effort for ${provider} must be one of ${PROVIDER_EFFORTS[provider].join(", ")}, not ${effort}`,
+    );
+    id = `explicit:${provider}`;
+    profile = {
+      provider,
+      model: model ?? null,
+      ...(effort !== undefined ? { effort } : {}),
+      command: [PROVIDER_EXECUTABLES[provider]],
+      account: "current",
+    };
+  }
+  launchableProfile(DIRECTOR_ROLE, id, profile);
+  // A runner profile selects an account through its own home; typed into a
+  // terminal it would run as whoever is logged in, without a record.
+  assert(
+    !profile.runner,
+    `Director profile ${id} runs through an OpenCodex runner with no supported interactive Orca terminal path`,
+  );
+  return {
+    role: DIRECTOR_ROLE,
+    profile: id,
+    provider: profile.provider,
+    ...profileArgv(org, "Director", id, profile, firstPrompt),
   };
 }
 
