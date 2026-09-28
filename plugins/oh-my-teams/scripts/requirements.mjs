@@ -23,6 +23,7 @@ import {
 } from "./core.mjs";
 import { canonicalize } from "./contracts.mjs";
 import { workspaceBinding } from "./evidence.mjs";
+import { hasValidAcceptance } from "./audit.mjs";
 
 const SCOPES = ["equal", "narrower"];
 const FIDELITY_STATUSES = ["met", "unmet"];
@@ -1049,4 +1050,51 @@ export function assertLedgerExists(orgFile, worktreeId) {
       "or record item-scoped requirements-exception records before closing",
   );
   return ledger;
+}
+
+/**
+ * Runs every check A.5 requires before a kickoff may close: the ledger's
+ * close-time completeness (`assertLedgerCloseReady`) and, when the
+ * organization declares an auditor, that both the brief and outcome
+ * checkpoints still carry a valid acceptance (B.5). This is the single call
+ * `checkCloseReady`, `deliverKickoff` and `kickoff-release --reason completed`
+ * each run unconditionally in their own function body; it takes no `force`
+ * parameter, so none of the three can be asked to skip it.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} worktreeId - PM worktree of the kickoff under audit.
+ * @param {object} options - Check inputs.
+ * @param {string} options.head - Result HEAD the kickoff is closing at.
+ * @param {string} options.repo - Workspace `head` is checked against for the outcome acceptance binding.
+ * @param {string[]} [options.registeredWorktreePaths] - Kickoff worktree paths evidence must not point into.
+ * @returns {Promise<{ready: boolean}>} Result once every check passes.
+ * @throws {Error} When no confirmed ledger exists, the ledger is not
+ *   close-ready, or (with an auditor configured) either checkpoint's
+ *   acceptance is missing or no longer valid.
+ */
+export async function assertKickoffCloseReady(
+  orgFile,
+  worktreeId,
+  { head, repo, registeredWorktreePaths = [] },
+) {
+  const ledger = assertLedgerExists(orgFile, worktreeId);
+  assertLedgerCloseReady({
+    ledger,
+    head,
+    ownerRoot: projectRoot(orgFile),
+    registeredWorktreePaths,
+  });
+  const org = readJSON(orgFile);
+  if (!org.auditor) return { ready: true };
+  assert(
+    await hasValidAcceptance(orgFile, worktreeId, "brief"),
+    "Brief audit acceptance is missing or no longer valid; " +
+      "run audit-accept for the brief checkpoint before closing",
+  );
+  assert(
+    await hasValidAcceptance(orgFile, worktreeId, "outcome", head, repo),
+    "Outcome audit acceptance is missing or no longer valid; " +
+      "run audit-accept for the outcome checkpoint before closing",
+  );
+  return { ready: true };
 }

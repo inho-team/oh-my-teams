@@ -37,6 +37,10 @@ import {
   deliverKickoff,
 } from "../plugins/oh-my-teams/scripts/delivery.mjs";
 import { sendSignal } from "../plugins/oh-my-teams/scripts/director.mjs";
+import {
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
 import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import {
   ACCEPTED_RISK_AUTHORITIES,
@@ -80,7 +84,13 @@ function minimalRequirements(worktreeId) {
   return {
     statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
     criteria: [
-      { id: "c1", text: `deliver ${worktreeId}`, scope: "equal", userVisible: false, derivedFrom: ["s1"] },
+      {
+        id: "c1",
+        text: `deliver ${worktreeId}`,
+        scope: "equal",
+        userVisible: false,
+        derivedFrom: ["s1"],
+      },
     ],
     confirmations: [],
   };
@@ -108,8 +118,15 @@ function claimFor(fixture, worktreeId, directorOpts) {
 // claim always requires a director), so tests standing in for that legacy
 // shape write the entry file directly rather than going through it.
 function writeLegacyEntry(fixture, worktreeId, extra = {}) {
-  const { requirements: _requirements, director: _director, ...claim } = claimFor(fixture, worktreeId);
-  const entryPath = path.join(registryDirectory(fixture.org), `${kickoffEntryName(worktreeId)}.json`);
+  const {
+    requirements: _requirements,
+    director: _director,
+    ...claim
+  } = claimFor(fixture, worktreeId);
+  const entryPath = path.join(
+    registryDirectory(fixture.org),
+    `${kickoffEntryName(worktreeId)}.json`,
+  );
   fs.mkdirSync(path.dirname(entryPath), { recursive: true });
   writeJSON(entryPath, {
     schemaVersion: 1,
@@ -118,6 +135,57 @@ function writeLegacyEntry(fixture, worktreeId, extra = {}) {
     createdAt: "2026-09-16T00:00:00.000Z",
     ...extra,
   });
+}
+
+// A tiny real Git checkout for tests that must satisfy
+// `requirementsFidelity`'s check that the declared head matches the
+// workspace's actual HEAD (assertKickoffCloseReady runs unconditionally
+// inside checkCloseReady/deliverKickoff, so a real, close-ready ledger is
+// the only way to reach the behavior those tests actually exercise).
+function initGitRepo(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const git = (...args) =>
+    execFileSync("git", args, {
+      cwd: dir,
+      stdio: "pipe",
+      encoding: "utf8",
+    }).trim();
+  git("init", "--initial-branch=main", "-q");
+  git("config", "user.email", "test@example.com");
+  git("config", "user.name", "Test");
+  fs.writeFileSync(path.join(dir, "file.txt"), "x\n");
+  git("add", "file.txt");
+  git("commit", "-q", "-m", "init");
+  return git("rev-parse", "HEAD");
+}
+
+// Registers a kickoff and drives its ledger to close-ready (a
+// director-confirmed fidelity check covering the minimal statement/criterion
+// pair as "met"), so tests can call checkCloseReady/deliverKickoff without
+// tripping the A.5/B.5 ledger-completeness check they no longer bypass.
+async function closeReadyKickoff(
+  fixture,
+  worktreeId,
+  directorPath,
+  extra = {},
+) {
+  const ledgerRepo = path.join(fixture.dir, `${worktreeId}-ledger-repo`);
+  const head = initGitRepo(ledgerRepo);
+  registerKickoff(fixture.org, {
+    ...claimFor(fixture, worktreeId, { checkoutPath: directorPath }),
+    ...extra,
+  });
+  await requirementsFidelity(fixture.org, worktreeId, {
+    head,
+    repo: ledgerRepo,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "x" },
+      { type: "criterion", id: "c1", status: "met", evidence: "x" },
+    ],
+  });
+  await requirementsFidelityConfirm(fixture.org, worktreeId, directorPath);
+  return head;
 }
 
 // ─── 1. 역할 서열과 접힘 ────────────────────────────────────────────────────
@@ -238,7 +306,7 @@ test("a claim with a requirements ledger but no director is refused, even equal-
   );
 });
 
-test("existing registry entries without director field list and release normally", (t) => {
+test("existing registry entries without director field list and release normally", async (t) => {
   const fixture = project(t);
   writeLegacyEntry(fixture, "wt-legacy");
   const [entry] = listKickoffs(fixture.org).kickoffs;
@@ -250,7 +318,9 @@ test("existing registry entries without director field list and release normally
   const warnings = [];
   console.warn = (msg) => warnings.push(msg);
   try {
-    const released = releaseKickoff(fixture.org, {
+    // "disbanded" skips the A.5/B.5 ledger check (only "completed" runs it),
+    // so this stays about the director-authority warning, not the ledger.
+    const released = await releaseKickoff(fixture.org, {
       worktreeId: "wt-legacy",
       reason: "disbanded",
     });
@@ -359,7 +429,7 @@ test("a director without checkoutPath is refused instead of borrowing the workin
 
 // ─── 5. deliver와 kickoff-release의 이사 권한 거부 ───────────────────────
 
-test("releaseKickoff refuses when caller is not the director's checkout path", (t) => {
+test("releaseKickoff refuses when caller is not the director's checkout path", async (t) => {
   const fixture = project(t);
   const directorPath = path.join(fixture.dir, "director-checkout");
   fs.mkdirSync(directorPath, { recursive: true });
@@ -370,18 +440,19 @@ test("releaseKickoff refuses when caller is not the director's checkout path", (
   const wrongDir = path.join(fixture.dir, "wrong-place");
   fs.mkdirSync(wrongDir, { recursive: true });
 
-  assert.throws(
-    () =>
-      releaseKickoff(fixture.org, {
-        worktreeId: "wt-auth",
-        reason: "disbanded",
-        callerCwd: wrongDir,
-      }),
+  // "disbanded" skips the A.5/B.5 ledger check, so this stays about director
+  // authority alone.
+  await assert.rejects(
+    releaseKickoff(fixture.org, {
+      worktreeId: "wt-auth",
+      reason: "disbanded",
+      callerCwd: wrongDir,
+    }),
     /kickoff-release must be run from the director/,
   );
 });
 
-test("releaseKickoff succeeds from the director's checkout path", (t) => {
+test("releaseKickoff succeeds from the director's checkout path", async (t) => {
   const fixture = project(t);
   const directorPath = fixture.dir;
   registerKickoff(
@@ -389,7 +460,7 @@ test("releaseKickoff succeeds from the director's checkout path", (t) => {
     claimFor(fixture, "wt-ok", { checkoutPath: directorPath }),
   );
 
-  const released = releaseKickoff(fixture.org, {
+  const released = await releaseKickoff(fixture.org, {
     worktreeId: "wt-ok",
     reason: "disbanded",
     callerCwd: directorPath,
@@ -397,7 +468,7 @@ test("releaseKickoff succeeds from the director's checkout path", (t) => {
   assert.equal(released.released, true);
 });
 
-test("releaseKickoff bypasses director check when force is given", (t) => {
+test("releaseKickoff bypasses director check when force is given", async (t) => {
   const fixture = project(t);
   const directorPath = path.join(fixture.dir, "director-checkout");
   fs.mkdirSync(directorPath, { recursive: true });
@@ -406,7 +477,7 @@ test("releaseKickoff bypasses director check when force is given", (t) => {
     claimFor(fixture, "wt-force", { checkoutPath: directorPath }),
   );
 
-  const released = releaseKickoff(fixture.org, {
+  const released = await releaseKickoff(fixture.org, {
     worktreeId: "wt-force",
     reason: "disbanded",
     callerCwd: "/some/wrong/place",
@@ -448,11 +519,15 @@ test("deliverKickoff bypasses director check when force is given", async (t) => 
   fs.mkdirSync(directorPath, { recursive: true });
   const wrongDir = path.join(fixture.dir, "pm-dir");
   fs.mkdirSync(wrongDir, { recursive: true });
-  const claim = {
-    ...claimFor(fixture, "wt-deliver-force", { checkoutPath: directorPath }),
-    delivery: { mode: "local-merge", branch: "main" },
-  };
-  registerKickoff(fixture.org, claim);
+  // A close-ready ledger, bound to a real head, so deliverKickoff clears the
+  // unconditional A.5/B.5 check and actually reaches the director/git checks
+  // this test means to exercise.
+  const head = await closeReadyKickoff(
+    fixture,
+    "wt-deliver-force",
+    directorPath,
+    { delivery: { mode: "local-merge", branch: "main" } },
+  );
 
   // With force it should proceed past the director check and fail on git ops,
   // not on director authority (the entry exists, force bypasses the path check).
@@ -462,7 +537,7 @@ test("deliverKickoff bypasses director check when force is given", async (t) => 
         orgFile: fixture.org,
         worktreeId: "wt-deliver-force",
         source: wrongDir,
-        head: "abc123",
+        head,
         callerCwd: wrongDir,
         force: true,
       }),
@@ -471,7 +546,7 @@ test("deliverKickoff bypasses director check when force is given", async (t) => 
   );
 });
 
-test("deliverKickoff warns and proceeds for legacy entry without director", async (t) => {
+test("deliverKickoff warns for legacy entry without director but still refuses without a ledger", async (t) => {
   const fixture = project(t);
   const wrongDir = path.join(fixture.dir, "somewhere");
   fs.mkdirSync(wrongDir, { recursive: true });
@@ -483,7 +558,10 @@ test("deliverKickoff warns and proceeds for legacy entry without director", asyn
   const originalWarn = console.warn;
   console.warn = (msg) => warnings.push(msg);
   try {
-    // Should warn but proceed past the director check (fails on git ops)
+    // The director-authority warning still fires (assertDirectorAuthority runs
+    // first), but a legacy entry with no requirements ledger at all is now
+    // refused unconditionally by assertKickoffCloseReady (A.6 compatibility
+    // boundary), never reaching the git operations.
     await assert.rejects(
       () =>
         deliverKickoff({
@@ -493,7 +571,7 @@ test("deliverKickoff warns and proceeds for legacy entry without director", asyn
           head: "abc123",
           callerCwd: wrongDir,
         }),
-      /Cannot read the source head|source head/i,
+      /has no requirements ledger/,
     );
     assert.ok(warnings.some((w) => w.includes("no director record")));
   } finally {
@@ -557,21 +635,18 @@ test("launchContext director lookup is non-fatal when registry has no matching e
 
 // ─── 7. PR 전달의 close-ready 신호 검사 ───────────────────────────────────
 
-test("checkCloseReady warns and returns legacy:true when no close-ready signal exists", (t) => {
+test("checkCloseReady warns and returns legacy:true when no close-ready signal exists", async (t) => {
   const fixture = project(t);
-  registerKickoff(
-    fixture.org,
-    claimFor(fixture, "wt-no-signal", { checkoutPath: fixture.dir }),
-  );
+  const head = await closeReadyKickoff(fixture, "wt-no-signal", fixture.dir);
 
   const warnings = [];
   const original = console.warn;
   console.warn = (msg) => warnings.push(msg);
   try {
-    const result = checkCloseReady({
+    const result = await checkCloseReady({
       orgFile: fixture.org,
       worktreeId: "wt-no-signal",
-      head: "abc123",
+      head,
     });
     assert.equal(result.ready, true);
     assert.equal(result.legacy, true);
@@ -581,11 +656,15 @@ test("checkCloseReady warns and returns legacy:true when no close-ready signal e
   }
 });
 
-test("checkCloseReady throws when signal head does not match requested head", (t) => {
+test("checkCloseReady throws when signal head does not match requested head", async (t) => {
   const fixture = project(t);
-  registerKickoff(
-    fixture.org,
-    claimFor(fixture, "wt-head-mismatch", { checkoutPath: fixture.dir }),
+  // The requested head must be the one the ledger's fidelity check is bound
+  // to (assertKickoffCloseReady runs before the signal comparison); the
+  // signal itself carries an unrelated, non-Git head to trigger the mismatch.
+  const head = await closeReadyKickoff(
+    fixture,
+    "wt-head-mismatch",
+    fixture.dir,
   );
   sendSignal(fixture.org, {
     worktreeId: "wt-head-mismatch",
@@ -594,39 +673,37 @@ test("checkCloseReady throws when signal head does not match requested head", (t
     head: "signal-sha",
   });
 
-  assert.throws(
-    () =>
-      checkCloseReady({
-        orgFile: fixture.org,
-        worktreeId: "wt-head-mismatch",
-        head: "different-sha",
-      }),
-    /close-ready signal records HEAD signal-sha but requested HEAD is different-sha/,
+  await assert.rejects(
+    checkCloseReady({
+      orgFile: fixture.org,
+      worktreeId: "wt-head-mismatch",
+      head,
+    }),
+    new RegExp(
+      `close-ready signal records HEAD signal-sha but requested HEAD is ${head}`,
+    ),
   );
 });
 
-test("checkCloseReady returns ready when signal head matches", (t) => {
+test("checkCloseReady returns ready when signal head matches", async (t) => {
   const fixture = project(t);
-  registerKickoff(
-    fixture.org,
-    claimFor(fixture, "wt-head-match", { checkoutPath: fixture.dir }),
-  );
+  const head = await closeReadyKickoff(fixture, "wt-head-match", fixture.dir);
   sendSignal(fixture.org, {
     worktreeId: "wt-head-match",
     kind: "close-ready",
     text: "ready",
-    head: "matching-sha",
+    head,
   });
 
-  const result = checkCloseReady({
+  const result = await checkCloseReady({
     orgFile: fixture.org,
     worktreeId: "wt-head-match",
-    head: "matching-sha",
+    head,
   });
   assert.equal(result.ready, true);
   assert.equal(result.legacy, undefined);
   assert.ok(result.signal);
-  assert.equal(result.signal.head, "matching-sha");
+  assert.equal(result.signal.head, head);
 });
 
 // ─── 8. kickoff-merge-record 이사 권한 거부 ─────────────────────────────
@@ -871,24 +948,21 @@ test("kickoff-merge-record refuses an unmerged commit through the command line",
 
 // ─── 10. 이사 기록이 없는 기존 항목의 호환 ──────────────────────────────
 
-test("checkCloseReady works for legacy kickoff without director record", (t) => {
+test("checkCloseReady refuses a legacy kickoff with no requirements ledger", async (t) => {
   const fixture = project(t);
   writeLegacyEntry(fixture, "wt-legacy-check");
 
-  const warnings = [];
-  const original = console.warn;
-  console.warn = (msg) => warnings.push(msg);
-  try {
-    const result = checkCloseReady({
+  // A legacy entry that predates the ledger feature has nothing for
+  // assertKickoffCloseReady to check; it must be retrofitted before it can
+  // close, the same A.6 compatibility boundary releaseKickoff enforces.
+  await assert.rejects(
+    checkCloseReady({
       orgFile: fixture.org,
       worktreeId: "wt-legacy-check",
       head: "any-sha",
-    });
-    assert.equal(result.ready, true);
-    assert.equal(result.legacy, true);
-  } finally {
-    console.warn = original;
-  }
+    }),
+    /has no requirements ledger/,
+  );
 });
 
 test("assertDirectorAuthority warns and proceeds for legacy entry without director", (t) => {

@@ -17,6 +17,7 @@ import {
   recordDelivery,
 } from "./kickoff-registry.mjs";
 import { findCloseReadySignal } from "./director.mjs";
+import { assertKickoffCloseReady } from "./requirements.mjs";
 
 async function git(repo, args, execute) {
   const result = await execute(["git", "-C", repo, ...args]);
@@ -115,16 +116,24 @@ export function assertDirectorAuthority(entry, callerCwd, use, force) {
  * and the function returns `{ready: true, legacy: true}` so existing kickoffs
  * remain closable.
  *
+ * Also runs `assertKickoffCloseReady` (A.5/B.5) unconditionally: the
+ * requirements ledger must be close-ready and, when the organization
+ * declares an auditor, both checkpoints must still carry a valid acceptance.
+ * There is no `force` parameter for this part of the check.
+ *
  * @param {object} options - Check options.
  * @param {string} options.orgFile - Organization JSON path.
  * @param {string} options.worktreeId - PM worktree of the kickoff.
  * @param {string} options.head - Integration HEAD SHA to verify against the signal.
- * @returns {{ready: boolean, legacy?: boolean, signal?: object}} Result.
- * @throws {Error} When a signal exists but its head does not match.
+ * @param {string} [options.repo] - Workspace `head` is checked against for the outcome acceptance binding.
+ * @returns {Promise<{ready: boolean, legacy?: boolean, signal?: object}>} Result.
+ * @throws {Error} When a signal exists but its head does not match, or the
+ *   ledger/audit check fails.
  */
-export function checkCloseReady({ orgFile, worktreeId, head }) {
+export async function checkCloseReady({ orgFile, worktreeId, head, repo }) {
   const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
   assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
+  await assertKickoffCloseReady(orgFile, worktreeId, { head, repo });
   const signal = findCloseReadySignal(orgFile, worktreeId);
   if (!signal) {
     console.warn(
@@ -151,6 +160,11 @@ export function checkCloseReady({ orgFile, worktreeId, head }) {
  * merge is recorded in the registry, and a second run for the same head
  * returns that record instead of merging again.
  *
+ * Also runs `assertKickoffCloseReady` (A.5/B.5) unconditionally, independent
+ * of the `gate` callback and never skipped by `force`: the requirements
+ * ledger must be close-ready and, when the organization declares an auditor,
+ * both checkpoints must still carry a valid acceptance.
+ *
  * @param {object} options - Delivery options.
  * @param {string} options.orgFile - Organization JSON in the owning project.
  * @param {string} options.worktreeId - PM worktree of the kickoff.
@@ -160,7 +174,7 @@ export function checkCloseReady({ orgFile, worktreeId, head }) {
  * @param {Function} [options.execute=run] - Injectable command runner.
  * @returns {Promise<object>} Branch, head, merge commit and whether it merged now.
  * @throws {Error} When delivery is not authorized, the head moved, the owner
- *   checkout is not ready, or the merge conflicts.
+ *   checkout is not ready, the merge conflicts, or the ledger/audit check fails.
  */
 export async function deliverKickoff({
   orgFile,
@@ -178,6 +192,8 @@ export async function deliverKickoff({
   // deliver. Entries without a director record predate this feature; they are
   // allowed through with a warning so existing kickoffs stay closable.
   assertDirectorAuthority(entry, callerCwd, "deliver", force);
+  // Ledger/audit check: unconditional, never bypassed by `force`.
+  await assertKickoffCloseReady(orgFile, worktreeId, { head, repo: source });
   const delivery = entry.delivery;
   assert(
     delivery,

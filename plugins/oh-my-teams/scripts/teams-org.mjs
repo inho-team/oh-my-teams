@@ -350,9 +350,9 @@ export const ALLOWED_OPTIONS = {
   "kickoff-show": ["org", "worktree"],
   "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
-  "kickoff-release": ["org", "worktree", "reason", "force"],
+  "kickoff-release": ["org", "worktree", "reason", "force", "repo", "head"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
-  "kickoff-check-close-ready": ["org", "worktree", "head"],
+  "kickoff-check-close-ready": ["org", "worktree", "head", "repo"],
   "kickoff-merge-record": [
     "org",
     "worktree",
@@ -1397,6 +1397,8 @@ async function executeCommand(args) {
         worktreeId: args.worktree,
         reason: args.reason,
         force: Boolean(args.force),
+        repo: args.repo,
+        head: args.head,
       });
     case "kickoff-branch-cleanup": {
       const { kickoffs } = listKickoffs(args.org, args.worktree);
@@ -1422,6 +1424,7 @@ async function executeCommand(args) {
         orgFile: args.org,
         worktreeId: args.worktree,
         head: args.head,
+        repo: args.repo,
       });
     case "kickoff-merge-record": {
       const [entry] = listKickoffs(args.org, args.worktree).kickoffs;

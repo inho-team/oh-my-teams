@@ -24,7 +24,10 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { canonicalize, readReference } from "./contracts.mjs";
-import { ledgerHash as computeLedgerHash, readLedger } from "./requirements.mjs";
+import {
+  ledgerHash as computeLedgerHash,
+  readLedger,
+} from "./requirements.mjs";
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
 import { assertDirectorAuthority } from "./delivery.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
@@ -155,7 +158,13 @@ export function evidenceFingerprint(ledger, outcomeCheckpoint) {
  * @returns {Promise<object>} `{ledgerHash}` for brief, `{ledgerHash, resultHead, evidenceFingerprint}` for outcome.
  * @throws {Error} When `resultHead` does not match the workspace's actual HEAD.
  */
-export async function computeBinding(checkpoint, ledger, audit, resultHead, repo) {
+export async function computeBinding(
+  checkpoint,
+  ledger,
+  audit,
+  resultHead,
+  repo,
+) {
   const ledgerHashValue = computeLedgerHash(ledger);
   if (checkpoint === "brief") return { ledgerHash: ledgerHashValue };
   assert(
@@ -225,10 +234,19 @@ export function verifiedAuditor(orgFile, worktreeId, env = process.env) {
  * @returns {object} The kickoff's registry entry.
  * @throws {Error} When the caller is not at the director's checkout.
  */
-export function verifiedDirector(orgFile, worktreeId, callerCwd = process.cwd()) {
+export function verifiedDirector(
+  orgFile,
+  worktreeId,
+  callerCwd = process.cwd(),
+) {
   const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
   assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
-  assertDirectorAuthority(entry, callerCwd, "audit-response (brief checkpoint)", false);
+  assertDirectorAuthority(
+    entry,
+    callerCwd,
+    "audit-response (brief checkpoint)",
+    false,
+  );
   return entry;
 }
 
@@ -266,7 +284,9 @@ export async function verifiedPm(
     bound = null;
   }
   assert(
-    bound && bound.coordinator_handle === callerHandle && bound.id === entry.runId,
+    bound &&
+      bound.coordinator_handle === callerHandle &&
+      bound.id === entry.runId,
     `Caller ${callerHandle} is not the PM bound to kickoff ${worktreeId}'s Run`,
   );
   return entry;
@@ -296,7 +316,15 @@ export async function verifiedPm(
 export async function auditObjection(
   orgFile,
   worktreeId,
-  { checkpoint, target, kind, description, rebuttalRequested, resultHead, repo },
+  {
+    checkpoint,
+    target,
+    kind,
+    description,
+    rebuttalRequested,
+    resultHead,
+    repo,
+  },
   env = process.env,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
@@ -309,13 +337,22 @@ export async function auditObjection(
     ["description", description],
     ["rebuttalRequested", rebuttalRequested],
   ]) {
-    assert(typeof value === "string" && value.trim(), `Objection ${name} required`);
+    assert(
+      typeof value === "string" && value.trim(),
+      `Objection ${name} required`,
+    );
   }
   verifiedAuditor(orgFile, worktreeId, env);
   const ledger = requireLedger(orgFile, worktreeId);
   return withAudit(orgFile, worktreeId, async (audit) => {
     const record = audit.checkpoints[checkpoint];
-    record.binding = await computeBinding(checkpoint, ledger, audit, resultHead, repo);
+    record.binding = await computeBinding(
+      checkpoint,
+      ledger,
+      audit,
+      resultHead,
+      repo,
+    );
     record.objections = [
       ...record.objections,
       {
@@ -356,12 +393,16 @@ export async function auditResponse(
   identity = {},
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
-  assert(typeof argument === "string" && argument.trim(), "Response argument required");
+  assert(
+    typeof argument === "string" && argument.trim(),
+    "Response argument required",
+  );
   assert(
     Array.isArray(evidenceRefs) &&
       evidenceRefs.length > 0 &&
       evidenceRefs.every(
-        (ref) => ref && typeof ref.path === "string" && typeof ref.sha256 === "string",
+        (ref) =>
+          ref && typeof ref.path === "string" && typeof ref.sha256 === "string",
       ),
     "Response evidenceRefs required: at least one {path, sha256}",
   );
@@ -414,7 +455,10 @@ export async function auditRuling(
   env = process.env,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
-  assert(VERDICTS.includes(verdict), `Ruling verdict must be one of ${VERDICTS.join("/")}`);
+  assert(
+    VERDICTS.includes(verdict),
+    `Ruling verdict must be one of ${VERDICTS.join("/")}`,
+  );
   assert(typeof reason === "string" && reason.trim(), "Ruling reason required");
   verifiedAuditor(orgFile, worktreeId, env);
   return withAudit(orgFile, worktreeId, (audit) => {
@@ -454,12 +498,19 @@ export async function auditRuling(
  * @param {NodeJS.ProcessEnv} [env] - Environment the auditor identity is read from.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  */
-export async function auditChecked(orgFile, worktreeId, checkpoint, checked, env = process.env) {
+export async function auditChecked(
+  orgFile,
+  worktreeId,
+  checkpoint,
+  checked,
+  env = process.env,
+) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
     Array.isArray(checked) &&
       checked.every(
-        (item) => item && ["statement", "criterion"].includes(item.type) && item.id,
+        (item) =>
+          item && ["statement", "criterion"].includes(item.type) && item.id,
       ),
     "checked must be a {type, id} array",
   );
@@ -497,7 +548,9 @@ function checkedCovers(checked, ledger) {
 function checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint) {
   const reasons = [];
   if (!checkedCovers(record.checked, ledger)) {
-    reasons.push("checked does not cover every current statement and criterion exactly once");
+    reasons.push(
+      "checked does not cover every current statement and criterion exactly once",
+    );
   }
   for (const objection of record.objections) {
     const latest = latestResponse(record, objection.id);
@@ -507,11 +560,15 @@ function checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint) {
       continue;
     }
     if (!ruling || ruling.respondedAgainst !== latest.id) {
-      reasons.push(`Objection ${objection.id} has no ruling on its latest response`);
+      reasons.push(
+        `Objection ${objection.id} has no ruling on its latest response`,
+      );
       continue;
     }
     if (ruling.verdict !== "persuaded") {
-      reasons.push(`Objection ${objection.id} is unresolved (${ruling.verdict})`);
+      reasons.push(
+        `Objection ${objection.id} is unresolved (${ruling.verdict})`,
+      );
     }
     if (checkpoint === "outcome") {
       for (const ref of latest.evidenceRefs) {
@@ -519,11 +576,15 @@ function checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint) {
         try {
           actual = fileSha256(inside(ownerRoot, ref.path));
         } catch (error) {
-          reasons.push(`Objection ${objection.id} response evidence unreadable: ${error.message}`);
+          reasons.push(
+            `Objection ${objection.id} response evidence unreadable: ${error.message}`,
+          );
           continue;
         }
         if (actual !== ref.sha256) {
-          reasons.push(`Objection ${objection.id} response evidence has changed since it was cited`);
+          reasons.push(
+            `Objection ${objection.id} response evidence has changed since it was cited`,
+          );
         }
       }
     }
@@ -551,10 +612,28 @@ function checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint) {
  * @param {string} [options.repo] - Workspace `resultHead` is checked against; required for "outcome".
  * @returns {Promise<{accepted: boolean, currentBinding: object, reasons: string[]}>} Result.
  */
-export async function auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead, repo }) {
+export async function auditAccepted({
+  audit,
+  checkpoint,
+  ledger,
+  ownerRoot,
+  resultHead,
+  repo,
+}) {
   const record = audit.checkpoints[checkpoint];
-  const reasons = checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint);
-  const currentBinding = await computeBinding(checkpoint, ledger, audit, resultHead, repo);
+  const reasons = checkpointSubstantiveReasons(
+    record,
+    ledger,
+    ownerRoot,
+    checkpoint,
+  );
+  const currentBinding = await computeBinding(
+    checkpoint,
+    ledger,
+    audit,
+    resultHead,
+    repo,
+  );
   return { accepted: reasons.length === 0, currentBinding, reasons };
 }
 
@@ -571,21 +650,41 @@ export async function auditAccepted({ audit, checkpoint, ledger, ownerRoot, resu
  * @returns {Promise<{accepted: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When any B.4 condition fails, naming every reason.
  */
-export async function auditAccept(orgFile, worktreeId, checkpoint, resultHead, repo, env = process.env) {
+export async function auditAccept(
+  orgFile,
+  worktreeId,
+  checkpoint,
+  resultHead,
+  repo,
+  env = process.env,
+) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   verifiedAuditor(orgFile, worktreeId, env);
   const ledger = requireLedger(orgFile, worktreeId);
   const ownerRoot = ownerProject(orgFile);
   return withAudit(orgFile, worktreeId, async (audit) => {
-    const check = await auditAccepted({ audit, checkpoint, ledger, ownerRoot, resultHead, repo });
-    assert(check.accepted, `Checkpoint ${checkpoint} cannot be accepted: ${check.reasons.join("; ")}`);
+    const check = await auditAccepted({
+      audit,
+      checkpoint,
+      ledger,
+      ownerRoot,
+      resultHead,
+      repo,
+    });
+    assert(
+      check.accepted,
+      `Checkpoint ${checkpoint} cannot be accepted: ${check.reasons.join("; ")}`,
+    );
     const record = audit.checkpoints[checkpoint];
     // A prior acceptance made stale by a later presentation or amendment
     // (path B) is superseded here, not discarded: it moves into history so
     // re-acceptance after re-audit leaves a full trail rather than erasing
     // the fact that an earlier acceptance existed and was invalidated.
     if (record.acceptance) {
-      record.acceptanceHistory = [...record.acceptanceHistory, record.acceptance];
+      record.acceptanceHistory = [
+        ...record.acceptanceHistory,
+        record.acceptance,
+      ];
     }
     record.binding = check.currentBinding;
     record.acceptance = {
@@ -622,18 +721,35 @@ export async function auditAccept(orgFile, worktreeId, checkpoint, resultHead, r
  * @param {string} [repo] - Workspace `resultHead` is checked against; required for "outcome".
  * @returns {Promise<boolean>} Whether the checkpoint currently has a valid acceptance.
  */
-export async function hasValidAcceptance(orgFile, worktreeId, checkpoint, resultHead, repo) {
+export async function hasValidAcceptance(
+  orgFile,
+  worktreeId,
+  checkpoint,
+  resultHead,
+  repo,
+) {
   const ledger = readLedger(orgFile, worktreeId);
   if (!ledger) return false;
   const audit = readAudit(orgFile, worktreeId);
   const record = audit.checkpoints[checkpoint];
   if (!record.acceptance) return false;
   const ownerRoot = ownerProject(orgFile);
-  const reasons = checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint);
+  const reasons = checkpointSubstantiveReasons(
+    record,
+    ledger,
+    ownerRoot,
+    checkpoint,
+  );
   if (reasons.length > 0) return false;
   let currentBinding;
   try {
-    currentBinding = await computeBinding(checkpoint, ledger, audit, resultHead, repo);
+    currentBinding = await computeBinding(
+      checkpoint,
+      ledger,
+      audit,
+      resultHead,
+      repo,
+    );
   } catch {
     // A stale or forged resultHead must make an existing acceptance invalid,
     // not throw — this is the plain-boolean gate contract callers rely on.
@@ -660,7 +776,10 @@ export function hasUnresolvedObjections(orgFile, worktreeId, checkpoint) {
     const latest = latestResponse(record, objection.id);
     const ruling = latestRuling(record, objection.id);
     return (
-      !latest || !ruling || ruling.respondedAgainst !== latest.id || ruling.verdict !== "persuaded"
+      !latest ||
+      !ruling ||
+      ruling.respondedAgainst !== latest.id ||
+      ruling.verdict !== "persuaded"
     );
   });
 }

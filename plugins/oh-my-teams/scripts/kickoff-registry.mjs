@@ -13,6 +13,7 @@ import {
 } from "./core.mjs";
 import { closeKickoffSignals } from "./director.mjs";
 import {
+  assertKickoffCloseReady,
   confirmedLedgerFromClaim,
   validateLedgerForClaim,
   writeConfirmedLedger,
@@ -644,18 +645,45 @@ export function recordDelivery(
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {object} request - Release request.
+ * For `reason: "completed"`, also runs `assertKickoffCloseReady` (A.5/B.5)
+ * unconditionally, before the registry lock is taken: the requirements
+ * ledger must be close-ready and, when the organization declares an auditor,
+ * both checkpoints must still carry a valid acceptance. `force` bypasses only
+ * the director-authority and delivered-flag checks below, never this one.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} request - Release request.
  * @param {string} request.worktreeId - PM worktree whose kickoff ends.
  * @param {string} request.reason - One of `RELEASE_REASONS`.
  * @param {boolean} [request.force=false] - Whether a takeover is authorized.
  * @param {string} [request.callerCwd] - Caller's working directory for director check.
- * @returns {{released: boolean, reason: string, archived: string, entry: object, closedSignals: string[]}} Result.
- * @throws {Error} When the worktree holds no kickoff, the reason is unknown, or
- *   a takeover is requested without authorization.
+ * @param {string} [request.head] - Result HEAD to check the ledger against for
+ *   `reason: "completed"`; falls back to a prior `deliver`'s recorded head.
+ * @param {string} [request.repo] - Workspace `head` is checked against for the
+ *   outcome acceptance binding.
+ * @returns {Promise<{released: boolean, reason: string, archived: string, entry: object, closedSignals: string[]}>} Result.
+ * @throws {Error} When the worktree holds no kickoff, the reason is unknown,
+ *   a takeover is requested without authorization, or (for `completed`) the
+ *   ledger/audit check fails.
  */
-export function releaseKickoff(
+export async function releaseKickoff(
   orgFile,
-  { worktreeId, reason, force = false, callerCwd = process.cwd() },
+  { worktreeId, reason, force = false, callerCwd = process.cwd(), head, repo },
 ) {
+  if (reason === "completed") {
+    const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
+    assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
+    const effectiveHead = head ?? entry.delivered?.head;
+    assert(
+      effectiveHead,
+      "kickoff-release --reason completed requires --head (or a prior deliver) " +
+        "to check the requirements ledger before closing",
+    );
+    await assertKickoffCloseReady(orgFile, worktreeId, {
+      head: effectiveHead,
+      repo,
+    });
+  }
   const released = withRegistry(orgFile, () => {
     const file = locateEntry(orgFile, worktreeId);
     assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);

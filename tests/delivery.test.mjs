@@ -17,6 +17,10 @@ import {
   deliverKickoff,
   kickoffOwner,
 } from "../plugins/oh-my-teams/scripts/delivery.mjs";
+import {
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
 import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const exampleOrg = path.resolve(
@@ -32,12 +36,21 @@ async function git(cwd, ...args) {
 // These tests are about delivery, not the requirements ledger (which has its
 // own tests), so every claim carries the smallest ledger that passes
 // validateLedgerForClaim: one equal-scope criterion needs no user
-// confirmation and so no director.
+// confirmation and so no director. kickoffProject drives it to close-ready
+// (a director-confirmed fidelity check covering s1/c1 as "met") right after
+// registering, since assertKickoffCloseReady now runs unconditionally inside
+// deliverKickoff/releaseKickoff.
 function minimalRequirements(worktreeId) {
   return {
     statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
     criteria: [
-      { id: "c1", text: `deliver ${worktreeId}`, scope: "equal", userVisible: false, derivedFrom: ["s1"] },
+      {
+        id: "c1",
+        text: `deliver ${worktreeId}`,
+        scope: "equal",
+        userVisible: false,
+        derivedFrom: ["s1"],
+      },
     ],
     confirmations: [],
   };
@@ -93,8 +106,21 @@ async function kickoffProject(
     // even for this equal-only ledger. The checkout is the test process's own
     // cwd so releaseKickoff's director-authority check passes without
     // --force.
-    director: { terminalHandle: `term_director_${worktreeId}`, checkoutPath: process.cwd() },
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath: process.cwd(),
+    },
   });
+  await requirementsFidelity(org, worktreeId, {
+    head,
+    repo: worktree,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "report.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(org, worktreeId, process.cwd());
   return { project, org, worktree, worktreeId, head };
 }
 
@@ -113,7 +139,10 @@ test("a claim records how the brief delivers, and a branch where one is merged",
     brief: entry.brief,
     delivery,
     requirements: minimalRequirements("wt-2"),
-    director: { terminalHandle: "term_director_wt-2", checkoutPath: process.cwd() },
+    director: {
+      terminalHandle: "term_director_wt-2",
+      checkoutPath: process.cwd(),
+    },
   });
   assert.throws(
     () => registerKickoff(fixture.org, claim(undefined)),
@@ -173,10 +202,12 @@ test("deliver merges the verified head into the owner branch once", async (t) =>
     delivered.mergeCommit,
   );
   assert.equal(
-    releaseKickoff(fixture.org, {
-      worktreeId: fixture.worktreeId,
-      reason: "completed",
-    }).released,
+    (
+      await releaseKickoff(fixture.org, {
+        worktreeId: fixture.worktreeId,
+        reason: "completed",
+      })
+    ).released,
     true,
   );
 });
@@ -227,20 +258,23 @@ test("deliver refuses a moved head, an unready owner, and a conflict", async (t)
   assert.equal(listKickoffs(fixture.org).kickoffs[0].delivered, undefined);
 
   // Completing without the merge the brief asked for needs the user's decision.
-  assert.throws(
-    () =>
-      releaseKickoff(fixture.org, {
-        worktreeId: fixture.worktreeId,
-        reason: "completed",
-      }),
-    /which deliver has not recorded/,
-  );
-  assert.equal(
+  await assert.rejects(
     releaseKickoff(fixture.org, {
       worktreeId: fixture.worktreeId,
       reason: "completed",
-      force: true,
-    }).released,
+      head: fixture.head,
+    }),
+    /which deliver has not recorded/,
+  );
+  assert.equal(
+    (
+      await releaseKickoff(fixture.org, {
+        worktreeId: fixture.worktreeId,
+        reason: "completed",
+        head: fixture.head,
+        force: true,
+      })
+    ).released,
     true,
   );
 });
@@ -266,10 +300,14 @@ test("deliver merges only what the brief authorized", async (t) => {
     );
     // A kickoff delivered another way is not held back from completing.
     assert.equal(
-      releaseKickoff(fixture.org, {
-        worktreeId: fixture.worktreeId,
-        reason: "completed",
-      }).released,
+      (
+        await releaseKickoff(fixture.org, {
+          worktreeId: fixture.worktreeId,
+          reason: "completed",
+          head: fixture.head,
+          repo: fixture.worktree,
+        })
+      ).released,
       true,
     );
   }

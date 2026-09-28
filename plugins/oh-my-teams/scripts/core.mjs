@@ -899,9 +899,10 @@ export function validateOrg(org) {
     assert(
       org.auditor.fallbacks === undefined ||
         (Array.isArray(org.auditor.fallbacks) &&
-          new Set(org.auditor.fallbacks).size === org.auditor.fallbacks.length &&
-          org.auditor.fallbacks.every(
-            (profile) => Object.hasOwn(org.profiles, profile),
+          new Set(org.auditor.fallbacks).size ===
+            org.auditor.fallbacks.length &&
+          org.auditor.fallbacks.every((profile) =>
+            Object.hasOwn(org.profiles, profile),
           )),
       "auditor.fallbacks must be unique profiles declared in org.profiles",
     );
