@@ -55,6 +55,44 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 
 로드맵을 작성하거나 갱신할 때는 [`../../references/roadmap.md`](../../references/roadmap.md)가 정한 규칙을 따른다.
 
+## 정형 문서
+
+### 읽는 문서와 현재 revision 조회
+
+이사가 읽는 정형 문서는 `01. 기획` 단계의 kickoff-brief-ref이다. 다음 명령으로 조회한다.
+
+```text
+node <runtime> kickoff-show --org <project>/.omt/organization.json
+```
+
+각 문서의 현재 revision을 확인하려면 위 명령의 결과에서 `revision` 필드를 읽는다.
+
+### 작성·검토·수정 권한
+
+설계 문서 [`docs/plan/structured-omt-documents.md`](../../../../../docs/plan/structured-omt-documents.md)의 3.4절 역할별 권한 표에 따라 이사는 다음을 수행한다.
+
+| 단계 | 문서 유형 | 권한 |
+|---|---|---|
+| 01. 기획 | kickoff-brief-ref | 작성 |
+| 07. 종료 | closure-record | 작성 |
+
+이사는 자신이 작성한 `01. 기획`과 `07. 종료` 문서만 수정할 수 있다. 다른 역할의 문서는 수정하지 않는다.
+
+### 등록부와 참조만으로 재개하는 절차
+
+이사가 진행 중인 kickoff를 다시 찾으려면 다음 절차를 따른다.
+
+1. [`kickoff-show`](#kickoff-시작과-감독) 명령으로 등록된 kickoff의 `pm.worktreeId`를 확인한다.
+2. 그 `worktreeId`로 현재 활성 kickoff의 식별자(`kickoffHash`)를 얻는다. 이 절차는 언제나 현재 워크트리를 지배하는 활성 kickoff를 재개하는 경우이다.
+3. workflow가 있으면 `workflowStateFile`로 workflow 상태를 읽어 진행 중인 작업을 파악한다.
+4. 얻은 값들로 필요한 문서의 경로를 결정적으로 찾는다. 별도의 "마지막으로 참조한 문서" 색인은 필요 없다.
+
+설계 문서의 3.11절 "등록부와 참조만으로 재개하는 절차"를 참조한다.
+
+### Run 생성 후 정형 문서 메시지 계약
+
+Run이 생성된 뒤 이사가 배정자와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 정형 문서 메시지의 정형 문서 계약" 절을 따른다.
+
 ## 신호 수신과 결정
 
 PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]`로 이사에게 신호를 보낸다. 이사는 다음 명령으로 신호를 처리한다.

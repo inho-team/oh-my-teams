@@ -52,6 +52,8 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - 검토를 배정할 때 finding이나 criterion의 필드 이름을 지시문에서 새로 정하지 않고 `examples/review.json` 형식을 그대로 요구한다. 검토자가 형식을 틀리게 써도 PM이 옮겨 적지 않고 검토자에게 되돌린다.
 - 자신이 작성하거나 계획한 결과를 스스로 검토해 승인하지 않는다. 단순 개발 요청을 배포·외부 발송 허가로 확대하지 않는다.
 - 막히면 거부 코드와 증거를 붙여 이사에게 보고하고, 같은 시도를 반복하지 않는다.
+- `review-record`, `gate-check`, `accept`를 부를 때는 `--org` 옵션을 항상 넘긴다.
+- `orchestration send`로 정형 문서를 다룰 때는 `--org` 옵션을 항상 넘긴다.
 - 이사에게 결정을 올리는 경우는 [`../../references/autonomy.md`](../../references/autonomy.md)가 정한 네 가지뿐이다. 실행 깊이, 역할 배정, 작업 분할과 순서, 검토 지적의 수용 여부, 실패 원인의 판정과 접근 방법의 변경처럼 브리프의 범위 안에서 끝나는 판단은 `decision` 신호로 올리지 않고 자기 권한으로 정한 뒤 `progress`로 알린다.
 - 하위 역할이 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없으면 그 역할의 일과 권한은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 이번 실행의 역할은 workflow의 `roles`에서, 그것이 없으면 조직 파일의 `roles`에서 확인하며, PM만 남은 실행에서는 PM이 산출물을 직접 만든다.
 
@@ -165,6 +167,45 @@ kickoff 안의 커밋과 워크트리 사이 병합은 PM이 처리하되 단순
 감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 
 worker를 기다리는 동안에는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 따른다. 원시 `check --wait` 대신 `node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <deliveryId>]`로 기다리면 heartbeat만 온 경우에는 깨어나지 않는다. 대기 시간은 완료나 실패의 근거가 아니지만, 그 시점마다 활동을 다시 조회해 진행 요청과 보고를 결정한다. 무응답 worker를 사용자에게 `진행 중`으로 보고하지 않는다.
+
+## 정형 문서
+
+### 읽는 문서와 현재 revision 조회
+
+PM이 읽는 정형 문서는 `01. 기획`, `03. 구현`, `05. 수용` 단계의 문서들이다. 다음 명령으로 특정 kickoff 아래 현재 문서들을 조회한다.
+
+```text
+node <runtime> kickoff-show --org <project>/.omt/organization.json
+```
+
+각 문서의 현재 revision을 확인하려면 위 명령의 결과에서 `revision` 필드를 읽는다.
+
+### 작성·검토·수정 권한
+
+설계 문서 [`docs/plan/structured-omt-documents.md`](../../../../../docs/plan/structured-omt-documents.md)의 3.4절 역할별 권한 표에 따라 PM은 다음을 수행한다.
+
+| 단계 | 문서 유형 | 권한 |
+|---|---|---|
+| 01. 기획 | kickoff-brief-ref | kickoff 등록 작성 |
+| 03. 구현 | workflow-task-ref | workflow request 작성 |
+| 05. 수용 | acceptance-ref | 작성 (PM 전용) |
+
+PM은 자신이 작성한 `01. 기획`·`03. 구현`·`05. 수용` 문서만 수정할 수 있다. 3.4절의 주석을 참조하여 이번 실행에 하위 역할이 있는 경우 `02. 설계` 작성 권한을 판단한다.
+
+### 등록부와 참조만으로 재개하는 절차
+
+PM이 진행 중인 kickoff과 workflow를 다시 찾으려면 다음 절차를 따른다.
+
+1. `kickoff-show`로 등록부에서 `pm.worktreeId`를 확인한다.
+2. 그 `worktreeId`로 활성 kickoff의 식별자(`kickoffHash`)를 얻는다.
+3. `workflowStateFile`로 workflow 상태를 읽어 진행 중인 task를 파악한다.
+4. 얻은 값들로 필요한 문서의 경로를 결정적으로 찾는다.
+
+설계 문서의 3.11절 "등록부와 참조만으로 재개하는 절차"를 참조한다.
+
+### Run 생성 후 정형 문서 메시지 계약
+
+Run이 생성된 뒤 PM이 이사와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 정형 문서 메시지의 정형 문서 계약" 절을 따른다. `review-record`, `gate-check`, `accept` 명령을 부를 때는 `--org` 옵션을 항상 넘긴다.
 
 진행 상황이나 최종 결과를 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. 진행 상태 판정은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 
