@@ -117,7 +117,7 @@ test("정상_생성_참조_갱신", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     // Create and save planning document
@@ -162,7 +162,7 @@ test("권한_없는_수정", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     // Create design doc as senior
@@ -203,7 +203,7 @@ test("오래된_revision", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     const doc = createTestDocument(
@@ -256,7 +256,7 @@ test("깨진_참조", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     // Try to save doc with broken reference
@@ -308,7 +308,7 @@ test("다른_kickoff_참조", () => {
       pmDir1,
       org.revision,
     );
-    const entry1 = registerKickoff(orgFile, req1);
+    const { entry: entry1 } = registerKickoff(orgFile, req1);
     const kickoff1 = kickoffHashFor(entry1);
 
     const pmDir2 = path.join(tempDir, "pm2");
@@ -319,7 +319,7 @@ test("다른_kickoff_참조", () => {
       pmDir2,
       org.revision,
     );
-    const entry2 = registerKickoff(orgFile, req2);
+    const { entry: entry2 } = registerKickoff(orgFile, req2);
     const kickoff2 = kickoffHashFor(entry2);
 
     // Try to reference from kickoff2 to kickoff1
@@ -367,7 +367,7 @@ test("동시_갱신", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     const doc = createTestDocument(
@@ -434,7 +434,7 @@ test("문서_참조_객체_원자성_인도", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     const planDoc = createTestDocument(
@@ -501,7 +501,7 @@ test("기존_kickoff_등록_항목_레거시_판정", () => {
       pmDir,
       legacyOrg.revision,
     );
-    const entry = registerKickoff(legacyOrgFile, request);
+    const { entry } = registerKickoff(legacyOrgFile, request);
 
     // Entry should exist but may not have registrationSeq
     assert.ok(entry);
@@ -525,7 +525,7 @@ test("registrationSeq_결여_무결성_실패", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
 
     // Entry registered after documentSystemActivatedAt should have registrationSeq
     assert.ok(entry.registrationSeq !== undefined);
@@ -570,7 +570,7 @@ test("문서_참조_객체_원자성_검토_수용", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     // Create resolved design doc
@@ -611,7 +611,7 @@ test("current_kickoff의_kickoffHash_전달_미커밋_문서", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     const planDoc = createTestDocument(
@@ -652,7 +652,7 @@ test("legacy_kickoff의_kickoffHash_생략", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
 
     // Entry should have kickoffHash
     assert.ok(entry.kickoffHash);
@@ -694,11 +694,15 @@ test("kickoffHash_재사용_격리", () => {
       pmDir1,
       org.revision,
     );
-    const entry1 = registerKickoff(orgFile, req1);
+    const { entry: entry1 } = registerKickoff(orgFile, req1);
     const hash1 = kickoffHashFor(entry1);
 
     // Release first kickoff
-    releaseKickoff(orgFile, entry1.kickoffId);
+    releaseKickoff(orgFile, {
+      worktreeId: entry1.pm.worktreeId,
+      reason: "completed",
+      force: true,
+    });
 
     // Re-register same worktreeId
     const pmDir2 = path.join(tempDir, "pm2");
@@ -709,7 +713,7 @@ test("kickoffHash_재사용_격리", () => {
       pmDir2,
       org.revision,
     );
-    const entry2 = registerKickoff(orgFile, req2);
+    const { entry: entry2 } = registerKickoff(orgFile, req2);
     const hash2 = kickoffHashFor(entry2);
 
     // Hashes should differ due to registrationSeq
@@ -734,7 +738,7 @@ test("재개", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     const doc = createTestDocument(
@@ -779,7 +783,7 @@ test("상태_기반_거부_초안_참조", () => {
       pmDir,
       org.revision,
     );
-    const entry = registerKickoff(orgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
     const kickoffId = kickoffHashFor(entry);
 
     // Create open design doc
@@ -851,7 +855,7 @@ test("kickoffHash_같은_밀리초_재등록", () => {
       pmDir1,
       org.revision,
     );
-    const entry1 = registerKickoff(orgFile, req1);
+    const { entry: entry1 } = registerKickoff(orgFile, req1);
     const hash1 = kickoffHashFor(entry1);
 
     const pmDir2 = path.join(tempDir, "pm2");
@@ -862,7 +866,7 @@ test("kickoffHash_같은_밀리초_재등록", () => {
       pmDir2,
       org.revision,
     );
-    const entry2 = registerKickoff(orgFile, req2);
+    const { entry: entry2 } = registerKickoff(orgFile, req2);
     const hash2 = kickoffHashFor(entry2);
 
     // Even if fast, registrationSeq ensures different hashes
@@ -890,7 +894,7 @@ test("재등록_후_이전_kickoff_문서_완결", () => {
       pmDir1,
       org.revision,
     );
-    const entry1 = registerKickoff(orgFile, req1);
+    const { entry: entry1 } = registerKickoff(orgFile, req1);
     const hash1 = kickoffHashFor(entry1);
 
     // Create documents in first kickoff
@@ -910,7 +914,11 @@ test("재등록_후_이전_kickoff_문서_완결", () => {
     saveDocument(stateDir, doc1);
 
     // Release first kickoff
-    releaseKickoff(orgFile, entry1.kickoffId);
+    releaseKickoff(orgFile, {
+      worktreeId: entry1.pm.worktreeId,
+      reason: "completed",
+      force: true,
+    });
 
     // Register second kickoff with same worktreeId
     const pmDir2 = path.join(tempDir, "pm2");
@@ -921,7 +929,7 @@ test("재등록_후_이전_kickoff_문서_완결", () => {
       pmDir2,
       org.revision,
     );
-    const entry2 = registerKickoff(orgFile, req2);
+    const { entry: entry2 } = registerKickoff(orgFile, req2);
     const hash2 = kickoffHashFor(entry2);
 
     // Hashes should differ
