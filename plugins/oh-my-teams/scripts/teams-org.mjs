@@ -1000,8 +1000,9 @@ async function compatibilityPrepare(args) {
 }
 
 async function preflightRoleWorktree(args, organization, environment, matrix) {
-  const org = organization(args.org);
-  const command = roleCommand(org, args.role, { profile: args.profile });
+  const command = roleCommand(organization, args.role, {
+    profile: args.profile,
+  });
   const worktreePath = args.worktree
     ? pathFromWorktreeId(args.worktree)
     : undefined;
@@ -1028,6 +1029,22 @@ async function preflightRoleWorktree(args, organization, environment, matrix) {
     `Role ${args.role} is refused by the launch matrix before worktree creation: ${prediction.reason.join(", ")}. ${prediction.nextAction}`,
   );
   return { command, prediction };
+}
+
+function trustedTaskExecutionRole(task) {
+  if (typeof task?.executionRole !== "string") return null;
+  if (task.executionRole === task.role) return task.executionRole;
+  const transition = (task.worktreeTransitions ?? []).find(
+    (entry) =>
+      entry?.id === task.execution?.transitionId &&
+      entry.kind === "junior-to-senior" &&
+      entry.fromRole === task.role &&
+      entry.toRole === task.executionRole &&
+      entry.toWorktreeId === task.worktreeId &&
+      entry.usedAt &&
+      task.execution?.executionRole === task.executionRole,
+  );
+  return transition ? task.executionRole : null;
 }
 
 function receiptBody(receipt) {
@@ -1262,9 +1279,16 @@ export async function createRoleWorktree(
     list = runOrcaJson,
   } = {},
 ) {
-  // This happens before Orca creates anything. A matrix refusal must not leave
-  // a default shell tab or a worktree to reconcile.
-  await preflightRoleWorktree(args, organization, environment, matrix);
+  const workflowOptions = [
+    args["workflow-id"] !== undefined,
+    args["workflow-task"] !== undefined,
+    args.state !== undefined,
+  ];
+  const hasWorkflow = workflowOptions.some(Boolean);
+  assert(
+    !hasWorkflow || workflowOptions.every(Boolean),
+    "--workflow-id, --workflow-task, and --state must be provided together",
+  );
   const sourceWorkflowId = args["prior-workflow-id"];
   const sourceWorkflowTask = args["prior-task-id"];
   assert(
@@ -1282,15 +1306,31 @@ export async function createRoleWorktree(
   );
   let promotion = null;
   let reusable = null;
-  if (args["workflow-id"] && args["workflow-task"]) {
-    assert(args.state, "--workflow-id and --workflow-task require --state");
-    const { state } = read(path.resolve(args.state), args["workflow-id"]);
-    const task = state.tasks[args["workflow-task"]];
+  let snapshot = null;
+  let state = null;
+  let task = null;
+  if (hasWorkflow) {
+    snapshot = read(path.resolve(args.state), args["workflow-id"]);
+    state = snapshot?.state;
+    assert(
+      state?.tasks && typeof state.tasks === "object",
+      `Workflow ${args["workflow-id"]} has no readable task state`,
+    );
+    task = state.tasks[args["workflow-task"]];
+    assert(task, `Unknown workflow task ${args["workflow-task"]}`);
     const existing = task?.worktreeId ?? task?.execution?.worktreeId;
     promotion =
-      existing && task?.role === "junior" && args.role === "senior"
+      existing &&
+      task.role === "junior" &&
+      args.role === "senior" &&
+      ["submitted", "review-pending", "reviewed"].includes(task.state)
         ? { fromWorktreeId: existing }
         : null;
+    const assignedRole = trustedTaskExecutionRole(task) ?? task.role;
+    assert(
+      promotion || assignedRole === args.role,
+      `Workflow task ${args["workflow-task"]} is assigned to ${assignedRole ?? "no role"}, not ${args.role}; only a reviewed Junior-to-Senior promotion may change roles`,
+    );
     assert(
       !existing || promotion,
       `Task ${args["workflow-task"]} already has worktree ${existing}; reuse it with role-terminal instead of creating another`,
@@ -1348,6 +1388,17 @@ export async function createRoleWorktree(
       );
     }
   }
+  // A workflow freezes its organization. This happens only after task and
+  // role ownership are proven, and before any Orca create/open/release/close
+  // effect, so the matrix predicts the same launch that role-terminal opens.
+  const preflightOrganization = hasWorkflow
+    ? snapshot.organization
+    : organization(args.org);
+  assert(
+    preflightOrganization,
+    `Workflow ${args["workflow-id"]} has no frozen organization snapshot`,
+  );
+  await preflightRoleWorktree(args, preflightOrganization, environment, matrix);
   assert(
     !args.worktree || reusable,
     "--worktree requires an accepted prior task of the same role; a promotion also preserves and closes that Senior session first",

@@ -30,6 +30,10 @@ import {
 const discovery = { executable: "orca", versionsMatch: true };
 const roleOrganization = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
+const workflowSnapshot = (state, organization = roleOrganization()) => ({
+  state,
+  organization,
+});
 const environment = async () => ({
   platform: "darwin",
   shell: "posix",
@@ -178,6 +182,164 @@ test("the launch matrix refuses before role-worktree creation", async () => {
   assert.equal(created, false);
 });
 
+test("workflow task ownership rejects before every role-worktree effect", async () => {
+  for (const [label, args, tasks, pattern] of [
+    [
+      "role-mismatch-new",
+      {},
+      { current: { role: "pm", state: "pending" } },
+      /assigned to pm, not senior/,
+    ],
+    [
+      "unknown-task-cross-workflow-reuse",
+      {
+        "prior-workflow-id": "accepted-workflow",
+        "prior-task-id": "accepted-task",
+        worktree: "repo::/repo/senior-existing",
+      },
+      {},
+      /Unknown workflow task missing/,
+    ],
+    [
+      "unreviewed-junior-to-senior",
+      { worktree: "repo::/repo/senior-existing" },
+      {
+        current: {
+          role: "junior",
+          state: "pending",
+          worktreeId: "repo::/repo/junior-rejected",
+        },
+      },
+      /assigned to junior, not senior/,
+    ],
+  ]) {
+    const effects = [];
+    await assert.rejects(
+      () =>
+        createRoleWorktree(
+          {
+            org: "/repo/.omt/organization.json",
+            role: "senior",
+            repo: "/repo",
+            name: "ownership-rejection",
+            base: "a".repeat(40),
+            state: "/repo/.omt",
+            "workflow-id": "current-workflow",
+            "workflow-task":
+              label === "unknown-task-cross-workflow-reuse"
+                ? "missing"
+                : "current",
+            ...args,
+          },
+          {
+            organization: roleOrganization,
+            environment,
+            matrix: supervised,
+            read: () => workflowSnapshot({ tasks }),
+            create: async () => effects.push("create"),
+            open: async () => effects.push("open"),
+            active: async () => effects.push("active"),
+            release: async () => effects.push("release"),
+            close: async () => effects.push("close"),
+            list: async () => effects.push("list"),
+          },
+        ),
+      pattern,
+      label,
+    );
+    assert.deepEqual(effects, [], label);
+  }
+});
+
+test("role-worktree workflow options reject a state-only context before creation", async () => {
+  const effects = [];
+  await assert.rejects(
+    () =>
+      createRoleWorktree(
+        {
+          org: "/repo/.omt/organization.json",
+          role: "senior",
+          repo: "/repo",
+          name: "state-only-context",
+          base: "a".repeat(40),
+          state: "/repo/.omt",
+        },
+        {
+          organization: roleOrganization,
+          environment,
+          matrix: supervised,
+          create: async () => effects.push("create"),
+          open: async () => effects.push("open"),
+        },
+      ),
+    /--workflow-id, --workflow-task, and --state must be provided together/,
+  );
+  assert.deepEqual(effects, []);
+});
+
+test("workflow worktree preflight uses the frozen organization snapshot", async () => {
+  const frozen = roleOrganization();
+  frozen.revision = 15;
+  const live = structuredClone(frozen);
+  live.revision = 16;
+  live.profiles[live.roles.senior.profile] = {
+    ...live.profiles[live.roles.senior.profile],
+    provider: "claude",
+    model: "claude-sonnet-5",
+  };
+  let liveReads = 0;
+  let created = false;
+  let preflight;
+  await assert.rejects(
+    () =>
+      createRoleWorktree(
+        {
+          org: "/repo/.omt/organization.json",
+          role: "senior",
+          repo: "/repo",
+          name: "frozen-preflight",
+          base: "a".repeat(40),
+          state: "/repo/.omt",
+          "workflow-id": "workflow-r15",
+          "workflow-task": "senior-task",
+        },
+        {
+          organization: () => {
+            liveReads += 1;
+            return live;
+          },
+          read: () =>
+            workflowSnapshot(
+              {
+                tasks: { "senior-task": { role: "senior", state: "pending" } },
+              },
+              frozen,
+            ),
+          environment: async () => ({
+            platform: "win32",
+            shell: "powershell",
+            trustRecordExists: false,
+            codexTrustRecordExists: false,
+            orcaVersion: "1.4.210",
+            cliVersion: "1.2.11",
+          }),
+          matrix: (input) => {
+            preflight = input;
+            return predictLaunchPath(input);
+          },
+          create: async () => {
+            created = true;
+          },
+        },
+      ),
+    /agy-interactive-terminal-unavailable/,
+  );
+  assert.equal(liveReads, 0);
+  assert.equal(created, false);
+  assert.equal(preflight.runner, "agy");
+  assert.equal(preflight.model, "gemini-3.8-flash-high");
+});
+
 test("the operational role-worktree command opens the session inside creation", async () => {
   let creation;
   let opened;
@@ -233,11 +395,12 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
         created = true;
         throw new Error("promotion must reuse the Senior worktree");
       },
-      read: () => ({
-        state: {
+      read: () =>
+        workflowSnapshot({
           tasks: {
             "w2-00": {
               role: "junior",
+              state: "reviewed",
               worktreeId: "repo::/repo/junior-rejected",
             },
             "senior-prior": {
@@ -246,8 +409,7 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
               worktreeId: "repo::/repo/senior-existing",
             },
           },
-        },
-      }),
+        }),
       git: async (repo, argv) => {
         if (argv[0] === "status") return "";
         if (argv[0] === "rev-parse" && argv[1] === "HEAD")
@@ -324,8 +486,8 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
       create: async () => {
         created = true;
       },
-      read: () => ({
-        state: {
+      read: () =>
+        workflowSnapshot({
           tasks: {
             next: { role: "senior", state: "pending" },
             prior: {
@@ -334,8 +496,7 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
               worktreeId: "repo::/repo/senior-existing",
             },
           },
-        },
-      }),
+        }),
       git: async (repo, argv) => {
         if (argv[0] === "status") return "";
         if (argv[0] === "rev-parse" && argv[1] === "HEAD")
@@ -404,8 +565,8 @@ test("two consecutive role-worktree reuses retain and verify prior closure proof
     organization: roleOrganization,
     environment,
     matrix: supervised,
-    read: (_stateDir, workflowId) => ({
-      state:
+    read: (_stateDir, workflowId) =>
+      workflowSnapshot(
         workflowId === "current-workflow"
           ? { tasks: { "next-task": { role: "senior", state: "pending" } } }
           : {
@@ -417,7 +578,7 @@ test("two consecutive role-worktree reuses retain and verify prior closure proof
                 },
               },
             },
-    }),
+      ),
     git: async (repo, argv) => {
       if (argv[0] === "status") return "";
       if (argv[0] === "rev-parse" && argv[1] === "HEAD")
@@ -555,20 +716,19 @@ test("a named accepted task in another workflow can safely reuse its same-role w
       matrix: supervised,
       read: (_stateDir, workflowId) => {
         reads.push(workflowId);
-        return {
-          state:
-            workflowId === "current-workflow"
-              ? { tasks: { "next-task": { role: "senior", state: "pending" } } }
-              : {
-                  tasks: {
-                    "accepted-task": {
-                      state: "accepted",
-                      executionRole: "senior",
-                      worktreeId: "repo::/repo/senior-existing",
-                    },
+        return workflowSnapshot(
+          workflowId === "current-workflow"
+            ? { tasks: { "next-task": { role: "senior", state: "pending" } } }
+            : {
+                tasks: {
+                  "accepted-task": {
+                    state: "accepted",
+                    executionRole: "senior",
+                    worktreeId: "repo::/repo/senior-existing",
                   },
                 },
-        };
+              },
+        );
       },
       git: async (repo, argv) => {
         if (argv[0] === "status") return "";
@@ -659,8 +819,8 @@ test("cross-workflow reuse refuses an unnamed or non-accepted source task", asyn
             organization: roleOrganization,
             environment,
             matrix: supervised,
-            read: (_stateDir, workflowId) => ({
-              state:
+            read: (_stateDir, workflowId) =>
+              workflowSnapshot(
                 workflowId === "current-workflow"
                   ? {
                       tasks: {
@@ -668,7 +828,7 @@ test("cross-workflow reuse refuses an unnamed or non-accepted source task", asyn
                       },
                     }
                   : sourceState,
-            }),
+              ),
             open: async () => {
               opened = true;
             },
@@ -703,8 +863,8 @@ test("cross-workflow reuse refuses a worktree claimed by another current task", 
           organization: roleOrganization,
           environment,
           matrix: supervised,
-          read: (_stateDir, workflowId) => ({
-            state:
+          read: (_stateDir, workflowId) =>
+            workflowSnapshot(
               workflowId === "current-workflow"
                 ? {
                     tasks: {
@@ -725,7 +885,7 @@ test("cross-workflow reuse refuses a worktree claimed by another current task", 
                       },
                     },
                   },
-          }),
+            ),
           open: async () => {
             opened = true;
           },
