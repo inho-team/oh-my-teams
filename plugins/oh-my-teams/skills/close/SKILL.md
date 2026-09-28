@@ -53,7 +53,12 @@ node <runtime> usage-report --org <project>/.omt/organization.json --worktree <p
 ```
 
    실행 중인 프로세스가 없는지 확인한다. "정산"은 세 대상을 가리키므로 각각 따로 확인한다. Orca Dispatch의 accepted settlement, `workflow-status`가 보고하는 모든 attempt의 종결 상태, 그리고 하네스 보고서가 없을 때 붙는 `unsettled` 표시는 저장 위치와 확인 명령이 서로 다르다.
-6. Orca의 현재 가이드에 따라 정산이 끝난 worker를 release하고 child worktree를 회수한다. 보존되지 않은 변경, 살아 있는 프로세스, 상태 불명 worker가 있으면 삭제하지 않으며, 종료를 확인하지 못한 worker는 `worker-abandon`으로 봉인한다.
+6. 완료된 kickoff의 워크트리 후보를 읽기 전용으로 조회한다. 후보별 Git 변경·로컬 증거·전달된 HEAD·Orca 터미널과 worker 상태를 확인하고 `safe-to-remove`, `preserve`, `already-removed` 판정을 따른다. 터미널이 보이지 않는다는 사실만으로 프로세스 종료를 판단하지 않는다. 보존 사유가 있으면 삭제하지 않는다. 종료를 확인하지 못한 worker는 `worker-abandon`으로 봉인한다. 정산이 끝난 worker의 release와 안전한 워크트리 회수에는 Orca 공식 명령을 사용한다. 과거 완료 kickoff는 보관된 기록을 지정해 다시 조회한다.
+
+```text
+node <runtime> kickoff-cleanup-candidates --org <project>/.omt/organization.json --worktree <pm-worktree-id>
+node <runtime> kickoff-cleanup-candidates --org <project>/.omt/organization.json --worktree <pm-worktree-id> --history-file <project>/.omt/history/kickoff-<id>.json
+```
 7. kickoff 브랜치를 정리한다. 전달(병합)이 확인된 뒤에만 원격 브랜치와 로컬 브랜치, 그리고 회수한 하위 워크트리의 브랜치를 삭제한다. 확인은 브랜치 이름이나 PR 상태가 아니라 커밋 내용이 전달 대상에 포함되었는지를 검사한다(`git merge-base --is-ancestor`). 전달이 확인되지 않은 브랜치는 지우지 않고 결과에 남긴다. `disband`는 실패 결과를 복구할 수 있도록 브랜치를 보존하므로, 이 단계는 `close`에서만 수행하고 `disband`에서는 수행하지 않는다.
 
 ```text
@@ -62,7 +67,7 @@ node <runtime> kickoff-branch-cleanup --org <project>/.omt/organization.json --w
 
 8. 환경이 워크트리 삭제를 지원하지만 별도 최종 승인이 필요한 경우에는 정확한 대상을 제시하고 승인을 받은 뒤 삭제한다. 승인은 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 받으며, 삭제 대상과 되돌릴 수 없다는 사실을 선택지에 함께 적는다. 환경이 삭제 자체를 지원하지 않으면 불가능한 승인을 요구하지 않고 사용자가 실행할 정리 절차를 제공한다.
 9. 요청된 전달과 정리가 모두 끝난 뒤에만 kickoff Goal을 완료 처리한다. 환경 제약으로 정리를 사용자에게 넘긴 경우에는 남은 정리 항목을 명시해 보고한 뒤 완료 처리한다.
-10. 마지막으로 이 kickoff의 등록 항목을 해제한다. `delivery.mode`가 `local-merge`인데 `deliver`가 병합을 기록하지 않았으면 `--reason completed`는 거부된다. 브리프가 요구한 전달 없이 완료로 닫으려면 사용자의 결정을 받은 뒤에만 `--force`를 붙이고, 전달하지 않은 사실을 보고에 적는다. 이 단계를 건너뛰면 `status`가 끝난 kickoff를 계속 진행 중으로 보여 주고, 그 워크트리에서 새 kickoff를 등록할 수 없다. 사용자에게 넘긴 정리 항목이 남아 있어도 Goal을 완료 처리했으면 항목은 해제하고, 남은 항목을 보고에 함께 적는다. 해제하면 이 kickoff에 남은 미처리 신호가 `closed` 상태로 정리되고, 결과의 `closedSignals`에 그 ID가 나온다.
+10. 마지막으로 이 kickoff의 등록 항목을 해제한다. `delivery.mode`가 `local-merge`인데 `deliver`가 병합을 기록하지 않았으면 `--reason completed`는 거부된다. 브리프가 요구한 전달 없이 완료로 닫으려면 사용자의 결정을 받은 뒤에만 `--force`를 붙이고, 전달하지 않은 사실을 보고에 적는다. 이 단계를 건너뛰면 `status`가 끝난 kickoff를 계속 진행 중으로 보여 주고, 그 워크트리에서 새 kickoff를 등록할 수 없다. 완료 해제는 워크트리별 정리 판정과 남은 소유자를 보관 기록에 남긴다. `cleanup-pending`인 후보는 나중에 보관 기록으로 재조회한다. 해제하면 이 kickoff에 남은 미처리 신호가 `closed` 상태로 정리되고, 결과의 `closedSignals`에 그 ID가 나온다.
 
 ```text
 node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <pm-worktree-id> --reason completed

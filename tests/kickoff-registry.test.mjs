@@ -276,6 +276,10 @@ test("the id Orca returns registers, binds and releases as given", (t) => {
     path.join(fixture.dir, ".omt", "history"),
   );
   assert.equal(readJSON(released.archived).pm.worktreeId, worktreeId);
+  assert.equal(readJSON(released.archived).cleanup.status, "cleanup-pending");
+  assert.deepEqual(readJSON(released.archived).cleanup.candidates[0].reasons, [
+    "inventory-not-provided",
+  ]);
   assert.deepEqual(ids(fixture), []);
 });
 
