@@ -122,6 +122,7 @@ import {
 import { draftOrganization } from "./org-draft.mjs";
 import {
   bindKickoffRun,
+  classifyKickoffEntry,
   cleanupKickoffBranches,
   kickoffHashFor,
   listKickoffs,
@@ -1476,17 +1477,6 @@ async function attachExistingWorkspace(args) {
   });
 }
 
-// Reimplements kickoff-registry.mjs's private classifyKickoffEntry, since the
-// design assigns this exact judgement to the five CLI cases below rather than
-// to gates.mjs (structured-omt-documents.md 3.7 item 5, 293-299행).
-function classifyKickoffEntry(entry, org) {
-  if (entry.registrationSeq !== undefined) return "current";
-  const activatedAt = org?.documentSystemActivatedAt;
-  return !activatedAt || entry.createdAt < activatedAt
-    ? "legacy"
-    : "integrity-failure";
-}
-
 /**
  * Resolves the `kickoffHash` a gate-evaluating CLI case must forward, following
  * the caller-obligation procedure for `--org` (structured-omt-documents.md 3.7
@@ -1542,6 +1532,82 @@ function documentLocation(stateDir, docId) {
     docType,
     localId,
   );
+}
+
+// 3.4절이 정한 stage/docType별 작성 권한 표. 조합이 여기 없으면(예: delivery/delivery-ref는
+// 표의 어느 역할 행에도 배정되지 않았다) 역할을 제한하지 않는다. design/design-contract는
+// 3.4절이 "이번 실행에 하위 역할이 하나도 없을 때만 PM이 직접 쓸 수 있다"는 조건을 붙이지만,
+// doc-save는 이번 실행의 역할 목록을 알 방법이 없어 그 조건을 판정하지 않고 PM 작성을
+// 허용한다(worker_done에 근거 기록).
+const DOCUMENT_AUTHOR_ROLES = {
+  "planning/kickoff-brief-ref": ["director", "pm"],
+  "design/design-contract": ["senior", "pm"],
+  "implementation/workflow-task-ref": ["pm", "pl", "senior", "junior"],
+  "implementation/integration-ref": ["pm", "pl", "senior", "junior"],
+  "review/review-ref": ["senior"],
+  "acceptance/acceptance-ref": ["pm"],
+  "closure/closure-record": ["director"],
+};
+
+// PL의 03. 구현 수정 권한은 "배정 관련 필드만"으로 문서 전체가 아니라 특정 필드에 한정되므로
+// (3.4절), doc-save는 그 필드 단위 제약을 판정하지 않고 own-document 검사에서 PL만 예외로
+// 둔다. 05. 수용은 표가 "PM 전용"이라고만 적어 특정 PM 실행에 고정하지 않으므로 예외로 둔다.
+function ownDocumentExempt(role, stageSlug) {
+  return role === "pl" || stageSlug === "acceptance";
+}
+
+/**
+ * Enforces the document-layer write authority and independence rules
+ * structured-omt-documents.md 3.4 assigns, using only the envelope about to
+ * be saved and files already on disk under `stateDir` (doc-save has no view
+ * of the current run's role roster, so PM-conditional rows are resolved
+ * permissively; see the caller's design-note comment).
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {object} doc - Envelope about to be saved (already bound for `saveDocument`).
+ * @throws {Error} When the author's role may not write this stage/docType, a
+ *   different execution than the document's own author is revising it, or a
+ *   review-ref names an implementation execution that matches its own author.
+ */
+function assertDocumentAuthority(stateDir, doc) {
+  const { docType } = parseDocId(doc.docId);
+  const allowedRoles = DOCUMENT_AUTHOR_ROLES[`${doc.stage}/${docType}`];
+  if (allowedRoles !== undefined) {
+    assert(
+      allowedRoles.includes(doc.author.role),
+      `Role ${doc.author.role} may not author ${doc.stage}/${docType} documents (structured-omt-documents.md 3.4)`,
+    );
+  }
+
+  const current = documentState(stateDir, doc.docId);
+  if (current.exists && !ownDocumentExempt(doc.author.role, doc.stage)) {
+    const priorDoc = readJSON(
+      path.join(
+        documentLocation(stateDir, doc.docId),
+        "revisions",
+        `${current.revision}.json`,
+      ),
+    );
+    assert(
+      priorDoc.author?.executionId === doc.author.executionId,
+      `Only the execution that authored ${doc.docId} may write its next revision (structured-omt-documents.md 3.4)`,
+    );
+  }
+
+  if (doc.stage === "review" && typeof doc.reviewFileRef === "string") {
+    const resolvedState = path.resolve(stateDir);
+    const reviewPath = path.resolve(stateDir, doc.reviewFileRef);
+    const insideState =
+      reviewPath === resolvedState ||
+      reviewPath.startsWith(resolvedState + path.sep);
+    if (insideState && fs.existsSync(reviewPath)) {
+      const review = readJSON(reviewPath);
+      assert(
+        review.implementationExecutionId !== doc.author.executionId,
+        "Independent review must use a different execution identity (structured-omt-documents.md 3.4)",
+      );
+    }
+  }
 }
 
 // Builds the { kickoffHash, workflowId } options object review-record,
@@ -2252,6 +2318,8 @@ export async function executeCommand(args, execute) {
     }
     case "doc-save": {
       const stateDir = path.resolve(args.state);
+      const doc = readJSON(args.doc);
+      assertDocumentAuthority(stateDir, doc);
       const options = {};
       if (args["expected-revision"] !== undefined) {
         options.expectedRevision = Number(args["expected-revision"]);
@@ -2262,7 +2330,7 @@ export async function executeCommand(args, execute) {
           .map((ref) => ref.trim())
           .filter(Boolean);
       }
-      return saveDocument(stateDir, readJSON(args.doc), options);
+      return saveDocument(stateDir, doc, options);
     }
     case "workflow-create":
       return createWorkflow(

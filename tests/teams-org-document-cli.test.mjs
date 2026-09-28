@@ -3,7 +3,10 @@
  * `doc-id`, `doc-show`, `doc-save`) and for the current/legacy/integrity-failure
  * caller-obligation procedure `--org` adds to `review-record`, `gate-check`,
  * `accept`, `merge-check`, `workflow-accept` and `kickoff-branch-cleanup`
- * (structured-omt-documents.md 3.7 item 5, 293-304행).
+ * (structured-omt-documents.md 3.7 item 5, 293-304행). Also covers `doc-save`'s
+ * 3.4절 작성 권한·독립성 검사(`assertDocumentAuthority`)와 `--refs`/`--expected-revision`
+ * 거부 경로, 그리고 `--workflow-id`를 생략했을 때 workflow-scoped 문서를 찾지 못해 게이트가
+ * pending으로 남는 fail-closed 경로.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -195,6 +198,10 @@ function envelope({
   stageSlug,
   docType,
   localId,
+  author = { role: "senior", executionId: "doc-writer" },
+  revision = 1,
+  basedOnRevision = null,
+  ...extra
 }) {
   return {
     schemaVersion: 1,
@@ -202,12 +209,13 @@ function envelope({
     stage: stageSlug,
     kickoffId: kickoffHash,
     workflowId,
-    revision: 1,
+    revision,
     state: "resolved",
-    author: { role: "senior", executionId: "doc-writer" },
+    author,
     createdAt: new Date().toISOString(),
-    basedOnRevision: null,
+    basedOnRevision,
     reason: "test fixture",
+    ...extra,
   };
 }
 
@@ -342,6 +350,270 @@ test("doc-save commits a new document and doc-show reports its revision and real
     fs.existsSync(path.join(body.path, "current.json")),
     `doc-show's reported path ${body.path} should hold the document's current.json`,
   );
+});
+
+test("doc-save refuses when the author's role may not write that stage/docType (structured-omt-documents.md 3.4)", async (t) => {
+  const fx = project(t);
+  const wt = await worktree(fx, "wt-authority-role");
+  const { kickoffHash } = registerCurrent(fx, "wt-authority-role", wt);
+
+  const docFile = path.join(wt.repoDir, "doc.json");
+  writeJSON(
+    docFile,
+    envelope({
+      kickoffHash,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+      author: { role: "junior", executionId: "junior-1" },
+    }),
+  );
+
+  const saved = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    docFile,
+  );
+  assert.notEqual(saved.code, 0);
+  assert.match(
+    saved.stderr,
+    /Role junior may not author review\/review-ref documents/,
+  );
+});
+
+test("doc-save refuses a different execution writing the next revision of a document it did not author", async (t) => {
+  const fx = project(t);
+  const wt = await worktree(fx, "wt-authority-own-doc");
+  const { kickoffHash } = registerCurrent(fx, "wt-authority-own-doc", wt);
+
+  const docFile = path.join(wt.repoDir, "doc.json");
+  writeJSON(
+    docFile,
+    envelope({
+      kickoffHash,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+      author: { role: "senior", executionId: "senior-1" },
+    }),
+  );
+  const firstSave = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    docFile,
+  );
+  assert.equal(firstSave.code, 0, firstSave.stderr);
+
+  const nextDocFile = path.join(wt.repoDir, "doc-next.json");
+  writeJSON(
+    nextDocFile,
+    envelope({
+      kickoffHash,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+      author: { role: "senior", executionId: "senior-2" },
+    }),
+  );
+  const secondSave = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    nextDocFile,
+  );
+  assert.notEqual(secondSave.code, 0);
+  assert.match(
+    secondSave.stderr,
+    /Only the execution that authored .+ may write its next revision/,
+  );
+});
+
+test("doc-save refuses a review-ref whose reviewFileRef names an implementation execution matching its own author", async (t) => {
+  const fx = project(t);
+  const wt = await worktree(fx, "wt-authority-independence");
+  const { kickoffHash } = registerCurrent(fx, "wt-authority-independence", wt);
+
+  const reviewFileRef = "reviews/review-1.json";
+  fs.mkdirSync(path.join(wt.stateDir, "reviews"), { recursive: true });
+  writeJSON(path.join(wt.stateDir, reviewFileRef), {
+    ...reviewInput(),
+    implementationExecutionId: "senior-1",
+  });
+
+  const docFile = path.join(wt.repoDir, "doc.json");
+  writeJSON(
+    docFile,
+    envelope({
+      kickoffHash,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+      author: { role: "senior", executionId: "senior-1" },
+      reviewFileRef,
+    }),
+  );
+
+  const saved = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    docFile,
+  );
+  assert.notEqual(saved.code, 0);
+  assert.match(
+    saved.stderr,
+    /Independent review must use a different execution identity/,
+  );
+});
+
+test("doc-save's --refs rejects a reference to a document that does not exist or names a stale revision", async (t) => {
+  const fx = project(t);
+  const wt = await worktree(fx, "wt-refs");
+  const { kickoffHash } = registerCurrent(fx, "wt-refs", wt);
+
+  const missingRefDocFile = path.join(wt.repoDir, "doc-missing-ref.json");
+  writeJSON(
+    missingRefDocFile,
+    envelope({
+      kickoffHash,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+    }),
+  );
+  const missingRefDocId = readJSON(missingRefDocFile).docId;
+  const nonexistentRef = `omt-doc:${kickoffHash}/none/acceptance/acceptance-ref/decision-1@r1`;
+  const savedMissingRef = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    missingRefDocFile,
+    "--refs",
+    nonexistentRef,
+  );
+  assert.notEqual(savedMissingRef.code, 0);
+  assert.match(
+    savedMissingRef.stderr,
+    /points at a document that does not exist/,
+  );
+
+  const targetDocFile = path.join(wt.repoDir, "doc-target.json");
+  writeJSON(
+    targetDocFile,
+    envelope({
+      kickoffHash,
+      stageSlug: "acceptance",
+      docType: "acceptance-ref",
+      localId: "decision-1",
+      author: { role: "pm", executionId: "pm-1" },
+    }),
+  );
+  const savedTarget = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    targetDocFile,
+  );
+  assert.equal(savedTarget.code, 0, savedTarget.stderr);
+
+  const staleRef = `omt-doc:${kickoffHash}/none/acceptance/acceptance-ref/decision-1@r2`;
+  const savedStaleRef = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    missingRefDocFile,
+    "--refs",
+    staleRef,
+  );
+  assert.notEqual(savedStaleRef.code, 0);
+  assert.match(
+    savedStaleRef.stderr,
+    /names revision 2, but the current revision is 1/,
+  );
+  assert.equal(missingRefDocId, readJSON(missingRefDocFile).docId);
+});
+
+test("doc-save's --expected-revision rejects a stale optimistic-concurrency read", async (t) => {
+  const fx = project(t);
+  const wt = await worktree(fx, "wt-expected-revision");
+  const { kickoffHash } = registerCurrent(fx, "wt-expected-revision", wt);
+
+  const docFile = path.join(wt.repoDir, "doc.json");
+  writeJSON(
+    docFile,
+    envelope({
+      kickoffHash,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+    }),
+  );
+  const firstSave = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    docFile,
+  );
+  assert.equal(firstSave.code, 0, firstSave.stderr);
+
+  const nextDocFile = path.join(wt.repoDir, "doc-next.json");
+  writeJSON(
+    nextDocFile,
+    envelope({
+      kickoffHash,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+      revision: 2,
+      basedOnRevision: 1,
+    }),
+  );
+  const staleSave = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    nextDocFile,
+    "--expected-revision",
+    "0",
+  );
+  assert.notEqual(staleSave.code, 0);
+  assert.match(
+    staleSave.stderr,
+    /Document changed; current revision is 1, read it again before writing/,
+  );
+
+  const freshSave = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    nextDocFile,
+    "--expected-revision",
+    "1",
+  );
+  assert.equal(freshSave.code, 0, freshSave.stderr);
+  assert.equal(JSON.parse(freshSave.stdout).revision, 2);
 });
 
 test("doc-show reports a document that does not exist", async (t) => {
@@ -546,6 +818,7 @@ test("review-record, gate-check, accept and merge-check forward kickoffHash for 
       stageSlug: "acceptance",
       docType: "acceptance-ref",
       localId: "decision-1",
+      author: { role: "pm", executionId: "pm-1" },
     }),
   );
   assert.equal(readJSON(acceptDocFile).docId, acceptDocId);
@@ -602,6 +875,131 @@ test("review-record, gate-check, accept and merge-check forward kickoffHash for 
   );
   assert.equal(merged.code, 0, merged.stderr);
   assert.equal(JSON.parse(merged.stdout).valid, true);
+});
+
+test("gate-check only finds a workflow-scoped review-ref document when --workflow-id is forwarded, leaving the gate pending without it", async (t) => {
+  const fx = project(t);
+  const wt = await worktree(fx, "wt-workflow-scoped");
+  const { kickoffHash } = registerCurrent(fx, "wt-workflow-scoped", wt);
+  const stateDir = wt.stateDir;
+  const workflowId = "wf-doc-cli";
+
+  const definedTask = reviewGateTask("workflow-scoped-gate");
+  const taskFile = path.join(wt.repoDir, "task.json");
+  writeJSON(taskFile, definedTask);
+  const report = await passingReport(
+    wt.repoDir,
+    stateDir,
+    definedTask,
+    "impl-run",
+  );
+  const reportFile = path.join(wt.repoDir, "report.json");
+  writeJSON(reportFile, report);
+  const reviewFile = path.join(wt.repoDir, "review.json");
+  writeJSON(reviewFile, reviewInput());
+
+  const recorded = await cliRun(
+    wt.repoDir,
+    "review-record",
+    "--task",
+    taskFile,
+    "--report",
+    reportFile,
+    "--review",
+    reviewFile,
+    "--repo",
+    wt.repoDir,
+    "--state",
+    stateDir,
+    "--org",
+    fx.orgFile,
+    "--workflow-id",
+    workflowId,
+  );
+  assert.equal(recorded.code, 0, recorded.stderr);
+
+  const reviewDocId = JSON.parse(
+    (
+      await cliRun(
+        wt.repoDir,
+        "doc-id",
+        "--kickoff-hash",
+        kickoffHash,
+        "--workflow-id",
+        workflowId,
+        "--stage",
+        "review",
+        "--doc-type",
+        "review-ref",
+        "--local-id",
+        "review-1",
+      )
+    ).stdout,
+  ).docId;
+  const reviewDocFile = path.join(wt.repoDir, "review-doc.json");
+  writeJSON(
+    reviewDocFile,
+    envelope({
+      kickoffHash,
+      workflowId,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+    }),
+  );
+  assert.equal(readJSON(reviewDocFile).docId, reviewDocId);
+  const savedReview = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    stateDir,
+    "--doc",
+    reviewDocFile,
+  );
+  assert.equal(savedReview.code, 0, savedReview.stderr);
+
+  const withoutWorkflowId = await cliRun(
+    wt.repoDir,
+    "gate-check",
+    "--task",
+    taskFile,
+    "--report",
+    reportFile,
+    "--repo",
+    wt.repoDir,
+    "--state",
+    stateDir,
+    "--org",
+    fx.orgFile,
+  );
+  assert.equal(withoutWorkflowId.code, 0, withoutWorkflowId.stderr);
+  assert.equal(
+    JSON.parse(withoutWorkflowId.stdout).gates["review-complete"].status,
+    "pending",
+    "omitting --workflow-id must not find a workflow-scoped review-ref document",
+  );
+
+  const withWorkflowId = await cliRun(
+    wt.repoDir,
+    "gate-check",
+    "--task",
+    taskFile,
+    "--report",
+    reportFile,
+    "--repo",
+    wt.repoDir,
+    "--state",
+    stateDir,
+    "--org",
+    fx.orgFile,
+    "--workflow-id",
+    workflowId,
+  );
+  assert.equal(withWorkflowId.code, 0, withWorkflowId.stderr);
+  assert.equal(
+    JSON.parse(withWorkflowId.stdout).gates["review-complete"].status,
+    "passed",
+  );
 });
 
 test("the same flow passes immediately when --org classifies the entry as legacy, omitting kickoffHash", async (t) => {
