@@ -77,6 +77,37 @@ function git(dir, args) {
   return execFileSync("git", args, { cwd: dir }).toString().trim();
 }
 
+// A minimal, real executable standing in for the Orca CLI, for CLI-level
+// tests of verifiedPm's `orchestration run-current` call. It only answers
+// that one subcommand, from a fixed handle -> runId map; every other
+// invocation exits non-zero, so a test that reaches this fake by an
+// unintended path fails loudly instead of appearing to succeed. Pointed to
+// via ORCA_CLI_COMMAND, exactly how selectOrcaExecutable discovers a real
+// Orca outside a CLI argument, so `--orca` cannot substitute for it.
+function writeFakeOrca(dir, runs) {
+  const file = path.join(dir, "fake-orca.mjs");
+  fs.writeFileSync(
+    file,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+const args = process.argv.slice(2);
+const flag = (name) => args[args.indexOf(name) + 1];
+if (args[0] === "orchestration" && args[1] === "run-current") {
+  const runs = ${JSON.stringify(runs)};
+  const handle = flag("--from");
+  const runId = runs[handle];
+  const run = runId ? { id: runId, coordinator_handle: handle } : null;
+  fs.writeSync(1, JSON.stringify({ ok: true, result: { run } }) + "\\n");
+  process.exit(0);
+}
+fs.writeSync(2, "fake-orca: unsupported invocation " + args.join(" ") + "\\n");
+process.exit(1);
+`,
+  );
+  fs.chmodSync(file, 0o755);
+  return file;
+}
+
 // A real Git repository with one commit, independent of the workspaceBinding
 // adapter under test — resultHead/head assertions must be checked against an
 // actual `git rev-parse HEAD`, not an arbitrary string a test made up.
@@ -147,8 +178,9 @@ const auditorEnv = (handle) => ({ ORCA_TERMINAL_HANDLE: handle });
 // verifiedPm confirms the caller via `orchestration run-current`; here that
 // Orca call is replaced with a fake that reports the caller bound to the
 // kickoff's own Run, exactly as the real CLI would once the PM is bound.
+// The caller's own identity is proven separately, via ORCA_TERMINAL_HANDLE
+// (see `auditorEnv`/`pmIdentity` call sites below), never through this object.
 const pmIdentity = (fixture) => ({
-  callerHandle: fixture.pmHandle,
   execute: async () => ({
     code: 0,
     timedOut: false,
@@ -196,6 +228,7 @@ async function objectAndResolve(fixture, { resultHead, evidencePath }) {
       ],
     },
     pmIdentity(fixture),
+    auditorEnv(fixture.pmHandle),
   );
   assert.equal(recorded, true);
   const responseId = audit.checkpoints.outcome.responses.at(-1).id;
@@ -499,6 +532,7 @@ test("ruling history is preserved across a not-persuaded then a persuaded verdic
       evidenceRefs: [{ path: "weak.txt", sha256: fileSha256(weakEvidence) }],
     },
     pmIdentity(fixture),
+    auditorEnv(fixture.pmHandle),
   );
   const weakResponseId =
     weakResponse.audit.checkpoints.outcome.responses.at(-1).id;
@@ -529,6 +563,7 @@ test("ruling history is preserved across a not-persuaded then a persuaded verdic
       ],
     },
     pmIdentity(fixture),
+    auditorEnv(fixture.pmHandle),
   );
   const strongResponseId =
     strongResponse.audit.checkpoints.outcome.responses.at(-1).id;
@@ -818,6 +853,7 @@ test("accept refuses while the outcome audit checkpoint has an unresolved object
       ],
     },
     pmIdentity(fixture),
+    auditorEnv(fixture.pmHandle),
   );
   const responseId = audit.checkpoints.outcome.responses.at(-1).id;
   await auditRuling(
@@ -1204,6 +1240,137 @@ test("cli audit-response: succeeds from the director's checkout (brief checkpoin
   );
   assert.equal(succeeded.code, 0, succeeded.stderr);
   assert.equal(JSON.parse(succeeded.stdout).recorded, true);
+});
+
+// --terminal and --orca were removed from audit-response's outcome-checkpoint
+// path (see teams-org.mjs's "audit-response" case) because a caller could
+// otherwise name any handle via --terminal and have run-current confirmed
+// against it, or point --orca at a forged executable that fabricates that
+// confirmation. verifiedPm now reads ORCA_TERMINAL_HANDLE from the real
+// process environment and discovers the Orca executable from
+// ORCA_CLI_COMMAND/platform defaults, the same way verifiedAuditor does for
+// the auditor role, so neither identity input is settable by argv.
+test("cli audit-response (outcome checkpoint): --terminal and --orca are unknown options, and the real-PM-env path succeeds", async (t) => {
+  const fixture = kickoff(t);
+  await auditObjection(
+    fixture.org,
+    fixture.worktreeId,
+    {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.repo,
+    },
+    auditorEnv(fixture.auditorHandle),
+  );
+  const objectionId = readAudit(
+    fixture.org,
+    fixture.worktreeId,
+  ).checkpoints.outcome.objections.at(-1).id;
+  const evidencePath = "outcome-evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "delivered\n");
+  const requestFile = path.join(fixture.dir, "outcome-response-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      checkpoint: "outcome",
+      objectionId,
+      argument: "c1 is delivered; see the cited evidence",
+      evidenceRefs: [
+        {
+          path: evidencePath,
+          sha256: fileSha256(path.join(fixture.dir, evidencePath)),
+        },
+      ],
+    }),
+  );
+
+  // (a) --terminal, forging the caller as the PM by naming its handle, is
+  // rejected as an unknown option before identity is even checked.
+  const terminalRejected = runCli([
+    "audit-response",
+    "--org",
+    fixture.org,
+    "--worktree",
+    fixture.worktreeId,
+    "--from",
+    requestFile,
+    "--terminal",
+    fixture.pmHandle,
+  ]);
+  assert.notEqual(terminalRejected.code, 0);
+  assert.match(terminalRejected.stderr, /--terminal/);
+
+  // (b) --orca, pointing identity verification at a forged executable, is
+  // likewise rejected as an unknown option (or would be, were the forged
+  // binary ever reached).
+  const forgedOrca = writeFakeOrca(fixture.dir, {
+    [fixture.pmHandle]: fixture.entry.runId,
+  });
+  const orcaRejected = runCli([
+    "audit-response",
+    "--org",
+    fixture.org,
+    "--worktree",
+    fixture.worktreeId,
+    "--from",
+    requestFile,
+    "--orca",
+    forgedOrca,
+  ]);
+  assert.notEqual(orcaRejected.code, 0);
+  assert.match(orcaRejected.stderr, /--orca/);
+
+  // (c) The real PM env path: ORCA_TERMINAL_HANDLE identifies the caller (as
+  // verifiedAuditor requires for the auditor), and ORCA_CLI_COMMAND (never
+  // --orca) is how the real Orca executable is discovered outside argv.
+  const realOrca = writeFakeOrca(fixture.dir, {
+    [fixture.pmHandle]: fixture.entry.runId,
+  });
+  const succeeded = runCli(
+    [
+      "audit-response",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    {
+      env: {
+        ORCA_TERMINAL_HANDLE: fixture.pmHandle,
+        ORCA_CLI_COMMAND: realOrca,
+      },
+    },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).recorded, true);
+
+  // Same env, a different (non-PM) handle: run-current reports no binding
+  // for it, so verifiedPm refuses even though ORCA_CLI_COMMAND is real.
+  const wrongHandle = runCli(
+    [
+      "audit-response",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    {
+      env: {
+        ORCA_TERMINAL_HANDLE: fixture.auditorHandle,
+        ORCA_CLI_COMMAND: realOrca,
+      },
+    },
+  );
+  assert.notEqual(wrongHandle.code, 0);
+  assert.match(wrongHandle.stderr, /is not the PM bound to kickoff/);
 });
 
 test("cli audit-ruling: succeeds with the auditor's handle, and refuses without one", async (t) => {

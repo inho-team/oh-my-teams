@@ -31,7 +31,7 @@ import {
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
 import { assertDirectorAuthority } from "./delivery.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
-import { runOrcaJson } from "./orca-adapter.mjs";
+import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
 import { workspaceBinding } from "./evidence.mjs";
 
 /** Checkpoints a kickoff's requirements ledger is audited at. */
@@ -254,28 +254,42 @@ export function verifiedDirector(
  * Confirms the caller is the PM bound to this kickoff's Run, reusing the same
  * `orchestration run-current` binding `verifySupervisor` checks.
  *
+ * The caller's identity is read from its own `ORCA_TERMINAL_HANDLE`, exactly
+ * as `verifiedAuditor` does, so a CLI argument can never substitute for
+ * actually being the terminal that Orca bound to this kickoff's Run (B.6).
+ * The Orca executable used to confirm that binding is likewise never taken
+ * from a CLI argument: `selectOrcaExecutable` discovers it from the real
+ * process environment, so a caller cannot point identity verification at a
+ * forged binary. Tests inject an executable through `options.orca` directly,
+ * never through argv.
+ *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
- * @param {object} options - Identity inputs.
- * @param {string} options.callerHandle - Caller's own terminal handle.
- * @param {string} [options.orca] - Orca CLI binary, for the injected `run`.
+ * @param {object} [options] - Identity inputs.
+ * @param {string} [options.orca] - Orca CLI binary override, for tests only.
  * @param {Function} [options.execute] - Injectable command runner.
+ * @param {NodeJS.ProcessEnv} [env] - Environment to read the handle from.
  * @returns {object} The kickoff's registry entry.
  * @throws {Error} When the caller is not bound to this kickoff's Run as PM.
  */
 export async function verifiedPm(
   orgFile,
   worktreeId,
-  { callerHandle, orca, execute = run },
+  { orca, execute = run } = {},
+  env = process.env,
 ) {
-  assert(callerHandle, "callerHandle is required to confirm the PM's identity");
+  const callerHandle = env.ORCA_TERMINAL_HANDLE;
+  assert(
+    callerHandle,
+    "ORCA_TERMINAL_HANDLE is not set, so the caller cannot be identified as the PM",
+  );
   const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
   assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
   assert(entry.runId, `Kickoff ${worktreeId} has not bound a Run yet`);
   let bound = null;
   try {
     const current = await runOrcaJson(
-      orca,
+      selectOrcaExecutable(orca, env),
       ["orchestration", "run-current", "--from", callerHandle],
       { execute },
     );
@@ -382,7 +396,9 @@ export async function auditObjection(
  * @param {string} request.objectionId - Objection being answered.
  * @param {string} request.argument - Substantive argument, not a bare claim of completion.
  * @param {{path: string, sha256: string}[]} request.evidenceRefs - Cited evidence.
- * @param {object} identity - Identity inputs for `verifiedDirector`/`verifiedPm`.
+ * @param {object} [identity] - Non-identity inputs for `verifiedDirector`/`verifiedPm`
+ *   (`callerCwd` for the director path, `orca`/`execute` overrides for tests).
+ * @param {NodeJS.ProcessEnv} [env] - Environment the PM identity is read from.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails, the objection is unknown, or fields are missing.
  */
@@ -391,6 +407,7 @@ export async function auditResponse(
   worktreeId,
   { checkpoint, objectionId, argument, evidenceRefs },
   identity = {},
+  env = process.env,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
@@ -409,7 +426,7 @@ export async function auditResponse(
   if (checkpoint === "brief") {
     verifiedDirector(orgFile, worktreeId, identity.callerCwd);
   } else {
-    await verifiedPm(orgFile, worktreeId, identity);
+    await verifiedPm(orgFile, worktreeId, identity, env);
   }
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];

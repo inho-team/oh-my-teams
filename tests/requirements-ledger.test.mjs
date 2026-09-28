@@ -1186,6 +1186,52 @@ test("director-authority-gap: requirementsException refuses a declared head that
   );
 });
 
+// teams-org.mjs's "requirements-draft" case now takes only statements/criteria
+// from --from and fixes worktreeId to --worktree last, so a worktreeId field
+// smuggled into the JSON file can no longer redirect the write to a different
+// worktree's draft file — the same forgery-prevention shape requirements-exception
+// already documents for callerCwd.
+test("cli requirements-draft: a worktreeId field in --from cannot redirect the draft to a different worktree", (t) => {
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-reqledger-draft-forge-")),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, ".omt", "organization.json");
+  const { statements, criteria } = baseStatementsAndCriteria();
+  const targetWorktreeId = "wt-target";
+  const attackerWorktreeId = "wt-attacker";
+  const draftRequest = path.join(dir, "draft-request.json");
+  fs.writeFileSync(
+    draftRequest,
+    JSON.stringify({ worktreeId: attackerWorktreeId, statements, criteria }),
+  );
+  const result = runCli([
+    "requirements-draft",
+    "--org",
+    orgFile,
+    "--worktree",
+    targetWorktreeId,
+    "--from",
+    draftRequest,
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+
+  const targetDraft = readDraft(orgFile, targetWorktreeId);
+  assert.ok(targetDraft, "draft was not written to --worktree's own file");
+  assert.equal(targetDraft.worktreeId, targetWorktreeId);
+  assert.deepEqual(
+    targetDraft.statements.map((s) => s.id),
+    statements.map((s) => s.id),
+  );
+
+  const attackerDraft = readDraft(orgFile, attackerWorktreeId);
+  assert.equal(
+    attackerDraft,
+    null,
+    "a worktreeId field in --from must not create a draft for that worktree",
+  );
+});
+
 // CLI-level authority tests for requirements-retrofit and requirements-exception
 // (director decision on requirements-retrofit's authority gap, msg_2f57aa6e083e):
 // --force no longer bypasses the checkout check, and a legacy (director-less)

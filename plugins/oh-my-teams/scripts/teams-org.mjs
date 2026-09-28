@@ -479,7 +479,7 @@ export const ALLOWED_OPTIONS = {
   "requirements-fidelity": ["org", "worktree", "from"],
   "requirements-fidelity-confirm": ["org", "worktree"],
   "audit-objection": ["org", "worktree", "from"],
-  "audit-response": ["org", "worktree", "from", "terminal", "orca"],
+  "audit-response": ["org", "worktree", "from"],
   "audit-ruling": ["org", "worktree", "from"],
   "audit-checked": ["org", "worktree", "checkpoint", "from"],
   "audit-accept": ["org", "worktree", "checkpoint", "head", "repo"],
@@ -2737,11 +2737,17 @@ export async function executeCommand(args, execute) {
         remoteName: args.remote ?? "origin",
       });
     }
-    case "requirements-draft":
+    case "requirements-draft": {
+      // Only statements/criteria come from --from: worktreeId is fixed to
+      // args.worktree last so a forged worktreeId field in the JSON file
+      // cannot redirect the draft write to a different worktree's file.
+      const { statements, criteria } = readJSON(args.from);
       return requirementsDraft(args.org, {
+        statements,
+        criteria,
         worktreeId: args.worktree,
-        ...readJSON(args.from),
       });
+    }
     case "requirements-confirm": {
       if (args.draft) {
         return requirementsConfirmDraft(args.org, {
@@ -2858,11 +2864,14 @@ export async function executeCommand(args, execute) {
       });
     }
     case "audit-response": {
-      // callerHandle is taken from --terminal, never from --from: identity
-      // for the "outcome" checkpoint is proven by asking the real orca binary
-      // for the Run bound to that handle (verifiedPm), so a forged --from
-      // field cannot substitute for actually being that terminal. callerCwd
-      // is always the real process.cwd(), for the same reason.
+      // Neither the caller's terminal handle nor the Orca executable used to
+      // confirm it is taken from a CLI argument: verifiedPm reads
+      // ORCA_TERMINAL_HANDLE from the real process environment and lets
+      // selectOrcaExecutable discover the real orca binary the same way,
+      // exactly like verifiedAuditor does for the auditor role. A --terminal
+      // or --orca argument here could otherwise forge the PM identity the
+      // "outcome" checkpoint's response is bound to. callerCwd is always the
+      // real process.cwd(), for the same reason on the director path.
       const { checkpoint, objectionId, argument, evidenceRefs } = readJSON(
         args.from,
       );
@@ -2870,11 +2879,7 @@ export async function executeCommand(args, execute) {
         args.org,
         args.worktree,
         { checkpoint, objectionId, argument, evidenceRefs },
-        {
-          callerCwd: process.cwd(),
-          callerHandle: args.terminal,
-          orca: args.orca,
-        },
+        { callerCwd: process.cwd() },
       );
     }
     case "audit-ruling": {
