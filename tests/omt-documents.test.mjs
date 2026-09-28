@@ -43,6 +43,7 @@ import {
   gateCheck,
   recordReview,
 } from "../plugins/oh-my-teams/scripts/gates.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const exampleOrgPath = path.resolve(
@@ -80,31 +81,12 @@ function createProjectStructure(tempDir, worktreeId) {
   return { orgFile, org, orgDir, briefFile, pmDir, stateDir, projectDir };
 }
 
-// registerKickoff은 이제 모든 claim에 확정된 요구 원장 초안을 요구한다
-// (docs/plan/requirements-ledger-and-audit.md A.2). 이 파일은 문서 시스템을 다루지
-// 원장 자체를 다루지 않으므로, validateLedgerForClaim을 통과하는 가장 작은 형태를 쓴다:
-// scope가 "equal"인 단일 criterion은 사용자 확인이 필요 없다.
-function minimalRequirements(worktreeId) {
-  return {
-    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
-    criteria: [
-      {
-        id: "c1",
-        text: `deliver ${worktreeId}`,
-        scope: "equal",
-        userVisible: false,
-        derivedFrom: ["s1"],
-      },
-    ],
-    confirmations: [],
-  };
-}
-
 // stateDir을 넘기면 entry.pm.stateDir이 그 값을 실제로 가리키게 되어, releaseKickoff/
 // cleanupKickoffBranches의 delivery-ref 문서 소유권 검사(documentState(entry.pm.stateDir, ...))가
 // 이 테스트 파일이 만든 문서를 올바르게 찾는다. 생략하면 registerKickoff은 빈 값을 cwd로
 // 되돌리므로, 그 값에 의존하지 않는 테스트에서는 그대로 생략한다.
 function createKickoffRequest(
+  orgFile,
   worktreeId,
   briefFile,
   pmDir,
@@ -125,7 +107,7 @@ function createKickoffRequest(
       mode: "local-merge",
       branch: "main",
     },
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(orgFile, worktreeId),
     director: {
       terminalHandle: `term_director_${worktreeId}`,
       checkoutPath,
@@ -292,7 +274,7 @@ function claimFor(fixture, worktreeId, wt, delivery = { mode: "none" }) {
     organizationRevision: readJSON(fixture.orgFile).revision,
     brief: fixture.brief,
     delivery,
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(fixture.orgFile, worktreeId),
     director: {
       terminalHandle: `term_director_${worktreeId}`,
       checkoutPath: wt.repoDir,
@@ -460,6 +442,7 @@ test("정상_생성_참조_갱신", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-1",
       briefFile,
       pmDir,
@@ -634,6 +617,7 @@ test("권한_없는_수정", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-2",
       briefFile,
       pmDir,
@@ -732,6 +716,7 @@ test("오래된_revision", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-3",
       briefFile,
       pmDir,
@@ -782,6 +767,7 @@ test("깨진_참조", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-4",
       briefFile,
       pmDir,
@@ -831,6 +817,7 @@ test("다른_kickoff_참조", () => {
     const pmDir1 = path.join(tempDir, "pm1");
     fs.mkdirSync(pmDir1, { recursive: true });
     const req1 = createKickoffRequest(
+      orgFile,
       "test-wt-5a",
       briefFile,
       pmDir1,
@@ -842,6 +829,7 @@ test("다른_kickoff_참조", () => {
     const pmDir2 = path.join(tempDir, "pm2");
     fs.mkdirSync(pmDir2, { recursive: true });
     const req2 = createKickoffRequest(
+      orgFile,
       "test-wt-5b",
       briefFile,
       pmDir2,
@@ -892,6 +880,7 @@ test("동시_갱신", async () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-6",
       briefFile,
       pmDir,
@@ -997,6 +986,7 @@ test("문서_참조_객체_원자성_인도", async (t) => {
   const pmDirA = path.join(tempDir, "pm-wt-7a");
   fs.mkdirSync(pmDirA, { recursive: true });
   const requestA = createKickoffRequest(
+    orgFile,
     "test-wt-7a",
     briefFile,
     pmDirA,
@@ -1039,6 +1029,7 @@ test("문서_참조_객체_원자성_인도", async (t) => {
   const pmDirB = path.join(tempDir, "pm-wt-7b");
   fs.mkdirSync(pmDirB, { recursive: true });
   const requestB = createKickoffRequest(
+    orgFile,
     "test-wt-7b",
     briefFile,
     pmDirB,
@@ -1090,6 +1081,7 @@ test("문서_참조_객체_원자성_인도", async (t) => {
   const pmDirC = path.join(tempDir, "pm-wt-7c");
   fs.mkdirSync(pmDirC, { recursive: true });
   const requestC = createKickoffRequest(
+    orgFile,
     "test-wt-7c",
     briefFile,
     pmDirC,
@@ -1166,6 +1158,7 @@ test("기존_kickoff_등록_항목_레거시_판정", async (t) => {
   registerKickoff(
     orgFile,
     createKickoffRequest(
+      orgFile,
       "test-wt-8",
       briefFile,
       pmDir,
@@ -1241,6 +1234,7 @@ test("registrationSeq_결여_무결성_실패", async (t) => {
   const { entry } = registerKickoff(
     orgFile,
     createKickoffRequest(
+      orgFile,
       "test-wt-9",
       briefFile,
       pmDir,
@@ -1666,6 +1660,7 @@ test("kickoffHash_재사용_격리", async (t) => {
     const pmDir1 = path.join(tempDir, "pm1");
     fs.mkdirSync(pmDir1, { recursive: true });
     const req1 = createKickoffRequest(
+      orgFile,
       "test-wt-15a",
       briefFile,
       pmDir1,
@@ -1697,6 +1692,7 @@ test("kickoffHash_재사용_격리", async (t) => {
     const pmDir2 = path.join(tempDir, "pm2");
     fs.mkdirSync(pmDir2, { recursive: true });
     const req2 = createKickoffRequest(
+      orgFile,
       "test-wt-15a",
       briefFile,
       pmDir2,
@@ -1750,6 +1746,7 @@ test("재개", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-16",
       briefFile,
       pmDir,
@@ -1793,6 +1790,7 @@ test("상태_기반_거부_초안_참조", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-17",
       briefFile,
       pmDir,
@@ -1867,6 +1865,7 @@ test("kickoffHash_같은_밀리초_재등록", (t) => {
   t.mock.timers.enable({ apis: ["Date"] });
 
   const req1 = createKickoffRequest(
+    orgFile,
     "test-wt-18a",
     briefFile,
     pmDir1,
@@ -1875,6 +1874,7 @@ test("kickoffHash_같은_밀리초_재등록", (t) => {
   const { entry: entry1 } = registerKickoff(orgFile, req1);
 
   const req2 = createKickoffRequest(
+    orgFile,
     "test-wt-18b",
     briefFile,
     pmDir2,
@@ -1903,6 +1903,7 @@ test("재등록_후_이전_kickoff_문서_완결", async (t) => {
   const pmDir1 = path.join(tempDir, "pm1");
   fs.mkdirSync(pmDir1, { recursive: true });
   const req1 = createKickoffRequest(
+    orgFile,
     "test-wt-19",
     briefFile,
     pmDir1,
@@ -1942,6 +1943,7 @@ test("재등록_후_이전_kickoff_문서_완결", async (t) => {
   const pmDir2 = path.join(tempDir, "pm2");
   fs.mkdirSync(pmDir2, { recursive: true });
   const req2 = createKickoffRequest(
+    orgFile,
     "test-wt-19",
     briefFile,
     pmDir2,

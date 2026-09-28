@@ -67,6 +67,14 @@ import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
 import { hasValidAcceptance } from "./audit.mjs";
 import {
+  readDraft,
+  requirementsConfirm,
+  requirementsConfirmDraft,
+  requirementsDraft,
+  requirementsException,
+  requirementsRetrofit,
+} from "./requirements.mjs";
+import {
   checkTerminalIdle,
   createWorktreeWithRoleSession,
   discoverOrcaRuntime,
@@ -444,6 +452,17 @@ export const ALLOWED_OPTIONS = {
     "remote",
     "force",
   ],
+  "requirements-draft": ["org", "worktree", "from"],
+  "requirements-confirm": [
+    "org",
+    "worktree",
+    "draft",
+    "checkout",
+    "criterion",
+    "quote",
+  ],
+  "requirements-retrofit": ["org", "worktree", "checkout"],
+  "requirements-exception": ["org", "worktree", "from"],
   deliver: [
     "org",
     "worktree",
@@ -704,6 +723,10 @@ export const REQUIRED_OPTIONS = {
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
   "kickoff-check-close-ready": ["org", "worktree", "head"],
   "kickoff-merge-record": ["org", "worktree", "head", "merge-commit"],
+  "requirements-draft": ["org", "worktree", "from"],
+  "requirements-confirm": ["org", "worktree", "criterion", "quote"],
+  "requirements-retrofit": ["org", "worktree"],
+  "requirements-exception": ["org", "worktree", "from"],
   deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
   "role-worktree-create": ["org", "role", "repo", "name", "base"],
@@ -812,7 +835,9 @@ export function parseArgs(argv) {
     const option = key.slice(2);
     // `--text` is a flag only for role-spec.
     if (
-      ["json", "apply", "force", "all", "write", "dry-run"].includes(option) ||
+      ["json", "apply", "force", "all", "write", "dry-run", "draft"].includes(
+        option,
+      ) ||
       (option === "text" && command === "role-spec")
     ) {
       args[option] = true;
@@ -2482,6 +2507,58 @@ async function writeDraft(args, execute) {
 }
 
 /**
+ * Checks director authority for a director-only `requirements-*` CLI command,
+ * strictly and without the `--force` bypass `assertDirectorAuthority`
+ * (delivery.mjs) offers other commands: a requirements command never accepts
+ * `--force` as a substitute for running from the right checkout (director
+ * decision on requirements-retrofit's authority gap, msg_2f57aa6e083e).
+ *
+ * When the kickoff has a registered director, the caller must be running
+ * from exactly that checkout. When it does not (a kickoff registered before
+ * director support existed), the caller must supply `--checkout`, must be
+ * running from exactly that path, and that path must be the organization's
+ * own owner checkout (`ownerProject(orgFile)`) — there is no warn-and-allow
+ * fallback for a missing director here, unlike `assertDirectorAuthority`.
+ *
+ * @param {object} entry - Kickoff registry entry the command targets.
+ * @param {string} orgFile - Organization JSON path, to resolve the owner checkout.
+ * @param {string|undefined} checkoutArg - The command's `--checkout` value, if given.
+ * @param {string} use - Command name, named in any thrown error.
+ * @returns {{checkoutPath: string}} The verified checkout, to record as the ledger's director.
+ * @throws {Error} When the caller is not running from the required checkout.
+ */
+function assertRequirementsDirectorAuthority(entry, orgFile, checkoutArg, use) {
+  const callerPath = path.resolve(process.cwd());
+  if (entry.director) {
+    const expected = path.resolve(entry.director.checkoutPath);
+    assert(
+      callerPath === expected,
+      `${use} must be run from the director's checkout at ${expected}; ` +
+        `current directory is ${callerPath}. There is no --force override for a requirements command.`,
+    );
+    return { checkoutPath: expected };
+  }
+  assert(
+    typeof checkoutArg === "string" && checkoutArg.trim(),
+    `${use} needs --checkout: this kickoff has no registered director, so the caller ` +
+      "must declare and prove the organization's owner checkout",
+  );
+  const declared = path.resolve(checkoutArg);
+  assert(
+    callerPath === declared,
+    `${use} must be run from the given --checkout path (${declared}); ` +
+      `current directory is ${callerPath}`,
+  );
+  const owner = path.resolve(ownerProject(orgFile));
+  assert(
+    declared === owner,
+    `${use} --checkout must be the organization's owner checkout (${owner}) for a ` +
+      `kickoff with no registered director; got ${declared}`,
+  );
+  return { checkoutPath: declared };
+}
+
+/**
  * Dispatches a parsed CLI command to its handler.
  *
  * @param {object} args - Parsed CLI arguments.
@@ -2628,6 +2705,51 @@ export async function executeCommand(args, execute) {
         remoteName: args.remote ?? "origin",
       });
     }
+    case "requirements-draft":
+      return requirementsDraft(args.org, {
+        worktreeId: args.worktree,
+        ...readJSON(args.from),
+      });
+    case "requirements-confirm": {
+      if (args.draft) {
+        return requirementsConfirmDraft(args.org, {
+          worktreeId: args.worktree,
+          criterionId: args.criterion,
+          userQuote: args.quote,
+          checkout: args.checkout,
+        });
+      }
+      return requirementsConfirm(args.org, args.worktree, {
+        criterionId: args.criterion,
+        userQuote: args.quote,
+      });
+    }
+    case "requirements-retrofit": {
+      const [entry] = listKickoffs(args.org, args.worktree).kickoffs;
+      assert(
+        entry,
+        `Worktree ${args.worktree} supervises no registered kickoff`,
+      );
+      const director = assertRequirementsDirectorAuthority(
+        entry,
+        args.org,
+        args.checkout,
+        "requirements-retrofit",
+      );
+      const draft = readDraft(args.org, args.worktree);
+      assert(
+        draft,
+        `No draft ledger recorded for worktree ${args.worktree}; run requirements-draft ` +
+          "(and, for a narrower criterion, requirements-confirm --draft) before retrofit",
+      );
+      return requirementsRetrofit(args.org, args.worktree, draft, director);
+    }
+    case "requirements-exception":
+      return requirementsException(
+        args.org,
+        args.worktree,
+        readJSON(args.from),
+      );
     case "prepare":
       return compatibilityPrepare(args);
     case "role-worktree-create":

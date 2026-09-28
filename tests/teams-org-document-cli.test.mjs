@@ -38,6 +38,7 @@ import {
   registerKickoff,
   registryDirectory,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
 const exampleOrgPath = path.resolve(
@@ -93,26 +94,6 @@ async function worktree(fixture, worktreeId) {
   return { repoDir, stateDir: path.join(repoDir, ".omt") };
 }
 
-// registerKickoff은 이제 모든 claim에 확정된 요구 원장 초안을 요구한다
-// (docs/plan/requirements-ledger-and-audit.md A.2). 이 파일은 문서 CLI를 다루지
-// 원장 자체를 다루지 않으므로, validateLedgerForClaim을 통과하는 가장 작은 형태를 쓴다:
-// scope가 "equal"인 단일 criterion은 사용자 확인이 필요 없다.
-function minimalRequirements(worktreeId) {
-  return {
-    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
-    criteria: [
-      {
-        id: "c1",
-        text: `deliver ${worktreeId}`,
-        scope: "equal",
-        userVisible: false,
-        derivedFrom: ["s1"],
-      },
-    ],
-    confirmations: [],
-  };
-}
-
 function claimFor(fixture, worktreeId, wt, delivery = { mode: "none" }) {
   return {
     goal: `deliver ${worktreeId}`,
@@ -120,7 +101,7 @@ function claimFor(fixture, worktreeId, wt, delivery = { mode: "none" }) {
     organizationRevision: readJSON(fixture.orgFile).revision,
     brief: fixture.brief,
     delivery,
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(fixture.orgFile, worktreeId),
     director: {
       terminalHandle: `term_director_${worktreeId}`,
       checkoutPath: wt.repoDir,
@@ -1509,7 +1490,7 @@ test("kickoff-branch-cleanup forwards --org as cleanupKickoffBranches' orgFile, 
     organizationRevision: readJSON(orgFile).revision,
     brief,
     delivery: { mode: "local-merge", branch: "feat/kickoff-work" },
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(orgFile, worktreeId),
     director: {
       terminalHandle: `term_director_${worktreeId}`,
       // macOS의 tmpdir는 /var가 /private/var의 심볼릭 링크라서, subprocess cwd가

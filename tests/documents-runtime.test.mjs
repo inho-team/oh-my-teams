@@ -17,6 +17,7 @@ import {
   requirementsFidelity,
   requirementsFidelityConfirm,
 } from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 import {
   DOCUMENT_STATES,
   STAGE_FOLDER_NAMES,
@@ -48,27 +49,6 @@ function project(t) {
   return { dir, org, brief };
 }
 
-// registerKickoff now requires a confirmed requirements draft on every claim
-// (docs/plan/requirements-ledger-and-audit.md A.2); this suite is about the
-// document runtime, not the ledger, so every claim carries the smallest one
-// that passes validateLedgerForClaim: a single equal-scope criterion needs no
-// user confirmation.
-function minimalRequirements(worktreeId) {
-  return {
-    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
-    criteria: [
-      {
-        id: "c1",
-        text: `deliver ${worktreeId}`,
-        scope: "equal",
-        userVisible: false,
-        derivedFrom: ["s1"],
-      },
-    ],
-    confirmations: [],
-  };
-}
-
 function claimFor(fixture, worktreeId) {
   const pm = path.join(fixture.dir, worktreeId);
   return {
@@ -77,7 +57,7 @@ function claimFor(fixture, worktreeId) {
     organizationRevision: readJSON(fixture.org).revision,
     brief: fixture.brief,
     delivery: { mode: "none" },
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(fixture.org, worktreeId),
     director: {
       terminalHandle: `term_director_${worktreeId}`,
       checkoutPath: fixture.dir,

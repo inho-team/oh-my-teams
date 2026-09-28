@@ -51,6 +51,7 @@ import {
   resolveKickoffHash,
   saveDocument,
 } from "../plugins/oh-my-teams/scripts/documents.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const example = () =>
   readJSON(
@@ -80,27 +81,6 @@ function project(t) {
   return { dir, org, brief };
 }
 
-// These tests are about the director role and registry authority, not the
-// requirements ledger (which has its own tests), so every claim carries the
-// smallest ledger that passes validateLedgerForClaim: one equal-scope
-// criterion needs no user confirmation and so no director to validate one
-// against, independent of whether this particular claim declares a director.
-function minimalRequirements(worktreeId) {
-  return {
-    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
-    criteria: [
-      {
-        id: "c1",
-        text: `deliver ${worktreeId}`,
-        scope: "equal",
-        userVisible: false,
-        derivedFrom: ["s1"],
-      },
-    ],
-    confirmations: [],
-  };
-}
-
 function claimFor(fixture, worktreeId, directorOpts) {
   const pm = path.join(fixture.dir, worktreeId);
   return {
@@ -113,7 +93,7 @@ function claimFor(fixture, worktreeId, directorOpts) {
     organizationRevision: readJSON(fixture.org).revision,
     brief: fixture.brief,
     delivery: { mode: "none" },
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(fixture.org, worktreeId),
     ...(directorOpts !== undefined ? { director: directorOpts } : {}),
   };
 }
@@ -605,7 +585,7 @@ test("director from registry reaches roleSpec via stateDir lookup (launchContext
     brief: fixture.brief,
     delivery: { mode: "none" },
     director: { terminalHandle: "term_lookup", checkoutPath: directorPath },
-    requirements: minimalRequirements("wt-director-lookup"),
+    requirements: minimalRequirements(fixture.org, "wt-director-lookup"),
   });
 
   // Replicate the launchContext lookup: find the kickoff entry by stateDir.

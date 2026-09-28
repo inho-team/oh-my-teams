@@ -18,6 +18,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import { recordLaunch } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import { requirementsPresent } from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 import {
   auditAccept,
   auditChecked,
@@ -40,24 +41,6 @@ const exampleOrg = new URL(
 // A plausible-looking commit id that is guaranteed not to be any fixture's
 // actual HEAD, for the forged/stale-head counterexamples below.
 const FORGED_HEAD = "0".repeat(40);
-
-// One equal-scope criterion needs no narrower confirmation, so no more of the
-// ledger draft/confirm flow (tested in its own file) is needed here.
-function minimalRequirements(worktreeId) {
-  return {
-    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
-    criteria: [
-      {
-        id: "c1",
-        text: `deliver ${worktreeId}`,
-        scope: "equal",
-        userVisible: false,
-        derivedFrom: ["s1"],
-      },
-    ],
-    confirmations: [],
-  };
-}
 
 function git(dir, args) {
   return execFileSync("git", args, { cwd: dir }).toString().trim();
@@ -104,7 +87,7 @@ function kickoff(t, worktreeId = "wt-1") {
     organizationRevision: readJSON(org).revision,
     brief,
     delivery: { mode: "none" },
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(org, worktreeId),
     director: { terminalHandle: "term_director_1", checkoutPath: dir },
   });
   bindKickoffRun(org, { worktreeId, runId: "run-1" });
@@ -944,7 +927,7 @@ function secondKickoff(fixture, worktreeId) {
     organizationRevision: readJSON(fixture.org).revision,
     brief,
     delivery: { mode: "none" },
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(fixture.org, worktreeId),
     director: { terminalHandle: "term_director_2", checkoutPath: dir },
   });
   const [entry] = listKickoffs(fixture.org, worktreeId).kickoffs;

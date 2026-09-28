@@ -27,6 +27,7 @@ import {
   saveDocument,
 } from "../plugins/oh-my-teams/scripts/documents.mjs";
 import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const exampleOrg = path.resolve(
   "plugins/oh-my-teams/examples/organization.json",
@@ -45,22 +46,6 @@ async function git(cwd, ...args) {
 // (a director-confirmed fidelity check covering s1/c1 as "met") right after
 // registering, since assertKickoffCloseReady now runs unconditionally inside
 // deliverKickoff/releaseKickoff.
-function minimalRequirements(worktreeId) {
-  return {
-    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
-    criteria: [
-      {
-        id: "c1",
-        text: `deliver ${worktreeId}`,
-        scope: "equal",
-        userVisible: false,
-        derivedFrom: ["s1"],
-      },
-    ],
-    confirmations: [],
-  };
-}
-
 // A project on main that owns an organization, and one kickoff worktree with
 // a committed result, like literacy-test's report branch.
 
@@ -106,7 +91,7 @@ async function kickoffProject(
     organizationRevision: JSON.parse(fs.readFileSync(org, "utf8")).revision,
     brief,
     delivery,
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(org, worktreeId),
     // validateLedgerForClaim requires a registered director unconditionally,
     // even for this equal-only ledger. The checkout is the test process's own
     // cwd so releaseKickoff's director-authority check passes without
@@ -143,7 +128,7 @@ test("a claim records how the brief delivers, and a branch where one is merged",
     organizationRevision: entry.organizationRevision,
     brief: entry.brief,
     delivery,
-    requirements: minimalRequirements("wt-2"),
+    requirements: minimalRequirements(fixture.org, "wt-2"),
     director: {
       terminalHandle: "term_director_wt-2",
       checkoutPath: process.cwd(),

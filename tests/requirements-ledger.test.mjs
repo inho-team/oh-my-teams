@@ -25,10 +25,63 @@ import {
   validateLedgerForClaim,
   writeConfirmedLedger,
 } from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import { writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
+import {
+  kickoffEntryName,
+  registryDirectory,
+} from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 
 // A plausible-looking commit id that is guaranteed not to be any fixture's
 // actual HEAD, for the forged/stale-head counterexamples below.
 const FORGED_HEAD = "0".repeat(40);
+
+const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
+
+// Runs the teams-org CLI as a real child process (never `run-use`), returning
+// its exit code and streams instead of throwing, so a rejection test can
+// assert on the exact message the CLI printed to stderr.
+function runCli(args, options = {}) {
+  try {
+    const stdout = execFileSync(process.execPath, [cli, ...args], {
+      stdio: "pipe",
+      encoding: "utf-8",
+      ...options,
+    });
+    return { code: 0, stdout, stderr: "" };
+  } catch (error) {
+    return {
+      code: error.status ?? 1,
+      stdout: error.stdout || "",
+      stderr: error.stderr || error.message || "",
+    };
+  }
+}
+
+// A registry entry with no `director` and no `requirements`, written directly
+// to the registry file the way a pre-ledger release would have (registerKickoff
+// itself now refuses to produce a director-less, requirements-less entry) —
+// the shape `requirements-retrofit`'s legacy branch exists to reach.
+function writeLegacyKickoffEntry(fx) {
+  const entryPath = path.join(
+    registryDirectory(fx.orgFile),
+    `${kickoffEntryName(fx.worktreeId)}.json`,
+  );
+  fs.mkdirSync(path.dirname(entryPath), { recursive: true });
+  writeJSON(entryPath, {
+    schemaVersion: 1,
+    goal: `deliver ${fx.worktreeId}`,
+    pm: {
+      worktreeId: fx.worktreeId,
+      path: fx.dir,
+      stateDir: path.join(fx.dir, ".omt"),
+    },
+    organizationRevision: 1,
+    brief: path.join(fx.dir, "brief.md"),
+    delivery: { mode: "none" },
+    runId: null,
+    createdAt: "2026-09-16T00:00:00.000Z",
+  });
+}
 
 function git(dir, args) {
   return execFileSync("git", args, { cwd: dir }).toString().trim();
@@ -136,6 +189,7 @@ function confirmClaim(fx) {
   const requirements = validateLedgerForClaim(
     { ...claimFrom(fx), worktreeId: fx.worktreeId },
     fx.director,
+    fx.orgFile,
   );
   const ledger = confirmedLedgerFromClaim(requirements, fx.director);
   writeConfirmedLedger(fx.orgFile, fx.worktreeId, ledger);
@@ -148,11 +202,35 @@ function evidenceFile(dir, text = "screenshot bytes") {
   return file;
 }
 
+// Reads the draft ledger's own file directly (there is exactly one file per
+// worktree under requirements-drafts/), so a test can plant a confirmation
+// on the stored draft that no public API can produce — here, one attached to
+// an equal-scope criterion, which requirementsConfirmDraft refuses to record
+// (only a narrower criterion may be confirmed). This is the only way to
+// reproduce "the stored draft carries a confirmation the claim drops" without
+// it being caught first by the narrower-criterion loop, which only checks
+// narrower criteria.
+function draftFilePath(fx) {
+  const dir = path.join(fx.projectRoot, "requirements-drafts");
+  const [name] = fs.readdirSync(dir);
+  return path.join(dir, name);
+}
+
+function readDraftFileDirect(fx) {
+  const file = draftFilePath(fx);
+  return { file, draft: JSON.parse(fs.readFileSync(file, "utf8")) };
+}
+
+function writeDraftFileDirect(file, draft) {
+  fs.writeFileSync(file, JSON.stringify(draft, null, 2));
+}
+
 test("validateLedgerForClaim accepts a narrower criterion with a matching hash-bound confirmation", () => {
   const fx = fixture({ after() {} });
   const requirements = validateLedgerForClaim(
     { ...claimFrom(fx), worktreeId: fx.worktreeId },
     fx.director,
+    fx.orgFile,
   );
   assert.equal(requirements.criteria.length, 2);
 });
@@ -174,6 +252,7 @@ test("validateLedgerForClaim refuses a narrower criterion with no recorded confi
           worktreeId: "wt-2",
         },
         { checkoutPath: dir },
+        orgFile,
       ),
     /requires a recorded user confirmation/,
   );
@@ -194,6 +273,7 @@ test("validateLedgerForClaim refuses a confirmation recorded from a checkout oth
       validateLedgerForClaim(
         { ...claimFrom(fx), worktreeId: fx.worktreeId },
         otherDirector,
+        fx.orgFile,
       ),
     /checkout other than the claim's declared director/,
   );
@@ -211,6 +291,7 @@ test("validateLedgerForClaim refuses a confirmation with a blank userQuote, even
       validateLedgerForClaim(
         { ...claim, worktreeId: fx.worktreeId },
         fx.director,
+        fx.orgFile,
       ),
     /missing the user's own quote/,
   );
@@ -228,6 +309,7 @@ test("validateLedgerForClaim refuses a confirmation with no valid confirmedAt ti
       validateLedgerForClaim(
         { ...claim, worktreeId: fx.worktreeId },
         fx.director,
+        fx.orgFile,
       ),
     /valid recorded timestamp/,
   );
@@ -238,11 +320,123 @@ test("validateLedgerForClaim does not require confirmation for equal-scope crite
   const requirements = validateLedgerForClaim(
     { ...claimFrom(fx), worktreeId: fx.worktreeId },
     fx.director,
+    fx.orgFile,
   );
   const equalCriterion = requirements.criteria.find(
     (item) => item.id === "visible-1",
   );
   assert.equal(equalCriterion.scope, "equal");
+});
+
+// draft-comparison-not-hash: ledgerHash(requirements.mjs) deliberately drops
+// each criterion's own `confirmation` field (that field is expected to
+// change as a confirmation is recorded, without invalidating other bindings
+// keyed on the ledger hash), so a claim/retrofit comparison that used
+// ledgerHash for this check would let a tampered `criterion.confirmation`
+// field through undetected. It has to compare criteria field-for-field
+// instead.
+test("validateLedgerForClaim refuses a claim whose criteria carry a tampered confirmation field, even though statements/criteria hash the same", (t) => {
+  const fx = fixture(t);
+  const claim = claimFrom(fx);
+  claim.criteria = claim.criteria.map((item) =>
+    item.id === "visible-1" ? { ...item, confirmation: "forged" } : item,
+  );
+  assert.equal(
+    ledgerHash({ statements: claim.statements, criteria: claim.criteria }),
+    ledgerHash({
+      statements: fx.statements,
+      criteria: readDraft(fx.orgFile, fx.worktreeId).criteria,
+    }),
+    "sanity check: ledgerHash itself does not notice the tampered field",
+  );
+  assert.throws(
+    () =>
+      validateLedgerForClaim(
+        { ...claim, worktreeId: fx.worktreeId },
+        fx.director,
+        fx.orgFile,
+      ),
+    /criteria do not match the recorded draft ledger/,
+  );
+});
+
+test("requirementsRetrofit refuses a draft argument whose criteria carry a tampered confirmation field", async (t) => {
+  const fx = fixture(t, "wt-legacy-tamper-criteria");
+  const claim = claimFrom(fx);
+  claim.criteria = claim.criteria.map((item) =>
+    item.id === "visible-1" ? { ...item, confirmation: "forged" } : item,
+  );
+  await assert.rejects(
+    requirementsRetrofit(fx.orgFile, fx.worktreeId, claim, fx.director),
+    /criteria do not match the recorded draft ledger/,
+  );
+});
+
+// draft-comparison-both-ways: a one-directional comparison that only asks,
+// for each confirmation the claim presents, "does the draft have this one?"
+// never notices a confirmation the stored draft carries but the claim drops
+// (requirementsConfirmDraft only ever confirms a narrower criterion, so the
+// dropped entry has to belong to an equal-scope criterion here — otherwise
+// the narrower-criterion loop above would already refuse it on its own,
+// independently of this check).
+test("validateLedgerForClaim refuses a claim that drops a confirmation the stored draft still carries", (t) => {
+  const fx = fixture(t);
+  const { file, draft } = readDraftFileDirect(fx);
+  const extraConfirmation = {
+    criterionId: "visible-1",
+    textHash: confirmationTextHash(
+      draft.criteria.find((item) => item.id === "visible-1"),
+      draft.statements,
+    ),
+    confirmedAt: new Date().toISOString(),
+    userQuote: "네, 이 기준도 확인했습니다",
+    recordedFromCheckout: path.resolve(fx.dir),
+  };
+  draft.confirmations = [...draft.confirmations, extraConfirmation];
+  writeDraftFileDirect(file, draft);
+  const claim = claimFrom(fx);
+  assert.equal(
+    claim.confirmations.length,
+    2,
+    "sanity check: draft now carries both confirmations",
+  );
+  claim.confirmations = claim.confirmations.filter(
+    (item) => item.criterionId !== "visible-1",
+  );
+  assert.throws(
+    () =>
+      validateLedgerForClaim(
+        { ...claim, worktreeId: fx.worktreeId },
+        fx.director,
+        fx.orgFile,
+      ),
+    /confirmations do not match the recorded draft ledger/,
+  );
+});
+
+test("requirementsRetrofit refuses a draft argument that drops a confirmation the stored draft still carries", async (t) => {
+  const fx = fixture(t, "wt-legacy-drop-confirmation");
+  const { file, draft } = readDraftFileDirect(fx);
+  const extraConfirmation = {
+    criterionId: "visible-1",
+    textHash: confirmationTextHash(
+      draft.criteria.find((item) => item.id === "visible-1"),
+      draft.statements,
+    ),
+    confirmedAt: new Date().toISOString(),
+    userQuote: "네, 이 기준도 확인했습니다",
+    recordedFromCheckout: path.resolve(fx.dir),
+  };
+  draft.confirmations = [...draft.confirmations, extraConfirmation];
+  writeDraftFileDirect(file, draft);
+  const claim = claimFrom(fx);
+  claim.confirmations = claim.confirmations.filter(
+    (item) => item.criterionId !== "visible-1",
+  );
+  await assert.rejects(
+    requirementsRetrofit(fx.orgFile, fx.worktreeId, claim, fx.director),
+    /confirmations do not match the recorded draft ledger/,
+  );
 });
 
 test("confirmationTextHash changes when a narrower criterion's scope flips away from narrower", () => {
@@ -939,4 +1133,140 @@ test("director-authority-gap: requirementsException refuses a declared head that
     }),
     /does not match the actual Git HEAD/,
   );
+});
+
+// CLI-level authority tests for requirements-retrofit and requirements-exception
+// (director decision on requirements-retrofit's authority gap, msg_2f57aa6e083e):
+// --force no longer bypasses the checkout check, and a legacy (director-less)
+// kickoff is retrofitted only from the organization's own owner checkout.
+
+test("cli director-authority-gap: requirements-retrofit refuses --force as an unknown option, even outside the checkout", (t) => {
+  const fx = fixture(t);
+  writeLegacyKickoffEntry(fx);
+  const other = otherCheckout(t);
+  const result = runCli(
+    [
+      "requirements-retrofit",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--checkout",
+      fx.dir,
+      "--force",
+    ],
+    { cwd: other },
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Unknown option: --force/);
+});
+
+test("cli director-authority-gap: requirements-retrofit refuses a director-less kickoff with no --checkout", (t) => {
+  const fx = fixture(t);
+  writeLegacyKickoffEntry(fx);
+  const result = runCli(
+    ["requirements-retrofit", "--org", fx.orgFile, "--worktree", fx.worktreeId],
+    { cwd: fx.dir },
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /needs --checkout/);
+});
+
+test("cli director-authority-gap: requirements-retrofit refuses a --checkout that does not match the caller's cwd", (t) => {
+  const fx = fixture(t);
+  writeLegacyKickoffEntry(fx);
+  const other = otherCheckout(t);
+  const result = runCli(
+    [
+      "requirements-retrofit",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--checkout",
+      fx.dir,
+    ],
+    { cwd: other },
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /must be run from the given --checkout path/);
+});
+
+test("cli director-authority-gap: requirements-retrofit refuses a --checkout that is not the organization's owner checkout", (t) => {
+  const fx = fixture(t);
+  writeLegacyKickoffEntry(fx);
+  // realpath'd, like fixture()'s own dir: otherCheckout() is not, and on
+  // macOS an unresolved os.tmpdir() path never equals process.cwd(), which
+  // would trip the "must be run from the given --checkout path" check before
+  // this test ever reaches the owner-checkout check it means to exercise.
+  const other = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-reqledger-other-")),
+  );
+  t.after(() => fs.rmSync(other, { recursive: true, force: true }));
+  const result = runCli(
+    [
+      "requirements-retrofit",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--checkout",
+      other,
+    ],
+    { cwd: other },
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /must be the organization's owner checkout/);
+});
+
+test("cli director-authority-gap: requirements-retrofit succeeds from the organization's own owner checkout", (t) => {
+  const fx = fixture(t);
+  writeLegacyKickoffEntry(fx);
+  const result = runCli(
+    [
+      "requirements-retrofit",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--checkout",
+      fx.dir,
+    ],
+    { cwd: fx.dir },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.retrofitted, true);
+});
+
+test("cli director-authority-gap: requirements-exception refuses a caller outside the ledger's director checkout", (t) => {
+  const fx = fixture(t);
+  confirmClaim(fx);
+  const requestFile = path.join(fx.dir, "exception-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      scope: [{ type: "criterion", id: "visible-1" }],
+      head: fx.head,
+      repo: fx.dir,
+      reason: "user accepted the current behavior for this release",
+      userQuote: "fine, ship it as-is for now",
+      unmetFacts: "the warning still fires on non-destructive commands too",
+    }),
+  );
+  const other = otherCheckout(t);
+  const result = runCli(
+    [
+      "requirements-exception",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: other },
+  );
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /must be run from the director's checkout/);
 });

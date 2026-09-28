@@ -93,6 +93,7 @@ function withLedgerFromClaim(orgFile, claim, worktreeId) {
   const requirements = validateLedgerForClaim(
     { ...claim.requirements, worktreeId },
     claim.director,
+    orgFile,
   );
   const ledger = confirmedLedgerFromClaim(requirements, claim.director);
   const written = writeConfirmedLedger(orgFile, worktreeId, ledger);

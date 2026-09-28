@@ -11,6 +11,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   assert,
   fileSha256,
@@ -31,6 +32,20 @@ const PRESENTATION_OUTCOMES = ["confirmed", "rejected"];
 
 function canonicalHash(value) {
   return hash(canonicalize(value));
+}
+
+/**
+ * Sorts a copy of `list` by the string value of `key`, so two arrays holding
+ * the same items in a different order compare equal, while a length
+ * difference, an added item, a removed item, or a changed field on any item
+ * still compares unequal.
+ *
+ * @param {object[]} list - Items to sort, each carrying `key`.
+ * @param {string} key - Property to sort by.
+ * @returns {object[]} New, sorted array; `list` itself is left untouched.
+ */
+function sortedBy(list, key) {
+  return [...list].sort((a, b) => String(a[key]).localeCompare(String(b[key])));
 }
 
 /**
@@ -350,22 +365,38 @@ export function requirementsConfirmDraft(
 }
 
 /**
- * Validates a claim's embedded requirements draft against the claim's own
- * declared director, closing the A.2 deadlock without any registry lookup.
+ * Validates a claim's embedded requirements against the stored draft ledger
+ * recorded on disk for the same worktree, closing the A.2 deadlock without a
+ * kickoff-registry lookup. This is the single comparison a new claim
+ * (`kickoff-registry.mjs`'s `withLedgerFromClaim`) and a legacy backfill
+ * (`requirementsRetrofit`) both run: neither may substitute hand-assembled
+ * statements, criteria or confirmations for what `requirements-draft` and
+ * `requirements-confirm --draft` actually recorded, so a confirmation whose
+ * hash and checkout merely happen to match (but was never spoken by the
+ * user through that draft) is refused. There is no equal-only shortcut: a
+ * claim that never went through `requirements-draft` is refused even when
+ * every criterion is equal-scope, because a narrower criterion demoted to
+ * equal-scope in the claim (to dodge the confirmation requirement below)
+ * would otherwise pass unnoticed (docs/plan/requirements-ledger-and-audit.md
+ * A.2).
  *
- * @param {object} requirements - The `requirements` block of a kickoff claim.
+ * @param {object} requirements - The `requirements` block of a kickoff claim
+ *   or a retrofit's reconstructed ledger, both compared against the stored
+ *   draft; carries the `worktreeId` the draft was recorded under.
  * @param {{checkoutPath: string}} director - The claim's declared director.
+ * @param {string} orgFile - Organization JSON path, to locate the stored draft.
  * @returns {object} The same `requirements` object, once every check passes.
  * @throws {Error} When statements/criteria are empty, a narrower criterion
- *   lacks a matching confirmation, or the confirmation was recorded from a
- *   checkout other than the claim's declared director.
+ *   lacks a matching confirmation, a confirmation was recorded from a
+ *   checkout other than the claim's declared director, no draft is recorded
+ *   for the worktree, or the requirements block diverges from that draft.
  */
-export function validateLedgerForClaim(requirements, director) {
+export function validateLedgerForClaim(requirements, director, orgFile) {
   assert(
     requirements && typeof requirements === "object",
     "Claim requirements ledger required",
   );
-  const { statements, criteria, confirmations = [] } = requirements;
+  const { statements, criteria, confirmations = [], worktreeId } = requirements;
   validateStatements(statements);
   validateCriteria(criteria, statements);
   // A registered director is required unconditionally, even when this claim's
@@ -406,6 +437,55 @@ export function validateLedgerForClaim(requirements, director) {
       `Confirmation for ${criterion.id}`,
     );
   }
+  // Every claim/retrofit must match a draft actually recorded on disk: this
+  // is what stops a hand-assembled requirements block (correct hash, correct
+  // checkout, non-blank quote, but never run through requirements-draft /
+  // requirements-confirm --draft) from passing. There is no equal-only
+  // exception (A.2, appendix B).
+  assert(
+    typeof orgFile === "string" && orgFile.trim(),
+    "Validating a claim's requirements ledger requires orgFile, to locate the stored draft",
+  );
+  assert(
+    typeof worktreeId === "string" && worktreeId.trim(),
+    "Claim requirements must carry the worktreeId the draft was recorded under",
+  );
+  const draft = readDraft(orgFile, worktreeId);
+  assert(
+    draft,
+    `No draft ledger recorded for worktree ${worktreeId}; run requirements-draft ` +
+      "(and, for a narrower criterion, requirements-confirm --draft from the director's checkout) " +
+      "before this claim or retrofit",
+  );
+  // Compared field-for-field against the draft, not via ledgerHash: ledgerHash
+  // deliberately excludes each criterion's own `confirmation` field (it is
+  // meant to stay stable across a confirmation being recorded), so a hash
+  // comparison here would let a claim tamper with that field undetected.
+  // Sorting both sides and running isDeepStrictEqual instead catches a
+  // changed, added, or removed statement/criterion (confirmation field
+  // included), and — for confirmations — is checked both ways: an entry the
+  // claim adds and one it drops from the stored draft are both refused.
+  assert(
+    isDeepStrictEqual(
+      sortedBy(statements, "id"),
+      sortedBy(draft.statements, "id"),
+    ),
+    `This claim's statements do not match the recorded draft ledger for worktree ${worktreeId} ` +
+      "(a statement was added, removed, or its text/source changed)",
+  );
+  assert(
+    isDeepStrictEqual(sortedBy(criteria, "id"), sortedBy(draft.criteria, "id")),
+    `This claim's criteria do not match the recorded draft ledger for worktree ${worktreeId} ` +
+      "(a criterion was added, removed, or its text/scope/userVisible/derivedFrom/confirmation field changed)",
+  );
+  assert(
+    isDeepStrictEqual(
+      sortedBy(confirmations, "criterionId"),
+      sortedBy(draft.confirmations, "criterionId"),
+    ),
+    `This claim's confirmations do not match the recorded draft ledger for worktree ${worktreeId} ` +
+      "(an entry was added, removed, or altered)",
+  );
   return requirements;
 }
 
@@ -863,9 +943,26 @@ export async function requirementsException(
  * same validation as a new claim's draft; the director's authority to do this
  * (`assertDirectorAuthority`) is checked by the caller.
  *
+ * `draft` must equal what `requirements-draft` (and, for a narrower
+ * criterion, `requirements-confirm --draft`) actually recorded on disk for
+ * `worktreeId` — `validateLedgerForClaim` compares it against that stored
+ * draft field-for-field, so a hand-assembled `draft` argument that never went
+ * through those commands is refused the same way a forged new-claim
+ * `requirements` block is. This closes counterexample 7 for legacy kickoffs
+ * too: a legacy kickoff still has to go through `requirements-draft` (and
+ * `requirements-confirm --draft` for any narrower criterion) before it can be
+ * retrofitted, it just does so after the fact instead of before the claim.
+ * One gap the runtime cannot catch: a criterion the user actually meant as
+ * narrower, but that the draft records as equal-scope, passes here exactly
+ * like any other equal-scope criterion, because nothing on disk marks it as a
+ * semantic narrowing. Catching that is the director's own fidelity
+ * confirmation (`requirementsFidelityConfirm`) and the auditor's comparison
+ * against the original statements, not this function.
+ *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree the retrofit applies to.
- * @param {{statements: object[], criteria: object[], confirmations: object[]}} draft - Reconstructed ledger content.
+ * @param {{statements: object[], criteria: object[], confirmations: object[]}} draft - Content
+ *   that must equal the stored draft already recorded for `worktreeId`.
  * @param {{checkoutPath: string}} director - The kickoff's registered director.
  * @returns {Promise<{retrofitted: boolean, ledger: object}>} Written ledger.
  * @throws {Error} When a confirmed ledger already exists, or validation fails.
@@ -882,7 +979,7 @@ export async function requirementsRetrofit(
       !fs.existsSync(file),
       `Worktree ${worktreeId} already has a confirmed ledger`,
     );
-    validateLedgerForClaim({ ...draft, worktreeId }, director);
+    validateLedgerForClaim({ ...draft, worktreeId }, director, orgFile);
     const ledger = confirmedLedgerFromClaim({ ...draft, worktreeId }, director);
     writeJSON(file, ledger);
     return { retrofitted: true, ledger };
@@ -1046,8 +1143,10 @@ export function assertLedgerExists(orgFile, worktreeId) {
   const ledger = readLedger(orgFile, worktreeId);
   assert(
     ledger,
-    `Worktree ${worktreeId} has no requirements ledger; run requirements-retrofit ` +
-      "or record item-scoped requirements-exception records before closing",
+    `Worktree ${worktreeId} has no requirements ledger; run requirements-draft, then ` +
+      "(for any narrower criterion, from the director's checkout) requirements-confirm --draft, " +
+      "then requirements-retrofit before closing — requirements-exception records unmet items only " +
+      "after a confirmed ledger exists, so it cannot substitute for the retrofit itself",
   );
   return ledger;
 }

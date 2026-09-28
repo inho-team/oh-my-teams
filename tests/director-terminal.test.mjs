@@ -24,6 +24,7 @@ import {
   REQUIRED_OPTIONS,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
@@ -302,27 +303,6 @@ function project(t) {
   return { dir, org, brief };
 }
 
-// registerKickoff now requires a confirmed requirements draft on every claim
-// (docs/plan/requirements-ledger-and-audit.md A.2); this suite is about
-// director reassignment, not the ledger, so each claim carries the smallest
-// one that passes validateLedgerForClaim: a single equal-scope criterion
-// needs no user confirmation.
-function minimalRequirements(worktreeId) {
-  return {
-    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
-    criteria: [
-      {
-        id: "c1",
-        text: `deliver ${worktreeId}`,
-        scope: "equal",
-        userVisible: false,
-        derivedFrom: ["s1"],
-      },
-    ],
-    confirmations: [],
-  };
-}
-
 function claim(fixture, worktreeId, terminalHandle) {
   const pm = path.join(fixture.dir, worktreeId);
   return {
@@ -331,7 +311,7 @@ function claim(fixture, worktreeId, terminalHandle) {
     organizationRevision: readJSON(fixture.org).revision,
     brief: fixture.brief,
     delivery: { mode: "none" },
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(fixture.org, worktreeId),
     director: { terminalHandle, checkoutPath: fixture.dir },
   };
 }

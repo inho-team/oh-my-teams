@@ -21,6 +21,7 @@ import {
   releaseKickoff,
   verifyHandoffClaim,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
 const exampleOrg = path.resolve(
@@ -38,26 +39,6 @@ function project(t) {
   return { dir, org, brief };
 }
 
-// These tests are about the registry itself, not the requirements ledger
-// (which has its own tests), so every claim carries the smallest ledger that
-// passes validateLedgerForClaim: one equal-scope criterion needs no user
-// confirmation and so no director.checkoutPath to validate it against.
-function minimalRequirements(worktreeId) {
-  return {
-    statements: [{ id: "s1", text: `deliver ${worktreeId}`, source: "brief" }],
-    criteria: [
-      {
-        id: "c1",
-        text: `deliver ${worktreeId}`,
-        scope: "equal",
-        userVisible: false,
-        derivedFrom: ["s1"],
-      },
-    ],
-    confirmations: [],
-  };
-}
-
 function claimFor(fixture, worktreeId) {
   const pm = path.join(fixture.dir, worktreeId);
   return {
@@ -71,7 +52,7 @@ function claimFor(fixture, worktreeId) {
     brief: fixture.brief,
     // These tests are about the registry itself; delivery has its own tests.
     delivery: { mode: "none" },
-    requirements: minimalRequirements(worktreeId),
+    requirements: minimalRequirements(fixture.org, worktreeId),
     // validateLedgerForClaim requires a registered director unconditionally,
     // even for this equal-only ledger, so every claim needs one. The checkout
     // is the test process's own cwd so kickoff-release's director-authority
@@ -316,6 +297,7 @@ test("the id Orca returns registers, binds and releases as given", async (t) => 
     goal: "deliver the Orca-addressed kickoff",
   };
   claim.pm = { ...claim.pm, worktreeId };
+  claim.requirements = minimalRequirements(fixture.org, worktreeId);
 
   const claimed = registerKickoff(fixture.org, claim);
   assert.equal(path.dirname(claimed.file), registryDirectory(fixture.org));
@@ -349,6 +331,7 @@ test("no worktree id writes outside the registry", async (t) => {
   const worktreeId = "../../escaped";
   const claim = claimFor(fixture, "wt-escape");
   claim.pm = { ...claim.pm, worktreeId };
+  claim.requirements = minimalRequirements(fixture.org, worktreeId);
 
   const claimed = registerKickoff(fixture.org, claim);
   assert.equal(path.dirname(claimed.file), registryDirectory(fixture.org));
