@@ -184,6 +184,84 @@ test("deliver merges the verified head into the owner branch once", async (t) =>
   );
 });
 
+test("a later delivery preserves the earlier merge and refuses a stale stage", async (t) => {
+  const fixture = await kickoffProject(t);
+  const options = {
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  };
+  const first = await deliverKickoff(options);
+  const ownerAfterFirst = await git(fixture.project, "rev-parse", "HEAD");
+
+  // A new commit on the old branch cannot replace the first delivered result.
+  fs.writeFileSync(path.join(fixture.worktree, "docs", "later.md"), "stale\n");
+  await git(fixture.worktree, "add", ".");
+  await git(fixture.worktree, "commit", "-qm", "stale continuation");
+  const staleHead = await git(fixture.worktree, "rev-parse", "HEAD");
+  await assert.rejects(
+    deliverKickoff({ ...options, head: staleHead }),
+    /does not contain previous merge/,
+  );
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    ownerAfterFirst,
+  );
+  assert.equal(
+    listKickoffs(fixture.org).kickoffs[0].deliveryHistory,
+    undefined,
+  );
+
+  await git(
+    fixture.worktree,
+    "merge",
+    "--no-ff",
+    "-qm",
+    "integrate main",
+    "main",
+  );
+  fs.writeFileSync(
+    path.join(fixture.worktree, "docs", "later.md"),
+    "current\n",
+  );
+  await git(fixture.worktree, "commit", "-qam", "finish continuation");
+  const nextHead = await git(fixture.worktree, "rev-parse", "HEAD");
+  let gateCalls = 0;
+  const second = await deliverKickoff({
+    ...options,
+    head: nextHead,
+    gate: async () => {
+      gateCalls += 1;
+    },
+  });
+  assert.equal(second.merged, true);
+  assert.equal(gateCalls, 1);
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    second.mergeCommit,
+  );
+  assert.equal(await git(fixture.project, "rev-parse", "HEAD^2"), nextHead);
+  const [entry] = listKickoffs(fixture.org).kickoffs;
+  assert.deepEqual(entry.deliveryHistory, [
+    {
+      head: first.head,
+      mergeCommit: first.mergeCommit,
+      at: entry.deliveryHistory[0].at,
+    },
+  ]);
+  assert.equal(entry.delivered.head, nextHead);
+  assert.equal(entry.delivered.mergeCommit, second.mergeCommit);
+  assert.equal(
+    (await deliverKickoff({ ...options, head: nextHead })).merged,
+    false,
+  );
+  assert.deepEqual(
+    listKickoffs(fixture.org).kickoffs[0].deliveryHistory,
+    entry.deliveryHistory,
+  );
+});
+
 test("deliver refuses a moved head, an unready owner, and a conflict", async (t) => {
   const fixture = await kickoffProject(t);
   const options = {
