@@ -77,13 +77,16 @@ function git(dir, args) {
   return execFileSync("git", args, { cwd: dir }).toString().trim();
 }
 
-// A minimal, real executable standing in for the Orca CLI, for CLI-level
-// tests of verifiedPm's `orchestration run-current` call. It only answers
-// that one subcommand, from a fixed handle -> runId map; every other
-// invocation exits non-zero, so a test that reaches this fake by an
-// unintended path fails loudly instead of appearing to succeed. Pointed to
-// via ORCA_CLI_COMMAND, exactly how selectOrcaExecutable discovers a real
-// Orca outside a CLI argument, so `--orca` cannot substitute for it.
+// A minimal, real executable standing in for the Orca CLI, for direct calls
+// of verifiedPm's `orchestration run-current` check. It only answers that one
+// subcommand, from a fixed handle -> runId map; every other invocation exits
+// non-zero, so a test that reaches this fake by an unintended path fails
+// loudly instead of appearing to succeed. Since verifiedPm resolves its
+// executable through selectTrustedOrcaExecutable unless one is given, the
+// only way a test reaches this fixture is by passing its path as
+// `options.orca` directly (an API argument, per B.6 decision B) — never
+// through argv or ORCA_CLI_COMMAND, both of which selectTrustedOrcaExecutable
+// ignores.
 function writeFakeOrca(dir, runs) {
   const file = path.join(dir, "fake-orca.mjs");
   fs.writeFileSync(
@@ -180,7 +183,16 @@ const auditorEnv = (handle) => ({ ORCA_TERMINAL_HANDLE: handle });
 // kickoff's own Run, exactly as the real CLI would once the PM is bound.
 // The caller's own identity is proven separately, via ORCA_TERMINAL_HANDLE
 // (see `auditorEnv`/`pmIdentity` call sites below), never through this object.
+// `orca` is a placeholder string, never a real path: verifiedPm passes it
+// straight through as `runOrcaJson`'s first argv element, and `execute` is
+// the only thing that ever runs, so the value itself is inert. It exists so
+// this options object exercises the same `options.orca` injection point
+// selectTrustedOrcaExecutable is bypassed by (B.6, decision B) — omitting it
+// would make verifiedPm call selectTrustedOrcaExecutable() instead, which
+// resolves a real, platform-specific path this fixture has no business
+// depending on.
 const pmIdentity = (fixture) => ({
+  orca: "fake-orca-unused-because-execute-is-mocked",
   execute: async () => ({
     code: 0,
     timedOut: false,
@@ -1004,7 +1016,7 @@ function secondKickoff(fixture, worktreeId) {
 
 test(
   "role-terminal --role auditor refuses without --state, without director authority, " +
-    "from the pm's or a worker's worktree, and with another kickoff's --state, then succeeds once all are satisfied",
+    "from the pm's or a worker's worktree, with another kickoff's --state, and with --orca even once every other check is satisfied",
   async (t) => {
     const fixture = kickoff(t);
     const org = readJSON(fixture.org);
@@ -1105,7 +1117,14 @@ test(
       /director's checkout/,
     );
 
-    // 정상 경로: 모든 검사를 통과하면 남는 실패는 실행기 부재뿐임을 확인한다.
+    // 모든 사전 검사(state, director authority, worktree 충돌)를 통과해도
+    // --orca는 여전히 거부된다: 감사 실행기는 selectTrustedOrcaExecutable로만
+    // 정해지며(B.6, 결정 B), 이 값이 실제 신뢰 경로를 가리키면 곧바로 진짜
+    // Orca 프로세스와 통신을 시도하게 되므로, 그 성공 경로까지 이 테스트가
+    // 안전하게 검증할 수 없다(로컬 개발 머신에 실제 Orca 설치가 있을 수 있어
+    // 부작용을 일으킬 위험이 있다). 그 성공/실패 분기 자체는
+    // orca-adapter.mjs의 selectTrustedOrcaExecutable 단위 테스트가
+    // candidates/exists를 주입해 다룬다.
     await assert.rejects(
       () =>
         roleTerminal([
@@ -1116,7 +1135,7 @@ test(
           "--orca",
           path.join(fixture.dir, "missing-orca"),
         ]),
-      /ENOENT|spawn/,
+      /does not accept --orca/,
     );
   },
 );
@@ -1247,10 +1266,16 @@ test("cli audit-response: succeeds from the director's checkout (brief checkpoin
 // otherwise name any handle via --terminal and have run-current confirmed
 // against it, or point --orca at a forged executable that fabricates that
 // confirmation. verifiedPm now reads ORCA_TERMINAL_HANDLE from the real
-// process environment and discovers the Orca executable from
-// ORCA_CLI_COMMAND/platform defaults, the same way verifiedAuditor does for
-// the auditor role, so neither identity input is settable by argv.
-test("cli audit-response (outcome checkpoint): --terminal and --orca are unknown options, and the real-PM-env path succeeds", async (t) => {
+// process environment and resolves its Orca executable through
+// selectTrustedOrcaExecutable, the same way verifiedAuditor's identity input
+// is settled without argv (B.6, decision B), so neither --terminal nor
+// --orca can substitute for either. The success path this used to exercise
+// at the CLI, by pointing ORCA_CLI_COMMAND at a forged Orca, no longer
+// demonstrates anything: selectTrustedOrcaExecutable ignores that variable,
+// so it is covered instead by the direct verifiedPm/auditResponse call below,
+// which injects a stand-in executable through options.orca (an API
+// argument), exactly as decision B requires test fixtures to.
+test("cli audit-response (outcome checkpoint): --terminal and --orca are unknown options", async (t) => {
   const fixture = kickoff(t);
   await auditObjection(
     fixture.org,
@@ -1323,54 +1348,76 @@ test("cli audit-response (outcome checkpoint): --terminal and --orca are unknown
   ]);
   assert.notEqual(orcaRejected.code, 0);
   assert.match(orcaRejected.stderr, /--orca/);
+});
 
-  // (c) The real PM env path: ORCA_TERMINAL_HANDLE identifies the caller (as
-  // verifiedAuditor requires for the auditor), and ORCA_CLI_COMMAND (never
-  // --orca) is how the real Orca executable is discovered outside argv.
-  const realOrca = writeFakeOrca(fixture.dir, {
+// The success and wrong-handle paths verifiedPm's Orca-executable argument
+// supports are exercised directly here, not through the CLI: a stand-in
+// executable is injected via options.orca, an API argument, never through
+// argv or an environment variable, matching decision B's requirement that
+// test fixtures never rely on ORCA_CLI_COMMAND to reach a fake Orca once
+// selectTrustedOrcaExecutable is the production path. run-current is a real
+// child process here (writeFakeOrca), not a mocked `execute`, so this still
+// exercises the actual spawn/parse path verifiedPm uses in production.
+test("verifiedPm (direct call): a stand-in executable is injected via options.orca, and a non-PM handle is refused even when run-current confirms someone else", async (t) => {
+  const fixture = kickoff(t);
+  await auditObjection(
+    fixture.org,
+    fixture.worktreeId,
+    {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.repo,
+    },
+    auditorEnv(fixture.auditorHandle),
+  );
+  const objectionId = readAudit(
+    fixture.org,
+    fixture.worktreeId,
+  ).checkpoints.outcome.objections.at(-1).id;
+  const evidencePath = "outcome-evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "delivered\n");
+  const responseRequest = {
+    checkpoint: "outcome",
+    objectionId,
+    argument: "c1 is delivered; see the cited evidence",
+    evidenceRefs: [
+      {
+        path: evidencePath,
+        sha256: fileSha256(path.join(fixture.dir, evidencePath)),
+      },
+    ],
+  };
+  const stubOrca = writeFakeOrca(fixture.dir, {
     [fixture.pmHandle]: fixture.entry.runId,
   });
-  const succeeded = runCli(
-    [
-      "audit-response",
-      "--org",
-      fixture.org,
-      "--worktree",
-      fixture.worktreeId,
-      "--from",
-      requestFile,
-    ],
-    {
-      env: {
-        ORCA_TERMINAL_HANDLE: fixture.pmHandle,
-        ORCA_CLI_COMMAND: realOrca,
-      },
-    },
-  );
-  assert.equal(succeeded.code, 0, succeeded.stderr);
-  assert.equal(JSON.parse(succeeded.stdout).recorded, true);
 
-  // Same env, a different (non-PM) handle: run-current reports no binding
-  // for it, so verifiedPm refuses even though ORCA_CLI_COMMAND is real.
-  const wrongHandle = runCli(
-    [
-      "audit-response",
-      "--org",
-      fixture.org,
-      "--worktree",
-      fixture.worktreeId,
-      "--from",
-      requestFile,
-    ],
-    {
-      env: {
-        ORCA_TERMINAL_HANDLE: fixture.auditorHandle,
-        ORCA_CLI_COMMAND: realOrca,
-      },
-    },
+  const succeeded = await auditResponse(
+    fixture.org,
+    fixture.worktreeId,
+    responseRequest,
+    { orca: stubOrca },
+    { ORCA_TERMINAL_HANDLE: fixture.pmHandle },
   );
-  assert.notEqual(wrongHandle.code, 0);
-  assert.match(wrongHandle.stderr, /is not the PM bound to kickoff/);
+  assert.equal(succeeded.recorded, true);
+
+  // Same stand-in executable, a different (non-PM) handle: run-current
+  // reports no binding for it, so verifiedPm refuses even though the
+  // executable itself confirms the PM's own binding.
+  await assert.rejects(
+    () =>
+      auditResponse(
+        fixture.org,
+        fixture.worktreeId,
+        responseRequest,
+        { orca: stubOrca },
+        { ORCA_TERMINAL_HANDLE: fixture.auditorHandle },
+      ),
+    /is not the PM bound to kickoff/,
+  );
 });
 
 test("cli audit-ruling: succeeds with the auditor's handle, and refuses without one", async (t) => {

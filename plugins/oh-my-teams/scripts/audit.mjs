@@ -31,7 +31,7 @@ import {
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
 import { assertDirectorAuthority } from "./delivery.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
-import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+import { runOrcaJson, selectTrustedOrcaExecutable } from "./orca-adapter.mjs";
 import { workspaceBinding } from "./evidence.mjs";
 
 /** Checkpoints a kickoff's requirements ledger is audited at. */
@@ -197,6 +197,12 @@ export async function computeBinding(
  * public handle into an argument has no such variable set to that value, so
  * this check cannot be satisfied by argument forgery (B.6).
  *
+ * It does not close environment forgery: a process sharing this OS user
+ * account can still start a child with `ORCA_TERMINAL_HANDLE` set to the
+ * auditor's handle and pass this check. Binding the handle to the process
+ * lineage that actually launched it is what B.6's design is meant to add;
+ * until it lands, this remains an open gap.
+ *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
  * @param {NodeJS.ProcessEnv} [env] - Environment to read the handle from.
@@ -255,13 +261,21 @@ export function verifiedDirector(
  * `orchestration run-current` binding `verifySupervisor` checks.
  *
  * The caller's identity is read from its own `ORCA_TERMINAL_HANDLE`, exactly
- * as `verifiedAuditor` does, so a CLI argument can never substitute for
- * actually being the terminal that Orca bound to this kickoff's Run (B.6).
- * The Orca executable used to confirm that binding is likewise never taken
- * from a CLI argument: `selectOrcaExecutable` discovers it from the real
- * process environment, so a caller cannot point identity verification at a
- * forged binary. Tests inject an executable through `options.orca` directly,
- * never through argv.
+ * as `verifiedAuditor` does, so a CLI argument (e.g. --terminal) can never
+ * substitute for it. The Orca executable used to confirm the binding comes
+ * from `selectTrustedOrcaExecutable`, not `selectOrcaExecutable`, so a CLI
+ * argument (e.g. --orca), `ORCA_CLI_COMMAND`, `ORCA_DEV_REPO_ROOT`, and PATH
+ * are all ignored for this call; only a fixed, per-platform install path is
+ * trusted (B.6, decision B).
+ *
+ * This closes executable forgery, not identity forgery: `ORCA_TERMINAL_HANDLE`
+ * itself is still read from the environment, so a caller sharing this OS
+ * user account can still set it to a value of their choosing and pass this
+ * check. Binding the handle to the process lineage that actually launched it
+ * is what B.6's design is meant to add next; until it lands this remains an
+ * open gap. Tests inject a stand-in executable through `options.orca`
+ * directly, never through argv or an environment variable, since neither of
+ * those reaches `selectTrustedOrcaExecutable`.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
@@ -289,7 +303,7 @@ export async function verifiedPm(
   let bound = null;
   try {
     const current = await runOrcaJson(
-      selectOrcaExecutable(orca, env),
+      orca ?? selectTrustedOrcaExecutable(),
       ["orchestration", "run-current", "--from", callerHandle],
       { execute },
     );

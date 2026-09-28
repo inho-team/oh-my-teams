@@ -1,4 +1,5 @@
 /** Version-matched, narrow adapter for the external Orca CLI. */
+import { existsSync } from "node:fs";
 import { assert, hash, run } from "./core.mjs";
 import {
   assertFailureSignal,
@@ -133,6 +134,68 @@ export function selectOrcaExecutable(explicit, env = process.env) {
   if (process.platform === "linux" && env.TERM_PROGRAM !== "Orca")
     return "orca-ide";
   return "orca";
+}
+
+/**
+ * Fixed, per-platform install paths trusted for identity confirmation and
+ * auditor launch. Each path must resist tampering by the same OS user that
+ * runs this process: on macOS, `/usr/local/bin/orca` is a symlink owned by
+ * `root:wheel` inside a `root:wheel`, mode-755 directory, so an ordinary
+ * user account cannot repoint or replace it. No such path has been
+ * confirmed for Windows or Linux, so both list stay empty on purpose;
+ * `selectTrustedOrcaExecutable` fails closed there rather than fall back to
+ * an unverified guess.
+ */
+const TRUSTED_ORCA_PATHS = Object.freeze({
+  darwin: Object.freeze(["/usr/local/bin/orca"]),
+  linux: Object.freeze([]),
+  win32: Object.freeze([]),
+});
+
+/**
+ * Selects the Orca executable trusted for identity confirmation and auditor
+ * launch, ignoring every caller-controlled input `selectOrcaExecutable`
+ * accepts.
+ *
+ * Unlike `selectOrcaExecutable`, this never reads a `--orca` argument,
+ * `ORCA_CLI_COMMAND`, `ORCA_DEV_REPO_ROOT`, or `PATH`: any of those can be
+ * set by another process sharing this OS user account, which would let a
+ * forged executable stand in for Orca on a path that confirms identity.
+ * Only a fixed, per-platform path list (`TRUSTED_ORCA_PATHS`) is consulted,
+ * and the first path that exists on disk is returned. When no listed path
+ * exists, this throws rather than fall back to a guess, since a wrong
+ * executable here would defeat the identity check it is meant to support.
+ *
+ * This does not close every gap: on macOS, `/Applications/Orca.app` itself
+ * is owned by the invoking user and could be replaced by that same user, so
+ * the check trusts the app bundle's integrity, not just its path.
+ *
+ * @param {object} [options] - Injection points, used only by tests.
+ * @param {string} [options.platform=process.platform] - Platform to select for.
+ * @param {string[]} [options.candidates] - Path list to check, overriding
+ *   `TRUSTED_ORCA_PATHS[platform]`. Production callers must never set this.
+ * @param {(path: string) => boolean} [options.exists] - Existence check,
+ *   overriding `existsSync`. Production callers must never set this.
+ * @returns {string} The first trusted path that exists.
+ * @throws {Error} When no trusted path is known for the platform, or none
+ *   of the known paths exist.
+ */
+export function selectTrustedOrcaExecutable({
+  platform = process.platform,
+  candidates,
+  exists = existsSync,
+} = {}) {
+  const paths = candidates ?? TRUSTED_ORCA_PATHS[platform] ?? [];
+  const found = paths.find((path) => exists(path));
+  if (!found) {
+    throw new Error(
+      `No trusted Orca executable found for platform "${platform}". ` +
+        "Identity confirmation and auditor launch refuse to fall back to " +
+        "--orca, ORCA_CLI_COMMAND, ORCA_DEV_REPO_ROOT, or PATH, since any " +
+        "of those can be forged by a process sharing this OS user account.",
+    );
+  }
+  return found;
 }
 
 function parseJsonResponse(result, invalidMessage) {

@@ -95,6 +95,7 @@ import {
   releaseWorker,
   runOrcaJson,
   selectOrcaExecutable,
+  selectTrustedOrcaExecutable,
   startWorker,
   waitForSupervisionMessage,
 } from "./orca-adapter.mjs";
@@ -2866,12 +2867,17 @@ export async function executeCommand(args, execute) {
     case "audit-response": {
       // Neither the caller's terminal handle nor the Orca executable used to
       // confirm it is taken from a CLI argument: verifiedPm reads
-      // ORCA_TERMINAL_HANDLE from the real process environment and lets
-      // selectOrcaExecutable discover the real orca binary the same way,
-      // exactly like verifiedAuditor does for the auditor role. A --terminal
+      // ORCA_TERMINAL_HANDLE from process.env, exactly like verifiedAuditor
+      // does for the auditor role, and resolves its Orca executable through
+      // selectTrustedOrcaExecutable, which ignores --orca, ORCA_CLI_COMMAND,
+      // ORCA_DEV_REPO_ROOT, and PATH entirely (B.6, decision B). A --terminal
       // or --orca argument here could otherwise forge the PM identity the
-      // "outcome" checkpoint's response is bound to. callerCwd is always the
-      // real process.cwd(), for the same reason on the director path.
+      // "outcome" checkpoint's response is bound to. This closes argument
+      // and executable forgery, not identity forgery: a caller sharing this
+      // OS user account can still set ORCA_TERMINAL_HANDLE itself and pass
+      // verifiedPm, until B.6's process-lineage binding lands. callerCwd is
+      // always the real process.cwd(), for the same reason on the director
+      // path.
       const { checkpoint, objectionId, argument, evidenceRefs } = readJSON(
         args.from,
       );
@@ -3064,6 +3070,15 @@ export async function executeCommand(args, execute) {
           args.state,
           "role-terminal --role auditor requires --state naming the audited kickoff's PM state directory",
         );
+        // The auditor launch is the executable a forged handle would need to
+        // impersonate, so it never accepts a caller-supplied binary: --orca
+        // is rejected outright rather than silently ignored, and the launch
+        // below always resolves through selectTrustedOrcaExecutable (B.6,
+        // decision B).
+        assert(
+          args.orca === undefined,
+          "role-terminal --role auditor does not accept --orca; the auditor launch always uses the trusted Orca executable",
+        );
         const stateDir = path.resolve(args.state);
         const { kickoffs } = listKickoffs(path.resolve(args.org));
         auditorEntry = kickoffs.find(
@@ -3134,17 +3149,25 @@ export async function executeCommand(args, execute) {
             allowUnverifiedApproval.trim().length > 0),
         "--allow-unverified requires a non-empty approval sentence",
       );
+      // The auditor launch resolves its executable through
+      // selectTrustedOrcaExecutable, never from args.orca (asserted absent
+      // above): this is the binary that opens the terminal whose handle
+      // downstream identity checks (verifiedAuditor) trust, so it must not
+      // be caller-controlled (B.6, decision B).
+      const auditorExecutable = auditorEntry
+        ? selectTrustedOrcaExecutable()
+        : args.orca;
       // 실제 환경에서 매트릭스 입력값을 읽습니다.
       // 알 수 없는 값은 'unknown'으로 전달하여 표가 unverified로 처리합니다.
       const env = await readLaunchEnvironment({
         worktreePath: target ?? undefined,
-        orcaExecutable: args.orca,
+        orcaExecutable: auditorExecutable,
       });
       const opened = await openRoleTerminal({
         worktree: args.worktree,
         command,
         title: args.title,
-        executable: args.orca,
+        executable: auditorExecutable,
         platform: env.platform,
         shell: env.shell,
         trustRecordExists: env.trustRecordExists,
