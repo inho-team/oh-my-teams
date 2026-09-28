@@ -255,6 +255,22 @@ export function validateEntry(stored) {
       (text(entry.delivered?.head) && text(entry.delivered?.mergeCommit)),
     "Kickoff delivered must name the head and the merge commit",
   );
+  // auditor is optional: recorded only once `role-terminal --role auditor`
+  // successfully opens this kickoff's audit terminal (B.2).
+  if (entry.auditor !== undefined) {
+    assert(
+      entry.auditor && typeof entry.auditor === "object",
+      "Kickoff auditor must be an object when present",
+    );
+    assert(
+      text(entry.auditor.terminalHandle),
+      "Kickoff auditor.terminalHandle required when auditor is present",
+    );
+    assert(
+      text(entry.auditor.path),
+      "Kickoff auditor.path required when auditor is present",
+    );
+  }
   return entry;
 }
 
@@ -500,6 +516,41 @@ export function bindKickoffRun(orgFile, { worktreeId, runId }) {
     const bound = validateEntry({ ...entry, runId });
     writeJSON(file, bound);
     return { bound: true, file, entry: bound };
+  });
+}
+
+/**
+ * Records which terminal and worktree opened as a kickoff's auditor.
+ *
+ * Called once `role-terminal --role auditor` (B.2) has already checked
+ * director authority and worktree independence; this only persists the
+ * result. A later auditor launch for the same kickoff overwrites the record,
+ * since an auditor terminal may be reopened.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {{worktreeId: string, terminalHandle: string, path: string}} launch -
+ *   PM worktree the auditor reviews, the terminal handle it opened as, and
+ *   the worktree it runs from.
+ * @returns {{recorded: true, file: string, entry: object}} Updated entry.
+ * @throws {Error} When the worktree holds no registered kickoff.
+ */
+export function recordAuditorLaunch(
+  orgFile,
+  { worktreeId, terminalHandle, path: auditorPath },
+) {
+  return withRegistry(orgFile, () => {
+    const file = locateEntry(orgFile, worktreeId);
+    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
+    const entry = validateEntry(readJSON(file));
+    const updated = validateEntry({
+      ...entry,
+      auditor: {
+        terminalHandle: text(terminalHandle),
+        path: text(auditorPath),
+      },
+    });
+    writeJSON(file, updated);
+    return { recorded: true, file, entry: updated };
   });
 }
 

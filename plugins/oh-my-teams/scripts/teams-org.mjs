@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assert,
+  AUDITOR_ROLE,
   chart,
   displayModel,
   definedRoles,
@@ -118,6 +119,7 @@ import {
   cleanupKickoffBranches,
   listKickoffs,
   ownerProject,
+  recordAuditorLaunch,
   recordDelivery,
   registerKickoff,
   releaseKickoff,
@@ -1644,7 +1646,42 @@ async function executeCommand(args) {
         args.profile === undefined || args["workflow-id"],
         "--profile requires --workflow-id, --state and --workflow-task",
       );
-      const { org, run: runCtx } = launchContext(args);
+      // B.2: the auditor is opened here too, but it is out-of-ladder (never
+      // folds, never runs a workflow), so it takes a resolution path of its
+      // own instead of launchContext's workflow-snapshot flow: --state names
+      // the audited kickoff directly, and the caller must be that kickoff's
+      // director.
+      let auditorEntry;
+      let org;
+      let runCtx;
+      if (args.role === AUDITOR_ROLE) {
+        assert(
+          !args["workflow-id"],
+          "role-terminal --role auditor does not run a workflow; omit --workflow-id",
+        );
+        assert(
+          args.state,
+          "role-terminal --role auditor requires --state naming the audited kickoff's PM state directory",
+        );
+        const stateDir = path.resolve(args.state);
+        const { kickoffs } = listKickoffs(path.resolve(args.org));
+        auditorEntry = kickoffs.find(
+          (entry) => path.resolve(entry.pm.stateDir) === stateDir,
+        );
+        assert(
+          auditorEntry,
+          `No kickoff is registered with pm state directory ${stateDir}`,
+        );
+        assertDirectorAuthority(
+          auditorEntry,
+          process.cwd(),
+          "role-terminal --role auditor",
+        );
+        org = readJSON(args.org);
+        runCtx = { orgFile: path.resolve(args.org) };
+      } else {
+        ({ org, run: runCtx } = launchContext(args));
+      }
       const firstPrompt =
         args.brief === undefined
           ? undefined
@@ -1660,6 +1697,28 @@ async function executeCommand(args) {
       );
       const target = selectedWorktreePath(args.worktree, process.cwd());
       if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
+      if (auditorEntry) {
+        assert(
+          target,
+          "role-terminal --role auditor needs a resolvable --worktree",
+        );
+        const forbidden = new Set([
+          path.resolve(auditorEntry.pm.path),
+          ...readLaunches(path.resolve(args.org))
+            .filter(
+              (line) =>
+                line.kickoffPmWorktreeId === auditorEntry.pm.worktreeId &&
+                line.role !== AUDITOR_ROLE &&
+                line.worktreePath,
+            )
+            .map((line) => line.worktreePath),
+        ]);
+        assert(
+          !forbidden.has(target),
+          `The auditor cannot run from ${target}, which this kickoff's PM or a worker already uses; ` +
+            "open it in a separate worktree so the audit stays independent of the work it reviews",
+        );
+      }
       const launchedAt = new Date().toISOString();
       assertWorktreeUnshared(
         runCtx.workflowState,
@@ -1714,6 +1773,13 @@ async function executeCommand(args) {
         });
       const drift = await resolveAndCheckDrift(args.org, org, command);
       const warnings = [...(opened.warnings || []), ...drift.warnings];
+      if (auditorEntry) {
+        recordAuditorLaunch(path.resolve(args.org), {
+          worktreeId: auditorEntry.pm.worktreeId,
+          terminalHandle: opened.terminal,
+          path: target,
+        });
+      }
       return {
         ...opened,
         ...(allowUnverifiedApproval ? { allowUnverifiedApproval } : {}),

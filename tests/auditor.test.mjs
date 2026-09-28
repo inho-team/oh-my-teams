@@ -81,7 +81,13 @@ function initRepo(dir) {
 // verifiedDirector check these tests exercise to pass. `dir` doubles as the
 // Git workspace resultHead/head claims are checked against.
 function kickoff(t, worktreeId = "wt-1") {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-"));
+  // realpath'd: on macOS os.tmpdir() sits under a /var -> /private/var
+  // symlink, and process.chdir() reports the resolved path, so an
+  // un-resolved dir would never equal process.cwd() in a director-authority
+  // check.
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-")),
+  );
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const head = initRepo(dir);
   const org = path.join(dir, ".omt", "organization.json");
@@ -929,3 +935,143 @@ test("director-signal refuses a close-ready under an audited kickoff before the 
   // it, so reaching here without a rejection is what proves the gate passed.
   await assert.doesNotReject(signalClose);
 });
+
+// A second kickoff registered under the same organization file as `fixture`,
+// with its own director checkout, so a --state belonging to it can be tried
+// from `fixture`'s director cwd (mismatched director-authority check).
+function secondKickoff(fixture, worktreeId) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-"));
+  const pm = path.join(dir, worktreeId);
+  const brief = path.join(dir, "brief.md");
+  fs.writeFileSync(brief, "goal, acceptance criteria, non-goals\n");
+  registerKickoff(fixture.org, {
+    goal: `deliver ${worktreeId}`,
+    pm: { worktreeId, path: pm, stateDir: path.join(pm, ".omt") },
+    organizationRevision: readJSON(fixture.org).revision,
+    brief,
+    delivery: { mode: "none" },
+    requirements: minimalRequirements(worktreeId),
+    director: { terminalHandle: "term_director_2", checkoutPath: dir },
+  });
+  const [entry] = listKickoffs(fixture.org, worktreeId).kickoffs;
+  return { dir, entry };
+}
+
+test(
+  "role-terminal --role auditor refuses without --state, without director authority, " +
+    "from the pm's or a worker's worktree, and with another kickoff's --state, then succeeds once all are satisfied",
+  async (t) => {
+    const fixture = kickoff(t);
+    const org = readJSON(fixture.org);
+    org.auditor = { profile: "claude-current" };
+    writeJSON(fixture.org, org);
+
+    const originalCwd = process.cwd();
+    t.after(() => process.chdir(originalCwd));
+
+    const workerDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "omt-audit-worker-"),
+    );
+    t.after(() => fs.rmSync(workerDir, { recursive: true, force: true }));
+    recordLaunch(fixture.org, {
+      via: "worker-start",
+      role: "senior",
+      stateDir: fixture.entry.pm.stateDir,
+      worktreePath: workerDir,
+      callerCwd: workerDir,
+    });
+
+    const auditorDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-run-"));
+    t.after(() => fs.rmSync(auditorDir, { recursive: true, force: true }));
+
+    const roleTerminal = (extraArgs) =>
+      main([
+        "role-terminal",
+        "--org",
+        fixture.org,
+        "--role",
+        "auditor",
+        ...extraArgs,
+      ]);
+
+    process.chdir(fixture.dir);
+
+    // --state 없음
+    await assert.rejects(
+      () => roleTerminal(["--worktree", `path:${auditorDir}`]),
+      /requires --state/,
+    );
+
+    // 이사가 아닌 cwd: fixture.dir is this kickoff's director checkout, so
+    // running from anywhere else must be refused.
+    const outsiderDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "omt-audit-outsider-"),
+    );
+    t.after(() => fs.rmSync(outsiderDir, { recursive: true, force: true }));
+    process.chdir(outsiderDir);
+    await assert.rejects(
+      () =>
+        roleTerminal([
+          "--worktree",
+          `path:${auditorDir}`,
+          "--state",
+          fixture.entry.pm.stateDir,
+        ]),
+      /director's checkout/,
+    );
+    process.chdir(fixture.dir);
+
+    // PM 워크트리
+    await assert.rejects(
+      () =>
+        roleTerminal([
+          "--worktree",
+          `path:${fixture.entry.pm.path}`,
+          "--state",
+          fixture.entry.pm.stateDir,
+        ]),
+      /PM or a worker already uses/,
+    );
+
+    // worker 워크트리
+    await assert.rejects(
+      () =>
+        roleTerminal([
+          "--worktree",
+          `path:${workerDir}`,
+          "--state",
+          fixture.entry.pm.stateDir,
+        ]),
+      /PM or a worker already uses/,
+    );
+
+    // 다른 kickoff의 --state: same organization, a different kickoff's PM state
+    // directory, tried from fixture's director cwd, not that kickoff's own.
+    const other = secondKickoff(fixture, "wt-other");
+    t.after(() => fs.rmSync(other.dir, { recursive: true, force: true }));
+    await assert.rejects(
+      () =>
+        roleTerminal([
+          "--worktree",
+          `path:${auditorDir}`,
+          "--state",
+          other.entry.pm.stateDir,
+        ]),
+      /director's checkout/,
+    );
+
+    // 정상 경로: 모든 검사를 통과하면 남는 실패는 실행기 부재뿐임을 확인한다.
+    await assert.rejects(
+      () =>
+        roleTerminal([
+          "--worktree",
+          `path:${auditorDir}`,
+          "--state",
+          fixture.entry.pm.stateDir,
+          "--orca",
+          path.join(fixture.dir, "missing-orca"),
+        ]),
+      /ENOENT|spawn/,
+    );
+  },
+);
