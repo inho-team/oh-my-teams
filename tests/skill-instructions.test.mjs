@@ -897,7 +897,10 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     );
     // An Agy terminal never reports tui-idle, and the inject workaround
     // escapes worker-stop and model checks.
-    assert.match(readSkill(role), /원시 `dispatch --inject`로 우회하지 않고/);
+    assert.match(
+      readSkill(role),
+      /원시 `dispatch --inject`로 우회하지 (?:않고|않습니다)/,
+    );
     // #41: a released reservation keeps its attempt spent, so the idle check
     // runs before the attempt is reserved.
     assert.match(readSkill(role), /예약하기 전에 `terminal-idle-check`/);
