@@ -1,12 +1,14 @@
 /** Regressions for session-bound OMT worktree creation and headless rejection. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createWorktreeWithRoleSession } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { predictLaunchPath } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
+import { runTurn } from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
 import {
   answerHeadless,
   startHeadlessWorker,
@@ -19,6 +21,10 @@ import {
   recordLaunchSafely,
   reclaimIntegratedRoleWorktree,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import {
+  readTerminalClosures,
+  terminalClosureLedgerFile,
+} from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 
 const discovery = { executable: "orca", versionsMatch: true };
 const roleOrganization = () =>
@@ -259,6 +265,8 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
           workerId: "senior-prior-dispatch",
         },
       ],
+      closures: () => [],
+      recordClosure: () => {},
       active: async () => ({ status: "clear" }),
       release: async (dispatchId) => releasedExternalTerminal(dispatchId),
       close: async (_orca, argv) => closedTerminal(argv.at(-1)),
@@ -345,6 +353,8 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
           workerId: "senior-prior-dispatch",
         },
       ],
+      closures: () => [],
+      recordClosure: () => {},
       active: async () => ({ status: "clear" }),
       release: async (dispatchId) => releasedExternalTerminal(dispatchId),
       close: async (_orca, argv) => closedTerminal(argv.at(-1)),
@@ -365,6 +375,160 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
   );
   assert.equal(created, false);
   assert.equal(result.session.terminal, "new-senior-terminal");
+});
+
+test("two consecutive role-worktree reuses retain and verify prior closure proofs", async (t) => {
+  const closureDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-closure-reuse-"),
+  );
+  t.after(() => fs.rmSync(closureDir, { recursive: true, force: true }));
+  const activeTerminals = [];
+  const releasedDispatches = [];
+  const listCalls = [0, 0];
+  let cycle = 0;
+  const args = {
+    org: path.join(closureDir, "organization.json"),
+    role: "senior",
+    repo: "/repo",
+    name: "reused-senior-task",
+    base: "c".repeat(40),
+    state: "/repo/.omt",
+    "workflow-id": "current-workflow",
+    "workflow-task": "next-task",
+    "prior-workflow-id": "accepted-workflow",
+    "prior-task-id": "accepted-task",
+    worktree: "repo::/repo/senior-existing",
+  };
+  const ports = {
+    organization: roleOrganization,
+    environment,
+    matrix: supervised,
+    read: (_stateDir, workflowId) => ({
+      state:
+        workflowId === "current-workflow"
+          ? { tasks: { "next-task": { role: "senior", state: "pending" } } }
+          : {
+              tasks: {
+                "accepted-task": {
+                  role: "senior",
+                  state: "accepted",
+                  worktreeId: "repo::/repo/senior-existing",
+                },
+              },
+            },
+    }),
+    git: async (repo, argv) => {
+      if (argv[0] === "status") return "";
+      if (argv[0] === "rev-parse" && argv[1] === "HEAD")
+        return repo === "/repo" ? "integration-a" : "senior-a";
+      if (argv[0] === "rev-parse") return "integration-a";
+      if (argv[0] === "merge-base") return "";
+      throw new Error(`unexpected git: ${argv.join(" ")}`);
+    },
+    launches: () => [
+      {
+        via: "worker-start",
+        workflowId: "accepted-workflow",
+        workflowTaskId: "accepted-task",
+        worktreePath: "/repo/senior-existing",
+        terminal: "past-terminal",
+        workerId: "past-dispatch",
+      },
+      ...(cycle === 0
+        ? []
+        : [
+            {
+              via: "worker-start",
+              workflowId: "current-workflow",
+              workflowTaskId: "next-task",
+              worktreePath: "/repo/senior-existing",
+              terminal: "first-reuse-terminal",
+              workerId: "first-reuse-dispatch",
+            },
+          ]),
+    ],
+    active: async (terminal) => {
+      activeTerminals.push(terminal);
+      return { status: "clear" };
+    },
+    release: async (dispatchId) => {
+      releasedDispatches.push(dispatchId);
+      return releasedExternalTerminal(dispatchId);
+    },
+    close: async (_orca, argv) => closedTerminal(argv.at(-1)),
+    list: async () => ({
+      result: {
+        terminals:
+          listCalls[cycle]++ % 2 === 0
+            ? [
+                {
+                  handle:
+                    cycle === 0 ? "past-terminal" : "first-reuse-terminal",
+                },
+              ]
+            : [],
+      },
+    }),
+    open: async (workspace) => ({
+      ready: true,
+      terminal: cycle === 0 ? "first-reuse-terminal" : "second-reuse-terminal",
+      role: "senior",
+      worktree: `id:${workspace.id}`,
+      modelRequested: "gpt-5.6-sol",
+    }),
+  };
+
+  const first = await createRoleWorktree(args, ports);
+  cycle = 1;
+  const [firstClosure] = readTerminalClosures(args.org);
+  firstClosure.terminals[0].close.receipt.result.close.ptyKilled = false;
+  fs.writeFileSync(
+    terminalClosureLedgerFile(args.org),
+    `${JSON.stringify(firstClosure)}\n`,
+  );
+  await assert.rejects(
+    () => createRoleWorktree(args, ports),
+    /Another or unowned terminal is connected/,
+  );
+  listCalls[1] = 0;
+  firstClosure.terminals[0].close.receipt.result.close.ptyKilled = true;
+  fs.writeFileSync(
+    terminalClosureLedgerFile(args.org),
+    `${JSON.stringify(firstClosure)}\n`,
+  );
+  const second = await createRoleWorktree(args, ports);
+  const closureProofs = readTerminalClosures(args.org);
+
+  assert.equal(first.session.terminal, "first-reuse-terminal");
+  assert.equal(second.session.terminal, "second-reuse-terminal");
+  assert.deepEqual(activeTerminals, [
+    "past-terminal",
+    "past-terminal",
+    "first-reuse-terminal",
+    "first-reuse-terminal",
+  ]);
+  assert.deepEqual(releasedDispatches, [
+    "past-dispatch",
+    "first-reuse-dispatch",
+  ]);
+  assert.equal(closureProofs.length, 2);
+  assert.equal(
+    closureProofs[0].terminals[0].close.receipt.result.close.ptyKilled,
+    true,
+  );
+  assert.equal(
+    closureProofs[0].terminals[0].close.receipt.result.close.handle,
+    "past-terminal",
+  );
+  assert.equal(
+    closureProofs[0].terminals[0].close.receipt.result.close.tabId,
+    "tab-past-terminal",
+  );
+  assert.equal(
+    closureProofs[0].terminals[0].releases[0].receipt.result.dispatchId,
+    "past-dispatch",
+  );
+  assert.deepEqual(closureProofs[0].afterReceipt.result.terminals, []);
 });
 
 test("a named accepted task in another workflow can safely reuse its same-role worktree", async () => {
@@ -423,6 +587,8 @@ test("a named accepted task in another workflow can safely reuse its same-role w
           workerId: "senior-prior-dispatch",
         },
       ],
+      closures: () => [],
+      recordClosure: () => {},
       active: async () => ({ status: "clear" }),
       release: async (dispatchId) => releasedExternalTerminal(dispatchId),
       close: async (_orca, argv) => closedTerminal(argv.at(-1)),
@@ -636,6 +802,8 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
           workerId: "dispatch-a",
         },
       ],
+      closures: () => [],
+      recordClosure: () => {},
       active: async () => ({ status: "clear" }),
       git: async (_repo, argv) => {
         calls.push(`git:${argv.join(" ")}`);
@@ -905,6 +1073,8 @@ test("an accepted promotion can reclaim its retired Junior worktree", async () =
           workerId: "junior-dispatch",
         },
       ],
+      closures: () => [],
+      recordClosure: () => {},
       active: async () => ({ status: "clear" }),
       git: async (_repo, argv) => {
         if (argv[0] === "status") return "";
@@ -965,4 +1135,23 @@ test("direct headless exports fail closed", () => {
     () => answerHeadless("/legacy", "old", "continue"),
     /Headless follow-up turns were removed/,
   );
+});
+
+test("headless runner rejects public and node entry execution before any provider spawn", async (t) => {
+  const turnDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-retired-runner-"));
+  t.after(() => fs.rmSync(turnDir, { recursive: true, force: true }));
+  await assert.rejects(
+    () => runTurn(turnDir),
+    /New headless runner execution was removed/,
+  );
+  assert.equal(fs.existsSync(path.join(turnDir, "pids.json")), false);
+  const runner = path.resolve(
+    "plugins/oh-my-teams/scripts/headless-runner.mjs",
+  );
+  const direct = spawnSync(process.execPath, [runner, turnDir], {
+    encoding: "utf8",
+  });
+  assert.equal(direct.status, 1);
+  assert.match(direct.stderr, /New headless runner execution was removed/);
+  assert.equal(fs.existsSync(path.join(turnDir, "pids.json")), false);
 });

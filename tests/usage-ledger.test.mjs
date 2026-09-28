@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import {
   recordLaunch,
+  recordTerminalClosure,
   readLaunches,
+  readTerminalClosures,
   resolveLaunchKickoff,
 } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 
@@ -18,6 +20,54 @@ test("P-09: readLaunches and recordLaunch", () => {
   assert.equal(launches.length, 1);
   assert.equal(launches[0].role, "senior");
   assert.equal(launches[0].via, "role-terminal");
+  fs.rmSync(tmpdir, { recursive: true, force: true });
+});
+
+test("terminal closure evidence survives a later role-worktree reuse", () => {
+  const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-closure-ledger-"));
+  const orgFile = path.join(tmpdir, "organization.json");
+  recordTerminalClosure(orgFile, {
+    worktreeId: "repo::/repo/child",
+    worktreePath: "/repo/child",
+    terminals: [
+      {
+        terminal: "term_closed",
+        workerIds: ["dispatch_closed"],
+        dispatch: { result: { status: "clear" } },
+        releases: [
+          {
+            dispatchId: "dispatch_closed",
+            receipt: {
+              result: {
+                dispatchId: "dispatch_closed",
+                state: "retained",
+                reason: "external_terminal",
+                processAction: "none",
+              },
+            },
+          },
+        ],
+        close: {
+          terminal: "term_closed",
+          receipt: {
+            result: {
+              close: {
+                handle: "term_closed",
+                tabId: "tab_closed",
+                ptyKilled: true,
+              },
+            },
+          },
+        },
+      },
+    ],
+    beforeReceipt: { result: { terminals: [{ handle: "term_closed" }] } },
+    afterReceipt: { result: { terminals: [] } },
+  });
+  const [closure] = readTerminalClosures(orgFile);
+  assert.equal(closure.worktreePath, "/repo/child");
+  assert.equal(closure.terminals[0].close.receipt.result.close.ptyKilled, true);
+  assert.equal(closure.terminals[0].releases[0].dispatchId, "dispatch_closed");
   fs.rmSync(tmpdir, { recursive: true, force: true });
 });
 

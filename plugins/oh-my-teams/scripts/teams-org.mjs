@@ -144,7 +144,9 @@ import {
 } from "./documents.mjs";
 import {
   readLaunches,
+  readTerminalClosures,
   recordLaunch,
+  recordTerminalClosure,
   lazyLaunchesBackward,
 } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
@@ -1075,10 +1077,41 @@ async function listWorktreeTerminals({ repo, worktreeId, orca, list }) {
     Array.isArray(terminals),
     "Orca did not prove the worktree terminal list; preserve the worktree",
   );
-  return terminals;
+  return { terminals, receipt: listed };
 }
 
-function ownedTerminals(launches, worktreePath) {
+function closureProvesTerminal(closure, worktreeId, worktreePath, entry) {
+  if (
+    closure?.worktreeId !== worktreeId ||
+    path.resolve(closure.worktreePath ?? "") !== worktreePath ||
+    !Array.isArray(closure.terminals)
+  )
+    return false;
+  const terminal = closure.terminals.find(
+    (candidate) => candidate?.terminal === entry.terminal,
+  );
+  if (
+    !terminal ||
+    terminal.dispatch?.result?.status !== "clear" ||
+    !Array.isArray(terminal.releases)
+  )
+    return false;
+  try {
+    assertClosedReceipt(terminal.close?.receipt, entry.terminal);
+    for (const dispatchId of entry.workerIds) {
+      const release = terminal.releases.find(
+        (candidate) => candidate?.dispatchId === dispatchId,
+      );
+      assertReleasedReceipt(release?.receipt, dispatchId);
+    }
+    const after = receiptBody(closure.afterReceipt).terminals;
+    return Array.isArray(after) && after.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function ownedTerminals(launches, closures, worktreeId, worktreePath) {
   const byTerminal = new Map();
   for (const entry of launches) {
     if (
@@ -1096,7 +1129,12 @@ function ownedTerminals(launches, worktreePath) {
       owned.workerIds.push(entry.workerId);
     byTerminal.set(entry.terminal, owned);
   }
-  return [...byTerminal.values()];
+  return [...byTerminal.values()].filter(
+    (entry) =>
+      !closures.some((closure) =>
+        closureProvesTerminal(closure, worktreeId, worktreePath, entry),
+      ),
+  );
 }
 
 async function proveAndCloseOwnedTerminals({
@@ -1105,16 +1143,18 @@ async function proveAndCloseOwnedTerminals({
   worktreePath,
   orca,
   launches,
+  closures,
   active,
   release,
   close,
   list,
 }) {
-  const owned = ownedTerminals(launches, worktreePath);
+  const owned = ownedTerminals(launches, closures, worktreeId, worktreePath);
   assert(
     owned.length > 0,
     "No owned Dispatch and terminal receipt matches this role worktree; preserve it for reconciliation",
   );
+  const dispatchesByTerminal = new Map();
   for (const entry of owned) {
     const dispatch = await active(entry.terminal, {
       executable: orca,
@@ -1124,16 +1164,17 @@ async function proveAndCloseOwnedTerminals({
       dispatch.status === "clear",
       `Role terminal ${entry.terminal} is ${dispatch.status}; do not reuse or reclaim its worktree`,
     );
+    dispatchesByTerminal.set(entry.terminal, dispatch);
   }
   const before = await listWorktreeTerminals({ repo, worktreeId, orca, list });
   const expected = new Set(owned.map((entry) => entry.terminal));
   const actual = new Set(
-    before
+    before.terminals
       .map((terminal) => terminal?.handle)
       .filter((handle) => typeof handle === "string"),
   );
   assert(
-    before.length === actual.size &&
+    before.terminals.length === actual.size &&
       actual.size === expected.size &&
       [...actual].every((handle) => expected.has(handle)),
     "Another or unowned terminal is connected to this worktree; preserve it without closing that session",
@@ -1161,10 +1202,29 @@ async function proveAndCloseOwnedTerminals({
   }
   const after = await listWorktreeTerminals({ repo, worktreeId, orca, list });
   assert(
-    after.length === 0,
+    after.terminals.length === 0,
     "A connected terminal remains after close; preserve the worktree",
   );
-  return { released, closed };
+  return {
+    worktreeId,
+    worktreePath,
+    terminals: owned.map((entry) => ({
+      terminal: entry.terminal,
+      workerIds: entry.workerIds,
+      dispatch: {
+        terminal: entry.terminal,
+        result: dispatchesByTerminal.get(entry.terminal),
+      },
+      releases: released.filter((item) =>
+        entry.workerIds.includes(item.dispatchId),
+      ),
+      close: closed.find((item) => item.terminal === entry.terminal),
+    })),
+    beforeReceipt: before.receipt,
+    afterReceipt: after.receipt,
+    released,
+    closed,
+  };
 }
 
 /**
@@ -1178,6 +1238,8 @@ async function proveAndCloseOwnedTerminals({
  * @param {Function} [ports.open] - Role-terminal opener.
  * @param {Function} [ports.read=readWorkflow] - Workflow-state reader.
  * @param {Function} [ports.git=gitEvidence] - Git evidence reader.
+ * @param {Function} [ports.closures=readTerminalClosures] - Durable closure-proof reader.
+ * @param {Function} [ports.recordClosure=recordTerminalClosure] - Closure-proof writer.
  * @returns {Promise<object>} Worktree identity and proven role terminal.
  */
 export async function createRoleWorktree(
@@ -1192,6 +1254,8 @@ export async function createRoleWorktree(
     environment = readLaunchEnvironment,
     matrix = predictLaunchPath,
     launches = readLaunches,
+    closures = readTerminalClosures,
+    recordClosure = (evidence) => recordTerminalClosure(args.org, evidence),
     active = findActiveDispatch,
     release = releaseWorker,
     close = runOrcaJson,
@@ -1339,17 +1403,19 @@ export async function createRoleWorktree(
             previousHead,
             integrationCommit,
           ]);
-          await proveAndCloseOwnedTerminals({
+          const terminalEvidence = await proveAndCloseOwnedTerminals({
             repo: path.resolve(args.repo),
             worktreeId: workspace.id,
             worktreePath: workspace.path,
             orca: args.orca,
             launches: launches(args.org),
+            closures: closures(args.org),
             active,
             release,
             close,
             list,
           });
+          recordClosure(terminalEvidence);
         }
         const session = await openRoleSession(workspace);
         assert(
@@ -1439,6 +1505,8 @@ function pathFromWorktreeId(worktreeId) {
  * @param {object} [ports] - Injectable lifecycle ports for focused tests.
  * @param {Function} [ports.read=readWorkflow] - Workflow state reader.
  * @param {Function} [ports.launches=readLaunches] - Role-session ledger reader.
+ * @param {Function} [ports.closures=readTerminalClosures] - Durable closure-proof reader.
+ * @param {Function} [ports.recordClosure=recordTerminalClosure] - Closure-proof writer.
  * @param {Function} [ports.git=gitEvidence] - Explicit-repository Git adapter.
  * @param {Function} [ports.active=findActiveDispatch] - Orca Dispatch lookup.
  * @param {Function} [ports.release=releaseWorker] - Settled Dispatch releaser.
@@ -1453,6 +1521,8 @@ export async function reclaimIntegratedRoleWorktree(
   {
     read = readWorkflow,
     launches = readLaunches,
+    closures = readTerminalClosures,
+    recordClosure = (evidence) => recordTerminalClosure(args.org, evidence),
     git = gitEvidence,
     active = findActiveDispatch,
     release = releaseWorker,
@@ -1508,11 +1578,13 @@ export async function reclaimIntegratedRoleWorktree(
     worktreePath,
     orca: args.orca,
     launches: worktreeLaunches,
+    closures: closures(args.org),
     active,
     release,
     close,
     list,
   });
+  recordClosure(terminalEvidence);
   const postCloseStatus = await git(worktreePath, [
     "status",
     "--porcelain=v1",

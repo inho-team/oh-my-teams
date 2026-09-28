@@ -39,6 +39,22 @@ export function ledgerFile(orgFile) {
 }
 
 /**
+ * Locates the durable evidence for role terminals closed before a worktree is
+ * reused. It is intentionally separate from launch attribution: a closure is
+ * a mandatory lifecycle proof, while recording a launch remains best-effort.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @returns {string} `<organization dir>/usage/terminal-closures.jsonl`.
+ */
+export function terminalClosureLedgerFile(orgFile) {
+  return path.join(
+    path.dirname(path.resolve(orgFile)),
+    "usage",
+    "terminal-closures.jsonl",
+  );
+}
+
+/**
  * Reads every launch line, skipping a line a crashed writer left incomplete.
  *
  * @param {string} orgFile - Organization JSON path.
@@ -58,6 +74,77 @@ export function readLaunches(orgFile) {
         return [];
       }
     });
+}
+
+/**
+ * Reads durable terminal-closure proofs, ignoring an incomplete line a
+ * crashed writer left behind. Consumers must still validate every stored Orca
+ * receipt before treating a past terminal as closed.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @returns {object[]} Closure proofs in append order.
+ */
+export function readTerminalClosures(orgFile) {
+  const file = terminalClosureLedgerFile(orgFile);
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      if (!line.trim()) return [];
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
+}
+
+/**
+ * Persists the complete evidence from one successful role-terminal closure.
+ * Unlike launch attribution, this write is not best-effort: without it, a
+ * later reuse must preserve the worktree instead of inferring that an absent
+ * terminal has exited.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} closure - Worktree, Dispatch, terminal, and list receipts.
+ * @param {string} [now] - Timestamp to record; the current time by default.
+ * @returns {{recorded: true, file: string, line: object}} Stored closure proof.
+ * @throws {Error} When the proof cannot be durably appended.
+ */
+export function recordTerminalClosure(
+  orgFile,
+  closure,
+  now = new Date().toISOString(),
+) {
+  assert(
+    closure && typeof closure === "object",
+    "Terminal closure evidence required",
+  );
+  assert(
+    typeof closure.worktreeId === "string" && closure.worktreeId,
+    "Terminal closure worktree id required",
+  );
+  assert(
+    typeof closure.worktreePath === "string" && closure.worktreePath,
+    "Terminal closure worktree path required",
+  );
+  assert(
+    Array.isArray(closure.terminals) && closure.terminals.length > 0,
+    "Terminal closure evidence needs closed terminals",
+  );
+  const file = terminalClosureLedgerFile(orgFile);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  return withLedgerLock(file, () => {
+    const line = {
+      schemaVersion: 1,
+      at: now,
+      ...closure,
+      worktreePath: path.resolve(closure.worktreePath),
+    };
+    fs.appendFileSync(file, `${JSON.stringify(line)}\n`, { mode: 0o600 });
+    return { recorded: true, file, line };
+  });
 }
 
 /**
