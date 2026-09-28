@@ -11,30 +11,27 @@ description: 최초 oh my teams 상설 조직을 네 역할의 모델만 물어 
 
 ## 묻는 것
 
-조직이 없으면 **네 역할(PM·PL·Senior·Junior)이 각각 어떤 모델을 쓸지만** 묻는다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 네 역할을 모두 두고, 실제로 몇 개의 역할을 쓸지는 kickoff마다 PM이 과제의 난이도를 보고 실행 깊이로 정하기 때문이다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다.
+조직이 없으면 **네 역할(PM·PL·Senior·Junior)이 각각 어떤 모델을 쓸지만** 묻는다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 네 역할을 모두 두고, 실제로 몇 개의 역할을 쓸지는 kickoff마다 PM이 과제의 난이도를 보고 실행 깊이로 정하기 때문이다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 이 역할별 모델 질문은 기존 조직을 계속 결성할 수 있게 남겨 둔 호환 경로이며, 질문 자체를 없애는 결정은 적응형 팀 편성 kickoff의 다음 파동이 맡는다.
 
 묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 한 번으로 끝난다. 구조화된 선택 도구는 한 번에 질문 네 개까지 담을 수 있으므로 PM·PL·Senior·Junior의 모델을 한꺼번에 묻는다. 번호를 매긴 선택지로 묻는 호스트에서도 네 개를 한 번에 제시한다.
 
 구독이 부족해 특정 역할을 아예 둘 수 없는 조직은 결성 후 `adjust`에서 그 역할을 뺀다. 뺀 역할이 맡던 일은 서열을 따라 위로 올라가 남은 가장 가까운 역할이 이어받으며, 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 역할 이름은 바꿀 수 없다. 실패 라우팅, 검토 요구사항과 스킬이 이 이름으로 역할을 지목하기 때문이다.
 
-모델 선택지는 역할의 성격에 따라 제시하고, 목록에 없는 모델은 자유 입력으로 받는다. 각 선택지는 괄호 안의 `provider:model` 값으로 저장된다.
+모델 선택지는 미리 박아 둔 표에서 고르지 않고, 묻기 직전에 실행한 조회 결과에서만 만든다. 다음을 실행한다.
 
-| 역할 | 선택지 (표시 이름 → 저장 값) |
-|---|---|
-| PM | Claude Fable → `claude:fable`, Claude Opus → `claude:opus`, Codex Astra → `codex:gpt-6-astra`, Agy Gemini Pro → `agy:gemini-3.1-pro-high` |
-| PL | Claude Opus → `claude:opus`, Codex Sol → `codex:gpt-5.6-sol`, Agy Gemini Pro → `agy:gemini-3.1-pro-high`, Claude Sonnet → `claude:sonnet`, Codex Terra → `codex:gpt-5.6-terra` |
-| Senior | Claude Sonnet → `claude:sonnet`, Codex Terra → `codex:gpt-5.6-terra`, Agy Gemini Pro → `agy:gemini-3.1-pro-high`, Agy Claude Opus → `agy:claude-opus-4-6-thinking` |
-| Junior | Claude Haiku → `claude:haiku`, Codex Luna → `codex:gpt-5.6-luna`, Agy Flash → `agy:gemini-3.8-flash-medium`, Agy Claude Sonnet → `agy:claude-sonnet-4-6` |
+```text
+node <runtime> model-catalog --codex-home <codex-home>
+```
 
-이 배열은 제안의 순서일 뿐 고정된 모델 능력 서열이나 구독 가격을 가정하지 않으며, 어떤 선택지도 사용자 답을 대신하지 않는다. 자유 입력으로 `provider:model` 형식의 값을 언제든 받는다. 질문 본문에 Claude Code 선택지는 최신 모델을 따라가고 Agy 선택지는 4.6 버전으로 고정되며 서로 구독이 다르다는 차이를 한 줄로 밝힌다.
+세 실행기(`claude`, `codex`, `agy`) 각각의 항목을 이렇게 읽는다.
 
-PL은 선택지가 다섯 개다. 구조화된 선택 도구(예: Claude Code `AskUserQuestion`, 질문당 선택지 최대 4개)를 쓰는 호스트에서는 앞의 네 개(Claude Opus, Codex Sol, Agy Gemini Pro, Claude Sonnet)를 선택지로 두고, Codex Terra는 질문 본문에 "자유 입력으로 `codex:gpt-5.6-terra`"처럼 안내한다. 번호를 매긴 선택지로 묻는 호스트에서는 다섯 개를 모두 제시한다.
+- `status`가 `"ok"`이면 `models` 배열의 각 항목(`id`, `displayName`, `efforts`)에서 역할의 성격에 맞는 몇 개를 선택지로 제시한다. 표시 이름은 `displayName`을 쓰고, 저장 값은 `provider:id`(예: `codex:gpt-6-astra`)로 적는다. 이번 조회에서 실제로 확인된 값이므로 능력이나 가격의 서열로 늘어놓지 않고 카탈로그가 준 순서를 그대로 따른다.
+- `status`가 `"unavailable"`이고 `reasonCode`가 `"no-catalog-interface"`가 아니면, 설치가 확인되지 않았거나 조회 명령이 실패한 것이다. 그 실행기는 선택지에서 완전히 빼고, 다른 실행기의 모델로 대신 채우지 않으며, 결성 보고에 `reason`을 짧게 적는다.
+- `status`가 `"unavailable"`이고 `reasonCode`가 `"no-catalog-interface"`이면(예: Claude Code처럼 실행기는 있지만 모델을 나열하는 명령이 없는 경우), `models`는 비어 있다. 이때는 그 실행기가 통상적으로 받는 별칭(Claude는 `fable`, `opus`, `sonnet`, `haiku`)을 선택지로 제시하고 `<provider>:<별칭>` 형식으로 받는다. 별칭은 판을 가리키지 않고 그때의 최신 판으로 풀리므로, 새 판이 나오면 조직 파일을 고치지 않아도 역할이 쓰는 모델이 바뀐다. 판을 묶어 두려면 별칭 대신 구체적인 판 이름을 자유 입력으로 받는다.
 
-묻기 전에 `claude`, `codex`, `agy`가 설치되어 있는지 확인하고, 확인되지 않은 선택지는 빼고 제시한다. 공급자별 확인 방법은 다음과 같다.
+목록에도 없는 모델은 자유 입력으로 `provider:model` 형식을 받는다. 어떤 선택지도 사용자 답을 대신하지 않는다.
 
-- **Agy**: `agy models` 출력에 해당 ID가 있는지 확인한다. 이 배포에서 확인한 ID는 `gemini-3.1-pro-high`, `gemini-3.8-flash-medium`, `claude-opus-4-6-thinking`, `claude-sonnet-4-6`, `gpt-oss-120b-medium`이다.
-- **Codex**: `host-defaults` 출력의 `codex.listed`에 해당 ID가 있는지 확인한다. 카탈로그는 계정과 CLI 버전에 따라 달라지므로 `codex.listed`에 없는 ID는 선택지에서 뺀다.
-- **Claude 별칭**: 설치된 `claude --help`의 `--model` 설명에서 예시로 드는 별칭(예: `fable`, `opus`, `sonnet`)으로 확인한다. `--model` 설명에 예시로 없는 별칭(예: `haiku`)은 `claude -p --model <별칭> --output-format json`으로 짧은 요청을 한 번 보내 응답의 `modelUsage`에 실제 모델이 기록되는지 확인한다. 어느 방법으로도 확인하지 못한 별칭은 선택지에서 뺀다. 별칭은 판을 가리키지 않고 그때의 최신 판으로 풀리므로, 새 판이 나오면 조직 파일을 고치지 않아도 역할이 쓰는 모델이 바뀐다. 2026-09-22에 Opus 5.5가 나오면서 Claude Code 2.1.280에서는 `opus`가 `claude-opus-5-5`로, `sonnet`이 `claude-sonnet-5`로, `haiku`가 `claude-haiku-4-5`로 풀린다. 판을 묶어 두려면 별칭 대신 `opus-5-5`처럼 판을 담은 이름을 프로필의 `model`에 적는다.
+구조화된 선택 도구(예: Claude Code `AskUserQuestion`, 질문당 선택지 최대 4개)를 쓰는 호스트에서, 한 역할에 제시할 선택지가 넷을 넘으면 앞의 네 개만 선택지로 두고 나머지는 질문 본문에 "자유 입력으로 `<provider>:<id>`"처럼 안내한다. 번호를 매긴 선택지로 묻는 호스트에서는 조회된 선택지를 모두 제시한다.
 
 ### 호스트 기본값과 자유 입력 안내
 
@@ -49,9 +46,9 @@ node <runtime> host-defaults --project <project>
 
 자유 입력으로 `codex:default`를 받으면 현재 해석값을 확인해 결과를 알린다. 예를 들어 "지금은 gpt-6-astra가 실행됩니다. 계정 기본값이 바뀌면 함께 바뀝니다."처럼 저장값과 현재 해석값을 구분하고, `codex debug models`가 실패했으면 확인하지 못했다고 적고 모델명을 추측하지 않는다.
 
-표의 Codex 선택지는 `codex.listed`에 해당 ID가 있을 때만 제시한다. 표에 없는 Codex 모델을 쓰려면 질문 본문에 `codex.listed`의 ID를 나열하고, 그 가운데 하나를 쓰려면 자유 입력으로 `codex:<id>`를 적으면 된다고 안내한다. 이 안내는 질문 본문에 넣으므로 질문 수와 선택지 수는 늘지 않고, 목록은 카탈로그 순서 그대로 적어 서열을 매기지 않는다.
+`model-catalog`의 Codex 선택지는 그 조회 자체가 `codex debug models`를 실행해 얻은 것이므로 따로 확인할 필요가 없다. 다만 `model-catalog` 조회가 실패했거나 그 결과 밖의 Codex 모델을 쓰려면 질문 본문에 `host-defaults` 출력의 `codex.listed`를 나열하고, 그 가운데 하나를 쓰려면 자유 입력으로 `codex:<id>`를 적으면 된다고 안내한다. 이 안내는 질문 본문에 넣으므로 질문 수와 선택지 수는 늘지 않고, 목록은 카탈로그 순서 그대로 적어 서열을 매기지 않는다.
 
-Gemini는 다른 모델과 달리 강도를 비워 둘 수 없다. Agy에는 강도 없는 Gemini ID가 없고, 강도를 빼고 `--model gemini-3.8-flash`로 부르면 1.2.4가 "requires --effort (available: low, medium, high)"라며 호출 전에 거부하므로, 따로 조정하지 않았을 때 쓰일 기본 강도가 없다. 그래서 결성 단계에서는 Flash 3.8을 `medium`으로, `medium`이 없는 Pro 3.1을 `high`로 정한다. 사용자가 고르지 않은 강도이므로 결성 보고에 반드시 적고, 다른 강도는 `adjust`에서 바꾼다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 역할만 다시 묻는다.
+Gemini는 다른 모델과 달리 강도를 비워 둘 수 없다. Agy에는 강도 없는 Gemini ID가 없고, 강도를 빼고 `--model gemini-3.8-flash`로 부르면 1.2.4가 "requires --effort (available: low, medium, high)"라며 호출 전에 거부한다. `model-catalog`가 돌려주는 `agy.models`의 `id`는 강도가 이미 포함된 값이므로(예: `gemini-3.8-flash-high`) 그 값을 그대로 선택지로 쓰면 항상 강도가 정해진 채로 저장된다. 자유 입력으로 강도가 빠진 Gemini 이름을 받았으면 어떤 강도로 보완했는지 결성 보고에 반드시 적고, 다른 강도로 바꾸려면 `adjust`에서 한다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 역할만 다시 묻는다.
 
 ## 묻지 않고 정하는 것
 

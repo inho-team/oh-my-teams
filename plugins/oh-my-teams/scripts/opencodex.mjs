@@ -654,10 +654,14 @@ function processStartTime(pid) {
 
 async function waitForEmptyGroup(group, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
+  await new Promise((resolve) => setTimeout(resolve, 20));
   while (Date.now() < deadline) {
-    if (processGroupMembers(group)?.length === 0) return;
+    const members = processGroupMembers(group);
+    if (members && members.length === 0) return true;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+  const members = processGroupMembers(group);
+  return Boolean(members && members.length === 0);
 }
 
 // Ends every member of a process group, not only its leader. A launcher that
@@ -665,17 +669,15 @@ async function waitForEmptyGroup(group, timeoutMs) {
 // trusts the leader's exit; it passes only when the group is observed empty.
 async function terminateGroup(group, graceMs) {
   assert(group, "opencodex-proxy-exit-unverifiable");
+  let empty = false;
   for (const signal of ["SIGTERM", "SIGKILL"]) {
-    if (processGroupMembers(group)?.length === 0) break;
     try {
       process.kill(-group, signal);
     } catch {}
-    await waitForEmptyGroup(group, graceMs);
+    empty = await waitForEmptyGroup(group, graceMs);
+    if (empty) break;
   }
-  assert(
-    processGroupMembers(group)?.length === 0,
-    "opencodex-proxy-exit-unverifiable",
-  );
+  assert(empty, "opencodex-proxy-exit-unverifiable");
   return { termination: "exited", descendantsExited: true };
 }
 
@@ -930,9 +932,9 @@ export async function acquireOpenCodexLease(accountHome, options = {}) {
 }
 
 // The health body when it names this port, otherwise null.
-async function healthProvesPort(port) {
+async function healthProvesPort(port, timeoutMs = 1000) {
   const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
-    signal: AbortSignal.timeout(1000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) return null;
   const body = await response.json().catch(() => null);
@@ -1084,8 +1086,11 @@ export async function startOpenCodexProxy(binding) {
   const deadline = Date.now() + (binding.readyTimeoutMs ?? 15000);
   while (Date.now() < deadline) {
     if (spawnError || exited) break;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
     try {
-      const health = await healthProvesPort(port);
+      const probeTimeout = Math.min(1000, remaining);
+      const health = await healthProvesPort(port, probeTimeout);
       if (health) {
         let listenerPid = null;
         let method = "sole-listener-in-owned-process-group";
@@ -1123,7 +1128,9 @@ export async function startOpenCodexProxy(binding) {
         };
       }
     } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const delay = Math.min(100, Math.max(0, deadline - Date.now()));
+    if (delay <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
   await stop();
   throw new Error("opencodex-proxy-not-ready");
