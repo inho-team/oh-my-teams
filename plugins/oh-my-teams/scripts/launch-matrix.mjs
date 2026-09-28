@@ -15,7 +15,7 @@
  * `predictLaunchPath`가 반환하는 결과 스키마.
  *
  * @typedef {object} MatrixResult
- * @property {'supervised-terminal'|'headless'|'blocked'} path - 예상 실행 경로.
+ * @property {'supervised-terminal'|'blocked'} path - 예상 실행 경로.
  * @property {string[]} reason - 거부·예외 이유 코드 목록. 성공 경로에서는 빈 배열.
  * @property {string} nextOwner - 거부 시 다음 담당자 (예: 'pm', 'user', '-').
  * @property {string} nextAction - 거부 시 다음 행동 가이드. 성공 경로에서는 빈 문자열.
@@ -83,8 +83,7 @@ export function classifyVersion(version, supported) {
  * 이 조합에서 실제로 의미가 있는 버전만 골라 가장 낮은 신뢰 상태를 돌려줍니다.
  *
  * Orca 버전은 Orca 터미널을 쓰는 경로에만, Antigravity CLI 버전은 Agy 역할에만
- * 적용합니다. headless 경로는 Orca 터미널과 에이전트 인식을 거치지 않으므로 Orca
- * 버전 차이의 영향을 받지 않습니다.
+ * 적용합니다. 모든 지원 경로는 Orca 역할 터미널을 사용하므로 Orca 버전도 확인합니다.
  *
  * @param {MatrixResult} candidate - 표가 고른 결과.
  * @param {object} params - 환경 조합 파라미터.
@@ -92,9 +91,7 @@ export function classifyVersion(version, supported) {
  */
 function relevantVersionStatus(candidate, { runner, orcaVersion, cliVersion }) {
   const statuses = [];
-  if (candidate.path !== "headless") {
-    statuses.push(classifyVersion(orcaVersion, VERIFIED_ORCA_VERSION));
-  }
+  statuses.push(classifyVersion(orcaVersion, VERIFIED_ORCA_VERSION));
   if (runner === "agy") {
     statuses.push(classifyVersion(cliVersion, VERIFIED_CLI_VERSION));
   }
@@ -246,11 +243,11 @@ const MATRIX_RULES = [
     match: ({ runner, platform, trustRecordExists }) =>
       runner === "agy" && platform === "win32" && trustRecordExists !== true,
     result: {
-      path: "headless",
-      reason: ["agy-headless-no-trust"],
-      nextOwner: "-",
+      path: "blocked",
+      reason: ["agy-interactive-terminal-unavailable"],
+      nextOwner: "pm",
       nextAction:
-        "신뢰 기록이 없거나 확인되지 않아도 Windows의 Agy는 감독 터미널을 열지 않고 headless 경로를 대신 사용합니다.",
+        "Windows의 Agy 역할 터미널 경로는 아직 검증되지 않았습니다. 세션 없는 대체 실행을 시작하지 말고 PM에게 보고하세요.",
       evidence: "unverified",
     },
   },
@@ -322,11 +319,11 @@ const MATRIX_RULES = [
       platform === "win32" &&
       trustRecordExists,
     result: {
-      path: "headless",
-      reason: ["orca-idle-requires-narrow-screen"],
-      nextOwner: "-",
+      path: "blocked",
+      reason: ["agy-interactive-terminal-unavailable"],
+      nextOwner: "pm",
       nextAction:
-        "1.4.204에서는 좁은 화면이 아니면 tui-idle에 도달하지 못한다고 실측됐지만, 그 판정 규칙은 1.4.210에서 교체되어 근거를 잃었고 Windows에서는 아직 재검증되지 않았습니다. 확인될 때까지 headless 경로를 사용합니다.",
+        "Windows의 Agy 역할 터미널 경로는 아직 검증되지 않았습니다. 세션 없는 대체 실행을 시작하지 말고 PM에게 보고하세요.",
       evidence: "unverified",
     },
   },
@@ -337,10 +334,11 @@ const MATRIX_RULES = [
     match: ({ runner, platform, trustRecordExists }) =>
       runner === "agy" && platform === "win32" && trustRecordExists,
     result: {
-      path: "headless",
-      reason: ["agy-headless-fallback"],
-      nextOwner: "-",
-      nextAction: "Agy 역할 대체 경로(headless)를 사용합니다.",
+      path: "blocked",
+      reason: ["agy-interactive-terminal-unavailable"],
+      nextOwner: "pm",
+      nextAction:
+        "Windows의 Agy 역할 터미널 경로는 아직 검증되지 않았습니다. 세션 없는 대체 실행을 시작하지 말고 PM에게 보고하세요.",
       evidence: "unverified",
     },
   },

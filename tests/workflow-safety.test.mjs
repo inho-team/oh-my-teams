@@ -861,7 +861,7 @@ test("resumeWorkflow rejects pending and stale-execution gates", async (t) => {
   assert.equal(revoked.state.tasks.gated.acceptedResult, null);
 });
 
-test("headless receipt: valid receipt passes, invalid receipts are rejected", async (t) => {
+test("headless receipt is rejected after sessionless execution removal", async (t) => {
   const dir = await repo(t),
     stateDir = path.join(dir, ".omt");
   writeJSON(path.join(dir, "a.json"), task("a"));
@@ -908,6 +908,19 @@ test("headless receipt: valid receipt passes, invalid receipts are rejected", as
     runnerPid: 1234,
     modelRequested: "gemini-3.1-pro-high",
   };
+  assert.throws(
+    () =>
+      attachExecution(stateDir, request.id, 1, {
+        schemaVersion: 1,
+        eventId: "attach-headless-good",
+        attemptId: "attempt-headless-good",
+        taskId: "a",
+        callAllowance: 1,
+        receipt: goodReceipt,
+      }),
+    /Sessionless headless execution was removed/,
+  );
+  return;
   const attached = attachExecution(stateDir, request.id, 1, {
     schemaVersion: 1,
     eventId: "attach-headless-good",

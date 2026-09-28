@@ -854,7 +854,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     // matrix decides the launch path and skills link the matrix table.
     assert.match(
       readSkill(role),
-      /호환성 표\(`scripts\/launch-matrix\.mjs`\)가 `headless`로 정한 역할은 `headless-start`로 실행/,
+      /호환성 표\(`scripts\/launch-matrix\.mjs`\)가 `blocked`를 돌려주는 프로필은 세션 없는 대체 실행을 시작하지 않고/,
     );
     // Skills and orca-runtime.md must link launch-matrix.mjs.
     assert.match(readSkill(role), /launch-matrix\.mjs/);

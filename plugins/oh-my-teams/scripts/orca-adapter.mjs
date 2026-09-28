@@ -318,6 +318,88 @@ export async function createWorktree(
   });
 }
 
+/**
+ * Removes a worktree through Orca after its caller has established that it is
+ * safe to reclaim. This adapter deliberately does not inspect or terminate
+ * processes: Orca owns those facts and its refusal leaves the worktree intact.
+ *
+ * @param {string} repo - Parent repository/worktree path.
+ * @param {object} options - Worktree identity and selected Orca runtime.
+ * @param {string} options.id - Orca worktree ID returned at creation time.
+ * @param {object} [options.discovery] - Existing matching runtime receipt.
+ * @param {string} [options.executable] - Selected Orca executable.
+ * @param {Function} [options.execute=run] - Injectable command runner.
+ * @returns {Promise<object>} Orca's reclamation receipt.
+ * @throws {Error} When Orca cannot confirm the reclamation.
+ */
+export async function reclaimWorktree(
+  repo,
+  { id, discovery: suppliedDiscovery, executable, execute = run },
+) {
+  assert(typeof id === "string" && id, "Orca worktree id required for reclaim");
+  const { selected } = await resolvedDiscovery(
+    executable,
+    suppliedDiscovery,
+    execute,
+  );
+  return runOrcaJson(
+    selected,
+    ["worktree", "remove", "--worktree", `id:${id}`],
+    { cwd: repo, execute },
+  );
+}
+
+/**
+ * Creates a worktree and requires a real role-terminal session before handing
+ * it to the caller. Only an explicit, observed no-session result is reclaimed;
+ * a thrown or ambiguous launch is preserved for reconciliation.
+ *
+ * @param {string} repo - Parent repository/worktree path.
+ * @param {object} options - Creation settings and role-session launcher.
+ * @param {Function} options.openRoleSession - Opens and proves the role session.
+ * @returns {Promise<object>} Workspace and proven role-session receipt.
+ * @throws {Error} When creation, session proof, or safe reclamation fails.
+ */
+export async function createWorktreeWithRoleSession(repo, options) {
+  assert(
+    typeof options?.openRoleSession === "function",
+    "A role-session opener is required when creating an OMT worktree",
+  );
+  const workspace = await createWorktree(repo, options);
+  let session;
+  try {
+    session = await options.openRoleSession(workspace);
+  } catch (error) {
+    // A thrown launch can have created a process that the adapter cannot see.
+    // Preserve it and make the caller reconcile it through Orca.
+    error.workspace = workspace;
+    throw error;
+  }
+  if (session?.ready === true && session.terminal)
+    return { workspace, session };
+
+  if (session?.sessionObserved === false) {
+    const reclaimed = await reclaimWorktree(repo, {
+      id: workspace.id,
+      executable: workspace.executable,
+      discovery: workspace.discovery,
+      execute: options.execute,
+    });
+    const error = new Error(
+      "Orca role session was not established; the newly created worktree was reclaimed",
+    );
+    error.workspace = workspace;
+    error.reclaimed = reclaimed;
+    throw error;
+  }
+
+  const error = new Error(
+    "Orca role session was not proven; the new worktree was preserved for reconciliation",
+  );
+  error.workspace = workspace;
+  throw error;
+}
+
 // A refusal Orca explained is only useful if the explanation survives the
 // throw. The message stays what a reader sees, while `signal` and `receipt`
 // carry the routing hint and any resources the caller still has to reclaim.

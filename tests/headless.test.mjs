@@ -539,7 +539,7 @@ test("a turn that records its exit and ends between two reads is exited, not unv
   );
 });
 
-test("headless-start keeps the role checks of a terminal launch", async (t) => {
+test("headless-start is rejected after sessionless execution removal", async (t) => {
   const box = sandbox(t);
   // Every profile names an executable that does not exist, so a check that
   // stops refusing can never start a real, billed provider CLI.
@@ -568,17 +568,14 @@ test("headless-start keeps the role checks of a terminal launch", async (t) => {
       box.state,
       ...extra,
     ]);
-  await assert.rejects(
-    run("pm", box.cwd),
-    /PM runs in its own terminal opened with role-command; it is not started as a headless worker/,
-  );
+  await assert.rejects(run("pm", box.cwd), /Unknown command: headless-start/);
   await assert.rejects(
     run("junior", path.join(box.cwd, "missing")),
-    /Worktree does not exist/,
+    /Unknown command: headless-start/,
   );
   await assert.rejects(
     run("junior", box.cwd, ["--workflow-id", "wf-1"]),
-    /Workflow|no such file|ENOENT/i,
+    /Unknown command: headless-start/,
   );
   org.profiles["ocx"] = {
     provider: "codex",
@@ -606,7 +603,7 @@ test("headless-start keeps the role checks of a terminal launch", async (t) => {
       "--worktree",
       "current",
     ]),
-    /headless-start only/,
+    /no interactive Orca terminal path/,
   );
   assert.deepEqual(listHeadless(box.state), []);
 });
@@ -1532,7 +1529,7 @@ test(
   },
 );
 
-test("headless-start refuses runner accounts whose session homes are shared or are an account home", async (t) => {
+test("headless-start is rejected before runner account validation", async (t) => {
   const box = sandbox(t);
   const org = JSON.parse(
     fs.readFileSync(
@@ -1582,7 +1579,7 @@ test("headless-start refuses runner accounts whose session homes are shared or a
       "--state",
       box.state,
     ]);
-  const overlap = /session homes must differ/;
+  const overlap = /Unknown command: headless-start/;
   // Two accounts on the one shared variable would share a CODEX_HOME.
   Object.assign(process.env, {
     OMT_OPENCODEX_ACCT_A_HOME: "/omt-test/a",

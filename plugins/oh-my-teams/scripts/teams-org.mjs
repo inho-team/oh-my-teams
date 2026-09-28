@@ -41,17 +41,6 @@ import {
   assertDirectorAuthority,
   checkCloseReady,
 } from "./delivery.mjs";
-import { assertDistinctOpenCodexHomes } from "./opencodex.mjs";
-import { startDashboard } from "./dashboard.mjs";
-import {
-  answerHeadless,
-  HEADLESS_PROTOCOL,
-  HEADLESS_PROVIDERS,
-  listHeadless,
-  startHeadlessWorker,
-  stopHeadless,
-  waitHeadless,
-} from "./headless.mjs";
 import {
   clearRoleTerminal,
   DISPATCH_PURPOSES,
@@ -71,7 +60,6 @@ import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
 import {
   checkTerminalIdle,
-  createWorktree,
   discoverOrcaRuntime,
   injectTask,
   runOrcaJson,
@@ -215,17 +203,6 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                the terminal comes from role-terminal; the worker's tab title
                starts with its role tag, e.g. [PL]; a Claude terminal that
                last received a different task, or any review, gets /clear first)
-  headless-start --org FILE --role ROLE --cwd DIR --spec TEXT --state DIR
-                 [--workflow-id ID] [--timeout-ms N] [--worker ID]
-                 [--workflow-task ID --profile FALLBACK]
-                 (runs the role as a non-interactive process, without Orca;
-                 --profile runs the fallback a workflow-handoff recorded)
-  headless-status --state DIR --worker ID [--wait-ms N]
-  headless-answer --state DIR --worker ID --text TEXT [--timeout-ms N]
-  headless-stop --state DIR --worker ID
-  headless-list --state DIR
-  dashboard --state DIR [--port N] [--host ADDRESS] [--token TEXT]
-            (serves the headless workers to a browser; every request needs the token)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
   prompt-answer --org FILE --terminal HANDLE --workflow-id ID --state DIR
@@ -437,23 +414,6 @@ export const ALLOWED_OPTIONS = {
     "terminal",
     "orca",
   ],
-  "headless-start": [
-    "org",
-    "role",
-    "cwd",
-    "spec",
-    "state",
-    "workflow-id",
-    "workflow-task",
-    "profile",
-    "timeout-ms",
-    "worker",
-  ],
-  "headless-status": ["state", "worker", "wait-ms"],
-  "headless-answer": ["state", "worker", "text", "timeout-ms"],
-  "headless-stop": ["state", "worker"],
-  "headless-list": ["state"],
-  dashboard: ["state", "port", "host", "token"],
   "role-command": ["org", "role", "workflow-id", "state"],
   "role-terminal": [
     "org",
@@ -624,12 +584,6 @@ export const REQUIRED_OPTIONS = {
   "terminal-idle-check": ["terminal"],
   "prompt-answer": ["org", "terminal", "workflow-id", "state"],
   "worker-limit-check": ["worktree", "provider"],
-  "headless-start": ["org", "role", "cwd", "spec", "state"],
-  "headless-status": ["state", "worker"],
-  "headless-answer": ["state", "worker", "text"],
-  "headless-stop": ["state", "worker"],
-  "headless-list": ["state"],
-  dashboard: ["state"],
   "role-command": ["org", "role"],
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
@@ -697,7 +651,7 @@ export function parseArgs(argv) {
     const key = rest[index];
     assert(key.startsWith("--"), `Unexpected argument: ${key}`);
     const option = key.slice(2);
-    // `--text` is a flag only for role-spec; headless-answer takes a value.
+    // `--text` is a flag only for role-spec.
     if (
       ["json", "apply", "force", "all", "write", "dry-run"].includes(option) ||
       (option === "text" && command === "role-spec")
@@ -893,27 +847,10 @@ async function compatibilityPrepare(args) {
     repo,
     path.join(stateDir, "prepared", args.name),
   );
-  const created = await createWorktree(repo, {
-    name: args.name,
-    base: prepared.frozenTask.baseRef,
-    executable: args.orca,
-  });
-  const attached = await attachWorkspace({
-    parentRepo: repo,
-    workspace: created.path,
-    stateDir,
-    name: args.name,
-    org,
-    task: prepared.frozenTask,
-    receipt: created.receipt,
-    executable: created.executable,
-    runtime: created.discovery,
-  });
   return {
-    ...attached,
-    note:
-      "Compatibility prepare completed. New integrations should use " +
-      "prepare-input, current Orca discovery, then attach-workspace.",
+    ...prepared,
+    stateDir,
+    note: "Compatibility prepare no longer creates a sessionless worktree. Create a child through Orca, open a role-terminal in it, verify ready/session proof, then attach-workspace.",
   };
 }
 
@@ -1178,84 +1115,6 @@ export async function freshenTerminal(
     ...decision,
     cleared: outcome.cleared,
     ...(outcome.cleared ? {} : { reason: outcome.reason }),
-  };
-}
-
-// A role run as a non-interactive process gets the same checks a terminal
-// launch does: its profile, whether this run holds the role, the owner
-// checkout, and another role's worktree. The instruction carries the role's
-// charter and the headless protocol, since no one answers a prompt.
-function startHeadlessRole(args) {
-  assert(
-    args.profile === undefined || args["workflow-id"],
-    "--profile requires --workflow-id, --state and --workflow-task",
-  );
-  // `--state` is where the worker is recorded; it names workflow state only
-  // together with `--workflow-id`.
-  const { org, run } = launchContext(
-    args["workflow-id"] ? args : { ...args, state: undefined },
-  );
-  const command = roleCommand(org, args.role, run);
-  // roleCommand also serves the PM's terminal; a worker is never PM.
-  assert(
-    command.role !== "pm",
-    args.role === "pm"
-      ? "PM runs in its own terminal opened with role-command; it is not started as a headless worker"
-      : `${args.role} folds to pm, which does its work itself`,
-  );
-  assert(
-    HEADLESS_PROVIDERS.includes(command.provider),
-    `Role ${command.role} uses ${command.provider}, which has no headless runtime; ` +
-      `supported: ${HEADLESS_PROVIDERS.join(", ")}`,
-  );
-  // One run's runner accounts must not share a session home or use an account
-  // home as one; the run's other roles are checked with this one.
-  if (command.runner) {
-    assertDistinctOpenCodexHomes(
-      (run.roles ?? Object.keys(org.roles)).map(
-        (name) => org.profiles[org.roles[name]?.profile],
-      ),
-    );
-  }
-  const cwd = path.resolve(args.cwd);
-  assertNotKickoffOwner(cwd, `starting ${command.role}`);
-  assertWorktreeUnshared(run.workflowState, command.role, `path:${cwd}`, cwd);
-  const workerId = args.worker ?? `${command.role}-${Date.now().toString(36)}`;
-  const launchedAt = new Date().toISOString();
-  const started = startHeadlessWorker({
-    stateDir: args.state,
-    workerId,
-    role: command.role,
-    profile: command.profile,
-    provider: command.provider,
-    binary: [command.argv[0]],
-    model: command.modelRequested,
-    effort: command.effortRequested,
-    runner: command.runner ?? null,
-    cwd,
-    prompt: `${roleSpec(org, command.role, args.spec, run)}
-${HEADLESS_PROTOCOL}
-`,
-    ...(args["timeout-ms"] === undefined
-      ? {}
-      : { timeoutMs: Number(args["timeout-ms"]) }),
-  });
-  return {
-    ...started,
-    ...recordLaunchSafely(args.org, launchedAt, {
-      via: "headless-start",
-      role: command.role,
-      profile: command.profile,
-      provider: command.provider,
-      modelRequested: command.modelRequested,
-      effortRequested: command.effortRequested,
-      worktreePath: cwd,
-      worktreeSelector: `path:${cwd}`,
-      workerId,
-      workflowId: args["workflow-id"] ?? null,
-      stateDir: args.state,
-      ...run.handoff,
-    }),
   };
 }
 
@@ -1709,40 +1568,6 @@ export async function executeCommand(args, execute) {
       });
     case "worker-start":
       return startSupervisedWorker(args);
-    case "headless-start":
-      return startHeadlessRole(args);
-    case "headless-status":
-      return waitHeadless(
-        args.state,
-        args.worker,
-        args["wait-ms"] === undefined ? 0 : Number(args["wait-ms"]),
-      );
-    case "headless-answer":
-      return answerHeadless(args.state, args.worker, args.text, {
-        timeoutMs:
-          args["timeout-ms"] === undefined
-            ? undefined
-            : Number(args["timeout-ms"]),
-      });
-    case "headless-stop":
-      return stopHeadless(args.state, args.worker);
-    case "headless-list":
-      return listHeadless(args.state);
-    case "dashboard": {
-      // The server keeps the process running; only where to open it is printed.
-      const started = await startDashboard({
-        stateDir: path.resolve(args.state),
-        port: args.port === undefined ? 4812 : Number(args.port),
-        host: args.host ?? "0.0.0.0",
-        token: args.token,
-      });
-      return {
-        listening: `${started.host}:${started.port}`,
-        local: `http://127.0.0.1:${started.port}${started.path}`,
-        path: started.path,
-        token: started.token,
-      };
-    }
     case "worker-limit-check":
       return workerLimitCheck({
         provider: args.provider,
@@ -1825,7 +1650,7 @@ export async function executeCommand(args, execute) {
       // it would bypass the runner and its fixed account without a record.
       assert(
         !command.runner,
-        "An explicit OpenCodex runner is supported by headless-start only; role-command would print a native Codex command that bypasses it",
+        "An explicit OpenCodex runner has no interactive Orca terminal path; role-command would print a native Codex command that bypasses it",
       );
       return command;
     }
@@ -1842,7 +1667,7 @@ export async function executeCommand(args, execute) {
       const command = roleCommand(org, args.role, { ...runCtx, firstPrompt });
       assert(
         !command.runner,
-        "An explicit OpenCodex runner is supported by headless-start only; role-terminal cannot run it as native Codex",
+        "An explicit OpenCodex runner has no interactive Orca terminal path; role-terminal cannot run it as native Codex",
       );
       assert(
         firstPrompt === undefined || command.role === "pm",

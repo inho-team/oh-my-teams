@@ -2,11 +2,12 @@
  * Launch ledger: which role was started where, when, and through which command.
  *
  * Provider session stores name a working directory and a time but never a
- * role, and neither an Orca terminal nor a headless worker leaves a lasting
+ * role, and neither an Orca terminal nor an older sessionless worker leaves a lasting
  * record of the role it was opened for. Each launch command appends one line
  * here, beside the organization, so a usage report can later tell whose
- * session a transcript in a worktree was. The ledger is best-effort: a launch
- * that cannot be recorded still runs.
+ * session a transcript in a worktree was. Old headless rows remain readable
+ * for recovery and historical usage attribution, but cannot be written again.
+ * The ledger is best-effort: a launch that cannot be recorded still runs.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -15,11 +16,10 @@ import { listKickoffs } from "./kickoff-registry.mjs";
 import { pathWithin } from "./usage-sources.mjs";
 
 /** Commands that append a launch line. */
-export const LAUNCH_VIAS = Object.freeze([
-  "role-terminal",
-  "worker-start",
-  "headless-start",
-]);
+export const LAUNCH_VIAS = Object.freeze(["role-terminal", "worker-start"]);
+
+/** Legacy launch type accepted only while reading pre-removal records. */
+export const LEGACY_LAUNCH_VIAS = Object.freeze(["headless-start"]);
 
 const LOCK_ATTEMPTS = 40;
 const LOCK_WAIT_MS = 25;

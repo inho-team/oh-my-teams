@@ -946,6 +946,10 @@ function validateExecutionInput(input, reserveOnly = false, stateDir = null) {
       input.receipt?.worktreeId,
     "Actual run/task/dispatch/execution/worktree receipt ids required",
   );
+  assert(
+    input.receipt.via !== "headless-start",
+    "Sessionless headless execution was removed; attach an Orca terminal receipt instead",
+  );
   if (input.receipt.via === "headless-start") {
     const expected = `headless:${input.receipt.executionId}`;
     assert(
