@@ -17,6 +17,11 @@ import {
   deliverKickoff,
   kickoffOwner,
 } from "../plugins/oh-my-teams/scripts/delivery.mjs";
+import {
+  deliveryRefDocId,
+  resolveKickoffHash,
+  saveDocument,
+} from "../plugins/oh-my-teams/scripts/documents.mjs";
 import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const exampleOrg = path.resolve(
@@ -150,12 +155,110 @@ test("deliver merges the verified head into the owner branch once", async (t) =>
     await git(fixture.project, "rev-parse", "HEAD"),
     delivered.mergeCommit,
   );
+
+  // Save the delivery-ref document before releasing
+  const kickoffHash = resolveKickoffHash(fixture.org, fixture.worktreeId);
+  const docId = deliveryRefDocId(kickoffHash, delivered.mergeCommit);
+  const entry = listKickoffs(fixture.org).kickoffs[0];
+  saveDocument(entry.pm.stateDir, {
+    schemaVersion: 1,
+    docId,
+    stage: "delivery",
+    kickoffId: kickoffHash,
+    workflowId: null,
+    revision: 1,
+    state: "resolved",
+    author: { role: "pm", executionId: "exec-1" },
+    createdAt: new Date().toISOString(),
+    basedOnRevision: null,
+    reason: "delivery recorded",
+    deliveredCommit: delivered.mergeCommit,
+  });
+
   assert.equal(
     releaseKickoff(fixture.org, {
       worktreeId: fixture.worktreeId,
       reason: "completed",
     }).released,
     true,
+  );
+});
+
+test("a later delivery preserves the earlier merge and refuses a stale stage", async (t) => {
+  const fixture = await kickoffProject(t);
+  const options = {
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  };
+  const first = await deliverKickoff(options);
+  const ownerAfterFirst = await git(fixture.project, "rev-parse", "HEAD");
+
+  // A new commit on the old branch cannot replace the first delivered result.
+  fs.writeFileSync(path.join(fixture.worktree, "docs", "later.md"), "stale\n");
+  await git(fixture.worktree, "add", ".");
+  await git(fixture.worktree, "commit", "-qm", "stale continuation");
+  const staleHead = await git(fixture.worktree, "rev-parse", "HEAD");
+  await assert.rejects(
+    deliverKickoff({ ...options, head: staleHead }),
+    /does not contain previous merge/,
+  );
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    ownerAfterFirst,
+  );
+  assert.equal(
+    listKickoffs(fixture.org).kickoffs[0].deliveryHistory,
+    undefined,
+  );
+
+  await git(
+    fixture.worktree,
+    "merge",
+    "--no-ff",
+    "-qm",
+    "integrate main",
+    "main",
+  );
+  fs.writeFileSync(
+    path.join(fixture.worktree, "docs", "later.md"),
+    "current\n",
+  );
+  await git(fixture.worktree, "commit", "-qam", "finish continuation");
+  const nextHead = await git(fixture.worktree, "rev-parse", "HEAD");
+  let gateCalls = 0;
+  const second = await deliverKickoff({
+    ...options,
+    head: nextHead,
+    gate: async () => {
+      gateCalls += 1;
+    },
+  });
+  assert.equal(second.merged, true);
+  assert.equal(gateCalls, 1);
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    second.mergeCommit,
+  );
+  assert.equal(await git(fixture.project, "rev-parse", "HEAD^2"), nextHead);
+  const [entry] = listKickoffs(fixture.org).kickoffs;
+  assert.deepEqual(entry.deliveryHistory, [
+    {
+      head: first.head,
+      mergeCommit: first.mergeCommit,
+      at: entry.deliveryHistory[0].at,
+    },
+  ]);
+  assert.equal(entry.delivered.head, nextHead);
+  assert.equal(entry.delivered.mergeCommit, second.mergeCommit);
+  assert.equal(
+    (await deliverKickoff({ ...options, head: nextHead })).merged,
+    false,
+  );
+  assert.deepEqual(
+    listKickoffs(fixture.org).kickoffs[0].deliveryHistory,
+    entry.deliveryHistory,
   );
 });
 

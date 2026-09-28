@@ -23,7 +23,6 @@ import {
   usageReport,
 } from "../plugins/oh-my-teams/scripts/usage-report.mjs";
 import { sessionRecord } from "../plugins/oh-my-teams/scripts/usage-sources.mjs";
-import { listHeadless } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const MINUTE = 60 * 1000;
@@ -34,9 +33,7 @@ const exampleOrg = path.resolve(
 
 function tempDir(t, prefix = "omt-usage-report-") {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-  t.after(async () => {
-    // A detached headless runner may still hold its files on Windows.
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+  t.after(() => {
     fs.rmSync(dir, {
       recursive: true,
       force: true,
@@ -55,6 +52,22 @@ function writeLines(file, entries) {
     file,
     `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
   );
+}
+
+// Tests may supply records written before sessionless execution was removed,
+// but must never append one through the operational ledger API.
+function recordLegacyLaunch(orgFile, launch, now) {
+  const recorded = recordLaunch(
+    orgFile,
+    { ...launch, via: "worker-start" },
+    now,
+  );
+  const legacy = { ...recorded.line, via: "headless-start" };
+  const file = recorded.file;
+  const rows = fs.readFileSync(file, "utf8").trimEnd().split("\n");
+  rows[rows.length - 1] = JSON.stringify(legacy);
+  fs.writeFileSync(file, `${rows.join("\n")}\n`);
+  return { ...recorded, line: legacy };
 }
 
 // A project whose registry entry is written directly, so its creation time,
@@ -133,8 +146,7 @@ test("a launch is tied to its kickoff by state, by PM worktree, or through an ea
     at(base, 5),
   );
   assert.equal(first.line.kickoffPmWorktreeId, fixture.worktreeId);
-  const fromPm = recordLaunch(fixture.orgFile, {
-    via: "headless-start",
+  const fromPm = recordLegacyLaunch(fixture.orgFile, {
     role: "junior",
     callerCwd: path.join(fixture.pmPath, "sub"),
   });
@@ -414,8 +426,8 @@ function tokenTotal(base, minutes, input, output) {
   };
 }
 
-// PL on Codex and Senior on Agy share one worktree; Junior runs headless on
-// Codex, whose own rollout must not be counted a second time.
+// PL on Codex and Senior on Agy share one worktree. The Junior row is a
+// read-only historical record, whose Codex rollout must not be counted twice.
 function kickoffWithSessions(t) {
   const base = Date.now() - 120 * MINUTE;
   const fixture = project(t, { createdAt: at(base, 0) });
@@ -443,13 +455,18 @@ function kickoffWithSessions(t) {
     worktreePath: shared,
     terminal: "term-senior",
   });
-  launch(15, {
-    via: "headless-start",
-    role: "junior",
-    provider: "codex",
-    worktreePath: juniorDir,
-    workerId: "junior-1",
-  });
+  recordLegacyLaunch(
+    fixture.orgFile,
+    {
+      role: "junior",
+      provider: "codex",
+      worktreePath: juniorDir,
+      workerId: "junior-1",
+      callerCwd: fixture.pmPath,
+      stateDir: fixture.stateDir,
+    },
+    at(base, 15),
+  );
 
   const sessions = path.join(fixture.homes.codexHome, "sessions", "2026");
   codexRollout(path.join(sessions, "rollout-pl.jsonl"), "th-pl", shared, base, [
@@ -741,52 +758,35 @@ test("usage-report runs from the CLI with explicit homes and writes a snapshot",
   );
 });
 
-test("a launch whose ledger cannot be written still starts, and says so", async (t) => {
+test("a historical headless launch remains readable but cannot be appended", (t) => {
   const base = Date.now() - 10 * MINUTE;
   const fixture = project(t, { createdAt: at(base, 0) });
   const worktree = path.join(fixture.dir, "junior-worktree");
   fs.mkdirSync(worktree);
-  const start = async (worker) => {
-    const captured = captureLog(t);
-    await main([
-      "headless-start",
-      "--org",
-      fixture.orgFile,
-      "--role",
-      "junior",
-      "--cwd",
-      worktree,
-      "--spec",
-      "x",
-      "--state",
-      fixture.stateDir,
-      "--worker",
-      worker,
-    ]);
-    captured.restore();
-    return JSON.parse(captured.lines.join("\n"));
-  };
-  const recorded = await start("junior-1");
-  assert.equal(recorded.ledger, ledgerFile(fixture.orgFile));
+  const recorded = recordLegacyLaunch(
+    fixture.orgFile,
+    {
+      role: "junior",
+      workerId: "junior-1",
+      worktreePath: worktree,
+      callerCwd: fixture.pmPath,
+      stateDir: fixture.stateDir,
+    },
+    at(base, 1),
+  );
   const [line] = readLaunches(fixture.orgFile);
   assert.equal(line.via, "headless-start");
   assert.equal(line.workerId, "junior-1");
   assert.equal(line.kickoffPmWorktreeId, fixture.worktreeId);
   assert.equal(line.worktreePath, worktree);
-
-  // A file where the ledger's directory belongs makes every append fail.
-  const usageDir = path.dirname(ledgerFile(fixture.orgFile));
-  fs.rmSync(usageDir, { recursive: true, force: true });
-  fs.writeFileSync(usageDir, "not a directory");
-  const blocked = await start("junior-2");
-  assert.equal(blocked.worker.id, "junior-2");
-  assert.match(blocked.ledgerError, /\S/);
-  assert.equal(blocked.ledger, undefined);
-  assert.deepEqual(
-    listHeadless(fixture.stateDir, {
-      codexHome: fixture.homes.codexHome,
-    }).map((worker) => worker.worker),
-    ["junior-1", "junior-2"],
+  assert.equal(recorded.file, ledgerFile(fixture.orgFile));
+  assert.throws(
+    () =>
+      recordLaunch(fixture.orgFile, {
+        via: "headless-start",
+        role: "junior",
+      }),
+    /Launch via must be one of/,
   );
 });
 

@@ -839,11 +839,43 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // built for one role is accepted as the role the run folded it onto.
   assert.match(
     runtime,
-    /node <runtime> role-terminal --org <organization\.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>/,
+    new RegExp(
+      [
+        "node <runtime> role-worktree-create --org <organization\\.json>",
+        " --role <역할> --repo <pm-worktree> --name <name> --base <base-sha>",
+        " --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>",
+      ].join(""),
+    ),
   );
   assert.doesNotMatch(readSkill("pl"), /custom argv/);
   assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
   assert.match(runtime, /대괄호/);
+  assert.doesNotMatch(runtime, /Windows에서 Agy는 신뢰 상태와 무관하게/);
+  assert.doesNotMatch(
+    runtime,
+    /표가 `headless`를 돌려주면 `headless-start`로 실행/,
+  );
+  const agents = fs.readFileSync(path.join(root, "AGENTS.md"), "utf8");
+  const archivedHeadlessPlan = fs.readFileSync(
+    path.join(root, "docs/plan/headless-runtime.md"),
+    "utf8",
+  );
+  assert.doesNotMatch(agents, /headless-runtime\.md.*예외/);
+  assert.match(archivedHeadlessPlan, /보관 기록: 제거된 비대화형 감독 런타임/);
+  assert.match(
+    archivedHeadlessPlan,
+    /새 역할 실행을 시작하거나 재개하지 않는다/,
+  );
+  assert.match(archivedHeadlessPlan, /제거된 명령 표면/);
+  const runtimeSource = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/scripts/teams-org.mjs"),
+    "utf8",
+  );
+  const help = runtimeSource.slice(
+    runtimeSource.indexOf("const HELP ="),
+    runtimeSource.indexOf("`;", runtimeSource.indexOf("const HELP =")),
+  );
+  assert.doesNotMatch(help, /headless-start|headless-answer/);
   for (const role of ["pm", "pl"]) {
     assert.match(
       readSkill(role),
@@ -854,7 +886,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     // matrix decides the launch path and skills link the matrix table.
     assert.match(
       readSkill(role),
-      /호환성 표\(`scripts\/launch-matrix\.mjs`\)가 `headless`로 정한 역할은 `headless-start`로 실행/,
+      /호환성 표\(`scripts\/launch-matrix\.mjs`\)가 `blocked`를 돌려주는 프로필은 세션 없는 대체 실행을 시작하지 않고/,
     );
     // Skills and orca-runtime.md must link launch-matrix.mjs.
     assert.match(readSkill(role), /launch-matrix\.mjs/);
@@ -891,7 +923,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(readReference("kickoff-registry.md"), /인계에 실패한 것이다/);
   assert.match(
     readReference("kickoff-registry.md"),
-    /worktree create --agent`를 쓰지 않고/,
+    /`role-worktree-create --brief <브리프 경로>`/,
   );
 });
 
@@ -1254,7 +1286,7 @@ test("skills cut review-rework loops and wasted context", () => {
   const runtime = readReference("orca-runtime.md");
   // A Junior implementation goes up after its first rejected review.
   assert.match(pm, /Junior 구현이 검토에서 한 번 반려된 일/);
-  assert.match(pm, /첫 검토에서 반려되면 수정을 Junior에게 다시 맡기지 않고/);
+  assert.match(pm, /첫 검토에서 반려되어 Senior의 별도 소유권이 필요하면/);
   assert.doesNotMatch(pm, /반복해서 실패한 일/);
   // Reviewers list every finding at once, then re-review only the fix diff.
   assert.match(senior, /첫 검토에서는 발견한 finding을 한 번에 모두 적고/);

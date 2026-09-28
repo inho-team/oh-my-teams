@@ -157,6 +157,42 @@ test("a new organization cannot mix Worker with the retired ranks", () => {
   assert.throws(() => validateOrg(org), /cannot declare legacy/);
 });
 
+test("published schemas accept Worker organizations, tasks, reviews, and document authors", () => {
+  const schema = (name) =>
+    JSON.parse(
+      readFileSync(
+        new URL(`../plugins/oh-my-teams/schemas/${name}`, import.meta.url),
+      ),
+    );
+  assert.ok(
+    schema("organization.schema.json").properties.roles.properties.worker,
+  );
+  assert.ok(
+    schema(
+      "workflow.schema.json",
+    ).properties.tasks.items.properties.role.enum.includes("worker"),
+  );
+  assert.ok(
+    schema("task.schema.json").$defs.review.properties.role.enum.includes(
+      "worker",
+    ),
+  );
+  assert.ok(
+    schema(
+      "review.schema.json",
+    ).properties.reviewer.properties.role.enum.includes("worker"),
+  );
+  for (const name of fs
+    .readdirSync(new URL("../plugins/oh-my-teams/schemas/", import.meta.url))
+    .filter(
+      (name) => name.startsWith("document-") && name.endsWith(".schema.json"),
+    )) {
+    assert.ok(
+      schema(name).$defs.author.properties.role.enum.includes("worker"),
+    );
+  }
+});
+
 test("Worker reviews require a separate execution identity", () => {
   const task = JSON.parse(
     readFileSync(

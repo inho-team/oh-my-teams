@@ -20,11 +20,13 @@ import {
   recordSettlement,
   readWorkflow,
   reworkTask,
+  prepareRolePromotion,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { work } from "../plugins/oh-my-teams/scripts/worker.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import { acceptOutcome } from "../plugins/oh-my-teams/scripts/gates.mjs";
+import { saveWorkflowState } from "../plugins/oh-my-teams/scripts/workflow-store.mjs";
 import { getTemplateRepo, cleanupTemplates } from "./template-factory.mjs";
 
 after(() => cleanupTemplates());
@@ -388,14 +390,21 @@ test("a review that asks for changes hands the task back within its attempt", as
       conclusion,
       findings,
     });
-  const rework = (eventId, reviewId, executionId) =>
+  const rework = (
+    eventId,
+    reviewId,
+    executionId,
+    worktreeId = "/w/report",
+    transitionId,
+  ) =>
     reworkTask(stateDir, request.id, revision(), {
       schemaVersion: 1,
       eventId,
       taskId: "a",
       attemptId: "attempt-1",
       reviewId,
-      receipt: receipt(executionId),
+      receipt: { ...receipt(executionId), worktreeId: `repo::${worktreeId}` },
+      ...(transitionId ? { transitionId } : {}),
     });
   review("approve-first", "first", "approved", []);
   review("reject-first", "first", "changes-requested", [
@@ -419,10 +428,42 @@ test("a review that asks for changes hands the task back within its attempt", as
     () => rework("rw-same", "reject-first", "first"),
     /new execution/,
   );
+  assert.throws(
+    () => rework("rw-other-worktree", "reject-first", "second", "/w/other"),
+    /must reuse its role worktree/,
+  );
 
-  const reworked = rework("rw-1", "reject-first", "second");
+  const pendingPromotion = readWorkflow(stateDir, request.id).state;
+  pendingPromotion.tasks.a.worktreeTransitions = [
+    {
+      id: "promotion-w2-00",
+      kind: "junior-to-senior",
+      fromRole: "junior",
+      toRole: "senior",
+      fromWorktreeId: "repo::/w/report",
+      toWorktreeId: "repo::/w/senior",
+      baseCommit: "junior-rejected-head",
+      preparedAt: "2026-09-28T00:00:00.000Z",
+    },
+  ];
+  pendingPromotion.revision += 1;
+  saveWorkflowState(stateDir, request.id, pendingPromotion);
+
+  const reworked = rework(
+    "rw-1",
+    "reject-first",
+    "second",
+    "/w/senior",
+    "promotion-w2-00",
+  );
   assert.equal(reworked.tasks.a.state, "running");
+  assert.equal(reworked.tasks.a.role, "junior");
+  assert.equal(reworked.tasks.a.executionRole, "senior");
   assert.equal(reworked.tasks.a.execution.executionId, "second");
+  assert.equal(reworked.tasks.a.execution.executionRole, "senior");
+  assert.equal(reworked.tasks.a.execution.transitionId, "promotion-w2-00");
+  assert.equal(reworked.tasks.a.worktreeId, "repo::/w/senior");
+  assert.equal(reworked.tasks.a.worktreeTransitions[0].executionId, "second");
   // The review sent the work back, so no new attempt is spent.
   assert.equal(reworked.budget.attemptsUsed, 1);
   const attempt = reworked.tasks.a.attempts[0];
@@ -468,7 +509,7 @@ test("a review that asks for changes hands the task back within its attempt", as
   // With both calls spent, another rejection has no call left to rework with.
   review("reject-second", "second", "inconclusive", []);
   assert.throws(
-    () => rework("rw-2", "reject-second", "third"),
+    () => rework("rw-2", "reject-second", "third", "/w/senior"),
     /used 2 of 2 calls/,
   );
 
@@ -487,6 +528,74 @@ test("a review that asks for changes hands the task back within its attempt", as
 const organization = readJSON(
   new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
 );
+
+test("a w2-00 Junior-to-Senior transition records matching prior commits", async (t) => {
+  const dir = await repo(t);
+  const stateDir = path.join(dir, ".omt");
+  writeJSON(path.join(dir, "w2-00.json"), task("w2-00"));
+  const request = {
+    schemaVersion: 1,
+    id: "w2-00-promotion",
+    goal: "Promote a rejected implementation without adding a workflow task",
+    repo: ".",
+    tasks: [{ file: "w2-00.json", role: "junior" }],
+    policy: { maxRunning: 1, maxReviewPending: 1 },
+    budget: { maxAttempts: 1, maxCalls: 2 },
+  };
+  await createWorkflow(stateDir, request, structuredClone(organization), dir);
+  const junior = "/w2-00/junior";
+  const senior = "/w2-00/senior";
+  const head = "w2-00-rejected-commit";
+  const revision = () => readWorkflow(stateDir, request.id).state.revision;
+  attachExecution(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "w2-00-attach",
+    attemptId: "w2-00-attempt",
+    taskId: "w2-00",
+    callAllowance: 2,
+    receipt: {
+      executionId: "w2-00-junior",
+      runId: "w2-00-run",
+      taskId: "w2-00-task",
+      dispatchId: "w2-00-dispatch",
+      worktreeId: `repo::${junior}`,
+    },
+  });
+  recordSettlement(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "w2-00-settle",
+    attemptId: "w2-00-attempt",
+    taskId: "w2-00",
+    executionId: "w2-00-junior",
+    outcome: "settled",
+    callsUsed: 1,
+  });
+
+  const prepared = await prepareRolePromotion(
+    stateDir,
+    request.id,
+    "w2-00",
+    {
+      fromWorktreeId: `repo::${junior}`,
+      toWorktreeId: `repo::${senior}`,
+      fromWorktreePath: junior,
+      toWorktreePath: senior,
+      base: head,
+    },
+    {
+      gitEvidence: async (_repo, argv) => {
+        assert.equal(argv[0], "rev-parse");
+        return head;
+      },
+    },
+  );
+  assert.equal(prepared.transition.baseCommit, head);
+  assert.equal(prepared.state.tasks["w2-00"].role, "junior");
+  assert.equal(
+    prepared.state.tasks["w2-00"].worktreeTransitions[0].toWorktreeId,
+    `repo::${senior}`,
+  );
+});
 
 test("prelaunch reservation blocks duplicate launches and attaches without spending twice", async (t) => {
   const dir = await repo(t),
@@ -861,7 +970,7 @@ test("resumeWorkflow rejects pending and stale-execution gates", async (t) => {
   assert.equal(revoked.state.tasks.gated.acceptedResult, null);
 });
 
-test("headless receipt: valid receipt passes, invalid receipts are rejected", async (t) => {
+test("headless receipt is rejected after sessionless execution removal", async (t) => {
   const dir = await repo(t),
     stateDir = path.join(dir, ".omt");
   writeJSON(path.join(dir, "a.json"), task("a"));
@@ -908,6 +1017,19 @@ test("headless receipt: valid receipt passes, invalid receipts are rejected", as
     runnerPid: 1234,
     modelRequested: "gemini-3.1-pro-high",
   };
+  assert.throws(
+    () =>
+      attachExecution(stateDir, request.id, 1, {
+        schemaVersion: 1,
+        eventId: "attach-headless-good",
+        attemptId: "attempt-headless-good",
+        taskId: "a",
+        callAllowance: 1,
+        receipt: goodReceipt,
+      }),
+    /Sessionless headless execution was removed/,
+  );
+  return;
   const attached = attachExecution(stateDir, request.id, 1, {
     schemaVersion: 1,
     eventId: "attach-headless-good",
