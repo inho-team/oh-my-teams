@@ -251,14 +251,11 @@ async function gitObservation(location, delivered, projectDir, gitCommand) {
       }
     }
     const ignoredPaths = ignored.split("\0").filter(Boolean);
-    const localEvidence = ignoredPaths.filter(
-      (file) => file !== "node_modules" && !file.startsWith("node_modules/"),
-    );
     return {
       head,
       dirty: Boolean(status),
-      ignored: localEvidence.length > 0,
-      ignoredCount: localEvidence.length,
+      ignored: ignoredPaths.length > 0,
+      ignoredCount: ignoredPaths.length,
       included,
     };
   } catch {

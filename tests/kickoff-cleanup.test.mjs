@@ -1,7 +1,18 @@
 /** Regression tests for conservative kickoff worktree reconciliation. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateKickoffCleanup } from "../plugins/oh-my-teams/scripts/kickoff-cleanup.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  evaluateKickoffCleanup,
+  scanKickoffCleanup,
+} from "../plugins/oh-my-teams/scripts/kickoff-cleanup.mjs";
+import {
+  registerKickoff,
+  releaseKickoff,
+} from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 
 const pm = "repo::/tmp/pm";
 const child = "repo::/tmp/child";
@@ -170,4 +181,85 @@ test("historical rescan retains removed child candidates without duplicating cle
   assert.equal(result.candidates.length, 2);
   assert.equal(result.candidates[1].status, "already-removed");
   assert.equal(result.candidates[0].status, "safe-to-remove");
+});
+
+test("a completed archive retains child identity for read-only partial cleanup reentry", async (t) => {
+  const project = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-cleanup-history-"),
+  );
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  const orgFile = path.join(project, ".omt", "organization.json");
+  const pmPath = path.join(project, "pm");
+  const childPath = path.join(project, "child");
+  const brief = path.join(project, "brief.md");
+  fs.mkdirSync(path.dirname(orgFile), { recursive: true });
+  fs.mkdirSync(pmPath);
+  fs.mkdirSync(childPath);
+  fs.writeFileSync(brief, "Goal and acceptance criteria");
+  fs.copyFileSync(
+    path.resolve("plugins/oh-my-teams/examples/organization.json"),
+    orgFile,
+  );
+  const pmId = `repo::${pmPath}`;
+  const childId = `repo::${childPath}`;
+  registerKickoff(orgFile, {
+    goal: "reconcile worktrees",
+    pm: { worktreeId: pmId, path: pmPath, stateDir: path.join(pmPath, ".omt") },
+    organizationRevision: readJSON(orgFile).revision,
+    brief,
+    delivery: { mode: "none" },
+  });
+  let childPresent = true;
+  const orca = async (_executable, args) => ({
+    result:
+      args[0] === "worktree"
+        ? {
+            worktrees: [
+              {
+                worktreeId: pmId,
+                path: pmPath,
+                childWorktreeIds: childPresent ? [childId] : [],
+              },
+              ...(childPresent
+                ? [
+                    {
+                      worktreeId: childId,
+                      path: childPath,
+                      parentWorktreeId: pmId,
+                    },
+                  ]
+                : []),
+            ],
+          }
+        : { terminals: [] },
+  });
+  const cleanup = await scanKickoffCleanup(
+    { orgFile, worktreeId: pmId },
+    { orca },
+  );
+  assert.deepEqual(
+    cleanup.candidates.map((candidate) => candidate.status),
+    ["preserve", "preserve"],
+  );
+  const released = releaseKickoff(orgFile, {
+    worktreeId: pmId,
+    reason: "completed",
+    cleanup,
+  });
+  assert.equal(readJSON(released.archived).cleanup.candidates.length, 2);
+  childPresent = false;
+  fs.rmSync(childPath, { recursive: true });
+  const rescanned = await scanKickoffCleanup(
+    {
+      orgFile,
+      worktreeId: pmId,
+      archiveFile: released.archived,
+    },
+    { orca },
+  );
+  assert.deepEqual(
+    rescanned.candidates.map((candidate) => candidate.status),
+    ["preserve", "already-removed"],
+  );
+  assert.equal(readJSON(released.archived).cleanup.candidates.length, 2);
 });
