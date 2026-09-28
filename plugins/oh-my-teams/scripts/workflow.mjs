@@ -666,6 +666,9 @@ function acceptWithoutIntegration(stateDir, id, expectedRevision) {
  * @param {number} expectedRevision - Revision observed before verification.
  * @param {string} [repo] - Final integration checkout, when integration is required.
  * @param {object} [report] - Report for the frozen integration task, when required.
+ * @param {object} [options] - Document ownership forwarded to `gateCheck`, unchanged otherwise.
+ * @param {string} [options.kickoffHash] - See `gates.mjs`'s `gateCheck` `options.kickoffHash`;
+ *   this workflow's own `id` is always forwarded as `gateCheck`'s `options.workflowId`.
  * @returns {Promise<object>} Accepted workflow bound to integration and task results.
  * @throws {Error} On missing contract, stale evidence, incomplete review or changed state.
  */
@@ -675,6 +678,7 @@ export async function acceptWorkflowIntegration(
   expectedRevision,
   repo,
   report,
+  { kickoffHash } = {},
 ) {
   const snapshot = readWorkflow(stateDir, id);
   assert(
@@ -704,7 +708,10 @@ export async function acceptWorkflowIntegration(
     ),
     "All component tasks must be accepted first",
   );
-  const gates = await gateCheck(repo, task, report, stateDir);
+  const gates = await gateCheck(repo, task, report, stateDir, {
+    kickoffHash,
+    workflowId: id,
+  });
   assert(
     gates.state === "accepted",
     "Integration checks, review and PM acceptance required",
@@ -1255,6 +1262,96 @@ export function increaseCallAllowance(stateDir, id, expectedRevision, input) {
       reason: input.reason,
     });
     state.revision += 1;
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
+  });
+}
+
+function validateBudgetInput(input) {
+  assert(
+    input?.schemaVersion === 1 && WORKFLOW_ID_PATTERN.test(input.eventId ?? ""),
+    "Budget increase requires schemaVersion=1 and eventId",
+  );
+  assert(
+    Number.isInteger(input.maxAttempts) && input.maxAttempts > 0,
+    "Budget increase requires a positive integer maxAttempts",
+  );
+  assert(
+    typeof input.approvedBy === "string" &&
+      input.approvedBy.trim() &&
+      typeof input.approvalRef === "string" &&
+      input.approvalRef.trim() &&
+      typeof input.reason === "string" &&
+      input.reason.trim(),
+    "Budget increase requires an approver, an approval reference and a reason",
+  );
+}
+
+/**
+ * Raises a workflow's attempt budget (`state.budget.maxAttempts`) with a
+ * recorded approval, so a workflow blocked on an exhausted attempt budget can
+ * resume dispatching through the runtime instead of an operator editing
+ * `state.json` directly.
+ *
+ * Only `maxAttempts` changes. `maxCalls`, `attemptsUsed`, `callsUsed`, every
+ * policy limit and every task's state are left untouched; the new limit must
+ * exceed the current `maxAttempts` (this command only raises the budget) and
+ * must not sit below `attemptsUsed` (it can never invalidate attempts already
+ * spent).
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - Event id, new maxAttempts, approver, approval
+ *   reference and reason.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, `maxAttempts` is not a positive
+ *   integer strictly above the current value, or it sits below `attemptsUsed`.
+ */
+export function increaseWorkflowBudget(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    validateBudgetInput(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+
+    const from = state.budget.maxAttempts;
+    assert(
+      input.maxAttempts > from,
+      `New maxAttempts ${input.maxAttempts} must exceed the current maxAttempts ${from}`,
+    );
+    assert(
+      input.maxAttempts >= state.budget.attemptsUsed,
+      `New maxAttempts ${input.maxAttempts} cannot be below attemptsUsed ${state.budget.attemptsUsed}`,
+    );
+
+    state.budget.maxAttempts = input.maxAttempts;
+    state.budget.history = [
+      ...(state.budget.history ?? []),
+      {
+        from,
+        to: input.maxAttempts,
+        approvedBy: input.approvedBy,
+        approvalRef: input.approvalRef,
+        reason: input.reason,
+        recordedAt: new Date().toISOString(),
+      },
+    ];
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "attempt-budget-increased",
+      from,
+      to: input.maxAttempts,
+      approvedBy: input.approvedBy,
+      approvalRef: input.approvalRef,
+      reason: input.reason,
+    });
+    state.revision += 1;
+    state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return { state, duplicate: false };
   });
