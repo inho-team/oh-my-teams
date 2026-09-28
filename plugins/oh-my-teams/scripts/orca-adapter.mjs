@@ -166,8 +166,17 @@ const TRUSTED_ORCA_REALPATHS = Object.freeze({
   }),
 });
 
-/** Placeholder passed where an executable argument is required but ignored: `trustedOrcaExecute`'s wrapped runner always substitutes the resolved script, never this string. */
-export const TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER = "orca";
+/**
+ * Placeholder passed where an executable argument is required but ignored:
+ * `trustedOrcaExecute`'s wrapped runner always substitutes the resolved
+ * script, never this string. Deliberately not a plausible binary name (such
+ * as "orca") so that a caller who forgets to also pass the paired `execute`
+ * function does not silently fall through to whatever `orca` happens to
+ * resolve to on PATH; `runOrcaJson` additionally refuses outright if this
+ * value ever reaches it as `executable`.
+ */
+export const TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER =
+  "__omt_trusted_orca_execution_only__";
 
 /**
  * Finds and validates the script that identity confirmation and auditor
@@ -335,24 +344,7 @@ function parseJsonResponse(result, invalidMessage) {
   }
 }
 
-/**
- * Executes one Orca JSON command and validates its transport envelope.
- *
- * @param {string} executable - Previously selected Orca executable.
- * @param {string[]} args - Orca subcommand and literal arguments, without `--json`.
- * @param {object} [options] - Working directory, timeout, and injectable runner.
- * @returns {Promise<object>} Parsed Orca envelope whose `ok` value is not false.
- * @throws {Error} For process failure, timeout, invalid JSON, or `ok: false`.
- */
-export async function runOrcaJson(
-  executable,
-  args,
-  { cwd, timeoutMs = 60000, execute = run } = {},
-) {
-  const result = await execute([executable, ...args, "--json"], {
-    cwd,
-    timeoutMs,
-  });
+function interpretOrcaJsonResult(result) {
   if (result.code !== 0 || result.timedOut) {
     const detail = result.stderr || result.stdout || "Orca command failed";
     throw orcaError(
@@ -371,6 +363,66 @@ export async function runOrcaJson(
     );
   }
   return parsed;
+}
+
+/**
+ * Executes one Orca JSON command and validates its transport envelope.
+ *
+ * @param {string} executable - Previously selected Orca executable.
+ * @param {string[]} args - Orca subcommand and literal arguments, without `--json`.
+ * @param {object} [options] - Working directory, timeout, and injectable runner.
+ * @returns {Promise<object>} Parsed Orca envelope whose `ok` value is not false.
+ * @throws {Error} For process failure, timeout, invalid JSON, `ok: false`, or
+ *   when `executable` is `TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER` (use
+ *   `runTrustedOrcaJson` instead).
+ */
+export async function runOrcaJson(
+  executable,
+  args,
+  { cwd, timeoutMs = 60000, execute = run } = {},
+) {
+  assert(
+    executable !== TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    "TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER reached the general, PATH-based " +
+      "runOrcaJson; it is not a real executable name. Call runTrustedOrcaJson " +
+      "instead, which builds and runs the trusted invocation itself, so a " +
+      "caller that forgot to also pass the paired execute function fails " +
+      "here rather than silently resolving this placeholder on PATH.",
+  );
+  const result = await execute([executable, ...args, "--json"], {
+    cwd,
+    timeoutMs,
+  });
+  return interpretOrcaJsonResult(result);
+}
+
+/**
+ * Executes one Orca JSON command through the fixed, trusted, allowlisted
+ * invocation `trustedOrcaExecute` builds, and validates its transport
+ * envelope exactly as `runOrcaJson` does.
+ *
+ * Unlike `runOrcaJson`, no caller-supplied executable or execute function
+ * ever reaches this: the trusted runner is built here, once, from
+ * `trustedOrcaExecute`, so there is no separate executable/execute pair for
+ * a caller to forget half of. This is what identity confirmation
+ * (`verifiedPm`) and auditor launch should call instead of composing
+ * `runOrcaJson` with a separately injected trusted `execute`.
+ *
+ * @param {string[]} args - Orca subcommand and literal arguments, without `--json`.
+ * @param {object} [options] - Injection points, used only by tests; passed
+ *   through to `trustedOrcaExecute`. Production callers must never set these.
+ * @returns {Promise<object>} Parsed Orca envelope whose `ok` value is not false.
+ * @throws {Error} For a validation failure from `trustedOrcaExecute`,
+ *   process failure, timeout, invalid JSON, or `ok: false`.
+ */
+export async function runTrustedOrcaJson(args, options = {}) {
+  const invoke = trustedOrcaExecute(options);
+  const result = await invoke([
+    TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    ...args,
+    "--json",
+  ]);
+  return interpretOrcaJsonResult(result);
 }
 
 /**

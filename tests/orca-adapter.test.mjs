@@ -12,6 +12,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   resolveTrustedOrcaScriptPath,
+  runOrcaJson,
+  runTrustedOrcaJson,
   trustedOrcaExecute,
   TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
   selectOrcaExecutable,
@@ -324,4 +326,126 @@ test("TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER is a non-empty string never resolved b
   await execute([TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER, "status"]);
   assert.equal(calls[0].argv[0], "/bin/bash");
   assert.ok(!calls[0].argv.includes(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER));
+});
+
+// Counterexample required by decision B item 3: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER
+// is deliberately not a plausible binary name (unlike the earlier "orca"
+// value it replaced), specifically so a caller that reaches the general,
+// PATH-based runOrcaJson with it — because it forgot to also route through
+// runTrustedOrcaJson/trustedOrcaExecute — fails loudly here instead of
+// silently resolving whatever "orca" happens to mean on PATH.
+test("runOrcaJson refuses outright when passed TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER as the executable, never spawning anything", async () => {
+  let spawnCalls = 0;
+  const execute = async () => {
+    spawnCalls += 1;
+    return {
+      code: 0,
+      timedOut: false,
+      stdout: '{"ok":true,"result":{}}',
+      stderr: "",
+    };
+  };
+  await assert.rejects(
+    () =>
+      runOrcaJson(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER, ["status"], { execute }),
+    /reached the general, PATH-based runOrcaJson/,
+  );
+  assert.equal(
+    spawnCalls,
+    0,
+    "runOrcaJson must refuse the placeholder before spawning anything",
+  );
+});
+
+// runTrustedOrcaJson is the single entry point identity confirmation
+// (verifiedPm) and auditor launch should call instead of composing
+// runOrcaJson with a separately injected trusted execute (decision B item
+// 1): it builds the trusted invocation itself, from options passed straight
+// through to trustedOrcaExecute, so there is no executable/execute pair for
+// a caller to assemble or forget half of.
+test("runTrustedOrcaJson builds its invocation through trustedOrcaExecute, discards the placeholder argv[0], and parses the envelope", async () => {
+  const { calls } = invocationOf();
+  const spawnExecute = (argv, callOptions) => {
+    calls.push({ argv, callOptions });
+    return Promise.resolve({
+      code: 0,
+      timedOut: false,
+      stdout: JSON.stringify({
+        ok: true,
+        result: { run: { id: "run-1", coordinator_handle: "term_pm_1" } },
+      }),
+      stderr: "",
+    });
+  };
+  const result = await runTrustedOrcaJson(
+    ["orchestration", "run-current", "--from", "term_pm_1"],
+    {
+      candidates: ["/usr/local/bin/orca"],
+      exists: () => true,
+      realpath: () => REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+      expectedRealpaths: REAL_DARWIN_REALPATHS,
+      userInfo: () => ({ homedir: "/Users/injected", username: "injected" }),
+      spawnExecute,
+    },
+  );
+  assert.equal(result.result.run.coordinator_handle, "term_pm_1");
+  assert.equal(calls.length, 1);
+  const [{ argv }] = calls;
+  assert.deepEqual(argv, [
+    "/bin/bash",
+    "--noprofile",
+    "--norc",
+    REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+    "orchestration",
+    "run-current",
+    "--from",
+    "term_pm_1",
+    "--json",
+  ]);
+});
+
+test("runTrustedOrcaJson rejects an ok:false envelope and a non-zero exit the same way runOrcaJson's shared parsing does", async () => {
+  await assert.rejects(
+    () =>
+      runTrustedOrcaJson(["orchestration", "run-current", "--from", "term_x"], {
+        candidates: ["/usr/local/bin/orca"],
+        exists: () => true,
+        realpath: () => REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+        expectedRealpaths: REAL_DARWIN_REALPATHS,
+        userInfo: () => ({ homedir: "/Users/injected", username: "injected" }),
+        spawnExecute: () =>
+          Promise.resolve({
+            code: 0,
+            timedOut: false,
+            stdout: JSON.stringify({
+              ok: false,
+              error: { code: "not_found", message: "no such run" },
+            }),
+            stderr: "",
+          }),
+      }),
+    /no such run/,
+  );
+});
+
+// runTrustedOrcaJson propagates trustedOrcaExecute's own refusal (no
+// candidate exists, or a realpath mismatch) rather than attempting a spawn —
+// this reproduces decision B.5's requirement that a caller with no trusted
+// executor available fails, rather than silently falling back to PATH.
+test("runTrustedOrcaJson propagates trustedOrcaExecute's refusal when no trusted path exists, without spawning anything", async () => {
+  let spawnCalls = 0;
+  await assert.rejects(
+    () =>
+      runTrustedOrcaJson(["status"], {
+        platform: "darwin",
+        candidates: [],
+        exists: () => true,
+        spawnExecute: async () => {
+          spawnCalls += 1;
+          return { code: 0, timedOut: false, stdout: "{}", stderr: "" };
+        },
+      }),
+    /No trusted Orca executable found/,
+  );
+  assert.equal(spawnCalls, 0);
 });

@@ -19,7 +19,6 @@ import {
   hash,
   inside,
   readJSON,
-  run,
   withAsyncFileLock,
   writeJSON,
 } from "./core.mjs";
@@ -31,11 +30,7 @@ import {
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
 import { assertDirectorAuthority } from "./delivery.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
-import {
-  runOrcaJson,
-  trustedOrcaExecute,
-  TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
-} from "./orca-adapter.mjs";
+import { runTrustedOrcaJson } from "./orca-adapter.mjs";
 import { workspaceBinding } from "./evidence.mjs";
 
 /** Checkpoints a kickoff's requirements ledger is audited at. */
@@ -261,18 +256,41 @@ export function verifiedDirector(
 }
 
 /**
+ * Judges whether a `run-current` result binds the caller as PM of the given
+ * Run, without performing any I/O. Kept separate from `verifiedPm` so this
+ * substantive judgment can be fixture-tested directly, and so `verifiedPm`
+ * carries no injection point through which a caller could substitute a
+ * fabricated `bound` value for the one `runTrustedOrcaJson` actually
+ * produced.
+ *
+ * @param {object | null} bound - `result.run` from a `run-current` response, or `null`.
+ * @param {string} callerHandle - The caller's own `ORCA_TERMINAL_HANDLE`.
+ * @param {string} runId - The kickoff's registered Run id.
+ * @returns {boolean} Whether `bound` names this caller as this Run's PM.
+ */
+export function isPmBoundToRun(bound, callerHandle, runId) {
+  return Boolean(
+    bound && bound.coordinator_handle === callerHandle && bound.id === runId,
+  );
+}
+
+/**
  * Confirms the caller is the PM bound to this kickoff's Run, reusing the same
  * `orchestration run-current` binding `verifySupervisor` checks.
  *
  * The caller's identity is read from its own `ORCA_TERMINAL_HANDLE`, exactly
  * as `verifiedAuditor` does, so a CLI argument (e.g. --terminal) can never
- * substitute for it. Unless a caller-provided `options.orca` overrides it
- * (tests only), the binding check runs through `trustedOrcaExecute`, which
+ * substitute for it. This function takes no executable, execute, or factory
+ * option: the binding check always runs through `runTrustedOrcaJson`, which
  * validates and then directly runs the fixed, per-platform trusted script
  * (`resolveTrustedOrcaScriptPath`) with a pinned interpreter and an
- * allowlisted child environment; a CLI argument (e.g. --orca),
+ * allowlisted child environment. A CLI argument (e.g. --orca),
  * `ORCA_CLI_COMMAND`, `ORCA_DEV_REPO_ROOT`, and PATH play no part in choosing
- * either the script or what it reads once running (B.6, decision B).
+ * either the script or what it reads once running (B.6, decision B). Nothing
+ * here is overridable: unlike the prior revision, a caller importing this
+ * module directly (rather than going through the CLI) has no option to pass
+ * that would substitute a forged executable, runner, or `run-current` result
+ * for the real one, since none of those inputs are accepted at all.
  *
  * What this closes is the caller's ability to redirect, through an argument,
  * `PATH`, or an inherited environment variable, which executable answers this
@@ -283,30 +301,15 @@ export function verifiedDirector(
  * integrity (its app bundle is owned by the same OS user, no code-signature
  * check is performed) is not verified. Binding the handle to the process
  * lineage that actually launched it is what B.6's design is meant to add
- * next; until it lands this remains an open gap. Tests inject a stand-in
- * executable through `options.orca` directly, never through argv or an
- * environment variable, since neither of those reaches `trustedOrcaExecute`.
+ * next; until it lands this remains an open gap.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
- * @param {object} [options] - Identity inputs.
- * @param {string} [options.orca] - Orca CLI binary override, for tests only;
- *   when set, the trusted-execution path is bypassed entirely.
- * @param {Function} [options.execute] - Command runner. With `options.orca`
- *   set, this runs the override directly; otherwise it is the process runner
- *   `trustedOrcaExecute` delegates the validated invocation to.
- * @param {Function} [options.trustedExecuteFactory=trustedOrcaExecute] -
- *   Factory building the trusted-execution runner, for tests only.
  * @param {NodeJS.ProcessEnv} [env] - Environment to read the handle from.
- * @returns {object} The kickoff's registry entry.
+ * @returns {Promise<object>} The kickoff's registry entry.
  * @throws {Error} When the caller is not bound to this kickoff's Run as PM.
  */
-export async function verifiedPm(
-  orgFile,
-  worktreeId,
-  { orca, execute = run, trustedExecuteFactory = trustedOrcaExecute } = {},
-  env = process.env,
-) {
+export async function verifiedPm(orgFile, worktreeId, env = process.env) {
   const callerHandle = env.ORCA_TERMINAL_HANDLE;
   assert(
     callerHandle,
@@ -317,22 +320,18 @@ export async function verifiedPm(
   assert(entry.runId, `Kickoff ${worktreeId} has not bound a Run yet`);
   let bound = null;
   try {
-    const invocationExecute = orca
-      ? execute
-      : trustedExecuteFactory({ spawnExecute: execute });
-    const current = await runOrcaJson(
-      orca ?? TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
-      ["orchestration", "run-current", "--from", callerHandle],
-      { execute: invocationExecute },
-    );
+    const current = await runTrustedOrcaJson([
+      "orchestration",
+      "run-current",
+      "--from",
+      callerHandle,
+    ]);
     bound = current.result?.run ?? null;
   } catch {
     bound = null;
   }
   assert(
-    bound &&
-      bound.coordinator_handle === callerHandle &&
-      bound.id === entry.runId,
+    isPmBoundToRun(bound, callerHandle, entry.runId),
     `Caller ${callerHandle} is not the PM bound to kickoff ${worktreeId}'s Run`,
   );
   return entry;
@@ -428,8 +427,11 @@ export async function auditObjection(
  * @param {string} request.objectionId - Objection being answered.
  * @param {string} request.argument - Substantive argument, not a bare claim of completion.
  * @param {{path: string, sha256: string}[]} request.evidenceRefs - Cited evidence.
- * @param {object} [identity] - Non-identity inputs for `verifiedDirector`/`verifiedPm`
- *   (`callerCwd` for the director path, `orca`/`execute` overrides for tests).
+ * @param {object} [identity] - Non-identity inputs for `verifiedDirector`
+ *   (`callerCwd` for the director path). Any other field, such as an
+ *   `orca`/`execute` override, is ignored: `verifiedPm`, used for the
+ *   "outcome" checkpoint, accepts no such override, so a caller cannot
+ *   substitute a forged executable, runner, or `run-current` result here.
  * @param {NodeJS.ProcessEnv} [env] - Environment the PM identity is read from.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails, the objection is unknown, or fields are missing.
@@ -458,7 +460,7 @@ export async function auditResponse(
   if (checkpoint === "brief") {
     verifiedDirector(orgFile, worktreeId, identity.callerCwd);
   } else {
-    await verifiedPm(orgFile, worktreeId, identity, env);
+    await verifiedPm(orgFile, worktreeId, env);
   }
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];

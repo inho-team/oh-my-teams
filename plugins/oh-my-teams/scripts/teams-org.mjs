@@ -93,6 +93,7 @@ import {
   injectTask,
   reclaimWorktree,
   releaseWorker,
+  resolveTrustedOrcaScriptPath,
   runOrcaJson,
   selectOrcaExecutable,
   trustedOrcaExecute,
@@ -2601,16 +2602,27 @@ function assertRequirementsDirectorAuthority(entry, orgFile, checkoutArg, use) {
  * placeholder name that `openRoleTerminal`/`checkTerminalIdle` never actually
  * read, paired with the runner `trustedExecuteFactory` builds, which
  * validates and then directly executes the fixed trusted script with a
- * pinned interpreter and an allowlisted environment (B.6, decision B).
+ * pinned interpreter and an allowlisted environment (B.6, decision B). It
+ * also returns `versionExecutable`, the same trusted script's resolved real
+ * path (from `resolveScriptPath`, not the placeholder), for the one caller
+ * that reads `executable` directly rather than through the paired `execute`:
+ * `readLaunchEnvironment`'s own `orca --version` probe, which does not, and
+ * must not, receive this launch's trusted `execute` (see the `role-terminal`
+ * case's comment for why). Passing the placeholder there instead would make
+ * that probe fail outright, since the placeholder is deliberately not a real
+ * executable name.
+ *
  * Outside the auditor branch, the caller's own `--orca` (or its absence)
- * passes through unchanged, and no trusted runner is built, matching
- * `selectOrcaExecutable`'s existing behavior.
+ * passes through unchanged for both `executable` and `versionExecutable`, no
+ * trusted runner is built, matching `selectOrcaExecutable`'s existing
+ * behavior.
  *
  * @param {object} options - Selection inputs.
  * @param {object} [options.auditorEntry] - Kickoff entry when launching the auditor role.
  * @param {string} [options.orcaArg] - The caller's `--orca`, only read outside the auditor branch.
  * @param {Function} [options.trustedExecuteFactory=trustedOrcaExecute] - Trusted-runner factory, for tests only.
- * @returns {{executable: string | undefined, execute: Function | undefined}}
+ * @param {Function} [options.resolveScriptPath=resolveTrustedOrcaScriptPath] - Trusted script path resolver, for tests only.
+ * @returns {{executable: string | undefined, execute: Function | undefined, versionExecutable: string | undefined}}
  *   `execute` is `undefined` outside the auditor branch, so callers fall back
  *   to their own default runner.
  */
@@ -2618,11 +2630,18 @@ export function resolveAuditorLaunchExecution({
   auditorEntry,
   orcaArg,
   trustedExecuteFactory = trustedOrcaExecute,
+  resolveScriptPath = resolveTrustedOrcaScriptPath,
 } = {}) {
-  if (!auditorEntry) return { executable: orcaArg, execute: undefined };
+  if (!auditorEntry)
+    return {
+      executable: orcaArg,
+      execute: undefined,
+      versionExecutable: orcaArg,
+    };
   return {
     executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
     execute: trustedExecuteFactory(),
+    versionExecutable: resolveScriptPath(),
   };
 }
 
@@ -2903,17 +2922,21 @@ export async function executeCommand(args, execute) {
       // Neither the caller's terminal handle nor the Orca executable used to
       // confirm it is taken from a CLI argument: verifiedPm reads
       // ORCA_TERMINAL_HANDLE from process.env, exactly like verifiedAuditor
-      // does for the auditor role, and (unless a test injects options.orca)
-      // runs its `orchestration run-current` check through
-      // trustedOrcaExecute, which validates the fixed trusted script
-      // (ignoring --orca, ORCA_CLI_COMMAND, and ORCA_DEV_REPO_ROOT) and then
-      // executes it directly with a pinned interpreter and an allowlisted
-      // child environment, so the script's own PATH search for `bash` and
-      // for the `dirname`/`readlink` it calls internally, BASH_ENV, and
-      // variables such as ORCA_USER_DATA_PATH or HOME cannot redirect what
-      // actually runs (B.6, decision B). A --terminal or --orca argument
-      // here could otherwise forge the PM identity the "outcome"
-      // checkpoint's response is bound to. What this closes is the caller's
+      // does for the auditor role, and accepts no executable, execute, or
+      // factory override at all (not even for tests) — it always runs its
+      // `orchestration run-current` check through runTrustedOrcaJson, which
+      // validates the fixed trusted script (ignoring --orca,
+      // ORCA_CLI_COMMAND, and ORCA_DEV_REPO_ROOT) and then executes it
+      // directly with a pinned interpreter and an allowlisted child
+      // environment, so the script's own PATH search for `bash` and for the
+      // `dirname`/`readlink` it calls internally, BASH_ENV, and variables
+      // such as ORCA_USER_DATA_PATH or HOME cannot redirect what actually
+      // runs (B.6, decision B). A --terminal or --orca argument here could
+      // otherwise forge the PM identity the "outcome" checkpoint's response
+      // is bound to; since verifiedPm takes no such argument, this CLI
+      // command never has one to pass through in the first place, and
+      // neither does any other Node code that imports auditResponse or
+      // verifiedPm directly. What this closes is the caller's
       // ability to redirect, through an argument, PATH, or an inherited
       // environment variable, which executable answers this check or what
       // that executable reads while doing so; it is not identity forgery: a
@@ -3204,13 +3227,22 @@ export async function executeCommand(args, execute) {
       // deliberately not passed to readLaunchEnvironment below, which also
       // runs `agy --version` through the same injected runner and would
       // otherwise have that call silently replaced by the Orca script too.
-      const { executable: auditorExecutable, execute: auditorExecute } =
-        resolveAuditorLaunchExecution({ auditorEntry, orcaArg: args.orca });
+      // readLaunchEnvironment instead receives `versionExecutable`, the
+      // trusted script's resolved real path rather than the placeholder: the
+      // placeholder is deliberately not runnable on its own (it only means
+      // something paired with `auditorExecute`), so passing it here would
+      // make the version probe fail outright instead of just resolving
+      // through PATH like the placeholder's previous, runnable value did.
+      const {
+        executable: auditorExecutable,
+        execute: auditorExecute,
+        versionExecutable,
+      } = resolveAuditorLaunchExecution({ auditorEntry, orcaArg: args.orca });
       // 실제 환경에서 매트릭스 입력값을 읽습니다.
       // 알 수 없는 값은 'unknown'으로 전달하여 표가 unverified로 처리합니다.
       const env = await readLaunchEnvironment({
         worktreePath: target ?? undefined,
-        orcaExecutable: auditorExecutable,
+        orcaExecutable: versionExecutable,
       });
       const opened = await openRoleTerminal({
         worktree: args.worktree,
