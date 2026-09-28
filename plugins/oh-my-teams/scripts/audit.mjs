@@ -196,15 +196,19 @@ export async function computeBinding(
  * public handle into an argument has no such variable set to that value, so
  * this check cannot be satisfied by argument forgery (B.6).
  *
- * It does not close environment forgery: a process sharing this OS user
- * account can still start a child with `ORCA_TERMINAL_HANDLE` set to the
- * auditor's handle and pass this check. A lineage-bind design that would tie
- * the handle to the process that actually launched it was drafted and then
- * rejected (B.6, option A): the caller-controlled environment and process
- * ancestry it would have relied on cannot itself serve as trusted evidence.
- * Closing this gap for real needs OS-attested launch evidence from Orca
- * (e.g. `ownerPid`/`ownerStartedAt`), which is left as a follow-up requiring
- * Orca-side work; see docs/plan/requirements-ledger-and-audit.md (B.6).
+ * What this does not close: any process sharing this OS user account —
+ * including the implementer's, the PM's, or the director's own session — can
+ * still set `ORCA_TERMINAL_HANDLE` to the auditor's handle before calling an
+ * audit command, or use `orca terminal send` to type a command straight into
+ * the open auditor terminal. Neither requires compromising anything; both
+ * are ordinary actions available to any same-user process. A lineage-bind
+ * design that would tie the handle to the process that actually launched it
+ * was drafted and then rejected (B.6, option A): the caller-controlled
+ * environment and process ancestry it would have relied on cannot itself
+ * serve as trusted evidence. Closing this gap for real needs OS-attested
+ * launch evidence from Orca (e.g. `ownerPid`/`ownerStartedAt`), which is left
+ * as a follow-up requiring Orca-side work; see
+ * docs/plan/requirements-ledger-and-audit.md (B.6).
  *
  * This function takes no environment-override argument, which removes only
  * the path where a public parameter could carry a substitute environment.
@@ -212,7 +216,8 @@ export async function computeBinding(
  * user account can set `ORCA_TERMINAL_HANDLE` before invoking this function,
  * or import this module and mutate `process.env` directly. Removing the
  * argument narrows the input surface; it does not by itself prove auditor
- * identity (see the environment-forgery gap above, which B.6 is meant to close).
+ * identity (see the environment-forgery gap above, which remains open — see
+ * docs/plan/requirements-ledger-and-audit.md, B.6).
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
@@ -309,10 +314,13 @@ export function isPmBoundToRun(bound, callerHandle, runId) {
  * `PATH`, or an inherited environment variable, which executable answers this
  * binding check or what that executable reads while doing so. What this does
  * not close: `ORCA_TERMINAL_HANDLE` itself is still read from the
- * environment, so a caller sharing this OS user account can still set it to a
- * value of their choosing and pass this check, and the trusted script's own
- * integrity (its app bundle is owned by the same OS user, no code-signature
- * check is performed) is not verified. A lineage-bind design meant to close
+ * environment, so any process sharing this OS user account — including the
+ * implementer's, the PM's own, or the director's session — can still set it
+ * to a value of their choosing and pass this check, or use `orca terminal
+ * send` to type a command straight into the terminal it names; neither
+ * requires compromising anything. The trusted script's own integrity (its
+ * app bundle is owned by the same OS user, no code-signature check is
+ * performed) is not verified either. A lineage-bind design meant to close
  * this was drafted and then rejected (B.6, option A) because the
  * caller-controlled environment and process ancestry it relied on cannot
  * itself serve as trusted evidence; closing this for real needs OS-attested

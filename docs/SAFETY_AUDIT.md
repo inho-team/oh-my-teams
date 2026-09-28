@@ -62,12 +62,13 @@ Claude·Codex marketplace를 새 경로에 연결하고 1.4.0을 설치했다.
 
 감사(auditor) 역할의 신원 확인(`audit.mjs`의 `verifiedAuditor`·`verifiedPm`)은
 호출 프로세스 자신의 `ORCA_TERMINAL_HANDLE` 환경변수를 launch ledger·Run
-바인딩과 대조하는 방식이며, PM이나 이사가 감사 handle을 CLI 인자로 복사해
-대리 판정하는 시도는 막는다. 다만 같은 OS 사용자로 로컬 환경을 완전히
-장악한 공격자가 `ORCA_TERMINAL_HANDLE` 값 자체를 임의로 설정해 위조하는
-경우까지는 막지 못한다. 이 한계를 좁히는 lineage bind·session-bind 설계를
-검토했으나 위조 가능한 환경·조상 프로세스 구조를 신뢰 근거로 쓸 수 없다는
-결함이 확인돼 구현하지 않기로 결정했다. 근거와 후속 과제(Orca 쪽
-`ownerPid`·`ownerStartedAt` attestation)는
+바인딩과 대조하는 방식이다. 이 검사가 막는 범위는 PM이나 이사가 감사
+handle을 CLI 인자로 복사해 대리 판정하는 시도뿐이다. 막지 못하는 범위는
+구현자·PM·이사 세션을 포함해 같은 OS 사용자로 실행되는 아무 프로세스가
+자신의 환경 변수에 `ORCA_TERMINAL_HANDLE`을 직접 설정하거나 `orca terminal
+send`로 감사 터미널에 명령을 넣는 경우다. 이 한계를 좁히는 lineage
+bind·session-bind 설계를 검토했으나 위조 가능한 환경·조상 프로세스 구조를
+신뢰 근거로 쓸 수 없다는 결함이 확인돼 구현하지 않기로 결정했다. 근거와
+후속 과제(Orca 쪽 `ownerPid`·`ownerStartedAt` attestation)는
 [`docs/plan/requirements-ledger-and-audit.md`의 B.6절](plan/requirements-ledger-and-audit.md)에
 남겨 두었다.
