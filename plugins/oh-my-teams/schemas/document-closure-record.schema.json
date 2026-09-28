@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams `07. 종료` closure-record document v1",
+  "$comment": "docs/plan/structured-omt-documents.md 3.2 (07. 종료 row and its 확정된 결정 on incidentRefs/lessonCandidateRefs), 3.7 item 7 (localId is the fixed constant \"closure\").",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "docId",
+    "stage",
+    "kickoffId",
+    "workflowId",
+    "revision",
+    "state",
+    "author",
+    "createdAt",
+    "basedOnRevision",
+    "reason",
+    "directorSignalRef",
+    "kickoffArchiveRef",
+    "outcome",
+    "incidentRefs",
+    "lessonCandidateRefs"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "docId": { "type": "string", "minLength": 1 },
+    "stage": { "const": "closure" },
+    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflowId": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+      ]
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": { "enum": ["open", "in-review", "resolved"] },
+    "author": { "$ref": "#/$defs/author" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "basedOnRevision": {
+      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "directorSignalRef": {
+      "$ref": "#/$defs/ref",
+      "$comment": "Points at `<ownerProject>/.omt/director/inbox/<id>.json` (1.2 table #28)."
+    },
+    "kickoffArchiveRef": {
+      "$ref": "#/$defs/ref",
+      "$comment": "Points at `<project>/.omt/history/kickoff-<hash>-<createdAt>.json` (1.2 table #4), written once by kickoff-release."
+    },
+    "outcome": {
+      "enum": ["completed", "disbanded", "taken-over"],
+      "$comment": "Reuses kickoff-registry.mjs RELEASE_REASONS so this field never drifts from the runtime vocabulary that already governs release."
+    },
+    "incidentRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "$comment": "3.2 확정된 결정: relative paths to incidents.mjs records, not omt-doc references; may be empty."
+    },
+    "lessonCandidateRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "$comment": "3.2 확정된 결정: relative paths to lessons.mjs records, not omt-doc references; may be empty."
+    }
+  },
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": { "enum": ["director", "pm", "pl", "senior", "junior"] },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}
