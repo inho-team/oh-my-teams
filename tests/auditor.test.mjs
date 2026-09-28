@@ -42,6 +42,37 @@ const exampleOrg = new URL(
 // actual HEAD, for the forged/stale-head counterexamples below.
 const FORGED_HEAD = "0".repeat(40);
 
+const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
+
+// Runs the teams-org CLI as a real child process (never `run-use`), returning
+// its exit code and streams instead of throwing, so a rejection test can
+// assert on the exact message the CLI printed to stderr. `env` merges onto
+// the child's own environment (not replaces it); a `null` value in `env`
+// deletes that key instead of setting it, which is how a test clears this
+// session's own inherited ORCA_TERMINAL_HANDLE to exercise the no-handle
+// rejection path.
+function runCli(args, { cwd, env } = {}) {
+  const merged = { ...process.env, ...env };
+  for (const [key, value] of Object.entries(env ?? {})) {
+    if (value === null) delete merged[key];
+  }
+  try {
+    const stdout = execFileSync(process.execPath, [cli, ...args], {
+      stdio: "pipe",
+      encoding: "utf-8",
+      cwd,
+      env: merged,
+    });
+    return { code: 0, stdout, stderr: "" };
+  } catch (error) {
+    return {
+      code: error.status ?? 1,
+      stdout: error.stdout || "",
+      stderr: error.stderr || error.message || "",
+    };
+  }
+}
+
 function git(dir, args) {
   return execFileSync("git", args, { cwd: dir }).toString().trim();
 }
@@ -384,6 +415,7 @@ test("path B: a presentation after acceptance invalidates it, and re-audit + re-
     location: "outcome re-presentation",
     userQuote: "yes, that matches",
     outcome: "confirmed",
+    callerCwd: fixture.dir,
   });
   assert.equal(
     await hasValidAcceptance(
@@ -1052,3 +1084,293 @@ test(
     );
   },
 );
+
+// CLI registration for audit-objection/audit-response/audit-ruling/
+// audit-checked/audit-accept (PM item 3): objection/ruling/checked/accept are
+// auditor-only via ORCA_TERMINAL_HANDLE (verifiedAuditor); response is
+// director-only for the brief checkpoint (verifiedDirector), exercised here
+// rather than the PM path, since the PM path calls the real orca binary
+// (verifiedPm) and so is exercised through the identity-injected direct-call
+// tests above, not as a subprocess.
+test("cli audit-objection: succeeds with the launched auditor's handle, and refuses without one", (t) => {
+  const fixture = kickoff(t);
+  const requestFile = path.join(fixture.dir, "objection-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      checkpoint: "brief",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 is not clearly derived from the brief",
+      rebuttalRequested: "point to the brief section it comes from",
+    }),
+  );
+  const refused = runCli(
+    [
+      "audit-objection",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: null } },
+  );
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /ORCA_TERMINAL_HANDLE is not set/);
+
+  const succeeded = runCli(
+    [
+      "audit-objection",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: fixture.auditorHandle } },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).recorded, true);
+});
+
+test("cli audit-response: succeeds from the director's checkout (brief checkpoint), and refuses from elsewhere", async (t) => {
+  const fixture = kickoff(t);
+  await auditObjection(
+    fixture.org,
+    fixture.worktreeId,
+    {
+      checkpoint: "brief",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 is not clearly derived from the brief",
+      rebuttalRequested: "point to the brief section it comes from",
+    },
+    auditorEnv(fixture.auditorHandle),
+  );
+  const objectionId = readAudit(
+    fixture.org,
+    fixture.worktreeId,
+  ).checkpoints.brief.objections.at(-1).id;
+  const evidencePath = "brief-evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "brief section 2\n");
+  const requestFile = path.join(fixture.dir, "response-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      checkpoint: "brief",
+      objectionId,
+      argument: "c1 traces to brief section 2",
+      evidenceRefs: [
+        {
+          path: evidencePath,
+          sha256: fileSha256(path.join(fixture.dir, evidencePath)),
+        },
+      ],
+    }),
+  );
+  const other = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-audit-response-other-"),
+  );
+  t.after(() => fs.rmSync(other, { recursive: true, force: true }));
+  const refused = runCli(
+    [
+      "audit-response",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: other },
+  );
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /director's checkout/);
+
+  const succeeded = runCli(
+    [
+      "audit-response",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: fixture.dir },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).recorded, true);
+});
+
+test("cli audit-ruling: succeeds with the auditor's handle, and refuses without one", async (t) => {
+  const fixture = kickoff(t);
+  await auditObjection(
+    fixture.org,
+    fixture.worktreeId,
+    {
+      checkpoint: "brief",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 is not clearly derived from the brief",
+      rebuttalRequested: "point to the brief section it comes from",
+    },
+    auditorEnv(fixture.auditorHandle),
+  );
+  const objectionId = readAudit(
+    fixture.org,
+    fixture.worktreeId,
+  ).checkpoints.brief.objections.at(-1).id;
+  const evidencePath = "brief-evidence-2.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "brief section 2\n");
+  const { audit } = await auditResponse(
+    fixture.org,
+    fixture.worktreeId,
+    {
+      checkpoint: "brief",
+      objectionId,
+      argument: "c1 traces to brief section 2",
+      evidenceRefs: [
+        {
+          path: evidencePath,
+          sha256: fileSha256(path.join(fixture.dir, evidencePath)),
+        },
+      ],
+    },
+    { callerCwd: fixture.dir },
+  );
+  const responseId = audit.checkpoints.brief.responses.at(-1).id;
+  const requestFile = path.join(fixture.dir, "ruling-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      checkpoint: "brief",
+      objectionId,
+      respondedAgainst: responseId,
+      verdict: "persuaded",
+      reason: "evidence supports the claim",
+    }),
+  );
+  const refused = runCli(
+    [
+      "audit-ruling",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: null } },
+  );
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /ORCA_TERMINAL_HANDLE is not set/);
+
+  const succeeded = runCli(
+    [
+      "audit-ruling",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: fixture.auditorHandle } },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).recorded, true);
+});
+
+test("cli audit-checked: succeeds with the auditor's handle, and refuses without one", (t) => {
+  const fixture = kickoff(t);
+  const requestFile = path.join(fixture.dir, "checked-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      checked: [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+    }),
+  );
+  const refused = runCli(
+    [
+      "audit-checked",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--checkpoint",
+      "brief",
+      "--from",
+      requestFile,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: null } },
+  );
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /ORCA_TERMINAL_HANDLE is not set/);
+
+  const succeeded = runCli(
+    [
+      "audit-checked",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--checkpoint",
+      "brief",
+      "--from",
+      requestFile,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: fixture.auditorHandle } },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).recorded, true);
+});
+
+test("cli audit-accept: succeeds with the auditor's handle once checked coverage holds, and refuses without one", async (t) => {
+  const fixture = kickoff(t);
+  await auditChecked(
+    fixture.org,
+    fixture.worktreeId,
+    "brief",
+    [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ],
+    auditorEnv(fixture.auditorHandle),
+  );
+  const refused = runCli(
+    [
+      "audit-accept",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--checkpoint",
+      "brief",
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: null } },
+  );
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /ORCA_TERMINAL_HANDLE is not set/);
+
+  const succeeded = runCli(
+    [
+      "audit-accept",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--checkpoint",
+      "brief",
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: fixture.auditorHandle } },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).accepted, true);
+});

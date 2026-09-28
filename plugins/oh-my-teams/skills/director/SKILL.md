@@ -20,6 +20,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 - 무거운 작업 전에 `resource-acquire --org <project>/.omt/organization.json --worktree <pm> --kind test|worker|build --note ...`로 자원 슬롯을 확보하고, 작업이 끝나면 `resource-release --org <project>/.omt/organization.json --slot <slotId>`로 해제한다.
 - `close`로 성공한 kickoff를 전달·병합·정리하고, `disband`로 실패하거나 취소된 kickoff를 해체한다.
 - 주인 브랜치 병합 여부를 결정한다.
+- `org.auditor`가 선언된 조직에서 `role-terminal --role auditor`로 감사 터미널을 여는 유일한 역할이다. `requirements-amend`(문구 변경), `requirements-confirm`(claim 이후 재확인), `requirements-present`(제시 증거 기록), `requirements-fidelity-confirm`(원문 대조 확인), `requirements-exception`(항목별 예외), `requirements-retrofit`(원장 없는 기존 kickoff의 사후 구성)도 director만 실행할 수 있다.
 
 ### 책임
 
@@ -54,6 +55,14 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 이사 세션 자체를 새로 열거나 다른 실행기의 세션으로 바꿀 때, 또는 이사 터미널이 Orca 탭에서 사라졌을 때에는 [director-terminal](../director-terminal/SKILL.md)의 절차대로 `director-terminal --replace`로 새 세션을 열고 등록부의 `director.terminalHandle`을 넘긴다. Orca의 터미널 명령을 손으로 조합해 이사를 띄우지 않는다.
 
 로드맵을 작성하거나 갱신할 때는 [`../../references/roadmap.md`](../../references/roadmap.md)가 정한 규칙을 따른다.
+
+## 요구 원장과 감사
+
+요구 원장(requirements ledger)과 감사 체크포인트의 전체 설계는 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)를 따른다. narrower criterion의 사용자 확인은 `requirements-draft`로 draft를 만든 뒤 `requirements-confirm --draft --checkout <이사 체크아웃 경로>`로 기록하고, `kickoff-claim`이 그 확인을 director의 checkoutPath와 대조해 확정 원장으로 승격한다.
+
+원장이 확정된 뒤 기준 문구나 범위를 고쳐야 하면 `requirements-amend`로 바꾸고, narrower criterion은 다시 `requirements-confirm`으로 재확인해야 한다. 구현 결과를 사용자에게 실제로 보여 준 증거는 `requirements-present --evidence <경로>`로 남기고, PM이 작성한 `requirements-fidelity` 원문 대조를 확인했으면 `requirements-fidelity-confirm`으로 승인한다. 원장이 요구하는 항목 중 충족하지 못한 것이 있으면 `--force`로 우회하지 않고 `requirements-exception`으로 항목별 예외를 남긴다. director 없이 등록된 기존 kickoff에는 `requirements-retrofit --checkout`으로 원장을 사후 구성한다.
+
+`org.auditor`가 선언된 조직에서는 [`auditor/SKILL.md`](../auditor/SKILL.md)가 정한 대로, 구현 착수 전에 브리프 감사 수용이, close-ready 발신 전에 결과 감사 수용이 각각 필요하다. 이사는 `role-terminal --role auditor --state <검토 대상 kickoff의 pm.stateDir> --worktree <감사 전용 워크트리>`로 감사 터미널을 열고, `brief` 체크포인트의 이의에는 이사 자신이 `audit-response`로 응답한다(`outcome` 체크포인트는 PM이 응답한다).
 
 ## 정형 문서
 

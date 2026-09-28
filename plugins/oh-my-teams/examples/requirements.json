@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "worktreeId": "5a8b2c1d::/Users/me/orca/workspaces/app/task",
+  "statements": [
+    {
+      "id": "s1",
+      "text": "카드 형태를 다 바꿔놔.",
+      "source": "이슈 #139 사용자 원문"
+    }
+  ],
+  "criteria": [
+    {
+      "id": "c1",
+      "text": "box-shadow가 사라진다.",
+      "derivedFrom": ["s1"],
+      "scope": "narrower",
+      "userVisible": true,
+      "confirmation": {
+        "criterionId": "c1",
+        "textHash": "sha256-of-canonical-json",
+        "confirmedAt": "2026-09-27T00:10:00Z",
+        "userQuote": "네, 카드 모양만 없애면 됩니다",
+        "recordedFromCheckout": "/Users/me/orca/app"
+      }
+    }
+  ],
+  "confirmations": [
+    {
+      "criterionId": "c1",
+      "textHash": "sha256-of-canonical-json",
+      "confirmedAt": "2026-09-27T00:10:00Z",
+      "userQuote": "네, 카드 모양만 없애면 됩니다",
+      "recordedFromCheckout": "/Users/me/orca/app"
+    }
+  ],
+  "presentations": [
+    {
+      "criterionId": "c1",
+      "head": "abc123",
+      "ledgerHash": "sha256-of-statements-and-criteria",
+      "evidence": {
+        "ownerPath": ".omt/requirements-evidence/c1-abc123.png",
+        "sha256": "sha256-of-evidence-file"
+      },
+      "userQuote": "이제 카드가 없어졌네요",
+      "outcome": "confirmed",
+      "recordedAt": "2026-09-27T01:00:00Z"
+    }
+  ],
+  "fidelityChecks": [
+    {
+      "head": "abc123",
+      "ledgerHash": "sha256-of-statements-and-criteria",
+      "recordedAt": "2026-09-27T01:05:00Z",
+      "recordedBy": "pm",
+      "items": [
+        {
+          "type": "statement",
+          "id": "s1",
+          "status": "met",
+          "evidence": "커밋 abc123에서 카드 그림자 제거 확인"
+        },
+        {
+          "type": "criterion",
+          "id": "c1",
+          "status": "met",
+          "evidence": "제시 증거 c1-abc123.png와 사용자 확인"
+        }
+      ],
+      "directorConfirmedAt": "2026-09-27T01:10:00Z"
+    }
+  ],
+  "exceptions": []
+}

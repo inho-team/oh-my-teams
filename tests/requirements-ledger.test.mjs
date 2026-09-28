@@ -176,6 +176,20 @@ function fixture(t, worktreeId = "wt-1") {
   };
 }
 
+// A director-less legacy kickoff's starting point: a real Git workspace and
+// an orgFile path, but no draft and no confirmed ledger yet — the state a
+// pre-ledger release's worktree is actually in before requirements-draft ever
+// runs, unlike fixture() above which already drafts and confirms.
+function legacyFixture(t, worktreeId = "wt-legacy-cli") {
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-reqledger-legacy-")),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const head = initRepo(dir);
+  const orgFile = path.join(dir, ".omt", "organization.json");
+  return { dir, orgFile, worktreeId, head };
+}
+
 function claimFrom(fx) {
   const draft = readDraft(fx.orgFile, fx.worktreeId);
   return {
@@ -326,6 +340,39 @@ test("validateLedgerForClaim does not require confirmation for equal-scope crite
     (item) => item.id === "visible-1",
   );
   assert.equal(equalCriterion.scope, "equal");
+});
+
+// The equal-only exception the test above proves (no confirmation loop to
+// run for equal-scope criteria) does not extend to the draft-comparison gate
+// below it: even an equal-only claim must match a draft actually recorded on
+// disk, so a hand-assembled equal-only requirements block that never went
+// through requirements-draft is still refused.
+test("validateLedgerForClaim refuses an equal-only claim with no draft ledger recorded for the worktree", (t) => {
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-reqledger-nodraft-")),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, ".omt", "organization.json");
+  const requirements = {
+    worktreeId: "wt-nodraft",
+    statements: [
+      { id: "s1", text: "the tool must warn before deleting", source: "brief" },
+    ],
+    criteria: [
+      {
+        id: "visible-1",
+        text: "the tool warns before deleting",
+        scope: "equal",
+        userVisible: true,
+        derivedFrom: ["s1"],
+      },
+    ],
+    confirmations: [],
+  };
+  assert.throws(
+    () => validateLedgerForClaim(requirements, { checkoutPath: dir }, orgFile),
+    /No draft ledger recorded for worktree wt-nodraft/,
+  );
 });
 
 // draft-comparison-not-hash: ledgerHash(requirements.mjs) deliberately drops
@@ -561,6 +608,7 @@ async function readyLedger(fx) {
     location: "https://example.invalid/pr/1",
     userQuote: "looks right, thanks",
     outcome: "confirmed",
+    callerCwd: fx.dir,
   });
   await requirementsFidelity(fx.orgFile, fx.worktreeId, {
     head: fx.head,
@@ -656,6 +704,7 @@ test("presented-evidence-gate: a rejected presentation is refused unless a match
     location: "https://example.invalid/pr/2",
     userQuote: "this is not what I asked for",
     outcome: "rejected",
+    callerCwd: fx.dir,
   });
   await requirementsFidelity(fx.orgFile, fx.worktreeId, {
     head: fx.head,
@@ -725,6 +774,7 @@ test("presented-evidence-gate: an exception scoped to a different criterion does
     location: "https://example.invalid/pr/3",
     userQuote: "not what I wanted",
     outcome: "rejected",
+    callerCwd: fx.dir,
   });
   await requirementsFidelity(fx.orgFile, fx.worktreeId, {
     head: fx.head,
@@ -961,6 +1011,7 @@ test("assertLedgerCloseReady refuses an unmet item with no matching item-scoped 
     location: "https://example.invalid/pr/5",
     userQuote: "looks right",
     outcome: "confirmed",
+    callerCwd: fx.dir,
   });
   await requirementsFidelity(fx.orgFile, fx.worktreeId, {
     head: fx.head,
@@ -1269,4 +1320,408 @@ test("cli director-authority-gap: requirements-exception refuses a caller outsid
   );
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /must be run from the director's checkout/);
+});
+
+test(
+  "cli legacy-sequence: a director-less legacy kickoff walks exception-refused -> draft -> " +
+    "confirm --draft (narrower, from the owner checkout) -> retrofit -> exception-succeeds",
+  (t) => {
+    const fx = legacyFixture(t);
+    writeLegacyKickoffEntry(fx);
+    const { statements, criteria } = baseStatementsAndCriteria();
+
+    // (f') a legacy kickoff with no ledger yet: requirements-exception is
+    // refused for want of any confirmed ledger to record the exception on.
+    const exceptionRequest = path.join(fx.dir, "exception-request.json");
+    fs.writeFileSync(
+      exceptionRequest,
+      JSON.stringify({
+        scope: [{ type: "criterion", id: "visible-1" }],
+        head: fx.head,
+        repo: fx.dir,
+        reason: "user accepted the current behavior for this release",
+        userQuote: "fine, ship it as-is for now",
+        unmetFacts: "the warning still fires on non-destructive commands too",
+      }),
+    );
+    const refused = runCli(
+      [
+        "requirements-exception",
+        "--org",
+        fx.orgFile,
+        "--worktree",
+        fx.worktreeId,
+        "--from",
+        exceptionRequest,
+      ],
+      { cwd: fx.dir },
+    );
+    assert.notEqual(refused.code, 0);
+    assert.match(refused.stderr, /No confirmed ledger/);
+
+    const draftRequest = path.join(fx.dir, "draft-request.json");
+    fs.writeFileSync(draftRequest, JSON.stringify({ statements, criteria }));
+    const drafted = runCli(
+      [
+        "requirements-draft",
+        "--org",
+        fx.orgFile,
+        "--worktree",
+        fx.worktreeId,
+        "--from",
+        draftRequest,
+      ],
+      { cwd: fx.dir },
+    );
+    assert.equal(drafted.code, 0, drafted.stderr);
+
+    const confirmed = runCli(
+      [
+        "requirements-confirm",
+        "--org",
+        fx.orgFile,
+        "--worktree",
+        fx.worktreeId,
+        "--draft",
+        "--checkout",
+        fx.dir,
+        "--criterion",
+        "narrow-1",
+        "--quote",
+        "yes, only warn on destructive commands",
+      ],
+      { cwd: fx.dir },
+    );
+    assert.equal(confirmed.code, 0, confirmed.stderr);
+
+    const retrofitted = runCli(
+      [
+        "requirements-retrofit",
+        "--org",
+        fx.orgFile,
+        "--worktree",
+        fx.worktreeId,
+        "--checkout",
+        fx.dir,
+      ],
+      { cwd: fx.dir },
+    );
+    assert.equal(retrofitted.code, 0, retrofitted.stderr);
+    assert.equal(JSON.parse(retrofitted.stdout).retrofitted, true);
+
+    const succeeded = runCli(
+      [
+        "requirements-exception",
+        "--org",
+        fx.orgFile,
+        "--worktree",
+        fx.worktreeId,
+        "--from",
+        exceptionRequest,
+      ],
+      { cwd: fx.dir },
+    );
+    assert.equal(succeeded.code, 0, succeeded.stderr);
+    assert.equal(JSON.parse(succeeded.stdout).recorded, true);
+  },
+);
+
+test(
+  "cli legacy-sequence: requirements-retrofit refuses a narrower confirmation recorded from a " +
+    "checkout other than the owner checkout, even though requirements-confirm --draft accepted it",
+  (t) => {
+    const fx = legacyFixture(t, "wt-legacy-cli-2");
+    writeLegacyKickoffEntry(fx);
+    const { statements, criteria } = baseStatementsAndCriteria();
+
+    const draftRequest = path.join(fx.dir, "draft-request.json");
+    fs.writeFileSync(draftRequest, JSON.stringify({ statements, criteria }));
+    const drafted = runCli(
+      [
+        "requirements-draft",
+        "--org",
+        fx.orgFile,
+        "--worktree",
+        fx.worktreeId,
+        "--from",
+        draftRequest,
+      ],
+      { cwd: fx.dir },
+    );
+    assert.equal(drafted.code, 0, drafted.stderr);
+
+    // Confirmed from a checkout other than the owner checkout:
+    // requirements-confirm --draft only proves the caller ran from
+    // --checkout, not that it is the organization's owner checkout — that
+    // stricter check belongs to retrofit, which compares against the
+    // claim's declared director (the owner checkout, for a legacy kickoff).
+    const otherDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "omt-reqledger-legacy-other-")),
+    );
+    t.after(() => fs.rmSync(otherDir, { recursive: true, force: true }));
+    const confirmed = runCli(
+      [
+        "requirements-confirm",
+        "--org",
+        fx.orgFile,
+        "--worktree",
+        fx.worktreeId,
+        "--draft",
+        "--checkout",
+        otherDir,
+        "--criterion",
+        "narrow-1",
+        "--quote",
+        "yes, only warn on destructive commands",
+      ],
+      { cwd: otherDir },
+    );
+    assert.equal(confirmed.code, 0, confirmed.stderr);
+
+    const retrofitted = runCli(
+      [
+        "requirements-retrofit",
+        "--org",
+        fx.orgFile,
+        "--worktree",
+        fx.worktreeId,
+        "--checkout",
+        fx.dir,
+      ],
+      { cwd: fx.dir },
+    );
+    assert.notEqual(retrofitted.code, 0);
+    assert.match(
+      retrofitted.stderr,
+      /was recorded from a checkout other than the claim's declared director/,
+    );
+  },
+);
+
+// CLI registration for requirements-amend/present/fidelity/fidelity-confirm
+// (PM item 3): amend/present/fidelity-confirm are director-only, checked the
+// same way requirements-retrofit/requirements-exception are above; fidelity
+// carries no in-function authority check by design (it is the PM's own
+// record, not the director's), so its CLI test proves success rather than a
+// rejection.
+test("cli requirements-amend: succeeds from the ledger's director checkout, and refuses from elsewhere", (t) => {
+  const fx = fixture(t);
+  confirmClaim(fx);
+  const requestFile = path.join(fx.dir, "amend-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      statements: fx.statements,
+      criteria: fx.criteria.map((item) =>
+        item.id === "visible-1"
+          ? { ...item, text: "the tool always warns before deleting" }
+          : item,
+      ),
+    }),
+  );
+  const other = otherCheckout(t);
+  const refused = runCli(
+    [
+      "requirements-amend",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: other },
+  );
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /must be run from the director's checkout/);
+
+  const succeeded = runCli(
+    [
+      "requirements-amend",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: fx.dir },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).amended, true);
+});
+
+test("cli requirements-present: succeeds from the ledger's director checkout, and refuses from elsewhere", (t) => {
+  const fx = fixture(t);
+  confirmClaim(fx);
+  const source = evidenceFile(fx.dir);
+  const requestFile = path.join(fx.dir, "present-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      criterionId: "visible-1",
+      head: fx.head,
+      repo: fx.dir,
+      source,
+      channel: "PR",
+      location: "https://example.invalid/pr/cli-1",
+      userQuote: "looks right",
+      outcome: "confirmed",
+    }),
+  );
+  const other = otherCheckout(t);
+  const refused = runCli(
+    [
+      "requirements-present",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: other },
+  );
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /must be run from the director's checkout/);
+
+  const succeeded = runCli(
+    [
+      "requirements-present",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: fx.dir },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).presented, true);
+});
+
+test("cli requirements-fidelity: records a fidelity check with no director-authority check, by design", (t) => {
+  const fx = fixture(t);
+  confirmClaim(fx);
+  const requestFile = path.join(fx.dir, "fidelity-request.json");
+  fs.writeFileSync(
+    requestFile,
+    JSON.stringify({
+      head: fx.head,
+      repo: fx.dir,
+      recordedBy: "director-1",
+      items: [
+        {
+          type: "statement",
+          id: "s1",
+          status: "met",
+          evidence: "matches brief section 2",
+        },
+        {
+          type: "criterion",
+          id: "narrow-1",
+          status: "met",
+          evidence: "warns only on rm/reset",
+        },
+        {
+          type: "criterion",
+          id: "visible-1",
+          status: "met",
+          evidence: "screenshot attached",
+        },
+      ],
+    }),
+  );
+  // Runs from a checkout other than the director's own: requirements-fidelity
+  // is the PM's own record, so no checkout check applies here.
+  const other = otherCheckout(t);
+  const result = runCli(
+    [
+      "requirements-fidelity",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--from",
+      requestFile,
+    ],
+    { cwd: other },
+  );
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).recorded, true);
+});
+
+test("cli requirements-fidelity-confirm: succeeds from the ledger's director checkout, and refuses from elsewhere", (t) => {
+  const fx = fixture(t);
+  confirmClaim(fx);
+  const fidelityRequest = path.join(fx.dir, "fidelity-request-2.json");
+  fs.writeFileSync(
+    fidelityRequest,
+    JSON.stringify({
+      head: fx.head,
+      repo: fx.dir,
+      recordedBy: "director-1",
+      items: [
+        {
+          type: "statement",
+          id: "s1",
+          status: "met",
+          evidence: "matches brief section 2",
+        },
+        {
+          type: "criterion",
+          id: "narrow-1",
+          status: "met",
+          evidence: "warns only on rm/reset",
+        },
+        {
+          type: "criterion",
+          id: "visible-1",
+          status: "met",
+          evidence: "screenshot attached",
+        },
+      ],
+    }),
+  );
+  const recorded = runCli(
+    [
+      "requirements-fidelity",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+      "--from",
+      fidelityRequest,
+    ],
+    { cwd: fx.dir },
+  );
+  assert.equal(recorded.code, 0, recorded.stderr);
+
+  const other = otherCheckout(t);
+  const refused = runCli(
+    [
+      "requirements-fidelity-confirm",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+    ],
+    { cwd: other },
+  );
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /must be run from the director's checkout/);
+
+  const succeeded = runCli(
+    [
+      "requirements-fidelity-confirm",
+      "--org",
+      fx.orgFile,
+      "--worktree",
+      fx.worktreeId,
+    ],
+    { cwd: fx.dir },
+  );
+  assert.equal(succeeded.code, 0, succeeded.stderr);
+  assert.equal(JSON.parse(succeeded.stdout).confirmed, true);
 });

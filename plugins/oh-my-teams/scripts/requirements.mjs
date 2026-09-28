@@ -640,14 +640,26 @@ export async function requirementsConfirm(
  * @param {string} request.location - Where within that channel it was shown (e.g. a PR URL or file path).
  * @param {string} request.userQuote - What the user said in response.
  * @param {string} request.outcome - "confirmed" or "rejected".
+ * @param {string} [request.callerCwd] - Caller's working directory, checked
+ *   against the ledger's recorded director.
  * @returns {Promise<{presented: boolean, ledger: object}>} Updated ledger.
  * @throws {Error} When the criterion is unknown, evidence cannot be read, fields are missing,
- *   or `head` does not match the workspace's actual Git HEAD.
+ *   `head` does not match the workspace's actual Git HEAD, or the caller is not the ledger's director.
  */
 export async function requirementsPresent(
   orgFile,
   worktreeId,
-  { criterionId, head, repo, source, channel, location, userQuote, outcome },
+  {
+    criterionId,
+    head,
+    repo,
+    source,
+    channel,
+    location,
+    userQuote,
+    outcome,
+    callerCwd = process.cwd(),
+  },
 ) {
   assert(
     typeof head === "string" && head.trim(),
@@ -691,6 +703,7 @@ export async function requirementsPresent(
       `No confirmed ledger for worktree ${worktreeId}`,
     );
     const ledger = readJSON(file);
+    assertLedgerDirectorAuthority(ledger, callerCwd, "requirements-present");
     const criterion = ledger.criteria.find((item) => item.id === criterionId);
     assert(criterion, `Unknown criterion: ${criterionId}`);
     const root = projectRoot(orgFile);

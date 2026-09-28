@@ -711,3 +711,14 @@ test("branch cleanup deletes branches whose content has reached the merge commit
     }),
   );
 });
+
+test("a claim with no requirements ledger at all is refused before any registry write", (t) => {
+  const fixture = project(t);
+  const claim = claimFor(fixture, "wt-no-requirements");
+  delete claim.requirements;
+  assert.throws(
+    () => registerKickoff(fixture.org, claim),
+    /Claim requirements ledger required/,
+  );
+  assert.deepEqual(ids(fixture), []);
+});

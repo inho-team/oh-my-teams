@@ -138,6 +138,8 @@ node <runtime> workflow-depth --id <workflow> --state <pm-state> --revision <rea
 
 task v2의 필수 검토가 끝난 뒤 [`../../examples/acceptance.json`](../../examples/acceptance.json) 형식으로 원래 목표의 모든 기준을 확인하고 `accept`를 기록한다. PM 수용은 구현자의 완료 주장이나 Orca accepted settlement와 다르다. 기존 사용자 위임은 재사용하지만 PR·머지·배포·외부 발송 권한을 acceptance 기록에서 새로 만들지 않는다.
 
+원장이 있는 kickoff는 `accept`와 별도로 `requirements-fidelity --org <organization.json> --worktree <id> --from <fidelity.json>`을 작성해, 현재 HEAD와 ledgerHash를 기준으로 각 statement·criterion이 `met`인지 `unmet`인지 남긴다. 이 기록은 director가 확인하기 전까지는 초안이므로, director의 `requirements-fidelity-confirm`을 기다린 뒤 다음 단계로 진행한다. `org.auditor`가 선언된 조직에서는 결과 감사(checkpoint: `outcome`)의 이의에 PM만 `audit-response`로 응답할 수 있다. `--terminal` 같은 인자로 신원을 대신 선언하지 않으며, 런타임이 이 kickoff의 Run에 coordinator로 바인딩된 PM인지를 직접 확인한다. 새 증거나 논거 없이 완료만 재선언하는 응답은 감사가 `not-persuaded`로 판정할 수 있고, 그 상태로는 `accept`와 close-ready 발신, `completed` 종료가 모두 막힌다. 자세한 순서는 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)의 A.4·A.5·B.5·B.6을 따른다.
+
 다중 작업은 [`../../examples/workflow.json`](../../examples/workflow.json)처럼 workflow 전체 budget과 동시 실행·review 대기 한도를 먼저 정한다. **task가 둘 이상이면 같은 요청에 `integrationTask`를 반드시 포함한다.** 통합은 자동으로 필수가 되는데 생성 뒤에는 추가할 수 없어, 빠뜨리면 모든 task를 수용해도 `integration-pending`에서 닫히지 않는다. task가 하나이고 `integrationTask`가 없는 workflow는 통합이 필요 없으므로, 그 task가 `accepted`가 된 뒤 `--repo`·`--report` 없이 `workflow-accept`로 닫는다. 재개 시 running attempt의 실제 실행 상태를 대조하며 상태 불명은 새 worker를 만드는 근거가 아니다. 굳힌 뒤에 검사를 더 넣어야 함을 뒤늦게 알게 되면 통합을 새로 만들지 않고 아직 수용 전인 통합 task에 `workflow-integration-checks`로 검사만 덧붙인다. 기존 검사의 순서와 `checkIndexes`는 그대로 유지되며, 이미 `accepted`된 통합에는 적용되지 않는다.
 
 필수 검토가 `changes-requested`나 `inconclusive`로 끝나거나 열린 finding을 남기면, 그것은 실패가 아니므로 `workflow-retry`가 아니라 검토 반려 루프로 처리한다.
@@ -214,6 +216,10 @@ Run이 생성된 뒤 PM이 이사와 정형 문서를 다룰 때 `orchestration 
 ## 사용 한도
 
 worker가 사용 한도에 걸리면 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `사용 한도 handoff` 절을 따른다. `worker-limit-check`로 판정하고, `verdict`가 `handoff`이면 `rate-limited` 실패로 정산한 뒤, 경로가 `capacity-handoff`일 때 `workflow-handoff`로 같은 워크트리의 작업을 그 역할의 fallback 프로필에 넘긴다. 조직 정책이 `fallback`이면 사용자에게 묻지 않고 곧바로 수행하고, 수행한 사실을 이사에게 `progress` 신호로 알린다. 정책이 `stop`이거나 남은 fallback이 없으면 한도가 풀리는 시각을 붙여 이사에게 `blocked`로 보고한다. handoff는 시도 예산을 쓰지 않지만, 같은 한도를 쓰는 프로필이나 조직에 선언되지 않은 프로필로 넘기지 않는다. 용량 부족(`verdict: retry`)은 프로필을 바꾸지 않고 같은 프로필로 재시도한다.
+
+## close-ready 발신 전 확인
+
+`director-signal --kind close-ready`를 보내기 전에, 원장이 있는 kickoff는 director의 `requirements-fidelity-confirm`과 (userVisible 기준이 있으면) `requirements-present`가 현재 HEAD·ledgerHash로 이미 끝났는지 확인한다. `org.auditor`가 선언된 조직에서는 여기서 처음으로 결과 감사 수용(`checkpoints.outcome.acceptance`)의 존재 자체가 요구되므로, 아직 감사를 받지 못했거나 이전 수용이 제시·결과 변경으로 무효화된 상태에서는 close-ready를 보내도 거부된다. 이 확인 없이 반복해서 close-ready를 보내면 director가 매번 거부 사유만 다시 조회하게 되므로, 보내기 전에 PM이 먼저 원장·감사 상태를 확인한다.
 
 ## 이사에게 결과 전달
 

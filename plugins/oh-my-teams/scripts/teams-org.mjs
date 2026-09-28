@@ -65,13 +65,24 @@ import {
 } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
-import { hasValidAcceptance } from "./audit.mjs";
+import {
+  auditAccept,
+  auditChecked,
+  auditObjection,
+  auditResponse,
+  auditRuling,
+  hasValidAcceptance,
+} from "./audit.mjs";
 import {
   readDraft,
+  requirementsAmend,
   requirementsConfirm,
   requirementsConfirmDraft,
   requirementsDraft,
   requirementsException,
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+  requirementsPresent,
   requirementsRetrofit,
 } from "./requirements.mjs";
 import {
@@ -463,6 +474,15 @@ export const ALLOWED_OPTIONS = {
   ],
   "requirements-retrofit": ["org", "worktree", "checkout"],
   "requirements-exception": ["org", "worktree", "from"],
+  "requirements-amend": ["org", "worktree", "from"],
+  "requirements-present": ["org", "worktree", "from"],
+  "requirements-fidelity": ["org", "worktree", "from"],
+  "requirements-fidelity-confirm": ["org", "worktree"],
+  "audit-objection": ["org", "worktree", "from"],
+  "audit-response": ["org", "worktree", "from", "terminal", "orca"],
+  "audit-ruling": ["org", "worktree", "from"],
+  "audit-checked": ["org", "worktree", "checkpoint", "from"],
+  "audit-accept": ["org", "worktree", "checkpoint", "head", "repo"],
   deliver: [
     "org",
     "worktree",
@@ -727,6 +747,18 @@ export const REQUIRED_OPTIONS = {
   "requirements-confirm": ["org", "worktree", "criterion", "quote"],
   "requirements-retrofit": ["org", "worktree"],
   "requirements-exception": ["org", "worktree", "from"],
+  "requirements-amend": ["org", "worktree", "from"],
+  "requirements-present": ["org", "worktree", "from"],
+  "requirements-fidelity": ["org", "worktree", "from"],
+  "requirements-fidelity-confirm": ["org", "worktree"],
+  "audit-objection": ["org", "worktree", "from"],
+  // --terminal is not required here: it is only relevant for the "outcome"
+  // checkpoint's PM identity (verifiedPm); "brief" uses the caller's own cwd
+  // (verifiedDirector) and never reads it.
+  "audit-response": ["org", "worktree", "from"],
+  "audit-ruling": ["org", "worktree", "from"],
+  "audit-checked": ["org", "worktree", "checkpoint", "from"],
+  "audit-accept": ["org", "worktree", "checkpoint"],
   deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
   "role-worktree-create": ["org", "role", "repo", "name", "base"],
@@ -2744,11 +2776,129 @@ export async function executeCommand(args, execute) {
       );
       return requirementsRetrofit(args.org, args.worktree, draft, director);
     }
-    case "requirements-exception":
-      return requirementsException(
+    case "requirements-exception": {
+      // Only these fields are taken from --from: callerCwd is the caller's
+      // actual working directory, proven by the process itself, and must
+      // never be settable by the JSON file the caller supplies (that would
+      // let a forged callerCwd field defeat assertLedgerDirectorAuthority
+      // the same way a --force flag would).
+      const { scope, head, repo, reason, userQuote, unmetFacts } = readJSON(
+        args.from,
+      );
+      return requirementsException(args.org, args.worktree, {
+        scope,
+        head,
+        repo,
+        reason,
+        userQuote,
+        unmetFacts,
+      });
+    }
+    case "requirements-amend": {
+      // callerCwd is never taken from --from, for the same forgery reason
+      // documented on requirements-exception above; it always defaults to
+      // the real process.cwd() inside requirementsAmend itself.
+      const { statements, criteria } = readJSON(args.from);
+      return requirementsAmend(args.org, args.worktree, {
+        statements,
+        criteria,
+      });
+    }
+    case "requirements-present": {
+      const {
+        criterionId,
+        head,
+        repo,
+        source,
+        channel,
+        location,
+        userQuote,
+        outcome,
+      } = readJSON(args.from);
+      return requirementsPresent(args.org, args.worktree, {
+        criterionId,
+        head,
+        repo,
+        source,
+        channel,
+        location,
+        userQuote,
+        outcome,
+      });
+    }
+    case "requirements-fidelity": {
+      const { head, repo, recordedBy, items } = readJSON(args.from);
+      return requirementsFidelity(args.org, args.worktree, {
+        head,
+        repo,
+        recordedBy,
+        items,
+      });
+    }
+    case "requirements-fidelity-confirm":
+      return requirementsFidelityConfirm(args.org, args.worktree);
+    case "audit-objection": {
+      const {
+        checkpoint,
+        target,
+        kind,
+        description,
+        rebuttalRequested,
+        resultHead,
+        repo,
+      } = readJSON(args.from);
+      return auditObjection(args.org, args.worktree, {
+        checkpoint,
+        target,
+        kind,
+        description,
+        rebuttalRequested,
+        resultHead,
+        repo,
+      });
+    }
+    case "audit-response": {
+      // callerHandle is taken from --terminal, never from --from: identity
+      // for the "outcome" checkpoint is proven by asking the real orca binary
+      // for the Run bound to that handle (verifiedPm), so a forged --from
+      // field cannot substitute for actually being that terminal. callerCwd
+      // is always the real process.cwd(), for the same reason.
+      const { checkpoint, objectionId, argument, evidenceRefs } = readJSON(
+        args.from,
+      );
+      return auditResponse(
         args.org,
         args.worktree,
-        readJSON(args.from),
+        { checkpoint, objectionId, argument, evidenceRefs },
+        {
+          callerCwd: process.cwd(),
+          callerHandle: args.terminal,
+          orca: args.orca,
+        },
+      );
+    }
+    case "audit-ruling": {
+      const { checkpoint, objectionId, respondedAgainst, verdict, reason } =
+        readJSON(args.from);
+      return auditRuling(args.org, args.worktree, {
+        checkpoint,
+        objectionId,
+        respondedAgainst,
+        verdict,
+        reason,
+      });
+    }
+    case "audit-checked": {
+      const { checked } = readJSON(args.from);
+      return auditChecked(args.org, args.worktree, args.checkpoint, checked);
+    }
+    case "audit-accept":
+      return auditAccept(
+        args.org,
+        args.worktree,
+        args.checkpoint,
+        args.head,
+        args.repo,
       );
     case "prepare":
       return compatibilityPrepare(args);

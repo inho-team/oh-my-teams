@@ -13,7 +13,7 @@ description: 성공한 oh my teams kickoff를 검증하고 허가된 PR/MR 생�
 
 종료할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회한다. kickoff가 여럿이면 사용자가 지목한 것만 종료한다. 기록된 `pm.stateDir`이 아래 명령의 `<pm-state>`이고, 회수 대상은 기록된 PM 워크트리와 그 아래의 자식 워크트리다. 이 절차는 PM 세션이 아니라 이사가 맡는다. 자기가 서 있는 워크트리는 스스로 제거할 수 없으므로, kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
-1. 원래 Goal의 모든 수용 기준, 필수 검토, 최신 HEAD의 검사와 미해결 사항을 확인한다.
+1. 원래 Goal의 모든 수용 기준, 필수 검토, 최신 HEAD의 검사와 미해결 사항을 확인한다. 요구 원장이 있는 kickoff는 `kickoff-check-close-ready`와 `deliverKickoff`, `kickoff-release --reason completed`가 원장 완결성(userVisible 기준의 제시 증거, 원문 대조 완전성, 미충족 항목의 항목별 예외)을 자동으로 검사하므로 눈으로 다시 세지 않는다. `org.auditor`가 선언된 조직에서는 같은 세 지점이 `checkpoints.brief.acceptance`와 `checkpoints.outcome.acceptance`도 함께 확인하며, 원장이나 결과·제시 증거가 감사 수용 이후에 바뀌었으면 그 수용은 이미 무효가 되어 있으므로 재수용을 먼저 받은 뒤 종료를 진행한다. 근거는 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)의 A.3·B.5를 따른다.
 2. 눈으로 확인하지 말고 게이트를 실행한다. `merge-check`는 필수 검토와 PM 수용이 source·task hash에 연결되기 전에는 병합을 거부하며, 비정상 종료는 병합 중단 조건이다.
 
 ```text
