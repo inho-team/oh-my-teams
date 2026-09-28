@@ -31,7 +31,11 @@ import {
 import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
 import { assertDirectorAuthority } from "./delivery.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
-import { runOrcaJson, selectTrustedOrcaExecutable } from "./orca-adapter.mjs";
+import {
+  runOrcaJson,
+  trustedOrcaExecute,
+  TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+} from "./orca-adapter.mjs";
 import { workspaceBinding } from "./evidence.mjs";
 
 /** Checkpoints a kickoff's requirements ledger is audited at. */
@@ -262,26 +266,37 @@ export function verifiedDirector(
  *
  * The caller's identity is read from its own `ORCA_TERMINAL_HANDLE`, exactly
  * as `verifiedAuditor` does, so a CLI argument (e.g. --terminal) can never
- * substitute for it. The Orca executable used to confirm the binding comes
- * from `selectTrustedOrcaExecutable`, not `selectOrcaExecutable`, so a CLI
- * argument (e.g. --orca), `ORCA_CLI_COMMAND`, `ORCA_DEV_REPO_ROOT`, and PATH
- * are all ignored for this call; only a fixed, per-platform install path is
- * trusted (B.6, decision B).
+ * substitute for it. Unless a caller-provided `options.orca` overrides it
+ * (tests only), the binding check runs through `trustedOrcaExecute`, which
+ * validates and then directly runs the fixed, per-platform trusted script
+ * (`resolveTrustedOrcaScriptPath`) with a pinned interpreter and an
+ * allowlisted child environment; a CLI argument (e.g. --orca),
+ * `ORCA_CLI_COMMAND`, `ORCA_DEV_REPO_ROOT`, and PATH play no part in choosing
+ * either the script or what it reads once running (B.6, decision B).
  *
- * This closes executable forgery, not identity forgery: `ORCA_TERMINAL_HANDLE`
- * itself is still read from the environment, so a caller sharing this OS
- * user account can still set it to a value of their choosing and pass this
- * check. Binding the handle to the process lineage that actually launched it
- * is what B.6's design is meant to add next; until it lands this remains an
- * open gap. Tests inject a stand-in executable through `options.orca`
- * directly, never through argv or an environment variable, since neither of
- * those reaches `selectTrustedOrcaExecutable`.
+ * What this closes is the caller's ability to redirect, through an argument,
+ * `PATH`, or an inherited environment variable, which executable answers this
+ * binding check or what that executable reads while doing so. What this does
+ * not close: `ORCA_TERMINAL_HANDLE` itself is still read from the
+ * environment, so a caller sharing this OS user account can still set it to a
+ * value of their choosing and pass this check, and the trusted script's own
+ * integrity (its app bundle is owned by the same OS user, no code-signature
+ * check is performed) is not verified. Binding the handle to the process
+ * lineage that actually launched it is what B.6's design is meant to add
+ * next; until it lands this remains an open gap. Tests inject a stand-in
+ * executable through `options.orca` directly, never through argv or an
+ * environment variable, since neither of those reaches `trustedOrcaExecute`.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
  * @param {object} [options] - Identity inputs.
- * @param {string} [options.orca] - Orca CLI binary override, for tests only.
- * @param {Function} [options.execute] - Injectable command runner.
+ * @param {string} [options.orca] - Orca CLI binary override, for tests only;
+ *   when set, the trusted-execution path is bypassed entirely.
+ * @param {Function} [options.execute] - Command runner. With `options.orca`
+ *   set, this runs the override directly; otherwise it is the process runner
+ *   `trustedOrcaExecute` delegates the validated invocation to.
+ * @param {Function} [options.trustedExecuteFactory=trustedOrcaExecute] -
+ *   Factory building the trusted-execution runner, for tests only.
  * @param {NodeJS.ProcessEnv} [env] - Environment to read the handle from.
  * @returns {object} The kickoff's registry entry.
  * @throws {Error} When the caller is not bound to this kickoff's Run as PM.
@@ -289,7 +304,7 @@ export function verifiedDirector(
 export async function verifiedPm(
   orgFile,
   worktreeId,
-  { orca, execute = run } = {},
+  { orca, execute = run, trustedExecuteFactory = trustedOrcaExecute } = {},
   env = process.env,
 ) {
   const callerHandle = env.ORCA_TERMINAL_HANDLE;
@@ -302,10 +317,13 @@ export async function verifiedPm(
   assert(entry.runId, `Kickoff ${worktreeId} has not bound a Run yet`);
   let bound = null;
   try {
+    const invocationExecute = orca
+      ? execute
+      : trustedExecuteFactory({ spawnExecute: execute });
     const current = await runOrcaJson(
-      orca ?? selectTrustedOrcaExecutable(),
+      orca ?? TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
       ["orchestration", "run-current", "--from", callerHandle],
-      { execute },
+      { execute: invocationExecute },
     );
     bound = current.result?.run ?? null;
   } catch {

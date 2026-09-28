@@ -95,7 +95,8 @@ import {
   releaseWorker,
   runOrcaJson,
   selectOrcaExecutable,
-  selectTrustedOrcaExecutable,
+  trustedOrcaExecute,
+  TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
   startWorker,
   waitForSupervisionMessage,
 } from "./orca-adapter.mjs";
@@ -2592,6 +2593,40 @@ function assertRequirementsDirectorAuthority(entry, orgFile, checkoutArg, use) {
 }
 
 /**
+ * Resolves the executable placeholder and command runner the `role-terminal`
+ * launch uses to open a terminal, in `executeCommand`'s `role-terminal` case.
+ *
+ * When `auditorEntry` is set (the auditor branch; `--orca` has already been
+ * asserted absent there), this always returns the trusted invocation: a
+ * placeholder name that `openRoleTerminal`/`checkTerminalIdle` never actually
+ * read, paired with the runner `trustedExecuteFactory` builds, which
+ * validates and then directly executes the fixed trusted script with a
+ * pinned interpreter and an allowlisted environment (B.6, decision B).
+ * Outside the auditor branch, the caller's own `--orca` (or its absence)
+ * passes through unchanged, and no trusted runner is built, matching
+ * `selectOrcaExecutable`'s existing behavior.
+ *
+ * @param {object} options - Selection inputs.
+ * @param {object} [options.auditorEntry] - Kickoff entry when launching the auditor role.
+ * @param {string} [options.orcaArg] - The caller's `--orca`, only read outside the auditor branch.
+ * @param {Function} [options.trustedExecuteFactory=trustedOrcaExecute] - Trusted-runner factory, for tests only.
+ * @returns {{executable: string | undefined, execute: Function | undefined}}
+ *   `execute` is `undefined` outside the auditor branch, so callers fall back
+ *   to their own default runner.
+ */
+export function resolveAuditorLaunchExecution({
+  auditorEntry,
+  orcaArg,
+  trustedExecuteFactory = trustedOrcaExecute,
+} = {}) {
+  if (!auditorEntry) return { executable: orcaArg, execute: undefined };
+  return {
+    executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    execute: trustedExecuteFactory(),
+  };
+}
+
+/**
  * Dispatches a parsed CLI command to its handler.
  *
  * @param {object} args - Parsed CLI arguments.
@@ -2868,16 +2903,26 @@ export async function executeCommand(args, execute) {
       // Neither the caller's terminal handle nor the Orca executable used to
       // confirm it is taken from a CLI argument: verifiedPm reads
       // ORCA_TERMINAL_HANDLE from process.env, exactly like verifiedAuditor
-      // does for the auditor role, and resolves its Orca executable through
-      // selectTrustedOrcaExecutable, which ignores --orca, ORCA_CLI_COMMAND,
-      // ORCA_DEV_REPO_ROOT, and PATH entirely (B.6, decision B). A --terminal
-      // or --orca argument here could otherwise forge the PM identity the
-      // "outcome" checkpoint's response is bound to. This closes argument
-      // and executable forgery, not identity forgery: a caller sharing this
-      // OS user account can still set ORCA_TERMINAL_HANDLE itself and pass
-      // verifiedPm, until B.6's process-lineage binding lands. callerCwd is
-      // always the real process.cwd(), for the same reason on the director
-      // path.
+      // does for the auditor role, and (unless a test injects options.orca)
+      // runs its `orchestration run-current` check through
+      // trustedOrcaExecute, which validates the fixed trusted script
+      // (ignoring --orca, ORCA_CLI_COMMAND, and ORCA_DEV_REPO_ROOT) and then
+      // executes it directly with a pinned interpreter and an allowlisted
+      // child environment, so the script's own PATH search for `bash` and
+      // for the `dirname`/`readlink` it calls internally, BASH_ENV, and
+      // variables such as ORCA_USER_DATA_PATH or HOME cannot redirect what
+      // actually runs (B.6, decision B). A --terminal or --orca argument
+      // here could otherwise forge the PM identity the "outcome"
+      // checkpoint's response is bound to. What this closes is the caller's
+      // ability to redirect, through an argument, PATH, or an inherited
+      // environment variable, which executable answers this check or what
+      // that executable reads while doing so; it is not identity forgery: a
+      // caller sharing this OS user account can still set
+      // ORCA_TERMINAL_HANDLE itself and pass verifiedPm, until B.6's
+      // process-lineage binding lands, and the trusted script's own
+      // integrity (its app bundle, owned by that same OS user) is not
+      // verified either. callerCwd is always the real process.cwd(), for the
+      // same reason on the director path.
       const { checkpoint, objectionId, argument, evidenceRefs } = readJSON(
         args.from,
       );
@@ -3073,8 +3118,8 @@ export async function executeCommand(args, execute) {
         // The auditor launch is the executable a forged handle would need to
         // impersonate, so it never accepts a caller-supplied binary: --orca
         // is rejected outright rather than silently ignored, and the launch
-        // below always resolves through selectTrustedOrcaExecutable (B.6,
-        // decision B).
+        // below always runs through trustedOrcaExecute, which both validates
+        // and directly executes the fixed trusted script (B.6, decision B).
         assert(
           args.orca === undefined,
           "role-terminal --role auditor does not accept --orca; the auditor launch always uses the trusted Orca executable",
@@ -3149,14 +3194,18 @@ export async function executeCommand(args, execute) {
             allowUnverifiedApproval.trim().length > 0),
         "--allow-unverified requires a non-empty approval sentence",
       );
-      // The auditor launch resolves its executable through
-      // selectTrustedOrcaExecutable, never from args.orca (asserted absent
-      // above): this is the binary that opens the terminal whose handle
-      // downstream identity checks (verifiedAuditor) trust, so it must not
-      // be caller-controlled (B.6, decision B).
-      const auditorExecutable = auditorEntry
-        ? selectTrustedOrcaExecutable()
-        : args.orca;
+      // The auditor launch resolves its executable and command runner
+      // through resolveAuditorLaunchExecution/trustedOrcaExecute, never from
+      // args.orca (asserted absent above): this is the terminal-opening call
+      // whose handle downstream identity checks (verifiedAuditor) trust, so
+      // neither the executable name nor what running it reads may be
+      // caller-controlled (B.6, decision B). `auditorExecute` is passed only
+      // to openRoleTerminal, which runs nothing but Orca commands; it is
+      // deliberately not passed to readLaunchEnvironment below, which also
+      // runs `agy --version` through the same injected runner and would
+      // otherwise have that call silently replaced by the Orca script too.
+      const { executable: auditorExecutable, execute: auditorExecute } =
+        resolveAuditorLaunchExecution({ auditorEntry, orcaArg: args.orca });
       // 실제 환경에서 매트릭스 입력값을 읽습니다.
       // 알 수 없는 값은 'unknown'으로 전달하여 표가 unverified로 처리합니다.
       const env = await readLaunchEnvironment({
@@ -3168,6 +3217,7 @@ export async function executeCommand(args, execute) {
         command,
         title: args.title,
         executable: auditorExecutable,
+        ...(auditorExecute ? { execute: auditorExecute } : {}),
         platform: env.platform,
         shell: env.shell,
         trustRecordExists: env.trustRecordExists,

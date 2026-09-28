@@ -1,28 +1,53 @@
-/** selectTrustedOrcaExecutable: the fixed, per-platform executable choice identity confirmation and auditor launch trust (B.6, decision B). */
+/**
+ * resolveTrustedOrcaScriptPath / trustedOrcaExecute: the fixed, per-platform
+ * script resolution and pinned-interpreter execution identity confirmation
+ * and auditor launch trust (B.6, decision B).
+ *
+ * Every test here injects exists/realpath/userInfo/spawnExecute rather than
+ * touching the filesystem, a real child process, or process.env's own
+ * ORCA_ and HOME values, so this suite passes on a machine with no Orca
+ * install and on any platform, including linux CI.
+ */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { selectTrustedOrcaExecutable } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import {
+  resolveTrustedOrcaScriptPath,
+  trustedOrcaExecute,
+  TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+  selectOrcaExecutable,
+} from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 
-test("selectTrustedOrcaExecutable returns the first injected candidate that exists", () => {
-  const found = selectTrustedOrcaExecutable({
+const REAL_DARWIN_REALPATHS = Object.freeze({
+  "/usr/local/bin/orca": "/Applications/Orca.app/Contents/Resources/bin/orca",
+});
+
+test("resolveTrustedOrcaScriptPath returns the realpath of the first injected candidate that exists and matches", () => {
+  const resolved = resolveTrustedOrcaScriptPath({
     candidates: ["/missing/orca", "/real/orca"],
     exists: (candidate) => candidate === "/real/orca",
+    realpath: () => "/real/orca-target",
+    expectedRealpaths: { "/real/orca": "/real/orca-target" },
   });
-  assert.equal(found, "/real/orca");
+  assert.equal(resolved, "/real/orca-target");
 });
 
-test("selectTrustedOrcaExecutable prefers an earlier candidate over a later one that also exists", () => {
-  const found = selectTrustedOrcaExecutable({
+test("resolveTrustedOrcaScriptPath prefers an earlier candidate over a later one that also exists", () => {
+  const resolved = resolveTrustedOrcaScriptPath({
     candidates: ["/first/orca", "/second/orca"],
     exists: () => true,
+    realpath: (candidate) => candidate,
+    expectedRealpaths: {
+      "/first/orca": "/first/orca",
+      "/second/orca": "/second/orca",
+    },
   });
-  assert.equal(found, "/first/orca");
+  assert.equal(resolved, "/first/orca");
 });
 
-test("selectTrustedOrcaExecutable throws, without falling back to any other selection, when no candidate exists", () => {
+test("resolveTrustedOrcaScriptPath throws, without falling back to any other selection, when no candidate exists", () => {
   assert.throws(
     () =>
-      selectTrustedOrcaExecutable({
+      resolveTrustedOrcaScriptPath({
         platform: "darwin",
         candidates: ["/missing/orca"],
         exists: () => false,
@@ -31,10 +56,10 @@ test("selectTrustedOrcaExecutable throws, without falling back to any other sele
   );
 });
 
-test("selectTrustedOrcaExecutable throws for a platform with no known trusted path, rather than guess one", () => {
+test("resolveTrustedOrcaScriptPath throws for a platform with no known trusted path, rather than guess one", () => {
   assert.throws(
     () =>
-      selectTrustedOrcaExecutable({
+      resolveTrustedOrcaScriptPath({
         platform: "win32",
         exists: () => true,
       }),
@@ -42,7 +67,7 @@ test("selectTrustedOrcaExecutable throws for a platform with no known trusted pa
   );
   assert.throws(
     () =>
-      selectTrustedOrcaExecutable({
+      resolveTrustedOrcaScriptPath({
         platform: "linux",
         exists: () => true,
       }),
@@ -53,10 +78,10 @@ test("selectTrustedOrcaExecutable throws for a platform with no known trusted pa
 // The error message is the only channel this function has to explain a
 // fail-closed refusal, so it must name the reason (no fallback exists),
 // not just that the search failed.
-test("selectTrustedOrcaExecutable's error explains it refuses --orca/ORCA_CLI_COMMAND/ORCA_DEV_REPO_ROOT/PATH fallback rather than guess", () => {
+test("resolveTrustedOrcaScriptPath's not-found error explains it refuses --orca/ORCA_CLI_COMMAND/ORCA_DEV_REPO_ROOT/PATH fallback rather than guess", () => {
   assert.throws(
     () =>
-      selectTrustedOrcaExecutable({
+      resolveTrustedOrcaScriptPath({
         platform: "darwin",
         candidates: [],
         exists: () => true,
@@ -65,26 +90,238 @@ test("selectTrustedOrcaExecutable's error explains it refuses --orca/ORCA_CLI_CO
   );
 });
 
-// darwin's real, built-in candidate list (no injected `candidates`) is
-// exercised with an injected `exists`, so this stays independent of whatever
-// Orca install (if any) the machine running this test actually has.
-test("selectTrustedOrcaExecutable's real darwin candidate list includes /usr/local/bin/orca", () => {
-  const found = selectTrustedOrcaExecutable({
-    platform: "darwin",
-    exists: (candidate) => candidate === "/usr/local/bin/orca",
-  });
-  assert.equal(found, "/usr/local/bin/orca");
+// Reproduces (f): a candidate that exists on disk but whose symlink was
+// repointed since TRUSTED_ORCA_REALPATHS was written must still be refused.
+test("resolveTrustedOrcaScriptPath (f) refuses a candidate whose realpath does not match the expected target", () => {
+  assert.throws(
+    () =>
+      resolveTrustedOrcaScriptPath({
+        platform: "darwin",
+        candidates: ["/usr/local/bin/orca"],
+        exists: () => true,
+        realpath: () => "/tmp/forged-orca-replacement",
+        expectedRealpaths: REAL_DARWIN_REALPATHS,
+      }),
+    /resolved to "\/tmp\/forged-orca-replacement".*not the expected "\/Applications\/Orca\.app/s,
+  );
 });
 
-// Production callers (audit.mjs's verifiedPm, teams-org.mjs's auditor
-// role-terminal launch) must never pass `candidates`/`exists`: this only
-// confirms the real, unpatched `existsSync` is what a call with no options
-// consults, i.e. that a caller cannot silently disable the disk check.
-test("selectTrustedOrcaExecutable with no options consults the real filesystem, not a fixed answer", () => {
+test("resolveTrustedOrcaScriptPath refuses a candidate with no expected realpath registered at all", () => {
+  assert.throws(
+    () =>
+      resolveTrustedOrcaScriptPath({
+        platform: "darwin",
+        candidates: ["/usr/local/bin/orca"],
+        exists: () => true,
+        realpath: () => "/anything",
+        expectedRealpaths: {},
+      }),
+    /no expected target registered/,
+  );
+});
+
+// darwin's real, built-in candidate list (no injected `candidates`) is
+// exercised with an injected `exists`/`realpath`, so this stays independent
+// of whatever Orca install (if any) the machine running this test actually
+// has, while still confirming /usr/local/bin/orca is on that list.
+test("resolveTrustedOrcaScriptPath's real darwin candidate list includes /usr/local/bin/orca, matched against the real expected realpath table", () => {
+  const resolved = resolveTrustedOrcaScriptPath({
+    platform: "darwin",
+    exists: (candidate) => candidate === "/usr/local/bin/orca",
+    realpath: () => REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+  });
+  assert.equal(resolved, REAL_DARWIN_REALPATHS["/usr/local/bin/orca"]);
+});
+
+// Production callers (audit.mjs's verifiedPm, teams-org.mjs's
+// resolveAuditorLaunchExecution) must never pass `candidates`/`exists`: this
+// only confirms the real, unpatched `existsSync` is what a call with no
+// options consults, i.e. that a caller cannot silently disable the disk
+// check.
+test("resolveTrustedOrcaScriptPath with no exists/candidates options consults the real filesystem, not a fixed answer", () => {
   assert.throws(() =>
-    selectTrustedOrcaExecutable({
+    resolveTrustedOrcaScriptPath({
       platform: "darwin",
       candidates: ["/nonexistent/path/for/omt-orca-adapter-test/orca"],
     }),
   );
+});
+
+function invocationOf(options) {
+  const calls = [];
+  const spawnExecute = (argv, callOptions) => {
+    calls.push({ argv, callOptions });
+    return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+  };
+  const execute = trustedOrcaExecute({
+    candidates: ["/usr/local/bin/orca"],
+    exists: () => true,
+    realpath: () => REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+    expectedRealpaths: REAL_DARWIN_REALPATHS,
+    userInfo: () => ({ homedir: "/Users/injected", username: "injected" }),
+    spawnExecute,
+    ...options,
+  });
+  return { execute, calls };
+}
+
+// (a) + (b, forged bash/dirname/readlink): whatever argv[0] a caller passes
+// (even the name of a forged orca/bash/dirname/readlink sitting earlier on
+// some PATH) is discarded; the actual spawn always targets /bin/bash by
+// absolute path with the resolved script, and the constructed env's PATH is
+// pinned to the system directories, never including any directory a forged
+// PATH entry could have injected.
+test("trustedOrcaExecute (a)(b) always spawns /bin/bash --noprofile --norc <resolved script>, ignoring argv[0] and any forged PATH", async () => {
+  const { execute, calls } = invocationOf();
+  await execute([
+    "/tmp/forged-orca",
+    "orchestration",
+    "run-current",
+    "--from",
+    "term_x",
+  ]);
+  assert.equal(calls.length, 1);
+  const [{ argv, callOptions }] = calls;
+  assert.deepEqual(argv, [
+    "/bin/bash",
+    "--noprofile",
+    "--norc",
+    REAL_DARWIN_REALPATHS["/usr/local/bin/orca"],
+    "orchestration",
+    "run-current",
+    "--from",
+    "term_x",
+  ]);
+  assert.equal(callOptions.env.PATH, "/usr/bin:/bin:/usr/sbin:/sbin");
+  assert.ok(
+    !callOptions.env.PATH.includes("/tmp"),
+    "a forged directory must never appear on the child's PATH",
+  );
+});
+
+// (c) BASH_ENV and ENV, which a non-interactive bash also consults for a
+// startup script, are absent from the constructed environment.
+test("trustedOrcaExecute (c) never includes BASH_ENV or ENV in the child environment", async () => {
+  const { execute, calls } = invocationOf();
+  await execute(["orca", "--version"]);
+  const env = calls[0].callOptions.env;
+  assert.equal(env.BASH_ENV, undefined);
+  assert.equal(env.ENV, undefined);
+});
+
+// (d) Every variable the downstream Orca CLI or its Electron host reads to
+// find runtime state, pairing, or identity is absent, not merely unset by
+// the caller.
+test("trustedOrcaExecute (d) never includes ORCA_*/NODE_OPTIONS/XDG_*/ELECTRON_* in the child environment", async () => {
+  const { execute, calls } = invocationOf();
+  await execute(["orca", "orchestration", "run-current", "--from", "term_x"]);
+  const env = calls[0].callOptions.env;
+  for (const key of [
+    "ORCA_USER_DATA_PATH",
+    "ORCA_REMOTE_PAIRING",
+    "ORCA_PAIRING_CODE",
+    "ORCA_ENVIRONMENT",
+    "ORCA_DEV_CLI_INVOCATION",
+    "ORCA_TERMINAL_HANDLE",
+    "ORCA_CLI_COMMAND",
+    "ORCA_DEV_REPO_ROOT",
+    "NODE_OPTIONS",
+    "XDG_CONFIG_HOME",
+    "ELECTRON_RUN_AS_NODE",
+  ]) {
+    assert.equal(
+      env[key],
+      undefined,
+      `${key} must not reach the trusted invocation's child`,
+    );
+  }
+});
+
+// (e) HOME (and USER/LOGNAME) come only from the injected identity source,
+// never from the calling process's own environment, so a caller who set
+// process.env.HOME to redirect ORCA_USER_DATA_PATH's default cannot affect
+// the trusted invocation.
+test("trustedOrcaExecute (e) takes HOME/USER/LOGNAME from userInfo, not from process.env", async () => {
+  const originalHome = process.env.HOME;
+  process.env.HOME = "/tmp/forged-home-for-omt-orca-adapter-test";
+  try {
+    const { execute, calls } = invocationOf({
+      userInfo: () => ({
+        homedir: "/Users/real-owner",
+        username: "real-owner",
+      }),
+    });
+    await execute(["orca", "--version"]);
+    const env = calls[0].callOptions.env;
+    assert.equal(env.HOME, "/Users/real-owner");
+    assert.equal(env.USER, "real-owner");
+    assert.equal(env.LOGNAME, "real-owner");
+    assert.notEqual(env.HOME, process.env.HOME);
+  } finally {
+    process.env.HOME = originalHome;
+  }
+});
+
+// (f) A realpath mismatch discovered while building the invocation is
+// refused before anything is spawned, propagating resolveTrustedOrcaScriptPath's
+// own refusal.
+test("trustedOrcaExecute (f) refuses to build an invocation when the trusted path's realpath does not match", () => {
+  assert.throws(
+    () =>
+      trustedOrcaExecute({
+        candidates: ["/usr/local/bin/orca"],
+        exists: () => true,
+        realpath: () => "/tmp/forged-orca-replacement",
+        expectedRealpaths: REAL_DARWIN_REALPATHS,
+      }),
+    /not the expected/,
+  );
+});
+
+// (g) No path known, or none exists: refused before anything is spawned,
+// on every platform this table names as fail-closed.
+test("trustedOrcaExecute (g) refuses to build an invocation when no trusted path exists, or on linux/win32", () => {
+  assert.throws(() =>
+    trustedOrcaExecute({
+      platform: "darwin",
+      candidates: [],
+      exists: () => true,
+    }),
+  );
+  assert.throws(() =>
+    trustedOrcaExecute({ platform: "linux", exists: () => true }),
+  );
+  assert.throws(() =>
+    trustedOrcaExecute({ platform: "win32", exists: () => true }),
+  );
+});
+
+// (h) selectOrcaExecutable's own fallback chain (--orca, ORCA_CLI_COMMAND,
+// ORCA_DEV_REPO_ROOT, PATH) is untouched by this decision: only the trusted
+// path adds a fixed-script requirement, never removes the existing
+// function's behavior for its own callers.
+test("trustedOrcaExecute (h) leaves selectOrcaExecutable's own fallback chain unchanged", () => {
+  assert.equal(selectOrcaExecutable("explicit-orca"), "explicit-orca");
+  assert.equal(
+    selectOrcaExecutable(undefined, { ORCA_CLI_COMMAND: "orca-from-env" }),
+    "orca-from-env",
+  );
+  assert.equal(
+    selectOrcaExecutable(undefined, { ORCA_DEV_REPO_ROOT: "/repo" }),
+    "orca-dev",
+  );
+});
+
+test("trustedOrcaExecute's returned runner rejects an empty argv, rather than spawn the trusted script with no Orca subcommand", () => {
+  const { execute } = invocationOf();
+  assert.throws(() => execute([]), /non-empty argv array/);
+});
+
+test("TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER is a non-empty string never resolved by trustedOrcaExecute's returned runner", async () => {
+  assert.equal(typeof TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER, "string");
+  assert.ok(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER.length > 0);
+  const { execute, calls } = invocationOf();
+  await execute([TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER, "status"]);
+  assert.equal(calls[0].argv[0], "/bin/bash");
+  assert.ok(!calls[0].argv.includes(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER));
 });
