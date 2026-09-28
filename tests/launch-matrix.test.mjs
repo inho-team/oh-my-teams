@@ -165,9 +165,9 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 8. Agy gemini win32 신뢰 있음 → headless (orca-idle-requires-narrow-screen)
+    // 8. Agy gemini win32 신뢰 있음 → blocked
     {
-      label: "agy_gemini_win32_headless",
+      label: "agy_gemini_win32_blocked",
       params: {
         runner: "agy",
         model: "gemini-3.1-pro-high",
@@ -178,7 +178,7 @@ test("표의 모든 행이 유효한 path·reason·nextOwner·nextAction·eviden
         ...V,
       },
     },
-    // 9. Agy gpt-oss win32 신뢰 있음 → headless
+    // 9. Agy gpt-oss win32 신뢰 있음 → blocked
     {
       label: "agy_gpt_oss_win32",
       params: {
@@ -269,10 +269,10 @@ test("설계 3절 규칙 적용 예시가 모두 같은 결과를 낸다", () =>
   assert.equal(claudeWin.path, "supervised-terminal");
   assert.equal(claudeWin.evidence, "verified");
 
-  // 예시 2: Windows gemini Agy → headless (orca-idle-requires-narrow-screen)
+  // 예시 2: Windows gemini Agy → blocked
   // 실측(Orca 1.4.204): tui-idle 120초 미도달, 폭 조정은 에이전트 식별 깨뜨림.
   // 그 판정 규칙은 1.4.210에서 교체되어 사라졌고 재검증할 Windows 머신이 없어
-  // evidence는 unverified로 낮아졌다(#104). 경로(headless)는 바뀌지 않는다.
+  // evidence는 unverified로 낮아졌고 새 실행은 차단된다(#104).
   const geminiWin32 = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
@@ -440,7 +440,7 @@ test("Antigravity CLI 버전은 Agy 역할에만 적용된다", () => {
 });
 
 test("지원되는 모든 역할 경로는 Orca 버전 근거를 기록한다", () => {
-  const headless = predictLaunchPath({
+  const blocked = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.8-flash-high",
     platform: "win32",
@@ -450,9 +450,9 @@ test("지원되는 모든 역할 경로는 Orca 버전 근거를 기록한다", 
     orcaVersion: "9.9.9",
     cliVersion: VERIFIED_CLI_VERSION,
   });
-  assert.equal(headless.path, "blocked");
-  assert.equal(headless.evidence, "unverified");
-  assert.ok(!headless.reason.includes("untested_version"));
+  assert.equal(blocked.path, "blocked");
+  assert.equal(blocked.evidence, "unverified");
+  assert.ok(!blocked.reason.includes("untested_version"));
 });
 
 test("classifyVersion은 같은 버전·패치 차이·그 밖을 구분한다", () => {
@@ -585,7 +585,7 @@ test("Windows Agy powershell 복합 명령은 no_agent_detected로 차단된다"
 test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한다", () => {
   // 실측 수정: 구현은 Windows에서 폭 조정을 생략해 단일 명령만 입력(isCompoundCommand=false).
   // gemini → 표 3행(신뢰 없음) 또는 표 8행(gemini win32 신뢰 있음) 도달.
-  // gemini + 신뢰 있음 → 8행 headless, evidence: unverified(#104), 승인 옵션과 무관하다.
+  // gemini + 신뢰 있음 → Windows Agy 차단, 승인 옵션과 무관하다.
   const geminiWithTrust = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
@@ -597,14 +597,14 @@ test("Windows Agy powershell 단일 명령은 no_agent_detected 없이 진행한
     allowUnverified: false,
     ...V,
   });
-  // gemini+win32+신뢰 있음 → 8행 headless (orca-idle-requires-narrow-screen)
+  // gemini+win32+신뢰 있음 → Windows Agy 차단
   assert.equal(geminiWithTrust.path, "blocked");
   assert.ok(
     geminiWithTrust.reason.includes("agy-interactive-terminal-unavailable"),
     "Windows Agy reason 코드",
   );
 
-  // allowUnverified=true+승인 → 8행 headless (evidence는 unverified 그대로, gate 불필요)
+  // allowUnverified=true+승인도 Windows Agy 차단을 우회하지 못한다.
   const geminiAllowed = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",
@@ -784,7 +784,7 @@ test("Agy 신뢰 기록 없음은 터미널을 열고 감독자가 질문에 답
 
 test("Windows Agy 규칙은 세션 없는 대체 실행을 거부한다 (acceptance: windows-evidence)", () => {
   // 근거였던 Orca 1.4.204의 판정 규칙은 1.4.210에서 교체되어 더 이상 존재하지 않고,
-  // 재검증할 Windows 머신이 없다(#104). 경로(headless)는 바뀌지 않는다.
+  // 재검증할 Windows 머신이 없다(#104). 따라서 새 실행은 계속 차단한다.
   const gemini = predictLaunchPath({
     runner: "agy",
     model: "gemini-3.1-pro-high",

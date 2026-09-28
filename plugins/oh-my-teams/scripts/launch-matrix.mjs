@@ -219,19 +219,8 @@ const MATRIX_RULES = [
   // 처음 여는 기본 경로였다. 이 규칙을 규칙 3보다 앞에 두어 신뢰 상태를 확인하기 전에
   // win32 + agy를 먼저 blocked로 걸러낸다.
   //
-  // 확인한 것: `docs/plan/agy-terminal-path.md`의 2026-09-18 r3-c1 실측(Windows 11,
-  // Orca 1.4.204, Antigravity CLI 1.2.5)은 신뢰 기록이 없는 새 워크트리에서 gemini Agy가
-  // 터미널을 열기도 전에 agent-trust-workspace로 거부됨을 실측으로 확인했다(옛 규칙 순서의
-  // 증상 재현). `docs/plan/headless-runtime.md`의 2026-09-17 Windows 검증은 신뢰 기록이
-  // 없는 새 임시 Git 저장소에서 headless-start로 같은 Agy(gemini) 역할을 실행해, 신뢰
-  // 질문에 막히지 않고 파일 작성과 커밋까지 `done`으로 끝냄을 실측으로 확인했다.
-  // 또한 확인한 것: `plugins/oh-my-teams/scripts/headless.mjs`의 `PROVIDERS.agy.command`
-  // (163번째 줄)는 headless 경로가 agy CLI를 실행할 때 `--dangerously-skip-permissions`
-  // 플래그를 실제로 넘긴다는 것을 소스로 보여준다.
-  // 확인하지 못한 것: 그 headless 검증 워크트리의 trustRecordExists 값이 정확히 false였는지
-  // unknown이었는지(당시 기록은 "임시 Git 저장소"라고만 적었다), 그리고 위 플래그가 폴더
-  // 신뢰 질문까지 억제하는지의 메커니즘(플래그의 존재 자체는 확인했으나 그 효과 범위는
-  // 확인하지 못했다), Windows에서 Agy 자체가 trustedWorkspaces에 기록하는 경로 표기.
+  // 과거 세션 없는 실험 기록은 사용량·복구를 위한 읽기 전용 근거로만 남긴다.
+  // 이 표는 새 역할 실행 경로를 선택하므로 그 기록을 대체 경로로 사용하지 않는다.
   // 규칙 8·9와 같은 이유로(#104: 근거였던 Orca 1.4.204 판정 규칙이 1.4.210에서 교체되었고
   // 재검증할 Windows 머신이 없음) evidence는 verified로 올리지 않는다.
   //

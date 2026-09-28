@@ -720,12 +720,8 @@ test("the launch documents open role terminals through role-terminal", () => {
   assert.match(runtime, /agent가 뜬 뒤 `terminal rename`으로 다시 지정한다/);
 });
 
-test("on Windows an Agy Gemini role without approval is refused before any terminal opens", async () => {
-  // 실측(Orca 1.4.204): Windows gemini+powershell → 8행(headless).
-  // 근거였던 1.4.204 판정 규칙은 1.4.210에서 교체되어 사라졌고 재검증할 Windows
-  // 머신이 없어 evidence는 verified가 아니라 unverified로 낮아졌다(#104).
-  // headless 경로는 openRoleTerminal에서 blocked와 동일하게 throw되며
-  // 이유 코드는 orca-idle-requires-narrow-screen.
+test("on Windows an Agy Gemini role is refused before any terminal opens", async () => {
+  // Windows Agy의 감독 터미널 경로는 검증되지 않았으므로 새 실행을 차단한다.
   const org = example();
   const gemini = roleCommand(org, "senior");
   const calls = [];
@@ -733,7 +729,7 @@ test("on Windows an Agy Gemini role without approval is refused before any termi
     calls.push(argv);
     return { code: 0, stdout: "{}" };
   };
-  // Windows powershell + gemini → 8행 headless → orca-idle-requires-narrow-screen
+  // Windows powershell + gemini → blocked
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -748,7 +744,7 @@ test("on Windows an Agy Gemini role without approval is refused before any termi
       trustRecordExists: true,
       allowUnverified: false,
     }),
-    /orca-idle-requires-narrow-screen/,
+    /agy-interactive-terminal-unavailable/,
   );
   assert.equal(calls.length, 0);
 
@@ -787,8 +783,7 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
     return { code: 0, stdout: "{}" };
   };
 
-  // Agy gemini win32 powershell → 8행 headless → orca-idle-requires-narrow-screen → 터미널 생성 없음
-  // (단일 명령 → isCompoundCommand=false → 2행 건너뜀 → 8행 headless, evidence: unverified)
+  // Windows Agy는 matrix에서 차단되어 터미널을 만들지 않는다.
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -801,7 +796,7 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
       allowUnverified: false,
       ...{ settleMs: 5, readyMs: 20, pollMs: 1 },
     }),
-    /orca-idle-requires-narrow-screen/,
+    /agy-interactive-terminal-unavailable/,
   );
   // matrix 거부는 orca 호출 전에 일어남
   assert.equal(
@@ -835,11 +830,8 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
   );
   assert.ok(callsTrust.length > 0, "터미널 생성까지 진행한다");
 });
-test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", async () => {
-  // finding: missing-headless-refusal-test
-  // Agy + win32 + posix shell + 신뢰 있음 + gpt-oss 모델 → 표 규칙 9 headless
-  // headless는 터미널 경로가 아니므로, 터미널 생성 전에 거부해야 한다.
-  const headlessCommand = {
+test("Windows Agy 차단은 터미널 생성 호출을 일으키지 않는다", async () => {
+  const blockedCommand = {
     role: "senior",
     profile: "agy-gpt-oss",
     provider: "agy",
@@ -855,11 +847,11 @@ test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", as
     return { code: 0, stdout: "{}" };
   };
 
-  // win32 + posix shell + 신뢰 있음 → rule 2 건너뜀(powershell 아님), rule 9 headless
+  // win32 Agy는 셸·모델과 무관하게 새 세션을 열기 전에 차단한다.
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
-      command: headlessCommand,
+      command: blockedCommand,
       executable: "orca",
       execute,
       platform: "win32",
@@ -873,22 +865,22 @@ test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", as
       pollMs: 1,
     }),
     (err) => {
-      assert.match(err.message, /headless/, "headless 거부 메시지 포함");
+      assert.match(
+        err.message,
+        /agy-interactive-terminal-unavailable/,
+        "차단 reason 코드 포함",
+      );
       return true;
     },
   );
   assert.equal(
     orcaCalls.length,
     0,
-    "headless 예측 거부는 Orca terminal create를 호출하지 않는다",
+    "차단된 Windows Agy는 Orca terminal create를 호출하지 않는다",
   );
 });
 
-test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 supervised-terminal이 아니라 headless로 거부된다", async () => {
-  // #46/agy-win-untrusted-path: 규칙 순서 구멍 수정 확인.
-  // 옛 순서에서는 플랫폼을 보지 않는 규칙 3(agent-trust-workspace)이 먼저 걸려 win32에서도
-  // 터미널 생성까지 진행했다(docs/plan/agy-terminal-path.md의 2026-09-18 r3-c1 실측이 이 증상을
-  // 확인했다). 새 규칙(2-1)이 win32 + agy를 신뢰 상태와 무관하게 headless로 먼저 걸러낸다.
+test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 차단된다", async () => {
   const org = example();
   const gemini = roleCommand(org, "senior");
 
@@ -913,16 +905,16 @@ test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 supervise
         pollMs: 1,
       }),
       (err) => {
-        assert.match(err.message, /headless/, "headless 거부 메시지 포함");
+        assert.match(err.message, /agy-interactive-terminal-unavailable/);
         assert.match(
           err.message,
-          /agy-headless-no-trust/,
-          "새 규칙의 reason 코드 포함",
+          /agy-interactive-terminal-unavailable/,
+          "Windows Agy 차단 reason 코드 포함",
         );
         assert.equal(
           err.matrixRefusal?.path,
-          "headless",
-          `trustRecordExists=${trustRecordExists}일 때 headless로 거부해야 한다`,
+          "blocked",
+          `trustRecordExists=${trustRecordExists}일 때 차단해야 한다`,
         );
         return true;
       },
