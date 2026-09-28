@@ -768,11 +768,157 @@ test("an entry without registrationSeq (pre-wave-2) keeps the old cleanupKickoff
     branches: ["feat/kickoff-work"],
     remoteName: "",
   });
-  // No registrationSeq means kickoffHashFor cannot run; the pre-existing
-  // git-content-only check is used instead, same as before this feature.
+  // No orgFile is given, so a registrationSeq-less entry classifies as legacy
+  // regardless of any activation boundary; the pre-existing git-content-only
+  // check is used instead, same as before this feature.
   assert.deepEqual(result, {
     deleted: ["feat/kickoff-work"],
     skipped: [],
     errors: [],
   });
+});
+
+test("releaseKickoff completes a legacy entry (registered before documentSystemActivatedAt) without a delivery-ref document", (t) => {
+  const fixture = project(t);
+  const { worktreeId, entry } = kickoff(fixture, "wt-a", {
+    mode: "local-merge",
+    branch: "main",
+  });
+  const entryFile = path.join(
+    registryDirectory(fixture.org),
+    `${kickoffEntryName(worktreeId)}.json`,
+  );
+  const { registrationSeq, ...withoutSeq } = readJSON(entryFile);
+  writeJSON(entryFile, {
+    ...withoutSeq,
+    delivered: {
+      head: "b".repeat(40),
+      mergeCommit: "a".repeat(40),
+      at: new Date().toISOString(),
+    },
+  });
+  assert.equal(entry.registrationSeq, registrationSeq);
+
+  // documentSystemActivatedAt is unset on the example organization, so this
+  // registrationSeq-less entry is legacy and skips the delivery-ref check
+  // entirely, without needing --force.
+  const result = releaseKickoff(fixture.org, {
+    worktreeId,
+    reason: "completed",
+    callerCwd: fixture.dir,
+  });
+  assert.equal(result.released, true);
+});
+
+test("releaseKickoff refuses a registrationSeq-less entry registered after documentSystemActivatedAt as an integrity failure", (t) => {
+  const fixture = project(t);
+  writeJSON(fixture.org, {
+    ...readJSON(fixture.org),
+    documentSystemActivatedAt: "2020-01-01T00:00:00.000Z",
+  });
+  const { worktreeId } = kickoff(fixture, "wt-a", {
+    mode: "local-merge",
+    branch: "main",
+  });
+  const entryFile = path.join(
+    registryDirectory(fixture.org),
+    `${kickoffEntryName(worktreeId)}.json`,
+  );
+  const { registrationSeq, ...withoutSeq } = readJSON(entryFile);
+  writeJSON(entryFile, {
+    ...withoutSeq,
+    delivered: {
+      head: "b".repeat(40),
+      mergeCommit: "a".repeat(40),
+      at: new Date().toISOString(),
+    },
+  });
+
+  assert.throws(
+    () =>
+      releaseKickoff(fixture.org, {
+        worktreeId,
+        reason: "completed",
+        callerCwd: fixture.dir,
+      }),
+    /no registrationSeq.*completion is refused as a corrupted entry/,
+  );
+
+  const forced = releaseKickoff(fixture.org, {
+    worktreeId,
+    reason: "completed",
+    force: true,
+    callerCwd: fixture.dir,
+  });
+  assert.equal(forced.released, true);
+});
+
+test("cleanupKickoffBranches skips a registrationSeq-less entry registered after documentSystemActivatedAt as an integrity failure", (t) => {
+  const fixture = project(t);
+  writeJSON(fixture.org, {
+    ...readJSON(fixture.org),
+    documentSystemActivatedAt: "2020-01-01T00:00:00.000Z",
+  });
+  const { repoDir, head, mergeCommit } = mergedRepo(t);
+  const integrityFailureEntry = {
+    createdAt: new Date().toISOString(),
+    delivery: { mode: "local-merge", branch: "main" },
+    delivered: { head, mergeCommit },
+  };
+
+  const skipped = cleanupKickoffBranches({
+    projectDir: repoDir,
+    entry: integrityFailureEntry,
+    branches: ["feat/kickoff-work"],
+    remoteName: "",
+    orgFile: fixture.org,
+  });
+  assert.deepEqual(skipped, {
+    deleted: [],
+    skipped: ["feat/kickoff-work"],
+    errors: [],
+  });
+
+  const forced = cleanupKickoffBranches({
+    projectDir: repoDir,
+    entry: integrityFailureEntry,
+    branches: ["feat/kickoff-work"],
+    remoteName: "",
+    orgFile: fixture.org,
+    force: true,
+  });
+  assert.deepEqual(forced, {
+    deleted: ["feat/kickoff-work"],
+    skipped: [],
+    errors: [],
+  });
+});
+
+test("cleanupKickoffBranches rejects an unreadable orgFile before touching any branch, and force does not bypass it", (t) => {
+  const { repoDir, head, mergeCommit } = mergedRepo(t);
+  const entry = {
+    delivery: { mode: "local-merge", branch: "main" },
+    delivered: { head, mergeCommit },
+  };
+  const missingOrgFile = path.join(repoDir, "does-not-exist.json");
+
+  for (const force of [false, true]) {
+    assert.throws(() =>
+      cleanupKickoffBranches({
+        projectDir: repoDir,
+        entry,
+        branches: ["feat/kickoff-work"],
+        remoteName: "",
+        orgFile: missingOrgFile,
+        force,
+      }),
+    );
+  }
+
+  const branches = execFileSync(
+    "git",
+    ["branch", "--list", "feat/kickoff-work"],
+    { cwd: repoDir, encoding: "utf8" },
+  );
+  assert.match(branches, /feat\/kickoff-work/);
 });

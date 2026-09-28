@@ -151,6 +151,24 @@ export function kickoffHashFor(entry) {
   );
 }
 
+// Classifies an entry against the structured document system's activation
+// boundary (structured-omt-documents.md 3.7 item 5, 3.10). An entry with a
+// registrationSeq is "current" regardless of the boundary. One without it is
+// "legacy" (registrationSeq absence is expected) when documentSystemActivatedAt
+// is unset or later than entry.createdAt, the same comparison validateLegacyRef
+// uses (documents.mjs); otherwise the entry was registered after activation and
+// should have a registrationSeq but does not, which is an "integrity-failure",
+// not a legacy one. Passing org as undefined (the orgFile-less default for
+// cleanupKickoffBranches) always resolves a registrationSeq-less entry to
+// "legacy", matching that function's documented no-orgFile contract.
+function classifyKickoffEntry(entry, org) {
+  if (entry.registrationSeq !== undefined) return "current";
+  const activatedAt = org?.documentSystemActivatedAt;
+  return !activatedAt || entry.createdAt < activatedAt
+    ? "legacy"
+    : "integrity-failure";
+}
+
 // Issues the next registrationSeq from <project>/.omt/kickoffs/.sequence.json,
 // reusing writeJSON's atomic replace. Callers must already hold the registry
 // lock (withRegistry), since the project-wide serialization it provides is
@@ -759,28 +777,45 @@ export function releaseKickoff(
     // A merge was recorded: the kickoff is not truly complete until its own
     // 06. 인도 delivery-ref document is committed too (docs/plan/
     // structured-omt-documents.md 3.7 item 5's releaseKickoff extension).
-    // Entries registered before registrationSeq existed cannot compute a
-    // kickoffHash, so they are let through unchanged, like the legacy
-    // director warning above.
+    // Entries registered before the structured document system was activated
+    // (the same documentSystemActivatedAt-vs-createdAt boundary 3.10 uses for
+    // legacyRef) are legacy and skip this check entirely, like the legacy
+    // director warning above. An entry with no registrationSeq that was
+    // registered after activation is instead an integrity-failure: normal
+    // registration always assigns one, so its absence is a corrupted or
+    // hand-edited entry, not a legacy one, and is not let through silently.
     if (
       reason === "completed" &&
       entry.delivery?.mode === "local-merge" &&
-      entry.delivered?.mergeCommit &&
-      entry.registrationSeq !== undefined
+      entry.delivered?.mergeCommit
     ) {
-      const kickoffHash = kickoffHashFor(entry);
-      const docId = deliveryRefDocId(kickoffHash, entry.delivered.mergeCommit);
-      const state = documentState(entry.pm.stateDir, docId);
+      const org = validateOrg(readJSON(orgFile));
+      const classification = classifyKickoffEntry(entry, org);
       assert(
-        state.exists || force,
-        `Kickoff delivered ${entry.delivered.mergeCommit} but its 06. 인도 delivery-ref document ` +
-          "is not committed yet; write it before completing, or pass --force with the user's decision",
+        classification !== "integrity-failure" || force,
+        `Kickoff was registered at ${entry.createdAt}, after documentSystemActivatedAt ` +
+          `(${org.documentSystemActivatedAt}), but has no registrationSeq; normal registration ` +
+          "always assigns one, so completion is refused as a corrupted entry unless the user " +
+          "decides to force it",
       );
-      assert(
-        !state.exists || state.kickoffId === kickoffHash || force,
-        `delivery-ref document at ${docId} belongs to a different kickoff; ` +
-          "pass --force with the user's decision if this is expected",
-      );
+      if (classification === "current") {
+        const kickoffHash = kickoffHashFor(entry);
+        const docId = deliveryRefDocId(
+          kickoffHash,
+          entry.delivered.mergeCommit,
+        );
+        const state = documentState(entry.pm.stateDir, docId);
+        assert(
+          state.exists || force,
+          `Kickoff delivered ${entry.delivered.mergeCommit} but its 06. 인도 delivery-ref document ` +
+            "is not committed yet; write it before completing, or pass --force with the user's decision",
+        );
+        assert(
+          !state.exists || state.kickoffId === kickoffHash || force,
+          `delivery-ref document at ${docId} belongs to a different kickoff; ` +
+            "pass --force with the user's decision if this is expected",
+        );
+      }
     }
     const archived = path.join(
       path.dirname(registryDirectory(orgFile)),
@@ -819,6 +854,12 @@ export function releaseKickoff(
  *   remote share the same name; each is tried independently).
  * @param {string} [request.remoteName="origin"] - Git remote to push the
  *   deletions to. Pass an empty string to skip remote deletion.
+ * @param {string} [request.orgFile] - Organization JSON path, used to read
+ *   `documentSystemActivatedAt` for the legacy-vs-integrity-failure boundary
+ *   (structured-omt-documents.md 3.7 item 5). Optional; when omitted, an
+ *   entry with no `registrationSeq` is always treated as legacy. When given
+ *   but unreadable, the call is refused before any branch is checked or
+ *   deleted, and `force` does not bypass that refusal.
  * @returns {{deleted: string[], skipped: string[], errors: string[]}} Result.
  */
 export function cleanupKickoffBranches({
@@ -828,6 +869,7 @@ export function cleanupKickoffBranches({
   remoteName = "origin",
   callerCwd = process.cwd(),
   force = false,
+  orgFile,
 }) {
   assert(
     typeof projectDir === "string" && projectDir,
@@ -835,6 +877,8 @@ export function cleanupKickoffBranches({
   );
   assert(entry && typeof entry === "object", "registry entry required");
   assert(Array.isArray(branches), "branches must be an array");
+  const org =
+    orgFile === undefined ? undefined : validateOrg(readJSON(orgFile));
 
   // Authority check: same policy as releaseKickoff.
   // Entries without a director record predate this feature; allowed with warning.
@@ -862,22 +906,33 @@ export function cleanupKickoffBranches({
   // is also committed and owned by this kickoff (structured-omt-documents.md
   // 3.7 item 5's cleanupKickoffBranches extension); otherwise deliveryRef stays
   // undefined and every branch is skipped below, same as "no delivered record".
-  // force bypasses the document check, matching releaseKickoff's policy.
-  // Entries without registrationSeq predate the structured document system
-  // and cannot compute a kickoffHash, so they keep the pre-existing behavior.
+  // force bypasses the document check, matching releaseKickoff's policy. A
+  // legacy entry (registrationSeq absent because it predates activation, or
+  // because no orgFile was given to learn the boundary at all) keeps the
+  // pre-existing, document-check-free behavior. An integrity-failure entry
+  // (registrationSeq absent despite activation) cannot compute a kickoffHash,
+  // so it is treated as unowned: skipped without force, bypassed with it,
+  // exactly like a "current" entry whose delivery-ref document is missing.
   let deliveryRef;
   if (
     (entry.delivery?.mode === "local-merge" ||
       entry.delivery?.mode === "pull-request") &&
     entry.delivered?.mergeCommit
   ) {
-    if (entry.registrationSeq === undefined) {
+    const classification = classifyKickoffEntry(entry, org);
+    if (classification === "legacy") {
       deliveryRef = entry.delivered.mergeCommit;
     } else {
-      const kickoffHash = kickoffHashFor(entry);
-      const docId = deliveryRefDocId(kickoffHash, entry.delivered.mergeCommit);
-      const state = documentState(entry.pm.stateDir, docId);
-      const owned = state.exists && state.kickoffId === kickoffHash;
+      let owned = false;
+      if (classification === "current") {
+        const kickoffHash = kickoffHashFor(entry);
+        const docId = deliveryRefDocId(
+          kickoffHash,
+          entry.delivered.mergeCommit,
+        );
+        const state = documentState(entry.pm.stateDir, docId);
+        owned = state.exists && state.kickoffId === kickoffHash;
+      }
       if (owned || force) deliveryRef = entry.delivered.mergeCommit;
     }
   }
