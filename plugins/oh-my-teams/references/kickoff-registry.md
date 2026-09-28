@@ -10,7 +10,7 @@
 
 등록부는 `organization.json`이 있는 **원본 프로젝트**의 `.omt/kickoffs/<해시>.json`이다. Orca 워크트리 ID는 `<repoId>::<워크트리 경로>` 형식이라 `:`와 `/`를 포함하므로 파일 이름으로 쓸 수 없다. 그래서 런타임은 ID의 SHA-256 해시로 파일 이름을 정하고, 원래 ID는 항목 안의 `pm.worktreeId`에 그대로 보관한다. 해시에는 경로 구분자나 `..`가 들어가지 않으므로 어떤 ID를 받아도 항목이 등록부 밖에 쓰이지 않는다. 해시를 도입하기 전에 ID를 그대로 파일 이름으로 쓴 항목도 계속 조회·종료할 수 있다. `.omt/`는 Git에서 제외되고 워크트리마다 별개의 디렉터리이므로, PM 워크트리 안에 두면 종료를 수행하는 세션이 읽지 못한다. 런타임은 `--org`로 받은 조직 파일과 같은 자리에서만 등록부를 찾는다.
 
-등록을 요청할 때 작성하는 파일은 다음 다섯 항목과, 이사가 시작하는 kickoff에서 덧붙이는 `director`를 담는다. `createdAt`은 런타임이 채우고, `runId`는 뒤따르는 `kickoff-bind`가 채운다.
+등록을 요청할 때 작성하는 파일은 다음 다섯 항목과, 이사가 시작하는 kickoff에서 덧붙이는 `director`를 담는다. `createdAt`과 `registrationSeq`는 런타임이 채우고, `runId`는 뒤따르는 `kickoff-bind`가 채운다.
 
 ```json
 {
@@ -51,6 +51,22 @@
 - `delivery`가 없거나, `mode`가 세 값이 아니거나, `local-merge`·`pull-request`인데 `branch`가 없을 때. 전달 허가가 기록되지 않은 kickoff는 종료할 때 무엇을 병합해도 되는지 알 수 없다.
 
 단일 kickoff 시절의 `.omt/active-kickoff.json`이 남아 있으면 등록부를 처음 읽거나 쓸 때 그 PM 워크트리의 항목으로 옮겨지므로, 그 kickoff도 그대로 종료할 수 있다. 등록 항목의 키를 `pm`과 `selfPm`으로 바꾸기 전에 `coordinator`와 `selfCoordinator`로 기록된 항목과 요청 파일도 새 키로 읽으며, 항목은 다음에 기록될 때 새 키로 저장된다. 옛 키와 새 키가 함께 있고 값이 다르면 어느 쪽이 맞는지 판단할 수 없으므로 거부한다.
+
+## kickoffHash와 registrationSeq
+
+구조화된 `.omt` 문서 시스템([`docs/plan/structured-omt-documents.md`](../../../docs/plan/structured-omt-documents.md))은 문서를 kickoff 하나에 묶기 위해 각 kickoff를 가리키는 고정된 해시값인 kickoffHash를 쓴다. 이 값을 `pm.worktreeId`와 `createdAt`만으로 만들면 같은 밀리초에 두 kickoff가 등록될 때 값이 겹칠 수 있으므로, 등록 항목에 `registrationSeq`라는 필드를 더해 그 문제를 막는다.
+
+`registrationSeq`는 `registerKickoff`가 등록 시점에 채우는, 1부터 시작해 프로젝트 전체에서 하나씩 커지는 정수다. 이 값은 등록부 디렉터리의 `.sequence.json`(`{ "next": <다음 값> }`)에 저장되며, `withRegistry`가 잡은 잠금 안에서만 읽고 쓰이므로 두 등록 요청이 같은 값을 받는 일이 없다. `.sequence.json`은 kickoff 항목이 아니므로 `listKickoffs`는 이름이 마침표로 시작하는 이 파일을 건너뛴다.
+
+`documents.mjs`가 내보내는 `kickoffHashFor(entry)`는 `sha256(entry.pm.worktreeId + "\u0000" + entry.createdAt + "\u0000" + entry.registrationSeq)`로 kickoffHash를 계산한다. `registrationSeq`가 없는 항목, 즉 구조화된 문서 시스템이 도입되기 전에 등록된 kickoff에는 이 함수를 쓸 수 없으며, 호출하면 그 사실을 알리는 오류로 거부된다. `documents.mjs`의 `resolveKickoffHash(orgFile, worktreeId)`는 `listKickoffs`가 돌려주는 활성 kickoff 가운데 그 워크트리의 항목을 찾아 `kickoffHashFor`에 넘기므로, 해제된 kickoff의 문서는 이 함수로 찾지 않고 종료 기록에 남은 kickoffId로 찾는다.
+
+## kickoff 종료와 전달 문서
+
+`registrationSeq`가 있는 kickoff, 즉 구조화된 문서 시스템 아래에서 등록된 kickoff는 종료할 때 자기 06. 인도 단계 delivery-ref 문서가 실제로 커밋되어 있는지를 확인받는다. 이 확인은 `kickoff-release`와 `kickoff-branch-cleanup` 두 곳에서 각각 다른 목적으로 이루어진다.
+
+`kickoff-release --reason completed`는 `delivery.mode`가 `local-merge`이고 `delivered.mergeCommit`이 있는 kickoff에 한해, `documents.mjs`의 `deliveryRefDocId(kickoffHash, mergeCommit)`으로 그 병합 커밋에 대응하는 delivery-ref 문서의 docId를 구하고 `documentState(stateDir, docId)`로 그 문서가 존재하며 이 kickoff의 것인지 확인한다. 문서가 아직 없으면 delivery-ref 문서가 아직 커밋되지 않았다는 이유로 해제를 거부하고, 문서는 있으나 다른 kickoff의 kickoffId를 가리키면 다른 kickoff에 속한 문서라는 이유로 거부한다. 두 경우 모두 사용자의 결정에 따라 `--force`를 붙이면 그대로 진행한다. 이 확인은 kickoff의 완료가 구조화된 문서로 먼저 남은 뒤에야 등록부에서도 완료로 기록되게 한다.
+
+`kickoff-branch-cleanup`은 브랜치를 지우기 전에 같은 delivery-ref 문서 확인을 한 번 더 거친다. `registrationSeq`가 있는 항목은 그 문서가 커밋되어 있고 이 kickoff의 것으로 확인될 때에만 기존의 `git merge-base --is-ancestor` 판정을 따라 브랜치를 지우며, 확인되지 않으면 `--force`가 없는 한 그 브랜치를 `skipped` 목록에 남긴다. `registrationSeq`가 없는 항목, 즉 구조화된 문서 시스템 이전에 등록된 kickoff는 이 문서 확인을 거치지 않고 기존처럼 git 커밋 포함 여부만으로 판단하므로, 예전 등록 항목의 동작은 그대로 유지된다.
 
 ## 명령
 
