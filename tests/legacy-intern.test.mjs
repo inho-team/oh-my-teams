@@ -109,7 +109,7 @@ test("an organization file that declares intern is refused with the way to migra
 });
 
 test("work addressed to intern resolves as Junior's", () => {
-  assert.deepEqual(ROLES, ["pm", "pl", "senior", "junior"]);
+  assert.deepEqual(ROLES, ["pm", "pl", "senior", "junior", "worker"]);
   assert.equal(foldRole(["pm", "junior"], "intern"), "junior");
   // A saved role list that still names intern counts as declaring Junior.
   assert.equal(foldRole(["pm", "intern"], "junior"), "junior");

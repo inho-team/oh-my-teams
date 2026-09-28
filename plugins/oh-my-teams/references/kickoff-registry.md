@@ -106,7 +106,7 @@ node <runtime> deliver --org <project>/.omt/organization.json --worktree <id> --
 
 ## 주인 체크아웃과 병합
 
-원본 프로젝트, 즉 `organization.json`과 등록부가 있는 체크아웃은 kickoff의 **주인 체크아웃**이다. kickoff의 워크트리끼리 합치는 병합은 팀 내부 작업이므로 PM·PL이 게이트를 통과시킨 뒤 자유롭게 진행한다. 주인 체크아웃으로 들어가는 병합만 `close`에서 이사가 `delivery`에 기록된 방식으로 수행한다.
+원본 프로젝트, 즉 `organization.json`과 등록부가 있는 체크아웃은 kickoff의 **주인 체크아웃**입니다. kickoff의 워크트리끼리 합치는 병합은 팀 내부 작업이므로 신규 조직에서는 PM이 게이트를 통과시킨 뒤 진행합니다. 이전 역할로 시작한 kickoff에서는 PL이 기존 통합 계약을 따릅니다. 주인 체크아웃으로 들어가는 병합은 `close`에서 이사가 `delivery`에 기록된 방식으로만 수행합니다.
 
 런타임은 이 경계를 다음과 같이 강제한다. 판단 기준은 그 체크아웃의 `.omt/kickoffs`에 진행 중인 kickoff가 있는지이며, kickoff 워크트리는 자기 등록부가 없으므로 주인으로 오인되지 않는다.
 
@@ -157,4 +157,4 @@ PM의 liveness가 `unverifiable`이라는 이유로 항목을 자동 해제하�
 
 ## 치르는 비용
 
-PM이 자식 워크트리로 한 단계 내려가므로 워커들은 그보다 한 단계 더 깊은 곳에 놓인다. Orca 중첩 깊이 제한에 더 빨리 닿게 되며, 한계에 걸리면 [`../skills/pm/SKILL.md`](../skills/pm/SKILL.md)가 정한 대로 PM·PL이 평평한 작업 파동으로 배정한다.
+PM이 자식 워크트리로 한 단계 내려가므로 Worker는 그보다 한 단계 더 깊은 곳에 놓입니다. Orca 중첩 깊이 제한에 걸리면 PM이 평평한 작업 파동으로 배정합니다. 이전 조직의 PL은 해당 kickoff가 저장한 분할 계약을 따릅니다.

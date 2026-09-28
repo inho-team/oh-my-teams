@@ -68,7 +68,9 @@
       "additionalProperties": false,
       "required": ["role", "executionId"],
       "properties": {
-        "role": { "enum": ["director", "pm", "pl", "senior", "junior"] },
+        "role": {
+          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+        },
         "executionId": { "type": "string", "minLength": 1 }
       }
     }

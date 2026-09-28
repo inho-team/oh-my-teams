@@ -7,8 +7,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AUDITOR_ROLE,
   DIRECTOR_ROLE,
   ROLE_LADDER,
+  ACTIVE_ROLES,
   ROLES,
   ROOT_ROLE,
   foldRole,
@@ -17,11 +19,13 @@ import {
   writeJSON,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
+  DISPATCH_AUTHORITY,
   readRoleCharter,
   resolveRoleLaunch,
   roleCommand,
   roleSpec,
 } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
+import { ROLE_TITLE_TAGS } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 import {
   listKickoffs,
   cleanupKickoffBranches,
@@ -182,7 +186,7 @@ test("DIRECTOR_ROLE is 'director' and sits above pm in ROLE_LADDER", () => {
   // director is not in ROLES (감독 worker 목록)
   assert.equal(ROLES.includes(DIRECTOR_ROLE), false);
   // ROLE_LADDER contains all ROLES after director
-  assert.deepEqual(ROLE_LADDER.slice(1), ROLES);
+  assert.deepEqual(ROLE_LADDER.slice(1), ACTIVE_ROLES);
 });
 
 test("director does not appear in foldRole or resolveRole: existing folding is unchanged", () => {
@@ -205,6 +209,55 @@ test("pm and director do not fold into each other", () => {
   assert.equal(foldRole(["pm"], ROOT_ROLE), ROOT_ROLE);
   // director는 ROLES에 없으므로 foldRole(['pm'], 'director')는 오류
   assert.throws(() => foldRole(["pm"], DIRECTOR_ROLE), /Unknown role/);
+});
+
+// 71cb8dd 병합(Director/PM/Worker 재편, AUDITOR_ROLE 도입)이 기존 PL/Senior/Junior
+// 계보와 새 Worker/Auditor 계보를 모두 보존하는지 확인하는 호환성 회귀 테스트.
+test("a legacy PL/Senior/Junior organization keeps its full fold and dispatch surface after the Worker/auditor reorg", () => {
+  const org = example();
+  const declared = ["pm", "pl", "senior", "junior"];
+  assert.deepEqual(Object.keys(org.roles), declared);
+  // 선언된 각 역할은 병합 전과 마찬가지로 스스로에게 그대로 접힌다.
+  for (const role of declared) {
+    assert.equal(foldRole(declared, role), role);
+  }
+  // worker가 선언되지 않은 조직에서 worker 요청은 여전히 가장 가까운 선언 역할로 접힌다.
+  assert.equal(foldRole(declared, "worker"), "junior");
+  // PM의 dispatch 권한은 worker가 추가된 뒤에도 pl/senior/junior를 그대로 포함한다.
+  assert.deepEqual(DISPATCH_AUTHORITY.pm, ["pl", "senior", "junior", "worker"]);
+  // roleCommand는 auditor 분기와 무관하게 선언된 profile로 junior를 그대로 실행한다.
+  const command = roleCommand(org, "junior", { roles: declared });
+  assert.equal(command.role, "junior");
+  assert.equal(command.profile, org.roles.junior.profile);
+});
+
+test("org.auditor coexists with AUDITOR_ROLE and Worker on a three-tier organization without polluting ROLES/ACTIVE_ROLES", () => {
+  const org = readJSON(
+    new URL(
+      "../plugins/oh-my-teams/examples/organization.three-tier.json",
+      import.meta.url,
+    ),
+  );
+  org.auditor = { profile: "codex-default" };
+  const declared = ["pm", "worker"];
+  assert.deepEqual(Object.keys(org.roles), declared);
+  // auditor는 out-of-ladder 역할이므로 ROLES·ACTIVE_ROLES 어디에도 섞이지 않는다.
+  assert.equal(ROLES.includes(AUDITOR_ROLE), false);
+  assert.equal(ACTIVE_ROLES.includes(AUDITOR_ROLE), false);
+  // foldRole은 auditor를 모르는 역할로 취급해 거부한다: auditor는 folding 대상이 아니다.
+  assert.throws(() => foldRole(declared, AUDITOR_ROLE), /Unknown role/);
+  // worker는 그대로 선언된 역할로 접히고, roleCommand는 auditor 요청을
+  // org.auditor의 profile로, worker 요청은 org.roles.worker의 profile로 각각 실행한다.
+  assert.equal(foldRole(declared, "worker"), "worker");
+  const auditorCommand = roleCommand(org, AUDITOR_ROLE);
+  assert.equal(auditorCommand.role, AUDITOR_ROLE);
+  assert.equal(auditorCommand.profile, org.auditor.profile);
+  const workerCommand = roleCommand(org, "worker", { roles: declared });
+  assert.equal(workerCommand.role, "worker");
+  assert.equal(workerCommand.profile, org.roles.worker.profile);
+  // 역할 터미널 제목 태그는 worker와 auditor 모두를 구분해서 표시한다.
+  assert.equal(ROLE_TITLE_TAGS.worker, "[Worker]");
+  assert.equal(ROLE_TITLE_TAGS.auditor, "[Auditor]");
 });
 
 // ─── 2. 시작 거부 ─────────────────────────────────────────────────────────

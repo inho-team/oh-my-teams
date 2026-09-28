@@ -27,14 +27,16 @@ Goal의 objective에는 사용자가 원하는 결과, 측정 가능한 수용 �
 
 수용 기준은 브리프에 적는 것과 별도로 요구 원장(requirements ledger)에도 남긴다. `requirements-draft --org <project>/.omt/organization.json --worktree <id> --from <draft.json>`로 statement·criterion 초안을 만들고, criterion마다 `scope`를 `"equal"`(사용자 원문 그대로) 또는 `"narrower"`(범위를 좁힌 재구성)로 명시한다. narrower criterion은 이사가 사용자에게 직접 확인한 뒤 `requirements-confirm --draft --checkout <이사 체크아웃 경로>`로 그 확인을 기록해야 하며, 확인 없는 narrower criterion은 `kickoff-claim`이 거부한다. `kickoff-claim`의 요청 파일에는 `director`뿐 아니라 이 draft 파일 내용을 그대로 담은 `requirements`도 포함하고, claim이 draft-confirm의 위치와 `director.checkoutPath`를 대조해 통과한 뒤에야 확정 원장이 만들어진다. 자세한 흐름은 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)의 A.2를 따른다.
 
-kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이고, PM·PL·Senior·Junior는 그 아래의 실행 주체다.
+kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이고, 신규 조직에서는 PM과 Worker가 그 아래의 실행 주체입니다. 기존 조직의 진행 중인 kickoff에는 저장된 역할 계약을 계속 적용합니다.
 
 ## 실행 주기
+
+[pm](../pm/SKILL.md)의 「실행 깊이」에서 신규 조직과 이전 kickoff의 실행 규칙을 구분합니다.
 
 [pm](../pm/SKILL.md)과 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)을 읽고 다음 주기를 수행한다.
 
 1. 원래 Goal과 현재 저장소 상태를 대조하고, 아직 충족되지 않은 수용 기준 가운데 다음으로 의미 있는 작업을 선택한다.
-2. PM이 과제 난이도로 정한 실행 깊이의 역할만 활성화하여 구현·검토·통합을 진행하고, 판단이 바뀌면 깊이를 조정한다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 독립 편집에는 Orca child worktree를 사용한다. 역할은 원시 `orca orchestration worker-start`가 아니라 `worker-start --org --role --workflow-id --state` 래퍼로만 띄우고, 산출물은 PM·PL이 아니라 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할이 만든다.
+2. 신규 조직에서는 PM이 목표를 분할하고 의존성과 통합을 책임지며, 필요한 구현·설계·독립 검토를 Worker에게 배정합니다. 구현과 독립 검토는 별도 실행 ID와 워크트리를 사용합니다. 독립 편집에는 Orca child worktree를 사용하고, Worker는 `worker-start --org --role worker --workflow-id --state` 래퍼로만 시작합니다. 기존 조직은 저장된 역할 목록과 실행 깊이를 따릅니다.
 3. 각 주기마다 코드 변경, 새 검사 결과, 검토 결과, 명확해진 장애물 중 하나 이상의 확인 가능한 진전을 남긴다.
 4. 실패하면 같은 시도를 무한 반복하지 않는다. 실패 원인과 시도를 기록하고 접근 방법이나 담당 역할을 바꾼다. `work` 실행·attempt마다 적용되는 provider 호출 한도, workflow의 호출 예산과 attempt 한도, 사용자가 정한 중단 조건을 지킨다. 대화형 역할 터미널의 턴은 이 한도에 세지 않으므로, 사용량은 `usage-report`로 따로 확인한다.
 5. worker를 기다리는 동안 `supervision-wait`의 대기 시간이 끝날 때마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.

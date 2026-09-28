@@ -55,7 +55,7 @@ export const STAGE_FOLDER_NAMES = Object.freeze({
 
 const HEX64 = /^[a-f0-9]{64}$/;
 const DOC_TYPE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-const AUTHOR_ROLES = ["director", "pm", "pl", "senior", "junior"];
+const AUTHOR_ROLES = ["director", "pm", "pl", "senior", "junior", "worker"];
 
 /**
  * Maps a `stageSlug` to its real, NFC-normalized storage folder name.

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "name": "small-team",
+  "modelPolicy": { "preset": "custom", "revision": 1 },
+  "pools": { "codex-current": { "label": "Codex current account" } },
+  "profiles": {
+    "codex-default": {
+      "provider": "codex",
+      "command": ["codex"],
+      "account": "current",
+      "subscription": "Codex (current account)",
+      "model": null,
+      "pool": "codex-current"
+    }
+  },
+  "roles": {
+    "pm": {
+      "parent": null,
+      "profile": "codex-default",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    },
+    "worker": {
+      "parent": "pm",
+      "profile": "codex-default",
+      "concurrency": 1,
+      "attempts": 1,
+      "fallbacks": []
+    }
+  },
+  "policy": {
+    "onExhaustion": "stop",
+    "maxCalls": 3,
+    "timeoutMs": 300000,
+    "repeatFailureLimit": 1,
+    "supervision": {
+      "progressCheckMs": 900000,
+      "unansweredLimit": 2
+    }
+  }
+}

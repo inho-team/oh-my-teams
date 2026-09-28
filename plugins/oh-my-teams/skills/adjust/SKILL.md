@@ -9,7 +9,7 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 
 프로젝트 `.omt/organization.json`을 읽는다. 없으면 `form`으로 이동한다. 사용자 요청으로 바뀌는 항목에 대해서만 필요한 선택을 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 받는다. 기존 구독 배정을 전부 다시 묻지 않는다.
 
-1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리한다. 이름 변경, 직급별 부모와 인원, 구독/모델, 추론 강도, 대체 순서, 보조 도구 허용, 자문자 허용과 자문 예산, `opus-first`·`balanced`·`single-subscription`·`advisor-codex`·`advisor-claude` 프리셋을 지원한다. 역할 ID는 pm/pl/senior/junior이며 이 이름은 바꿀 수 없다. Intern 역할은 2.6.0에서 삭제되었으므로, `intern`이 남은 조직 파일은 런타임이 거부한다. 그런 조직은 Intern 프로필이 필요하면 Junior로 옮기고 `intern` 역할과 허용 목록 항목을 지운 뒤 `edit`로 저장한다.
+1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리합니다. 신규 조직의 역할 ID는 `pm`과 `worker`이며, Worker의 부모는 PM입니다. 기존 조직의 `pl`·`senior`·`junior`는 이전 kickoff를 위한 호환 경로에만 남겨 둡니다. 기존 조직을 전환하려면 진행 중인 kickoff의 스냅샷은 그대로 두고, 새 설정의 PL 책임을 PM에게, Senior·Junior 책임을 Worker에게 옮긴 뒤 기존 역할과 허용 목록 항목을 삭제하여 `edit`로 저장합니다. 모델·추론 강도·대체 순서·인원·보조 도구와 자문 예산도 요청 범위에서 조정할 수 있습니다.
 2. 새 구독이나 과금 경로를 임의로 선택하지 않는다. 계정 연결은 아래 「계정과 실행기」를 따른다.
 3. 수정안을 별도 JSON에 쓰고 현재 스킬 기준 `../../scripts/teams-org.mjs`를 호출한다.
 
