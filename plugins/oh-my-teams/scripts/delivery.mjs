@@ -190,11 +190,7 @@ export async function deliverKickoff({
       ? `The brief delivers through a pull request against ${delivery.branch}; follow close's PR procedure`
       : "The brief asked for no delivery into the project, so nothing is merged",
   );
-  if (entry.delivered) {
-    assert(
-      entry.delivered.head === head,
-      `Kickoff already delivered ${entry.delivered.head}`,
-    );
+  if (entry.delivered?.head === head) {
     return {
       delivered: true,
       merged: false,
@@ -244,6 +240,17 @@ export async function deliverKickoff({
     sourceHead === pinned,
     `Source ${sourceDir} is at ${sourceHead}, not the verified ${pinned}; verify again`,
   );
+  if (entry.delivered) {
+    const previous = await git(
+      sourceDir,
+      ["merge-base", "--is-ancestor", entry.delivered.mergeCommit, pinned],
+      execute,
+    );
+    assert(
+      previous.ok,
+      `New delivery head ${pinned} does not contain previous merge ${entry.delivered.mergeCommit}`,
+    );
+  }
   await gate({ source: sourceDir, base: delivery.branch });
 
   const branch = await git(owner, ["symbolic-ref", "--short", "HEAD"], execute);
