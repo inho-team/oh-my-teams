@@ -119,6 +119,7 @@ test("workflow-budget raises maxAttempts and leaves other budget fields and task
   });
   const before = readWorkflow(stateDir, request.id).state;
   const taskBefore = structuredClone(before.tasks.a);
+  const policyBefore = structuredClone(before.policy);
 
   const raised = increaseWorkflowBudget(
     stateDir,
@@ -133,6 +134,7 @@ test("workflow-budget raises maxAttempts and leaves other budget fields and task
   assert.equal(raised.state.budget.attemptsUsed, 0);
   assert.equal(raised.state.budget.callsUsed, 0);
   assert.deepEqual(raised.state.tasks.a, taskBefore);
+  assert.deepEqual(raised.state.policy, policyBefore);
   assert.equal(raised.state.revision, before.revision + 1);
   const change = raised.state.budget.history.at(-1);
   assert.equal(change.from, 1);
@@ -318,6 +320,26 @@ test("workflow-budget rejects missing or blank approval fields", async (t) => {
         request.id,
         revision(),
         approval({ eventId: "budget-non-integer", maxAttempts: 1.5 }),
+      ),
+    /positive integer maxAttempts/,
+  );
+  assert.throws(
+    () =>
+      increaseWorkflowBudget(
+        stateDir,
+        request.id,
+        revision(),
+        approval({ eventId: "budget-zero", maxAttempts: 0 }),
+      ),
+    /positive integer maxAttempts/,
+  );
+  assert.throws(
+    () =>
+      increaseWorkflowBudget(
+        stateDir,
+        request.id,
+        revision(),
+        approval({ eventId: "budget-negative", maxAttempts: -1 }),
       ),
     /positive integer maxAttempts/,
   );
