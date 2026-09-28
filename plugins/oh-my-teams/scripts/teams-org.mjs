@@ -273,6 +273,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   review-record --task FILE --report FILE --review FILE --repo DIR --state DIR
   gate-check --task FILE --report FILE --repo DIR --state DIR
   accept --task FILE --report FILE --decision FILE --repo DIR --state DIR
+         [--org FILE --worktree ID]
+         (--org/--worktree name the kickoff under a requirements/audit ledger;
+          refuses while its outcome audit checkpoint has an unresolved objection)
   workflow-create --workflow FILE --org FILE --state DIR
   workflow-status --id ID --state DIR
   workflow-resume --id ID --state DIR --revision N [--observations FILE]
@@ -486,7 +489,7 @@ export const ALLOWED_OPTIONS = {
   aggregate: ["expected", "report"],
   "review-record": ["task", "report", "review", "repo", "state"],
   "gate-check": ["task", "report", "repo", "state"],
-  accept: ["task", "report", "decision", "repo", "state"],
+  accept: ["task", "report", "decision", "repo", "state", "org", "worktree"],
   "workflow-create": ["workflow", "org", "state"],
   "workflow-status": ["id", "state"],
   "workflow-resume": ["id", "state", "revision", "observations"],
@@ -1842,6 +1845,8 @@ async function executeCommand(args) {
         readJSON(args.report),
         readJSON(args.decision),
         path.resolve(args.state),
+        args.org && path.resolve(args.org),
+        args.worktree,
       );
     case "workflow-create":
       return createWorkflow(

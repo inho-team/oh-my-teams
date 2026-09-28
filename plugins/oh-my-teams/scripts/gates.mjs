@@ -11,6 +11,7 @@ import {
 } from "./core.mjs";
 import { taskHash, validateTask } from "./contracts.mjs";
 import { validateEvidence } from "./evidence.mjs";
+import { hasUnresolvedObjections } from "./audit.mjs";
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 // RegExp#test turns a missing value into the string "undefined", which the
@@ -425,23 +426,53 @@ async function recordReviewLocked(repo, task, report, input, stateDir) {
 /**
  * Records PM acceptance after every required review gate is complete.
  *
+ * When `orgFile`/`worktreeId` name a kickoff under a requirements/audit
+ * ledger, also refuses while the kickoff's outcome audit checkpoint has an
+ * unresolved objection (B.5: this check applies to every task's accept, not
+ * only the last one, and does not require an audit acceptance to already
+ * exist — a kickoff with tasks left can still accept its first one before
+ * outcome audit even starts). Omitting them (no kickoff/ledger in play)
+ * skips the check entirely.
+ *
  * @param {string} repo - Current implementation workspace.
  * @param {object} task - Trusted task v2 contract.
  * @param {object} report - Passing implementation report.
  * @param {object} input - PM identity, full criteria set, and decision basis.
  * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} [orgFile] - Organization JSON of the kickoff this task belongs to.
+ * @param {string} [worktreeId] - PM worktree of that kickoff.
  * @returns {Promise<object>} Acceptance decision and accepted gate status.
- * @throws {Error} For incomplete reviews, criteria, duplicate IDs, or stale source.
+ * @throws {Error} For incomplete reviews, criteria, duplicate IDs, stale source,
+ *   or an unresolved outcome audit objection.
  */
-export async function acceptOutcome(repo, task, report, input, stateDir) {
+export async function acceptOutcome(
+  repo,
+  task,
+  report,
+  input,
+  stateDir,
+  orgFile,
+  worktreeId,
+) {
   return withAsyncFileLock(
     path.join(stateDir, "gates-write.lock"),
-    () => acceptOutcomeLocked(repo, task, report, input, stateDir),
+    () =>
+      acceptOutcomeLocked(repo, task, report, input, stateDir, {
+        orgFile,
+        worktreeId,
+      }),
     "Review/acceptance update in progress",
   );
 }
 
-async function acceptOutcomeLocked(repo, task, report, input, stateDir) {
+async function acceptOutcomeLocked(
+  repo,
+  task,
+  report,
+  input,
+  stateDir,
+  { orgFile, worktreeId } = {},
+) {
   validateTask(task);
   assert(task.schemaVersion === 2, "Structured acceptance requires task v2");
   assert(
@@ -473,6 +504,13 @@ async function acceptOutcomeLocked(repo, task, report, input, stateDir) {
     ),
     "Required reviews are incomplete",
   );
+  if (orgFile && worktreeId) {
+    assert(
+      !hasUnresolvedObjections(orgFile, worktreeId, "outcome"),
+      "The outcome audit checkpoint has an unresolved objection; it must be " +
+        "ruled persuaded (audit-ruling) before this task can be accepted",
+    );
+  }
   const target = decisionFile(stateDir, input.id);
   assert(!fs.existsSync(target), `Decision already exists: ${input.id}`);
   const record = {

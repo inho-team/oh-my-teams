@@ -26,6 +26,9 @@ import {
   hasValidAcceptance,
   readAudit,
 } from "../plugins/oh-my-teams/scripts/audit.mjs";
+import { acceptOutcome } from "../plugins/oh-my-teams/scripts/gates.mjs";
+import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
+import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 
 const exampleOrg = new URL(
   "../plugins/oh-my-teams/examples/organization.json",
@@ -685,4 +688,141 @@ test("requirementsPresent refuses a declared head that does not match the worksp
     }),
     /does not match the actual Git HEAD/,
   );
+});
+
+// No review requirements at all: `review-complete` reaches `not-required`
+// straight from a single passing check, isolating the new B.5 objection gate
+// from the unrelated independent-review gate this file does not exercise.
+function gapTask(worktreeId) {
+  return {
+    schemaVersion: 2,
+    revision: 1,
+    kind: "edit",
+    id: `accept-gap-${worktreeId}`,
+    goal: `deliver ${worktreeId}`,
+    instruction: "no-op",
+    nonGoals: [],
+    constraints: [],
+    files: ["README.md"],
+    checks: [[process.execPath, "-e", "process.exit(0)"]],
+    acceptance: [
+      { id: "check", description: "check", method: "check", checkIndexes: [0] },
+    ],
+    dependencies: [],
+    contractRefs: [],
+    contextRefs: [],
+    openQuestions: [],
+    reviewRequirements: [],
+    environment: "test",
+    baseRef: "HEAD",
+    risk: "low",
+  };
+}
+
+test("accept refuses while the outcome audit checkpoint has an unresolved objection, and succeeds once ruled persuaded", async (t) => {
+  const fixture = kickoff(t);
+  // Top-level `.omt/`, not the kickoff's own PM state dir: `changedWorkspaceFiles`
+  // only excludes a repo-root `.omt/`, so gate/evidence bookkeeping must live
+  // there too or verify() would see its own writes as workspace drift.
+  const stateDir = path.join(fixture.dir, ".omt");
+  const task = gapTask(fixture.worktreeId);
+  // Written before the first verify() call so the workspace tree the report's
+  // evidence binds to already includes it; writing it later, between the two
+  // acceptOutcome calls below, would make the second one see stale evidence.
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
+  const options = {
+    baseRef: task.baseRef,
+    commands: task.checks,
+    environment: task.environment,
+    store: path.join(stateDir, "evidence"),
+  };
+  const report = {
+    taskId: task.id,
+    taskHash: taskHash(task),
+    taskRevision: task.revision,
+    runId: "gap-4-run",
+    evidence: await verify(fixture.repo, options),
+  };
+  const decision = {
+    schemaVersion: 1,
+    id: "accept-gap-4",
+    decider: { kind: "pm", executionId: "pm-1" },
+    criteria: ["check"],
+    basis: "Check passed",
+  };
+
+  await auditObjection(
+    fixture.org,
+    fixture.worktreeId,
+    {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.repo,
+    },
+    auditorEnv(fixture.auditorHandle),
+  );
+
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.repo,
+        task,
+        report,
+        decision,
+        stateDir,
+        fixture.org,
+        fixture.worktreeId,
+      ),
+    /outcome audit checkpoint has an unresolved objection/,
+  );
+
+  const objectionId = readAudit(
+    fixture.org,
+    fixture.worktreeId,
+  ).checkpoints.outcome.objections.at(-1).id;
+  const { audit } = await auditResponse(
+    fixture.org,
+    fixture.worktreeId,
+    {
+      checkpoint: "outcome",
+      objectionId,
+      argument: "c1 is delivered; see the cited evidence",
+      evidenceRefs: [
+        {
+          path: evidencePath,
+          sha256: fileSha256(path.join(fixture.dir, evidencePath)),
+        },
+      ],
+    },
+    pmIdentity(fixture),
+  );
+  const responseId = audit.checkpoints.outcome.responses.at(-1).id;
+  await auditRuling(
+    fixture.org,
+    fixture.worktreeId,
+    {
+      checkpoint: "outcome",
+      objectionId,
+      respondedAgainst: responseId,
+      verdict: "persuaded",
+      reason: "evidence supports the claim",
+    },
+    auditorEnv(fixture.auditorHandle),
+  );
+
+  const { decision: recorded } = await acceptOutcome(
+    fixture.repo,
+    task,
+    report,
+    decision,
+    stateDir,
+    fixture.org,
+    fixture.worktreeId,
+  );
+  assert.equal(recorded.status, "accepted");
 });
