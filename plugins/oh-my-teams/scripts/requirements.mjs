@@ -32,8 +32,61 @@ function canonicalHash(value) {
   return hash(canonicalize(value));
 }
 
+/**
+ * Rejects a confirmation or presentation record whose user-facing fields are
+ * blank or malformed, so a record assembled by hand (matching hash and
+ * checkout, but never actually spoken by the user) cannot pass the gate that
+ * `requirementsConfirmDraft`/`requirementsConfirm`/`requirementsPresent`
+ * would otherwise have refused to write.
+ *
+ * @param {object} record - Confirmation or presentation record to check.
+ * @param {string} label - What the record is, for the error message.
+ * @throws {Error} When `userQuote` is blank or `confirmedAt`/`recordedAt` is not a valid timestamp.
+ */
+function assertSubstantiveUserRecord(record, label) {
+  assert(
+    typeof record.userQuote === "string" && record.userQuote.trim(),
+    `${label} is missing the user's own quote`,
+  );
+  const timestamp = record.confirmedAt ?? record.recordedAt;
+  assert(
+    typeof timestamp === "string" && !Number.isNaN(Date.parse(timestamp)),
+    `${label} is missing a valid recorded timestamp`,
+  );
+}
+
 function projectRoot(orgFile) {
   return path.dirname(path.resolve(orgFile));
+}
+
+/**
+ * Checks that a ledger-mutating call runs from the ledger's own recorded
+ * director checkout. Checked against the ledger itself, not a kickoff-registry
+ * lookup, so `requirements.mjs` stays independent of `kickoff-registry.mjs`
+ * (the same self-declared-location principle `requirementsConfirmDraft`
+ * documents for A.2). A ledger written before this check existed carries no
+ * `director` and is let through with a warning, mirroring
+ * `delivery.mjs`'s `assertDirectorAuthority` precedent for legacy entries.
+ *
+ * @param {object} ledger - Confirmed ledger read from disk.
+ * @param {string} callerCwd - Caller's working directory to compare.
+ * @param {string} use - Description of the operation, for the error message.
+ * @throws {Error} When the caller is not at the ledger's director checkout path.
+ */
+function assertLedgerDirectorAuthority(ledger, callerCwd, use) {
+  if (!ledger.director) {
+    console.warn(
+      `[omt] Warning: ledger has no director record; ${use} proceeds without director verification.`,
+    );
+    return;
+  }
+  const expected = path.resolve(ledger.director.checkoutPath);
+  const actual = path.resolve(callerCwd);
+  assert(
+    actual === expected,
+    `${use} must be run from the director's checkout at ${expected}; ` +
+      `current directory is ${actual}.`,
+  );
 }
 
 function entryName(worktreeId) {
@@ -137,8 +190,7 @@ function validateCriteria(criteria, statements) {
     );
   }
   assert(
-    new Set(criteria.map((criterion) => criterion.id)).size ===
-      criteria.length,
+    new Set(criteria.map((criterion) => criterion.id)).size === criteria.length,
     "Criterion ids must be unique",
   );
 }
@@ -192,7 +244,10 @@ export function confirmationTextHash(criterion, statements) {
  * @returns {{drafted: boolean, file: string, draft: object}} Written draft.
  * @throws {Error} When statements or criteria are missing or malformed.
  */
-export function requirementsDraft(orgFile, { worktreeId, statements, criteria }) {
+export function requirementsDraft(
+  orgFile,
+  { worktreeId, statements, criteria },
+) {
   validateStatements(statements);
   validateCriteria(criteria, statements);
   return withDrafts(orgFile, () => {
@@ -321,11 +376,15 @@ export function validateLedgerForClaim(requirements, director) {
   // added. A pre-ledger kickoff with no director at all is migrated through
   // a separate, director-run retrofit procedure instead of this check.
   assert(
-    director && typeof director.checkoutPath === "string" && director.checkoutPath.trim(),
+    director &&
+      typeof director.checkoutPath === "string" &&
+      director.checkoutPath.trim(),
     "Claim director.checkoutPath is required to validate the requirements ledger",
   );
   const directorPath = path.resolve(director.checkoutPath);
-  for (const criterion of criteria.filter((item) => item.scope === "narrower")) {
+  for (const criterion of criteria.filter(
+    (item) => item.scope === "narrower",
+  )) {
     const confirmation = confirmations.find(
       (item) => item.criterionId === criterion.id,
     );
@@ -341,6 +400,10 @@ export function validateLedgerForClaim(requirements, director) {
       path.resolve(confirmation.recordedFromCheckout) === directorPath,
       `Confirmation for ${criterion.id} was recorded from a checkout other than the claim's declared director`,
     );
+    assertSubstantiveUserRecord(
+      confirmation,
+      `Confirmation for ${criterion.id}`,
+    );
   }
   return requirements;
 }
@@ -349,9 +412,12 @@ export function validateLedgerForClaim(requirements, director) {
  * Builds the confirmed ledger record written when a claim is registered.
  *
  * @param {object} requirements - Validated `requirements` block of a claim.
+ * @param {{checkoutPath: string}} [director] - The claim's declared director,
+ *   recorded on the ledger so later mutations (amend/confirm/fidelity-confirm/
+ *   exception) can check director authority without a kickoff-registry lookup.
  * @returns {object} Confirmed ledger, with empty presentations/fidelityChecks/exceptions.
  */
-export function confirmedLedgerFromClaim(requirements) {
+export function confirmedLedgerFromClaim(requirements, director) {
   return {
     schemaVersion: 1,
     worktreeId: requirements.worktreeId,
@@ -361,6 +427,9 @@ export function confirmedLedgerFromClaim(requirements) {
     presentations: [],
     fidelityChecks: [],
     exceptions: [],
+    ...(director?.checkoutPath
+      ? { director: { checkoutPath: path.resolve(director.checkoutPath) } }
+      : {}),
   };
 }
 
@@ -389,17 +458,31 @@ export function writeConfirmedLedger(orgFile, worktreeId, ledger) {
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree the ledger belongs to.
- * @param {{statements: object[], criteria: object[]}} amendment - New statements/criteria.
- * @returns {{amended: boolean, ledger: object, ledgerHash: string}} Updated ledger.
- * @throws {Error} When no confirmed ledger exists yet, or the amendment is malformed.
+ * @param {object} amendment - New statements/criteria.
+ * @param {object[]} amendment.statements - Replacement statements.
+ * @param {object[]} amendment.criteria - Replacement criteria.
+ * @param {string} [amendment.callerCwd] - Caller's working directory, checked
+ *   against the ledger's recorded director.
+ * @returns {Promise<{amended: boolean, ledger: object, ledgerHash: string}>} Updated ledger.
+ * @throws {Error} When no confirmed ledger exists yet, the amendment is malformed,
+ *   or the caller is not the ledger's director.
  */
-export function requirementsAmend(orgFile, worktreeId, { statements, criteria }) {
+export async function requirementsAmend(
+  orgFile,
+  worktreeId,
+  { statements, criteria, callerCwd = process.cwd() },
+) {
   validateStatements(statements);
   validateCriteria(criteria, statements);
   return withLedgers(orgFile, () => {
     const file = ledgerFile(orgFile, worktreeId);
-    assert(fs.existsSync(file), `No confirmed ledger for worktree ${worktreeId}`);
-    const ledger = { ...readJSON(file), statements, criteria };
+    assert(
+      fs.existsSync(file),
+      `No confirmed ledger for worktree ${worktreeId}`,
+    );
+    const existing = readJSON(file);
+    assertLedgerDirectorAuthority(existing, callerCwd, "requirements-amend");
+    const ledger = { ...existing, statements, criteria };
     writeJSON(file, ledger);
     return { amended: true, ledger, ledgerHash: ledgerHash(ledger) };
   });
@@ -411,19 +494,32 @@ export function requirementsAmend(orgFile, worktreeId, { statements, criteria })
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree the ledger belongs to.
- * @param {{criterionId: string, userQuote: string}} request - Confirmation to record.
- * @returns {{confirmed: boolean, ledger: object}} Updated ledger.
- * @throws {Error} When the ledger or criterion is missing, or the criterion is not narrower.
+ * @param {object} request - Confirmation to record.
+ * @param {string} request.criterionId - Narrower criterion being confirmed.
+ * @param {string} request.userQuote - The user's own words.
+ * @param {string} [request.callerCwd] - Caller's working directory, checked
+ *   against the ledger's recorded director.
+ * @returns {Promise<{confirmed: boolean, ledger: object}>} Updated ledger.
+ * @throws {Error} When the ledger or criterion is missing, the criterion is not narrower,
+ *   or the caller is not the ledger's director.
  */
-export function requirementsConfirm(orgFile, worktreeId, { criterionId, userQuote }) {
+export async function requirementsConfirm(
+  orgFile,
+  worktreeId,
+  { criterionId, userQuote, callerCwd = process.cwd() },
+) {
   assert(
     typeof userQuote === "string" && userQuote.trim(),
     "userQuote is required for a narrower criterion confirmation",
   );
   return withLedgers(orgFile, () => {
     const file = ledgerFile(orgFile, worktreeId);
-    assert(fs.existsSync(file), `No confirmed ledger for worktree ${worktreeId}`);
+    assert(
+      fs.existsSync(file),
+      `No confirmed ledger for worktree ${worktreeId}`,
+    );
     const ledger = readJSON(file);
+    assertLedgerDirectorAuthority(ledger, callerCwd, "requirements-confirm");
     const criterion = ledger.criteria.find((item) => item.id === criterionId);
     assert(criterion, `Unknown criterion: ${criterionId}`);
     assert(
@@ -438,7 +534,9 @@ export function requirementsConfirm(orgFile, worktreeId, { criterionId, userQuot
       recordedFromCheckout: process.cwd(),
     };
     ledger.confirmations = [
-      ...ledger.confirmations.filter((item) => item.criterionId !== criterionId),
+      ...ledger.confirmations.filter(
+        (item) => item.criterionId !== criterionId,
+      ),
       confirmation,
     ];
     writeJSON(file, ledger);
@@ -457,6 +555,8 @@ export function requirementsConfirm(orgFile, worktreeId, { criterionId, userQuot
  * @param {string} request.head - Result HEAD the presentation reflects.
  * @param {string} request.repo - Workspace `head` is checked against.
  * @param {string} request.source - Local file path copied into evidence storage.
+ * @param {string} request.channel - How the result was shown to the user (e.g. "PR", "terminal report", "doc link").
+ * @param {string} request.location - Where within that channel it was shown (e.g. a PR URL or file path).
  * @param {string} request.userQuote - What the user said in response.
  * @param {string} request.outcome - "confirmed" or "rejected".
  * @returns {Promise<{presented: boolean, ledger: object}>} Updated ledger.
@@ -466,7 +566,7 @@ export function requirementsConfirm(orgFile, worktreeId, { criterionId, userQuot
 export async function requirementsPresent(
   orgFile,
   worktreeId,
-  { criterionId, head, repo, source, userQuote, outcome },
+  { criterionId, head, repo, source, channel, location, userQuote, outcome },
 ) {
   assert(
     typeof head === "string" && head.trim(),
@@ -479,6 +579,14 @@ export async function requirementsPresent(
   assert(
     PRESENTATION_OUTCOMES.includes(outcome),
     `Presentation outcome must be one of ${PRESENTATION_OUTCOMES.join("/")}`,
+  );
+  assert(
+    typeof channel === "string" && channel.trim(),
+    "channel is required for a presentation (how the result was shown to the user)",
+  );
+  assert(
+    typeof location === "string" && location.trim(),
+    "location is required for a presentation (where within that channel it was shown)",
   );
   assert(
     typeof userQuote === "string" && userQuote.trim(),
@@ -497,7 +605,10 @@ export async function requirementsPresent(
   );
   return withLedgers(orgFile, () => {
     const file = ledgerFile(orgFile, worktreeId);
-    assert(fs.existsSync(file), `No confirmed ledger for worktree ${worktreeId}`);
+    assert(
+      fs.existsSync(file),
+      `No confirmed ledger for worktree ${worktreeId}`,
+    );
     const ledger = readJSON(file);
     const criterion = ledger.criteria.find((item) => item.id === criterionId);
     assert(criterion, `Unknown criterion: ${criterionId}`);
@@ -514,6 +625,8 @@ export async function requirementsPresent(
       head,
       ledgerHash: ledgerHash(ledger),
       evidence: { ownerPath, sha256: fileSha256(destination) },
+      channel,
+      location,
       userQuote,
       outcome,
       recordedAt: new Date().toISOString(),
@@ -535,7 +648,11 @@ export async function requirementsPresent(
  * @throws {Error} When items do not cover every statement/criterion exactly once, or `head`
  *   does not match the workspace's actual Git HEAD.
  */
-export async function requirementsFidelity(orgFile, worktreeId, { head, repo, recordedBy, items }) {
+export async function requirementsFidelity(
+  orgFile,
+  worktreeId,
+  { head, repo, recordedBy, items },
+) {
   assert(typeof head === "string" && head.trim(), "head is required");
   assert(
     typeof repo === "string" && repo.trim(),
@@ -569,7 +686,10 @@ export async function requirementsFidelity(orgFile, worktreeId, { head, repo, re
   }
   return withLedgers(orgFile, () => {
     const file = ledgerFile(orgFile, worktreeId);
-    assert(fs.existsSync(file), `No confirmed ledger for worktree ${worktreeId}`);
+    assert(
+      fs.existsSync(file),
+      `No confirmed ledger for worktree ${worktreeId}`,
+    );
     const ledger = readJSON(file);
     const expected = new Set([
       ...ledger.statements.map((statement) => `statement:${statement.id}`),
@@ -601,14 +721,29 @@ export async function requirementsFidelity(orgFile, worktreeId, { head, repo, re
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree the ledger belongs to.
- * @returns {{confirmed: boolean, ledger: object}} Updated ledger.
- * @throws {Error} When no fidelity check has been recorded yet.
+ * @param {string} [callerCwd] - Caller's working directory, checked against
+ *   the ledger's recorded director.
+ * @returns {Promise<{confirmed: boolean, ledger: object}>} Updated ledger.
+ * @throws {Error} When no fidelity check has been recorded yet, or the caller
+ *   is not the ledger's director.
  */
-export function requirementsFidelityConfirm(orgFile, worktreeId) {
+export async function requirementsFidelityConfirm(
+  orgFile,
+  worktreeId,
+  callerCwd = process.cwd(),
+) {
   return withLedgers(orgFile, () => {
     const file = ledgerFile(orgFile, worktreeId);
-    assert(fs.existsSync(file), `No confirmed ledger for worktree ${worktreeId}`);
+    assert(
+      fs.existsSync(file),
+      `No confirmed ledger for worktree ${worktreeId}`,
+    );
     const ledger = readJSON(file);
+    assertLedgerDirectorAuthority(
+      ledger,
+      callerCwd,
+      "requirements-fidelity-confirm",
+    );
     assert(
       ledger.fidelityChecks.length > 0,
       "No fidelity check has been recorded yet",
@@ -631,16 +766,29 @@ export function requirementsFidelityConfirm(orgFile, worktreeId) {
  * @param {object} request - Exception to record.
  * @param {{type: string, id: string}[]} request.scope - Exact items covered; no blanket scope.
  * @param {string} request.head - Result HEAD the exception applies to.
+ * @param {string} request.repo - Workspace `head` is checked against.
  * @param {string} request.reason - Why the item cannot be met.
  * @param {string} request.userQuote - The user's own words accepting the gap.
  * @param {string} request.unmetFacts - What is actually true instead.
- * @returns {{recorded: boolean, ledger: object}} Updated ledger.
- * @throws {Error} When the scope is empty, names unknown items, or fields are missing.
+ * @param {string} [request.callerCwd] - Caller's working directory, checked
+ *   against the ledger's recorded director.
+ * @returns {Promise<{recorded: boolean, ledger: object}>} Updated ledger.
+ * @throws {Error} When the scope is empty, names unknown items, fields are missing,
+ *   `head` does not match the workspace's actual Git HEAD, or the caller is not
+ *   the ledger's director.
  */
-export function requirementsException(
+export async function requirementsException(
   orgFile,
   worktreeId,
-  { scope, head, reason, userQuote, unmetFacts },
+  {
+    scope,
+    head,
+    repo,
+    reason,
+    userQuote,
+    unmetFacts,
+    callerCwd = process.cwd(),
+  },
 ) {
   assert(
     Array.isArray(scope) &&
@@ -665,10 +813,25 @@ export function requirementsException(
     );
   }
   assert(typeof head === "string" && head.trim(), "head is required");
+  assert(
+    typeof repo === "string" && repo.trim(),
+    "repo is required to verify head against the workspace's actual HEAD",
+  );
+  const { head: actualHead } = await workspaceBinding(repo);
+  assert(
+    actualHead && actualHead === head,
+    `Declared head ${head} does not match the actual Git HEAD ` +
+      `${actualHead ?? "(not a Git workspace)"} of ${repo}; ` +
+      "a stale or forged head cannot ground an exception",
+  );
   return withLedgers(orgFile, () => {
     const file = ledgerFile(orgFile, worktreeId);
-    assert(fs.existsSync(file), `No confirmed ledger for worktree ${worktreeId}`);
+    assert(
+      fs.existsSync(file),
+      `No confirmed ledger for worktree ${worktreeId}`,
+    );
     const ledger = readJSON(file);
+    assertLedgerDirectorAuthority(ledger, callerCwd, "requirements-exception");
     const known = new Set([
       ...ledger.statements.map((statement) => `statement:${statement.id}`),
       ...ledger.criteria.map((criterion) => `criterion:${criterion.id}`),
@@ -703,10 +866,15 @@ export function requirementsException(
  * @param {string} worktreeId - PM worktree the retrofit applies to.
  * @param {{statements: object[], criteria: object[], confirmations: object[]}} draft - Reconstructed ledger content.
  * @param {{checkoutPath: string}} director - The kickoff's registered director.
- * @returns {{retrofitted: boolean, ledger: object}} Written ledger.
+ * @returns {Promise<{retrofitted: boolean, ledger: object}>} Written ledger.
  * @throws {Error} When a confirmed ledger already exists, or validation fails.
  */
-export function requirementsRetrofit(orgFile, worktreeId, draft, director) {
+export async function requirementsRetrofit(
+  orgFile,
+  worktreeId,
+  draft,
+  director,
+) {
   return withLedgers(orgFile, () => {
     const file = ledgerFile(orgFile, worktreeId);
     assert(
@@ -714,7 +882,7 @@ export function requirementsRetrofit(orgFile, worktreeId, draft, director) {
       `Worktree ${worktreeId} already has a confirmed ledger`,
     );
     validateLedgerForClaim({ ...draft, worktreeId }, director);
-    const ledger = confirmedLedgerFromClaim({ ...draft, worktreeId });
+    const ledger = confirmedLedgerFromClaim({ ...draft, worktreeId }, director);
     writeJSON(file, ledger);
     return { retrofitted: true, ledger };
   });
@@ -723,7 +891,10 @@ export function requirementsRetrofit(orgFile, worktreeId, draft, director) {
 function latestForBinding(records, head, currentLedgerHash) {
   return [...records]
     .reverse()
-    .find((record) => record.head === head && record.ledgerHash === currentLedgerHash);
+    .find(
+      (record) =>
+        record.head === head && record.ledgerHash === currentLedgerHash,
+    );
 }
 
 /**
@@ -741,7 +912,9 @@ function latestForBinding(records, head, currentLedgerHash) {
  * @param {object} options - Check inputs.
  * @param {object} options.ledger - Confirmed ledger to check.
  * @param {string} options.head - Current result HEAD.
- * @param {string} options.ownerRoot - Owner project root, for evidence containment.
+ * @param {string} options.ownerRoot - Directory presentation evidence is stored under: the
+ *   organization file's own parent directory (`projectRoot(orgFile)`, i.e. `requirementsPresent`'s
+ *   write target), not the director's checkout or any audit-response `ownerProject` repo.
  * @param {string[]} [options.registeredWorktreePaths] - Kickoff worktree paths evidence must not point into.
  * @returns {{ready: boolean}} Result when every check passes.
  * @throws {Error} On the first failing check, naming the item and reason.
@@ -762,8 +935,13 @@ export function assertLedgerCloseReady({
     );
     assert(
       confirmation &&
-        confirmation.textHash === confirmationTextHash(criterion, ledger.statements),
+        confirmation.textHash ===
+          confirmationTextHash(criterion, ledger.statements),
       `Narrower criterion ${criterion.id} has no valid user confirmation for its current text`,
+    );
+    assertSubstantiveUserRecord(
+      confirmation,
+      `Confirmation for ${criterion.id}`,
     );
   }
 
@@ -787,6 +965,17 @@ export function assertLedgerCloseReady({
         fileSha256(resolved) === presentation.evidence.sha256,
         `Presentation evidence for ${criterion.id} has changed since it was recorded`,
       );
+      assertSubstantiveUserRecord(
+        presentation,
+        `Presentation for ${criterion.id}`,
+      );
+      assert(
+        typeof presentation.channel === "string" &&
+          presentation.channel.trim() &&
+          typeof presentation.location === "string" &&
+          presentation.location.trim(),
+        `Presentation for ${criterion.id} is missing the channel/location it was shown through`,
+      );
     }
     const exempt = ledger.exceptions.some(
       (exception) =>
@@ -802,7 +991,11 @@ export function assertLedgerCloseReady({
     );
   }
 
-  const fidelity = latestForBinding(ledger.fidelityChecks, head, currentLedgerHash);
+  const fidelity = latestForBinding(
+    ledger.fidelityChecks,
+    head,
+    currentLedgerHash,
+  );
   assert(
     fidelity && fidelity.directorConfirmedAt,
     "No director-confirmed fidelity check exists for the current head/ledger",
@@ -811,7 +1004,9 @@ export function assertLedgerCloseReady({
     ...ledger.statements.map((statement) => `statement:${statement.id}`),
     ...ledger.criteria.map((criterion) => `criterion:${criterion.id}`),
   ]);
-  const covered = new Set(fidelity.items.map((item) => `${item.type}:${item.id}`));
+  const covered = new Set(
+    fidelity.items.map((item) => `${item.type}:${item.id}`),
+  );
   assert(
     covered.size === fidelity.items.length &&
       expected.size === covered.size &&

@@ -87,7 +87,7 @@ function withLedgerFromClaim(orgFile, claim, worktreeId) {
     { ...claim.requirements, worktreeId },
     claim.director,
   );
-  const ledger = confirmedLedgerFromClaim(requirements);
+  const ledger = confirmedLedgerFromClaim(requirements, claim.director);
   const written = writeConfirmedLedger(orgFile, worktreeId, ledger);
   return written.ledgerHash;
 }
