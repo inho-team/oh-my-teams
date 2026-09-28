@@ -78,13 +78,14 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 감독 worker는 다음처럼 역할, 조직 파일과 이번 kickoff의 workflow로 터미널을 연 뒤 그 터미널에 작업을 넘긴다. `role-terminal`과 `worker-start`가 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 agent·모델·강도를 정하고, `worker-start` 래퍼가 `--spec` 앞에 받는 역할의 권한·책임·한계와 조직 파일·workflow·PM state 경로를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로 이 경로들이 머리글에 필요하다.
 
 ```text
-<orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <project>/.omt/organization.json --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
+node <runtime> role-worktree-create --org <project>/.omt/organization.json --role junior --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>
 node <runtime> terminal-idle-check --terminal <handle>
 node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
 node <runtime> worker-start --org <project>/.omt/organization.json --role junior --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --terminal <handle> --worktree id:<worktreeId> --spec "<구체적인 작업>"
 node <runtime> role-spec --org <project>/.omt/organization.json --role senior --workflow-id <workflowId> --state <pm-state> --spec "<구체적인 작업>"
 ```
+
+`workflow-attach`가 receipt를 받으면 task는 그 `worktreeId`에 고정된다. 같은 task의 수정, 재시도, 재검토는 `role-worktree-create`를 다시 호출하지 않고 기존 워크트리에서 `role-terminal`을 다시 열거나 유지한 세션을 점검해 사용한다. 런타임은 다른 worktree receipt를 `workflow-rework`에 연결하지 않는다. 역할을 Junior에서 Senior로 올려야 해 별도 워크트리가 필요하면 같은 task를 억지로 바꾸지 말고, 검토 finding과 기준 커밋을 명시한 후속 task로 분리한다.
 
 질문 때문에 점검이 거부되면 `node <runtime> prompt-answer --org <project>/.omt/organization.json --terminal <handle> --workflow-id <workflowId> --state <pm-state>`로 답한 뒤 위 `terminal-idle-check`부터 다시 실행한다. 분류기가 알아보지 못한 화면(캡처되지 않은 명령 승인·업데이트 안내)에는 키를 보내지 않으며, Orca가 그 터미널을 `blockedReason`으로 멈춘 상태라고 보고하면 `escalate`(`next`: `report-upstream`)로 끝나므로 점검으로 되돌아가지 않고 보고한다. `prompt-answer`는 호출한 터미널이 그 역할의 감독자이고 대상 터미널의 워크트리를 Orca가 이 kickoff의 PM 워크트리 아래에 만들어진 것으로 기록하고 있을 때에만 화면을 읽고 키를 한 번 보낸 뒤 다시 읽어 확인하며, 모든 시도를 PM state의 `prompt-answers.jsonl`에 기록한다. 호출자는 환경 변수로만 식별되므로 이 확인은 감독 관계가 없는 터미널의 실수 호출을 막을 뿐 악의적인 프로세스를 막지는 못한다. 결과가 `escalate`나 `unresolved`이거나 거부되었을 때, 또는 사람이 정해야 하는 질문일 때에만 PM이 `director-signal`로 이사에게 알린다. 절차와 거부 코드는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「프롬프트 질문 답하기」 절을 따른다.
 
@@ -101,7 +102,7 @@ Claude 역할 터미널은 `--autocompact 250k`(조직의 `policy.claudeAutoComp
 | 상위 | Senior | 설계와 구현이 한 번에 필요한 일, 여러 모듈에 걸치는 변경, 공개 인터페이스·보안·데이터 형식 변경, Junior 구현이 검토에서 한 번 반려된 일 |
 | 하위 | Junior | 파일과 완료 조건이 닫힌 수정, 정해진 반복 편집, 인용 수집처럼 결정적으로 검증할 수 있는 일 |
 
-Senior에게 구현을 맡길 때에는 workflow task의 `role`을 `senior`로 적는다. 그 task의 필수 검토는 구현한 실행과 다른 Senior 실행이나 PL·PM이 맡으며, 같은 실행이 검토하면 런타임이 거부한다. 판단이 애매하면 하위 등급으로 시작한다. Junior 구현이 첫 검토에서 반려되면 수정을 Junior에게 다시 맡기지 않고 그 finding과 함께 Senior에게 올린다. Senior는 Junior의 워크트리에서 시작할 수 없으므로, Junior의 커밋을 기준으로 만든 새 워크트리에서 고치게 하고 그 실행을 `workflow-rework`로 연결한다. Junior가 두 번째 반려를 받을 때까지 기다리면 검토와 수정이 한 번씩 더 들고, finding도 여러 차례에 나뉘어 나오기 쉽다.
+Senior에게 구현을 맡길 때에는 workflow task의 `role`을 `senior`로 적는다. 그 task의 필수 검토는 구현한 실행과 다른 Senior 실행이나 PL·PM이 맡으며, 같은 실행이 검토하면 런타임이 거부한다. 판단이 애매하면 하위 등급으로 시작한다. Junior 구현이 첫 검토에서 반려되어 Senior의 별도 소유권이 필요하면, finding과 Junior 커밋을 기준으로 한 후속 task를 만들고 새 워크트리를 그 후속 task에만 배정한다. 같은 task의 `workflow-rework`는 원래 Junior 워크트리를 재사용한다. Junior가 두 번째 반려를 받을 때까지 기다리면 검토와 수정이 한 번씩 더 들고, finding도 여러 차례에 나뉘어 나오기 쉽다.
 
 ## 실행 깊이
 
@@ -164,7 +165,7 @@ node <runtime> workflow-allowance --id <workflowId> --state <pm-state> --revisio
 
 kickoff 안의 커밋과 워크트리 사이 병합은 PM이 처리하되 단순 개발 요청을 운영 배포나 외부 메시지 발송 허가로 확대하지 않는다. 완료 시점에는 주인 체크아웃에 직접 합치지 않고, 게이트를 통과한 통합 워크트리의 경로와 HEAD를 이사에게 넘긴다. 주인 브랜치와 충돌해 `deliver`가 되돌아오면 주인 브랜치를 통합 워크트리에 합쳐 해결하고 게이트부터 다시 통과시킨다. 구체적인 머지 절차는 PL 스킬을 따른다.
 
-감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
+감독 작업은 task가 수용되고 workflow 통합이 끝난 뒤에만 reuse/retain/release 중 하나를 정한다. 중간 회수는 `role-worktree-reclaim --org <organization.json> --state <pm-state> --workflow-id <workflowId> --workflow-task <task id> --repo <integration-worktree> --worktree <receipt-worktreeId> --merge-commit <integration-commit>`으로 수행한다. 이 명령은 Dispatch가 clear인지, worker-release와 역할 터미널 close가 성공했는지, 자식 HEAD가 통합 커밋의 조상인지, 자식 Git 상태가 깨끗한지를 확인한 뒤에만 Orca 회수를 호출한다. 하나라도 증명하지 못하면 워크트리를 보존하고 PM이 재사용하거나 조정한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 
 worker를 기다리는 동안에는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 따른다. 원시 `check --wait` 대신 `node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <deliveryId>]`로 기다리면 heartbeat만 온 경우에는 깨어나지 않는다. 대기 시간은 완료나 실패의 근거가 아니지만, 그 시점마다 활동을 다시 조회해 진행 요청과 보고를 결정한다. 무응답 worker를 사용자에게 `진행 중`으로 보고하지 않는다.
 

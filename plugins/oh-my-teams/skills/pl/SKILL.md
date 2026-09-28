@@ -49,8 +49,7 @@ PL은 PM이 띄운 감독 worker로 실행된다. Orca의 중첩 worker 깊이�
 
 ```text
 <orca> orchestration run-create --objective "<PM이 맡긴 분할 목표>" --json
-<orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <organization.json> --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
+node <runtime> role-worktree-create --org <organization.json> --role junior --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>
 node <runtime> terminal-idle-check --terminal <junior-handle>
 node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
 node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <junior-handle> --worktree id:<worktreeId> --spec "<구체적인 구현 작업>"
@@ -62,6 +61,8 @@ node <runtime> supervision-wait --run <pl-run-id> --org <organization.json> [--a
 ```
 
 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 같은 task의 수정은 같은 `--workflow-task`를 넘겨 대화를 유지한다. 규칙은 [pm](../pm/SKILL.md)의 「작업 배정」과 같다.
+
+`workflow-attach` 뒤에는 task의 역할 워크트리가 고정된다. 같은 task의 수정·재시도·검토는 그 안전한 워크트리와 `role-terminal`을 재사용하며 새 자식을 만들지 않는다. 다른 역할이나 별도 소유권이 필요하면 기준 커밋과 finding을 명시한 후속 task를 PM에게 제안한다. `role-worktree-create`가 이미 연결된 task를 거부하면 새 이름으로 우회하지 않는다.
 
 질문 때문에 점검이 거부되면 `node <runtime> prompt-answer --org <organization.json> --terminal <senior-handle> --workflow-id <workflowId> --state <pm-state>`로 답한 뒤 위 `terminal-idle-check`부터 다시 실행한다. 분류기가 알아보지 못한 화면(캡처되지 않은 명령 승인·업데이트 안내)에는 키를 보내지 않으며, Orca가 그 터미널을 `blockedReason`으로 멈춘 상태라고 보고하면 `escalate`(`next`: `report-upstream`)로 끝나므로 점검으로 되돌아가지 않고 보고한다. `prompt-answer`는 PL이 자신이 시작한 역할의 터미널에만 쓸 수 있고, 다른 PL의 하위 역할이나 PM의 워크트리 터미널, Orca가 kickoff의 PM 워크트리 아래에 만든 것으로 기록하지 않는 워크트리의 터미널에는 거부된다. 호출자는 환경 변수로만 식별되므로 이 확인은 감독 관계가 없는 터미널의 실수 호출을 막을 뿐 악의적인 프로세스를 막지는 못한다. 결과가 `escalate`나 `unresolved`이거나 거부되면 화면과 `prompt-answers.jsonl`의 기록을 증거로 PM에게 보고하며, 사람이 정해야 하는 질문은 PM이 `director-signal`로 이사에게 알린다. 절차는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「프롬프트 질문 답하기」 절을 따른다.
 
@@ -106,4 +107,4 @@ task v1의 `merge-check`는 review gate를 조회하지 않고 통과시키므�
 
 주인 체크아웃으로의 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행하며, PL은 그 입력이 될 통합 워크트리와 검증한 HEAD를 준비한다. 전달 방식이 `pull-request`여서 PR을 머지할 때에만 다음을 따른다. 최신 remote base와 PR HEAD를 조회하고, 통합 검증 결과와 일치하는지 확인한다. `gh pr merge --match-head-commit <verified-pr-head>` 등 현재 설치된 도구가 지원하는 HEAD 제한을 사용한다. base 변경이나 경쟁 머지로 검증 전제가 달라지면 새 통합 검사 후 진행한다. 머지 뒤 실제 착지 커밋을 확인한다.
 
-부모 보고에는 작업 ID·검증 키·변경 요약·실패/미해결 사항·원본 경로만 올린다. 전체 로그를 단계마다 다시 붙이지 않는다. accepted settlement 후 Orca worker-release를 사용하고, 워크트리 삭제는 코드와 증거가 보존되고 프로세스 종료가 입증된 경우에만 한다. 강제 종료/자동 clean/reset으로 실패 증거를 버리지 않는다.
+부모 보고에는 작업 ID·검증 키·변경 요약·실패/미해결 사항·원본 경로만 올린다. 전체 로그를 단계마다 다시 붙이지 않는다. PM이 task 수용과 통합을 확인한 뒤에만 `role-worktree-reclaim`으로 Orca worker-release, 역할 터미널 close, 커밋 보존·병합 증거·깨끗한 Git 상태 검증과 회수를 차례로 수행한다. 강제 종료/자동 clean/reset으로 실패 증거를 버리지 않는다.

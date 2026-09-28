@@ -177,8 +177,8 @@ const SUPERVISED_TRUST_ACTION =
  *
  * 설계 3절의 표 순서를 그대로 따릅니다(Orca 1.4.210 실측으로 7번을 삭제하고 10번을 확장, #104;
  * 신뢰 기록 없는 Agy·Codex는 supervised-terminal로 바뀌어 감독자가 답함, #105;
- * Windows Agy는 신뢰 상태를 확인하기 전에 headless로 먼저 걸러냄, #46/agy-win-untrusted-path):
- * 복합 명령 Windows Agy → Windows Agy(신뢰 상태 무관, headless) →
+ * Windows Agy는 신뢰 상태를 확인하기 전에 blocked로 먼저 걸러냄, #46/agy-win-untrusted-path):
+ * 복합 명령 Windows Agy → Windows Agy(신뢰 상태 무관, blocked) →
  * 신뢰 없음(Agy, 남은 건 POSIX뿐, 감독자가 답함) → 신뢰 없음(Codex, 감독자가 답함) →
  * Claude skipPrompt=false → Claude win32 skipPrompt=true →
  * Agy gemini win32/powershell(신뢰 있음) → Agy win32/powershell(다른 계열, 신뢰 있음) →
@@ -204,11 +204,11 @@ const MATRIX_RULES = [
       reason: ["no_agent_detected"],
       nextOwner: "pm",
       nextAction:
-        "Windows PowerShell에서 Agy는 복합 명령 실행 시 에이전트 식별에 실패합니다. 단일 명령으로 분리하거나 headless를 사용하세요.",
+        "Windows PowerShell에서 Agy는 복합 명령 실행 시 에이전트 식별에 실패합니다. 세션 없는 대체 실행을 시작하지 말고 PM에게 보고하세요.",
       evidence: "source-derived",
     },
   },
-  // 2-1. Agy / win32 / 신뢰 상태가 true로 확인되지 않음(false 또는 unknown) → headless
+  // 2-1. Agy / win32 / 신뢰 상태가 true로 확인되지 않음(false 또는 unknown) → blocked
   //
   // #46이 내린 결론은 "Windows의 Agy는 감독 터미널로 시작되지 않는다"이며 신뢰 상태를
   // 조건으로 달지 않는다. 그런데 옛 순서는 신뢰 기록이 있을 때만 이 결론(규칙 8·9)을
@@ -217,7 +217,7 @@ const MATRIX_RULES = [
   // trustedWorkspaces를 정확 일치로 판정하므로 새로 만든 워크트리는 정의상 항상
   // trustRecordExists가 false이고, 이 조합은 드문 구멍이 아니라 Windows에서 Agy 역할을
   // 처음 여는 기본 경로였다. 이 규칙을 규칙 3보다 앞에 두어 신뢰 상태를 확인하기 전에
-  // win32 + agy를 먼저 headless로 걸러낸다.
+  // win32 + agy를 먼저 blocked로 걸러낸다.
   //
   // 확인한 것: `docs/plan/agy-terminal-path.md`의 2026-09-18 r3-c1 실측(Windows 11,
   // Orca 1.4.204, Antigravity CLI 1.2.5)은 신뢰 기록이 없는 새 워크트리에서 gemini Agy가
@@ -307,11 +307,11 @@ const MATRIX_RULES = [
     },
   },
   // 7. (삭제됨) Agy + claude 계열 + 신뢰 있음 → blocked였던 규칙. Orca 1.4.210 실측으로 반증되어 삭제(#104).
-  // 8. Agy / gemini / win32 / 신뢰 있음 → headless
+  // 8. Agy / gemini / win32 / 신뢰 있음 → blocked
   // 실측(Orca 1.4.204): tui-idle이 120초까지 오지 않아 worker-start 불가.
   // 폭 조정(Windows에서는 mode con: cols)은 powershell 전경 문제로 에이전트 식별을 깨뜨려 두 조건을 동시에 만족할 방법이 없음.
   // 근거였던 Orca 1.4.204의 판정 규칙은 1.4.210에서 교체되어 더 이상 존재하지 않고, 재검증할 Windows 머신이
-  // 없으므로 evidence를 verified에서 unverified로 낮춘다. 경로(headless)는 바꾸지 않는다(#104).
+  // 없으므로 evidence를 verified에서 unverified로 낮추고, 새 실행은 blocked로 둔다(#104).
   {
     match: ({ runner, model, platform, trustRecordExists }) =>
       runner === "agy" &&
@@ -327,9 +327,9 @@ const MATRIX_RULES = [
       evidence: "unverified",
     },
   },
-  // 9. Agy / - / win32 / 신뢰 있음 (gemini 외 다른 계열 포함) → headless
+  // 9. Agy / - / win32 / 신뢰 있음 (gemini 외 다른 계열 포함) → blocked
   // 근거였던 Orca 1.4.204의 판정 규칙은 1.4.210에서 교체되어 더 이상 존재하지 않고, 재검증할 Windows 머신이
-  // 없으므로 evidence를 verified에서 unverified로 낮춘다. 경로(headless)는 바꾸지 않는다(#104).
+  // 없으므로 evidence를 verified에서 unverified로 낮추고, 새 실행은 blocked로 둔다(#104).
   {
     match: ({ runner, platform, trustRecordExists }) =>
       runner === "agy" && platform === "win32" && trustRecordExists,

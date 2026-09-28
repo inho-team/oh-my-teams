@@ -55,13 +55,22 @@ import {
 import { predictLaunchPath } from "./launch-matrix.mjs";
 import { answerPrompt } from "./prompt-supervision.mjs";
 import { advise, assist, draft, validateTask, work } from "./worker.mjs";
-import { aggregate, validateEvidence, verify } from "./evidence.mjs";
+import {
+  aggregate,
+  git as gitEvidence,
+  validateEvidence,
+  verify,
+} from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
 import {
   checkTerminalIdle,
+  createWorktreeWithRoleSession,
   discoverOrcaRuntime,
+  findActiveDispatch,
   injectTask,
+  reclaimWorktree,
+  releaseWorker,
   runOrcaJson,
   selectOrcaExecutable,
   startWorker,
@@ -179,6 +188,16 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
           (merges a verified kickoff result into the branch its claim recorded;
           run by the director in close)
   prepare --org FILE --task FILE --repo DIR --name NAME [--orca EXECUTABLE]
+  role-worktree-create --org FILE --role ROLE --repo DIR --name NAME --base SHA
+                        [--setup inherit|run|skip] [--title TEXT] [--brief FILE]
+                        [--workflow-id ID --state DIR --workflow-task ID]
+                        [--profile FALLBACK] [--orca EXECUTABLE]
+                        (creates a child only while opening and proving its Orca role session;
+                        a proven no-session launch is reclaimed, an ambiguous launch is preserved)
+  role-worktree-reclaim --org FILE --state DIR --workflow-id ID --workflow-task ID
+                        --repo DIR --worktree ID --merge-commit SHA [--orca EXECUTABLE]
+                        (reclaims an accepted and integrated child only after its Dispatch is
+                        clear, its commit is preserved by --merge-commit, and Git is clean)
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
   attach-workspace --org FILE --task FILE --repo DIR --workspace DIR
@@ -377,6 +396,31 @@ export const ALLOWED_OPTIONS = {
     "state",
   ],
   prepare: ["org", "task", "repo", "name", "orca"],
+  "role-worktree-create": [
+    "org",
+    "role",
+    "repo",
+    "name",
+    "base",
+    "setup",
+    "title",
+    "brief",
+    "workflow-id",
+    "state",
+    "workflow-task",
+    "profile",
+    "orca",
+  ],
+  "role-worktree-reclaim": [
+    "org",
+    "state",
+    "workflow-id",
+    "workflow-task",
+    "repo",
+    "worktree",
+    "merge-commit",
+    "orca",
+  ],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -562,6 +606,16 @@ export const REQUIRED_OPTIONS = {
   "kickoff-merge-record": ["org", "worktree", "head", "merge-commit"],
   deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
+  "role-worktree-create": ["org", "role", "repo", "name", "base"],
+  "role-worktree-reclaim": [
+    "org",
+    "state",
+    "workflow-id",
+    "workflow-task",
+    "repo",
+    "worktree",
+    "merge-commit",
+  ],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -851,6 +905,191 @@ async function compatibilityPrepare(args) {
     ...prepared,
     stateDir,
     note: "Compatibility prepare no longer creates a sessionless worktree. Create a child through Orca, open a role-terminal in it, verify ready/session proof, then attach-workspace.",
+  };
+}
+
+/**
+ * Creates one Orca child worktree only as part of opening its role session.
+ * The callback reuses the same `role-terminal` implementation exposed by the
+ * CLI, so a new operational path cannot accidentally bypass session proof.
+ *
+ * @param {object} args - Parsed `role-worktree-create` command arguments.
+ * @param {object} [ports] - Injectable ports for focused lifecycle tests.
+ * @param {Function} [ports.create=createWorktreeWithRoleSession] - Creator.
+ * @param {Function} [ports.open] - Role-terminal opener.
+ * @returns {Promise<object>} Worktree identity and proven role terminal.
+ */
+export async function createRoleWorktree(
+  args,
+  { create = createWorktreeWithRoleSession, open } = {},
+) {
+  if (args["workflow-id"] && args["workflow-task"]) {
+    assert(args.state, "--workflow-id and --workflow-task require --state");
+    const { state } = readWorkflow(
+      path.resolve(args.state),
+      args["workflow-id"],
+    );
+    const task = state.tasks[args["workflow-task"]];
+    const existing = task?.worktreeId ?? task?.execution?.worktreeId;
+    assert(
+      !existing,
+      `Task ${args["workflow-task"]} already has worktree ${existing}; reuse it with role-terminal instead of creating another`,
+    );
+  }
+  const openRoleSession =
+    open ??
+    ((workspace) =>
+      executeCommand({
+        ...args,
+        command: "role-terminal",
+        worktree: `id:${workspace.id}`,
+      }));
+  const created = await create(path.resolve(args.repo), {
+    name: args.name,
+    base: args.base,
+    setup: args.setup ?? "inherit",
+    executable: args.orca,
+    openRoleSession: async (workspace) => {
+      let opened;
+      try {
+        opened = await openRoleSession(workspace);
+      } catch (error) {
+        // The matrix refuses before creating a terminal. Other throws may
+        // follow a terminal/process creation and must stay for reconciliation.
+        if (error.matrixRefusal) {
+          return { ready: false, sessionObserved: false };
+        }
+        throw error;
+      }
+      return {
+        ...opened,
+        // A returned terminal alone can still be a shell or a blocked prompt.
+        // Only role-terminal's ready proof is a session; an absent terminal is
+        // the one failure state safe to reclaim automatically.
+        sessionObserved:
+          opened?.ready === true ||
+          (typeof opened?.terminal === "string" && opened.terminal.length > 0),
+      };
+    },
+  });
+  return {
+    ...created.workspace,
+    session: created.session,
+  };
+}
+
+function pathFromWorktreeId(worktreeId) {
+  const separator = String(worktreeId).indexOf("::");
+  assert(separator > 0, "Workflow worktree receipt must include its path");
+  return path.resolve(String(worktreeId).slice(separator + 2));
+}
+
+/**
+ * Reclaims a child only after the completed workflow proves it is no longer a
+ * live execution and its exact commit has reached an integration commit.
+ *
+ * This intentionally has no fallback removal path. A missing ledger row,
+ * unknown Dispatch state, dirty child, or incomplete merge evidence leaves the
+ * worktree intact for the PM to reconcile or reuse.
+ *
+ * @param {object} args - Parsed `role-worktree-reclaim` command arguments.
+ * @param {object} [ports] - Injectable lifecycle ports for focused tests.
+ * @param {Function} [ports.read=readWorkflow] - Workflow state reader.
+ * @param {Function} [ports.launches=readLaunches] - Role-session ledger reader.
+ * @param {Function} [ports.git=gitEvidence] - Explicit-repository Git adapter.
+ * @param {Function} [ports.active=findActiveDispatch] - Orca Dispatch lookup.
+ * @param {Function} [ports.release=releaseWorker] - Settled Dispatch releaser.
+ * @param {Function} [ports.close=runOrcaJson] - Orca terminal closer.
+ * @param {Function} [ports.reclaim=reclaimWorktree] - Orca worktree reclaimer.
+ * @returns {Promise<object>} Evidence and Orca receipts for the reclaimed child.
+ * @throws {Error} When any process, commit, integration, or cleanliness proof is absent.
+ */
+export async function reclaimIntegratedRoleWorktree(
+  args,
+  {
+    read = readWorkflow,
+    launches = readLaunches,
+    git = gitEvidence,
+    active = findActiveDispatch,
+    release = releaseWorker,
+    close = runOrcaJson,
+    reclaim = reclaimWorktree,
+  } = {},
+) {
+  const repo = path.resolve(args.repo);
+  const { state } = read(path.resolve(args.state), args["workflow-id"]);
+  const task = state.tasks[args["workflow-task"]];
+  assert(task, `Unknown workflow task ${args["workflow-task"]}`);
+  assert(
+    state.status === "accepted" && state.integration?.decision,
+    "Only an accepted workflow with integration evidence may reclaim a child worktree",
+  );
+  assert(
+    task.state === "accepted",
+    `Task ${args["workflow-task"]} is ${task.state}; accepted task required before reclaim`,
+  );
+  const worktreeId = task.worktreeId ?? task.execution?.worktreeId;
+  assert(worktreeId, "Accepted task has no role-worktree receipt to reclaim");
+  assert(
+    worktreeId === args.worktree,
+    `Task ${args["workflow-task"]} is bound to ${worktreeId}, not ${args.worktree}`,
+  );
+  const worktreePath = pathFromWorktreeId(worktreeId);
+  const launch = launches(args.org)
+    .filter(
+      (entry) =>
+        entry.via === "worker-start" &&
+        entry.workflowId === args["workflow-id"] &&
+        entry.workflowTaskId === args["workflow-task"] &&
+        typeof entry.worktreePath === "string" &&
+        path.resolve(entry.worktreePath) === worktreePath,
+    )
+    .findLast((entry) => entry.terminal && entry.workerId);
+  assert(
+    launch,
+    "No terminal and Dispatch receipt matches this accepted role worktree; preserve it for reconciliation",
+  );
+  const dispatch = await active(launch.terminal, {
+    executable: args.orca,
+    cwd: repo,
+  });
+  assert(
+    dispatch.status === "clear",
+    `Role terminal ${launch.terminal} is ${dispatch.status}; do not reclaim its worktree`,
+  );
+  const status = await git(worktreePath, ["status", "--porcelain=v1", "-uall"]);
+  assert(!status, "Child worktree has uncommitted changes; do not reclaim it");
+  const head = await git(worktreePath, ["rev-parse", "HEAD"]);
+  await git(repo, [
+    "rev-parse",
+    "--verify",
+    `${args["merge-commit"]}^{commit}`,
+  ]);
+  await git(repo, ["merge-base", "--is-ancestor", head, args["merge-commit"]]);
+
+  const released = await release(launch.workerId, {
+    executable: args.orca,
+    cwd: repo,
+  });
+  const closed = await close(
+    selectOrcaExecutable(args.orca),
+    ["terminal", "close", "--terminal", launch.terminal],
+    { cwd: repo },
+  );
+  const reclaimed = await reclaim(repo, {
+    id: worktreeId,
+    executable: args.orca,
+  });
+  return {
+    worktreeId,
+    worktreePath,
+    head,
+    mergeCommit: args["merge-commit"],
+    dispatchId: launch.workerId,
+    terminal: launch.terminal,
+    released,
+    closed,
+    reclaimed,
   };
 }
 
@@ -1523,6 +1762,10 @@ export async function executeCommand(args, execute) {
     }
     case "prepare":
       return compatibilityPrepare(args);
+    case "role-worktree-create":
+      return createRoleWorktree(args);
+    case "role-worktree-reclaim":
+      return reclaimIntegratedRoleWorktree(args);
     case "prepare-input":
       return prepareInput(
         validateOrg(readJSON(args.org)),

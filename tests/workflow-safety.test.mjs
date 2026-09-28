@@ -388,14 +388,14 @@ test("a review that asks for changes hands the task back within its attempt", as
       conclusion,
       findings,
     });
-  const rework = (eventId, reviewId, executionId) =>
+  const rework = (eventId, reviewId, executionId, worktreeId = "/w/report") =>
     reworkTask(stateDir, request.id, revision(), {
       schemaVersion: 1,
       eventId,
       taskId: "a",
       attemptId: "attempt-1",
       reviewId,
-      receipt: receipt(executionId),
+      receipt: { ...receipt(executionId), worktreeId: `repo::${worktreeId}` },
     });
   review("approve-first", "first", "approved", []);
   review("reject-first", "first", "changes-requested", [
@@ -419,10 +419,15 @@ test("a review that asks for changes hands the task back within its attempt", as
     () => rework("rw-same", "reject-first", "first"),
     /new execution/,
   );
+  assert.throws(
+    () => rework("rw-other-worktree", "reject-first", "second", "/w/other"),
+    /must reuse its role worktree/,
+  );
 
   const reworked = rework("rw-1", "reject-first", "second");
   assert.equal(reworked.tasks.a.state, "running");
   assert.equal(reworked.tasks.a.execution.executionId, "second");
+  assert.equal(reworked.tasks.a.worktreeId, "repo::/w/report");
   // The review sent the work back, so no new attempt is spent.
   assert.equal(reworked.budget.attemptsUsed, 1);
   const attempt = reworked.tasks.a.attempts[0];

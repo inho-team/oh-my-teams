@@ -135,11 +135,18 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Agy 역할의 시작 경로는 `role-terminal`이 `scripts/launch-matrix.mjs`의 호환성 표를 조회해 정한다. 표가 `blocked`를 돌려주면 터미널을 만들기 전에 시도 예약도 하지 않고 PM에게 보고한다. 실행 경로가 `supervised-terminal`이고 근거가 `unverified`인 조합도 별도 승인 없이 터미널을 연다. 결과의 `matrix`와 `warnings`에 근거 등급·환경·버전 경고를 남기며, 실행 후 준비 상태와 모델을 확인하기 전에는 작업을 넘기지 않는다. `--allow-unverified` 옵션은 이전 호출과의 호환을 위해 남겨 두며 알려진 실패를 우회하지 않는다. 검사 대상은 이사(kickoff를 선언한 호스트 세션)가 아니라 저장된 역할 프로필의 실행기다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
 
 ```text
-<orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <organization.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
+node <runtime> role-worktree-create --org <organization.json> --role <역할> --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>
 node <runtime> terminal-idle-check --terminal <handle>
 node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
 node <runtime> worker-start --org <organization.json> --role <역할> --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> [--purpose review] --terminal <handle> --worktree id:<worktreeId> --spec <작업>
+```
+
+`workflow-attach`는 task를 receipt의 `worktreeId`에 고정한다. 같은 task의 수정·재시도·재검토는 이 워크트리를 재사용하고, `role-worktree-create`는 이미 고정된 task의 새 자식 생성을 거부한다. 다른 역할의 독립 소유권이 필요하면 기준 커밋과 검토 finding을 가진 후속 task를 만들며, 같은 task의 새 이름 생성으로 우회하지 않는다.
+
+**수용·통합 후 중간 회수.** PM은 workflow와 해당 task가 모두 `accepted`이고 통합 결정이 기록된 뒤에만 다음 명령을 실행한다. 이 명령은 usage ledger의 `worker-start` receipt에서 terminal·Dispatch를 찾아 `worker-list`가 `clear`인지 확인하고, 자식 Git 상태가 깨끗하며 자식 HEAD가 통합 커밋의 조상인지 확인한다. 이어서 settled Dispatch를 release하고 역할 터미널을 닫은 뒤 Orca에 회수를 요청한다. ledger, 종료, commit, 병합, Git 상태 중 하나라도 증명하지 못하면 어느 것도 회수하지 않고 워크트리를 보존한다.
+
+```text
+node <runtime> role-worktree-reclaim --org <organization.json> --state <pm-state> --workflow-id <workflowId> --workflow-task <task id> --repo <integration-worktree> --worktree <receipt-worktreeId> --merge-commit <integration-commit>
 ```
 
 **다른 task를 넘길 때의 새 대화.** 한 검토자 터미널이 Claude 세션 하나로 서로 다른 검토 8건을 처리하면서 호출마다 평균 231k, 최대 408k 토큰을 다시 보냈다. 그래서 래퍼는 Claude 터미널에 작업을 넘기기 전에 실행 기록(`.omt/usage/launches.jsonl`)에서 같은 터미널의 가장 최근 `worker-start`를 찾아 비교한다. 이번 시작이 검토(`--purpose review`)이거나, 직전 시작이 검토였거나, task가 다르면 터미널이 idle인지 확인한 뒤 `/clear`를 보내고, 다시 idle이 된 것을 확인하고 나서 작업을 넘긴다. task는 `--workflow-id`와 `--workflow-task`의 조합으로, 그것이 없으면 `--task`로 준 Orca Task로 구별한다. 둘 다 없는 시작은 같은 task임을 증명할 수 없으므로 다른 task로 본다. 같은 task의 수정은 대화를 유지하므로, 재작업을 넘길 때에도 같은 `--workflow-task`를 준다. 결과의 `freshContext`에 `cleared`와 그 이유(`review`, `purpose-changed`, `different-task`, `task-unidentified`, `same-task`, `first-task`)가 남고, 실행 기록에는 `workflowTaskId`, `orcaTaskId`, `purpose`가 함께 기록된다. Codex와 Agy 터미널은 비우지 않는다.
@@ -170,7 +177,7 @@ Orca는 `antigravity` 터미널의 대기 상태를 화면으로 판정한다(`d
 
 workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 `via`와 화면에서 확인한 모델을 함께 적는다. 진행은 `check --wait`와 터미널 화면으로 따라가고, 작업이 끝나면 터미널을 직접 닫는다. `injected`가 `false`이면 결과에 `status: "blocked"`가 붙으므로 작업이 넘어간 것으로 보고하지 않는다. Orca가 `inject_rejected`나 `no_agent_detected`로 주입을 거부하면 래퍼는 예외를 던지지 않고 이 결과를 돌려준다. 결과에는 거부 원문(`orcaResponse`), 중립 신호 `injectRefusal`(`kind: "not-started"`), 그 신호의 분류 `route`(`start-refused` → PM의 `change-launch-path`), 이번 호출이 만든 Task를 `failed`로 닫았는지 알리는 `taskClosed`가 담긴다. `taskClosed`가 `false`이고 `taskCreated`가 `true`이면 그 Task를 `orchestration task-update --status failed`로 직접 닫는다. 이 거부는 작업을 하나도 넘기지 않았다는 확정된 사실이므로, 같은 코드를 `failure-classify`에 `runtime`·`code`로 넣지 말고 결과의 `injectRefusal`을 그대로 쓴다. `worker-start` 경로의 같은 코드는 이미 띄운 에이전트가 남아 있을 수 있어 여전히 프로세스 상태 미상으로 분류되기 때문이다. 미리 예약한 시도는 `workflow-release`의 해제 파일에 `refusal`로 `injectRefusal`을 함께 넣으면 돌려받는다. 다른 해제는 지금처럼 시도를 소진한 채로 둔다. 다음 kickoff부터는 Gemini 모델 프로필이나 Claude·Codex 프로필로 바꾸도록 안내한다.
 
-**headless-start receipt 형식.** `headless-start`로 실행한 Agy 역할을 workflow에 연결할 때 제출하는 receipt 형식이다. `via: "headless-start"`가 고정값이고, `executionId`는 headless worker ID이며, `taskId`와 `dispatchId`는 모두 `headless:<executionId>` 형식이어야 한다. `runId`는 실제 Orca Run ID로 필수이고, `worktreeId`는 Orca 워크트리 ID로 필수이다. `workflow-attach`와 `workflow-rework`는 PM state의 `headless/<executionId>/worker.json`과 이 receipt의 작업 경로를 대조해 연결을 검증한다. `headless-start` 결과의 receipt 초안은 `runId`와 `worktreeId`가 비어 있어 호출자가 실제 값으로 채운 뒤 제출해야 한다.
+**레거시 headless-start receipt 형식(읽기 전용).** 다음 형식은 과거 workflow 기록과 사용량을 복구·해석하는 근거일 뿐이다. 새 `workflow-attach`와 `workflow-rework`는 `via: "headless-start"` receipt를 거부한다. 이전 receipt의 `executionId`는 headless worker ID이며, `taskId`와 `dispatchId`는 모두 `headless:<executionId>` 형식이었고, `runId`와 `worktreeId`는 실제 Orca Run·워크트리 ID였다. 과거 검증은 PM state의 `headless/<executionId>/worker.json`과 receipt 작업 경로를 대조했다.
 
 ### 역할 터미널 열기
 
@@ -273,8 +280,7 @@ Run을 바인딩한 뒤에는 `--spec`으로 Task와 첫 시도를 한 번에 �
 PM은 감독 worker가 아니므로 `worker-start`로 띄우지 않는다. `orca worktree create --agent`에는 모델 옵션이 없어 PM 프로필의 모델을 전달할 수 없으므로, 워크트리를 agent 없이 만든 뒤 `role-terminal`로 프로필의 명령을 실행한 터미널을 연다. 이사가 PM에게 처음 인계할 브리프는 `--brief <경로>`로 넘긴다. `role-terminal`이 그 경로를 `roleCommand`의 `firstPrompt`로 만들어 PM이 실행할 명령 자체의 인자로 붙이므로, 터미널을 연 뒤 별도로 `terminal send`를 실행할 필요가 없다.
 
 ```text
-<orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --worktree id:<worktreeId> --brief <브리프 경로> [--title <kickoff 요약>]
+node <runtime> role-worktree-create --org <project>/.omt/organization.json --role pm --repo <owner-checkout> --name <name> --base <base-sha> --brief <브리프 경로> [--title <kickoff 요약>]
 ```
 
 `role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model> --autocompact 250k`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort> --config check_for_update_on_startup=false`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. Codex 명령에 항상 붙는 `--config check_for_update_on_startup=false`는 설치본 확인 기록인 `docs/plan/codex-update-check.md`를 근거로 한다. Claude 명령의 `--autocompact`(Claude Code 2.1.221 이상)는 세션이 그 크기에 이르면 대화를 압축하게 해서, 오래 실행되는 역할이 매 호출마다 전체 기록을 다시 보내지 않게 한다. 값은 조직의 `policy.claudeAutoCompact`(100000~1000000 사이의 정수 토큰)이며, 없으면 250000을 쓰고 `"auto"`이면 플래그를 붙이지 않는다. Codex와 Agy 명령에는 붙이지 않는다. `--brief`는 이 두 인자 뒤, 명령의 맨 끝에 붙는다. Claude와 Codex에는 위치 인자로, Agy에는 `--prompt-interactive`(별칭 `-i`) 플래그로 붙는데, 이는 설치본의 `--help`로 확인한 지원이며 `role-launch.mjs`의 `FIRST_PROMPT_ARG`에 있다. 확인하지 못한 provider는 이 인자를 붙이지 않고 `role-terminal`이 그 자리에서 거부하므로, 그런 provider의 브리프는 여전히 터미널을 연 뒤 `terminal send`로 보낸다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 실은 채로 터미널을 연 뒤에는 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 이사에게 그대로 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 이사가 PM을 대신 맡지도 않는다. PM이 이미 뜬 뒤 붙여넣기로 도착하는 후속 인계 지시는 이 절이 다루지 않으며, PM 스킬의 인계 지시 확인 규칙과 `kickoff-handoff-verify` 명령을 따른다.
@@ -376,17 +382,16 @@ worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 
    ```
 
    런타임은 워크트리의 git 상태로 `snapshot-<n>.json`을 만들고 task를 다시 대기 상태로 둔다. 이 handoff 뒤의 첫 실행은 시도 예산을 쓰지 않는다. 정책이 `fallback`이면 사용자에게 묻지 않고 곧바로 수행하며, 수행한 뒤 이사에게 `director-signal --kind progress`로 task, 멈춘 프로필, 이어받은 프로필, 한도가 풀리는 시각을 알린다.
-6. **이어서 실행:** `workflow-resume`의 `dispatch-ready`에 나온 `profile`과 `worktree`로 같은 워크트리에 fallback을 실행한다. `role-terminal`, `worker-start`와 `headless-start`에는 같은 `--workflow-id`, `--state`, `--workflow-task`와 `--profile <fallback>`을 넘기며, 기록된 handoff 대상이 아닌 프로필은 런타임이 거부한다. 지시문에는 남은 일을 끝내라는 목표만 쓰면 된다. 래퍼가 handoff 이력, `checkpoint.md`와 snapshot 경로, "먼저 worktree와 대조하라"는 지시를 머리글에 붙인다. 이후 이 task의 재시도도 같은 fallback으로 실행한다.
+6. **이어서 실행:** `workflow-resume`의 `dispatch-ready`에 나온 `profile`과 `worktree`로 같은 워크트리에 fallback을 실행한다. `role-terminal`과 `worker-start`에는 같은 `--workflow-id`, `--state`, `--workflow-task`와 `--profile <fallback>`을 넘기며, 기록된 handoff 대상이 아닌 프로필은 런타임이 거부한다. 지시문에는 남은 일을 끝내라는 목표만 쓰면 된다. 래퍼가 handoff 이력, `checkpoint.md`와 snapshot 경로, "먼저 worktree와 대조하라"는 지시를 머리글에 붙인다. 이후 이 task의 재시도도 같은 fallback으로 실행한다.
 
    ```text
    node <runtime> role-terminal --org <org> --role <role> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback>
    node <runtime> worker-start --org <org> --role <role> --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback> --terminal <handle> --worktree id:<worktreeId> --spec "<남은 일을 끝낸다>"
-   node <runtime> headless-start --org <org> --role <role> --cwd <worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback> --spec "<남은 일을 끝낸다>"
    ```
 
 7. **검토:** 검토는 평소처럼 배정하되, 검토 `worker-start`에도 같은 `--workflow-task`를 넘긴다. 그러면 검토 지시문에 handoff 이력이 붙어, 검토자가 여러 프로필이 나누어 만든 변경의 경계를 확인한다.
 
-headless로 실행하던 역할은 fallback도 `headless-start`로 실행할 수 있다. 다만 `--workflow-id`를 넘긴 `headless-start`는 `--state`를 workflow 상태 경로로 읽으므로, headless worker 기록도 PM의 상태 디렉터리에 남는다. 한도가 풀린 뒤에도 진행 중인 task를 원래 프로필로 되돌리지 않으며, 원래 프로필은 다음 task부터 다시 쓴다.
+과거에 세션 없는 실행으로 남은 handoff 기록은 읽을 수 있지만 재개하지 않는다. 한도가 풀린 뒤에도 진행 중인 task를 원래 프로필로 되돌리지 않으며, 원래 프로필은 다음 task부터 다시 쓴다.
 
 ## worker-list와 liveness
 
@@ -409,8 +414,8 @@ node <runtime> usage-report --org <project>/.omt/organization.json --worktree <p
 node <runtime> usage-report --org <project>/.omt/organization.json --all
 ```
 
-- **역할 연결**: `role-terminal`, `worker-start`, `headless-start`는 실행할 때마다 `<project>/.omt/usage/launches.jsonl`에 역할, 프로필, 요청 모델, 워크트리, 터미널, 시작 시각을 한 줄씩 남긴다. 이 줄은 `--state`가 가리키는 PM state, PM 워크트리 안에서의 실행, 또는 앞서 기록된 역할 워크트리 안에서의 실행으로 kickoff에 묶인다. 기록에 실패해도 실행은 계속되고 결과에 `ledgerError`가 붙는다. 보고서는 PM 워크트리(등록 항목)와 이 기록의 워크트리에서 만든 세션을 실행기·경로·시각으로 역할에 연결한다. 같은 워크트리에서 같은 실행기의 두 역할을 1분 안에 띄웠으면 어느 쪽인지 가릴 수 없어 `ambiguous`로, 어느 기록으로도 설명되지 않는 세션은 `unattributed`로 표시하고 추측하지 않는다. 이 기록이 생기기 전의 kickoff는 `--place <role>=<dir>`로 역할이 쓴 워크트리를 직접 알려 준다.
+- **역할 연결**: `role-terminal`과 `worker-start`는 실행할 때마다 `<project>/.omt/usage/launches.jsonl`에 역할, 프로필, 요청 모델, 워크트리, 터미널, 시작 시각을 한 줄씩 남긴다. 이 줄은 `--state`가 가리키는 PM state, PM 워크트리 안에서의 실행, 또는 앞서 기록된 역할 워크트리 안에서의 실행으로 kickoff에 묶인다. 기록에 실패해도 실행은 계속되고 결과에 `ledgerError`가 붙는다. 과거 headless 행은 읽기 전용으로 보존한다. 보고서는 PM 워크트리(등록 항목)와 이 기록의 워크트리에서 만든 세션을 실행기·경로·시각으로 역할에 연결한다. 같은 워크트리에서 같은 실행기의 두 역할을 1분 안에 띄웠으면 어느 쪽인지 가릴 수 없어 `ambiguous`로, 어느 기록으로도 설명되지 않는 세션은 `unattributed`로 표시하고 추측하지 않는다. 이 기록이 생기기 전의 kickoff는 `--place <role>=<dir>`로 역할이 쓴 워크트리를 직접 알려 준다.
 - **읽는 기록**: Claude는 `~/.claude/projects`의 transcript(같은 응답이 여러 줄로 반복되므로 응답 id로 한 번만 센다), Codex는 `~/.codex/sessions`와 `archived_sessions`의 rollout(누적 합계이므로 kickoff 기간의 마지막 값에서 기간 전 마지막 값을 뺀다), Agy는 `~/.gemini/antigravity-cli/conversation_summaries.db`의 대화 id·작업 경로·단계 수·시각 열만 읽는다. headless worker는 PM state의 stream을, 로컬 하네스는 `runs`와 `assists` 보고서의 호출 기록을 읽고, 같은 세션이 CLI 기록에도 있으면 두 번 세지 않는다. 메시지 본문, 제목, 미리보기는 읽지 않는다. 위치는 `--claude-home`, `--codex-home`, `--agy-home` 또는 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OMT_AGY_HOME`으로 바꾼다.
-- **측정되지 않는 것**: Agy 대화형 세션은 토큰 사용량이 어디에도 기록되지 않는다. 이런 세션은 `measured: false`, `reason: "agy-interactive-usage-not-recorded"`로 표시하고 토큰은 `null`로 둔다. 단계 수(`steps`)만 보조 지표로 보여 준다. 사용량 비교가 중요한 kickoff에서는 Agy 역할을 `role-terminal` 대신 `headless-start`로 실행한다. headless 결과에는 사용량이 담긴다. 다만 Agy의 stream-json에서 사용량이 담기는 위치는 아직 실제 출력으로 확인하지 않았으므로, 결과 이벤트의 중첩 위치와 최상위를 모두 읽는다.
+- **측정되지 않는 것**: Agy 대화형 세션은 토큰 사용량이 어디에도 기록되지 않는다. 이런 세션은 `measured: false`, `reason: "agy-interactive-usage-not-recorded"`로 표시하고 토큰은 `null`로 둔다. 단계 수(`steps`)만 보조 지표로 보여 준다. 사용량 비교가 중요한 kickoff도 역할 세션을 유지하며, 측정되지 않은 사용량을 임의 추정하지 않는다.
 - **해석**: 역할별 점유율(`share`)은 측정된 세션의 prompt와 output 토큰만으로 계산한다. 측정된 세션이 없는 역할은 0%가 아니라 `unmeasured`이며, `coverage`가 몇 개 세션 위에서 계산했는지 알린다. prompt 토큰은 Claude에서 캐시 읽기·생성을 포함한 합, Codex에서 캐시를 포함해 보고된 입력, Agy에서 보고된 `input_tokens`다. Agy의 `input_tokens`가 캐시 읽기를 포함하는지는 확인되지 않았다. Claude headless의 `costUsd`는 CLI가 계산한 API 환산 추정치이며 구독 요금이 아니다. 요청 모델과 보고 모델이 다르면 `mismatches`에 적는다.
 - **호출 한도와의 관계**: 조직의 `policy.maxCalls`는 `work` 한 번과 workflow attempt 하나가 쓰는 provider 호출 수를 제한하고, workflow의 `budget.maxCalls`는 그 workflow 전체의 호출 예산이다. 둘 다 대화형 역할 터미널의 턴을 세지 않으므로, 대화형 역할이 쓴 양은 이 보고서로만 확인한다.

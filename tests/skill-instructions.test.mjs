@@ -839,7 +839,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // built for one role is accepted as the role the run folded it onto.
   assert.match(
     runtime,
-    /node <runtime> role-terminal --org <organization\.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>/,
+    /node <runtime> role-worktree-create --org <organization\.json> --role <역할> --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>/,
   );
   assert.doesNotMatch(readSkill("pl"), /custom argv/);
   assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
@@ -891,7 +891,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(readReference("kickoff-registry.md"), /인계에 실패한 것이다/);
   assert.match(
     readReference("kickoff-registry.md"),
-    /worktree create --agent`를 쓰지 않고/,
+    /`role-worktree-create --brief <브리프 경로>`/,
   );
 });
 
@@ -1254,7 +1254,7 @@ test("skills cut review-rework loops and wasted context", () => {
   const runtime = readReference("orca-runtime.md");
   // A Junior implementation goes up after its first rejected review.
   assert.match(pm, /Junior 구현이 검토에서 한 번 반려된 일/);
-  assert.match(pm, /첫 검토에서 반려되면 수정을 Junior에게 다시 맡기지 않고/);
+  assert.match(pm, /첫 검토에서 반려되어 Senior의 별도 소유권이 필요하면/);
   assert.doesNotMatch(pm, /반복해서 실패한 일/);
   // Reviewers list every finding at once, then re-review only the fix diff.
   assert.match(senior, /첫 검토에서는 발견한 finding을 한 번에 모두 적고/);

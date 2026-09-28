@@ -1049,7 +1049,12 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
         ),
         "Duplicate execution receipt",
       );
+      assert(
+        !item.worktreeId || item.worktreeId === input.receipt.worktreeId,
+        `Task ${input.taskId} must reuse its role worktree ${item.worktreeId}`,
+      );
       item.execution = input.receipt;
+      item.worktreeId = input.receipt.worktreeId;
       item.state = "running";
       attempt.receipt = input.receipt;
       attempt.status = "running";
@@ -1127,6 +1132,13 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
     item.workerRunId = null;
     item.attemptId = input.attemptId;
     item.execution = reserveOnly ? null : input.receipt;
+    if (!reserveOnly) {
+      assert(
+        !item.worktreeId || item.worktreeId === input.receipt.worktreeId,
+        `Task ${input.taskId} must reuse its role worktree ${item.worktreeId}`,
+      );
+      item.worktreeId = input.receipt.worktreeId;
+    }
     item.attempts.push({
       id: input.attemptId,
       status: item.state,
@@ -1586,6 +1598,10 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       !executions.includes(input.receipt.executionId),
       "Rework needs a new execution, not one already recorded",
     );
+    assert(
+      !item.worktreeId || item.worktreeId === input.receipt.worktreeId,
+      `Task ${input.taskId} must reuse its role worktree ${item.worktreeId}`,
+    );
     const spent = (attempt.priorCallsUsed ?? 0) + (attempt.callsUsed ?? 0);
     assert(
       spent < attempt.callAllowance &&
@@ -1623,6 +1639,7 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
     attempt.receipt = input.receipt;
     attempt.status = "running";
     item.execution = input.receipt;
+    item.worktreeId = input.receipt.worktreeId;
     item.workerRunId = null;
     item.acceptedResult = null;
     item.state = "running";
