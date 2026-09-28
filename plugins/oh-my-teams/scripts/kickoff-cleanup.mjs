@@ -62,9 +62,9 @@ function candidateIds(entry, worktrees) {
 function worktreePath(id, item, entry) {
   if (id === entry.pm.worktreeId) return entry.pm.path;
   return (
-    item?.path ??
     entry.cleanup?.candidates?.find((candidate) => candidate.worktreeId === id)
       ?.path ??
+    item?.path ??
     null
   );
 }
@@ -155,12 +155,29 @@ export function evaluateKickoffCleanup(entry, observed) {
   const candidates = candidateIds(entry, worktrees).map((id) => {
     const item = byId.get(id);
     const location = worktreePath(id, item, entry);
+    const previous = entry.cleanup?.candidates?.find(
+      (candidate) => candidate.worktreeId === id,
+    );
     const gitState = observed.git?.[id] ?? null;
     const attached = terminals.filter((terminal) => terminal.worktreeId === id);
     const assigned = workers.filter((worker) => workerWorkspace(worker) === id);
     const reasons = [];
     if (!inventoryComplete) reasons.push("inventory-incomplete");
     if (!item) reasons.push("orca-worktree-unlisted");
+    if (
+      item?.path &&
+      location &&
+      path.resolve(item.path) !== path.resolve(location)
+    )
+      reasons.push("worktree-path-changed");
+    if (item && previous && (!previous.instanceId || !item.worktreeInstanceId))
+      reasons.push("worktree-instance-unverified");
+    if (
+      item?.worktreeInstanceId &&
+      previous?.instanceId &&
+      item.worktreeInstanceId !== previous.instanceId
+    )
+      reasons.push("worktree-instance-changed");
     if (!item && observed.remoteHostsOmitted)
       reasons.push("remote-hosts-omitted");
     if (item && !gitState) reasons.push("git-unverifiable");
@@ -191,6 +208,7 @@ export function evaluateKickoffCleanup(entry, observed) {
     return {
       worktreeId: id,
       path: location,
+      instanceId: item?.worktreeInstanceId ?? previous?.instanceId ?? null,
       owner: entry.director?.terminalHandle ?? entry.pm.worktreeId,
       status:
         removed && inventoryComplete && !observed.remoteHostsOmitted

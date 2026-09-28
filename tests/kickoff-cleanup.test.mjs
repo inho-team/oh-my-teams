@@ -27,12 +27,14 @@ const worktrees = [
   {
     worktreeId: pm,
     path: "/tmp/pm",
+    worktreeInstanceId: "pm-instance",
     childWorktreeIds: [child],
     liveTerminalCount: 0,
   },
   {
     worktreeId: child,
     path: "/tmp/child",
+    worktreeInstanceId: "child-instance",
     parentWorktreeId: pm,
     liveTerminalCount: 0,
   },
@@ -168,8 +170,8 @@ test("historical rescan retains removed child candidates without duplicating cle
     ...entry,
     cleanup: {
       candidates: [
-        { worktreeId: pm, path: "/tmp/pm" },
-        { worktreeId: child, path: "/tmp/child" },
+        { worktreeId: pm, path: "/tmp/pm", instanceId: "pm-instance" },
+        { worktreeId: child, path: "/tmp/child", instanceId: "child-instance" },
       ],
     },
   };
@@ -181,6 +183,28 @@ test("historical rescan retains removed child candidates without duplicating cle
   assert.equal(result.candidates.length, 2);
   assert.equal(result.candidates[1].status, "already-removed");
   assert.equal(result.candidates[0].status, "safe-to-remove");
+});
+
+test("historical scan preserves a replacement worktree at the same path", () => {
+  const history = {
+    ...entry,
+    cleanup: {
+      candidates: [
+        { worktreeId: pm, path: "/tmp/pm", instanceId: "old-pm-instance" },
+        {
+          worktreeId: child,
+          path: "/tmp/child",
+          instanceId: "old-child-instance",
+        },
+      ],
+    },
+  };
+  const input = observed();
+  const result = evaluateKickoffCleanup(history, input);
+  assert.equal(result.candidates[0].status, "preserve");
+  assert.ok(result.candidates[0].reasons.includes("worktree-instance-changed"));
+  assert.equal(result.candidates[1].status, "preserve");
+  assert.ok(result.candidates[1].reasons.includes("worktree-instance-changed"));
 });
 
 test("a completed archive retains child identity for read-only partial cleanup reentry", async (t) => {
@@ -218,6 +242,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
               {
                 worktreeId: pmId,
                 path: pmPath,
+                worktreeInstanceId: "pm-fixture-instance",
                 childWorktreeIds: childPresent ? [childId] : [],
               },
               ...(childPresent
@@ -225,6 +250,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
                     {
                       worktreeId: childId,
                       path: childPath,
+                      worktreeInstanceId: "child-fixture-instance",
                       parentWorktreeId: pmId,
                     },
                   ]
@@ -247,6 +273,10 @@ test("a completed archive retains child identity for read-only partial cleanup r
     cleanup,
   });
   assert.equal(readJSON(released.archived).cleanup.candidates.length, 2);
+  assert.equal(
+    readJSON(released.archived).cleanup.candidates[1].instanceId,
+    "child-fixture-instance",
+  );
   childPresent = false;
   fs.rmSync(childPath, { recursive: true });
   const rescanned = await scanKickoffCleanup(
