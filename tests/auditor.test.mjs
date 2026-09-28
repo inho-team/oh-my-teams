@@ -9,6 +9,7 @@ import {
   AUDITOR_ROLE,
   fileSha256,
   readJSON,
+  writeJSON,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   bindKickoffRun,
@@ -29,6 +30,7 @@ import {
 import { acceptOutcome } from "../plugins/oh-my-teams/scripts/gates.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
+import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const exampleOrg = new URL(
   "../plugins/oh-my-teams/examples/organization.json",
@@ -825,4 +827,105 @@ test("accept refuses while the outcome audit checkpoint has an unresolved object
     fixture.worktreeId,
   );
   assert.equal(recorded.status, "accepted");
+});
+
+test("worker-start refuses to assign under an audited kickoff before the brief audit is accepted, and proceeds once it is", async (t) => {
+  const fixture = kickoff(t);
+  const org = readJSON(fixture.org);
+  org.auditor = { profile: "claude-current" };
+  writeJSON(fixture.org, org);
+  fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
+
+  const missingOrca = path.join(fixture.dir, "missing-orca");
+  const workerStart = () =>
+    main([
+      "worker-start",
+      "--repo",
+      fixture.entry.pm.path,
+      "--org",
+      fixture.org,
+      "--role",
+      "senior",
+      "--spec",
+      "x",
+      "--terminal",
+      "term_worker_1",
+      "--orca",
+      missingOrca,
+    ]);
+
+  await assert.rejects(workerStart, /no valid brief-audit acceptance yet/);
+
+  await auditChecked(
+    fixture.org,
+    fixture.worktreeId,
+    "brief",
+    [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ],
+    auditorEnv(fixture.auditorHandle),
+  );
+  await auditAccept(
+    fixture.org,
+    fixture.worktreeId,
+    "brief",
+    undefined,
+    undefined,
+    auditorEnv(fixture.auditorHandle),
+  );
+
+  // The audit gate opened; what stops the launch now is the same missing-Orca
+  // executable failure any worker-start hits once it actually tries to spawn
+  // a worker, proving execution reached past the new brief-audit gate.
+  await assert.rejects(workerStart, /Selected Orca executable failed/);
+});
+
+test("director-signal refuses a close-ready under an audited kickoff before the outcome audit is accepted, and proceeds once it is", async (t) => {
+  const fixture = kickoff(t);
+  const org = readJSON(fixture.org);
+  org.auditor = { profile: "claude-current" };
+  writeJSON(fixture.org, org);
+
+  const signalClose = () =>
+    main([
+      "director-signal",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--kind",
+      "close-ready",
+      "--text",
+      "ready to close",
+      "--head",
+      fixture.head,
+      "--source",
+      fixture.repo,
+    ]);
+
+  await assert.rejects(signalClose, /valid outcome-audit acceptance/);
+
+  await auditChecked(
+    fixture.org,
+    fixture.worktreeId,
+    "outcome",
+    [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ],
+    auditorEnv(fixture.auditorHandle),
+  );
+  await auditAccept(
+    fixture.org,
+    fixture.worktreeId,
+    "outcome",
+    fixture.head,
+    fixture.repo,
+    auditorEnv(fixture.auditorHandle),
+  );
+
+  // The audit gate opened; main() prints its JSON result instead of returning
+  // it, so reaching here without a rejection is what proves the gate passed.
+  await assert.doesNotReject(signalClose);
 });

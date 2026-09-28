@@ -61,6 +61,7 @@ import { advise, assist, draft, validateTask, work } from "./worker.mjs";
 import { aggregate, validateEvidence, verify } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
+import { hasValidAcceptance } from "./audit.mjs";
 import {
   checkTerminalIdle,
   createWorktree,
@@ -126,6 +127,7 @@ import {
   readLaunches,
   recordLaunch,
   lazyLaunchesBackward,
+  resolveLaunchKickoff,
 } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
 import {
@@ -860,6 +862,28 @@ async function startSupervisedWorker(args) {
     args.worktree ?? "current",
     args.repo,
   );
+  // B.5: an audited org must not let implementation start before the brief
+  // audit checkpoint has a valid acceptance. This is the only place that
+  // enforcement is checked (requirements-fidelity does not gate on it), and
+  // it only applies once this launch can be tied to a registered kickoff.
+  if (org.auditor) {
+    const worktreeId = resolveLaunchKickoff(
+      listKickoffs(run.orgFile).kickoffs,
+      lazyLaunchesBackward(run.orgFile),
+      {
+        stateDir: args.state ? path.resolve(args.state) : null,
+        callerCwd: path.resolve(args.repo),
+      },
+    );
+    if (worktreeId) {
+      assert(
+        await hasValidAcceptance(run.orgFile, worktreeId, "brief"),
+        `Kickoff ${worktreeId} has an auditor configured but no valid brief-audit ` +
+          "acceptance yet; the director must resolve the brief audit " +
+          "(audit-response/audit-ruling/audit-accept) before a worker can be assigned",
+      );
+    }
+  }
   assert(
     args.purpose === undefined || DISPATCH_PURPOSES.includes(args.purpose),
     `--purpose must be one of: ${DISPATCH_PURPOSES.join(", ")}`,
@@ -2010,6 +2034,23 @@ async function executeCommand(args) {
         args.expected.split(","),
       );
     case "director-signal": {
+      if (args.kind === "close-ready") {
+        const org = readJSON(args.org);
+        if (org.auditor) {
+          assert(
+            await hasValidAcceptance(
+              args.org,
+              args.worktree,
+              "outcome",
+              args.head,
+              args.source,
+            ),
+            "close-ready requires a valid outcome-audit acceptance for this kickoff; " +
+              "resolve the outcome audit checkpoint (audit-response/audit-ruling/audit-accept) " +
+              "before sending it",
+          );
+        }
+      }
       const { signaled, id, entry, record } = sendSignal(args.org, {
         worktreeId: args.worktree,
         kind: args.kind,
