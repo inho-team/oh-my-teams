@@ -1929,7 +1929,8 @@ test("workflow retry preserves attempts and cumulative budget", async (t) => {
     runId: "run-r2",
     taskId: "orca-r2",
     dispatchId: "dispatch-r2",
-    worktreeId: "wt-r2",
+    // A retry is a new attempt, but it stays in the proven role worktree.
+    worktreeId: "wt-r1",
   };
   const second = attachExecution(stateDir, request.id, 6, {
     schemaVersion: 1,

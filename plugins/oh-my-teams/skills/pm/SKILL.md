@@ -25,10 +25,12 @@ node <runtime> kickoff-handoff-verify --org <organization.json> --worktree <이 
 
 ### 권한
 
+호환성 표(`scripts/launch-matrix.mjs`)가 `blocked`를 돌려주는 프로필은 세션 없는 대체 실행을 시작하지 않고 PM에게 이유 코드와 다음 행동을 보고한다.
+
 - 목표·범위·우선순위·수용 기준과 비목표를 정하고, 필요하면 이사에게 결정을 요청한다.
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
 - `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-handoff`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다. attempt의 호출 한도를 늘려야 하면 `workflow-allowance`를, 검토 없이 정산된 task를 수동으로 되돌려야 하면 `workflow-reopen`을, 이미 굳힌 통합 task에 검사를 더해야 하면 `workflow-integration-checks`를 쓴다. 세 명령 모두 승인자(`approvedBy`)와 사유(`reason`)를 요구하며 근거를 이사에게 보고한다.
-- 이번 실행의 PL·Senior·Junior를 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘기며(두 명령에 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검하고, 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. 화면에 폴더 신뢰나 명령 승인 같은 질문이 남아 `blockedReason`으로 거부되었으면 사람을 기다리지 않고 감독자인 PM이 `prompt-answer`로 답한 뒤 `terminal-idle-check`부터 다시 진행한다. Agy 터미널이고 이사가 승인했을 때에만 래퍼의 `--inject-fallback`을 쓴다), 호환성 표(`scripts/launch-matrix.mjs`)가 `headless`로 정한 역할은 `headless-start`로 실행하며, Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
+- 이번 실행의 PL·Senior·Junior를 `worker-start --org --role --workflow-id --state` 래퍼로만 감독 worker로 시작하고, `role-spec`으로 지시문 머리글을 만든다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 `--terminal`로 넘긴다. 두 명령에는 같은 `--workflow-id`·`--state`를 넘기고, 이번 실행에 있는 역할만 요청한다. 시도를 예약하기 전에 `terminal-idle-check`로 그 터미널을 점검한다. 터미널이 idle 신호를 보고하지 않아 거부되면 반복하거나 원시 `dispatch --inject`로 우회하지 않고 멈춰 보고한다. 화면에 폴더 신뢰나 명령 승인 같은 질문이 남아 `blockedReason`으로 거부되었으면 사람을 기다리지 않고 감독자인 PM이 `prompt-answer`로 답한 뒤 `terminal-idle-check`부터 다시 진행한다. 호환성 표가 `blocked`를 돌려주는 프로필은 세션 없는 대체 실행을 시작하지 않고 PM에게 이유 코드와 다음 행동을 보고한다. Ollama 역할과 현재 계정이 아닌 프로필의 역할은 `work` 하네스로 실행한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절). Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하며, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, worker를 기다릴 때에는 heartbeat를 걸러 주는 `supervision-wait`를 쓰고, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
 - 조직이 PM에게 자문자를 허용했으면 계획 확정, 최종 수용, 반복 실패 같은 결정 관문에서만 자기 역할로 `advise`를 호출한다.
@@ -52,6 +54,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - 검토를 배정할 때 finding이나 criterion의 필드 이름을 지시문에서 새로 정하지 않고 `examples/review.json` 형식을 그대로 요구한다. 검토자가 형식을 틀리게 써도 PM이 옮겨 적지 않고 검토자에게 되돌린다.
 - 자신이 작성하거나 계획한 결과를 스스로 검토해 승인하지 않는다. 단순 개발 요청을 배포·외부 발송 허가로 확대하지 않는다.
 - 막히면 거부 코드와 증거를 붙여 이사에게 보고하고, 같은 시도를 반복하지 않는다.
+- `review-record`, `gate-check`, `accept`를 부를 때는 `--org` 옵션을 항상 넘긴다.
 - 이사에게 결정을 올리는 경우는 [`../../references/autonomy.md`](../../references/autonomy.md)가 정한 네 가지뿐이다. 실행 깊이, 역할 배정, 작업 분할과 순서, 검토 지적의 수용 여부, 실패 원인의 판정과 접근 방법의 변경처럼 브리프의 범위 안에서 끝나는 판단은 `decision` 신호로 올리지 않고 자기 권한으로 정한 뒤 `progress`로 알린다.
 - 하위 역할이 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없으면 그 역할의 일과 권한은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 이번 실행의 역할은 workflow의 `roles`에서, 그것이 없으면 조직 파일의 `roles`에서 확인하며, PM만 남은 실행에서는 PM이 산출물을 직접 만든다.
 
@@ -64,7 +67,7 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 자기 phase가 가리키는 하위 문서를 갱신할 때는 [`../../references/roadmap.md`](../../references/roadmap.md)의 규칙을 따르고, 로드맵 본문은 고치지 않는다.
 
 - PM은 사용자 요청과 사업·제품 맥락을 분석하고 중장기 목표, 우선순위, 수용 기준과 비목표를 결정한다. 상세 저장소 분석과 대안 조사가 필요하면 PL에게는 그 조사를 어떤 작업으로 나누고 누구에게 배정할지 계획하게 하고, 조사 자체는 Senior·Junior가 수행한다. 범위와 최종 판단의 책임은 PM에게 남는다.
-- 전체 요청을 목표·수용 기준·비목표·제약과 파일 소유권이 분명한 task v2로 나눈다. 작은 저위험 변경은 한 task로 유지한다. 독립 편집 작업마다 **Orca child worktree**를 사용한다. 기준 커밋을 명시하고 실제 반환된 전체 worktree ID를 보관한다. 다른 역할의 task가 작업하는 워크트리에 역할을 띄우지 않으며, 검토자는 검토 대상을 경로와 커밋으로 읽게 한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
+- 전체 요청을 목표·수용 기준·비목표·제약과 파일 소유권이 분명한 task v2로 나눈다. 작은 저위험 변경은 한 task로 유지한다. 새 task마다 child worktree를 만들지 않고, 먼저 같은 역할의 유휴 역할 worktree가 있는지 확인한다. 이전 task가 수용되었고 그 HEAD가 명시한 통합 커밋에 보존되며, 모든 `run-list` cursor page와 각 Run의 명시적 `worker-list --run <id>` cursor page가 끝나고 후자 영수증의 `scope.source: "flag"`·Run ID가 일치하여 모든 Dispatch가 clear·release되고, 소유한 역할 터미널이 종료되었으며, Git 상태가 깨끗할 때만 `role-worktree-create --worktree <id>`로 새 역할 세션을 증명해 재사용한다. Run-bound PM 터미널의 암묵적 `worker-list`는 전역 증거가 아니다. 이전 task가 다른 workflow에 있으면 자동 추측하지 않고 `--prior-workflow-id <id> --prior-task-id <id>`를 함께 주며, 현 workflow의 다른 task가 그 worktree를 소유하면 거부된다. 이 증거가 없거나 다른 연결 터미널·셸이 남으면 소유하지 않은 세션을 닫지 않고 보존한다. 재사용할 수 없을 때만 독립 편집 작업에 **Orca child worktree**를 사용한다. 기준 커밋을 명시하고 실제 반환된 전체 worktree ID를 보관한다. 다른 역할의 task가 작업하는 워크트리에 역할을 띄우지 않으며, 검토자는 검토 대상을 경로와 커밋으로 읽게 한다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
 - 네 역할을 모두 상시 실행하지 않는다. 이번 실행에서 쓰는 역할은 아래 「실행 깊이」로 정하며, 깊이에 포함된 역할 사이에서는 제한된 실무를 PL·Senior를 거치지 않고 Junior에게 직접 배정할 수 있다.
 - 역할별 모델·계정·동시 인원과 fallback을 조직 파일에서 읽는다. 조직도는 보고 구조이며 모든 작업이 모든 단계를 통과해야 한다는 뜻이 아니다. Orca 중첩 깊이 제한에 걸리면 PM/PL이 평평한 작업 파동으로 배정한다.
 - 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다. 조직이 선언한 fallback 프로필로 넘기는 것은 이 전환에 해당하지 않으며, 절차는 아래 「사용 한도」를 따른다.
@@ -76,13 +79,14 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 감독 worker는 다음처럼 역할, 조직 파일과 이번 kickoff의 workflow로 터미널을 연 뒤 그 터미널에 작업을 넘긴다. `role-terminal`과 `worker-start`가 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 agent·모델·강도를 정하고, `worker-start` 래퍼가 `--spec` 앞에 받는 역할의 권한·책임·한계와 조직 파일·workflow·PM state 경로를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로 이 경로들이 머리글에 필요하다.
 
 ```text
-<orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <project>/.omt/organization.json --role junior --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
+node <runtime> role-worktree-create --org <project>/.omt/organization.json --role junior --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>
 node <runtime> terminal-idle-check --terminal <handle>
 node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
 node <runtime> worker-start --org <project>/.omt/organization.json --role junior --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --terminal <handle> --worktree id:<worktreeId> --spec "<구체적인 작업>"
 node <runtime> role-spec --org <project>/.omt/organization.json --role senior --workflow-id <workflowId> --state <pm-state> --spec "<구체적인 작업>"
 ```
+
+`workflow-attach`가 receipt를 받으면 같은 역할의 수정·재시도·재검토는 그 `worktreeId`를 재사용한다. 새 task도 위의 수용·통합·Dispatch clear/release·소유 터미널 종료·Git clean 증거를 모두 갖춘 같은 역할 worktree를 우선 재사용한다. `role-worktree-create --worktree <worktreeId>`는 이 검증과 새 역할 세션 증명을 한 호출로 수행한다. 단, Junior 반려를 Senior가 같은 attempt에서 고칠 때에는 기존의 깨끗한 Senior 역할 워크트리를 `role-worktree-create ... --role senior --worktree <senior-worktreeId>`로 다시 열어 이전 Senior task의 보존·종료 증거와 동시 프로세스 부재를 확인하고, Junior HEAD와 Senior HEAD가 `--base`에 일치하는지 검증해 전환 기록을 만든다. 그 기록과 Senior receipt를 같은 task의 `workflow-rework`에 연결한다. 원래 task의 `role: junior`는 바꾸지 않으며 Senior 실행 역할은 전환 기록과 receipt에 따로 남긴다. workflow를 고정한 뒤 후속 task를 만들라는 우회는 하지 않는다.
 
 질문 때문에 점검이 거부되면 `node <runtime> prompt-answer --org <project>/.omt/organization.json --terminal <handle> --workflow-id <workflowId> --state <pm-state>`로 답한 뒤 위 `terminal-idle-check`부터 다시 실행한다. 분류기가 알아보지 못한 화면(캡처되지 않은 명령 승인·업데이트 안내)에는 키를 보내지 않으며, Orca가 그 터미널을 `blockedReason`으로 멈춘 상태라고 보고하면 `escalate`(`next`: `report-upstream`)로 끝나므로 점검으로 되돌아가지 않고 보고한다. `prompt-answer`는 호출한 터미널이 그 역할의 감독자이고 대상 터미널의 워크트리를 Orca가 이 kickoff의 PM 워크트리 아래에 만들어진 것으로 기록하고 있을 때에만 화면을 읽고 키를 한 번 보낸 뒤 다시 읽어 확인하며, 모든 시도를 PM state의 `prompt-answers.jsonl`에 기록한다. 호출자는 환경 변수로만 식별되므로 이 확인은 감독 관계가 없는 터미널의 실수 호출을 막을 뿐 악의적인 프로세스를 막지는 못한다. 결과가 `escalate`나 `unresolved`이거나 거부되었을 때, 또는 사람이 정해야 하는 질문일 때에만 PM이 `director-signal`로 이사에게 알린다. 절차와 거부 코드는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「프롬프트 질문 답하기」 절을 따른다.
 
@@ -99,7 +103,7 @@ Claude 역할 터미널은 `--autocompact 250k`(조직의 `policy.claudeAutoComp
 | 상위 | Senior | 설계와 구현이 한 번에 필요한 일, 여러 모듈에 걸치는 변경, 공개 인터페이스·보안·데이터 형식 변경, Junior 구현이 검토에서 한 번 반려된 일 |
 | 하위 | Junior | 파일과 완료 조건이 닫힌 수정, 정해진 반복 편집, 인용 수집처럼 결정적으로 검증할 수 있는 일 |
 
-Senior에게 구현을 맡길 때에는 workflow task의 `role`을 `senior`로 적는다. 그 task의 필수 검토는 구현한 실행과 다른 Senior 실행이나 PL·PM이 맡으며, 같은 실행이 검토하면 런타임이 거부한다. 판단이 애매하면 하위 등급으로 시작한다. Junior 구현이 첫 검토에서 반려되면 수정을 Junior에게 다시 맡기지 않고 그 finding과 함께 Senior에게 올린다. Senior는 Junior의 워크트리에서 시작할 수 없으므로, Junior의 커밋을 기준으로 만든 새 워크트리에서 고치게 하고 그 실행을 `workflow-rework`로 연결한다. Junior가 두 번째 반려를 받을 때까지 기다리면 검토와 수정이 한 번씩 더 들고, finding도 여러 차례에 나뉘어 나오기 쉽다.
+Senior에게 구현을 맡길 때에는 workflow task의 `role`을 `senior`로 적는다. 그 task의 필수 검토는 구현한 실행과 다른 Senior 실행이나 PL·PM이 맡으며, 같은 실행이 검토하면 런타임이 거부한다. 판단이 애매하면 하위 등급으로 시작한다. Junior 구현이 첫 검토에서 반려되어 Senior의 별도 소유권이 필요하면, Junior HEAD를 기준으로 만든 Senior 역할 세션 worktree를 전환 기록으로 증명해 같은 task의 `workflow-rework`로 연결한다. Junior가 두 번째 반려를 받을 때까지 기다리면 검토와 수정이 한 번씩 더 들고, finding도 여러 차례에 나뉘어 나오기 쉽다.
 
 ## 실행 깊이
 
@@ -162,9 +166,48 @@ node <runtime> workflow-allowance --id <workflowId> --state <pm-state> --revisio
 
 kickoff 안의 커밋과 워크트리 사이 병합은 PM이 처리하되 단순 개발 요청을 운영 배포나 외부 메시지 발송 허가로 확대하지 않는다. 완료 시점에는 주인 체크아웃에 직접 합치지 않고, 게이트를 통과한 통합 워크트리의 경로와 HEAD를 이사에게 넘긴다. 주인 브랜치와 충돌해 `deliver`가 되돌아오면 주인 브랜치를 통합 워크트리에 합쳐 해결하고 게이트부터 다시 통과시킨다. 구체적인 머지 절차는 PL 스킬을 따른다.
 
-감독 작업은 accepted settlement 후 reuse/retain/release 중 하나를 정하고, 워크트리 회수는 코드·증거 보존 및 실제 프로세스 종료를 확인한 뒤 Orca로 처리한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
+감독 작업은 task가 수용되고 workflow 통합이 끝난 뒤에만 reuse/retain/release 중 하나를 정한다. 중간 회수는 `role-worktree-reclaim --org <organization.json> --state <pm-state> --workflow-id <workflowId> --workflow-task <task id> --repo <integration-worktree> --worktree <receipt-worktreeId> --merge-commit <integration-commit>`으로 수행한다. 이 명령은 Dispatch가 clear인지, worker-release와 역할 터미널 close가 성공했는지, 자식 HEAD가 통합 커밋의 조상인지, 자식 Git 상태가 깨끗한지를 확인한 뒤에만 Orca 회수를 호출한다. 하나라도 증명하지 못하면 워크트리를 보존하고 PM이 재사용하거나 조정한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 
 worker를 기다리는 동안에는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 따른다. 원시 `check --wait` 대신 `node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <deliveryId>]`로 기다리면 heartbeat만 온 경우에는 깨어나지 않는다. 대기 시간은 완료나 실패의 근거가 아니지만, 그 시점마다 활동을 다시 조회해 진행 요청과 보고를 결정한다. 무응답 worker를 사용자에게 `진행 중`으로 보고하지 않는다.
+
+## 정형 문서
+
+### 읽는 문서와 현재 revision 조회
+
+PM이 읽는 정형 문서는 `01. 기획`, `03. 구현`, `05. 수용` 단계의 문서들이다. `kickoff-show`로 특정 kickoff의 `worktreeId`를 확인한다.
+
+```text
+node <runtime> kickoff-show --org <project>/.omt/organization.json
+```
+
+문서의 현재 revision은 `kickoff-show` 결과에 담기지 않는다. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 "정형 `.omt` 문서 CLI" 절이 정한 `doc-resolve-kickoff` → `doc-id` → `doc-show` 순서로 조회하며, `doc-show` 결과의 `revision` 필드를 읽는다.
+
+### 작성·검토·수정 권한
+
+설계 문서 [`docs/plan/structured-omt-documents.md`](../../../../../docs/plan/structured-omt-documents.md)의 3.4절 역할별 권한 표에 따라 PM은 다음을 수행한다.
+
+| 단계 | 문서 유형 | 권한 |
+|---|---|---|
+| 01. 기획 | kickoff-brief-ref | kickoff 등록 작성 |
+| 03. 구현 | workflow-task-ref | workflow request 작성 |
+| 05. 수용 | acceptance-ref | 작성 (PM 전용) |
+
+PM은 자신이 작성한 `01. 기획`·`03. 구현`·`05. 수용` 문서만 수정할 수 있다. 3.4절의 주석을 참조하여 이번 실행에 하위 역할이 있는 경우 `02. 설계` 작성 권한을 판단한다.
+
+### 등록부와 참조만으로 재개하는 절차
+
+PM이 진행 중인 kickoff과 workflow를 다시 찾으려면 다음 절차를 따른다.
+
+1. `kickoff-show`로 등록부에서 `pm.worktreeId`를 확인한다.
+2. 그 `worktreeId`로 `doc-resolve-kickoff`를 호출해 활성 kickoff의 식별자(`kickoffHash`)를 얻는다.
+3. `workflow-status`로 workflow 상태를 읽어 진행 중인 task를 파악한다.
+4. `doc-id`로 필요한 문서의 `docId`를 조립하고 `doc-show`로 경로와 현재 revision을 확인한다.
+
+설계 문서의 3.11절 "등록부와 참조만으로 재개하는 절차"를 참조한다.
+
+### Run 생성 후 정형 문서 메시지 계약
+
+Run이 생성된 뒤 PM이 이사와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다. `review-record`, `gate-check`, `accept` 명령을 부를 때는 `--org` 옵션을 항상 넘긴다.
 
 진행 상황이나 최종 결과를 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. 진행 상태 판정은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 

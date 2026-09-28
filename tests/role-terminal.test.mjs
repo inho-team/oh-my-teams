@@ -41,6 +41,25 @@ import { VERIFIED_ORCA_VERSION } from "../plugins/oh-my-teams/scripts/launch-mat
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
 const PROMPT = "me@host project %";
+const GLOBAL_RUN = "run_global";
+
+function runListReceipt(runs = [{ id: GLOBAL_RUN }], nextCursor = null) {
+  return JSON.stringify({ ok: true, result: { runs, nextCursor } });
+}
+
+function workerListReceipt(
+  workers,
+  { page = { hasMore: false, nextCursor: null }, run = GLOBAL_RUN } = {},
+) {
+  return JSON.stringify({
+    ok: true,
+    result: {
+      workers,
+      page,
+      scope: { source: "flag", run },
+    },
+  });
+}
 
 // Plays Orca's terminal verbs; the last screen repeats once the script ends.
 // Each create issues the next handle, `closeFails` makes close refuse, and
@@ -720,12 +739,8 @@ test("the launch documents open role terminals through role-terminal", () => {
   assert.match(runtime, /agent가 뜬 뒤 `terminal rename`으로 다시 지정한다/);
 });
 
-test("on Windows an Agy Gemini role without approval is refused before any terminal opens", async () => {
-  // 실측(Orca 1.4.204): Windows gemini+powershell → 8행(headless).
-  // 근거였던 1.4.204 판정 규칙은 1.4.210에서 교체되어 사라졌고 재검증할 Windows
-  // 머신이 없어 evidence는 verified가 아니라 unverified로 낮아졌다(#104).
-  // headless 경로는 openRoleTerminal에서 blocked와 동일하게 throw되며
-  // 이유 코드는 orca-idle-requires-narrow-screen.
+test("on Windows an Agy Gemini role is refused before any terminal opens", async () => {
+  // Windows Agy의 감독 터미널 경로는 검증되지 않았으므로 새 실행을 차단한다.
   const org = example();
   const gemini = roleCommand(org, "senior");
   const calls = [];
@@ -733,7 +748,7 @@ test("on Windows an Agy Gemini role without approval is refused before any termi
     calls.push(argv);
     return { code: 0, stdout: "{}" };
   };
-  // Windows powershell + gemini → 8행 headless → orca-idle-requires-narrow-screen
+  // Windows powershell + gemini → blocked
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -748,7 +763,7 @@ test("on Windows an Agy Gemini role without approval is refused before any termi
       trustRecordExists: true,
       allowUnverified: false,
     }),
-    /orca-idle-requires-narrow-screen/,
+    /agy-interactive-terminal-unavailable/,
   );
   assert.equal(calls.length, 0);
 
@@ -787,8 +802,7 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
     return { code: 0, stdout: "{}" };
   };
 
-  // Agy gemini win32 powershell → 8행 headless → orca-idle-requires-narrow-screen → 터미널 생성 없음
-  // (단일 명령 → isCompoundCommand=false → 2행 건너뜀 → 8행 headless, evidence: unverified)
+  // Windows Agy는 matrix에서 차단되어 터미널을 만들지 않는다.
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
@@ -801,7 +815,7 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
       allowUnverified: false,
       ...{ settleMs: 5, readyMs: 20, pollMs: 1 },
     }),
-    /orca-idle-requires-narrow-screen/,
+    /agy-interactive-terminal-unavailable/,
   );
   // matrix 거부는 orca 호출 전에 일어남
   assert.equal(
@@ -835,11 +849,8 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
   );
   assert.ok(callsTrust.length > 0, "터미널 생성까지 진행한다");
 });
-test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", async () => {
-  // finding: missing-headless-refusal-test
-  // Agy + win32 + posix shell + 신뢰 있음 + gpt-oss 모델 → 표 규칙 9 headless
-  // headless는 터미널 경로가 아니므로, 터미널 생성 전에 거부해야 한다.
-  const headlessCommand = {
+test("Windows Agy 차단은 터미널 생성 호출을 일으키지 않는다", async () => {
+  const blockedCommand = {
     role: "senior",
     profile: "agy-gpt-oss",
     provider: "agy",
@@ -855,11 +866,11 @@ test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", as
     return { code: 0, stdout: "{}" };
   };
 
-  // win32 + posix shell + 신뢰 있음 → rule 2 건너뜀(powershell 아님), rule 9 headless
+  // win32 Agy는 셸·모델과 무관하게 새 세션을 열기 전에 차단한다.
   await assert.rejects(
     openRoleTerminal({
       worktree: "id:repo::C:/wt",
-      command: headlessCommand,
+      command: blockedCommand,
       executable: "orca",
       execute,
       platform: "win32",
@@ -873,22 +884,22 @@ test("headless 예측 시 터미널 생성 호출이 일어나지 않는다", as
       pollMs: 1,
     }),
     (err) => {
-      assert.match(err.message, /headless/, "headless 거부 메시지 포함");
+      assert.match(
+        err.message,
+        /agy-interactive-terminal-unavailable/,
+        "차단 reason 코드 포함",
+      );
       return true;
     },
   );
   assert.equal(
     orcaCalls.length,
     0,
-    "headless 예측 거부는 Orca terminal create를 호출하지 않는다",
+    "차단된 Windows Agy는 Orca terminal create를 호출하지 않는다",
   );
 });
 
-test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 supervised-terminal이 아니라 headless로 거부된다", async () => {
-  // #46/agy-win-untrusted-path: 규칙 순서 구멍 수정 확인.
-  // 옛 순서에서는 플랫폼을 보지 않는 규칙 3(agent-trust-workspace)이 먼저 걸려 win32에서도
-  // 터미널 생성까지 진행했다(docs/plan/agy-terminal-path.md의 2026-09-18 r3-c1 실측이 이 증상을
-  // 확인했다). 새 규칙(2-1)이 win32 + agy를 신뢰 상태와 무관하게 headless로 먼저 걸러낸다.
+test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 차단된다", async () => {
   const org = example();
   const gemini = roleCommand(org, "senior");
 
@@ -913,16 +924,16 @@ test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 supervise
         pollMs: 1,
       }),
       (err) => {
-        assert.match(err.message, /headless/, "headless 거부 메시지 포함");
+        assert.match(err.message, /agy-interactive-terminal-unavailable/);
         assert.match(
           err.message,
-          /agy-headless-no-trust/,
-          "새 규칙의 reason 코드 포함",
+          /agy-interactive-terminal-unavailable/,
+          "Windows Agy 차단 reason 코드 포함",
         );
         assert.equal(
           err.matrixRefusal?.path,
-          "headless",
-          `trustRecordExists=${trustRecordExists}일 때 headless로 거부해야 한다`,
+          "blocked",
+          `trustRecordExists=${trustRecordExists}일 때 차단해야 한다`,
         );
         return true;
       },
@@ -1406,10 +1417,7 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
     ok: true,
     result: { wait: { satisfied: true } },
   });
-  const noActiveDispatch = JSON.stringify({
-    ok: true,
-    result: { workers: [] },
-  });
+  const noActiveDispatch = workerListReceipt([]);
   const execute = async (argv) => {
     calls.push(argv);
     return {
@@ -1419,9 +1427,11 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
       stdout:
         argv[2] === "wait"
           ? idle
-          : argv[2] === "worker-list"
-            ? noActiveDispatch
-            : '{"ok":true}',
+          : argv[2] === "run-list"
+            ? runListReceipt()
+            : argv[2] === "worker-list"
+              ? noActiveDispatch
+              : '{"ok":true}',
     };
   };
   const result = await clearRoleTerminal({
@@ -1433,13 +1443,14 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
     [
+      "orchestration run-list",
       "orchestration worker-list",
       "terminal wait",
       "terminal send",
       "terminal wait",
     ],
   );
-  assert.deepEqual(calls[2], [
+  assert.deepEqual(calls[3], [
     "orca",
     "terminal",
     "send",
@@ -1461,6 +1472,14 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
         executable: "orca",
         execute: async (argv) => {
           busy.push(argv);
+          if (argv[2] === "run-list") {
+            return {
+              code: 0,
+              stderr: "",
+              timedOut: false,
+              stdout: runListReceipt(),
+            };
+          }
           if (argv[2] === "worker-list") {
             return {
               code: 0,
@@ -1484,6 +1503,7 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
   assert.deepEqual(
     busy.map((argv) => argv.slice(1, 3).join(" ")),
     [
+      "orchestration run-list",
       "orchestration worker-list",
       "terminal wait",
       "terminal read",
@@ -1496,24 +1516,27 @@ test("clearRoleTerminal refuses /clear on a terminal with an active dispatch, wi
   const calls = [];
   const execute = async (argv) => {
     calls.push(argv);
+    if (argv[2] === "run-list") {
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: runListReceipt(),
+      };
+    }
     if (argv[2] === "worker-list") {
       return {
         code: 0,
         stderr: "",
         timedOut: false,
-        stdout: JSON.stringify({
-          ok: true,
-          result: {
-            workers: [
-              {
-                dispatchId: "ctx_active",
-                taskId: "task_active",
-                dispatchStatus: "dispatched",
-                agentTerminalHandle: "term_1",
-              },
-            ],
+        stdout: workerListReceipt([
+          {
+            dispatchId: "ctx_active",
+            taskId: "task_active",
+            dispatchStatus: "dispatched",
+            agentTerminalHandle: "term_1",
           },
-        }),
+        ]),
       };
     }
     throw new Error(`unexpected call ${argv[2]}`);
@@ -1536,7 +1559,7 @@ test("clearRoleTerminal refuses /clear on a terminal with an active dispatch, wi
   // Only the lookup ran; /clear was never typed into the busy terminal.
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
-    ["orchestration worker-list"],
+    ["orchestration run-list", "orchestration worker-list"],
   );
 });
 
@@ -1544,6 +1567,8 @@ test("clearRoleTerminal skips /clear, without refusing, when an active dispatch 
   const calls = [];
   const execute = async (argv) => {
     calls.push(argv);
+    if (argv[2] === "run-list")
+      return { code: 0, stderr: "", timedOut: false, stdout: runListReceipt() };
     if (argv[2] === "worker-list") {
       const err = new Error("connection reset");
       throw err;
@@ -1562,7 +1587,7 @@ test("clearRoleTerminal skips /clear, without refusing, when an active dispatch 
   });
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
-    ["orchestration worker-list"],
+    ["orchestration run-list", "orchestration worker-list"],
   );
 });
 
@@ -1570,23 +1595,21 @@ test("findActiveDispatch counts an unresolved dispatch status as unknown, never 
   // A worker matching the terminal sits in "pending" (not yet "dispatched",
   // not "completed" or "failed" either): the documented status vocabulary
   // does not say the Dispatch is settled, so /clear must not be assumed safe.
-  const execute = async () => ({
+  const execute = async (argv) => ({
     code: 0,
     stderr: "",
     timedOut: false,
-    stdout: JSON.stringify({
-      ok: true,
-      result: {
-        workers: [
-          {
-            dispatchId: "ctx_pending",
-            taskId: "task_pending",
-            dispatchStatus: "pending",
-            agentTerminalHandle: "term_1",
-          },
-        ],
-      },
-    }),
+    stdout:
+      argv[2] === "run-list"
+        ? runListReceipt()
+        : workerListReceipt([
+            {
+              dispatchId: "ctx_pending",
+              taskId: "task_pending",
+              dispatchStatus: "pending",
+              agentTerminalHandle: "term_1",
+            },
+          ]),
   });
   const result = await findActiveDispatch("term_1", {
     executable: "orca",
@@ -1595,33 +1618,268 @@ test("findActiveDispatch counts an unresolved dispatch status as unknown, never 
   assert.deepEqual(result, { status: "unknown" });
 });
 
-test("findActiveDispatch counts a truncated page with no match on it as unknown, never as clear", async () => {
-  // No worker on this page names the terminal, but page.hasMore says a later
-  // page might still hold its Dispatch: "clear" would be a guess.
-  const execute = async () => ({
-    code: 0,
-    stderr: "",
-    timedOut: false,
-    stdout: JSON.stringify({
-      ok: true,
-      result: {
-        workers: [
-          {
-            dispatchId: "ctx_other",
-            taskId: "task_other",
-            dispatchStatus: "dispatched",
-            agentTerminalHandle: "term_2",
-          },
-        ],
-        page: { hasMore: true },
-      },
-    }),
-  });
+test("findActiveDispatch follows a 101-row cursor page before clearing a terminal", async () => {
+  const calls = [];
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({
+    dispatchId: `ctx_${index}`,
+    dispatchStatus: "completed",
+    agentTerminalHandle: `other_${index}`,
+  }));
+  const execute = async (argv) => {
+    calls.push(argv);
+    const secondPage = argv.includes("--cursor");
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout:
+        argv[2] === "run-list"
+          ? runListReceipt()
+          : workerListReceipt(
+              secondPage
+                ? [
+                    {
+                      dispatchId: "ctx_target",
+                      taskId: "task_target",
+                      dispatchStatus: "completed",
+                      agentTerminalHandle: "term_1",
+                    },
+                  ]
+                : firstPage,
+              {
+                page: secondPage
+                  ? { hasMore: false, nextCursor: null }
+                  : { hasMore: true, nextCursor: "opaque-page-2" },
+              },
+            ),
+    };
+  };
   const result = await findActiveDispatch("term_1", {
     executable: "orca",
     execute,
   });
-  assert.deepEqual(result, { status: "unknown" });
+  assert.deepEqual(result, { status: "clear" });
+  assert.deepEqual(calls[2], [
+    "orca",
+    "orchestration",
+    "worker-list",
+    "--run",
+    GLOBAL_RUN,
+    "--include-remote",
+    "--limit",
+    "100",
+    "--cursor",
+    "opaque-page-2",
+    "--json",
+  ]);
+});
+
+test("findActiveDispatch finds a target terminal's active Dispatch on a later page", async () => {
+  let page = 0;
+  const execute = async (argv) => {
+    if (argv[2] === "run-list") {
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: runListReceipt(),
+      };
+    }
+    page += 1;
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout: workerListReceipt(
+        page === 1
+          ? [{ dispatchStatus: "completed" }]
+          : [
+              {
+                dispatchId: "ctx_late",
+                taskId: "task_late",
+                dispatchStatus: "dispatched",
+                resource: { terminalHandle: "term_1" },
+              },
+            ],
+        {
+          page:
+            page === 1
+              ? { hasMore: true, nextCursor: "opaque-page-2" }
+              : { hasMore: false, nextCursor: null },
+        },
+      ),
+    };
+  };
+  const result = await findActiveDispatch("term_1", {
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, {
+    status: "active",
+    dispatchId: "ctx_late",
+    taskId: "task_late",
+  });
+});
+
+test("findActiveDispatch preserves a terminal when run or worker paging is incomplete", async () => {
+  for (const [label, responses] of [
+    ["missing-cursor", [{ workers: [], page: { hasMore: true } }]],
+    ["missing-page", [{ workers: [] }]],
+    [
+      "bound-scope",
+      [
+        {
+          workers: [],
+          page: { hasMore: false, nextCursor: null },
+          scope: { source: "bound" },
+        },
+      ],
+    ],
+    [
+      "cyclic",
+      [
+        {
+          workers: [],
+          page: { hasMore: true, nextCursor: "repeat" },
+          scope: { source: "flag", run: GLOBAL_RUN },
+        },
+        {
+          workers: [],
+          page: { hasMore: true, nextCursor: "repeat" },
+          scope: { source: "flag", run: GLOBAL_RUN },
+        },
+      ],
+    ],
+    [
+      "failure",
+      [
+        {
+          workers: [],
+          page: { hasMore: true, nextCursor: "next" },
+          scope: { source: "flag", run: GLOBAL_RUN },
+        },
+        null,
+      ],
+    ],
+  ]) {
+    let current = 0;
+    const execute = async (argv) => {
+      if (argv[2] === "run-list") {
+        return {
+          code: 0,
+          stderr: "",
+          timedOut: false,
+          stdout: runListReceipt(),
+        };
+      }
+      const response = responses[current++];
+      if (!response) throw new Error("page transport failed");
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: JSON.stringify({ ok: true, result: response }),
+      };
+    };
+    const result = await findActiveDispatch("term_1", {
+      executable: "orca",
+      execute,
+    });
+    assert.deepEqual(result, { status: "unknown" }, label);
+  }
+});
+
+test("findActiveDispatch follows every global run page before checking each explicit Run", async () => {
+  const calls = [];
+  const firstRuns = Array.from({ length: 100 }, (_, index) => ({
+    id: `run_${index}`,
+  }));
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "run-list") {
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: argv.includes("--cursor")
+          ? runListReceipt([{ id: "run_target" }])
+          : runListReceipt(firstRuns, "runs-page-2"),
+      };
+    }
+    const run = argv[argv.indexOf("--run") + 1];
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout: workerListReceipt(
+        run === "run_target"
+          ? [
+              {
+                dispatchId: "ctx_target",
+                dispatchStatus: "dispatched",
+                resource: { terminalHandle: "term_1" },
+              },
+            ]
+          : [],
+        { run },
+      ),
+    };
+  };
+  const result = await findActiveDispatch("term_1", {
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, {
+    status: "active",
+    dispatchId: "ctx_target",
+    taskId: null,
+  });
+  assert.deepEqual(calls[1], [
+    "orca",
+    "orchestration",
+    "run-list",
+    "--limit",
+    "100",
+    "--cursor",
+    "runs-page-2",
+    "--json",
+  ]);
+  assert.ok(
+    calls.some(
+      (argv) => argv[2] === "worker-list" && argv.includes("run_target"),
+    ),
+  );
+});
+
+test("findActiveDispatch preserves a terminal when global Run discovery is incomplete", async () => {
+  for (const [label, replies] of [
+    ["missing-cursor", [{ runs: [{ id: GLOBAL_RUN }] }]],
+    [
+      "cyclic-cursor",
+      [
+        { runs: [{ id: "run_one" }], nextCursor: "repeat" },
+        { runs: [{ id: "run_two" }], nextCursor: "repeat" },
+      ],
+    ],
+    ["transport-error", [null]],
+  ]) {
+    let current = 0;
+    const result = await findActiveDispatch("term_1", {
+      executable: "orca",
+      execute: async (argv) => {
+        assert.equal(argv[2], "run-list", label);
+        const reply = replies[current++];
+        if (!reply) throw new Error("run-list transport failed");
+        return {
+          code: 0,
+          stderr: "",
+          timedOut: false,
+          stdout: JSON.stringify({ ok: true, result: reply }),
+        };
+      },
+    });
+    assert.deepEqual(result, { status: "unknown" }, label);
+  }
 });
 
 test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/reason, not the decision's guess (#84)", async (t) => {
@@ -1646,6 +1904,9 @@ test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/rea
   // cannot decide whether an active Dispatch stands in the way.
   const execute = async (argv) => {
     calls.push(argv);
+    if (argv[2] === "run-list") {
+      return { code: 0, stderr: "", timedOut: false, stdout: runListReceipt() };
+    }
     if (argv[2] === "worker-list") throw new Error("connection reset");
     throw new Error(`unexpected call ${argv[2]}`);
   };
@@ -1673,7 +1934,7 @@ test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/rea
   });
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
-    ["orchestration worker-list"],
+    ["orchestration run-list", "orchestration worker-list"],
   );
 });
 

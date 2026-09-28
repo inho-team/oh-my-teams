@@ -13,12 +13,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert } from "./core.mjs";
-import {
-  answerHeadless,
-  headlessDetail,
-  listHeadless,
-  stopHeadless,
-} from "./headless.mjs";
+import { headlessDetail, listHeadless, stopHeadless } from "./headless.mjs";
 
 // The page is a plain HTML file beside this module, read once at load.
 const DASHBOARD_HTML = fs.readFileSync(
@@ -128,17 +123,11 @@ export function createDashboardServer({ stateDir, token, headless = {} }) {
       if (request.method === "GET" && !action) {
         return send(response, 200, headlessDetail(stateDir, id, headless));
       }
-      if (request.method === "POST" && action === "answer") {
-        const body = await readBody(request);
-        return send(
-          response,
-          200,
-          answerHeadless(stateDir, id, body.text, {
-            ...headless,
-            timeoutMs: headless.timeoutMs,
-          }),
-        );
-      }
+      if (request.method === "POST" && action === "answer")
+        return send(response, 410, {
+          error:
+            "Headless follow-up turns were removed; this dashboard is read-only except stop",
+        });
       if (request.method === "POST" && action === "stop") {
         return send(response, 200, stopHeadless(stateDir, id));
       }

@@ -2,6 +2,8 @@
 
 oh my teams는 역할·작업 계약·검증 gate를 소유하고, worktree·터미널·Task/Dispatch·settlement는 Orca에 맡긴다. 저장소에 복사된 명령 옵션을 최신 사양으로 간주하지 않는다.
 
+2026-09-28부터 모든 새 역할 실행은 Orca 역할 터미널에 연결해야 합니다. 아래에 남아 있는 `headless`·`headless-start` 표기는 이전 kickoff의 기록, receipt, 사용량과 복구를 읽기 위한 역사적 근거이며 새 실행의 지시가 아닙니다. 특히 아래 Windows Agy의 과거 `headless-start` 서술은 더 이상 실행 경로가 아니며 현재 matrix와 CLI는 이를 거부합니다. 새 세션 없는 실행과 receipt는 런타임이 거부합니다.
+
 감독 실행을 시작할 때 한 번 다음 절차를 따른다.
 
 1. 현재 세션의 공식 `orca-cli` skill이 정한 discovery 규칙으로 실행 파일을 하나 선택한다. 조용히 다른 실행 파일로 전환하지 않는다.
@@ -95,7 +97,7 @@ node <runtime> worker-start --org <organization.json> --role <pl|senior|junior> 
 | 실행기           | 시작 경로                                                                                                                                                                  |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude·Codex·Agy | 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 모델·강도·권한 우회 플래그를 담은 명령의 터미널을 열고, 그 터미널을 `--terminal`로 넘긴다. `--terminal` 없이 호출하면 거부한다. |
-| Agy(모델·플랫폼 조합에 따라) | `scripts/launch-matrix.mjs`의 호환성 표가 시작 경로를 정한다. 표가 `headless`를 돌려주면 `headless-start`로 실행하고, `blocked`를 돌려주면 이유 코드와 `nextAction`을 보고하며 터미널을 만들지 않는다(아래 Agy 대기 판정 문단). |
+| Agy(모델·플랫폼 조합에 따라) | `scripts/launch-matrix.mjs`의 호환성 표가 역할 터미널 경로를 정한다. 표가 `blocked`를 돌려주면 이유 코드와 `nextAction`을 보고하며 터미널을 만들지 않는다. |
 | Ollama           | 대화형 Orca agent가 없으므로 감독 worker로 띄우지 않고 `work` 하네스로 실행한다.                                                                                           |
 
 Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권한 우회 플래그를 보장할 수 없기 때문이다. 자세한 근거는 아래 「역할 탭 제목」 절의 권한 우회 플래그 문단에 있다.
@@ -130,14 +132,21 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 ### 역할 터미널에서 시작
 
-모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Agy 역할의 시작 경로는 `role-terminal`이 `scripts/launch-matrix.mjs`의 호환성 표를 조회해 정한다. 표가 `blocked`를 돌려주면 터미널을 만들기 전에(시도 예약 전에) 거부하고, `headless`를 돌려주면 아래 Agy 대기 판정 문단의 headless 경로를 따른다. 실행 경로가 `supervised-terminal`이고 근거가 `unverified`인 조합도 별도 승인 없이 터미널을 연다. 결과의 `matrix`와 `warnings`에 근거 등급·환경·버전 경고를 남기며, 실행 후 준비 상태와 모델을 확인하기 전에는 작업을 넘기지 않는다. `--allow-unverified` 옵션은 이전 호출과의 호환을 위해 남겨 두며 알려진 실패를 우회하지 않는다. 검사 대상은 이사(kickoff를 선언한 호스트 세션)가 아니라 저장된 역할 프로필의 실행기다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
+모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Agy 역할의 시작 경로는 `role-terminal`이 `scripts/launch-matrix.mjs`의 호환성 표를 조회해 정한다. 표가 `blocked`를 돌려주면 터미널을 만들기 전에 시도 예약도 하지 않고 PM에게 보고한다. 실행 경로가 `supervised-terminal`이고 근거가 `unverified`인 조합도 별도 승인 없이 터미널을 연다. 결과의 `matrix`와 `warnings`에 근거 등급·환경·버전 경고를 남기며, 실행 후 준비 상태와 모델을 확인하기 전에는 작업을 넘기지 않는다. `--allow-unverified` 옵션은 이전 호출과의 호환을 위해 남겨 두며 알려진 실패를 우회하지 않는다. 검사 대상은 이사(kickoff를 선언한 호스트 세션)가 아니라 저장된 역할 프로필의 실행기다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
 
 ```text
-<orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <organization.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>
+node <runtime> role-worktree-create --org <organization.json> --role <역할> --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> [--worktree <worktreeId> --prior-workflow-id <accepted-workflowId> --prior-task-id <accepted-taskId>]
 node <runtime> terminal-idle-check --terminal <handle>
 node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
 node <runtime> worker-start --org <organization.json> --role <역할> --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> [--purpose review] --terminal <handle> --worktree id:<worktreeId> --spec <작업>
+```
+
+`workflow-attach`는 같은 역할의 수정·재시도를 receipt의 `worktreeId`에 고정한다. 다른 workflow의 수용된 같은 역할 worktree를 재사용할 때에는 `--prior-workflow-id`와 `--prior-task-id`를 함께 명시한다. 런타임은 그 task의 accepted 상태, 실행 역할, worktree ID와 현 task의 소유권 충돌 부재를 확인하고 기존 Git·통합·terminal gate를 다시 적용하며, 자동으로 source를 추측하지 않는다. 다만 반려된 Junior task는 기존의 깨끗한 Senior 역할 worktree를 재사용해 역할·모델·워크트리 연결을 증명하고, Junior worktree의 HEAD와 Senior worktree의 HEAD가 같은 기준 커밋임을 검증해 전환 기록을 만들었을 때에만 같은 attempt의 `workflow-rework`에서 Senior worktree ID를 받을 수 있다. 원래 task의 `role`은 Junior로 보존하며, Senior 실행 역할은 전환 기록과 rework receipt에 별도로 기록한다. workflow가 고정된 뒤 후속 task를 만들라는 우회는 하지 않는다.
+
+**수용·통합 후 중간 회수.** PM은 해당 task가 `accepted`이고 PM 통합 HEAD가 증명되면 다른 workflow task가 남아 있어도 다음 명령을 실행한다. 이 명령은 usage ledger의 `worker-start` receipt에서 terminal·Dispatch를 찾고, Run-bound 호출의 암묵적 `worker-list`를 전역 근거로 쓰지 않는다. 대신 모든 `run-list` cursor page를 읽고 각 Run에 명시 `worker-list --run <id>`를 실행해 모든 worker cursor page의 `scope.source`가 `flag`이고 scope Run ID가 요청 ID와 같은지 확인한 뒤에만 `clear`로 판정한다. 이어서 자식 HEAD와 `--merge-commit`이 PM 통합 HEAD에 포함되는지, 자식 Git 상태가 terminal close 전후 모두 깨끗한지 확인한다. settled Dispatch를 release하고 역할 터미널을 닫은 뒤, 정확한 handle·tabId·`ptyKilled:true`, Dispatch clear·release, 사후 빈 terminal list 영수증을 `usage/terminal-closures.jsonl`에 반드시 보존하고 Orca에 회수를 요청한다. 다음 재사용은 이 완전한 closure proof가 있는 과거 terminal만 제외하며, 목록에 보이지 않는다는 사실만으로 종료를 추정하지 않는다. ledger, Run·worker page, 종료, commit, 병합, Git 상태 중 하나라도 증명하지 못하면 어느 것도 회수하지 않고 워크트리를 보존한다.
+
+```text
+node <runtime> role-worktree-reclaim --org <organization.json> --state <pm-state> --workflow-id <workflowId> --workflow-task <task id> --repo <integration-worktree> --worktree <receipt-worktreeId> --merge-commit <integration-commit>
 ```
 
 **다른 task를 넘길 때의 새 대화.** 한 검토자 터미널이 Claude 세션 하나로 서로 다른 검토 8건을 처리하면서 호출마다 평균 231k, 최대 408k 토큰을 다시 보냈다. 그래서 래퍼는 Claude 터미널에 작업을 넘기기 전에 실행 기록(`.omt/usage/launches.jsonl`)에서 같은 터미널의 가장 최근 `worker-start`를 찾아 비교한다. 이번 시작이 검토(`--purpose review`)이거나, 직전 시작이 검토였거나, task가 다르면 터미널이 idle인지 확인한 뒤 `/clear`를 보내고, 다시 idle이 된 것을 확인하고 나서 작업을 넘긴다. task는 `--workflow-id`와 `--workflow-task`의 조합으로, 그것이 없으면 `--task`로 준 Orca Task로 구별한다. 둘 다 없는 시작은 같은 task임을 증명할 수 없으므로 다른 task로 본다. 같은 task의 수정은 대화를 유지하므로, 재작업을 넘길 때에도 같은 `--workflow-task`를 준다. 결과의 `freshContext`에 `cleared`와 그 이유(`review`, `purpose-changed`, `different-task`, `task-unidentified`, `same-task`, `first-task`)가 남고, 실행 기록에는 `workflowTaskId`, `orcaTaskId`, `purpose`가 함께 기록된다. Codex와 Agy 터미널은 비우지 않는다.
@@ -156,7 +165,7 @@ Orca의 `worker-start`는 Dispatch를 먼저 만든 뒤, 넘겨받은 터미널�
 
 Orca 1.4.203은 Claude 터미널의 대기 상태를 agent가 보내는 터미널 제목(`✳`로 시작하는 제목)과 상태 훅으로, Codex 터미널은 같은 신호와 화면의 `OpenAI Codex` 배너(`model:`과 `directory:` 줄)로 판정한다. 대기 중인 Claude 터미널에 `terminal wait --for tui-idle`을 실행하면 곧바로 `satisfied: true`가 돌아오는 것을 확인했다. Codex 터미널은 소스에서 판정 규칙만 확인했고 실제 터미널로는 확인하지 않았다. Claude·Codex 터미널이 `timeout`으로 거부되면 agent가 아직 화면을 그리는 중이거나 다른 입력을 처리하는 중이므로, 화면을 읽어 확인한 뒤 보고한다. Claude의 폴더 신뢰 질문이나 권한 우회 모드를 처음 켤 때 나오는 확인 질문은 `role-terminal`이 답하지 않는다. 이런 질문이 새 워크트리에서 나오면 위 사전 점검이 `blockedReason`과 함께 거부하므로, 감독자가 「프롬프트 질문 답하기」 절의 `prompt-answer` 명령으로 답한 뒤 다시 점검한다. Claude 역할은 실제로 끝까지 확인했다. Claude Code 2.1.274와 Haiku 4.5로, Run을 바인딩한 PM 터미널에서 새 자식 워크트리에 `role-terminal` → `terminal-idle-check` → `worker-start --terminal` 순서로 작업을 넘기자 worker가 파일을 만들고 커밋한 뒤 `worker_done`을 보냈다(2026-09-17). 이 새 워크트리에서는 폴더 신뢰 질문도, 권한 우회 모드의 확인 질문도 나오지 않았다. 다만 이 확인 질문은 사용자 설정의 `skipDangerousModePermissionPrompt`가 켜진 환경이었으므로, 그 설정이 없는 환경에서는 나올 수 있다. 정산 뒤 `worker-release`는 `role-terminal`로 연 터미널을 `retained`(`external_terminal`)로 남기고 프로세스를 멈추지 않으므로, 워크트리를 회수할 때 그 터미널도 `terminal close`로 직접 닫는다. Codex 역할 터미널은 신뢰 질문이 나온다는 것만 확인했고(위 Codex 신뢰 문단), `worker_done`까지는 확인하지 않았다.
 
-Orca는 `antigravity` 터미널의 대기 상태를 화면으로 판정한다(`docs/plan/agy-terminal-path.md`의 「Orca 판정 규칙」 2절). 프롬프트 줄이 `>`만 있거나 `> <모드 이름> mode: ` 형식이면 대기로 본다. Agy가 보내는 `Stop` 훅은 이 판정을 대신하지 않는다. `agentIdentity`는 `live-hook` > `process` > `launch` > `completed-hook` > `sleeping-session` > `sibling` > `title` 순의 증거 우선순위(`PANE_AGENT_EVIDENCE_SOURCES`)로 결정되며, 에이전트 식별은 화면이 아니라 실행 명령(detectCmd agy)을 기준으로 삼는다(「Orca 판정 규칙」 6절). `isTerminalRunningAgent`의 liveness 판정과는 별개이다. `agentIdentity`는 터미널을 연 직후에는 `null`이었다가 몇 초 뒤 `antigravity`로 확정되므로, 조회가 이르면 식별 실패로 오인할 수 있다. POSIX 셸에서도 폭 조정 없이 명령이 그대로 입력된다. Orca 1.4.204 시절에는 판정 규칙 때문에 `stty cols 44`를 앞에 붙여 띄웠으나, Orca 1.4.210에서 판정 함수가 교체되었고 macOS에서는 폭 조정 여부와 무관하게 감독 터미널이 성립하는 것을 실측으로 확인했다([#104](https://github.com/inho-team/oh-my-teams/issues/104), 2026-09-25, Orca 1.4.210, Antigravity CLI 1.2.11). 결과의 `launched`와 `columns`에 실제로 입력한 명령과 폭이 남는다. 이 폭은 그 터미널의 작업 화면에도 적용된다. Windows에서도 마찬가지로 폭 조정을 붙이지 않는다(`docs/plan/agy-terminal-path.md`의 「설계」 7절; `plugins/oh-my-teams/scripts/role-terminal.mjs`의 `launchLine`). Orca 1.4.204 시절에는 `mode con: cols=44`로 폭을 조정해도 화면 배치만 macOS와 같아졌을 뿐 대기가 보고되지 않았고, `mode con: …; agy …`로 연 터미널의 제목이 `powershell.exe`로 남아 Orca가 agy로 인식하지 못했고, 아래 예외 경로의 주입도 `no_agent_detected`로 거부되었다([#46](https://github.com/inho-team/oh-my-teams/issues/46), [stablyai/orca#21110](https://github.com/stablyai/orca/issues/21110)). Windows에서 Agy는 신뢰 상태와 무관하게 실행 경로를 `headless`로 유지하되, 근거 등급이 `verified`가 아니다(규칙 2-1·8·9, `docs/plan/agy-terminal-path.md`의 「launch-matrix 규칙 순서 수정」 절). 신뢰 기록이 없거나 확인되지 않은 새 워크트리를 규칙 2-1이 규칙 3(`supervised-terminal`)보다 먼저 걸러내므로, Windows에서 Agy 역할을 처음 여는 새 워크트리도 감독 터미널을 열려고 시도하지 않는다([#46](https://github.com/inho-team/oh-my-teams/issues/46)의 결론과 일치). 근거였던 Orca 1.4.204의 판정 규칙은 더 이상 존재하지 않으며 재검증할 Windows 머신이 없다. Windows 11에서 `gemini-3.8-flash-medium` 역할이 `headless` 경로로 파일을 만들고 커밋한 뒤 `done`, `modelProof: matched`로 끝나는 것을 확인했다(`docs/plan/headless-runtime.md`의 Windows 검증). Agy 역할의 시작 경로는 `scripts/launch-matrix.mjs`의 호환성 표가 정하며, 표가 `headless`를 돌려주면 `headless-start`로 실행한다. `role-terminal`은 표가 `blocked`를 돌려주면 터미널을 만들기 전에 거부하므로, 사용자가 터미널을 열고 예외 주입을 승인한 뒤에야 실패를 알게 되는 일은 없다. 이 경로는 Orca의 터미널과 에이전트 인식을 거치지 않는다. 미확인: 표가 다루지 않는 조합에서의 실제 동작, `role-terminal` 경로에서 신뢰 기록이 있는 POSIX 워크트리의 동작, Windows에서 Agy CLI가 `trustedWorkspaces`에 실제로 기록하는 경로 표기(대소문자·구분자).
+Orca는 `antigravity` 터미널의 대기 상태를 화면으로 판정한다(`docs/plan/agy-terminal-path.md`의 「Orca 판정 규칙」 2절). 프롬프트 줄이 `>`만 있거나 `> <모드 이름> mode: ` 형식이면 대기로 본다. Agy가 보내는 `Stop` 훅은 이 판정을 대신하지 않는다. `agentIdentity`는 `live-hook` > `process` > `launch` > `completed-hook` > `sleeping-session` > `sibling` > `title` 순의 증거 우선순위(`PANE_AGENT_EVIDENCE_SOURCES`)로 결정되며, 에이전트 식별은 화면이 아니라 실행 명령(detectCmd agy)을 기준으로 삼는다(「Orca 판정 규칙」 6절). `isTerminalRunningAgent`의 liveness 판정과는 별개이다. `agentIdentity`는 터미널을 연 직후에는 `null`이었다가 몇 초 뒤 `antigravity`로 확정되므로, 조회가 이르면 식별 실패로 오인할 수 있다. POSIX 셸에서도 폭 조정 없이 명령이 그대로 입력된다. Orca 1.4.204 시절에는 판정 규칙 때문에 `stty cols 44`를 앞에 붙여 띄웠으나, Orca 1.4.210에서 판정 함수가 교체되었고 macOS에서는 폭 조정 여부와 무관하게 감독 터미널이 성립하는 것을 실측으로 확인했다([#104](https://github.com/inho-team/oh-my-teams/issues/104), 2026-09-25, Orca 1.4.210, Antigravity CLI 1.2.11). 결과의 `launched`와 `columns`에 실제로 입력한 명령과 폭이 남는다. 이 폭은 그 터미널의 작업 화면에도 적용된다. Windows에서도 마찬가지로 폭 조정을 붙이지 않는다(`docs/plan/agy-terminal-path.md`의 「설계」 7절; `plugins/oh-my-teams/scripts/role-terminal.mjs`의 `launchLine`). Orca 1.4.204 시절에는 `mode con: cols=44`로 폭을 조정해도 화면 배치만 macOS와 같아졌을 뿐 대기가 보고되지 않았고, `mode con: …; agy …`로 연 터미널의 제목이 `powershell.exe`로 남아 Orca가 agy로 인식하지 못했고, 아래 예외 경로의 주입도 `no_agent_detected`로 거부되었다([#46](https://github.com/inho-team/oh-my-teams/issues/46), [stablyai/orca#21110](https://github.com/stablyai/orca/issues/21110)).
 
 이 거부의 신호는 `code: "timeout"`, `kind: "execution-unconfigured"`이며 `failure-classify`는 PM의 `rebind-profile-agent`로 보낸다. 신호는 실행기를 구분하지 않지만, 같은 프로필의 터미널로 다시 시작해도 같은 거부가 재현된다는 판단은 Agy 터미널에만 해당한다. Claude·Codex 터미널은 위 문단대로 화면을 확인해 보고하며, 어느 경우에도 같은 명령을 반복하지 않는다. `adjust`는 진행 중인 kickoff의 조직 스냅샷을 바꾸지 않고 실행 중 프로필을 다시 묶는 절차도 없으므로, PM은 그 역할에 작업을 넘기지 않고 멈춘 뒤 거부 원문과 함께 사용자에게 보고한다. 원시 `orchestration dispatch --inject`로 직접 주입해 우회하지 않는다.
 
@@ -168,7 +177,7 @@ Orca는 `antigravity` 터미널의 대기 상태를 화면으로 판정한다(`d
 
 workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 `via`와 화면에서 확인한 모델을 함께 적는다. 진행은 `check --wait`와 터미널 화면으로 따라가고, 작업이 끝나면 터미널을 직접 닫는다. `injected`가 `false`이면 결과에 `status: "blocked"`가 붙으므로 작업이 넘어간 것으로 보고하지 않는다. Orca가 `inject_rejected`나 `no_agent_detected`로 주입을 거부하면 래퍼는 예외를 던지지 않고 이 결과를 돌려준다. 결과에는 거부 원문(`orcaResponse`), 중립 신호 `injectRefusal`(`kind: "not-started"`), 그 신호의 분류 `route`(`start-refused` → PM의 `change-launch-path`), 이번 호출이 만든 Task를 `failed`로 닫았는지 알리는 `taskClosed`가 담긴다. `taskClosed`가 `false`이고 `taskCreated`가 `true`이면 그 Task를 `orchestration task-update --status failed`로 직접 닫는다. 이 거부는 작업을 하나도 넘기지 않았다는 확정된 사실이므로, 같은 코드를 `failure-classify`에 `runtime`·`code`로 넣지 말고 결과의 `injectRefusal`을 그대로 쓴다. `worker-start` 경로의 같은 코드는 이미 띄운 에이전트가 남아 있을 수 있어 여전히 프로세스 상태 미상으로 분류되기 때문이다. 미리 예약한 시도는 `workflow-release`의 해제 파일에 `refusal`로 `injectRefusal`을 함께 넣으면 돌려받는다. 다른 해제는 지금처럼 시도를 소진한 채로 둔다. 다음 kickoff부터는 Gemini 모델 프로필이나 Claude·Codex 프로필로 바꾸도록 안내한다.
 
-**headless-start receipt 형식.** `headless-start`로 실행한 Agy 역할을 workflow에 연결할 때 제출하는 receipt 형식이다. `via: "headless-start"`가 고정값이고, `executionId`는 headless worker ID이며, `taskId`와 `dispatchId`는 모두 `headless:<executionId>` 형식이어야 한다. `runId`는 실제 Orca Run ID로 필수이고, `worktreeId`는 Orca 워크트리 ID로 필수이다. `workflow-attach`와 `workflow-rework`는 PM state의 `headless/<executionId>/worker.json`과 이 receipt의 작업 경로를 대조해 연결을 검증한다. `headless-start` 결과의 receipt 초안은 `runId`와 `worktreeId`가 비어 있어 호출자가 실제 값으로 채운 뒤 제출해야 한다.
+**레거시 headless-start receipt 형식(읽기 전용).** 다음 형식은 과거 workflow 기록과 사용량을 복구·해석하는 근거일 뿐이다. 새 `workflow-attach`와 `workflow-rework`는 `via: "headless-start"` receipt를 거부한다. 이전 receipt의 `executionId`는 headless worker ID이며, `taskId`와 `dispatchId`는 모두 `headless:<executionId>` 형식이었고, `runId`와 `worktreeId`는 실제 Orca Run·워크트리 ID였다. 과거 검증은 PM state의 `headless/<executionId>/worker.json`과 receipt 작업 경로를 대조했다.
 
 ### 역할 터미널 열기
 
@@ -271,8 +280,7 @@ Run을 바인딩한 뒤에는 `--spec`으로 Task와 첫 시도를 한 번에 �
 PM은 감독 worker가 아니므로 `worker-start`로 띄우지 않는다. `orca worktree create --agent`에는 모델 옵션이 없어 PM 프로필의 모델을 전달할 수 없으므로, 워크트리를 agent 없이 만든 뒤 `role-terminal`로 프로필의 명령을 실행한 터미널을 연다. 이사가 PM에게 처음 인계할 브리프는 `--brief <경로>`로 넘긴다. `role-terminal`이 그 경로를 `roleCommand`의 `firstPrompt`로 만들어 PM이 실행할 명령 자체의 인자로 붙이므로, 터미널을 연 뒤 별도로 `terminal send`를 실행할 필요가 없다.
 
 ```text
-<orca> worktree create --name <name> --parent-worktree active --json
-node <runtime> role-terminal --org <project>/.omt/organization.json --role pm --worktree id:<worktreeId> --brief <브리프 경로> [--title <kickoff 요약>]
+node <runtime> role-worktree-create --org <project>/.omt/organization.json --role pm --repo <owner-checkout> --name <name> --base <base-sha> --brief <브리프 경로> [--title <kickoff 요약>]
 ```
 
 `role-command`는 Claude에는 `claude --dangerously-skip-permissions --model <model> --autocompact 250k`, Codex에는 `codex --dangerously-bypass-approvals-and-sandbox --model <model> --config model_reasoning_effort=<effort> --config check_for_update_on_startup=false`, Agy에는 `agy --dangerously-skip-permissions --model <model>`을 만들고, 모델이 `null`이면 모델 인자 없이 만든다. Codex 명령에 항상 붙는 `--config check_for_update_on_startup=false`는 설치본 확인 기록인 `docs/plan/codex-update-check.md`를 근거로 한다. Claude 명령의 `--autocompact`(Claude Code 2.1.221 이상)는 세션이 그 크기에 이르면 대화를 압축하게 해서, 오래 실행되는 역할이 매 호출마다 전체 기록을 다시 보내지 않게 한다. 값은 조직의 `policy.claudeAutoCompact`(100000~1000000 사이의 정수 토큰)이며, 없으면 250000을 쓰고 `"auto"`이면 플래그를 붙이지 않는다. Codex와 Agy 명령에는 붙이지 않는다. `--brief`는 이 두 인자 뒤, 명령의 맨 끝에 붙는다. Claude와 Codex에는 위치 인자로, Agy에는 `--prompt-interactive`(별칭 `-i`) 플래그로 붙는데, 이는 설치본의 `--help`로 확인한 지원이며 `role-launch.mjs`의 `FIRST_PROMPT_ARG`에 있다. 확인하지 못한 provider는 이 인자를 붙이지 않고 `role-terminal`이 그 자리에서 거부하므로, 그런 provider의 브리프는 여전히 터미널을 연 뒤 `terminal send`로 보낸다. `role-terminal`은 이 명령으로 터미널을 열며 동작은 위 「역할 터미널 열기」 절과 같다. `opus[1m]`의 대괄호처럼 셸이 해석하는 문자가 든 인자는 POSIX 셸과 PowerShell에서 모두 글자 그대로 읽히는 작은따옴표로 감싼다. 실행 파일은 PATH에 있는 이름만 받는다. PowerShell은 따옴표로 감싼 경로를 명령이 아니라 문자열로 읽기 때문이다. 브리프를 실은 채로 터미널을 연 뒤에는 결과가 `ready: true`인지, `screen`에 표시된 모델이 `modelRequested`와 같은지 확인한다. `modelRequested`가 `null`이면 화면의 모델을 `host-defaults`의 현재 해석값과 대조한다. `role-terminal`이 프로필을 거부하거나, `ready: false`이거나, 화면의 모델이 다르면 이사에게 그대로 보고한다. 이 경우 다른 실행기나 기본 모델로 대신 띄우지 않으며, 이사가 PM을 대신 맡지도 않는다. PM이 이미 뜬 뒤 붙여넣기로 도착하는 후속 인계 지시는 이 절이 다루지 않으며, PM 스킬의 인계 지시 확인 규칙과 `kickoff-handoff-verify` 명령을 따른다.
@@ -374,17 +382,16 @@ worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 
    ```
 
    런타임은 워크트리의 git 상태로 `snapshot-<n>.json`을 만들고 task를 다시 대기 상태로 둔다. 이 handoff 뒤의 첫 실행은 시도 예산을 쓰지 않는다. 정책이 `fallback`이면 사용자에게 묻지 않고 곧바로 수행하며, 수행한 뒤 이사에게 `director-signal --kind progress`로 task, 멈춘 프로필, 이어받은 프로필, 한도가 풀리는 시각을 알린다.
-6. **이어서 실행:** `workflow-resume`의 `dispatch-ready`에 나온 `profile`과 `worktree`로 같은 워크트리에 fallback을 실행한다. `role-terminal`, `worker-start`와 `headless-start`에는 같은 `--workflow-id`, `--state`, `--workflow-task`와 `--profile <fallback>`을 넘기며, 기록된 handoff 대상이 아닌 프로필은 런타임이 거부한다. 지시문에는 남은 일을 끝내라는 목표만 쓰면 된다. 래퍼가 handoff 이력, `checkpoint.md`와 snapshot 경로, "먼저 worktree와 대조하라"는 지시를 머리글에 붙인다. 이후 이 task의 재시도도 같은 fallback으로 실행한다.
+6. **이어서 실행:** `workflow-resume`의 `dispatch-ready`에 나온 `profile`과 `worktree`로 같은 워크트리에 fallback을 실행한다. `role-terminal`과 `worker-start`에는 같은 `--workflow-id`, `--state`, `--workflow-task`와 `--profile <fallback>`을 넘기며, 기록된 handoff 대상이 아닌 프로필은 런타임이 거부한다. 지시문에는 남은 일을 끝내라는 목표만 쓰면 된다. 래퍼가 handoff 이력, `checkpoint.md`와 snapshot 경로, "먼저 worktree와 대조하라"는 지시를 머리글에 붙인다. 이후 이 task의 재시도도 같은 fallback으로 실행한다.
 
    ```text
    node <runtime> role-terminal --org <org> --role <role> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback>
    node <runtime> worker-start --org <org> --role <role> --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback> --terminal <handle> --worktree id:<worktreeId> --spec "<남은 일을 끝낸다>"
-   node <runtime> headless-start --org <org> --role <role> --cwd <worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --profile <fallback> --spec "<남은 일을 끝낸다>"
    ```
 
 7. **검토:** 검토는 평소처럼 배정하되, 검토 `worker-start`에도 같은 `--workflow-task`를 넘긴다. 그러면 검토 지시문에 handoff 이력이 붙어, 검토자가 여러 프로필이 나누어 만든 변경의 경계를 확인한다.
 
-headless로 실행하던 역할은 fallback도 `headless-start`로 실행할 수 있다. 다만 `--workflow-id`를 넘긴 `headless-start`는 `--state`를 workflow 상태 경로로 읽으므로, headless worker 기록도 PM의 상태 디렉터리에 남는다. 한도가 풀린 뒤에도 진행 중인 task를 원래 프로필로 되돌리지 않으며, 원래 프로필은 다음 task부터 다시 쓴다.
+과거에 세션 없는 실행으로 남은 handoff 기록은 읽을 수 있지만 재개하지 않는다. 한도가 풀린 뒤에도 진행 중인 task를 원래 프로필로 되돌리지 않으며, 원래 프로필은 다음 task부터 다시 쓴다.
 
 ## worker-list와 liveness
 
@@ -407,8 +414,48 @@ node <runtime> usage-report --org <project>/.omt/organization.json --worktree <p
 node <runtime> usage-report --org <project>/.omt/organization.json --all
 ```
 
-- **역할 연결**: `role-terminal`, `worker-start`, `headless-start`는 실행할 때마다 `<project>/.omt/usage/launches.jsonl`에 역할, 프로필, 요청 모델, 워크트리, 터미널, 시작 시각을 한 줄씩 남긴다. 이 줄은 `--state`가 가리키는 PM state, PM 워크트리 안에서의 실행, 또는 앞서 기록된 역할 워크트리 안에서의 실행으로 kickoff에 묶인다. 기록에 실패해도 실행은 계속되고 결과에 `ledgerError`가 붙는다. 보고서는 PM 워크트리(등록 항목)와 이 기록의 워크트리에서 만든 세션을 실행기·경로·시각으로 역할에 연결한다. 같은 워크트리에서 같은 실행기의 두 역할을 1분 안에 띄웠으면 어느 쪽인지 가릴 수 없어 `ambiguous`로, 어느 기록으로도 설명되지 않는 세션은 `unattributed`로 표시하고 추측하지 않는다. 이 기록이 생기기 전의 kickoff는 `--place <role>=<dir>`로 역할이 쓴 워크트리를 직접 알려 준다.
+- **역할 연결**: `role-terminal`과 `worker-start`는 실행할 때마다 `<project>/.omt/usage/launches.jsonl`에 역할, 프로필, 요청 모델, 워크트리, 터미널, 시작 시각을 한 줄씩 남긴다. 이 줄은 `--state`가 가리키는 PM state, PM 워크트리 안에서의 실행, 또는 앞서 기록된 역할 워크트리 안에서의 실행으로 kickoff에 묶인다. 기록에 실패해도 실행은 계속되고 결과에 `ledgerError`가 붙는다. 과거 headless 행은 읽기 전용으로 보존한다. 보고서는 PM 워크트리(등록 항목)와 이 기록의 워크트리에서 만든 세션을 실행기·경로·시각으로 역할에 연결한다. 같은 워크트리에서 같은 실행기의 두 역할을 1분 안에 띄웠으면 어느 쪽인지 가릴 수 없어 `ambiguous`로, 어느 기록으로도 설명되지 않는 세션은 `unattributed`로 표시하고 추측하지 않는다. 이 기록이 생기기 전의 kickoff는 `--place <role>=<dir>`로 역할이 쓴 워크트리를 직접 알려 준다.
 - **읽는 기록**: Claude는 `~/.claude/projects`의 transcript(같은 응답이 여러 줄로 반복되므로 응답 id로 한 번만 센다), Codex는 `~/.codex/sessions`와 `archived_sessions`의 rollout(누적 합계이므로 kickoff 기간의 마지막 값에서 기간 전 마지막 값을 뺀다), Agy는 `~/.gemini/antigravity-cli/conversation_summaries.db`의 대화 id·작업 경로·단계 수·시각 열만 읽는다. headless worker는 PM state의 stream을, 로컬 하네스는 `runs`와 `assists` 보고서의 호출 기록을 읽고, 같은 세션이 CLI 기록에도 있으면 두 번 세지 않는다. 메시지 본문, 제목, 미리보기는 읽지 않는다. 위치는 `--claude-home`, `--codex-home`, `--agy-home` 또는 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OMT_AGY_HOME`으로 바꾼다.
-- **측정되지 않는 것**: Agy 대화형 세션은 토큰 사용량이 어디에도 기록되지 않는다. 이런 세션은 `measured: false`, `reason: "agy-interactive-usage-not-recorded"`로 표시하고 토큰은 `null`로 둔다. 단계 수(`steps`)만 보조 지표로 보여 준다. 사용량 비교가 중요한 kickoff에서는 Agy 역할을 `role-terminal` 대신 `headless-start`로 실행한다. headless 결과에는 사용량이 담긴다. 다만 Agy의 stream-json에서 사용량이 담기는 위치는 아직 실제 출력으로 확인하지 않았으므로, 결과 이벤트의 중첩 위치와 최상위를 모두 읽는다.
+- **측정되지 않는 것**: Agy 대화형 세션은 토큰 사용량이 어디에도 기록되지 않는다. 이런 세션은 `measured: false`, `reason: "agy-interactive-usage-not-recorded"`로 표시하고 토큰은 `null`로 둔다. 단계 수(`steps`)만 보조 지표로 보여 준다. 사용량 비교가 중요한 kickoff도 역할 세션을 유지하며, 측정되지 않은 사용량을 임의 추정하지 않는다.
 - **해석**: 역할별 점유율(`share`)은 측정된 세션의 prompt와 output 토큰만으로 계산한다. 측정된 세션이 없는 역할은 0%가 아니라 `unmeasured`이며, `coverage`가 몇 개 세션 위에서 계산했는지 알린다. prompt 토큰은 Claude에서 캐시 읽기·생성을 포함한 합, Codex에서 캐시를 포함해 보고된 입력, Agy에서 보고된 `input_tokens`다. Agy의 `input_tokens`가 캐시 읽기를 포함하는지는 확인되지 않았다. Claude headless의 `costUsd`는 CLI가 계산한 API 환산 추정치이며 구독 요금이 아니다. 요청 모델과 보고 모델이 다르면 `mismatches`에 적는다.
 - **호출 한도와의 관계**: 조직의 `policy.maxCalls`는 `work` 한 번과 workflow attempt 하나가 쓰는 provider 호출 수를 제한하고, workflow의 `budget.maxCalls`는 그 workflow 전체의 호출 예산이다. 둘 다 대화형 역할 터미널의 턴을 세지 않으므로, 대화형 역할이 쓴 양은 이 보고서로만 확인한다.
+
+## 정형 `.omt` 문서 CLI
+
+구조화된 `.omt` 문서(docId, revision, 잠금)를 다루는 런타임 로직은 `documents.mjs`가 소유하며, `teams-org.mjs`는 그 함수를 그대로 감싼 네 명령만 노출한다.
+
+```text
+node <runtime> doc-resolve-kickoff --org <project>/.omt/organization.json --worktree <pm-worktree-id>
+node <runtime> doc-id --kickoff-hash <hex64> [--workflow-id <id>] --stage <stageSlug> --doc-type <docType> --local-id <localId> [--revision <n>]
+node <runtime> doc-show --state <pm-worktree>/.omt --doc-id <docId>
+node <runtime> doc-save --state <pm-worktree>/.omt --doc <envelope.json> [--expected-revision <n>] [--refs <ref1,ref2,...>] [--org <project>/.omt/organization.json]
+```
+
+- `doc-resolve-kickoff`은 `resolveKickoffHash(orgFile, worktreeId)`를 그대로 호출해 `{ kickoffHash }`를 반환한다. worktree가 지배하는 활성 kickoff이 없으면 오류로 거부하며, release된 kickoff의 문서는 이 명령이 아니라 그 kickoff의 closure-record `kickoffId`로 직접 조립한다.
+- `doc-id`는 `buildDocId`/`buildDocRef`를 감싼 순수 빌더다. 파일시스템에 접근하지 않으며, `--revision`을 주면 응답에 `docRef`도 함께 담는다. `--workflow-id`를 생략하면 kickoff 범위 문서(`workflowId: null`, docId의 두 번째 segment는 `none`)를 만든다.
+- `doc-show`는 `documentState(stateDir, docId)`의 필드(`exists`, 존재할 때 `revision`/`hash`/`state`/`kickoffId`/`workflowId`)에 더해, 문서의 실제 폴더 경로를 `path` 필드로 함께 반환한다. 이 경로는 `documents.mjs`의 비공개 `documentDirectory` 공식(`<stateDir>/documents/<kickoffHash>/<workflowId ?? "none">/<stageFolderName(stageSlug)>/<docType>/<localId>`)을 그대로 재구현한 것이며, 이 조립 공식은 design 3.5절이 고정한 공개 계약이므로 재구현이 안전하다.
+- `doc-save`는 저장 전에 `assertDocumentAuthority`로 design 3.4절의 작성 권한·독립성을 검사한 뒤 `saveDocument(stateDir, doc, { expectedRevision, refs })`를 호출한다. `--doc`은 전체 envelope JSON 파일 경로이며, `--refs`는 검증할 `omt-doc:` 문서 참조만 쉼표로 구분해 전달한다. `saveDocument`가 호출하는 `validateReference`는 `omt-doc:`으로 시작하지 않는 참조를 즉시 거부하므로, legacy 참조(`validateLegacyRef`, org 인자가 필요한 별도 export 함수)는 이 옵션으로 검증되지 않는다.
+- `assertDocumentAuthority`는 design 3.4절 표를 stage/docType 조합별 허용 역할 표로 옮겨 `doc.author.role`을 검사하고(표에 없는 조합, 예: `06. 인도`의 `delivery-ref`는 표가 어느 역할에도 배정하지 않아 제한하지 않는다), 이미 존재하는 문서를 갱신할 때는 그 문서의 첫 revision을 쓴 실행만 다음 revision을 쓸 수 있는지 확인한다(`05. 수용`은 "PM 전용"일 뿐 특정 PM 실행에 고정되지 않으므로 예외이고, PL은 "배정 관련 필드만" 수정할 수 있어 문서 전체를 자기 것으로 고정하는 이 검사에서 예외다). `review/review-ref` 문서는 본문의 `reviewFileRef`가 `stateDir` 안의 실제 review 기록을 가리키면 그 기록의 `implementationExecutionId`가 이 문서의 `author.executionId`와 같은지 검사해, 같은 실행이 구현과 검토를 모두 맡은 문서를 거부한다(review.schema.json이 이미 강제하는 독립성 검사를 문서 계층에도 얹은 것). `design/design-contract`는 PM이 이번 실행에 하위 역할이 없을 때만 직접 쓸 수 있다는 로스터 조건이 있다(design 3.4.2절). `assertDocumentAuthority`는 이 조건을 판정하기 위해, PM이 `design/design-contract`를 쓰는 저장에서만 이번 실행의 역할 목록을 다음 두 갈래로 얻는다. `doc.workflowId`가 있으면 `readWorkflow`가 돌려주는 워크플로 스냅샷의 `state.roles`를(없으면 같은 스냅샷의 `organization`으로 `definedRoles`를 구해) 쓰고, 없으면 `doc-save`의 `--org`가 가리키는 조직 파일로 `definedRoles`를 구해 쓴다. `canonicalRole`로 정규화한 이 목록에 `pl`·`senior`·`junior` 가운데 하나라도 있으면 저장을 거부하며, `doc.workflowId`가 없는데 `--org`도 주어지지 않았거나 `--org`를 읽지 못하거나 `doc.workflowId`가 가리키는 워크플로가 없으면 이 조건을 판정하지 않고 저장 자체를 거부한다. 이 로스터 조건은 `design/design-contract`를 PM이 쓸 때만 판정되며, 다른 stage/docType 조합에는 적용되지 않는다.
+
+PL의 "배정 관련 필드만"이라는 수정 범위(design 3.4.3절)도 own-document 검사와 별도로 `assertDocumentAuthority`가 판정한다. own-document 검사 자체는 여전히 PL을 예외로 둬 PM이 쓴 첫 revision을 다른 실행의 PL이 이어 쓰는 정상 흐름을 막지 않지만, PL이 `implementation/workflow-task-ref` 또는 `implementation/integration-ref`의 다음 revision을 쓸 때는 직전 revision과 비교해 각 docType이 허용한 필드(`workflow-task-ref`는 `attemptRefs`, `integration-ref`는 `taskHashRef`·`extensionHistory`)만 달라야 저장을 허용한다. `revision`·`basedOnRevision`·`createdAt`·`author` 네 필드는 저장 계층이 강제하거나 호출마다 자연히 달라지는 값이라 비교에서 항상 제외하며, 비교는 `JSON.stringify` 동등 비교를 쓴다. 나머지 필드가 하나라도 다르면 거부한다.
+
+## `review-record`/`gate-check`/`accept`/`merge-check`/`workflow-accept`의 `--org` 판정 절차
+
+다섯 명령은 선택 인자 `--org <organization.json>`(`workflow-accept` 제외 넷은 `--workflow-id`도 선택)을 받는다. `--org`를 주면 명령은 gate 평가 **전에** 다음 판정을 스스로 계산해 `gates.mjs`/`workflow.mjs`에 넘긴다(design 3.7절 5번 항목, `classifyKickoffEntry`를 `teams-org.mjs`가 재구현).
+
+1. `listKickoffs(--org)`에서 `entry.pm.stateDir`가 `path.resolve(--state)`와 일치하는 kickoff 항목을 찾는다. 못 찾으면 즉시 거부한다(release되어 이관됐거나 등록 자체가 없는 경우).
+2. 찾은 항목이 `registrationSeq`를 가지면 **current**다. 이때 `kickoffHash`(entry로부터 계산)를 반드시 넘기고, `--workflow-id`를 받았으면 그 값도 함께 넘긴다. 이후 해당 gate는 `review-ref`/`acceptance-ref` 문서가 그 kickoffHash·workflowId 아래 커밋되어야만 통과한다.
+3. `registrationSeq`가 없고 조직의 `documentSystemActivatedAt`이 없거나 항목의 `createdAt`보다 뒤이면 **legacy**다. `kickoffHash`를 넘기지 않아 이전(문서 검사 없는) review/decision 전용 판정으로 되돌아간다.
+4. `registrationSeq`가 없는데 활성화 시각을 지났으면 **integrity-failure**다. 판정이 불명확하므로 gate를 평가하지 않고 명령 자체를 거부한다. `--org`로 준 조직 파일을 읽지 못했을 때도 같게 거부한다.
+
+`--org`를 주지 않으면 이 판정은 전혀 실행되지 않고 기존 review/decision 전용 동작을 그대로 유지한다(하위 호환). `workflow-accept`는 `--workflow-id`를 받지 않는데, `acceptWorkflowIntegration`이 자신의 workflow `id`를 그대로 workflowId로 쓰기 때문이다. `kickoff-branch-cleanup`은 이미 필수이던 `--org`를 `cleanupKickoffBranches`의 `orgFile`로도 전달해, 등록부의 `delivery.mode`가 `local-merge`/`pull-request`이고 병합 커밋이 기록된 항목의 브랜치 삭제를, legacy면 기존처럼 git 내용만으로, current면 `delivery-ref` 문서 소유권까지 확인하고, integrity-failure면 `--force` 없이는 건너뛴다.
+
+## 등록부와 참조만으로 재개하는 절차
+
+세션이 끊긴 뒤 재개할 때는 부모 대화를 복사하지 않고 위 명령들로 필요한 문서를 결정적으로 다시 찾는다(design 3.11절).
+
+1. `kickoff-show`로 그 PM worktree가 지배하는 활성 kickoff의 `worktreeId`를 확인하고, `doc-resolve-kickoff`로 `kickoffHash`를 얻는다.
+2. `workflow-status`로 workflow 상태를 읽어 `workflowId`와 진행 중인 `taskId`를 얻는다.
+3. `doc-id`로 `docId`를 조립하고 `doc-show`로 해당 문서의 현재 revision과 경로를 확인한다.
+
+등록부에 "마지막으로 참조한 문서" 같은 별도 색인을 추가하지 않으며, `resolveKickoffHash`는 활성 등록부만 조회하므로 release된 kickoff의 문서에는 이 절차를 쓰지 않고 그 kickoff의 closure-record `kickoffId`를 직접 쓴다.
