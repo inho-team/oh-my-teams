@@ -836,8 +836,14 @@ export async function checkTerminalIdle(
  * whose `dispatchStatus` is neither settled (`completed`, `failed`) nor
  * confirmed active (`dispatched`) all count as `unknown`, since only the
  * documented `--status` vocabulary (`task-update --help`) is trusted to mean
- * settled. A `page.hasMore` truncation with no match on this page counts the
- * same way, since a later page could still hold the terminal's Dispatch.
+ * settled. A coordinator terminal can be bound to just one Run, so this
+ * lookup first follows every page of the global `run-list`, then explicitly
+ * follows every `worker-list --run <id>` page for each returned Run. The
+ * latter receipt must prove `scope.source: flag` and the requested Run id;
+ * an implicit `bound` scope is not global evidence. A missing or cyclic
+ * cursor, malformed run/page/scope, duplicate Run id, or any page read
+ * failure is `unknown` rather than a guess that older Dispatches have
+ * settled.
  *
  * @param {string} terminal - Terminal handle to check.
  * @param {object} [options={}] - Executable, cwd, and injectable runner.
@@ -854,41 +860,105 @@ export async function findActiveDispatch(
 ) {
   assert(terminal, "A terminal handle is required");
   const selected = selectOrcaExecutable(executable);
-  let envelope;
-  try {
-    envelope = await runOrcaJson(
-      selected,
-      ["orchestration", "worker-list", "--limit", "100"],
-      { cwd, execute },
-    );
-  } catch {
-    return { status: "unknown" };
+  const runIds = [];
+  const seenRuns = new Set();
+  const runCursors = new Set();
+  let runCursor = null;
+  while (true) {
+    const args = ["orchestration", "run-list", "--limit", "100"];
+    if (runCursor) args.push("--cursor", runCursor);
+    let envelope;
+    try {
+      envelope = await runOrcaJson(selected, args, { cwd, execute });
+    } catch {
+      return { status: "unknown" };
+    }
+    const runs = envelope.result?.runs;
+    if (!Array.isArray(runs)) return { status: "unknown" };
+    for (const run of runs) {
+      if (typeof run?.id !== "string" || !run.id || seenRuns.has(run.id))
+        return { status: "unknown" };
+      seenRuns.add(run.id);
+      runIds.push(run.id);
+    }
+    const nextCursor = envelope.result?.nextCursor;
+    if (nextCursor === null) break;
+    if (typeof nextCursor !== "string" || !nextCursor)
+      return { status: "unknown" };
+    if (runCursors.has(nextCursor)) return { status: "unknown" };
+    runCursors.add(nextCursor);
+    runCursor = nextCursor;
   }
-  const workers = envelope.result?.workers;
-  if (!Array.isArray(workers)) return { status: "unknown" };
-  const matches = workers.filter(
-    (worker) =>
-      worker.agentTerminalHandle === terminal ||
-      worker.resource?.terminalHandle === terminal,
-  );
-  const active = matches.find(
-    (worker) => worker.dispatchStatus === "dispatched",
-  );
-  if (active) {
-    return {
-      status: "active",
-      dispatchId: active.dispatchId,
-      taskId: active.taskId ?? null,
-    };
+
+  for (const runId of runIds) {
+    const workerCursors = new Set();
+    let workerCursor = null;
+    while (true) {
+      const args = [
+        "orchestration",
+        "worker-list",
+        "--run",
+        runId,
+        "--include-remote",
+        "--limit",
+        "100",
+      ];
+      if (workerCursor) args.push("--cursor", workerCursor);
+      let envelope;
+      try {
+        envelope = await runOrcaJson(selected, args, { cwd, execute });
+      } catch {
+        return { status: "unknown" };
+      }
+      const workers = envelope.result?.workers;
+      const scope = envelope.result?.scope;
+      if (
+        !Array.isArray(workers) ||
+        scope?.source !== "flag" ||
+        scope.run !== runId
+      )
+        return { status: "unknown" };
+      const matches = workers.filter(
+        (worker) =>
+          worker.agentTerminalHandle === terminal ||
+          worker.resource?.terminalHandle === terminal,
+      );
+      const active = matches.find(
+        (worker) => worker.dispatchStatus === "dispatched",
+      );
+      if (active) {
+        return {
+          status: "active",
+          dispatchId: active.dispatchId,
+          taskId: active.taskId ?? null,
+        };
+      }
+      if (
+        matches.some(
+          (worker) => !["completed", "failed"].includes(worker.dispatchStatus),
+        )
+      )
+        return { status: "unknown" };
+      const page = envelope.result?.page;
+      if (
+        typeof page !== "object" ||
+        page === null ||
+        (page.hasMore !== true && page.hasMore !== false)
+      )
+        return { status: "unknown" };
+      if (page.hasMore === false) {
+        if (page.nextCursor !== undefined && page.nextCursor !== null)
+          return { status: "unknown" };
+        break;
+      }
+      if (typeof page.nextCursor !== "string" || !page.nextCursor)
+        return { status: "unknown" };
+      if (workerCursors.has(page.nextCursor)) return { status: "unknown" };
+      workerCursors.add(page.nextCursor);
+      workerCursor = page.nextCursor;
+    }
   }
-  const unresolved = matches.some(
-    (worker) => !["completed", "failed"].includes(worker.dispatchStatus),
-  );
-  const pagedPastMatch =
-    matches.length === 0 && envelope.result?.page?.hasMore === true;
-  return unresolved || pagedPastMatch
-    ? { status: "unknown" }
-    : { status: "clear" };
+  return { status: "clear" };
 }
 
 /**

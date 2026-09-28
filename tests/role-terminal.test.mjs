@@ -41,6 +41,25 @@ import { VERIFIED_ORCA_VERSION } from "../plugins/oh-my-teams/scripts/launch-mat
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
 const PROMPT = "me@host project %";
+const GLOBAL_RUN = "run_global";
+
+function runListReceipt(runs = [{ id: GLOBAL_RUN }], nextCursor = null) {
+  return JSON.stringify({ ok: true, result: { runs, nextCursor } });
+}
+
+function workerListReceipt(
+  workers,
+  { page = { hasMore: false, nextCursor: null }, run = GLOBAL_RUN } = {},
+) {
+  return JSON.stringify({
+    ok: true,
+    result: {
+      workers,
+      page,
+      scope: { source: "flag", run },
+    },
+  });
+}
 
 // Plays Orca's terminal verbs; the last screen repeats once the script ends.
 // Each create issues the next handle, `closeFails` makes close refuse, and
@@ -1398,10 +1417,7 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
     ok: true,
     result: { wait: { satisfied: true } },
   });
-  const noActiveDispatch = JSON.stringify({
-    ok: true,
-    result: { workers: [] },
-  });
+  const noActiveDispatch = workerListReceipt([]);
   const execute = async (argv) => {
     calls.push(argv);
     return {
@@ -1411,9 +1427,11 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
       stdout:
         argv[2] === "wait"
           ? idle
-          : argv[2] === "worker-list"
-            ? noActiveDispatch
-            : '{"ok":true}',
+          : argv[2] === "run-list"
+            ? runListReceipt()
+            : argv[2] === "worker-list"
+              ? noActiveDispatch
+              : '{"ok":true}',
     };
   };
   const result = await clearRoleTerminal({
@@ -1425,13 +1443,14 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
     [
+      "orchestration run-list",
       "orchestration worker-list",
       "terminal wait",
       "terminal send",
       "terminal wait",
     ],
   );
-  assert.deepEqual(calls[2], [
+  assert.deepEqual(calls[3], [
     "orca",
     "terminal",
     "send",
@@ -1453,6 +1472,14 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
         executable: "orca",
         execute: async (argv) => {
           busy.push(argv);
+          if (argv[2] === "run-list") {
+            return {
+              code: 0,
+              stderr: "",
+              timedOut: false,
+              stdout: runListReceipt(),
+            };
+          }
           if (argv[2] === "worker-list") {
             return {
               code: 0,
@@ -1476,6 +1503,7 @@ test("clearRoleTerminal waits for idle, sends /clear, and waits for idle again",
   assert.deepEqual(
     busy.map((argv) => argv.slice(1, 3).join(" ")),
     [
+      "orchestration run-list",
       "orchestration worker-list",
       "terminal wait",
       "terminal read",
@@ -1488,24 +1516,27 @@ test("clearRoleTerminal refuses /clear on a terminal with an active dispatch, wi
   const calls = [];
   const execute = async (argv) => {
     calls.push(argv);
+    if (argv[2] === "run-list") {
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: runListReceipt(),
+      };
+    }
     if (argv[2] === "worker-list") {
       return {
         code: 0,
         stderr: "",
         timedOut: false,
-        stdout: JSON.stringify({
-          ok: true,
-          result: {
-            workers: [
-              {
-                dispatchId: "ctx_active",
-                taskId: "task_active",
-                dispatchStatus: "dispatched",
-                agentTerminalHandle: "term_1",
-              },
-            ],
+        stdout: workerListReceipt([
+          {
+            dispatchId: "ctx_active",
+            taskId: "task_active",
+            dispatchStatus: "dispatched",
+            agentTerminalHandle: "term_1",
           },
-        }),
+        ]),
       };
     }
     throw new Error(`unexpected call ${argv[2]}`);
@@ -1528,7 +1559,7 @@ test("clearRoleTerminal refuses /clear on a terminal with an active dispatch, wi
   // Only the lookup ran; /clear was never typed into the busy terminal.
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
-    ["orchestration worker-list"],
+    ["orchestration run-list", "orchestration worker-list"],
   );
 });
 
@@ -1536,6 +1567,8 @@ test("clearRoleTerminal skips /clear, without refusing, when an active dispatch 
   const calls = [];
   const execute = async (argv) => {
     calls.push(argv);
+    if (argv[2] === "run-list")
+      return { code: 0, stderr: "", timedOut: false, stdout: runListReceipt() };
     if (argv[2] === "worker-list") {
       const err = new Error("connection reset");
       throw err;
@@ -1554,7 +1587,7 @@ test("clearRoleTerminal skips /clear, without refusing, when an active dispatch 
   });
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
-    ["orchestration worker-list"],
+    ["orchestration run-list", "orchestration worker-list"],
   );
 });
 
@@ -1562,23 +1595,21 @@ test("findActiveDispatch counts an unresolved dispatch status as unknown, never 
   // A worker matching the terminal sits in "pending" (not yet "dispatched",
   // not "completed" or "failed" either): the documented status vocabulary
   // does not say the Dispatch is settled, so /clear must not be assumed safe.
-  const execute = async () => ({
+  const execute = async (argv) => ({
     code: 0,
     stderr: "",
     timedOut: false,
-    stdout: JSON.stringify({
-      ok: true,
-      result: {
-        workers: [
-          {
-            dispatchId: "ctx_pending",
-            taskId: "task_pending",
-            dispatchStatus: "pending",
-            agentTerminalHandle: "term_1",
-          },
-        ],
-      },
-    }),
+    stdout:
+      argv[2] === "run-list"
+        ? runListReceipt()
+        : workerListReceipt([
+            {
+              dispatchId: "ctx_pending",
+              taskId: "task_pending",
+              dispatchStatus: "pending",
+              agentTerminalHandle: "term_1",
+            },
+          ]),
   });
   const result = await findActiveDispatch("term_1", {
     executable: "orca",
@@ -1587,33 +1618,268 @@ test("findActiveDispatch counts an unresolved dispatch status as unknown, never 
   assert.deepEqual(result, { status: "unknown" });
 });
 
-test("findActiveDispatch counts a truncated page with no match on it as unknown, never as clear", async () => {
-  // No worker on this page names the terminal, but page.hasMore says a later
-  // page might still hold its Dispatch: "clear" would be a guess.
-  const execute = async () => ({
-    code: 0,
-    stderr: "",
-    timedOut: false,
-    stdout: JSON.stringify({
-      ok: true,
-      result: {
-        workers: [
-          {
-            dispatchId: "ctx_other",
-            taskId: "task_other",
-            dispatchStatus: "dispatched",
-            agentTerminalHandle: "term_2",
-          },
-        ],
-        page: { hasMore: true },
-      },
-    }),
-  });
+test("findActiveDispatch follows a 101-row cursor page before clearing a terminal", async () => {
+  const calls = [];
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({
+    dispatchId: `ctx_${index}`,
+    dispatchStatus: "completed",
+    agentTerminalHandle: `other_${index}`,
+  }));
+  const execute = async (argv) => {
+    calls.push(argv);
+    const secondPage = argv.includes("--cursor");
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout:
+        argv[2] === "run-list"
+          ? runListReceipt()
+          : workerListReceipt(
+              secondPage
+                ? [
+                    {
+                      dispatchId: "ctx_target",
+                      taskId: "task_target",
+                      dispatchStatus: "completed",
+                      agentTerminalHandle: "term_1",
+                    },
+                  ]
+                : firstPage,
+              {
+                page: secondPage
+                  ? { hasMore: false, nextCursor: null }
+                  : { hasMore: true, nextCursor: "opaque-page-2" },
+              },
+            ),
+    };
+  };
   const result = await findActiveDispatch("term_1", {
     executable: "orca",
     execute,
   });
-  assert.deepEqual(result, { status: "unknown" });
+  assert.deepEqual(result, { status: "clear" });
+  assert.deepEqual(calls[2], [
+    "orca",
+    "orchestration",
+    "worker-list",
+    "--run",
+    GLOBAL_RUN,
+    "--include-remote",
+    "--limit",
+    "100",
+    "--cursor",
+    "opaque-page-2",
+    "--json",
+  ]);
+});
+
+test("findActiveDispatch finds a target terminal's active Dispatch on a later page", async () => {
+  let page = 0;
+  const execute = async (argv) => {
+    if (argv[2] === "run-list") {
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: runListReceipt(),
+      };
+    }
+    page += 1;
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout: workerListReceipt(
+        page === 1
+          ? [{ dispatchStatus: "completed" }]
+          : [
+              {
+                dispatchId: "ctx_late",
+                taskId: "task_late",
+                dispatchStatus: "dispatched",
+                resource: { terminalHandle: "term_1" },
+              },
+            ],
+        {
+          page:
+            page === 1
+              ? { hasMore: true, nextCursor: "opaque-page-2" }
+              : { hasMore: false, nextCursor: null },
+        },
+      ),
+    };
+  };
+  const result = await findActiveDispatch("term_1", {
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, {
+    status: "active",
+    dispatchId: "ctx_late",
+    taskId: "task_late",
+  });
+});
+
+test("findActiveDispatch preserves a terminal when run or worker paging is incomplete", async () => {
+  for (const [label, responses] of [
+    ["missing-cursor", [{ workers: [], page: { hasMore: true } }]],
+    ["missing-page", [{ workers: [] }]],
+    [
+      "bound-scope",
+      [
+        {
+          workers: [],
+          page: { hasMore: false, nextCursor: null },
+          scope: { source: "bound" },
+        },
+      ],
+    ],
+    [
+      "cyclic",
+      [
+        {
+          workers: [],
+          page: { hasMore: true, nextCursor: "repeat" },
+          scope: { source: "flag", run: GLOBAL_RUN },
+        },
+        {
+          workers: [],
+          page: { hasMore: true, nextCursor: "repeat" },
+          scope: { source: "flag", run: GLOBAL_RUN },
+        },
+      ],
+    ],
+    [
+      "failure",
+      [
+        {
+          workers: [],
+          page: { hasMore: true, nextCursor: "next" },
+          scope: { source: "flag", run: GLOBAL_RUN },
+        },
+        null,
+      ],
+    ],
+  ]) {
+    let current = 0;
+    const execute = async (argv) => {
+      if (argv[2] === "run-list") {
+        return {
+          code: 0,
+          stderr: "",
+          timedOut: false,
+          stdout: runListReceipt(),
+        };
+      }
+      const response = responses[current++];
+      if (!response) throw new Error("page transport failed");
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: JSON.stringify({ ok: true, result: response }),
+      };
+    };
+    const result = await findActiveDispatch("term_1", {
+      executable: "orca",
+      execute,
+    });
+    assert.deepEqual(result, { status: "unknown" }, label);
+  }
+});
+
+test("findActiveDispatch follows every global run page before checking each explicit Run", async () => {
+  const calls = [];
+  const firstRuns = Array.from({ length: 100 }, (_, index) => ({
+    id: `run_${index}`,
+  }));
+  const execute = async (argv) => {
+    calls.push(argv);
+    if (argv[2] === "run-list") {
+      return {
+        code: 0,
+        stderr: "",
+        timedOut: false,
+        stdout: argv.includes("--cursor")
+          ? runListReceipt([{ id: "run_target" }])
+          : runListReceipt(firstRuns, "runs-page-2"),
+      };
+    }
+    const run = argv[argv.indexOf("--run") + 1];
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout: workerListReceipt(
+        run === "run_target"
+          ? [
+              {
+                dispatchId: "ctx_target",
+                dispatchStatus: "dispatched",
+                resource: { terminalHandle: "term_1" },
+              },
+            ]
+          : [],
+        { run },
+      ),
+    };
+  };
+  const result = await findActiveDispatch("term_1", {
+    executable: "orca",
+    execute,
+  });
+  assert.deepEqual(result, {
+    status: "active",
+    dispatchId: "ctx_target",
+    taskId: null,
+  });
+  assert.deepEqual(calls[1], [
+    "orca",
+    "orchestration",
+    "run-list",
+    "--limit",
+    "100",
+    "--cursor",
+    "runs-page-2",
+    "--json",
+  ]);
+  assert.ok(
+    calls.some(
+      (argv) => argv[2] === "worker-list" && argv.includes("run_target"),
+    ),
+  );
+});
+
+test("findActiveDispatch preserves a terminal when global Run discovery is incomplete", async () => {
+  for (const [label, replies] of [
+    ["missing-cursor", [{ runs: [{ id: GLOBAL_RUN }] }]],
+    [
+      "cyclic-cursor",
+      [
+        { runs: [{ id: "run_one" }], nextCursor: "repeat" },
+        { runs: [{ id: "run_two" }], nextCursor: "repeat" },
+      ],
+    ],
+    ["transport-error", [null]],
+  ]) {
+    let current = 0;
+    const result = await findActiveDispatch("term_1", {
+      executable: "orca",
+      execute: async (argv) => {
+        assert.equal(argv[2], "run-list", label);
+        const reply = replies[current++];
+        if (!reply) throw new Error("run-list transport failed");
+        return {
+          code: 0,
+          stderr: "",
+          timedOut: false,
+          stdout: JSON.stringify({ ok: true, result: reply }),
+        };
+      },
+    });
+    assert.deepEqual(result, { status: "unknown" }, label);
+  }
 });
 
 test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/reason, not the decision's guess (#84)", async (t) => {
@@ -1638,6 +1904,9 @@ test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/rea
   // cannot decide whether an active Dispatch stands in the way.
   const execute = async (argv) => {
     calls.push(argv);
+    if (argv[2] === "run-list") {
+      return { code: 0, stderr: "", timedOut: false, stdout: runListReceipt() };
+    }
     if (argv[2] === "worker-list") throw new Error("connection reset");
     throw new Error(`unexpected call ${argv[2]}`);
   };
@@ -1665,7 +1934,7 @@ test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/rea
   });
   assert.deepEqual(
     calls.map((argv) => argv.slice(1, 3).join(" ")),
-    ["orchestration worker-list"],
+    ["orchestration run-list", "orchestration worker-list"],
   );
 });
 

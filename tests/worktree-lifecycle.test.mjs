@@ -12,8 +12,10 @@ import {
   startHeadlessWorker,
 } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import {
+  ALLOWED_OPTIONS,
   createRoleWorktree,
   main,
+  parseArgs,
   recordLaunchSafely,
   reclaimIntegratedRoleWorktree,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
@@ -365,6 +367,232 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
   assert.equal(result.session.terminal, "new-senior-terminal");
 });
 
+test("a named accepted task in another workflow can safely reuse its same-role worktree", async () => {
+  const reads = [];
+  let listed = 0;
+  const result = await createRoleWorktree(
+    {
+      org: "/repo/.omt/organization.json",
+      role: "senior",
+      repo: "/repo",
+      name: "cross-workflow-senior",
+      base: "f".repeat(40),
+      state: "/repo/.omt",
+      "workflow-id": "current-workflow",
+      "workflow-task": "next-task",
+      "prior-workflow-id": "accepted-workflow",
+      "prior-task-id": "accepted-task",
+      worktree: "repo::/repo/senior-existing",
+    },
+    {
+      organization: roleOrganization,
+      environment,
+      matrix: supervised,
+      read: (_stateDir, workflowId) => {
+        reads.push(workflowId);
+        return {
+          state:
+            workflowId === "current-workflow"
+              ? { tasks: { "next-task": { role: "senior", state: "pending" } } }
+              : {
+                  tasks: {
+                    "accepted-task": {
+                      state: "accepted",
+                      executionRole: "senior",
+                      worktreeId: "repo::/repo/senior-existing",
+                    },
+                  },
+                },
+        };
+      },
+      git: async (repo, argv) => {
+        if (argv[0] === "status") return "";
+        if (argv[0] === "rev-parse" && argv[1] === "HEAD")
+          return repo === "/repo" ? "integration-a" : "senior-a";
+        if (argv[0] === "rev-parse") return "integration-a";
+        if (argv[0] === "merge-base") return "";
+        throw new Error(`unexpected git: ${argv.join(" ")}`);
+      },
+      launches: () => [
+        {
+          via: "worker-start",
+          workflowId: "accepted-workflow",
+          workflowTaskId: "accepted-task",
+          worktreePath: "/repo/senior-existing",
+          terminal: "senior-prior-terminal",
+          workerId: "senior-prior-dispatch",
+        },
+      ],
+      active: async () => ({ status: "clear" }),
+      release: async (dispatchId) => releasedExternalTerminal(dispatchId),
+      close: async (_orca, argv) => closedTerminal(argv.at(-1)),
+      list: async () => ({
+        result: {
+          terminals:
+            listed++ === 0 ? [{ handle: "senior-prior-terminal" }] : [],
+        },
+      }),
+      open: async (workspace) => ({
+        ready: true,
+        terminal: "cross-workflow-senior-terminal",
+        role: "senior",
+        worktree: `id:${workspace.id}`,
+        modelRequested: "gpt-5.6-sol",
+      }),
+    },
+  );
+  assert.deepEqual(reads, ["current-workflow", "accepted-workflow"]);
+  assert.deepEqual(result.reusedFrom, {
+    workflowId: "accepted-workflow",
+    workflowTaskId: "accepted-task",
+  });
+});
+
+test("cross-workflow reuse refuses an unnamed or non-accepted source task", async () => {
+  for (const [label, args, sourceState] of [
+    [
+      "unnamed",
+      {},
+      { tasks: { prior: { state: "accepted", role: "senior" } } },
+    ],
+    [
+      "not-accepted",
+      {
+        "prior-workflow-id": "other-workflow",
+        "prior-task-id": "other-task",
+      },
+      {
+        tasks: {
+          "other-task": {
+            state: "rejected",
+            role: "senior",
+            worktreeId: "repo::/repo/senior-existing",
+          },
+        },
+      },
+    ],
+  ]) {
+    let opened = false;
+    await assert.rejects(
+      () =>
+        createRoleWorktree(
+          {
+            org: "/repo/.omt/organization.json",
+            role: "senior",
+            repo: "/repo",
+            name: "cross-workflow-refusal",
+            base: "0".repeat(40),
+            state: "/repo/.omt",
+            "workflow-id": "current-workflow",
+            "workflow-task": "next-task",
+            worktree: "repo::/repo/senior-existing",
+            ...args,
+          },
+          {
+            organization: roleOrganization,
+            environment,
+            matrix: supervised,
+            read: (_stateDir, workflowId) => ({
+              state:
+                workflowId === "current-workflow"
+                  ? {
+                      tasks: {
+                        "next-task": { role: "senior", state: "pending" },
+                      },
+                    }
+                  : sourceState,
+            }),
+            open: async () => {
+              opened = true;
+            },
+          },
+        ),
+      /accepted prior task|explicit prior workflow\/task/,
+      label,
+    );
+    assert.equal(opened, false, label);
+  }
+});
+
+test("cross-workflow reuse refuses a worktree claimed by another current task", async () => {
+  let opened = false;
+  await assert.rejects(
+    () =>
+      createRoleWorktree(
+        {
+          org: "/repo/.omt/organization.json",
+          role: "senior",
+          repo: "/repo",
+          name: "cross-workflow-conflict",
+          base: "0".repeat(40),
+          state: "/repo/.omt",
+          "workflow-id": "current-workflow",
+          "workflow-task": "next-task",
+          "prior-workflow-id": "accepted-workflow",
+          "prior-task-id": "accepted-task",
+          worktree: "repo::/repo/senior-existing",
+        },
+        {
+          organization: roleOrganization,
+          environment,
+          matrix: supervised,
+          read: (_stateDir, workflowId) => ({
+            state:
+              workflowId === "current-workflow"
+                ? {
+                    tasks: {
+                      "next-task": { role: "senior", state: "pending" },
+                      "other-task": {
+                        role: "senior",
+                        state: "running",
+                        worktreeId: "repo::/repo/senior-existing",
+                      },
+                    },
+                  }
+                : {
+                    tasks: {
+                      "accepted-task": {
+                        role: "senior",
+                        state: "accepted",
+                        worktreeId: "repo::/repo/senior-existing",
+                      },
+                    },
+                  },
+          }),
+          open: async () => {
+            opened = true;
+          },
+        },
+      ),
+    /also owned by current workflow task other-task/,
+  );
+  assert.equal(opened, false);
+});
+
+test("CLI usage admits only an explicit paired cross-workflow reuse source", () => {
+  const allowed = ALLOWED_OPTIONS["role-worktree-create"];
+  assert.ok(allowed.includes("prior-workflow-id"));
+  assert.ok(allowed.includes("prior-task-id"));
+  assert.deepEqual(
+    parseArgs([
+      "role-worktree-create",
+      "--prior-workflow-id",
+      "accepted-workflow",
+      "--prior-task-id",
+      "accepted-task",
+    ]),
+    {
+      command: "role-worktree-create",
+      "prior-workflow-id": "accepted-workflow",
+      "prior-task-id": "accepted-task",
+    },
+  );
+  assert.match(
+    fs.readFileSync("plugins/oh-my-teams/scripts/teams-org.mjs", "utf8"),
+    /\[--prior-workflow-id ID --prior-task-id ID\]/,
+  );
+});
+
 test("an integrated child is reclaimed only after every lifecycle proof", async () => {
   const calls = [];
   const result = await reclaimIntegratedRoleWorktree(
@@ -532,7 +760,7 @@ test("ambiguous Orca release, close, or terminal-list receipts preserve the chil
       },
     ],
     [
-      "close",
+      "pty-killed-false",
       {
         close: async () => ({
           result: {

@@ -205,10 +205,12 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   role-worktree-create --org FILE --role ROLE --repo DIR --name NAME --base SHA
                         [--setup inherit|run|skip] [--title TEXT] [--brief FILE]
                         [--workflow-id ID --state DIR --workflow-task ID]
+                        [--prior-workflow-id ID --prior-task-id ID]
                         [--worktree WORKTREE_ID] [--profile FALLBACK] [--orca EXECUTABLE]
                         (creates a child only while opening and proving its Orca role session;
                         reuses a proven idle same-role worktree only after prior acceptance,
                         integration, Dispatch release, terminal closure, and Git-clean proof;
+                        cross-workflow reuse requires the explicit accepted prior pair;
                         a proven no-session launch is reclaimed, an ambiguous launch is preserved)
   role-worktree-reclaim --org FILE --state DIR --workflow-id ID --workflow-task ID
                         --repo DIR --worktree ID --merge-commit SHA [--orca EXECUTABLE]
@@ -456,6 +458,8 @@ export const ALLOWED_OPTIONS = {
     "workflow-id",
     "state",
     "workflow-task",
+    "prior-workflow-id",
+    "prior-task-id",
     "profile",
     "worktree",
     "orca",
@@ -1197,6 +1201,21 @@ export async function createRoleWorktree(
   // This happens before Orca creates anything. A matrix refusal must not leave
   // a default shell tab or a worktree to reconcile.
   await preflightRoleWorktree(args, organization, environment, matrix);
+  const sourceWorkflowId = args["prior-workflow-id"];
+  const sourceWorkflowTask = args["prior-task-id"];
+  assert(
+    Boolean(sourceWorkflowId) === Boolean(sourceWorkflowTask),
+    "--prior-workflow-id and --prior-task-id must be provided together",
+  );
+  assert(
+    !sourceWorkflowId || args.worktree,
+    "A prior workflow/task is only valid when reusing its --worktree",
+  );
+  assert(
+    !sourceWorkflowId ||
+      (args["workflow-id"] && args["workflow-task"] && args.state),
+    "Cross-workflow reuse requires the current --workflow-id, --workflow-task, and --state",
+  );
   let promotion = null;
   let reusable = null;
   if (args["workflow-id"] && args["workflow-task"]) {
@@ -1213,18 +1232,56 @@ export async function createRoleWorktree(
       `Task ${args["workflow-task"]} already has worktree ${existing}; reuse it with role-terminal instead of creating another`,
     );
     if (args.worktree) {
-      const prior = Object.entries(state.tasks).find(
+      let source = null;
+      if (sourceWorkflowId) {
+        const sourceState =
+          sourceWorkflowId === args["workflow-id"]
+            ? state
+            : read(path.resolve(args.state), sourceWorkflowId).state;
+        assert(
+          sourceState?.tasks && typeof sourceState.tasks === "object",
+          `Prior workflow ${sourceWorkflowId} has no readable task state`,
+        );
+        source = {
+          workflowId: sourceWorkflowId,
+          taskId: sourceWorkflowTask,
+          state: sourceState,
+        };
+      }
+      const prior = source
+        ? [source.taskId, source.state.tasks[source.taskId]]
+        : Object.entries(state.tasks).find(
+            ([taskId, item]) =>
+              taskId !== args["workflow-task"] &&
+              item.state === "accepted" &&
+              (item.worktreeId ?? item.execution?.worktreeId) ===
+                args.worktree &&
+              (item.executionRole ?? item.role) === args.role,
+          );
+      assert(
+        prior?.[1]?.state === "accepted" &&
+          (prior[1].worktreeId ?? prior[1].execution?.worktreeId) ===
+            args.worktree &&
+          (prior[1].executionRole ?? prior[1].role) === args.role,
+        source
+          ? "The explicit prior workflow/task must be accepted, use this worktree, and match the execution role"
+          : "A reused role worktree needs an accepted prior task of the same execution role",
+      );
+      reusable = {
+        workflowId: source?.workflowId ?? args["workflow-id"],
+        taskId: prior[0],
+        task: prior[1],
+      };
+      const conflictingTask = Object.entries(state.tasks).find(
         ([taskId, item]) =>
           taskId !== args["workflow-task"] &&
-          item.state === "accepted" &&
-          item.worktreeId === args.worktree &&
-          (item.executionRole ?? item.role) === args.role,
+          taskId !== reusable.taskId &&
+          (item.worktreeId ?? item.execution?.worktreeId) === args.worktree,
       );
       assert(
-        prior,
-        "A reused role worktree needs an accepted prior task of the same execution role",
+        !conflictingTask,
+        `Worktree ${args.worktree} is also owned by current workflow task ${conflictingTask?.[0]}; preserve it instead of opening another role session`,
       );
-      reusable = { taskId: prior[0], task: prior[1] };
     }
   }
   assert(
@@ -1352,6 +1409,14 @@ export async function createRoleWorktree(
   return {
     ...created.workspace,
     session: created.session,
+    ...(reusable
+      ? {
+          reusedFrom: {
+            workflowId: reusable.workflowId,
+            workflowTaskId: reusable.taskId,
+          },
+        }
+      : {}),
     ...(transition ? { transition: transition.transition } : {}),
   };
 }
