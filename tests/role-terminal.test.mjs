@@ -1229,6 +1229,93 @@ test("readLaunchEnvironment: readOrcaVersion이 있으면 execute를 통한 orca
   );
 });
 
+// B.6, decision B, msg_f2bc63e31bc2/msg_f12840182482: 감사 launch는 신뢰
+// 버전 조회가 검증된 semver를 내놓지 못하면 openRoleTerminal을 호출하기 전에
+// 거부되어야 한다. readTrustedOrcaVersion의 계약(throw 또는 semver 문자열
+// 또는 null)에 따라, throw·null·빈 값은 모두 readLaunchEnvironment 안에서
+// orcaVersion === "unknown"으로 수렴하므로 각 실패 모드를 개별 테스트로
+// 재현해 같은 검사 지점이 전부 잡아낸다는 것을 확인한다. (저장소 관례상
+// tests/repository-metadata.test.mjs가 정적으로 `test(` 선언 개수를 세므로,
+// 동적으로 test()를 생성하는 반복문 대신 각 케이스를 개별 top-level
+// test로 풀어 쓴다.)
+async function assertFailsClosedOnUnverifiedOrca(readOrcaVersion) {
+  const { readLaunchEnvironment } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+
+  await assert.rejects(
+    () =>
+      readLaunchEnvironment({
+        worktreePath: "/nonexistent-auditor-worktree",
+        homedir: "/nonexistent-auditor-home",
+        readOrcaVersion,
+        skipAgyVersion: true,
+        throwOnUnverifiedOrca: true,
+      }),
+    /refuses to open|allow-unverified cannot lift/,
+  );
+
+  // 비감사 경로는 throwOnUnverifiedOrca를 넘기지 않으므로, 같은
+  // readOrcaVersion 실패가 있어도 조용히 orcaVersion "unknown"으로
+  // 반환을 마쳐야 한다(반례 h: 기존 동작 불변).
+  const env = await readLaunchEnvironment({
+    worktreePath: "/nonexistent-auditor-worktree",
+    homedir: "/nonexistent-auditor-home",
+    readOrcaVersion,
+    skipAgyVersion: true,
+  });
+  assert.equal(env.orcaVersion, "unknown");
+}
+
+test(
+  "readLaunchEnvironment: throwOnUnverifiedOrca=true이고 readOrcaVersion이 throw하면 " +
+    "거부하고, 일반 역할에서는 orcaVersion이 unknown이어도 거부하지 않는다",
+  async () => {
+    await assertFailsClosedOnUnverifiedOrca(async () => {
+      throw new Error("trusted script exited non-zero");
+    });
+  },
+);
+
+test(
+  "readLaunchEnvironment: throwOnUnverifiedOrca=true이고 readOrcaVersion이 null을 내놓으면 " +
+    "거부하고, 일반 역할에서는 orcaVersion이 unknown이어도 거부하지 않는다",
+  async () => {
+    await assertFailsClosedOnUnverifiedOrca(async () => null);
+  },
+);
+
+test(
+  "readLaunchEnvironment: throwOnUnverifiedOrca=true이고 readOrcaVersion이 빈 값을 내놓으면 " +
+    "거부하고, 일반 역할에서는 orcaVersion이 unknown이어도 거부하지 않는다",
+  async () => {
+    await assertFailsClosedOnUnverifiedOrca(async () => "");
+  },
+);
+
+// --allow-unverified가 이 거부를 풀 수 없다는 것은 코드 구조로 보장된다:
+// teams-org.mjs의 role-terminal 감사 분기는 allowUnverifiedApproval을
+// readLaunchEnvironment에 전혀 전달하지 않으므로(grep으로 확인), 이 함수에는
+// 애초에 그 값을 받아 검사를 우회할 매개변수가 없다. throwOnUnverifiedOrca가
+// 다른 옵션과 무관하게 무조건 적용된다는 것은 위 테스트가 이미 보여준다.
+test("readLaunchEnvironment는 throwOnUnverifiedOrca를 우회할 매개변수를 받지 않는다(allow-unverified 등가 옵션 없음)", async () => {
+  const { readLaunchEnvironment } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+  await assert.rejects(
+    () =>
+      readLaunchEnvironment({
+        worktreePath: "/nonexistent-auditor-worktree",
+        homedir: "/nonexistent-auditor-home",
+        readOrcaVersion: async () => null,
+        skipAgyVersion: true,
+        throwOnUnverifiedOrca: true,
+        // 존재하지 않는 옵션을 흉내 내 넘겨도 거부를 풀 수 없어야 한다.
+        allowUnverified: "user approved anyway",
+        allowUnverifiedApproval: "user approved anyway",
+      }),
+    /refuses to open|allow-unverified cannot lift/,
+  );
+});
+
 test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", async () => {
   const { readLaunchEnvironment: readEnv } =
     await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");

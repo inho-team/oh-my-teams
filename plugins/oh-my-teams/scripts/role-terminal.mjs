@@ -64,7 +64,16 @@ import {
  *   실행하지 않고 cliVersion을 "unknown"으로 둡니다(감사 launch 전용). agy
  *   조회는 판독 결과가 판정에 쓰이기 전에 PATH의 agy를 무조건 실행하므로,
  *   감사 프로필이 agy가 아닌 launch에서는 그 실행 자체가 불필요한 위험입니다.
+ * @param {boolean} [options.throwOnUnverifiedOrca=false] - true면 Orca 버전
+ *   판독이 결국 "unknown"으로 남을 때(감사 launch 전용, msg_f2bc63e31bc2/
+ *   msg_f12840182482 fail-closed) 반환하지 않고 throw합니다. `readOrcaVersion`이
+ *   throw하거나, null·빈 값·semver가 아닌 값을 반환하는 경우 모두 이 자리에서
+ *   같은 "unknown" 상태로 합쳐지므로, 검사 지점은 하나로 충분합니다. 이 옵션은
+ *   호출자의 `--allow-unverified` 같은 완화 플래그와 무관하게 항상 적용되며,
+ *   role-terminal의 감사 분기는 그 플래그를 이 함수에 전달하지 않으므로 우회할
+ *   방법이 없습니다.
  * @returns {Promise<object>} 환경 값 객체.
+ * @throws {Error} `throwOnUnverifiedOrca`가 true이고 Orca 버전이 검증되지 않은 경우.
  */
 export async function readLaunchEnvironment({
   worktreePath,
@@ -74,6 +83,7 @@ export async function readLaunchEnvironment({
   execute = run,
   readOrcaVersion,
   skipAgyVersion = false,
+  throwOnUnverifiedOrca = false,
 } = {}) {
   const platform = process.platform;
   const shell = platform === "win32" ? "powershell" : "posix";
@@ -237,6 +247,14 @@ export async function readLaunchEnvironment({
     } catch (error) {
       launchErrors.push(error);
     }
+  }
+
+  if (throwOnUnverifiedOrca && orcaVersion === "unknown") {
+    const cause = launchErrors.at(-1);
+    throw new Error(
+      "role-terminal --role auditor refuses to open: the trusted Orca version probe did not return a verified version, and --allow-unverified cannot lift this refusal" +
+        (cause ? ` (${cause.message})` : ""),
+    );
   }
 
   return {

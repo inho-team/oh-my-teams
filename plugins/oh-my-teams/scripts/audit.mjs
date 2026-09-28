@@ -202,10 +202,13 @@ export async function computeBinding(
  * lineage that actually launched it is what B.6's design is meant to add;
  * until it lands, this remains an open gap.
  *
- * This function takes no environment-override argument: unlike the prior
- * revision, a caller importing this module directly has no option to pass
- * a substitute environment for `process.env`, so a --terminal argument (or
- * a Node-level override) can never stand in for the handle Orca actually set.
+ * This function takes no environment-override argument, which removes only
+ * the path where a public parameter could carry a substitute environment.
+ * `process.env` itself remains caller-controllable: a caller sharing this OS
+ * user account can set `ORCA_TERMINAL_HANDLE` before invoking this function,
+ * or import this module and mutate `process.env` directly. Removing the
+ * argument narrows the input surface; it does not by itself prove auditor
+ * identity (see the environment-forgery gap above, which B.6 is meant to close).
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
@@ -237,11 +240,12 @@ export function verifiedAuditor(orgFile, worktreeId) {
  * checkout, reusing the same authority check `deliver` and `kickoff-release`
  * already enforce.
  *
- * This function takes no working-directory argument: unlike the prior
- * revision, a caller importing this module directly has no option to pass a
- * substitute `callerCwd` naming the director's checkout while running
- * somewhere else. `assertDirectorAuthority` always sees this process's own,
- * real `process.cwd()`.
+ * This function takes no working-directory argument: a caller importing this
+ * module directly has no public parameter to pass a substitute `callerCwd`
+ * naming the director's checkout while running somewhere else.
+ * `assertDirectorAuthority` always sees this process's own, real
+ * `process.cwd()` — a value the running process itself controls (e.g. via
+ * `chdir`), but that a separate caller cannot override through this API.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
@@ -291,11 +295,11 @@ export function isPmBoundToRun(bound, callerHandle, runId) {
  * (`resolveTrustedOrcaScriptPath`) with a pinned interpreter and an
  * allowlisted child environment. A CLI argument (e.g. --orca),
  * `ORCA_CLI_COMMAND`, `ORCA_DEV_REPO_ROOT`, and PATH play no part in choosing
- * either the script or what it reads once running (B.6, decision B). Nothing
- * here is overridable: unlike the prior revision, a caller importing this
- * module directly (rather than going through the CLI) has no option to pass
- * that would substitute a forged executable, runner, or `run-current` result
- * for the real one, since none of those inputs are accepted at all.
+ * either the script or what it reads once running (B.6, decision B). None of
+ * this is overridable: a caller importing this module directly (rather than
+ * going through the CLI) has no parameter through which to substitute a
+ * forged executable, runner, or `run-current` result for the real one, since
+ * none of those inputs are accepted at all.
  *
  * What this closes is the caller's ability to redirect, through an argument,
  * `PATH`, or an inherited environment variable, which executable answers this
@@ -308,9 +312,11 @@ export function isPmBoundToRun(bound, callerHandle, runId) {
  * lineage that actually launched it is what B.6's design is meant to add
  * next; until it lands this remains an open gap.
  *
- * This function takes no environment-override argument either: like
- * `verifiedAuditor`, a caller importing this module directly has no option to
- * pass a substitute environment for `process.env`.
+ * This function takes no environment-override argument either, for the same
+ * reason `verifiedAuditor` does not: this only removes the path where a
+ * public parameter could carry a substitute environment. `process.env`
+ * itself remains caller-controllable, so this alone does not prove PM
+ * identity; it narrows the input surface, nothing more.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} worktreeId - PM worktree of the kickoff under audit.

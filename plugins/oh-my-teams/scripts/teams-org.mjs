@@ -3237,14 +3237,25 @@ export async function executeCommand(args, execute) {
       // --version` probe entirely, rather than letting it run unconditionally
       // against PATH before the launch even opens: cliVersion only affects
       // launch-matrix's judgment when the launched runner is "agy"
-      // (launch-matrix.mjs), and the auditor profile here is Claude, so
-      // omitting it never changes the matrix result. `homedir` is likewise
-      // read from `os.userInfo()` rather than left at readLaunchEnvironment's
-      // own `os.homedir()` default, so the auditor branch's trust-record
-      // lookups cannot be redirected through an inherited HOME either. None
+      // (launch-matrix.mjs). The auditor is normally configured on a Claude
+      // profile, but org.auditor's provider is not schema-restricted to
+      // "claude" (providers/index.mjs's PROVIDER_IDS admits agy too), so an
+      // agy-configured auditor is possible; that residual gap is unresolved
+      // and tracked separately, not closed by omitting this probe.
+      // `homedir` is likewise read from `os.userInfo()` rather than left at
+      // readLaunchEnvironment's own `os.homedir()` default, so the auditor
+      // branch's trust-record lookups cannot be redirected through an
+      // inherited HOME either. `throwOnUnverifiedOrca: true`
+      // (msg_f2bc63e31bc2/msg_f12840182482) fails the launch closed the
+      // moment the trusted version probe above does not resolve to a
+      // verified semver, whatever the reason (throw, non-zero exit, null,
+      // empty, non-semver): readLaunchEnvironment collapses every one of
+      // those into orcaVersion === "unknown" before this check runs.
+      // allowUnverifiedApproval, read just above, is never passed into
+      // readLaunchEnvironment, so it has no way to relax this refusal. None
       // of this applies outside the auditor branch: a non-auditor launch
-      // keeps its existing PATH-based Orca/agy version probes and homedir
-      // default unchanged.
+      // keeps its existing PATH-based Orca/agy version probes, homedir
+      // default, and unverified-version tolerance unchanged.
       const {
         executable: auditorExecutable,
         execute: auditorExecute,
@@ -3260,6 +3271,7 @@ export async function executeCommand(args, execute) {
               readOrcaVersion: () => readTrustedOrcaVersion(),
               skipAgyVersion: true,
               homedir: os.userInfo().homedir,
+              throwOnUnverifiedOrca: true,
             }
           : {}),
       });
