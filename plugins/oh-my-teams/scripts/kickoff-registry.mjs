@@ -342,6 +342,26 @@ export function validateEntry(stored) {
       "Kickoff auditor.path required when auditor is present",
     );
   }
+  if (entry.deliveryHistory !== undefined) {
+    assert(
+      Array.isArray(entry.deliveryHistory) &&
+        entry.deliveryHistory.length > 0 &&
+        entry.delivered,
+      "Kickoff deliveryHistory requires a current delivery and previous records",
+    );
+    const heads = new Set([entry.delivered.head]);
+    for (const record of entry.deliveryHistory) {
+      assert(
+        text(record?.head) && text(record?.mergeCommit) && text(record?.at),
+        "Kickoff deliveryHistory records require head, merge commit and timestamp",
+      );
+      assert(
+        !heads.has(record.head),
+        "Kickoff deliveryHistory heads must be unique",
+      );
+      heads.add(record.head);
+    }
+  }
   return entry;
 }
 
@@ -776,7 +796,7 @@ export function verifyDeliveredCommits(
  *   the remote whose branch may hold a merge made elsewhere (default `origin`).
  * @returns {{recorded: boolean, entry: object}} Updated entry.
  * @throws {Error} When the worktree holds no kickoff or delivers to no branch,
- *   another head was delivered, or the commits fail verification.
+ *   the new head omits the previous merge, or the commits fail verification.
  */
 export function recordDelivery(
   orgFile,
@@ -796,17 +816,26 @@ export function recordDelivery(
       mergeCommit,
       remoteName,
     });
+    const previous = entry.delivered;
+    const nextStage = previous && previous.head !== verified.head;
     assert(
-      !entry.delivered || entry.delivered.head === verified.head,
-      `Kickoff already delivered ${entry.delivered?.head}`,
+      !nextStage ||
+        isAncestor(ownerProject(orgFile), previous.mergeCommit, verified.head),
+      `New delivery head ${verified.head} does not contain previous merge ${previous?.mergeCommit}`,
     );
     const updated = validateEntry({
       ...entry,
-      delivered: entry.delivered ?? {
-        head: verified.head,
-        mergeCommit: verified.mergeCommit,
-        at: new Date().toISOString(),
-      },
+      deliveryHistory: nextStage
+        ? [...(entry.deliveryHistory ?? []), previous]
+        : entry.deliveryHistory,
+      delivered:
+        !previous || nextStage
+          ? {
+              head: verified.head,
+              mergeCommit: verified.mergeCommit,
+              at: new Date().toISOString(),
+            }
+          : previous,
     });
     writeJSON(file, updated);
     return { recorded: true, entry: updated };

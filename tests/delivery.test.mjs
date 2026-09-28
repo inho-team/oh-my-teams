@@ -222,6 +222,195 @@ test("deliver merges the verified head into the owner branch once", async (t) =>
   );
 });
 
+test("a later delivery preserves the earlier merge and refuses a stale stage", async (t) => {
+  const fixture = await kickoffProject(t);
+  const options = {
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  };
+  const first = await deliverKickoff(options);
+  const ownerAfterFirst = await git(fixture.project, "rev-parse", "HEAD");
+
+  // A new commit on the old branch cannot replace the first delivered result.
+  fs.writeFileSync(path.join(fixture.worktree, "docs", "later.md"), "stale\n");
+  await git(fixture.worktree, "add", ".");
+  await git(fixture.worktree, "commit", "-qm", "stale continuation");
+  const staleHead = await git(fixture.worktree, "rev-parse", "HEAD");
+  // The lineage check (entry.delivered.mergeCommit must be staleHead's
+  // ancestor) runs only after assertKickoffCloseReady's fidelity gate, so
+  // this counterexample must first clear that gate for staleHead too — the
+  // rejection under test is lineage, not missing evidence.
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: staleHead,
+    repo: fixture.worktree,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "report.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(
+    fixture.org,
+    fixture.worktreeId,
+    process.cwd(),
+  );
+  await assert.rejects(
+    deliverKickoff({ ...options, head: staleHead }),
+    /does not contain previous merge/,
+  );
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    ownerAfterFirst,
+  );
+  assert.equal(
+    listKickoffs(fixture.org).kickoffs[0].deliveryHistory,
+    undefined,
+  );
+
+  await git(
+    fixture.worktree,
+    "merge",
+    "--no-ff",
+    "-qm",
+    "integrate main",
+    "main",
+  );
+  fs.writeFileSync(
+    path.join(fixture.worktree, "docs", "later.md"),
+    "current\n",
+  );
+  await git(fixture.worktree, "commit", "-qam", "finish continuation");
+  const nextHead = await git(fixture.worktree, "rev-parse", "HEAD");
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: nextHead,
+    repo: fixture.worktree,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "report.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(
+    fixture.org,
+    fixture.worktreeId,
+    process.cwd(),
+  );
+  let gateCalls = 0;
+  const second = await deliverKickoff({
+    ...options,
+    head: nextHead,
+    gate: async () => {
+      gateCalls += 1;
+    },
+  });
+  assert.equal(second.merged, true);
+  assert.equal(gateCalls, 1);
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    second.mergeCommit,
+  );
+  assert.equal(await git(fixture.project, "rev-parse", "HEAD^2"), nextHead);
+  const [entry] = listKickoffs(fixture.org).kickoffs;
+  assert.deepEqual(entry.deliveryHistory, [
+    {
+      head: first.head,
+      mergeCommit: first.mergeCommit,
+      at: entry.deliveryHistory[0].at,
+    },
+  ]);
+  assert.equal(entry.delivered.head, nextHead);
+  assert.equal(entry.delivered.mergeCommit, second.mergeCommit);
+  assert.equal(
+    (await deliverKickoff({ ...options, head: nextHead })).merged,
+    false,
+  );
+  assert.deepEqual(
+    listKickoffs(fixture.org).kickoffs[0].deliveryHistory,
+    entry.deliveryHistory,
+  );
+});
+
+// #139 counterexamples: deliverKickoff's early-return branch
+// (`entry.delivered?.head === head`, line 209 in delivery.mjs) sits AFTER
+// `assertKickoffCloseReady` (line 196), so redelivery — same head or a new
+// one — always re-runs the ledger/audit gate rather than skipping it. These
+// two tests exercise that ordering directly, one gate at a time.
+test("deliver refuses a redelivery whose new head has no confirmed fidelity check (evidence gate is not skipped on redelivery)", async (t) => {
+  const fixture = await kickoffProject(t);
+  const options = {
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  };
+  const first = await deliverKickoff(options);
+  assert.equal(first.merged, true);
+
+  // A new commit lands, but no requirementsFidelity/requirementsFidelityConfirm
+  // is ever recorded for it: the user-evidence checkpoint for this head is missing.
+  await git(
+    fixture.worktree,
+    "merge",
+    "--no-ff",
+    "-qm",
+    "integrate main",
+    "main",
+  );
+  fs.writeFileSync(
+    path.join(fixture.worktree, "docs", "report.md"),
+    "undisclosed change\n",
+  );
+  await git(fixture.worktree, "commit", "-qam", "undisclosed change");
+  const undisclosedHead = await git(fixture.worktree, "rev-parse", "HEAD");
+
+  await assert.rejects(
+    deliverKickoff({ ...options, head: undisclosedHead }),
+    /No director-confirmed fidelity check exists/,
+  );
+  // Nothing merged: the owner branch stays exactly at the first delivery.
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    first.mergeCommit,
+  );
+  assert.equal(listKickoffs(fixture.org).kickoffs[0].delivered.head, fixture.head);
+});
+
+test("deliver refuses a same-head redelivery once the organization declares an auditor with no acceptance recorded yet (early return does not skip the audit gate)", async (t) => {
+  const fixture = await kickoffProject(t);
+  const options = {
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  };
+  const first = await deliverKickoff(options);
+  assert.equal(first.merged, true);
+
+  // The organization adopts an auditor after the first delivery, with no
+  // brief/outcome acceptance recorded for this kickoff yet — an unresolved
+  // audit checkpoint, the redelivery-time counterpart of the unresolved
+  // objection that `hasValidAcceptance` already refuses on its own
+  // (tests/auditor.test.mjs:346).
+  const org = JSON.parse(fs.readFileSync(fixture.org, "utf8"));
+  org.auditor = { profile: "claude-current" };
+  fs.writeFileSync(fixture.org, JSON.stringify(org, null, 2));
+
+  // Same head as the first, successful delivery: this is exactly the
+  // `entry.delivered?.head === head` branch that returns early. If that
+  // early return ran before the gate, this call would wrongly succeed.
+  await assert.rejects(
+    deliverKickoff(options),
+    /Brief audit acceptance is missing or no longer valid/,
+  );
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    first.mergeCommit,
+  );
+  assert.equal(listKickoffs(fixture.org).kickoffs[0].delivered.head, fixture.head);
+});
+
 test("deliver refuses a moved head, an unready owner, and a conflict", async (t) => {
   const fixture = await kickoffProject(t);
   const options = {
