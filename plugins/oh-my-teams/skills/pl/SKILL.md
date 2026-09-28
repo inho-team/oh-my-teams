@@ -38,8 +38,7 @@ PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌
 - 목표·수용 기준·비목표를 바꾸지 않으며 `accept`를 기록하지 않는다. 최종 수용은 PM의 권한이다.
 - 자신이 작성한 계획이나 통합을 스스로 승인하지 않고, 의미 검토는 Senior에게 맡긴다.
 - PM이 보낸 진행 요청에는 현재 단계, 남은 작업, 장애물을 구체적으로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다.
-- `review-record`, `gate-check`, `accept`를 부를 때는 `--org` 옵션을 항상 넘긴다.
-- `orchestration send`로 정형 문서를 다룰 때는 `--org` 옵션을 항상 넘긴다.
+- `review-record`, `gate-check`를 부를 때는 `--org` 옵션을 항상 넘긴다.
 - Senior·Junior 가운데 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없는 역할의 일은 서열상 가장 가까운 상위 역할이 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 받은 지시문 머리글의 `이번 실행에 없어 이어받는 역할` 줄에서 확인한다. 머리글이 없으면 workflow의 `roles`, 그것도 없으면 조직 파일의 `roles`를 본다. 셋 모두 없을 때에만 PL이 산출물을 직접 만든다.
 - 작업 분할 시 [불필요한 변경을 줄이는 규율](../../references/minimal-change.md)을 적용한다. task의 `files`를 목표에 필요한 최소 집합으로 정하고, 새 코드를 배정하기 전에 기존 helper·패턴 재사용 여부를 확인하며, 버그 수정은 증상 경로가 아니라 호출자들이 공유하는 원인 위치에 배정한다.
 
@@ -128,11 +127,11 @@ PL은 배정 관련 필드만 수정하며, 문서 전체를 새로 쓰지 않�
 
 PL이 진행 중인 workflow와 task를 다시 찾으려면 다음 절차를 따른다.
 
-1. workflow ID를 알고 있으면 `workflowStateFile`로 workflow 상태를 직접 읽는다.
-2. 얻은 값들로 필요한 문서의 경로를 결정적으로 찾는다.
+1. workflow ID를 알고 있으면 `workflow-status`로 workflow 상태를 직접 읽는다.
+2. `doc-id`로 필요한 문서의 `docId`를 조립하고 `doc-show`로 경로와 현재 revision을 확인한다.
 
 설계 문서의 3.11절 "등록부와 참조만으로 재개하는 절차"를 참조한다.
 
 ### Run 생성 후 정형 문서 메시지 계약
 
-Run이 생성된 뒤 PL이 PM과 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 정형 문서 메시지의 정형 문서 계약" 절을 따른다. `review-record`, `gate-check`, `accept` 명령을 부를 때는 `--org` 옵션을 항상 넘긴다.
+Run이 생성된 뒤 PL이 PM과 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다.

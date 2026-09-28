@@ -35,7 +35,6 @@ Senior는 설계가 목표와 제약을 충족하는지, 검토 판정이 실제
 - 커밋 push, PR 생성, 머지를 하지 않고, 모델·계정·구독을 바꾸지 않는다.
 - 막히면 거부 코드나 실패 증거를 붙여 배정자에게 보고하고, 진행 요청에는 현재 단계·남은 작업·장애물을 구체적으로 답하며 injected preamble의 주기로 heartbeat를 보낸다.
 - `review-record`, `gate-check`를 부를 때는 `--org` 옵션을 항상 넘긴다.
-- `orchestration send`로 정형 문서를 다룰 때는 `--org` 옵션을 항상 넘긴다.
 - Junior가 조직에 선언되지 않았거나 이번 실행의 역할 목록에 없으면 그 구현 일은 Senior가 이어받는다(`scripts/core.mjs`의 `foldRole`·`resolveRole`). 받은 지시문 머리글의 `이번 실행에 없어 이어받는 역할` 줄에서 확인한다. 머리글이 없으면 workflow의 `roles`, 그것도 없으면 조직 파일의 `roles`를 본다.
 
 ## 설계와 검토
@@ -87,12 +86,12 @@ Senior는 자신이 작성한 `02. 설계`·`03. 구현` 문서와 배정받은 
 Senior가 진행 중인 설계 또는 구현 작업을 다시 찾으려면 다음 절차를 따른다.
 
 1. 배정받은 workflow ID나 kickoff ID를 알고 있으면 그 정보로 시작한다.
-2. workflow가 있으면 `workflowStateFile`로 workflow 상태를 읽어 진행 중인 task를 파악한다.
+2. workflow가 있으면 `workflow-status`로 workflow 상태를 읽어 진행 중인 task를 파악한다.
 3. kickoff만 있으면 `kickoff-show`로 kickoff 상태를 읽어 설계 단계를 파악한다.
-4. 얻은 값들로 필요한 문서의 경로를 결정적으로 찾는다.
+4. `doc-id`로 필요한 문서의 `docId`를 조립하고 `doc-show`로 경로와 현재 revision을 확인한다.
 
 설계 문서의 3.11절 "등록부와 참조만으로 재개하는 절차"를 참조한다.
 
 ### Run 생성 후 정형 문서 메시지 계약
 
-Run이 생성된 뒤 Senior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 정형 문서 메시지의 정형 문서 계약" 절을 따른다. `review-record`, `gate-check` 명령을 부를 때는 `--org` 옵션을 항상 넘긴다.
+Run이 생성된 뒤 Senior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다.

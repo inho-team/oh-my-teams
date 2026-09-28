@@ -71,11 +71,11 @@ Junior는 자신이 작성한 `03. 구현` 문서만 수정할 수 있다. 검�
 Junior가 배정받은 task를 다시 찾으려면 다음 절차를 따른다.
 
 1. 배정자가 넘긴 workflow ID를 사용한다.
-2. `workflowStateFile`로 workflow 상태를 읽어 현재 task를 파악한다.
-3. 얻은 값들로 배정받은 문서의 경로를 결정적으로 찾는다.
+2. `workflow-status`로 workflow 상태를 읽어 현재 task를 파악한다.
+3. `doc-id`로 배정받은 문서의 `docId`를 조립하고 `doc-show`로 경로와 현재 revision을 확인한다.
 
 설계 문서의 3.11절 "등록부와 참조만으로 재개하는 절차"를 참조한다.
 
 ### Run 생성 후 정형 문서 메시지 계약
 
-Run이 생성된 뒤 Junior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 정형 문서 메시지의 정형 문서 계약" 절을 따른다.
+Run이 생성된 뒤 Junior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다.
