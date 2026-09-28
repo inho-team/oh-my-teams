@@ -42,17 +42,6 @@ import {
   assertDirectorAuthority,
   checkCloseReady,
 } from "./delivery.mjs";
-import { assertDistinctOpenCodexHomes } from "./opencodex.mjs";
-import { startDashboard } from "./dashboard.mjs";
-import {
-  answerHeadless,
-  HEADLESS_PROTOCOL,
-  HEADLESS_PROVIDERS,
-  listHeadless,
-  startHeadlessWorker,
-  stopHeadless,
-  waitHeadless,
-} from "./headless.mjs";
 import {
   clearRoleTerminal,
   DISPATCH_PURPOSES,
@@ -67,14 +56,22 @@ import {
 import { predictLaunchPath } from "./launch-matrix.mjs";
 import { answerPrompt } from "./prompt-supervision.mjs";
 import { advise, assist, draft, validateTask, work } from "./worker.mjs";
-import { aggregate, validateEvidence, verify } from "./evidence.mjs";
+import {
+  aggregate,
+  git as gitEvidence,
+  validateEvidence,
+  verify,
+} from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
 import {
   checkTerminalIdle,
-  createWorktree,
+  createWorktreeWithRoleSession,
   discoverOrcaRuntime,
+  findActiveDispatch,
   injectTask,
+  reclaimWorktree,
+  releaseWorker,
   runOrcaJson,
   selectOrcaExecutable,
   startWorker,
@@ -92,6 +89,7 @@ import {
   acceptWorkflowIntegration,
   createWorkflow,
   readWorkflow,
+  prepareRolePromotion,
   recordSettlement,
   releaseReservation,
   resumeWorkflow,
@@ -146,7 +144,9 @@ import {
 } from "./documents.mjs";
 import {
   readLaunches,
+  readTerminalClosures,
   recordLaunch,
+  recordTerminalClosure,
   lazyLaunchesBackward,
 } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
@@ -204,6 +204,21 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
           (merges a verified kickoff result into the branch its claim recorded;
           run by the director in close)
   prepare --org FILE --task FILE --repo DIR --name NAME [--orca EXECUTABLE]
+  role-worktree-create --org FILE --role ROLE --repo DIR --name NAME --base SHA
+                        [--setup inherit|run|skip] [--title TEXT] [--brief FILE]
+                        [--workflow-id ID --state DIR --workflow-task ID]
+                        [--prior-workflow-id ID --prior-task-id ID]
+                        [--worktree WORKTREE_ID] [--profile FALLBACK] [--orca EXECUTABLE]
+                        (creates a child only while opening and proving its Orca role session;
+                        reuses a proven idle same-role worktree only after prior acceptance,
+                        integration, Dispatch release, terminal closure, and Git-clean proof;
+                        cross-workflow reuse requires the explicit accepted prior pair;
+                        a proven no-session launch is reclaimed, an ambiguous launch is preserved)
+  role-worktree-reclaim --org FILE --state DIR --workflow-id ID --workflow-task ID
+                        --repo DIR --worktree ID --merge-commit SHA [--orca EXECUTABLE]
+                        (reclaims an accepted and integrated child only after every related
+                        Dispatch is released, every owned terminal is closed, no other terminal
+                        remains, its commit is preserved by --merge-commit, and Git is clean)
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
   attach-workspace --org FILE --task FILE --repo DIR --workspace DIR
@@ -228,17 +243,6 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                the terminal comes from role-terminal; the worker's tab title
                starts with its role tag, e.g. [PL]; a Claude terminal that
                last received a different task, or any review, gets /clear first)
-  headless-start --org FILE --role ROLE --cwd DIR --spec TEXT --state DIR
-                 [--workflow-id ID] [--timeout-ms N] [--worker ID]
-                 [--workflow-task ID --profile FALLBACK]
-                 (runs the role as a non-interactive process, without Orca;
-                 --profile runs the fallback a workflow-handoff recorded)
-  headless-status --state DIR --worker ID [--wait-ms N]
-  headless-answer --state DIR --worker ID --text TEXT [--timeout-ms N]
-  headless-stop --state DIR --worker ID
-  headless-list --state DIR
-  dashboard --state DIR [--port N] [--host ADDRESS] [--token TEXT]
-            (serves the headless workers to a browser; every request needs the token)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
   prompt-answer --org FILE --terminal HANDLE --workflow-id ID --state DIR
@@ -444,6 +448,34 @@ export const ALLOWED_OPTIONS = {
     "state",
   ],
   prepare: ["org", "task", "repo", "name", "orca"],
+  "role-worktree-create": [
+    "org",
+    "role",
+    "repo",
+    "name",
+    "base",
+    "setup",
+    "title",
+    "brief",
+    "workflow-id",
+    "state",
+    "workflow-task",
+    "prior-workflow-id",
+    "prior-task-id",
+    "profile",
+    "worktree",
+    "orca",
+  ],
+  "role-worktree-reclaim": [
+    "org",
+    "state",
+    "workflow-id",
+    "workflow-task",
+    "repo",
+    "worktree",
+    "merge-commit",
+    "orca",
+  ],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -481,23 +513,6 @@ export const ALLOWED_OPTIONS = {
     "terminal",
     "orca",
   ],
-  "headless-start": [
-    "org",
-    "role",
-    "cwd",
-    "spec",
-    "state",
-    "workflow-id",
-    "workflow-task",
-    "profile",
-    "timeout-ms",
-    "worker",
-  ],
-  "headless-status": ["state", "worker", "wait-ms"],
-  "headless-answer": ["state", "worker", "text", "timeout-ms"],
-  "headless-stop": ["state", "worker"],
-  "headless-list": ["state"],
-  dashboard: ["state", "port", "host", "token"],
   "role-command": ["org", "role", "workflow-id", "state"],
   "role-terminal": [
     "org",
@@ -675,6 +690,16 @@ export const REQUIRED_OPTIONS = {
   "kickoff-merge-record": ["org", "worktree", "head", "merge-commit"],
   deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
+  "role-worktree-create": ["org", "role", "repo", "name", "base"],
+  "role-worktree-reclaim": [
+    "org",
+    "state",
+    "workflow-id",
+    "workflow-task",
+    "repo",
+    "worktree",
+    "merge-commit",
+  ],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -697,12 +722,6 @@ export const REQUIRED_OPTIONS = {
   "terminal-idle-check": ["terminal"],
   "prompt-answer": ["org", "terminal", "workflow-id", "state"],
   "worker-limit-check": ["worktree", "provider"],
-  "headless-start": ["org", "role", "cwd", "spec", "state"],
-  "headless-status": ["state", "worker"],
-  "headless-answer": ["state", "worker", "text"],
-  "headless-stop": ["state", "worker"],
-  "headless-list": ["state"],
-  dashboard: ["state"],
   "role-command": ["org", "role"],
   "role-terminal": ["org", "role", "worktree"],
   "host-defaults": [],
@@ -775,7 +794,7 @@ export function parseArgs(argv) {
     const key = rest[index];
     assert(key.startsWith("--"), `Unexpected argument: ${key}`);
     const option = key.slice(2);
-    // `--text` is a flag only for role-spec; headless-answer takes a value.
+    // `--text` is a flag only for role-spec.
     if (
       ["json", "apply", "force", "all", "write", "dry-run"].includes(option) ||
       (option === "text" && command === "role-spec")
@@ -971,27 +990,680 @@ async function compatibilityPrepare(args) {
     repo,
     path.join(stateDir, "prepared", args.name),
   );
-  const created = await createWorktree(repo, {
-    name: args.name,
-    base: prepared.frozenTask.baseRef,
+  return {
+    ...prepared,
+    stateDir,
+    note:
+      "Compatibility prepare only writes the frozen input. Run role-worktree-create " +
+      "to create or safely reuse the child with a proven Orca role session, then attach-workspace.",
+  };
+}
+
+async function preflightRoleWorktree(args, organization, environment, matrix) {
+  const command = roleCommand(organization, args.role, {
+    profile: args.profile,
+  });
+  const worktreePath = args.worktree
+    ? pathFromWorktreeId(args.worktree)
+    : undefined;
+  const env = await environment({
+    worktreePath,
+    orcaExecutable: args.orca,
+  });
+  const prediction = matrix({
+    runner: command.provider,
+    model: command.modelRequested,
+    platform: env.platform,
+    shell: env.shell,
+    trustRecordExists: env.trustRecordExists,
+    codexTrustRecordExists: env.codexTrustRecordExists,
+    skipDangerousModePermissionPrompt: Boolean(
+      PERMISSION_BYPASS[command.provider],
+    ),
+    orcaVersion: env.orcaVersion,
+    cliVersion: env.cliVersion,
+    isCompoundCommand: false,
+  });
+  assert(
+    prediction.path !== "blocked",
+    `Role ${args.role} is refused by the launch matrix before worktree creation: ${prediction.reason.join(", ")}. ${prediction.nextAction}`,
+  );
+  return { command, prediction };
+}
+
+function trustedTaskExecutionRole(task) {
+  if (typeof task?.executionRole !== "string") return null;
+  if (task.executionRole === task.role) return task.executionRole;
+  const transition = (task.worktreeTransitions ?? []).find(
+    (entry) =>
+      entry?.id === task.execution?.transitionId &&
+      entry.kind === "junior-to-senior" &&
+      entry.fromRole === task.role &&
+      entry.toRole === task.executionRole &&
+      entry.toWorktreeId === task.worktreeId &&
+      entry.usedAt &&
+      task.execution?.executionRole === task.executionRole,
+  );
+  return transition ? task.executionRole : null;
+}
+
+function receiptBody(receipt) {
+  return receipt?.result ?? receipt ?? {};
+}
+
+function assertReleasedReceipt(receipt, dispatchId) {
+  const release = receiptBody(receipt);
+  const evidence = JSON.stringify(release);
+  assert(
+    release.dispatchId === dispatchId &&
+      release.state === "retained" &&
+      release.reason === "external_terminal" &&
+      release.processAction === "none" &&
+      !evidence.includes("terminal_stop_unverifiable") &&
+      !evidence.includes("terminalStopUnverifiable"),
+    `Dispatch ${dispatchId} was not conclusively released as an external terminal; preserve its worktree`,
+  );
+}
+
+function assertClosedReceipt(receipt, terminal) {
+  const body = receiptBody(receipt);
+  const close = body.close;
+  const evidence = JSON.stringify(body);
+  const hasTabId =
+    (typeof close?.tabId === "string" && close.tabId.length > 0) ||
+    Number.isInteger(close?.tabId);
+  assert(
+    close?.handle === terminal &&
+      hasTabId &&
+      close.ptyKilled === true &&
+      !/"ptyKilled"\s*:\s*false/.test(evidence) &&
+      !evidence.includes("terminal_stop_unverifiable") &&
+      !evidence.includes("terminalStopUnverifiable"),
+    `Terminal ${terminal} did not prove its own PTY termination; preserve its worktree`,
+  );
+}
+
+async function listWorktreeTerminals({ repo, worktreeId, orca, list }) {
+  const listed = await list(
+    selectOrcaExecutable(orca),
+    ["terminal", "list", "--worktree", `id:${worktreeId}`],
+    { cwd: repo },
+  );
+  const terminals = receiptBody(listed).terminals;
+  assert(
+    Array.isArray(terminals),
+    "Orca did not prove the worktree terminal list; preserve the worktree",
+  );
+  return { terminals, receipt: listed };
+}
+
+function closureProvesTerminal(closure, worktreeId, worktreePath, entry) {
+  if (
+    closure?.worktreeId !== worktreeId ||
+    path.resolve(closure.worktreePath ?? "") !== worktreePath ||
+    !Array.isArray(closure.terminals)
+  )
+    return false;
+  const terminal = closure.terminals.find(
+    (candidate) => candidate?.terminal === entry.terminal,
+  );
+  if (
+    !terminal ||
+    terminal.dispatch?.result?.status !== "clear" ||
+    !Array.isArray(terminal.releases)
+  )
+    return false;
+  try {
+    assertClosedReceipt(terminal.close?.receipt, entry.terminal);
+    for (const dispatchId of entry.workerIds) {
+      const release = terminal.releases.find(
+        (candidate) => candidate?.dispatchId === dispatchId,
+      );
+      assertReleasedReceipt(release?.receipt, dispatchId);
+    }
+    const after = receiptBody(closure.afterReceipt).terminals;
+    return Array.isArray(after) && after.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function ownedTerminals(launches, closures, worktreeId, worktreePath) {
+  const byTerminal = new Map();
+  for (const entry of launches) {
+    if (
+      entry.via !== "worker-start" ||
+      typeof entry.terminal !== "string" ||
+      typeof entry.workerId !== "string" ||
+      path.resolve(entry.worktreePath ?? "") !== worktreePath
+    )
+      continue;
+    const owned = byTerminal.get(entry.terminal) ?? {
+      terminal: entry.terminal,
+      workerIds: [],
+    };
+    if (!owned.workerIds.includes(entry.workerId))
+      owned.workerIds.push(entry.workerId);
+    byTerminal.set(entry.terminal, owned);
+  }
+  return [...byTerminal.values()].filter(
+    (entry) =>
+      !closures.some((closure) =>
+        closureProvesTerminal(closure, worktreeId, worktreePath, entry),
+      ),
+  );
+}
+
+async function proveAndCloseOwnedTerminals({
+  repo,
+  worktreeId,
+  worktreePath,
+  orca,
+  launches,
+  closures,
+  active,
+  release,
+  close,
+  list,
+}) {
+  const owned = ownedTerminals(launches, closures, worktreeId, worktreePath);
+  assert(
+    owned.length > 0,
+    "No owned Dispatch and terminal receipt matches this role worktree; preserve it for reconciliation",
+  );
+  const dispatchesByTerminal = new Map();
+  for (const entry of owned) {
+    const dispatch = await active(entry.terminal, {
+      executable: orca,
+      cwd: repo,
+    });
+    assert(
+      dispatch.status === "clear",
+      `Role terminal ${entry.terminal} is ${dispatch.status}; do not reuse or reclaim its worktree`,
+    );
+    dispatchesByTerminal.set(entry.terminal, dispatch);
+  }
+  const before = await listWorktreeTerminals({ repo, worktreeId, orca, list });
+  const expected = new Set(owned.map((entry) => entry.terminal));
+  const actual = new Set(
+    before.terminals
+      .map((terminal) => terminal?.handle)
+      .filter((handle) => typeof handle === "string"),
+  );
+  assert(
+    before.terminals.length === actual.size &&
+      actual.size === expected.size &&
+      [...actual].every((handle) => expected.has(handle)),
+    "Another or unowned terminal is connected to this worktree; preserve it without closing that session",
+  );
+  const released = [];
+  for (const entry of owned) {
+    for (const dispatchId of entry.workerIds) {
+      const receipt = await release(dispatchId, {
+        executable: orca,
+        cwd: repo,
+      });
+      assertReleasedReceipt(receipt, dispatchId);
+      released.push({ dispatchId, receipt });
+    }
+  }
+  const closed = [];
+  for (const entry of owned) {
+    const receipt = await close(
+      selectOrcaExecutable(orca),
+      ["terminal", "close", "--terminal", entry.terminal],
+      { cwd: repo },
+    );
+    assertClosedReceipt(receipt, entry.terminal);
+    closed.push({ terminal: entry.terminal, receipt });
+  }
+  const after = await listWorktreeTerminals({ repo, worktreeId, orca, list });
+  assert(
+    after.terminals.length === 0,
+    "A connected terminal remains after close; preserve the worktree",
+  );
+  return {
+    worktreeId,
+    worktreePath,
+    terminals: owned.map((entry) => ({
+      terminal: entry.terminal,
+      workerIds: entry.workerIds,
+      dispatch: {
+        terminal: entry.terminal,
+        result: dispatchesByTerminal.get(entry.terminal),
+      },
+      releases: released.filter((item) =>
+        entry.workerIds.includes(item.dispatchId),
+      ),
+      close: closed.find((item) => item.terminal === entry.terminal),
+    })),
+    beforeReceipt: before.receipt,
+    afterReceipt: after.receipt,
+    released,
+    closed,
+  };
+}
+
+/**
+ * Creates one Orca child worktree only as part of opening its role session.
+ * The callback reuses the same `role-terminal` implementation exposed by the
+ * CLI, so a new operational path cannot accidentally bypass session proof.
+ *
+ * @param {object} args - Parsed `role-worktree-create` command arguments.
+ * @param {object} [ports] - Injectable ports for focused lifecycle tests.
+ * @param {Function} [ports.create=createWorktreeWithRoleSession] - Creator.
+ * @param {Function} [ports.open] - Role-terminal opener.
+ * @param {Function} [ports.read=readWorkflow] - Workflow-state reader.
+ * @param {Function} [ports.git=gitEvidence] - Git evidence reader.
+ * @param {Function} [ports.closures=readTerminalClosures] - Durable closure-proof reader.
+ * @param {Function} [ports.recordClosure=recordTerminalClosure] - Closure-proof writer.
+ * @returns {Promise<object>} Worktree identity and proven role terminal.
+ */
+export async function createRoleWorktree(
+  args,
+  {
+    create = createWorktreeWithRoleSession,
+    open,
+    promote = prepareRolePromotion,
+    read = readWorkflow,
+    git = gitEvidence,
+    organization = (orgFile) => validateOrg(readJSON(orgFile)),
+    environment = readLaunchEnvironment,
+    matrix = predictLaunchPath,
+    launches = readLaunches,
+    closures = readTerminalClosures,
+    recordClosure = (evidence) => recordTerminalClosure(args.org, evidence),
+    active = findActiveDispatch,
+    release = releaseWorker,
+    close = runOrcaJson,
+    list = runOrcaJson,
+  } = {},
+) {
+  const workflowOptions = [
+    args["workflow-id"] !== undefined,
+    args["workflow-task"] !== undefined,
+    args.state !== undefined,
+  ];
+  const hasWorkflow = workflowOptions.some(Boolean);
+  assert(
+    !hasWorkflow || workflowOptions.every(Boolean),
+    "--workflow-id, --workflow-task, and --state must be provided together",
+  );
+  const sourceWorkflowId = args["prior-workflow-id"];
+  const sourceWorkflowTask = args["prior-task-id"];
+  assert(
+    Boolean(sourceWorkflowId) === Boolean(sourceWorkflowTask),
+    "--prior-workflow-id and --prior-task-id must be provided together",
+  );
+  assert(
+    !sourceWorkflowId || args.worktree,
+    "A prior workflow/task is only valid when reusing its --worktree",
+  );
+  assert(
+    !sourceWorkflowId ||
+      (args["workflow-id"] && args["workflow-task"] && args.state),
+    "Cross-workflow reuse requires the current --workflow-id, --workflow-task, and --state",
+  );
+  let promotion = null;
+  let reusable = null;
+  let snapshot = null;
+  let state = null;
+  let task = null;
+  if (hasWorkflow) {
+    snapshot = read(path.resolve(args.state), args["workflow-id"]);
+    state = snapshot?.state;
+    assert(
+      state?.tasks && typeof state.tasks === "object",
+      `Workflow ${args["workflow-id"]} has no readable task state`,
+    );
+    task = state.tasks[args["workflow-task"]];
+    assert(task, `Unknown workflow task ${args["workflow-task"]}`);
+    const existing = task?.worktreeId ?? task?.execution?.worktreeId;
+    promotion =
+      existing &&
+      task.role === "junior" &&
+      args.role === "senior" &&
+      ["submitted", "review-pending", "reviewed"].includes(task.state)
+        ? { fromWorktreeId: existing }
+        : null;
+    const assignedRole = trustedTaskExecutionRole(task) ?? task.role;
+    assert(
+      promotion || assignedRole === args.role,
+      `Workflow task ${args["workflow-task"]} is assigned to ${assignedRole ?? "no role"}, not ${args.role}; only a reviewed Junior-to-Senior promotion may change roles`,
+    );
+    assert(
+      !existing || promotion,
+      `Task ${args["workflow-task"]} already has worktree ${existing}; reuse it with role-terminal instead of creating another`,
+    );
+    if (args.worktree) {
+      let source = null;
+      if (sourceWorkflowId) {
+        const sourceState =
+          sourceWorkflowId === args["workflow-id"]
+            ? state
+            : read(path.resolve(args.state), sourceWorkflowId).state;
+        assert(
+          sourceState?.tasks && typeof sourceState.tasks === "object",
+          `Prior workflow ${sourceWorkflowId} has no readable task state`,
+        );
+        source = {
+          workflowId: sourceWorkflowId,
+          taskId: sourceWorkflowTask,
+          state: sourceState,
+        };
+      }
+      const prior = source
+        ? [source.taskId, source.state.tasks[source.taskId]]
+        : Object.entries(state.tasks).find(
+            ([taskId, item]) =>
+              taskId !== args["workflow-task"] &&
+              item.state === "accepted" &&
+              (item.worktreeId ?? item.execution?.worktreeId) ===
+                args.worktree &&
+              (item.executionRole ?? item.role) === args.role,
+          );
+      assert(
+        prior?.[1]?.state === "accepted" &&
+          (prior[1].worktreeId ?? prior[1].execution?.worktreeId) ===
+            args.worktree &&
+          (prior[1].executionRole ?? prior[1].role) === args.role,
+        source
+          ? "The explicit prior workflow/task must be accepted, use this worktree, and match the execution role"
+          : "A reused role worktree needs an accepted prior task of the same execution role",
+      );
+      reusable = {
+        workflowId: source?.workflowId ?? args["workflow-id"],
+        taskId: prior[0],
+        task: prior[1],
+      };
+      const conflictingTask = Object.entries(state.tasks).find(
+        ([taskId, item]) =>
+          taskId !== args["workflow-task"] &&
+          taskId !== reusable.taskId &&
+          (item.worktreeId ?? item.execution?.worktreeId) === args.worktree,
+      );
+      assert(
+        !conflictingTask,
+        `Worktree ${args.worktree} is also owned by current workflow task ${conflictingTask?.[0]}; preserve it instead of opening another role session`,
+      );
+    }
+  }
+  // A workflow freezes its organization. This happens only after task and
+  // role ownership are proven, and before any Orca create/open/release/close
+  // effect, so the matrix predicts the same launch that role-terminal opens.
+  const preflightOrganization = hasWorkflow
+    ? snapshot.organization
+    : organization(args.org);
+  assert(
+    preflightOrganization,
+    `Workflow ${args["workflow-id"]} has no frozen organization snapshot`,
+  );
+  await preflightRoleWorktree(args, preflightOrganization, environment, matrix);
+  assert(
+    !args.worktree || reusable,
+    "--worktree requires an accepted prior task of the same role; a promotion also preserves and closes that Senior session first",
+  );
+  const openRoleSession =
+    open ??
+    ((workspace) =>
+      executeCommand({
+        ...args,
+        command: "role-terminal",
+        worktree: `id:${workspace.id}`,
+      }));
+  const existingRoleWorktree = Boolean(
+    args.worktree && (promotion || reusable),
+  );
+  const created = existingRoleWorktree
+    ? await (async () => {
+        if (promotion)
+          assert(
+            args.worktree !== promotion.fromWorktreeId,
+            "Senior promotion needs a separate Senior role worktree",
+          );
+        const workspace = {
+          id: args.worktree,
+          path: pathFromWorktreeId(args.worktree),
+        };
+        const clean = await git(workspace.path, [
+          "status",
+          "--porcelain=v1",
+          "-uall",
+        ]);
+        assert(
+          !clean,
+          "A reused role worktree must be clean before opening a new role session",
+        );
+        if (reusable) {
+          const previousHead = await git(workspace.path, ["rev-parse", "HEAD"]);
+          const integrationCommit = await git(workspace.path, [
+            "rev-parse",
+            `${args.base}^{commit}`,
+          ]);
+          const integrationHead = await git(path.resolve(args.repo), [
+            "rev-parse",
+            "HEAD",
+          ]);
+          assert(
+            integrationCommit === integrationHead,
+            "A reused role worktree must be based on the current PM integration HEAD",
+          );
+          await git(workspace.path, [
+            "merge-base",
+            "--is-ancestor",
+            previousHead,
+            integrationCommit,
+          ]);
+          const terminalEvidence = await proveAndCloseOwnedTerminals({
+            repo: path.resolve(args.repo),
+            worktreeId: workspace.id,
+            worktreePath: workspace.path,
+            orca: args.orca,
+            launches: launches(args.org),
+            closures: closures(args.org),
+            active,
+            release,
+            close,
+            list,
+          });
+          recordClosure(terminalEvidence);
+        }
+        const session = await openRoleSession(workspace);
+        assert(
+          session?.ready === true &&
+            session.terminal &&
+            session.role === args.role &&
+            session.worktree === `id:${workspace.id}` &&
+            session.modelRequested,
+          "Existing Senior worktree has no matching proven role session",
+        );
+        return { workspace, session };
+      })()
+    : await create(path.resolve(args.repo), {
+        name: args.name,
+        base: args.base,
+        setup: args.setup ?? "inherit",
+        executable: args.orca,
+        openRoleSession: async (workspace) => {
+          let opened;
+          try {
+            opened = await openRoleSession(workspace);
+          } catch (error) {
+            // The matrix refuses before creating a terminal. Other throws may
+            // follow a terminal/process creation and must stay for reconciliation.
+            if (error.matrixRefusal) {
+              return { ready: false, sessionObserved: false };
+            }
+            throw error;
+          }
+          return {
+            ...opened,
+            // A returned terminal alone can still be a shell or a blocked prompt.
+            // Only role-terminal's ready proof is a session; an absent terminal is
+            // the one failure state safe to reclaim automatically.
+            sessionObserved:
+              opened?.ready === true ||
+              (typeof opened?.terminal === "string" &&
+                opened.terminal.length > 0),
+          };
+        },
+      });
+  let transition;
+  if (promotion) {
+    transition = await promote(
+      path.resolve(args.state),
+      args["workflow-id"],
+      args["workflow-task"],
+      {
+        ...promotion,
+        toWorktreeId: created.workspace.id,
+        fromWorktreePath: pathFromWorktreeId(promotion.fromWorktreeId),
+        toWorktreePath: created.workspace.path,
+        base: args.base,
+      },
+    );
+  }
+  return {
+    ...created.workspace,
+    session: created.session,
+    ...(reusable
+      ? {
+          reusedFrom: {
+            workflowId: reusable.workflowId,
+            workflowTaskId: reusable.taskId,
+          },
+        }
+      : {}),
+    ...(transition ? { transition: transition.transition } : {}),
+  };
+}
+
+function pathFromWorktreeId(worktreeId) {
+  const separator = String(worktreeId).indexOf("::");
+  assert(separator > 0, "Workflow worktree receipt must include its path");
+  return path.resolve(String(worktreeId).slice(separator + 2));
+}
+
+/**
+ * Reclaims a child only after the completed workflow proves it is no longer a
+ * live execution and its exact commit has reached an integration commit.
+ *
+ * This intentionally has no fallback removal path. A missing ledger row,
+ * unknown Dispatch state, dirty child, or incomplete merge evidence leaves the
+ * worktree intact for the PM to reconcile or reuse.
+ *
+ * @param {object} args - Parsed `role-worktree-reclaim` command arguments.
+ * @param {object} [ports] - Injectable lifecycle ports for focused tests.
+ * @param {Function} [ports.read=readWorkflow] - Workflow state reader.
+ * @param {Function} [ports.launches=readLaunches] - Role-session ledger reader.
+ * @param {Function} [ports.closures=readTerminalClosures] - Durable closure-proof reader.
+ * @param {Function} [ports.recordClosure=recordTerminalClosure] - Closure-proof writer.
+ * @param {Function} [ports.git=gitEvidence] - Explicit-repository Git adapter.
+ * @param {Function} [ports.active=findActiveDispatch] - Orca Dispatch lookup.
+ * @param {Function} [ports.release=releaseWorker] - Settled Dispatch releaser.
+ * @param {Function} [ports.close=runOrcaJson] - Orca terminal closer.
+ * @param {Function} [ports.list=runOrcaJson] - Orca worktree terminal lister.
+ * @param {Function} [ports.reclaim=reclaimWorktree] - Orca worktree reclaimer.
+ * @returns {Promise<object>} Evidence and Orca receipts for the reclaimed child.
+ * @throws {Error} When any process, commit, integration, or cleanliness proof is absent.
+ */
+export async function reclaimIntegratedRoleWorktree(
+  args,
+  {
+    read = readWorkflow,
+    launches = readLaunches,
+    closures = readTerminalClosures,
+    recordClosure = (evidence) => recordTerminalClosure(args.org, evidence),
+    git = gitEvidence,
+    active = findActiveDispatch,
+    release = releaseWorker,
+    close = runOrcaJson,
+    list = runOrcaJson,
+    reclaim = reclaimWorktree,
+  } = {},
+) {
+  const repo = path.resolve(args.repo);
+  const { state } = read(path.resolve(args.state), args["workflow-id"]);
+  const task = state.tasks[args["workflow-task"]];
+  assert(task, `Unknown workflow task ${args["workflow-task"]}`);
+  assert(
+    task.state === "accepted",
+    `Task ${args["workflow-task"]} is ${task.state}; accepted task required before reclaim`,
+  );
+  const currentWorktreeId = task.worktreeId ?? task.execution?.worktreeId;
+  const retiredTransition = (task.worktreeTransitions ?? []).find(
+    (transition) =>
+      transition.usedAt && transition.fromWorktreeId === args.worktree,
+  );
+  const worktreeId = retiredTransition?.fromWorktreeId ?? currentWorktreeId;
+  assert(worktreeId, "Accepted task has no role-worktree receipt to reclaim");
+  assert(
+    worktreeId === args.worktree,
+    `Task ${args["workflow-task"]} is bound to ${currentWorktreeId}, not ${args.worktree}`,
+  );
+  const worktreePath = pathFromWorktreeId(worktreeId);
+  // A reused child can carry receipts from earlier tasks. The terminal list is
+  // worktree-scoped, so release and close every ledger-owned Dispatch in that
+  // worktree rather than selecting only this task's newest receipt.
+  const worktreeLaunches = launches(args.org);
+  const status = await git(worktreePath, ["status", "--porcelain=v1", "-uall"]);
+  assert(!status, "Child worktree has uncommitted changes; do not reclaim it");
+  const head = await git(worktreePath, ["rev-parse", "HEAD"]);
+  const mergeCommit = await git(repo, [
+    "rev-parse",
+    "--verify",
+    `${args["merge-commit"]}^{commit}`,
+  ]);
+  const integrationHead = await git(repo, ["rev-parse", "HEAD"]);
+  await git(repo, [
+    "merge-base",
+    "--is-ancestor",
+    mergeCommit,
+    integrationHead,
+  ]);
+  await git(repo, ["merge-base", "--is-ancestor", head, mergeCommit]);
+
+  const terminalEvidence = await proveAndCloseOwnedTerminals({
+    repo,
+    worktreeId,
+    worktreePath,
+    orca: args.orca,
+    launches: worktreeLaunches,
+    closures: closures(args.org),
+    active,
+    release,
+    close,
+    list,
+  });
+  recordClosure(terminalEvidence);
+  const postCloseStatus = await git(worktreePath, [
+    "status",
+    "--porcelain=v1",
+    "-uall",
+  ]);
+  assert(
+    !postCloseStatus,
+    "Child worktree changed while closing its terminal; do not reclaim it",
+  );
+  const reclaimed = await reclaim(repo, {
+    id: worktreeId,
     executable: args.orca,
   });
-  const attached = await attachWorkspace({
-    parentRepo: repo,
-    workspace: created.path,
-    stateDir,
-    name: args.name,
-    org,
-    task: prepared.frozenTask,
-    receipt: created.receipt,
-    executable: created.executable,
-    runtime: created.discovery,
-  });
   return {
-    ...attached,
-    note:
-      "Compatibility prepare completed. New integrations should use " +
-      "prepare-input, current Orca discovery, then attach-workspace.",
+    worktreeId,
+    worktreePath,
+    head,
+    mergeCommit,
+    integrationHead,
+    dispatches: terminalEvidence.released,
+    terminals: terminalEvidence.closed,
+    // Keep the former singular fields for callers that reclaim exactly one
+    // dispatch, while the receipt arrays retain every lifecycle proof.
+    released: terminalEvidence.released.at(-1)?.receipt,
+    closed: terminalEvidence.closed.at(-1)?.receipt,
+    releaseReceipts: terminalEvidence.released,
+    closeReceipts: terminalEvidence.closed,
+    reclaimed,
   };
 }
 
@@ -1259,90 +1931,16 @@ export async function freshenTerminal(
   };
 }
 
-// A role run as a non-interactive process gets the same checks a terminal
-// launch does: its profile, whether this run holds the role, the owner
-// checkout, and another role's worktree. The instruction carries the role's
-// charter and the headless protocol, since no one answers a prompt.
-function startHeadlessRole(args) {
-  assert(
-    args.profile === undefined || args["workflow-id"],
-    "--profile requires --workflow-id, --state and --workflow-task",
-  );
-  // `--state` is where the worker is recorded; it names workflow state only
-  // together with `--workflow-id`.
-  const { org, run } = launchContext(
-    args["workflow-id"] ? args : { ...args, state: undefined },
-  );
-  const command = roleCommand(org, args.role, run);
-  // roleCommand also serves the PM's terminal; a worker is never PM.
-  assert(
-    command.role !== "pm",
-    args.role === "pm"
-      ? "PM runs in its own terminal opened with role-command; it is not started as a headless worker"
-      : `${args.role} folds to pm, which does its work itself`,
-  );
-  assert(
-    HEADLESS_PROVIDERS.includes(command.provider),
-    `Role ${command.role} uses ${command.provider}, which has no headless runtime; ` +
-      `supported: ${HEADLESS_PROVIDERS.join(", ")}`,
-  );
-  // One run's runner accounts must not share a session home or use an account
-  // home as one; the run's other roles are checked with this one.
-  if (command.runner) {
-    assertDistinctOpenCodexHomes(
-      (run.roles ?? Object.keys(org.roles)).map(
-        (name) => org.profiles[org.roles[name]?.profile],
-      ),
-    );
-  }
-  const cwd = path.resolve(args.cwd);
-  assertNotKickoffOwner(cwd, `starting ${command.role}`);
-  assertWorktreeUnshared(run.workflowState, command.role, `path:${cwd}`, cwd);
-  const workerId = args.worker ?? `${command.role}-${Date.now().toString(36)}`;
-  const launchedAt = new Date().toISOString();
-  const started = startHeadlessWorker({
-    stateDir: args.state,
-    workerId,
-    role: command.role,
-    profile: command.profile,
-    provider: command.provider,
-    binary: [command.argv[0]],
-    model: command.modelRequested,
-    effort: command.effortRequested,
-    runner: command.runner ?? null,
-    cwd,
-    prompt: `${roleSpec(org, command.role, args.spec, run)}
-${HEADLESS_PROTOCOL}
-`,
-    ...(args["timeout-ms"] === undefined
-      ? {}
-      : { timeoutMs: Number(args["timeout-ms"]) }),
-  });
-  return {
-    ...started,
-    ...recordLaunchSafely(args.org, launchedAt, {
-      via: "headless-start",
-      role: command.role,
-      profile: command.profile,
-      provider: command.provider,
-      modelRequested: command.modelRequested,
-      effortRequested: command.effortRequested,
-      worktreePath: cwd,
-      worktreeSelector: `path:${cwd}`,
-      workerId,
-      workflowId: args["workflow-id"] ?? null,
-      stateDir: args.state,
-      ...run.handoff,
-    }),
-  };
-}
-
-// A usage report can attribute a session to a role only through this line,
-// but a launch that already started must not fail because the ledger could
-// not be written, so the failure travels in the result instead. The line is
-// stamped with when the launch began: opening a terminal waits for the agent
-// to be ready, and its session is created well before that wait ends.
-function recordLaunchSafely(orgFile, launchedAt, launch) {
+/**
+ * Records an already-opened interactive role session without turning a ledger
+ * filesystem fault into a second launch or a failed session.
+ *
+ * @param {string} orgFile - Organization file whose launch ledger is updated.
+ * @param {string} launchedAt - Timestamp captured before the terminal opens.
+ * @param {object} launch - Interactive launch fields for the ledger.
+ * @returns {{ledger?: string, ledgerError?: string}} Stored ledger path or preserved write error.
+ */
+export function recordLaunchSafely(orgFile, launchedAt, launch) {
   try {
     const { file } = recordLaunch(
       orgFile,
@@ -1991,6 +2589,10 @@ export async function executeCommand(args, execute) {
     }
     case "prepare":
       return compatibilityPrepare(args);
+    case "role-worktree-create":
+      return createRoleWorktree(args);
+    case "role-worktree-reclaim":
+      return reclaimIntegratedRoleWorktree(args);
     case "prepare-input":
       return prepareInput(
         validateOrg(readJSON(args.org)),
@@ -2036,40 +2638,6 @@ export async function executeCommand(args, execute) {
       });
     case "worker-start":
       return startSupervisedWorker(args);
-    case "headless-start":
-      return startHeadlessRole(args);
-    case "headless-status":
-      return waitHeadless(
-        args.state,
-        args.worker,
-        args["wait-ms"] === undefined ? 0 : Number(args["wait-ms"]),
-      );
-    case "headless-answer":
-      return answerHeadless(args.state, args.worker, args.text, {
-        timeoutMs:
-          args["timeout-ms"] === undefined
-            ? undefined
-            : Number(args["timeout-ms"]),
-      });
-    case "headless-stop":
-      return stopHeadless(args.state, args.worker);
-    case "headless-list":
-      return listHeadless(args.state);
-    case "dashboard": {
-      // The server keeps the process running; only where to open it is printed.
-      const started = await startDashboard({
-        stateDir: path.resolve(args.state),
-        port: args.port === undefined ? 4812 : Number(args.port),
-        host: args.host ?? "0.0.0.0",
-        token: args.token,
-      });
-      return {
-        listening: `${started.host}:${started.port}`,
-        local: `http://127.0.0.1:${started.port}${started.path}`,
-        path: started.path,
-        token: started.token,
-      };
-    }
     case "worker-limit-check":
       return workerLimitCheck({
         provider: args.provider,
@@ -2152,7 +2720,7 @@ export async function executeCommand(args, execute) {
       // it would bypass the runner and its fixed account without a record.
       assert(
         !command.runner,
-        "An explicit OpenCodex runner is supported by headless-start only; role-command would print a native Codex command that bypasses it",
+        "An explicit OpenCodex runner has no interactive Orca terminal path; role-command would print a native Codex command that bypasses it",
       );
       return command;
     }
@@ -2169,7 +2737,7 @@ export async function executeCommand(args, execute) {
       const command = roleCommand(org, args.role, { ...runCtx, firstPrompt });
       assert(
         !command.runner,
-        "An explicit OpenCodex runner is supported by headless-start only; role-terminal cannot run it as native Codex",
+        "An explicit OpenCodex runner has no interactive Orca terminal path; role-terminal cannot run it as native Codex",
       );
       assert(
         firstPrompt === undefined || command.role === "pm",

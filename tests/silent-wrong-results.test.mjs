@@ -265,7 +265,7 @@ test("a retired attempt id cannot be reused to overwrite a settled attempt", asy
   await createWorkflow(stateDir, request, structuredClone(organization), dir);
   const revision = () => readWorkflow(stateDir, request.id).state.revision;
 
-  const attach = (eventId, attemptId, executionId) =>
+  const attach = (eventId, attemptId, executionId, worktreeId = "wt-alpha") =>
     attachExecution(stateDir, request.id, revision(), {
       schemaVersion: 1,
       eventId,
@@ -277,7 +277,7 @@ test("a retired attempt id cannot be reused to overwrite a settled attempt", asy
         runId: executionId,
         taskId: "alpha",
         dispatchId: executionId,
-        worktreeId: executionId,
+        worktreeId,
       },
     });
 

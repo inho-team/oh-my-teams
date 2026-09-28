@@ -1,40 +1,18 @@
 /**
- * Headless supervisor: roles as non-interactive provider processes, no Orca.
+ * Historical headless record readers and a retired execution guard.
  *
- * Each worker is a directory under `<pm-state>/headless/<id>` holding one
- * directory per turn. A turn is run by a detached runner that owns the
- * provider process and records its exit, so liveness, completion, the model
- * and the session to resume are all read from files rather than inferred from
- * a terminal screen. A question ends a turn with a marker; the answer resumes
- * the same provider session as the next turn. The design and the first-step
- * measurements are in docs/plan/headless-runtime.md and
- * experiments/HEADLESS_POC.md.
+ * This module reads legacy records and may request their recorded process to
+ * stop. New workers and follow-up turns are deliberately rejected; Orca role
+ * terminals own all current role execution.
  */
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { assert, readJSON, writeJSON } from "./core.mjs";
-import { printTimeout } from "./providers/shared.mjs";
+import { assert, readJSON } from "./core.mjs";
 import { addTokenUsage, normalizeTokenUsage } from "./usage.mjs";
 
-const RUNNER = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "headless-runner.mjs",
-);
 const WORKER_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const MARKER = /^(DONE|QUESTION|FAILED):\s*(.*)$/;
-
-/** Rules appended to every headless instruction; no one watches the process. */
-export const HEADLESS_PROTOCOL = [
-  "## 비대화형 실행 규약",
-  "",
-  "- 이 작업은 사람이 지켜보지 않는 비대화형 프로세스로 실행된다. 질문이나 권한을 묻는 대화형 도구(예: ask_question, ask_permission)를 쓰지 않는다. 그런 도구는 응답을 받지 못한 채 제한 시간까지 멈춘다.",
-  "- 진행할 수 없는 질문이 생기면 작업을 멈추고, 응답의 마지막 줄을 `QUESTION: <질문>`으로 끝낸다. 답은 같은 세션의 다음 지시로 온다.",
-  "- 작업을 마치면 응답의 마지막 줄을 `DONE: <변경 요약과 커밋 SHA>`로, 마칠 수 없으면 `FAILED: <이유>`로 끝낸다.",
-  "- 임시 스크립트, 의존성 설치, 내려받은 파일은 작업 워크트리 밖의 임시 디렉터리에서 만든다.",
-].join("\n");
 
 function agyLimitKind(errorText) {
   if (/RESOURCE_EXHAUSTED/.test(errorText)) return "usage-limit";
@@ -45,20 +23,6 @@ function agyLimitKind(errorText) {
 
 const PROVIDERS = {
   claude: {
-    command({ binary, model, effort, prompt, session }) {
-      const argv = [
-        ...binary,
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-      ];
-      if (session) argv.push("--resume", session);
-      if (model) argv.push("--model", model);
-      if (effort) argv.push("--effort", effort);
-      return { argv, stdin: prompt };
-    },
     read(events) {
       const init = events.find(
         (event) => event.type === "system" && event.subtype === "init",
@@ -96,15 +60,6 @@ const PROVIDERS = {
     },
   },
   codex: {
-    command({ binary, model, effort, prompt, session }) {
-      const argv = [...binary, "exec"];
-      if (session) argv.push("resume", session);
-      argv.push("--json", "--dangerously-bypass-approvals-and-sandbox");
-      if (model) argv.push("-m", model);
-      if (effort) argv.push("-c", `model_reasoning_effort=${effort}`);
-      argv.push(prompt);
-      return { argv, stdin: null };
-    },
     read(events, { codexHome, lookupModel = true } = {}) {
       const thread = events.find((event) => event.type === "thread.started");
       const messages = events.filter(
@@ -155,20 +110,6 @@ const PROVIDERS = {
     },
   },
   agy: {
-    command({ binary, model, prompt, session, timeoutMs }) {
-      const argv = [
-        ...binary,
-        "--output-format",
-        "stream-json",
-        "--dangerously-skip-permissions",
-      ];
-      if (timeoutMs != null)
-        argv.push("--print-timeout", printTimeout(timeoutMs));
-      if (session) argv.push("--conversation", session);
-      if (model) argv.push("--model", model);
-      argv.push("-p", prompt);
-      return { argv, stdin: null };
-    },
     read(events) {
       const init = events.find((event) => event.event === "init");
       const result = events.findLast((event) => event.event === "result");
@@ -216,9 +157,6 @@ const PROVIDERS = {
     },
   },
 };
-
-/** Providers this runtime can run headless. */
-export const HEADLESS_PROVIDERS = Object.freeze(Object.keys(PROVIDERS));
 
 /**
  * Process-lifetime cache: `"${home}:${threadId}"` → model string.
@@ -274,26 +212,6 @@ export function codexRolloutModel(threadId, codexHome) {
     }
   }
   return null;
-}
-
-/**
- * Builds the argv and stdin of one headless turn for a provider.
- *
- * @param {object} options - Provider, executable argv, model, effort, prompt, session, and timeoutMs.
- * @param {string} options.provider - `claude`, `codex` or `agy`.
- * @param {string[]} options.binary - Executable argv, e.g. `["claude"]`.
- * @param {string | null} [options.model] - Model to request.
- * @param {string | null} [options.effort] - Reasoning effort to request.
- * @param {string} options.prompt - Instruction for this turn.
- * @param {string | null} [options.session] - Session to resume.
- * @param {number | null} [options.timeoutMs] - Per-turn time limit passed as --print-timeout (agy only).
- * @returns {{argv: string[], stdin: string | null}} Command and stdin payload.
- * @throws {Error} When the provider cannot run headless.
- */
-export function headlessCommand({ provider, ...options }) {
-  const adapter = PROVIDERS[provider];
-  assert(adapter, `Provider ${provider} has no headless runtime`);
-  return adapter.command(options);
 }
 
 /**
@@ -657,48 +575,8 @@ export function turnLiveness({ runnerAlive, readExit }) {
   return { liveness: running ? "live" : "unverifiable", exit: null };
 }
 
-function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
-  const number = turnDirs(dir).length + 1;
-  const turnDir = path.join(dir, "turns", String(number));
-  fs.mkdirSync(turnDir, { recursive: true });
-  const resolvedTimeoutMs = timeoutMs ?? worker.timeoutMs;
-  const command = worker.runner
-    ? { argv: [], stdin: prompt }
-    : headlessCommand({
-        provider: worker.provider,
-        binary: worker.binary,
-        model: worker.modelRequested,
-        effort: worker.effortRequested,
-        prompt,
-        session,
-        timeoutMs: resolvedTimeoutMs,
-      });
-  const { argv, stdin } = command;
-  fs.writeFileSync(path.join(turnDir, "prompt.txt"), prompt);
-  if (stdin !== null) fs.writeFileSync(path.join(turnDir, "stdin.txt"), stdin);
-  writeJSON(path.join(turnDir, "turn.json"), {
-    number,
-    argv,
-    stdinFile: stdin === null ? null : "stdin.txt",
-    cwd: worker.cwd,
-    session: session ?? null,
-    timeoutMs: resolvedTimeoutMs,
-    startedAt: new Date().toISOString(),
-    runner: worker.runner ?? null,
-  });
-  const runner = spawn(process.execPath, [RUNNER, turnDir], {
-    cwd: worker.cwd,
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  runner.unref();
-  writeJSON(path.join(turnDir, "runner.json"), { pid: runner.pid ?? null });
-  return { turn: number, runnerPid: runner.pid ?? null };
-}
-
 /**
- * Starts a headless worker and its first turn.
+ * Refuses to start a new headless worker.
  *
  * @param {object} options - Worker definition.
  * @param {string} options.stateDir - PM worktree state directory.
@@ -713,12 +591,8 @@ function launchTurn(dir, worker, { prompt, session, timeoutMs }) {
  * @param {string} options.prompt - Full instruction, protocol included.
  * @param {number} [options.timeoutMs=1800000] - Per-turn time limit.
  * @param {object | null} [options.runner] - Secret-free explicit runner metadata.
- * @returns {object} The worker record, the turn it started, and a headless receipt draft.
- *   The draft's `runId` and `worktreeId` are `null`; the caller must fill them with the
- *   actual Orca Run ID and the Orca worktree ID (`<repo-id>::<path>`) before passing the
- *   receipt to `workflow-attach`. Leaving either field null causes `workflow-attach` to
- *   reject the receipt as incomplete.
- * @throws {Error} When the id is taken or the provider cannot run headless.
+ * @returns {never} This function always throws.
+ * @throws {Error} Always, because new headless execution is retired.
  */
 export function startHeadlessWorker({
   stateDir,
@@ -734,38 +608,9 @@ export function startHeadlessWorker({
   timeoutMs = 30 * 60 * 1000,
   runner = null,
 }) {
-  assert(PROVIDERS[provider], `Provider ${provider} has no headless runtime`);
-  assert(fs.existsSync(cwd), `Worktree does not exist: ${cwd}`);
-  const dir = workerDir(stateDir, workerId);
-  assert(!fs.existsSync(dir), `Headless worker already exists: ${workerId}`);
-  fs.mkdirSync(dir, { recursive: true });
-  const worker = {
-    schemaVersion: 1,
-    id: workerId,
-    role,
-    profile,
-    provider,
-    binary,
-    modelRequested: model ?? null,
-    effortRequested: effort ?? null,
-    cwd: path.resolve(cwd),
-    timeoutMs,
-    runner,
-    createdAt: new Date().toISOString(),
-  };
-  writeJSON(path.join(dir, "worker.json"), worker);
-  const launched = launchTurn(dir, worker, { prompt });
-  const receipt = {
-    via: "headless-start",
-    executionId: workerId,
-    runId: null,
-    taskId: `headless:${workerId}`,
-    dispatchId: `headless:${workerId}`,
-    worktreeId: null,
-    runnerPid: launched.runnerPid ?? null,
-    modelRequested: model ?? null,
-  };
-  return { worker, ...launched, receipt };
+  throw new Error(
+    "New headless execution was removed; read legacy records or start an Orca role terminal",
+  );
 }
 
 function readTurn(worker, turnDir, options) {
@@ -1024,30 +869,19 @@ export async function waitHeadless(stateDir, workerId, waitMs, options = {}) {
 }
 
 /**
- * Answers a worker's question by resuming its session as the next turn.
+ * Refuses a new headless follow-up turn.
  *
  * @param {string} stateDir - PM worktree state directory.
  * @param {string} workerId - Worker whose turn ended.
  * @param {string} text - Answer or follow-up instruction.
  * @param {object} [options] - `timeoutMs` and `codexHome`.
- * @returns {object} The turn started.
- * @throws {Error} When the worker is still running or has no session to resume.
+ * @returns {never} This function always throws.
+ * @throws {Error} Always, because new headless execution is retired.
  */
 export function answerHeadless(stateDir, workerId, text, options = {}) {
-  assert(typeof text === "string" && text.trim(), "An answer is required");
-  const status = headlessStatus(stateDir, workerId, options);
-  assert(
-    status.liveness === "exited",
-    `Worker ${workerId} is ${status.liveness}; answer only a turn that ended`,
+  throw new Error(
+    "Headless follow-up turns were removed; preserve the legacy record and use an Orca role terminal",
   );
-  assert(status.session, `Worker ${workerId} reported no session to resume`);
-  const dir = workerDir(stateDir, workerId);
-  const worker = readJSON(path.join(dir, "worker.json"));
-  return launchTurn(dir, worker, {
-    prompt: `${text.trim()}\n\n${HEADLESS_PROTOCOL}`,
-    session: status.session,
-    timeoutMs: options.timeoutMs,
-  });
 }
 
 /**
