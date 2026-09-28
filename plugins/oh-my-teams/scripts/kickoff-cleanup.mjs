@@ -9,6 +9,7 @@ import {
   validateEntry,
 } from "./kickoff-registry.mjs";
 import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+import { readLaunches, readTerminalClosures } from "./usage-ledger.mjs";
 
 function archivedEntry(orgFile, archiveFile, worktreeId) {
   const directory = path.join(path.dirname(path.resolve(orgFile)), "history");
@@ -79,6 +80,65 @@ function cleanWorker(row) {
   );
 }
 
+function receiptBody(receipt) {
+  return receipt?.result ?? receipt ?? {};
+}
+
+function closureProvesLaunch(closure, launch, worktreeId, location) {
+  if (
+    closure?.worktreeId !== worktreeId ||
+    path.resolve(closure.worktreePath ?? "") !== location ||
+    !closure.at ||
+    !launch.at ||
+    closure.at < launch.at
+  )
+    return false;
+  const terminal = closure.terminals?.find(
+    (item) => item.terminal === launch.terminal,
+  );
+  const close = receiptBody(terminal?.close?.receipt).close;
+  const closeEvidence = JSON.stringify(terminal?.close?.receipt ?? {});
+  const before = receiptBody(closure.beforeReceipt).terminals;
+  const after = receiptBody(closure.afterReceipt).terminals;
+  const release = terminal?.releases?.find(
+    (item) => item.dispatchId === launch.workerId,
+  );
+  const released = receiptBody(release?.receipt);
+  return (
+    terminal?.dispatch?.result?.status === "clear" &&
+    Array.isArray(before) &&
+    before.some((item) => item.handle === launch.terminal) &&
+    close?.handle === launch.terminal &&
+    (typeof close.tabId === "string" || Number.isInteger(close.tabId)) &&
+    close.ptyKilled === true &&
+    !closeEvidence.includes('"ptyKilled":false') &&
+    !closeEvidence.includes("terminal_stop_unverifiable") &&
+    !closeEvidence.includes("terminalStopUnverifiable") &&
+    Array.isArray(after) &&
+    after.length === 0 &&
+    (launch.workerId === null ||
+      (released.dispatchId === launch.workerId &&
+        released.state === "retained" &&
+        released.reason === "external_terminal" &&
+        released.processAction === "none"))
+  );
+}
+
+function closedLaunchesProven(launches, closures, id, location) {
+  if (typeof location !== "string") return false;
+  const owned = launches.filter((launch) => launch.worktreePath === location);
+  return (
+    owned.length > 0 &&
+    owned.every(
+      (launch) =>
+        typeof launch.terminal === "string" &&
+        closures.some((closure) =>
+          closureProvesLaunch(closure, launch, id, location),
+        ),
+    )
+  );
+}
+
 /**
  * Evaluates a bounded Orca inventory without treating an absent terminal as process exit.
  *
@@ -115,7 +175,16 @@ export function evaluateKickoffCleanup(entry, observed) {
       reasons.push("terminal-or-process-live");
     if (assigned.some((worker) => !cleanWorker(worker)))
       reasons.push("worker-unsettled-or-unverifiable");
-    if (assigned.length === 0) reasons.push("process-exit-unproven");
+    if (
+      assigned.length === 0 &&
+      !closedLaunchesProven(
+        observed.launches ?? [],
+        observed.closures ?? [],
+        id,
+        location,
+      )
+    )
+      reasons.push("process-exit-unproven");
     if (id === entry.pm.worktreeId && !entry.releasedAt)
       reasons.push("pm-kickoff-active");
     const removed = !item && observed.absentPaths?.includes(location);
@@ -273,6 +342,8 @@ export async function scanKickoffCleanup(
     worktrees,
     terminals,
     workers,
+    launches: readLaunches(orgFile),
+    closures: readTerminalClosures(orgFile),
     git: gitStates,
     absentPaths,
     errors,

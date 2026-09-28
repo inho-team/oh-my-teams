@@ -93,6 +93,55 @@ test("a sessionless child stays preserved without an explicit exit receipt", () 
   assert.ok(result.candidates[1].reasons.includes("process-exit-unproven"));
 });
 
+test("a matching Orca PTY kill receipt proves a role launch ended", () => {
+  const input = observed();
+  input.workers = [exited(pm)];
+  input.launches = [
+    {
+      at: "2026-09-29T00:10:00.000Z",
+      worktreePath: "/tmp/child",
+      terminal: "term-child",
+      workerId: null,
+    },
+  ];
+  input.closures = [
+    {
+      at: "2026-09-29T00:20:00.000Z",
+      worktreeId: child,
+      worktreePath: "/tmp/child",
+      terminals: [
+        {
+          terminal: "term-child",
+          dispatch: { result: { status: "clear" } },
+          close: {
+            receipt: {
+              result: {
+                close: {
+                  handle: "term-child",
+                  tabId: "tab-1",
+                  ptyKilled: true,
+                },
+              },
+            },
+          },
+          releases: [],
+        },
+      ],
+      beforeReceipt: { result: { terminals: [{ handle: "term-child" }] } },
+      afterReceipt: { result: { terminals: [] } },
+    },
+  ];
+  assert.equal(
+    evaluateKickoffCleanup(entry, input).candidates[1].status,
+    "safe-to-remove",
+  );
+  input.closures[0].terminals[0].close.receipt.result.close.ptyKilled = false;
+  assert.equal(
+    evaluateKickoffCleanup(entry, input).candidates[1].status,
+    "preserve",
+  );
+});
+
 test("an absent child remains preserved when remote hosts were omitted", () => {
   const input = observed();
   input.worktrees = [{ ...worktrees[0], childWorktreeIds: [child] }];
