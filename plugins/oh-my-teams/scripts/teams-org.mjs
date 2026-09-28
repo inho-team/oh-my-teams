@@ -88,6 +88,7 @@ import {
   acceptWorkflowIntegration,
   createWorkflow,
   readWorkflow,
+  prepareRolePromotion,
   recordSettlement,
   releaseReservation,
   resumeWorkflow,
@@ -921,8 +922,13 @@ async function compatibilityPrepare(args) {
  */
 export async function createRoleWorktree(
   args,
-  { create = createWorktreeWithRoleSession, open } = {},
+  {
+    create = createWorktreeWithRoleSession,
+    open,
+    promote = prepareRolePromotion,
+  } = {},
 ) {
+  let promotion = null;
   if (args["workflow-id"] && args["workflow-task"]) {
     assert(args.state, "--workflow-id and --workflow-task require --state");
     const { state } = readWorkflow(
@@ -931,8 +937,12 @@ export async function createRoleWorktree(
     );
     const task = state.tasks[args["workflow-task"]];
     const existing = task?.worktreeId ?? task?.execution?.worktreeId;
+    promotion =
+      existing && task?.role === "junior" && args.role === "senior"
+        ? { fromWorktreeId: existing }
+        : null;
     assert(
-      !existing,
+      !existing || promotion,
       `Task ${args["workflow-task"]} already has worktree ${existing}; reuse it with role-terminal instead of creating another`,
     );
   }
@@ -972,9 +982,25 @@ export async function createRoleWorktree(
       };
     },
   });
+  let transition;
+  if (promotion) {
+    transition = await promote(
+      path.resolve(args.state),
+      args["workflow-id"],
+      args["workflow-task"],
+      {
+        ...promotion,
+        toWorktreeId: created.workspace.id,
+        fromWorktreePath: pathFromWorktreeId(promotion.fromWorktreeId),
+        toWorktreePath: created.workspace.path,
+        base: args.base,
+      },
+    );
+  }
   return {
     ...created.workspace,
     session: created.session,
+    ...(transition ? { transition: transition.transition } : {}),
   };
 }
 
@@ -1021,10 +1047,6 @@ export async function reclaimIntegratedRoleWorktree(
   const task = state.tasks[args["workflow-task"]];
   assert(task, `Unknown workflow task ${args["workflow-task"]}`);
   assert(
-    state.status === "accepted" && state.integration?.decision,
-    "Only an accepted workflow with integration evidence may reclaim a child worktree",
-  );
-  assert(
     task.state === "accepted",
     `Task ${args["workflow-task"]} is ${task.state}; accepted task required before reclaim`,
   );
@@ -1060,12 +1082,19 @@ export async function reclaimIntegratedRoleWorktree(
   const status = await git(worktreePath, ["status", "--porcelain=v1", "-uall"]);
   assert(!status, "Child worktree has uncommitted changes; do not reclaim it");
   const head = await git(worktreePath, ["rev-parse", "HEAD"]);
-  await git(repo, [
+  const mergeCommit = await git(repo, [
     "rev-parse",
     "--verify",
     `${args["merge-commit"]}^{commit}`,
   ]);
-  await git(repo, ["merge-base", "--is-ancestor", head, args["merge-commit"]]);
+  const integrationHead = await git(repo, ["rev-parse", "HEAD"]);
+  await git(repo, [
+    "merge-base",
+    "--is-ancestor",
+    mergeCommit,
+    integrationHead,
+  ]);
+  await git(repo, ["merge-base", "--is-ancestor", head, mergeCommit]);
 
   const released = await release(launch.workerId, {
     executable: args.orca,
@@ -1076,6 +1105,15 @@ export async function reclaimIntegratedRoleWorktree(
     ["terminal", "close", "--terminal", launch.terminal],
     { cwd: repo },
   );
+  const postCloseStatus = await git(worktreePath, [
+    "status",
+    "--porcelain=v1",
+    "-uall",
+  ]);
+  assert(
+    !postCloseStatus,
+    "Child worktree changed while closing its terminal; do not reclaim it",
+  );
   const reclaimed = await reclaim(repo, {
     id: worktreeId,
     executable: args.orca,
@@ -1084,7 +1122,8 @@ export async function reclaimIntegratedRoleWorktree(
     worktreeId,
     worktreePath,
     head,
-    mergeCommit: args["merge-commit"],
+    mergeCommit,
+    integrationHead,
     dispatchId: launch.workerId,
     terminal: launch.terminal,
     released,

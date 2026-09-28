@@ -2,7 +2,7 @@
 
 oh my teams는 역할·작업 계약·검증 gate를 소유하고, worktree·터미널·Task/Dispatch·settlement는 Orca에 맡긴다. 저장소에 복사된 명령 옵션을 최신 사양으로 간주하지 않는다.
 
-2026-09-28부터 모든 새 역할 실행은 Orca 역할 터미널에 연결해야 합니다. 아래에 남아 있는 `headless`·`headless-start` 표기는 이전 kickoff의 기록, receipt, 사용량과 복구를 읽기 위한 역사적 근거이며 새 실행의 지시가 아닙니다. 새 세션 없는 실행과 receipt는 런타임이 거부합니다.
+2026-09-28부터 모든 새 역할 실행은 Orca 역할 터미널에 연결해야 합니다. 아래에 남아 있는 `headless`·`headless-start` 표기는 이전 kickoff의 기록, receipt, 사용량과 복구를 읽기 위한 역사적 근거이며 새 실행의 지시가 아닙니다. 특히 아래 Windows Agy의 과거 `headless-start` 서술은 더 이상 실행 경로가 아니며 현재 matrix와 CLI는 이를 거부합니다. 새 세션 없는 실행과 receipt는 런타임이 거부합니다.
 
 감독 실행을 시작할 때 한 번 다음 절차를 따른다.
 
@@ -141,9 +141,9 @@ node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision 
 node <runtime> worker-start --org <organization.json> --role <역할> --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> [--purpose review] --terminal <handle> --worktree id:<worktreeId> --spec <작업>
 ```
 
-`workflow-attach`는 task를 receipt의 `worktreeId`에 고정한다. 같은 task의 수정·재시도·재검토는 이 워크트리를 재사용하고, `role-worktree-create`는 이미 고정된 task의 새 자식 생성을 거부한다. 다른 역할의 독립 소유권이 필요하면 기준 커밋과 검토 finding을 가진 후속 task를 만들며, 같은 task의 새 이름 생성으로 우회하지 않는다.
+`workflow-attach`는 같은 역할의 수정·재시도를 receipt의 `worktreeId`에 고정한다. 다만 반려된 Junior task는 기존 worktree의 HEAD와 Senior 역할 세션 worktree의 HEAD가 같은 기준 커밋임을 검증해 전환 기록을 만들었을 때에만 같은 attempt의 `workflow-rework`에서 Senior worktree ID를 받을 수 있다. workflow가 고정된 뒤 후속 task를 만들라는 우회는 하지 않는다.
 
-**수용·통합 후 중간 회수.** PM은 workflow와 해당 task가 모두 `accepted`이고 통합 결정이 기록된 뒤에만 다음 명령을 실행한다. 이 명령은 usage ledger의 `worker-start` receipt에서 terminal·Dispatch를 찾아 `worker-list`가 `clear`인지 확인하고, 자식 Git 상태가 깨끗하며 자식 HEAD가 통합 커밋의 조상인지 확인한다. 이어서 settled Dispatch를 release하고 역할 터미널을 닫은 뒤 Orca에 회수를 요청한다. ledger, 종료, commit, 병합, Git 상태 중 하나라도 증명하지 못하면 어느 것도 회수하지 않고 워크트리를 보존한다.
+**수용·통합 후 중간 회수.** PM은 해당 task가 `accepted`이고 PM 통합 HEAD가 증명되면 다른 workflow task가 남아 있어도 다음 명령을 실행한다. 이 명령은 usage ledger의 `worker-start` receipt에서 terminal·Dispatch를 찾아 `worker-list`가 `clear`인지 확인하고, 자식 HEAD와 `--merge-commit`이 PM 통합 HEAD에 포함되는지, 자식 Git 상태가 terminal close 전후 모두 깨끗한지 확인한다. 이어서 settled Dispatch를 release하고 역할 터미널을 닫은 뒤 Orca에 회수를 요청한다. ledger, 종료, commit, 병합, Git 상태 중 하나라도 증명하지 못하면 어느 것도 회수하지 않고 워크트리를 보존한다.
 
 ```text
 node <runtime> role-worktree-reclaim --org <organization.json> --state <pm-state> --workflow-id <workflowId> --workflow-task <task id> --repo <integration-worktree> --worktree <receipt-worktreeId> --merge-commit <integration-commit>

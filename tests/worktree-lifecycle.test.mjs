@@ -4,6 +4,10 @@ import assert from "node:assert/strict";
 import { createWorktreeWithRoleSession } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { predictLaunchPath } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
 import {
+  answerHeadless,
+  startHeadlessWorker,
+} from "../plugins/oh-my-teams/scripts/headless.mjs";
+import {
   createRoleWorktree,
   main,
   reclaimIntegratedRoleWorktree,
@@ -153,9 +157,10 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
     },
   );
   assert.equal(result.head, "child-a");
-  assert.deepEqual(calls.slice(-3), [
+  assert.deepEqual(calls.slice(-4), [
     "release:dispatch-a",
     "close:term-a",
+    "git:status --porcelain=v1 -uall",
     "reclaim:repo::/repo/child",
   ]);
 });
@@ -222,4 +227,15 @@ test("the CLI rejects new headless launches and Windows Agy has no sessionless f
   });
   assert.equal(result.path, "blocked");
   assert.ok(result.reason.includes("agy-interactive-terminal-unavailable"));
+});
+
+test("direct headless exports fail closed", () => {
+  assert.throws(
+    () => startHeadlessWorker({}),
+    /New headless execution was removed/,
+  );
+  assert.throws(
+    () => answerHeadless("/legacy", "old", "continue"),
+    /Headless follow-up turns were removed/,
+  );
 });

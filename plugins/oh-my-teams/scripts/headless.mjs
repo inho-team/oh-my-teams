@@ -734,6 +734,10 @@ export function startHeadlessWorker({
   timeoutMs = 30 * 60 * 1000,
   runner = null,
 }) {
+  throw new Error(
+    "New headless execution was removed; read legacy records or start an Orca role terminal",
+  );
+  /* c8 ignore start -- retained below only to document the legacy record format. */
   assert(PROVIDERS[provider], `Provider ${provider} has no headless runtime`);
   assert(fs.existsSync(cwd), `Worktree does not exist: ${cwd}`);
   const dir = workerDir(stateDir, workerId);
@@ -766,6 +770,7 @@ export function startHeadlessWorker({
     modelRequested: model ?? null,
   };
   return { worker, ...launched, receipt };
+  /* c8 ignore stop */
 }
 
 function readTurn(worker, turnDir, options) {
@@ -1034,6 +1039,10 @@ export async function waitHeadless(stateDir, workerId, waitMs, options = {}) {
  * @throws {Error} When the worker is still running or has no session to resume.
  */
 export function answerHeadless(stateDir, workerId, text, options = {}) {
+  throw new Error(
+    "Headless follow-up turns were removed; preserve the legacy record and use an Orca role terminal",
+  );
+  /* c8 ignore start -- legacy implementation remains unreachable for recovery readers. */
   assert(typeof text === "string" && text.trim(), "An answer is required");
   const status = headlessStatus(stateDir, workerId, options);
   assert(
@@ -1048,6 +1057,7 @@ export function answerHeadless(stateDir, workerId, text, options = {}) {
     session: status.session,
     timeoutMs: options.timeoutMs,
   });
+  /* c8 ignore stop */
 }
 
 /**
