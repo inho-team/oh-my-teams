@@ -292,7 +292,7 @@ omt-doc:<kickoffHash>/<workflowId|none>/<stageSlug>/<docType>/<localId>@r<revisi
 
      **호출자 의무(w2-05가 `teams-org.mjs`에서 구현).** `review-record`, `gate-check`, `accept`, `merge-check`, `workflow-accept` 다섯 CLI 케이스는 `--org`가 주어지면 다음 절차를 따른다.
 
-     1. 그 state가 속한 kickoff 등록 항목을 찾는다. 새 필드를 만들지 않고 등록부의 기존 필드(`kickoff-bind`가 채우는 `entry.pm.worktreeId` 등)로 그 state 디렉터리가 속한 항목을 결정적으로 찾는다.
+     1. 그 state가 속한 kickoff 등록 항목을 찾는다. 새 필드를 만들지 않고 등록부의 기존 필드(`registerKickoff`이 등록 시점에 채우는 `entry.pm.stateDir`)로 그 state 디렉터리가 속한 항목을 결정적으로 찾는다. `listKickoffs(orgFile)`이 돌려주는 각 항목의 `entry.pm.stateDir`를 `path.resolve(args.state)`와 비교해, 값이 일치하는 항목을 그 state가 속한 kickoff으로 판정한다.
      2. 찾은 항목에 3.7절 5번 항목의 판정(`documentSystemActivatedAt`과 `entry.createdAt`의 비교, `registrationSeq` 유무)을 그대로 적용한다.
         - **current**(정형 문서 체계 활성화 이후 등록되고 `registrationSeq`가 있는 항목)이면 `kickoffHashFor`가 그 항목으로부터 계산하는 `kickoffHash`(와 workflow가 있으면 `workflowId`)를 반드시 `gateCheck`/`recordReview`/`acceptOutcome`에 넘긴다.
         - **legacy**(정형 문서 체계 활성화 이전으로 판정된 항목)이면 생략한다. 위 (b)에 해당하는 정당한 생략이다.
@@ -429,7 +429,7 @@ Orca 자체의 Goal/Run/Task/Dispatch 판정, 정산 로직은 오케스트레�
 | 문서-참조 객체 원자성(검토·수용) | `04. 검토`/`05. 수용` 문서가 아직 커밋되지 않은 review/decision 기록은 `review-complete`/`outcome-accepted` 게이트를 통과시키지 못하고 `acceptOutcome`이 거부된다. 문서를 커밋한 뒤에는 같은 review/decision 기록으로 게이트가 정상 통과한다 | 3.7.5절 |
 | current kickoff의 kickoffHash 전달과 미커밋 문서 | `--org`가 가리키는 kickoff 항목이 current로 판정되면 CLI(`review-record`/`gate-check`/`accept`/`merge-check`/`workflow-accept`)가 `kickoffHash`(와 workflow가 있으면 `workflowId`)를 `gateCheck`/`recordReview`/`acceptOutcome`에 넘기고, 대응하는 review-ref/acceptance-ref 문서가 아직 커밋되지 않았으면 review/decision 기록 자체는 유지된 채 `review-complete`/`outcome-accepted` 게이트만 `pending`으로 남는다 | 3.7.5절 |
 | legacy kickoff의 kickoffHash 생략 | `--org`가 가리키는 kickoff 항목이 legacy로 판정되면 CLI는 `kickoffHash`를 넘기지 않고, `gateCheck`는 문서 확인 없이 기존 review/decision 전용 판정만으로 통과 여부를 정한다 | 3.7.5절 |
-| integrity-failure 거부 | 정형 문서 체계 활성화 이후 등록됐는데도 `registrationSeq`가 없는 kickoff 항목이거나 `--org`가 가리키는 organization을 읽지 못하면, CLI는 gate를 평가하기 전에 명령 자체를 거부한다 | 3.7.5절 |
+| integrity-failure 거부 | 정형 문서 체계 활성화 이후 등록됐는데도 `registrationSeq`가 없는 kickoff 항목이거나, `--org`가 가리키는 organization을 읽지 못하거나, `--org`가 주어졌는데도 그 state가 속한 kickoff 항목을 찾지 못하면(예: 이미 release되어 `history/`로 이관됐거나 등록 자체가 없는 경우), CLI는 gate를 평가하기 전에 명령 자체를 거부한다 | 3.7.5절 |
 | kickoffHash 재사용 격리 | 같은 `worktreeId`를 release 뒤 재등록하면 새 kickoff은 이전 kickoff과 다른 `kickoffHash`를 받고, kickoff-brief-ref/closure-record가 revision 1부터 독립적으로 시작해 이전 kickoff의 문서 이력을 잇지 않는다 | 3.7.5절 |
 | 재개 | 등록부와 workflow state만으로 문서 디렉터리를 다시 찾아 이전 세션이 쓴 문서를 읽을 수 있다. 이는 항상 지금 활성인 kickoff을 재개하는 경우다 | 3.11절 |
 | 상태 기반 거부(초안 참조) | `state: "open"`인 `02. 설계` 문서를 가리키는 `03. 구현` 문서의 `designRef`는 대상이 존재해도(`documentState(...).exists === true`) `state !== "resolved"`이므로 저장이 거부된다. 같은 설계 문서가 독립 검토를 통과해 `state: "resolved"`가 된 뒤에는 같은 `designRef`가 성공한다 | 3.7.7절(계약 B) |
