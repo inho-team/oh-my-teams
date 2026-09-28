@@ -24,6 +24,7 @@ import {
   registerKickoff,
   releaseKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { execSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const exampleOrgPath = path.resolve(
@@ -178,11 +179,36 @@ test("권한_없는_수정", () => {
     designDoc.openQuestions = [];
     designDoc.reviewRequirementRef = null;
 
-    saveDocument(stateDir, designDoc);
+    const r1 = saveDocument(stateDir, designDoc);
+    assert.equal(r1.revision, 1);
 
-    // Save documents in general is allowed
-    const result = saveDocument(stateDir, designDoc);
-    assert.ok(result.docId);
+    // Try to update with different executionId (different person, even if same role)
+    designDoc.revision = 2;
+    designDoc.basedOnRevision = 1;
+    designDoc.author = { role: "senior", executionId: "charlie-exec-2" };
+    designDoc.reason = "attempted update by different execution";
+
+    // Write doc to temp file
+    const docFile = path.join(tempDir, "design-doc-update.json");
+    fs.writeFileSync(docFile, JSON.stringify(designDoc, null, 2));
+
+    // Try to save via doc-save CLI (which calls assertDocumentAuthority)
+    let failed = false;
+    let errorMsg = "";
+    try {
+      execSync(
+        `node plugins/oh-my-teams/scripts/teams-org.mjs doc-save --state "${stateDir}" --doc "${docFile}" --expected-revision 1`,
+        { stdio: "pipe", encoding: "utf-8" },
+      );
+    } catch (e) {
+      failed = true;
+      errorMsg = e.stderr || e.message || e.stdout || "";
+    }
+
+    assert(
+      failed && errorMsg.includes("3.4"),
+      `Expected permission error with 3.4, got: ${errorMsg}`,
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -464,35 +490,15 @@ test("문서_참조_객체_원자성_인도", () => {
 test("기존_kickoff_등록_항목_레거시_판정", () => {
   const tempDir = makeTempDir();
   try {
-    const orgDir = path.join(tempDir, ".omt");
-    fs.mkdirSync(orgDir, { recursive: true });
+    const { orgFile, org, briefFile, pmDir } = createProjectStructure(
+      tempDir,
+      "test-wt-8",
+    );
 
-    // Create legacy org without documentSystemActivatedAt
-    const legacyOrg = {
-      schemaVersion: 1,
-      name: "legacy-org",
-      roles: [
-        { handle: "alice", role: "director" },
-        { handle: "bob", role: "pm" },
-      ],
-      profiles: {
-        alice: { role: "director" },
-        bob: { role: "pm" },
-      },
-      policy: {
-        modelPreference: "user",
-      },
-      revision: 1,
-      // No documentSystemActivatedAt
-    };
-
-    const legacyOrgFile = path.join(orgDir, "legacy-org.json");
-    fs.writeFileSync(legacyOrgFile, JSON.stringify(legacyOrg, null, 2));
-
-    const briefFile = path.join(tempDir, "brief.md");
-    fs.writeFileSync(briefFile, "# Brief\n");
-    const pmDir = path.join(tempDir, "pm");
-    fs.mkdirSync(pmDir, { recursive: true });
+    // Remove documentSystemActivatedAt to create legacy org
+    const legacyOrg = readJSON(orgFile);
+    delete legacyOrg.documentSystemActivatedAt;
+    fs.writeFileSync(orgFile, JSON.stringify(legacyOrg, null, 2));
 
     // Try to register with legacy org
     const request = createKickoffRequest(
@@ -501,7 +507,7 @@ test("기존_kickoff_등록_항목_레거시_판정", () => {
       pmDir,
       legacyOrg.revision,
     );
-    const { entry } = registerKickoff(legacyOrgFile, request);
+    const { entry } = registerKickoff(orgFile, request);
 
     // Entry should exist but may not have registrationSeq
     assert.ok(entry);
@@ -641,21 +647,55 @@ test("current_kickoff의_kickoffHash_전달_미커밋_문서", () => {
 test("legacy_kickoff의_kickoffHash_생략", () => {
   const tempDir = makeTempDir();
   try {
-    const { orgFile, org, briefFile, pmDir } = createProjectStructure(
-      tempDir,
-      "test-wt-13",
+    // Create legacy org without documentSystemActivatedAt from the start
+    const orgDir = path.join(tempDir, ".omt");
+    fs.mkdirSync(orgDir, { recursive: true });
+
+    // Copy example organization
+    const exampleOrgPath = path.resolve(
+      path.join(__dirname, "../plugins/oh-my-teams/examples/organization.json"),
     );
+    const orgFile = path.join(orgDir, "organization.json");
+    fs.copyFileSync(exampleOrgPath, orgFile);
+
+    // Remove documentSystemActivatedAt to make it legacy
+    const legacyOrg = readJSON(orgFile);
+    delete legacyOrg.documentSystemActivatedAt;
+    fs.writeFileSync(orgFile, JSON.stringify(legacyOrg, null, 2));
+
+    // Create brief file
+    const briefFile = path.join(tempDir, "brief.md");
+    fs.writeFileSync(briefFile, "# Test Brief\n");
+
+    // Create PM directory
+    const pmDir = path.join(tempDir, "pm-wt");
+    fs.mkdirSync(pmDir, { recursive: true });
+
+    // Create state directory for documents
+    const stateDir = path.join(orgDir, "state");
+    fs.mkdirSync(stateDir, { recursive: true });
 
     const request = createKickoffRequest(
       "test-wt-13",
       briefFile,
       pmDir,
-      org.revision,
+      legacyOrg.revision,
     );
-    const { entry } = registerKickoff(orgFile, request);
+    const { file, entry } = registerKickoff(orgFile, request);
 
-    // Entry should have kickoffHash
-    assert.ok(entry.kickoffHash);
+    // Remove registrationSeq to simulate legacy entry (pre-structured-documents system)
+    const legacyEntry = readJSON(file);
+    delete legacyEntry.registrationSeq;
+    fs.writeFileSync(file, JSON.stringify(legacyEntry, null, 2));
+
+    // Re-read entry to reflect the change
+    const updatedEntry = readJSON(file);
+    assert.equal(updatedEntry.registrationSeq, undefined);
+
+    // kickoffHashFor should fail for legacy entry
+    assert.throws(() => {
+      kickoffHashFor(updatedEntry);
+    });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
