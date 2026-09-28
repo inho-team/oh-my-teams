@@ -855,6 +855,27 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     runtime,
     /표가 `headless`를 돌려주면 `headless-start`로 실행/,
   );
+  const agents = fs.readFileSync(path.join(root, "AGENTS.md"), "utf8");
+  const archivedHeadlessPlan = fs.readFileSync(
+    path.join(root, "docs/plan/headless-runtime.md"),
+    "utf8",
+  );
+  assert.doesNotMatch(agents, /headless-runtime\.md.*예외/);
+  assert.match(archivedHeadlessPlan, /보관 기록: 제거된 비대화형 감독 런타임/);
+  assert.match(
+    archivedHeadlessPlan,
+    /새 역할 실행을 시작하거나 재개하지 않는다/,
+  );
+  assert.match(archivedHeadlessPlan, /제거된 명령 표면/);
+  const runtimeSource = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/scripts/teams-org.mjs"),
+    "utf8",
+  );
+  const help = runtimeSource.slice(
+    runtimeSource.indexOf("const HELP ="),
+    runtimeSource.indexOf("`;", runtimeSource.indexOf("const HELP =")),
+  );
+  assert.doesNotMatch(help, /headless-start|headless-answer/);
   for (const role of ["pm", "pl"]) {
     assert.match(
       readSkill(role),

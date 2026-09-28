@@ -1,7 +1,11 @@
 /** Regressions for session-bound OMT worktree creation and headless rejection. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createWorktreeWithRoleSession } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { predictLaunchPath } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
 import {
   answerHeadless,
@@ -10,10 +14,26 @@ import {
 import {
   createRoleWorktree,
   main,
+  recordLaunchSafely,
   reclaimIntegratedRoleWorktree,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const discovery = { executable: "orca", versionsMatch: true };
+const roleOrganization = () =>
+  readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
+const environment = async () => ({
+  platform: "darwin",
+  shell: "posix",
+  trustRecordExists: true,
+  codexTrustRecordExists: true,
+  orcaVersion: "1.4.210",
+  cliVersion: "1.2.11",
+});
+const supervised = () => ({
+  path: "supervised-terminal",
+  reason: [],
+  nextAction: "",
+});
 
 function workspaceReceipt() {
   return JSON.stringify({
@@ -71,6 +91,61 @@ test("an ambiguous role launch preserves the new worktree for reconciliation", a
   assert.equal(calls.length, 1);
 });
 
+test("a failed automatic reclamation retains the actual Orca worktree id", async () => {
+  const execute = async (argv) => ({
+    code: argv.includes("remove") ? 1 : 0,
+    stderr: argv.includes("remove") ? "default shell still attached" : "",
+    timedOut: false,
+    stdout: argv.includes("create") ? workspaceReceipt() : "",
+  });
+  await assert.rejects(
+    () =>
+      createWorktreeWithRoleSession("/repo", {
+        name: "role-child",
+        base: "f".repeat(40),
+        discovery,
+        execute,
+        openRoleSession: async () => ({ ready: false, sessionObserved: false }),
+      }),
+    (error) => {
+      assert.equal(error.reclaimWorktreeId, "wt_1");
+      assert.equal(error.workspace.id, "wt_1");
+      assert.match(error.reclaimError, /default shell/);
+      return true;
+    },
+  );
+});
+
+test("the launch matrix refuses before role-worktree creation", async () => {
+  let created = false;
+  await assert.rejects(
+    () =>
+      createRoleWorktree(
+        {
+          org: "/repo/.omt/organization.json",
+          role: "junior",
+          repo: "/repo",
+          name: "blocked-task",
+          base: "a".repeat(40),
+        },
+        {
+          organization: roleOrganization,
+          environment,
+          matrix: () => ({
+            path: "blocked",
+            reason: ["test-block"],
+            nextAction: "report",
+          }),
+          create: async () => {
+            created = true;
+          },
+        },
+      ),
+    /before worktree creation: test-block/,
+  );
+  assert.equal(created, false);
+});
+
 test("the operational role-worktree command opens the session inside creation", async () => {
   let creation;
   let opened;
@@ -83,6 +158,9 @@ test("the operational role-worktree command opens the session inside creation", 
       base: "c".repeat(40),
     },
     {
+      organization: roleOrganization,
+      environment,
+      matrix: supervised,
       create: async (_repo, options) => {
         creation = options;
         const session = await options.openRoleSession({ id: "wt_a" });
@@ -116,6 +194,9 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
       worktree: "repo::/repo/senior-existing",
     },
     {
+      organization: roleOrganization,
+      environment,
+      matrix: supervised,
       create: async () => {
         created = true;
         throw new Error("promotion must reuse the Senior worktree");
@@ -127,13 +208,44 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
               role: "junior",
               worktreeId: "repo::/repo/junior-rejected",
             },
+            "senior-prior": {
+              role: "senior",
+              state: "accepted",
+              worktreeId: "repo::/repo/senior-existing",
+            },
           },
         },
       }),
-      git: async (_repo, argv) => {
-        assert.deepEqual(argv, ["status", "--porcelain=v1", "-uall"]);
-        return "";
+      git: async (repo, argv) => {
+        if (argv[0] === "status") return "";
+        if (argv[0] === "rev-parse" && argv[1] === "HEAD")
+          return repo === "/repo" ? "integration-a" : "senior-a";
+        if (argv[0] === "rev-parse") return "integration-a";
+        if (argv[0] === "merge-base") return "";
+        throw new Error(`unexpected git: ${argv.join(" ")}`);
       },
+      launches: () => [
+        {
+          via: "worker-start",
+          workflowId: "workflow-w2-00",
+          workflowTaskId: "senior-prior",
+          worktreePath: "/repo/senior-existing",
+          terminal: "senior-prior-terminal",
+          workerId: "senior-prior-dispatch",
+        },
+      ],
+      active: async () => ({ status: "clear" }),
+      release: async () => ({ released: true }),
+      close: async () => ({ closed: true, ptyKilled: true }),
+      list: (() => {
+        let calls = 0;
+        return async () => ({
+          result: {
+            terminals:
+              calls++ === 0 ? [{ handle: "senior-prior-terminal" }] : [],
+          },
+        });
+      })(),
       open: async (workspace) => ({
         ready: true,
         terminal: "senior-terminal",
@@ -154,6 +266,80 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
   assert.equal(promotion[3].toWorktreeId, "repo::/repo/senior-existing");
   assert.equal(promotion[3].base, "d".repeat(40));
   assert.equal(result.transition.id, "promotion-w2-00");
+});
+
+test("a new same-role task reuses only an accepted, integrated, idle worktree", async () => {
+  let created = false;
+  let listed = 0;
+  const result = await createRoleWorktree(
+    {
+      org: "/repo/.omt/organization.json",
+      role: "senior",
+      repo: "/repo",
+      name: "next-senior-task",
+      base: "e".repeat(40),
+      state: "/repo/.omt",
+      "workflow-id": "workflow-reuse",
+      "workflow-task": "next",
+      worktree: "repo::/repo/senior-existing",
+    },
+    {
+      organization: roleOrganization,
+      environment,
+      matrix: supervised,
+      create: async () => {
+        created = true;
+      },
+      read: () => ({
+        state: {
+          tasks: {
+            next: { role: "senior", state: "pending" },
+            prior: {
+              role: "senior",
+              state: "accepted",
+              worktreeId: "repo::/repo/senior-existing",
+            },
+          },
+        },
+      }),
+      git: async (repo, argv) => {
+        if (argv[0] === "status") return "";
+        if (argv[0] === "rev-parse" && argv[1] === "HEAD")
+          return repo === "/repo" ? "integration-a" : "senior-a";
+        if (argv[0] === "rev-parse") return "integration-a";
+        if (argv[0] === "merge-base") return "";
+        throw new Error(`unexpected git: ${argv.join(" ")}`);
+      },
+      launches: () => [
+        {
+          via: "worker-start",
+          workflowId: "workflow-reuse",
+          workflowTaskId: "prior",
+          worktreePath: "/repo/senior-existing",
+          terminal: "senior-prior-terminal",
+          workerId: "senior-prior-dispatch",
+        },
+      ],
+      active: async () => ({ status: "clear" }),
+      release: async () => ({ released: true }),
+      close: async () => ({ closed: true, ptyKilled: true }),
+      list: async () => ({
+        result: {
+          terminals:
+            listed++ === 0 ? [{ handle: "senior-prior-terminal" }] : [],
+        },
+      }),
+      open: async (workspace) => ({
+        ready: true,
+        terminal: "new-senior-terminal",
+        role: "senior",
+        worktree: `id:${workspace.id}`,
+        modelRequested: "gpt-5.6-sol",
+      }),
+    },
+  );
+  assert.equal(created, false);
+  assert.equal(result.session.terminal, "new-senior-terminal");
 });
 
 test("an integrated child is reclaimed only after every lifecycle proof", async () => {
@@ -188,6 +374,14 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
           workflowTaskId: "task-a",
           worktreePath: "/repo/child",
           terminal: "term-a",
+          workerId: "dispatch-earlier",
+        },
+        {
+          via: "worker-start",
+          workflowId: "workflow-a",
+          workflowTaskId: "task-a",
+          worktreePath: "/repo/child",
+          terminal: "term-a",
           workerId: "dispatch-a",
         },
       ],
@@ -204,8 +398,14 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
       },
       close: async (_orca, argv) => {
         calls.push(`close:${argv.at(-1)}`);
-        return { result: { closed: true } };
+        return { result: { closed: true, ptyKilled: true } };
       },
+      list: (() => {
+        let calls = 0;
+        return async () => ({
+          result: { terminals: calls++ === 0 ? [{ handle: "term-a" }] : [] },
+        });
+      })(),
       reclaim: async (_repo, options) => {
         calls.push(`reclaim:${options.id}`);
         return { result: { removed: true } };
@@ -213,7 +413,8 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
     },
   );
   assert.equal(result.head, "child-a");
-  assert.deepEqual(calls.slice(-4), [
+  assert.deepEqual(calls.slice(-5), [
+    "release:dispatch-earlier",
     "release:dispatch-a",
     "close:term-a",
     "git:status --porcelain=v1 -uall",
@@ -259,14 +460,170 @@ test("an active or unproven child is preserved instead of reclaimed", async () =
             },
           ],
           active: async () => ({ status: "active" }),
+          git: async (_repo, argv) => {
+            if (argv[0] === "status") return "";
+            if (argv[0] === "rev-parse" && argv[1] === "HEAD") return "child-a";
+            return "merge-a";
+          },
           reclaim: async () => {
             reclaimed = true;
           },
         },
       ),
-    /do not reclaim/,
+    /do not reuse or reclaim/,
   );
   assert.equal(reclaimed, false);
+});
+
+test("a failed release, failed terminal close, or extra terminal preserves the child", async () => {
+  for (const [label, ports] of [
+    ["release", { release: async () => ({ released: false }) }],
+    ["close", { close: async () => ({ closed: true, ptyKilled: false }) }],
+    ["extra-terminal", { extraTerminal: true }],
+  ]) {
+    let reclaimed = false;
+    let listed = 0;
+    await assert.rejects(
+      () =>
+        reclaimIntegratedRoleWorktree(
+          {
+            org: "/repo/.omt/organization.json",
+            state: "/repo/.omt",
+            "workflow-id": "workflow-a",
+            "workflow-task": "task-a",
+            repo: "/repo/integration",
+            worktree: "repo::/repo/child",
+            "merge-commit": "merge-a",
+          },
+          {
+            read: () => ({
+              state: {
+                tasks: {
+                  "task-a": {
+                    state: "accepted",
+                    worktreeId: "repo::/repo/child",
+                  },
+                },
+              },
+            }),
+            launches: () => [
+              {
+                via: "worker-start",
+                workflowId: "workflow-a",
+                workflowTaskId: "task-a",
+                worktreePath: "/repo/child",
+                terminal: "owned-terminal",
+                workerId: "owned-dispatch",
+              },
+            ],
+            active: async () => ({ status: "clear" }),
+            git: async (_repo, argv) => {
+              if (argv[0] === "status") return "";
+              if (argv[0] === "rev-parse" && argv[1] === "HEAD")
+                return "child-a";
+              return "merge-a";
+            },
+            release: ports.release ?? (async () => ({ released: true })),
+            close:
+              ports.close ?? (async () => ({ closed: true, ptyKilled: true })),
+            list: async () => ({
+              result: {
+                terminals:
+                  listed++ === 0
+                    ? [
+                        { handle: "owned-terminal" },
+                        ...(ports.extraTerminal
+                          ? [{ handle: "other-shell" }]
+                          : []),
+                      ]
+                    : [],
+              },
+            }),
+            reclaim: async () => {
+              reclaimed = true;
+            },
+          },
+        ),
+      /preserve|termination|Another or unowned/,
+      label,
+    );
+    assert.equal(reclaimed, false, label);
+  }
+});
+
+test("an accepted promotion can reclaim its retired Junior worktree", async () => {
+  let listed = 0;
+  const result = await reclaimIntegratedRoleWorktree(
+    {
+      org: "/repo/.omt/organization.json",
+      state: "/repo/.omt",
+      "workflow-id": "workflow-promotion",
+      "workflow-task": "w2-00",
+      repo: "/repo/integration",
+      worktree: "repo::/repo/junior-rejected",
+      "merge-commit": "merge-a",
+    },
+    {
+      read: () => ({
+        state: {
+          tasks: {
+            "w2-00": {
+              state: "accepted",
+              role: "junior",
+              worktreeId: "repo::/repo/senior-fixed",
+              worktreeTransitions: [
+                {
+                  usedAt: "2026-09-29T00:00:00.000Z",
+                  fromWorktreeId: "repo::/repo/junior-rejected",
+                },
+              ],
+            },
+          },
+        },
+      }),
+      launches: () => [
+        {
+          via: "worker-start",
+          workflowId: "workflow-promotion",
+          workflowTaskId: "w2-00",
+          worktreePath: "/repo/junior-rejected",
+          terminal: "junior-terminal",
+          workerId: "junior-dispatch",
+        },
+      ],
+      active: async () => ({ status: "clear" }),
+      git: async (_repo, argv) => {
+        if (argv[0] === "status") return "";
+        if (argv[0] === "rev-parse" && argv[1] === "HEAD") return "junior-a";
+        return "merge-a";
+      },
+      release: async () => ({ released: true }),
+      close: async () => ({ closed: true, ptyKilled: true }),
+      list: async () => ({
+        result: {
+          terminals: listed++ === 0 ? [{ handle: "junior-terminal" }] : [],
+        },
+      }),
+      reclaim: async (_repo, options) => ({ removed: options.id }),
+    },
+  );
+  assert.equal(result.worktreeId, "repo::/repo/junior-rejected");
+  assert.equal(result.reclaimed.removed, "repo::/repo/junior-rejected");
+});
+
+test("an interactive terminal launch keeps its session when its ledger write fails", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ledger-failure-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, "organization.json");
+  fs.writeFileSync(orgFile, JSON.stringify(roleOrganization()));
+  fs.writeFileSync(path.join(dir, "usage"), "not a directory");
+  const result = recordLaunchSafely(orgFile, "2026-09-29T00:00:00.000Z", {
+    via: "role-terminal",
+    role: "senior",
+    terminal: "already-open-terminal",
+  });
+  assert.match(result.ledgerError, /EEXIST|ENOTDIR|not a directory/);
+  assert.equal(result.ledger, undefined);
 });
 
 test("the CLI rejects new headless launches and Windows Agy has no sessionless fallback", async () => {

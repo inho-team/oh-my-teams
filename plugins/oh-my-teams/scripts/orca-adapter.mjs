@@ -379,12 +379,27 @@ export async function createWorktreeWithRoleSession(repo, options) {
     return { workspace, session };
 
   if (session?.sessionObserved === false) {
-    const reclaimed = await reclaimWorktree(repo, {
-      id: workspace.id,
-      executable: workspace.executable,
-      discovery: workspace.discovery,
-      execute: options.execute,
-    });
+    let reclaimed;
+    try {
+      reclaimed = await reclaimWorktree(repo, {
+        id: workspace.id,
+        executable: workspace.executable,
+        discovery: workspace.discovery,
+        execute: options.execute,
+      });
+    } catch (cause) {
+      // A default shell can remain after a role-terminal refusal.  The
+      // worktree id is the only safe reconciliation target, so never lose it
+      // behind Orca's removal error.
+      const error = new Error(
+        "Orca role session was not established and automatic reclamation failed; preserve the residual worktree for reconciliation",
+        { cause },
+      );
+      error.workspace = workspace;
+      error.reclaimWorktreeId = workspace.id;
+      error.reclaimError = cause.message;
+      throw error;
+    }
     const error = new Error(
       "Orca role session was not established; the newly created worktree was reclaimed",
     );

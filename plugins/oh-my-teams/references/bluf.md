@@ -38,7 +38,7 @@ oh my teams의 모든 역할이 보고하거나 지시할 때 따르는 공통 �
 스키마나 표식이 정해진 출력은 그 형식을 그대로 따른다.
 
 - `worker_done` 같은 Orca 메시지의 구조화된 필드, JSON report, review·acceptance·failure 파일
-- headless 실행의 마지막 줄 표식(`DONE:`, `QUESTION:`, `FAILED:`). 표식은 마지막 줄에 두고, 그 앞의 본문을 두괄식으로 쓴다.
+- 과거 headless 실행 기록의 마지막 줄 표식(`DONE:`, `QUESTION:`, `FAILED:`). 이 표식은 복구·감사용 보관 형식이며 새 실행이나 재턴을 지시하지 않는다.
 - 커밋 메시지, PR 제목, 로그 문자열처럼 프로젝트 관례가 정한 텍스트
 
 사용자에게 전달하는 최종 결과를 한국어로 쓰는 자세한 기준은 [`korean-result-reporting.md`](korean-result-reporting.md)가 이 순서를 사용자 보고에 맞게 풀어 쓴다.
