@@ -85,7 +85,7 @@ node <runtime> worker-start --org <project>/.omt/organization.json --role junior
 node <runtime> role-spec --org <project>/.omt/organization.json --role senior --workflow-id <workflowId> --state <pm-state> --spec "<구체적인 작업>"
 ```
 
-`workflow-attach`가 receipt를 받으면 같은 역할의 수정·재시도·재검토는 그 `worktreeId`를 재사용한다. 단, Junior 반려를 Senior가 같은 attempt에서 고칠 때에는 Junior HEAD를 Senior 역할 세션 worktree의 `--base`로 검증해 전환 기록을 만든 뒤 `workflow-rework`에 그 기록과 새 receipt를 함께 연결한다. workflow를 고정한 뒤 후속 task를 만들라는 우회는 하지 않는다.
+`workflow-attach`가 receipt를 받으면 같은 역할의 수정·재시도·재검토는 그 `worktreeId`를 재사용한다. 단, Junior 반려를 Senior가 같은 attempt에서 고칠 때에는 기존의 깨끗한 Senior 역할 워크트리를 `role-worktree-create ... --role senior --worktree <senior-worktreeId>`로 다시 열어 역할·모델·워크트리 연결을 증명하고, Junior HEAD와 Senior HEAD가 `--base`에 일치하는지 검증해 전환 기록을 만든다. 그 기록과 Senior receipt를 같은 task의 `workflow-rework`에 연결한다. 원래 task의 `role: junior`는 바꾸지 않으며 Senior 실행 역할은 전환 기록과 receipt에 따로 남긴다. workflow를 고정한 뒤 후속 task를 만들라는 우회는 하지 않는다.
 
 질문 때문에 점검이 거부되면 `node <runtime> prompt-answer --org <project>/.omt/organization.json --terminal <handle> --workflow-id <workflowId> --state <pm-state>`로 답한 뒤 위 `terminal-idle-check`부터 다시 실행한다. 분류기가 알아보지 못한 화면(캡처되지 않은 명령 승인·업데이트 안내)에는 키를 보내지 않으며, Orca가 그 터미널을 `blockedReason`으로 멈춘 상태라고 보고하면 `escalate`(`next`: `report-upstream`)로 끝나므로 점검으로 되돌아가지 않고 보고한다. `prompt-answer`는 호출한 터미널이 그 역할의 감독자이고 대상 터미널의 워크트리를 Orca가 이 kickoff의 PM 워크트리 아래에 만들어진 것으로 기록하고 있을 때에만 화면을 읽고 키를 한 번 보낸 뒤 다시 읽어 확인하며, 모든 시도를 PM state의 `prompt-answers.jsonl`에 기록한다. 호출자는 환경 변수로만 식별되므로 이 확인은 감독 관계가 없는 터미널의 실수 호출을 막을 뿐 악의적인 프로세스를 막지는 못한다. 결과가 `escalate`나 `unresolved`이거나 거부되었을 때, 또는 사람이 정해야 하는 질문일 때에만 PM이 `director-signal`로 이사에게 알린다. 절차와 거부 코드는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「프롬프트 질문 답하기」 절을 따른다.
 

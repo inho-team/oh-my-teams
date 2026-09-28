@@ -100,6 +100,62 @@ test("the operational role-worktree command opens the session inside creation", 
   assert.equal(result.session.terminal, "term_a");
 });
 
+test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", async () => {
+  let created = false;
+  let promotion;
+  const result = await createRoleWorktree(
+    {
+      org: "/repo/.omt/organization.json",
+      role: "senior",
+      repo: "/repo",
+      name: "task-a-senior",
+      base: "d".repeat(40),
+      state: "/repo/.omt",
+      "workflow-id": "workflow-w2-00",
+      "workflow-task": "w2-00",
+      worktree: "repo::/repo/senior-existing",
+    },
+    {
+      create: async () => {
+        created = true;
+        throw new Error("promotion must reuse the Senior worktree");
+      },
+      read: () => ({
+        state: {
+          tasks: {
+            "w2-00": {
+              role: "junior",
+              worktreeId: "repo::/repo/junior-rejected",
+            },
+          },
+        },
+      }),
+      git: async (_repo, argv) => {
+        assert.deepEqual(argv, ["status", "--porcelain=v1", "-uall"]);
+        return "";
+      },
+      open: async (workspace) => ({
+        ready: true,
+        terminal: "senior-terminal",
+        role: "senior",
+        worktree: `id:${workspace.id}`,
+        modelRequested: "gpt-5.6-sol",
+      }),
+      promote: async (...args) => {
+        promotion = args;
+        return { transition: { id: "promotion-w2-00" } };
+      },
+    },
+  );
+  assert.equal(created, false);
+  assert.equal(result.id, "repo::/repo/senior-existing");
+  assert.equal(result.session.terminal, "senior-terminal");
+  assert.equal(promotion[3].fromWorktreeId, "repo::/repo/junior-rejected");
+  assert.equal(promotion[3].toWorktreeId, "repo::/repo/senior-existing");
+  assert.equal(promotion[3].base, "d".repeat(40));
+  assert.equal(result.transition.id, "promotion-w2-00");
+});
+
 test("an integrated child is reclaimed only after every lifecycle proof", async () => {
   const calls = [];
   const result = await reclaimIntegratedRoleWorktree(

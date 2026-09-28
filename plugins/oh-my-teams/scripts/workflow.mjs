@@ -1530,18 +1530,20 @@ function worktreePathFromReceipt(worktreeId) {
 }
 
 /**
- * Records a Junior-to-Senior handoff only after the new role worktree proves
- * it was created from the rejected Junior commit.
+ * Records a Junior-to-Senior handoff only after the Senior role worktree proves
+ * it matches the rejected Junior commit.
  *
  * @param {string} stateDir - PM workflow store.
  * @param {string} id - Workflow identifier.
  * @param {string} taskId - Reworked task identifier.
  * @param {object} transition - Role worktree and commit proof.
  * @param {string} transition.fromWorktreeId - Rejected Junior worktree.
- * @param {string} transition.toWorktreeId - New Senior worktree.
+ * @param {string} transition.toWorktreeId - Senior worktree to reuse or create.
  * @param {string} transition.fromWorktreePath - Rejected Junior path.
  * @param {string} transition.toWorktreePath - New Senior path.
  * @param {string} transition.base - Requested child base revision.
+ * @param {object} [ports] - Injectable evidence ports for focused tests.
+ * @param {Function} [ports.gitEvidence=git] - Git evidence reader.
  * @returns {Promise<object>} Durable transition record for `workflow-rework`.
  * @throws {Error} When the base, task state, or role transition is not proven.
  */
@@ -1550,15 +1552,19 @@ export async function prepareRolePromotion(
   id,
   taskId,
   { fromWorktreeId, toWorktreeId, fromWorktreePath, toWorktreePath, base },
+  { gitEvidence = git } = {},
 ) {
   const oldPath = path.resolve(fromWorktreePath);
   const newPath = path.resolve(toWorktreePath);
-  const previousHead = await git(oldPath, ["rev-parse", "HEAD"]);
-  const resolvedBase = await git(oldPath, ["rev-parse", `${base}^{commit}`]);
-  const newHead = await git(newPath, ["rev-parse", "HEAD"]);
+  const previousHead = await gitEvidence(oldPath, ["rev-parse", "HEAD"]);
+  const resolvedBase = await gitEvidence(oldPath, [
+    "rev-parse",
+    `${base}^{commit}`,
+  ]);
+  const newHead = await gitEvidence(newPath, ["rev-parse", "HEAD"]);
   assert(
     resolvedBase === previousHead && newHead === previousHead,
-    "Senior role worktree must be created at the rejected Junior commit",
+    "Senior role worktree must match the rejected Junior commit",
   );
 
   return withWorkflowUpdate(stateDir, id, () => {
@@ -1708,6 +1714,13 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
           .concurrency,
       `No ${transition?.toRole ?? item.role} concurrency slot available`,
     );
+    const receipt = transition
+      ? {
+          ...input.receipt,
+          executionRole: transition.toRole,
+          transitionId: transition.id,
+        }
+      : input.receipt;
 
     item.rework.push({
       fromAttempt: item.attemptId,
@@ -1716,7 +1729,7 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       conclusion: review.conclusion,
       openFindings,
       fromExecution: executionId,
-      toExecution: input.receipt.executionId,
+      toExecution: receipt.executionId,
       recordedAt: new Date().toISOString(),
     });
     attempt.previousReceipts = [
@@ -1725,14 +1738,14 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
     ];
     attempt.priorCallsUsed = spent;
     attempt.callsUsed = undefined;
-    attempt.receipt = input.receipt;
+    attempt.receipt = receipt;
     attempt.status = "running";
-    item.execution = input.receipt;
-    item.worktreeId = input.receipt.worktreeId;
+    item.execution = receipt;
+    item.worktreeId = receipt.worktreeId;
     if (transition) {
       transition.usedAt = new Date().toISOString();
-      transition.executionId = input.receipt.executionId;
-      item.role = transition.toRole;
+      transition.executionId = receipt.executionId;
+      item.executionRole = transition.toRole;
     }
     item.workerRunId = null;
     item.acceptedResult = null;
@@ -1743,7 +1756,7 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       taskId: input.taskId,
       attemptId: input.attemptId,
       reviewId: input.reviewId,
-      receipt: input.receipt,
+      receipt,
     });
     state.revision += 1;
     state.status = deriveWorkflowStatus(state);

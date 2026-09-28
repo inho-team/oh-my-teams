@@ -839,11 +839,22 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // built for one role is accepted as the role the run folded it onto.
   assert.match(
     runtime,
-    /node <runtime> role-worktree-create --org <organization\.json> --role <역할> --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>/,
+    new RegExp(
+      [
+        "node <runtime> role-worktree-create --org <organization\\.json>",
+        " --role <역할> --repo <pm-worktree> --name <name> --base <base-sha>",
+        " --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>",
+      ].join(""),
+    ),
   );
   assert.doesNotMatch(readSkill("pl"), /custom argv/);
   assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
   assert.match(runtime, /대괄호/);
+  assert.doesNotMatch(runtime, /Windows에서 Agy는 신뢰 상태와 무관하게/);
+  assert.doesNotMatch(
+    runtime,
+    /표가 `headless`를 돌려주면 `headless-start`로 실행/,
+  );
   for (const role of ["pm", "pl"]) {
     assert.match(
       readSkill(role),

@@ -192,8 +192,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   role-worktree-create --org FILE --role ROLE --repo DIR --name NAME --base SHA
                         [--setup inherit|run|skip] [--title TEXT] [--brief FILE]
                         [--workflow-id ID --state DIR --workflow-task ID]
-                        [--profile FALLBACK] [--orca EXECUTABLE]
+                        [--worktree WORKTREE_ID] [--profile FALLBACK] [--orca EXECUTABLE]
                         (creates a child only while opening and proving its Orca role session;
+                        a verified Junior-to-Senior promotion may reuse a clean Senior worktree;
                         a proven no-session launch is reclaimed, an ambiguous launch is preserved)
   role-worktree-reclaim --org FILE --state DIR --workflow-id ID --workflow-task ID
                         --repo DIR --worktree ID --merge-commit SHA [--orca EXECUTABLE]
@@ -410,6 +411,7 @@ export const ALLOWED_OPTIONS = {
     "state",
     "workflow-task",
     "profile",
+    "worktree",
     "orca",
   ],
   "role-worktree-reclaim": [
@@ -905,7 +907,10 @@ async function compatibilityPrepare(args) {
   return {
     ...prepared,
     stateDir,
-    note: "Compatibility prepare no longer creates a sessionless worktree. Create a child through Orca, open a role-terminal in it, verify ready/session proof, then attach-workspace.",
+    note:
+      "Compatibility prepare no longer creates a sessionless worktree. " +
+      "Create a child through Orca, open a role-terminal in it, " +
+      "verify ready/session proof, then attach-workspace.",
   };
 }
 
@@ -918,6 +923,8 @@ async function compatibilityPrepare(args) {
  * @param {object} [ports] - Injectable ports for focused lifecycle tests.
  * @param {Function} [ports.create=createWorktreeWithRoleSession] - Creator.
  * @param {Function} [ports.open] - Role-terminal opener.
+ * @param {Function} [ports.read=readWorkflow] - Workflow-state reader.
+ * @param {Function} [ports.git=gitEvidence] - Git evidence reader.
  * @returns {Promise<object>} Worktree identity and proven role terminal.
  */
 export async function createRoleWorktree(
@@ -926,15 +933,14 @@ export async function createRoleWorktree(
     create = createWorktreeWithRoleSession,
     open,
     promote = prepareRolePromotion,
+    read = readWorkflow,
+    git = gitEvidence,
   } = {},
 ) {
   let promotion = null;
   if (args["workflow-id"] && args["workflow-task"]) {
     assert(args.state, "--workflow-id and --workflow-task require --state");
-    const { state } = readWorkflow(
-      path.resolve(args.state),
-      args["workflow-id"],
-    );
+    const { state } = read(path.resolve(args.state), args["workflow-id"]);
     const task = state.tasks[args["workflow-task"]];
     const existing = task?.worktreeId ?? task?.execution?.worktreeId;
     promotion =
@@ -946,6 +952,10 @@ export async function createRoleWorktree(
       `Task ${args["workflow-task"]} already has worktree ${existing}; reuse it with role-terminal instead of creating another`,
     );
   }
+  assert(
+    !args.worktree || promotion,
+    "--worktree only reuses a clean Senior worktree for a verified Junior-to-Senior promotion",
+  );
   const openRoleSession =
     open ??
     ((workspace) =>
@@ -954,34 +964,63 @@ export async function createRoleWorktree(
         command: "role-terminal",
         worktree: `id:${workspace.id}`,
       }));
-  const created = await create(path.resolve(args.repo), {
-    name: args.name,
-    base: args.base,
-    setup: args.setup ?? "inherit",
-    executable: args.orca,
-    openRoleSession: async (workspace) => {
-      let opened;
-      try {
-        opened = await openRoleSession(workspace);
-      } catch (error) {
-        // The matrix refuses before creating a terminal. Other throws may
-        // follow a terminal/process creation and must stay for reconciliation.
-        if (error.matrixRefusal) {
-          return { ready: false, sessionObserved: false };
-        }
-        throw error;
-      }
-      return {
-        ...opened,
-        // A returned terminal alone can still be a shell or a blocked prompt.
-        // Only role-terminal's ready proof is a session; an absent terminal is
-        // the one failure state safe to reclaim automatically.
-        sessionObserved:
-          opened?.ready === true ||
-          (typeof opened?.terminal === "string" && opened.terminal.length > 0),
-      };
-    },
-  });
+  const existingSenior = promotion && args.worktree;
+  const created = existingSenior
+    ? await (async () => {
+        assert(
+          args.worktree !== promotion.fromWorktreeId,
+          "Senior promotion needs a separate Senior role worktree",
+        );
+        const workspace = {
+          id: args.worktree,
+          path: pathFromWorktreeId(args.worktree),
+        };
+        const clean = await git(workspace.path, [
+          "status",
+          "--porcelain=v1",
+          "-uall",
+        ]);
+        assert(!clean, "Senior role worktree must be clean before promotion");
+        const session = await openRoleSession(workspace);
+        assert(
+          session?.ready === true &&
+            session.terminal &&
+            session.role === args.role &&
+            session.worktree === `id:${workspace.id}` &&
+            session.modelRequested,
+          "Existing Senior worktree has no matching proven role session",
+        );
+        return { workspace, session };
+      })()
+    : await create(path.resolve(args.repo), {
+        name: args.name,
+        base: args.base,
+        setup: args.setup ?? "inherit",
+        executable: args.orca,
+        openRoleSession: async (workspace) => {
+          let opened;
+          try {
+            opened = await openRoleSession(workspace);
+          } catch (error) {
+            // The matrix refuses before creating a terminal. Other throws may
+            // follow a terminal/process creation and must stay for reconciliation.
+            if (error.matrixRefusal) {
+              return { ready: false, sessionObserved: false };
+            }
+            throw error;
+          }
+          return {
+            ...opened,
+            // A returned terminal alone can still be a shell or a blocked prompt.
+            // Only role-terminal's ready proof is a session; an absent terminal is
+            // the one failure state safe to reclaim automatically.
+            sessionObserved:
+              opened?.ready === true ||
+              (typeof opened?.terminal === "string" &&
+                opened.terminal.length > 0),
+          };
+        },
+      });
   let transition;
   if (promotion) {
     transition = await promote(
