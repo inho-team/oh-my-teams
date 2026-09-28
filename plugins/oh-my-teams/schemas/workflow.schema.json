@@ -22,7 +22,7 @@
       "type": "integer",
       "minimum": 1,
       "maximum": 4,
-      "description": "Roles this run uses: 1 PM; 2 +Junior; 3 +Senior; 4 +PL. Omitted means every role the organization declares. A depth of 5 saved before 2.6.0 reads as 4."
+      "description": "New organizations use 1 PM or 2 PM+Worker. Saved legacy organizations use 1 PM; 2 +Junior; 3 +Senior; 4 +PL. A saved depth of 5 reads as 4."
     },
     "tasks": {
       "type": "array",
@@ -33,7 +33,7 @@
         "required": ["file", "role"],
         "properties": {
           "file": { "type": "string", "minLength": 1 },
-          "role": { "enum": ["pm", "pl", "senior", "junior"] }
+          "role": { "enum": ["pm", "pl", "senior", "junior", "worker"] }
         }
       }
     },

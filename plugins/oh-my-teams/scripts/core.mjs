@@ -20,12 +20,13 @@ import { OPENCODEX_RUNNER_PROVIDERS } from "./opencodex.mjs";
 /**
  * Stable role identifiers used by schemas, organization graphs, and reports.
  *
- * The order is a seniority ladder from most to least senior, and `resolveRole`
- * reads it that way. An organization may omit every role except `pm`, so a
- * responsibility addressed to an absent role folds upward along this array
- * until it reaches a role the organization actually declares.
+ * The first four identifiers preserve the saved legacy ladder. Worker is the
+ * only subordinate role in new organizations. `foldRole` handles both shapes.
  */
-export const ROLES = ["pm", "pl", "senior", "junior"];
+export const ROLES = ["pm", "pl", "senior", "junior", "worker"];
+
+/** Roles used by newly formed organizations. The other names remain for saved runs. */
+export const ACTIVE_ROLES = Object.freeze(["pm", "worker"]);
 
 /**
  * Role names that no longer exist, mapped to the role that took over their work.
@@ -58,20 +59,15 @@ export const canonicalRole = (role) => LEGACY_ROLE_ALIASES[role] ?? role;
 export const DIRECTOR_ROLE = "director";
 
 /**
- * Full seniority ladder from most to least senior, including the director.
- *
- * `ROLES` lists only the roles an organization may bind and launch as workers.
- * `ROLE_LADDER` adds the director so that authority checks and header
- * generation can express "above PM" without mixing director into the folding
- * or depth logic that `ROLES` drives.
+ * New Director–PM–Worker hierarchy; legacy role identifiers remain in `ROLES`.
  */
-export const ROLE_LADDER = Object.freeze([DIRECTOR_ROLE, ...ROLES]);
+export const ROLE_LADDER = Object.freeze([DIRECTOR_ROLE, ...ACTIVE_ROLES]);
 
 /** The one role every organization must declare, and the root of its graph. */
 export const ROOT_ROLE = "pm";
 
 /**
- * Roles a run of each depth uses, from the most senior down.
+ * Legacy roles a run of each depth uses, from the most senior down.
  *
  * Roles join in the order a team misses them most. Implementation comes first,
  * because a PM alone has nobody to hand work to; independent review comes next;
@@ -83,11 +79,14 @@ export const DEPTH_ROLES = Object.freeze({
   1: Object.freeze(["pm"]),
   2: Object.freeze(["pm", "junior"]),
   3: Object.freeze(["pm", "senior", "junior"]),
-  4: Object.freeze([...ROLES]),
+  4: Object.freeze(["pm", "pl", "senior", "junior"]),
 });
 
-/** Depth that uses every role an organization declares. */
+/** Legacy depth that uses every role in a four-role organization. */
 export const FULL_DEPTH = 4;
+
+/** Maximum depth for newly formed PM/Worker organizations. */
+export const ACTIVE_FULL_DEPTH = 2;
 
 // Depth 5 meant the full ladder while Intern existed. Saved workflows keep that
 // number, and the full ladder is now depth 4, so it is read as the full depth.
@@ -101,7 +100,7 @@ const LEGACY_FULL_DEPTH = 5;
  * PM is always among them because every organization declares it.
  *
  * @param {string[]} declared - Roles the organization declares.
- * @param {number} depth - Run depth from 1 to 4; a saved depth 5 reads as 4.
+ * @param {number} depth - Run depth from 1 to 2 for new teams, or 1 to 4 for legacy teams; a saved depth 5 reads as 4.
  * @returns {string[]} Active roles in ladder order.
  * @throws {Error} When the depth is outside 1..4.
  */
@@ -109,6 +108,15 @@ export function depthRoles(declared, depth) {
   const roles = DEPTH_ROLES[depth === LEGACY_FULL_DEPTH ? FULL_DEPTH : depth];
   assert(roles, `Depth must be 1..${FULL_DEPTH}`);
   const present = new Set(declared);
+  if (
+    present.has("worker") &&
+    !["pl", "senior", "junior"].some((role) => present.has(role))
+  ) {
+    assert(depth <= ACTIVE_FULL_DEPTH, `Depth must be 1..${ACTIVE_FULL_DEPTH}`);
+    return depth === 1
+      ? ["pm"]
+      : ACTIVE_ROLES.filter((role) => present.has(role));
+  }
   return roles.filter((role) => present.has(role));
 }
 
@@ -139,11 +147,8 @@ export const definedRoles = (org) =>
 /**
  * Folds a responsibility addressed to one role onto the role that holds it.
  *
- * A reduced organization omits roles rather than renaming them, so failure
- * routing, review requirements, and assistant drafting keep naming the role
- * that owns the work in a full team. This resolves that name to the closest
- * senior role actually declared, which terminates at `pm` because `validateOrg`
- * requires it.
+ * In new organizations, PL work belongs to PM and Senior/Junior work belongs
+ * to Worker. Saved legacy runs still fold to the closest declared senior role.
  *
  * Takes the declared names rather than the organization so a persisted workflow
  * can fold a later routing decision from the role list it recorded at creation,
@@ -155,9 +160,12 @@ export const definedRoles = (org) =>
  * @throws {Error} When the name is not a known role or nothing declares it.
  */
 export function foldRole(declared, role) {
-  const rank = ROLES.indexOf(canonicalRole(role));
+  const canonical = canonicalRole(role);
+  const rank = ROLES.indexOf(canonical);
   assert(rank >= 0, `Unknown role: ${role}`);
   const present = new Set((declared ?? []).map(canonicalRole));
+  if (present.has("worker") && ["senior", "junior"].includes(canonical))
+    return "worker";
   for (let index = rank; index >= 0; index -= 1) {
     if (present.has(ROLES[index])) return ROLES[index];
   }
@@ -830,6 +838,13 @@ export function validateOrg(org) {
   assert(
     Object.keys(org.roles).every((role) => ROLES.includes(role)),
     `Roles must be named from ${ROLES.join("/")}`,
+  );
+  assert(
+    !Object.hasOwn(org.roles, "worker") ||
+      !["pl", "senior", "junior"].some((role) =>
+        Object.hasOwn(org.roles, role),
+      ),
+    "Worker organizations cannot declare legacy PL, Senior, or Junior roles",
   );
   assert(
     Object.hasOwn(org.roles, ROOT_ROLE),

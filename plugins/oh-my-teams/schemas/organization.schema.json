@@ -52,7 +52,8 @@
         "pm": { "$ref": "#/$defs/assistantProfiles" },
         "pl": { "$ref": "#/$defs/assistantProfiles" },
         "senior": { "$ref": "#/$defs/assistantProfiles" },
-        "junior": { "$ref": "#/$defs/assistantProfiles" }
+        "junior": { "$ref": "#/$defs/assistantProfiles" },
+        "worker": { "$ref": "#/$defs/assistantProfiles" }
       }
     },
     "advisors": {
@@ -63,19 +64,21 @@
         "pm": { "$ref": "#/$defs/assistantProfiles" },
         "pl": { "$ref": "#/$defs/assistantProfiles" },
         "senior": { "$ref": "#/$defs/assistantProfiles" },
-        "junior": { "$ref": "#/$defs/assistantProfiles" }
+        "junior": { "$ref": "#/$defs/assistantProfiles" },
+        "worker": { "$ref": "#/$defs/assistantProfiles" }
       }
     },
     "roles": {
       "type": "object",
       "required": ["pm"],
-      "$comment": "A reduced organization declares only the roles it runs, so only PM is required. Work addressed to an omitted role folds onto the closest declared senior role; core.mjs resolveRole performs that fold and validateOrg rejects a parent the organization does not declare.",
+      "$comment": "New organizations declare PM and Worker; saved legacy organizations can omit subordinate roles. core.mjs foldRole resolves omitted roles and validateOrg rejects undeclared parents.",
       "additionalProperties": false,
       "properties": {
         "pm": { "$ref": "#/$defs/role" },
         "pl": { "$ref": "#/$defs/role" },
         "senior": { "$ref": "#/$defs/role" },
-        "junior": { "$ref": "#/$defs/role" }
+        "junior": { "$ref": "#/$defs/role" },
+        "worker": { "$ref": "#/$defs/role" }
       }
     },
     "policy": {
@@ -244,7 +247,7 @@
       "type": "object",
       "required": ["parent", "profile", "concurrency", "attempts", "fallbacks"],
       "properties": {
-        "parent": { "enum": [null, "pm", "pl", "senior", "junior"] },
+        "parent": { "enum": [null, "pm", "pl", "senior", "junior", "worker"] },
         "profile": { "type": "string", "minLength": 1 },
         "concurrency": { "type": "integer", "minimum": 1, "maximum": 32 },
         "attempts": { "type": "integer", "minimum": 1, "maximum": 5 },

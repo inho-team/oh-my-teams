@@ -50,6 +50,8 @@ const gateFile = (stateDir, taskId) =>
 // junior one still cannot. Reviewer independence is a separate check on
 // execution identity, so this never weakens it.
 function seniorEnoughToReview(reviewerRole, requiredRole) {
+  if (requiredRole === "worker")
+    return reviewerRole === "worker" || reviewerRole === "pm";
   const required = ROLES.indexOf(canonicalRole(requiredRole));
   const reviewer = ROLES.indexOf(canonicalRole(reviewerRole));
   return required >= 0 && reviewer >= 0 && reviewer <= required;

@@ -1,14 +1,14 @@
 # oh my teams
 
-Claude Code·Codex용 **에이전트 조직 플러그인**. PM / PL / Senior / Junior의 역할과 모델·구독을 분리하고 Orca 위에서 작업을 실행한다. 내부 실행기는 **Claude, Codex, Agy, Ollama**이며, 독립 편집 작업과 통합에는 **Orca worktree**를 사용한다.
+Claude Code·Codex용 **에이전트 조직 플러그인**. 이사는 사용자와 소통하고 최종 병합·종료를 책임지며, PM은 미션 전체와 Worker의 작업을 지휘합니다. Worker는 구현·설계·독립 검토를 수행합니다. 실행기는 **Claude, Codex, Agy, Ollama**이며, 독립 편집과 통합에는 **Orca worktree**를 사용합니다.
 
 ## 시작
 
 | 스킬 | 동작 |
 |---|---|
 | `help` | 설치된 생애주기·역할·지원 스킬과 사용 시점을 표로 안내 |
-| `form` | 네 역할의 모델만 골라 상설 조직을 결성하고, 나머지는 비용이 늘지 않는 기본값으로 저장 |
-| `kickoff` | 하나의 개발 Goal을 시작하거나 재개하고, PM이 난이도에 맞춘 실행 깊이로 완료 조건까지 지속 감독 |
+| `form` | PM과 Worker의 모델을 골라 상설 조직을 결성하고, 나머지는 비용이 늘지 않는 기본값으로 저장 |
+| `kickoff` | 하나의 개발 Goal을 시작하거나 재개하고, PM이 Worker를 지휘하여 완료 조건까지 지속 감독 |
 | `status` | 상설 조직과 현재 Goal·실행 팀·워크트리·검증 상태를 구분하여 표시 |
 | `adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존. 추론 강도·대체 순서·인원·보조 도구·별도 계정은 여기서 정함 |
 | `close` | 성공한 Goal의 PR/MR·병합·워크트리 정리와 완료 기록 처리 |
@@ -32,13 +32,12 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 `kickoff`는 호스트의 네이티브 Goal을 유일한 지속 실행 권한으로 사용한다. 같은 세션에서 Ralph, autopilot 또는 다른 Goal 루프를 함께 실행하지 않는다. 매 실행 주기에는 확인 가능한 진전을 남기며, 완료 조건과 최신 검증이 모두 충족된 뒤 `close`로 전달과 자원 정리를 마쳐야 Goal을 완료한다.
 
 ```text
-PM       분석·중장기 계획·최종 결과
-└─ PL    분석·중단기 계획·분할·통합
-   └─ Senior  구체적인 구현 방법·상위 등급 구현·중요 변경 검토
-      └─ Junior  기능 구현·제한된 편집·반복 실무
+Director  사용자 소통·중대한 결정·최종 병합과 종료
+└─ PM    목표 달성·분할·배정·통합·최종 수용
+   └─ Worker  구현·설계·독립 검토
 ```
 
-작은 작업에 네 세션을 모두 만들지 않는다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`, 웹 검증에는 `orca-browser-use`, 외부 앱에는 `computer-use` 스킬을 필요할 때 사용한다.
+작은 작업에서는 PM만 사용하며, 구현과 독립 검토가 필요한 작업은 서로 다른 Worker 실행에 배정합니다. 진행 중인 이전 kickoff는 저장된 PL·Senior·Junior 역할 스냅샷을 유지합니다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`를 사용합니다.
 
 ## 설치
 
@@ -128,19 +127,19 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 Codex 계정의 모델 카탈로그는 계정과 CLI 버전에 따라 달라진다. codex-cli 0.154.0(2026-09-16)의 `codex debug models`에는 `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`가 선택 가능한 모델로 들어 있었고, `config.toml`에 `model`이 없으면 이 가운데 첫 항목이 실행된다. 설치 때 `agy models`와 Codex 카탈로그로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
 
-기본 예제는 PM=Claude 호스트 기본 모델, PL=`gpt-5.6-sol`, Senior=`gemini-3.8-flash-high`, Junior=`claude-opus-4-6-thinking`으로 배정한다. 여기에 더해 `gpt-5.6-luna`와 `gpt-5.6-terra` 프로필을 미리 정의해 두므로, 역할의 `profile`만 바꾸면 다른 Codex 모델로 옮길 수 있다. 역할이 실제로 참조하는 프로필에는 강도를 적지 않았다. 강도 표기 예시는 어떤 역할도 참조하지 않는 `codex-terra`에만 두었으므로, 이 예제로 실행하는 호출의 추론 깊이는 이전과 같다. 공유 풀 소진 이후 모든 역할의 동시 실행 슬롯은 1로 고정했다. 조직의 `assistants`에 허용된 역할은 저장된 GPT-OSS 프로필을 보조 도구로 호출할 수 있다. 기본 예제에서는 모든 역할이 허용되어 있으며, 호출한 역할이 결과를 검증하고 최종 판단을 책임진다.
+새 조직의 구조 예제는 [PM·Worker 조직](plugins/oh-my-teams/examples/organization.three-tier.json)이다. 이전 [네 역할 예제](plugins/oh-my-teams/examples/organization.json)는 진행 중인 kickoff의 역할 스냅샷과 이전 설정을 이해하기 위한 호환 자료이며, 새 결성의 기본값이 아니다. 모든 역할의 동시 실행 슬롯은 기본 1이며, 보조 도구는 `assistants`에 명시적으로 허용한 역할만 사용할 수 있다.
 
 Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
 
 ### 결성 질문과 기본값
 
-`form`은 네 역할(PM·PL·Senior·Junior)이 각각 어떤 모델을 쓸지만 묻고, 질문은 한 번으로 끝난다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 네 역할을 두고, 몇 개를 쓸지는 kickoff마다 PM이 실행 깊이로 정한다. 이 역할별 모델 질문은 기존 조직을 계속 결성할 수 있게 남겨 둔 호환 경로이며, 질문 자체를 없애는 결정은 적응형 팀 편성 kickoff의 다음 파동이 맡는다. 선택지는 미리 박아 둔 표가 아니라 묻기 직전에 실행한 `model-catalog` 조회 결과에서 만든다: 조회가 `"ok"`로 돌려준 실행기는 그 `models` 목록에서 역할의 성격에 맞는 몇 개를, 목록을 내지 못하는 실행기(예: `no-catalog-interface`인 Claude Code)는 통상적인 별칭에서 몇 개를 고르고, 그 밖의 모델은 자유 입력 `provider:model`로 받는다. Codex의 개별 모델 ID는 그 조회 자체가 설치된 CLI의 `codex debug models`를 실행해 얻은 것이므로 따로 확인하지 않고, 자유 입력 `codex:<id>`로도 고를 수 있다.
+`form`은 PM과 Worker가 사용할 모델만 한 번에 묻는다. 직급이나 실행 깊이는 묻지 않는다. PM은 목표 달성을 책임지고 구현·설계·독립 검토가 필요할 때 Worker를 배정한다. 선택지는 결성 직전에 실행한 `model-catalog` 조회 결과를 바탕으로 제시하며, 확인된 목록에 없는 모델은 자유 입력 `provider:model`로 받는다. 예전 네 모델을 전달하는 `org-draft` 호출은 기존 설정을 위한 호환 경로로 유지한다.
 
 묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번이 쓰는 provider 호출 수와 workflow attempt 하나에 배정되는 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓴다. 다만 Agy는 Gemini 모델에 기본 강도를 두지 않고 강도 없이 부르면 거부하므로, `model-catalog`가 돌려주는 Gemini id는 강도가 이미 포함되어 있어(예: `gemini-3.8-flash-medium`) 그 값을 그대로 쓰면 따로 정할 필요가 없다. 자유 입력으로 강도 없는 이름을 받았으면 보완한 강도를 결성 보고에 적는다. 보조 도구 호출은 허용하지 않는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
 
 ### 실행 깊이
 
-한 번의 kickoff가 쓰는 역할 수는 PM이 과제의 난이도를 보고 정한다. 깊이 1은 PM만, 2는 PM·Junior, 3은 여기에 Senior, 4는 PL까지 네 역할을 모두 쓴다. 역할은 구현, 독립 검토, 병렬 분할·통합의 순서로 더해진다. 이번 실행에서 쓰지 않는 역할 앞으로 온 일은 서열을 따라 위로 올라가 포함된 가장 가까운 역할이 맡는다. 역할은 작업을 배정받을 때만 모델을 호출하므로, 쓰지 않는 역할은 비용이 들지 않는다.
+새 kickoff의 깊이 1은 PM만, 깊이 2는 PM과 Worker를 사용한다. 깊이 2가 기본이며, 독립 검토가 필요하면 같은 역할의 다른 실행 ID와 워크트리에 배정한다. 이전 조직의 깊이 1~4와 PL·Senior·Junior 기록은 기존 kickoff의 실행 스냅샷에서만 유지한다.
 
 깊이는 사용자에게 묻지 않고 PM이 정해 사유와 함께 알리며, 사용자가 다른 깊이를 말하면 따른다. 처음 깊이는 workflow 요청의 `depth`에 기록되고, 실행 중에는 `workflow-depth` 명령으로 바꾼다. 올리기는 언제든 가능하다. 내리기는 빠지는 역할에 예약되었거나 실행 중인 작업이 없을 때만 런타임이 허용하며, 종료를 확인하지 못한 워커도 정산 전까지는 실행 중으로 본다. 대기 중인 작업은 원래 요청된 역할을 기준으로 다시 배정되고, 이미 실행을 마친 작업은 실행한 역할을 유지한다. 모든 변경은 사유·근거와 함께 `depthHistory`에 남는다.
 
@@ -177,7 +176,7 @@ Agy는 `gemini-3.8-flash-high`처럼 모델 ID 자체에 강도를 담는다. �
 
 `advisor-codex`와 `advisor-claude`는 이전에 저장된 조직의 `modelPolicy.preset`과 history에서 계속 읽히는 이름이지만, 고정 모델을 역할·자문자에 자동으로 배정하던 동작은 제거되었다. 이 이름으로 `preset` 명령을 다시 실행하면 "no longer assigns fixed models, fallbacks, or advisors"로 거부되며 `edit`와 `model-catalog`로 옮기는 경로를 안내받는다. 특정 실행기로 역할이나 자문자를 옮기려면 `model-catalog`로 지금 확인 가능한 모델을 조회하고, 쓸 프로필을 사용자와 확인한 뒤 `edit`로 저장한다.
 
-역할도 네 개를 모두 둘 필요가 없다. PM만 필수이고 나머지 세 역할은 생략할 수 있으며, 남긴 역할의 상위 역할은 반드시 조직이 선언한 역할이어야 한다. 생략한 역할이 맡던 일은 `pm > pl > senior > junior` 서열을 따라 위로 올라가 선언된 가장 가까운 역할이 이어받는다. PM과 Junior만 둔 조직에서는 Senior가 맡던 검토와 PL이 맡던 실패 처리를 PM이 수행한다. 검토 요구사항은 요구된 역할보다 같거나 상위인 역할이 수행하면 충족되며, 구현과 다른 실행 주체여야 한다는 독립성 조건은 그대로 적용된다. 역할 이름 자체는 바꿀 수 없다. 구조는 [축소 조직 예제](plugins/oh-my-teams/examples/organization.single-subscription.json)에서 확인한다.
+새 조직에서 PM은 필수이고 Worker는 생략할 수 있다. Worker가 없으면 PM이 직접 수행하지만, 구현과 같은 실행을 독립 검토로 기록할 수 없다. 이전 조직의 [축소 예제](plugins/oh-my-teams/examples/organization.single-subscription.json)는 기존 역할과 실행 스냅샷을 위한 호환 자료다.
 
 `opus-first`와 `balanced`도 같은 이름 호환 규칙을 따른다. 이 두 이름은 [6유형 실측](experiments/ROUTING_REPORT.md)에서 Agy 역할을 Opus로 시작하는 구성과 Senior=Opus·Junior=Sonnet으로 나눈 구성을 가리켰고, 그 실측에서 balanced(당시에는 Intern=GPT-OSS를 포함한 구성)가 6/6을 통과하며 Opus-first보다 토큰 9.7%, 모델 시간 16.0%를 줄여 잠정 권고가 됐다는 기록은 남아 있다. 다만 이 두 이름으로 `preset`을 다시 실행해도 고정 모델을 자동으로 배정하지 않으며, 같은 실측 결과로 옮기려면 `model-catalog`로 지금 시점의 모델을 확인한 뒤 `edit`로 직접 배정한다. 같은 공유 풀의 소진이 구조적으로 확인되면 그 풀의 다른 모델을 연쇄 호출하지 않는다. 구독의 실제 할당량 차감·가격은 토큰 수와 구분한다.
 
@@ -242,8 +241,8 @@ npm run lint
 - 실패는 requirement/scope/implementation/environment/contract/review/quota/process-unknown으로 분류해 담당자에게 돌리고, 재작업은 이전 attempt와 전체 예산을 보존한다. 해결 경험은 검증 전까지 lesson 후보일 뿐 skill을 자동 수정하지 않는다.
 - 이슈·알림 입력은 기본 kill switch, dedupe key, 제안 한도, 관찰 기간과 무진전 중단을 적용한다. 생성 범위는 진단·수정 제안이며 배포 권한은 포함하지 않는다.
 - `verify`는 HEAD·base·파일 내용·검사 argv·환경 지문·원본 로그가 모두 일치하는 성공만 재사용한다. 실패·소스 변경은 재검증한다. 외부 DB·도구 변화는 environment 지문에 반영해야 한다.
-- 최종 통합 후 `merge-check`, 실제 PR HEAD·최신 remote base 대조, 프로젝트 필수 CI와 필요한 Senior 검토를 거친다. 해시는 무결성 검사이며 로컬 보고 작성자의 서명 인증은 아니다.
-- 하네스는 push·PR·머지·배포를 자동 수행하지 않는다. PM/PL이 사용자 요청 범위에 따라 처리한다. 감독된 워커의 회수는 Orca accepted settlement와 실제 프로세스 종료 근거를 따른다.
+- 최종 통합 후 `merge-check`, 실제 PR HEAD·최신 remote base 대조, 프로젝트 필수 CI와 필요한 독립 Worker 검토를 거친다. 해시는 무결성 검사이며 로컬 보고 작성자의 서명 인증은 아니다.
+- 하네스는 push·PR·머지·배포를 자동 수행하지 않는다. PM은 팀 내부 통합을 책임지고, 주인 체크아웃의 병합과 종료는 이사가 처리한다. 감독된 워커의 회수는 Orca accepted settlement와 실제 프로세스 종료 근거를 따른다.
 
 테스트는 조직 저장·변경, 순환, 계정 연결, 편집 범위, 검증 캐시, 보고 누락, 승격·할당량·동시 실행을 확인한다. `experiments/`의 실험은 실제 Orca worktree와 구독을 사용하므로 명시적으로 실행한다.
 

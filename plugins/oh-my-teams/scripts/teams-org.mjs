@@ -119,7 +119,7 @@ import {
   shadowModelCheck,
   shadowStatusFilter,
 } from "./jev.mjs";
-import { draftOrganization } from "./org-draft.mjs";
+import { draftOrganization, draftThreeTierOrganization } from "./org-draft.mjs";
 import {
   bindKickoffRun,
   classifyKickoffEntry,
@@ -173,7 +173,8 @@ import {
 } from "./resources.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
-  org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-4]
+  org-draft --name NAME --models PM,WORKER --output FILE [--tiers 1-4 (legacy)]
+            (four model choices without --tiers retain the previous format)
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
   preset --org FILE --name opus-first|balanced|single-subscription|advisor-codex|advisor-claude --revision N
@@ -290,7 +291,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                    acknowledged here; the timeout defaults to the organization's
                    policy.supervision.progressCheckMs; pass the returned
                    deliveryId as --ack on the next wait)
-  work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role junior]
+  work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role worker]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
   assist --org FILE --task FILE --repo DIR --state DIR --role ROLE
@@ -2153,10 +2154,16 @@ function documentLocation(stateDir, docId) {
 // 추가로 붙이며, 그 조건은 assertPmRosterCondition(3.4.2절)이 판정한다.
 const DOCUMENT_AUTHOR_ROLES = {
   "planning/kickoff-brief-ref": ["director", "pm"],
-  "design/design-contract": ["senior", "pm"],
-  "implementation/workflow-task-ref": ["pm", "pl", "senior", "junior"],
-  "implementation/integration-ref": ["pm", "pl", "senior", "junior"],
-  "review/review-ref": ["senior"],
+  "design/design-contract": ["senior", "worker", "pm"],
+  "implementation/workflow-task-ref": [
+    "pm",
+    "pl",
+    "senior",
+    "junior",
+    "worker",
+  ],
+  "implementation/integration-ref": ["pm", "pl", "senior", "junior", "worker"],
+  "review/review-ref": ["senior", "worker"],
   "acceptance/acceptance-ref": ["pm"],
   "closure/closure-record": ["director"],
 };
@@ -2248,8 +2255,9 @@ function assertPmRosterCondition(stateDir, doc, orgFile) {
   assert(
     !roster.includes("pl") &&
       !roster.includes("senior") &&
-      !roster.includes("junior"),
-    "PM may not author design/design-contract while this run's role roster includes pl, senior, or junior (structured-omt-documents.md 3.4.2)",
+      !roster.includes("junior") &&
+      !roster.includes("worker"),
+    "PM may not author design/design-contract while this run's role roster includes pl, senior, junior, or worker (structured-omt-documents.md 3.4.2)",
   );
 }
 
@@ -2407,11 +2415,15 @@ async function writeDraft(args, execute) {
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
   assert(!fs.existsSync(output), "Draft output exists; choose a new path");
-  const organization = draftOrganization({
-    name: args.name,
-    tiers: args.tiers === undefined ? undefined : Number(args.tiers),
-    models: args.models.split(","),
-  });
+  const models = args.models.split(",");
+  const organization =
+    args.tiers === undefined && models.length === 2
+      ? draftThreeTierOrganization({ name: args.name, models })
+      : draftOrganization({
+          name: args.name,
+          tiers: args.tiers === undefined ? undefined : Number(args.tiers),
+          models,
+        });
   const projectDir = path.dirname(output);
   const defaults = await resolveHostDefaults({ project: projectDir });
   if (defaults.codex?.error) {
@@ -2892,7 +2904,7 @@ export async function executeCommand(args, execute) {
         readJSON(args.org),
         readJSON(args.task),
         {
-          role: args.role || "junior",
+          role: args.role,
           stateDir: path.resolve(args.state),
           workflowId: args["workflow-id"],
           attemptId: args["attempt-id"],
