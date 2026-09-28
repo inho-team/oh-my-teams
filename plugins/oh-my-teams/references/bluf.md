@@ -42,3 +42,35 @@ oh my teams의 모든 역할이 보고하거나 지시할 때 따르는 공통 �
 - 커밋 메시지, PR 제목, 로그 문자열처럼 프로젝트 관례가 정한 텍스트
 
 사용자에게 전달하는 최종 결과를 한국어로 쓰는 자세한 기준은 [`korean-result-reporting.md`](korean-result-reporting.md)가 이 순서를 사용자 보고에 맞게 풀어 쓴다.
+
+## Run 생성 후 orchestration 메시지의 정형 문서 계약
+
+Run이 생성된 뒤 배정자와 역할이 `orchestration send`/`reply`로 정형 문서를 다룰 때는 다음 계약을 따른다.
+
+**`send`의 본문 필드:**
+
+```json
+{
+  "action": "read|update|review|accept",
+  "docRef": "omt-doc:<kickoffHash>/<workflowId|none>/<stageSlug>/<docType>/<localId>@r<revision>",
+  "expectedRevision": <숫자>,
+  "section": "<필요하면 절 이름, 없으면 생략>"
+}
+```
+
+- `action`: 메시지가 요청하는 동작(읽기, 수정, 검토, 수용).
+- `docRef`: 정형 문서를 가리키는 식별자. `kickoffHash`(kickoff 인스턴스를 고유하게 식별)와 workflow가 있으면 `workflowId`, 없으면 `none`. `stageSlug`는 `planning|design|implementation|review|acceptance|delivery|closure` 일곱 값 가운데 하나. `docType`은 폴더별 문서 유형. `localId`는 그 문서 타입 내에서의 고유 식별자. `@r<revision>`은 지금 알고 있는 문서의 revision 번호.
+- `expectedRevision`: 발신자가 채워 넣는 값으로, 갱신을 요청하기 직전에 자신이 마지막으로 확인한 문서의 현재 revision 번호를 담는다. 3.7절의 `expectedRevision` 낙관적 동시성 검사(`core.mjs:1157-1160`)와 같은 의미이며, `action`이 문서를 실제로 갱신하는 동작(`update`·`review`·`accept`)일 때 그 갱신을 반영하는 시점의 실제 현재 revision이 이 값과 다르면 갱신 자체가 거부된다.
+- `section`: 메시지가 특정 절만 다룬다면 그 절의 이름. 전체 문서를 다루면 생략.
+
+**메시지 본문의 원칙:**
+
+메시지는 **절대로 문서의 전문을 담지 않는다.** 정형 문서의 참조는 `docRef`로 충분하며, 원본이 필요한 쪽은 이 식별자로 `docId`를 조립해 저장소에서 직접 조회한다. 메시지의 사본은 어떤 경우에도 정형 문서의 정본을 대체하지 않는다.
+
+**`reply`의 본문 순서와 내용:**
+
+답변도 두괄식을 그대로 따르되, 상세 부분에는 `docRef`가 가리키는 문서의 새 revision 번호와 변경 요약만 포함한다. 갱신된 문서의 전문이나 상세한 변경 내역은 붙이지 않는다.
+
+**독자의 검증 책임:**
+
+`send`를 받은 쪽은 먼저 받은 `docRef`의 revision이 자신이 소유한 kickoff·workflow의 최신 허용 revision과 같은지 확인한 뒤에만 그 메시지 내용을 신뢰해야 한다. revision이 다르면 메시지를 보낸 뒤에 같은 문서가 갱신되었다는 뜻이므로, 메시지 내용은 이미 낡았을 수 있다. 이 경우 정형 문서 저장소에서 최신 버전을 다시 조회한다.

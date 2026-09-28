@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assert,
+  canonicalRole,
   chart,
   displayModel,
   definedRoles,
@@ -97,6 +98,7 @@ import {
   reworkTask,
   setWorkflowDepth,
   increaseCallAllowance,
+  increaseWorkflowBudget,
   reopenTask,
   extendIntegrationChecks,
 } from "./workflow.mjs";
@@ -120,7 +122,9 @@ import {
 import { draftOrganization } from "./org-draft.mjs";
 import {
   bindKickoffRun,
+  classifyKickoffEntry,
   cleanupKickoffBranches,
+  kickoffHashFor,
   listKickoffs,
   ownerProject,
   reassignDirector,
@@ -129,6 +133,15 @@ import {
   releaseKickoff,
   verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
+import {
+  buildDocId,
+  buildDocRef,
+  documentState,
+  parseDocId,
+  resolveKickoffHash,
+  saveDocument,
+  stageFolderName,
+} from "./documents.mjs";
 import {
   readLaunches,
   recordLaunch,
@@ -285,17 +298,43 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
         (per-command timeout; default 300000, max 1800000; recorded in the
         evidence fingerprint so differing timeouts never share a cache entry)
   merge-check --evidence FILE --task TRUSTED_TASK --repo DIR --base REF
-              [--report FILE --state DIR]
+              [--report FILE --state DIR] [--org FILE] [--workflow-id ID]
   review-record --task FILE --report FILE --review FILE --repo DIR --state DIR
+                [--org FILE] [--workflow-id ID]
   gate-check --task FILE --report FILE --repo DIR --state DIR
+             [--org FILE] [--workflow-id ID]
   accept --task FILE --report FILE --decision FILE --repo DIR --state DIR
+         [--org FILE] [--workflow-id ID]
+         (--org resolves the state's kickoff entry to a current/legacy/
+         integrity-failure judgement per structured-omt-documents.md 3.7 item 5;
+         current forwards kickoffHash [and --workflow-id, if given] to the
+         document ownership checks in gates.mjs, legacy omits both, and
+         integrity-failure or an unresolvable entry refuses the command)
+  doc-resolve-kickoff --org FILE --worktree ID
+                      (resolveKickoffHash for the worktree's active kickoff)
+  doc-id --kickoff-hash HASH --stage STAGE --doc-type TYPE --local-id ID
+         [--workflow-id ID] [--revision N]
+         (builds a docId, and a docRef when --revision is given)
+  doc-show --state DIR --doc-id ID
+           (documentState plus the document's real filesystem location)
+  doc-save --state DIR --doc FILE [--expected-revision N] [--refs REF[,REF...]]
+           [--org FILE]
+           (--org is read only when doc.workflowId is unset, to resolve this
+           run's role roster for the PM design/design-contract roster
+           condition in structured-omt-documents.md 3.4.2; when workflowId is
+           set the workflow snapshot's state.roles, or its organization when
+           state.roles is absent, is used instead and --org is ignored)
   workflow-create --workflow FILE --org FILE --state DIR
   workflow-status --id ID --state DIR
   workflow-resume --id ID --state DIR --revision N [--observations FILE]
   workflow-attach --id ID --state DIR --revision N --execution FILE
   workflow-reserve --id ID --state DIR --revision N --execution FILE
   workflow-accept --id ID --state DIR --revision N [--repo DIR --report FILE]
-                  (repo and report only when the workflow requires integration)
+                  [--org FILE]
+                  (repo and report only when the workflow requires integration;
+                  --org applies the same current/legacy/integrity-failure
+                  judgement as accept, forwarding only kickoffHash since this
+                  case's own --id is already the workflowId gates.mjs receives)
   workflow-settle --id ID --state DIR --revision N --settlement FILE
   workflow-release --id ID --state DIR --revision N --release FILE
   workflow-retry --id ID --state DIR --revision N --retry FILE
@@ -309,6 +348,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                      (raises the callAllowance of a reserved or running attempt;
                      the increase must fit inside the workflow's unreserved
                      call budget)
+  workflow-budget --id ID --state DIR --revision N --change FILE
+                  (raises state.budget.maxAttempts with a recorded approval;
+                  the new limit must exceed the current maxAttempts and must
+                  not sit below attemptsUsed; maxCalls, attemptsUsed,
+                  callsUsed, policy and task state are unaffected)
   workflow-reopen --id ID --state DIR --revision N --reopen FILE
                   (manually reopens a submitted or reviewed task by opening a
                   new attempt; requires approver and reason, spends budget)
@@ -521,17 +565,45 @@ export const ALLOWED_OPTIONS = {
   assist: ["org", "task", "repo", "state", "role", "kind", "profile"],
   advise: ["org", "brief", "repo", "state", "role", "kind", "profile"],
   verify: ["task", "repo", "state", "timeout-ms"],
-  "merge-check": ["evidence", "task", "repo", "base", "report", "state"],
+  "merge-check": [
+    "evidence",
+    "task",
+    "repo",
+    "base",
+    "report",
+    "state",
+    "org",
+    "workflow-id",
+  ],
   aggregate: ["expected", "report"],
-  "review-record": ["task", "report", "review", "repo", "state"],
-  "gate-check": ["task", "report", "repo", "state"],
-  accept: ["task", "report", "decision", "repo", "state"],
+  "review-record": [
+    "task",
+    "report",
+    "review",
+    "repo",
+    "state",
+    "org",
+    "workflow-id",
+  ],
+  "gate-check": ["task", "report", "repo", "state", "org", "workflow-id"],
+  accept: ["task", "report", "decision", "repo", "state", "org", "workflow-id"],
+  "doc-resolve-kickoff": ["org", "worktree"],
+  "doc-id": [
+    "kickoff-hash",
+    "workflow-id",
+    "stage",
+    "doc-type",
+    "local-id",
+    "revision",
+  ],
+  "doc-show": ["state", "doc-id"],
+  "doc-save": ["state", "doc", "expected-revision", "refs", "org"],
   "workflow-create": ["workflow", "org", "state"],
   "workflow-status": ["id", "state"],
   "workflow-resume": ["id", "state", "revision", "observations"],
   "workflow-attach": ["id", "state", "revision", "execution"],
   "workflow-reserve": ["id", "state", "revision", "execution"],
-  "workflow-accept": ["id", "state", "revision", "repo", "report"],
+  "workflow-accept": ["id", "state", "revision", "repo", "report", "org"],
   "workflow-settle": ["id", "state", "revision", "settlement"],
   "workflow-release": ["id", "state", "revision", "release"],
   "workflow-retry": ["id", "state", "revision", "retry"],
@@ -539,6 +611,7 @@ export const ALLOWED_OPTIONS = {
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
   "workflow-allowance": ["id", "state", "revision", "allowance"],
+  "workflow-budget": ["id", "state", "revision", "change"],
   "workflow-reopen": ["id", "state", "revision", "reopen"],
   "workflow-integration-checks": ["id", "state", "revision", "checks"],
   "handoff-checkpoint": [
@@ -661,6 +734,10 @@ export const REQUIRED_OPTIONS = {
   "review-record": ["task", "report", "review", "repo", "state"],
   "gate-check": ["task", "report", "repo", "state"],
   accept: ["task", "report", "decision", "repo", "state"],
+  "doc-resolve-kickoff": ["org", "worktree"],
+  "doc-id": ["kickoff-hash", "stage", "doc-type", "local-id"],
+  "doc-show": ["state", "doc-id"],
+  "doc-save": ["state", "doc"],
   "workflow-create": ["workflow", "org", "state"],
   "workflow-status": ["id", "state"],
   "workflow-resume": ["id", "state", "revision"],
@@ -674,6 +751,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
   "workflow-allowance": ["id", "state", "revision", "allowance"],
+  "workflow-budget": ["id", "state", "revision", "change"],
   "workflow-reopen": ["id", "state", "revision", "reopen"],
   "workflow-integration-checks": ["id", "state", "revision", "checks"],
   "handoff-checkpoint": ["state", "workflow-id", "workflow-task", "file"],
@@ -1817,6 +1895,252 @@ async function attachExistingWorkspace(args) {
   });
 }
 
+/**
+ * Resolves the `kickoffHash` a gate-evaluating CLI case must forward, following
+ * the caller-obligation procedure for `--org` (structured-omt-documents.md 3.7
+ * item 5, 293-300행): find the kickoff entry that owns `stateDir`, classify it,
+ * and refuse the command outright on integrity-failure, an unreadable
+ * organization file, or a `stateDir` with no matching entry.
+ *
+ * @param {string|undefined} orgFile - `--org` value, or undefined when the caller omitted it.
+ * @param {string} stateDir - Resolved `--state` directory the command targets.
+ * @returns {string|undefined} `kickoffHash` to forward, or undefined to omit it (no `--org`, or a legacy entry).
+ * @throws {Error} When the entry is integrity-failure, the organization file cannot be read, or no entry owns `stateDir`.
+ */
+function resolveGateKickoffHash(orgFile, stateDir) {
+  if (orgFile === undefined) return undefined;
+  let org;
+  try {
+    org = readJSON(path.resolve(orgFile));
+  } catch (error) {
+    throw new Error(
+      `Cannot read organization file ${orgFile} to classify its kickoff entry: ${error.message}`,
+    );
+  }
+  const resolvedState = path.resolve(stateDir);
+  const entry = listKickoffs(orgFile).kickoffs.find(
+    (candidate) => path.resolve(candidate.pm.stateDir) === resolvedState,
+  );
+  assert(
+    entry !== undefined,
+    `No registered kickoff owns state directory ${stateDir}; refusing without a current/legacy judgement`,
+  );
+  const classification = classifyKickoffEntry(entry, org);
+  assert(
+    classification !== "integrity-failure",
+    `Kickoff entry for worktree ${entry.pm.worktreeId} has no registrationSeq though it postdates document system activation; refusing`,
+  );
+  return classification === "current" ? kickoffHashFor(entry) : undefined;
+}
+
+// Reconstructs a document's real filesystem location from its docId, following
+// the public path formula structured-omt-documents.md 3.5 fixes
+// (`<stateDir>/documents/<kickoffHash>/<workflowId|none>/<폴더 이름>/<docType>/<localId>`).
+// documents.mjs keeps its own path-joining helper private, so `doc-show`
+// rebuilds the same, stable formula from the exported `parseDocId`/`stageFolderName`.
+function documentLocation(stateDir, docId) {
+  const { kickoffHash, workflowId, stageSlug, docType, localId } =
+    parseDocId(docId);
+  return path.join(
+    stateDir,
+    "documents",
+    kickoffHash,
+    workflowId ?? "none",
+    stageFolderName(stageSlug),
+    docType,
+    localId,
+  );
+}
+
+// 3.4절이 정한 stage/docType별 작성 권한 표. 조합이 여기 없으면(예: delivery/delivery-ref는
+// 표의 어느 역할 행에도 배정되지 않았다) 역할을 제한하지 않는다. design/design-contract는
+// 3.4절이 "이번 실행에 하위 역할이 하나도 없을 때만 PM이 직접 쓸 수 있다"는 로스터 조건을
+// 추가로 붙이며, 그 조건은 assertPmRosterCondition(3.4.2절)이 판정한다.
+const DOCUMENT_AUTHOR_ROLES = {
+  "planning/kickoff-brief-ref": ["director", "pm"],
+  "design/design-contract": ["senior", "pm"],
+  "implementation/workflow-task-ref": ["pm", "pl", "senior", "junior"],
+  "implementation/integration-ref": ["pm", "pl", "senior", "junior"],
+  "review/review-ref": ["senior"],
+  "acceptance/acceptance-ref": ["pm"],
+  "closure/closure-record": ["director"],
+};
+
+// PL의 03. 구현 수정 권한은 "배정 관련 필드만"으로 문서 전체가 아니라 특정 필드에 한정되므로
+// (3.4절), own-document 검사(직전 revision을 쓴 실행만 다음 revision을 쓸 수 있다는 제약)
+// 자체는 PL을 여전히 예외로 둔다(PM이 첫 revision을, 다른 실행의 PL이 다음 revision을 쓰는
+// 정상 흐름을 막지 않기 위함, 3.4.3절). 문서 전체가 아니라 필드만 제한하는 쪽은 별도로
+// assertPlFieldScope가 판정한다. 05. 수용은 표가 "PM 전용"이라고만 적어 특정 PM 실행에
+// 고정하지 않으므로 예외로 둔다.
+function ownDocumentExempt(role, stageSlug) {
+  return role === "pl" || stageSlug === "acceptance";
+}
+
+// 3.4.3절이 PL의 "배정 관련 필드"로 고정한 필드 목록. 여기 없는 stage/docType 조합에는
+// assertPlFieldScope가 아무 제약도 걸지 않는다.
+const PL_MUTABLE_FIELDS = {
+  "implementation/workflow-task-ref": ["attemptRefs"],
+  "implementation/integration-ref": ["taskHashRef", "extensionHistory"],
+};
+
+// 저장 계층이 강제하거나(revision, basedOnRevision) 매 저장마다 호출자가 새로 채워 넣어
+// 직전 값과 자연히 달라지는 입력값(createdAt, author)이라 필드 비교에서 항상 제외한다
+// (3.4.3절 세 번째 문단).
+const PL_FIELD_SCOPE_ALWAYS_EXCLUDED = [
+  "revision",
+  "basedOnRevision",
+  "createdAt",
+  "author",
+];
+
+function withoutFields(source, fields) {
+  const copy = { ...source };
+  for (const field of fields) delete copy[field];
+  return copy;
+}
+
+// PL이 쓰는 다음 revision에서 PL_MUTABLE_FIELDS가 허용한 필드(와 저장 계층 관리 필드)를
+// 뺀 나머지가 직전 revision과 완전히 같은지 JSON.stringify 동등 비교로 판정한다(3.4.3절).
+function assertPlFieldScope(priorDoc, doc, stageDocType) {
+  const mutableFields = PL_MUTABLE_FIELDS[stageDocType];
+  if (mutableFields === undefined) return;
+  const excluded = [...PL_FIELD_SCOPE_ALWAYS_EXCLUDED, ...mutableFields];
+  assert(
+    JSON.stringify(withoutFields(priorDoc, excluded)) ===
+      JSON.stringify(withoutFields(doc, excluded)),
+    `PL may only change ${mutableFields.join(" and ")} in the next revision of ${stageDocType} (structured-omt-documents.md 3.4.3)`,
+  );
+}
+
+// 3.4.2절이 정한 이번 실행의 역할 목록 판정: doc.workflowId가 있으면 그 워크플로 스냅샷의
+// state.roles(없으면 스냅샷의 organization으로 definedRoles), 없으면 orgFile이 가리키는
+// 조직 파일로 definedRoles를 구한다. 어느 쪽도 읽지 못하면(orgFile 부재·읽기 실패·워크플로
+// 없음) 저장을 거부하는 것이 이 함수를 부르는 쪽의 몫이므로 여기서는 오류를 그대로 던진다.
+function runRoleRoster(stateDir, workflowId, orgFile) {
+  if (workflowId) {
+    let snapshot;
+    try {
+      snapshot = readWorkflow(stateDir, workflowId);
+    } catch (error) {
+      throw new Error(
+        `Cannot read workflow ${workflowId} to resolve this run's role roster (structured-omt-documents.md 3.4.2): ${error.message}`,
+      );
+    }
+    return snapshot.state.roles ?? definedRoles(snapshot.organization);
+  }
+  assert(
+    orgFile !== undefined,
+    "Cannot resolve this run's role roster: doc.workflowId is not set and --org was not given (structured-omt-documents.md 3.4.2)",
+  );
+  let org;
+  try {
+    org = readJSON(path.resolve(orgFile));
+  } catch (error) {
+    throw new Error(
+      `Cannot read organization file ${orgFile} to resolve this run's role roster (structured-omt-documents.md 3.4.2): ${error.message}`,
+    );
+  }
+  return definedRoles(org);
+}
+
+// design/design-contract를 PM이 직접 쓰려면 이번 실행의 역할 목록에 pl·senior·junior가
+// 하나도 없어야 한다(3.4절 PM 행, 3.4.2절). 역할 목록을 얻지 못하면(runRoleRoster가 던짐)
+// 그 오류가 그대로 저장을 거부한다.
+function assertPmRosterCondition(stateDir, doc, orgFile) {
+  const roster = runRoleRoster(stateDir, doc.workflowId, orgFile).map(
+    canonicalRole,
+  );
+  assert(
+    !roster.includes("pl") &&
+      !roster.includes("senior") &&
+      !roster.includes("junior"),
+    "PM may not author design/design-contract while this run's role roster includes pl, senior, or junior (structured-omt-documents.md 3.4.2)",
+  );
+}
+
+/**
+ * Enforces the document-layer write authority and independence rules
+ * structured-omt-documents.md 3.4 assigns, using the envelope about to be
+ * saved, files already on disk under `stateDir`, and (only for the PM
+ * design/design-contract roster condition) the workflow snapshot or `--org`
+ * organization file named by `orgFile`.
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {object} doc - Envelope about to be saved (already bound for `saveDocument`).
+ * @param {string} [orgFile] - `--org` path; read only when `doc.workflowId`
+ *   is unset and the author is a PM writing design/design-contract.
+ * @throws {Error} When the author's role may not write this stage/docType, the
+ *   PM roster condition rejects a design/design-contract save, a different
+ *   execution than the document's own author is revising it, a PL's next
+ *   revision changes a field outside 3.4.3's allowed list, or a review-ref
+ *   names an implementation execution that matches its own author.
+ */
+function assertDocumentAuthority(stateDir, doc, orgFile) {
+  const { docType } = parseDocId(doc.docId);
+  const stageDocType = `${doc.stage}/${docType}`;
+  const allowedRoles = DOCUMENT_AUTHOR_ROLES[stageDocType];
+  if (allowedRoles !== undefined) {
+    assert(
+      allowedRoles.includes(doc.author.role),
+      `Role ${doc.author.role} may not author ${stageDocType} documents (structured-omt-documents.md 3.4)`,
+    );
+  }
+
+  if (doc.author.role === "pm" && stageDocType === "design/design-contract") {
+    assertPmRosterCondition(stateDir, doc, orgFile);
+  }
+
+  const current = documentState(stateDir, doc.docId);
+  if (current.exists) {
+    const priorDoc = readJSON(
+      path.join(
+        documentLocation(stateDir, doc.docId),
+        "revisions",
+        `${current.revision}.json`,
+      ),
+    );
+    if (!ownDocumentExempt(doc.author.role, doc.stage)) {
+      assert(
+        priorDoc.author?.executionId === doc.author.executionId,
+        `Only the execution that authored ${doc.docId} may write its next revision (structured-omt-documents.md 3.4)`,
+      );
+    }
+    if (doc.author.role === "pl") {
+      assertPlFieldScope(priorDoc, doc, stageDocType);
+    }
+  }
+
+  if (doc.stage === "review" && typeof doc.reviewFileRef === "string") {
+    const resolvedState = path.resolve(stateDir);
+    const reviewPath = path.resolve(stateDir, doc.reviewFileRef);
+    const insideState =
+      reviewPath === resolvedState ||
+      reviewPath.startsWith(resolvedState + path.sep);
+    if (insideState && fs.existsSync(reviewPath)) {
+      const review = readJSON(reviewPath);
+      assert(
+        review.implementationExecutionId !== doc.author.executionId,
+        "Independent review must use a different execution identity (structured-omt-documents.md 3.4)",
+      );
+    }
+  }
+}
+
+// Builds the { kickoffHash, workflowId } options object review-record,
+// gate-check, accept and merge-check forward to gates.mjs, per the
+// caller-obligation procedure resolveGateKickoffHash implements. workflowId
+// is forwarded only when the caller passed --workflow-id; it is not itself
+// part of the current/legacy/integrity-failure judgement (293-297행).
+function gateHookOptions(args, stateDir) {
+  const kickoffHash = resolveGateKickoffHash(args.org, stateDir);
+  return {
+    ...(kickoffHash === undefined ? {} : { kickoffHash }),
+    ...(args["workflow-id"] === undefined
+      ? {}
+      : { workflowId: args["workflow-id"] }),
+  };
+}
+
 async function mergeCheck(args) {
   const repo = path.resolve(args.repo);
   // The owner branch is merged only by deliver; a gate passing there would
@@ -1829,11 +2153,13 @@ async function mergeCheck(args) {
       args.report && args.state,
       "task v2 merge-check requires --report and --state",
     );
+    const stateDir = path.resolve(args.state);
     const gates = await gateCheck(
       repo,
       task,
       readJSON(args.report),
-      path.resolve(args.state),
+      stateDir,
+      gateHookOptions(args, stateDir),
     );
     assert(gates.state === "accepted", "Task outcome has not been accepted");
   }
@@ -2038,6 +2364,7 @@ export async function executeCommand(args, execute) {
         remoteName: args.remote ?? "origin",
         callerCwd: process.cwd(),
         force: args.force ?? false,
+        orgFile: args.org,
       });
     }
     case "kickoff-check-close-ready":
@@ -2421,29 +2748,76 @@ export async function executeCommand(args, execute) {
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
     }
-    case "review-record":
+    case "review-record": {
+      const stateDir = path.resolve(args.state);
       return recordReview(
         path.resolve(args.repo),
         validateTask(readJSON(args.task)),
         readJSON(args.report),
         readJSON(args.review),
-        path.resolve(args.state),
+        stateDir,
+        gateHookOptions(args, stateDir),
       );
-    case "gate-check":
+    }
+    case "gate-check": {
+      const stateDir = path.resolve(args.state);
       return gateCheck(
         path.resolve(args.repo),
         validateTask(readJSON(args.task)),
         readJSON(args.report),
-        path.resolve(args.state),
+        stateDir,
+        gateHookOptions(args, stateDir),
       );
-    case "accept":
+    }
+    case "accept": {
+      const stateDir = path.resolve(args.state);
       return acceptOutcome(
         path.resolve(args.repo),
         validateTask(readJSON(args.task)),
         readJSON(args.report),
         readJSON(args.decision),
-        path.resolve(args.state),
+        stateDir,
+        gateHookOptions(args, stateDir),
       );
+    }
+    case "doc-resolve-kickoff":
+      return { kickoffHash: resolveKickoffHash(args.org, args.worktree) };
+    case "doc-id": {
+      const docId = buildDocId({
+        kickoffHash: args["kickoff-hash"],
+        workflowId: args["workflow-id"] ?? null,
+        stageSlug: args.stage,
+        docType: args["doc-type"],
+        localId: args["local-id"],
+      });
+      return args.revision === undefined
+        ? { docId }
+        : { docId, docRef: buildDocRef(docId, Number(args.revision)) };
+    }
+    case "doc-show": {
+      const stateDir = path.resolve(args.state);
+      return {
+        docId: args["doc-id"],
+        path: documentLocation(stateDir, args["doc-id"]),
+        ...documentState(stateDir, args["doc-id"]),
+      };
+    }
+    case "doc-save": {
+      const stateDir = path.resolve(args.state);
+      const doc = readJSON(args.doc);
+      assertDocumentAuthority(stateDir, doc, args.org);
+      const options = {};
+      if (args["expected-revision"] !== undefined) {
+        options.expectedRevision = Number(args["expected-revision"]);
+      }
+      if (args.refs !== undefined) {
+        options.refs = args.refs
+          .split(",")
+          .map((ref) => ref.trim())
+          .filter(Boolean);
+      }
+      return saveDocument(stateDir, doc, options);
+    }
     case "workflow-create":
       return createWorkflow(
         path.resolve(args.state),
@@ -2453,14 +2827,18 @@ export async function executeCommand(args, execute) {
       );
     case "workflow-status":
       return readWorkflow(path.resolve(args.state), args.id).state;
-    case "workflow-accept":
+    case "workflow-accept": {
+      const stateDir = path.resolve(args.state);
+      const kickoffHash = resolveGateKickoffHash(args.org, stateDir);
       return acceptWorkflowIntegration(
-        path.resolve(args.state),
+        stateDir,
         args.id,
         Number(args.revision),
         args.repo && path.resolve(args.repo),
         args.report && readJSON(args.report),
+        kickoffHash === undefined ? {} : { kickoffHash },
       );
+    }
     case "workflow-resume":
       return resumeWorkflow(
         path.resolve(args.state),
@@ -2540,6 +2918,13 @@ export async function executeCommand(args, execute) {
         args.id,
         Number(args.revision),
         readJSON(args.allowance),
+      );
+    case "workflow-budget":
+      return increaseWorkflowBudget(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.change),
       );
     case "workflow-reopen":
       return reopenTask(
