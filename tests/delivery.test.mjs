@@ -17,6 +17,11 @@ import {
   deliverKickoff,
   kickoffOwner,
 } from "../plugins/oh-my-teams/scripts/delivery.mjs";
+import {
+  deliveryRefDocId,
+  resolveKickoffHash,
+  saveDocument,
+} from "../plugins/oh-my-teams/scripts/documents.mjs";
 import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const exampleOrg = path.resolve(
@@ -150,6 +155,26 @@ test("deliver merges the verified head into the owner branch once", async (t) =>
     await git(fixture.project, "rev-parse", "HEAD"),
     delivered.mergeCommit,
   );
+
+  // Save the delivery-ref document before releasing
+  const kickoffHash = resolveKickoffHash(fixture.org, fixture.worktreeId);
+  const docId = deliveryRefDocId(kickoffHash, delivered.mergeCommit);
+  const entry = listKickoffs(fixture.org).kickoffs[0];
+  saveDocument(entry.pm.stateDir, {
+    schemaVersion: 1,
+    docId,
+    stage: "delivery",
+    kickoffId: kickoffHash,
+    workflowId: null,
+    revision: 1,
+    state: "resolved",
+    author: { role: "pm", executionId: "exec-1" },
+    createdAt: new Date().toISOString(),
+    basedOnRevision: null,
+    reason: "delivery recorded",
+    deliveredCommit: delivered.mergeCommit,
+  });
+
   assert.equal(
     releaseKickoff(fixture.org, {
       worktreeId: fixture.worktreeId,
