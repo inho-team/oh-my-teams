@@ -99,6 +99,7 @@ import {
   reworkTask,
   setWorkflowDepth,
   increaseCallAllowance,
+  increaseWorkflowBudget,
   reopenTask,
   extendIntegrationChecks,
 } from "./workflow.mjs";
@@ -340,6 +341,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                      (raises the callAllowance of a reserved or running attempt;
                      the increase must fit inside the workflow's unreserved
                      call budget)
+  workflow-budget --id ID --state DIR --revision N --change FILE
+                  (raises state.budget.maxAttempts with a recorded approval;
+                  the new limit must exceed the current maxAttempts and must
+                  not sit below attemptsUsed; maxCalls, attemptsUsed,
+                  callsUsed, policy and task state are unaffected)
   workflow-reopen --id ID --state DIR --revision N --reopen FILE
                   (manually reopens a submitted or reviewed task by opening a
                   new attempt; requires approver and reason, spends budget)
@@ -589,6 +595,7 @@ export const ALLOWED_OPTIONS = {
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
   "workflow-allowance": ["id", "state", "revision", "allowance"],
+  "workflow-budget": ["id", "state", "revision", "change"],
   "workflow-reopen": ["id", "state", "revision", "reopen"],
   "workflow-integration-checks": ["id", "state", "revision", "checks"],
   "handoff-checkpoint": [
@@ -724,6 +731,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-rework": ["id", "state", "revision", "rework"],
   "workflow-depth": ["id", "state", "revision", "change"],
   "workflow-allowance": ["id", "state", "revision", "allowance"],
+  "workflow-budget": ["id", "state", "revision", "change"],
   "workflow-reopen": ["id", "state", "revision", "reopen"],
   "workflow-integration-checks": ["id", "state", "revision", "checks"],
   "handoff-checkpoint": ["state", "workflow-id", "workflow-task", "file"],
@@ -2432,6 +2440,13 @@ export async function executeCommand(args, execute) {
         args.id,
         Number(args.revision),
         readJSON(args.allowance),
+      );
+    case "workflow-budget":
+      return increaseWorkflowBudget(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.change),
       );
     case "workflow-reopen":
       return reopenTask(

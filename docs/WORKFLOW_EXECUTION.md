@@ -32,6 +32,36 @@ worker를 곧바로 만들지 않고 기존 launch를 조회한다. 외부 명�
 호출보다 작은 값을 정산하면 거부한다. 다른 worker로 동일 attempt를 재실행할
 수 없으며, 종료 사실과 재작업 근거를 기록한 새 attempt를 사용한다.
 
+## 시도 한도(maxAttempts) 증가
+
+`workflow-budget --id ID --state DIR --revision N --change FILE`은
+`state.budget.maxAttempts`를 승인 근거와 함께 올리는 append-only 명령이다.
+시도 한도가 소진되어 더 이상 `workflow-reserve`를 받아들이지 않는 workflow를,
+`state.json`을 직접 고치지 않고 런타임을 통해 다시 예약 가능하게 만드는 용도다.
+
+입력 파일:
+
+```json
+{
+  "schemaVersion": 1,
+  "eventId": "budget-omt-docs-w2-impl-1",
+  "maxAttempts": 12,
+  "approvedBy": "director",
+  "approvalRef": "decision-2026-09-27",
+  "reason": "이사 승인: 11 -> 12로 시도 한도 상향"
+}
+```
+
+`maxAttempts`는 양의 정수여야 하며, 현재 `state.budget.maxAttempts`보다
+엄격히 커야 하고 `state.budget.attemptsUsed`보다 작으면 거부된다.
+`approvedBy`·`approvalRef`·`reason`은 모두 비어 있지 않은 문자열이어야
+한다. 이 명령은 `maxAttempts`만 바꾼다. `maxCalls`·`attemptsUsed`·
+`callsUsed`·policy·모든 task 상태는 그대로 유지되며, 변경 내역은
+`state.budget.history`에 `{from, to, approvedBy, approvalRef, reason,
+recordedAt}`으로 덧붙고 `attempt-budget-increased` 이벤트가 함께 기록된다.
+같은 `eventId`를 다시 보내면 상태를 바꾸지 않고 중복으로 반환하며,
+`expectedRevision`이 현재 revision과 다르면 거부한다.
+
 ## 최종 통합 수용
 
 다중 task workflow는 생성 요청에 `integrationTask`로 최종 통합 task v2
