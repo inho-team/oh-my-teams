@@ -42,6 +42,29 @@ function workspaceReceipt() {
   });
 }
 
+function releasedExternalTerminal(dispatchId) {
+  return {
+    result: {
+      dispatchId,
+      state: "retained",
+      reason: "external_terminal",
+      processAction: "none",
+    },
+  };
+}
+
+function closedTerminal(terminal) {
+  return {
+    result: {
+      close: {
+        handle: terminal,
+        tabId: `tab-${terminal}`,
+        ptyKilled: true,
+      },
+    },
+  };
+}
+
 test("a new worktree is reclaimed only when role-session absence is proven", async () => {
   const calls = [];
   const execute = async (argv) => {
@@ -235,8 +258,8 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
         },
       ],
       active: async () => ({ status: "clear" }),
-      release: async () => ({ released: true }),
-      close: async () => ({ closed: true, ptyKilled: true }),
+      release: async (dispatchId) => releasedExternalTerminal(dispatchId),
+      close: async (_orca, argv) => closedTerminal(argv.at(-1)),
       list: (() => {
         let calls = 0;
         return async () => ({
@@ -321,8 +344,8 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
         },
       ],
       active: async () => ({ status: "clear" }),
-      release: async () => ({ released: true }),
-      close: async () => ({ closed: true, ptyKilled: true }),
+      release: async (dispatchId) => releasedExternalTerminal(dispatchId),
+      close: async (_orca, argv) => closedTerminal(argv.at(-1)),
       list: async () => ({
         result: {
           terminals:
@@ -394,11 +417,11 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
       },
       release: async (id) => {
         calls.push(`release:${id}`);
-        return { released: true };
+        return releasedExternalTerminal(id);
       },
       close: async (_orca, argv) => {
         calls.push(`close:${argv.at(-1)}`);
-        return { result: { closed: true, ptyKilled: true } };
+        return closedTerminal(argv.at(-1));
       },
       list: (() => {
         let calls = 0;
@@ -475,11 +498,69 @@ test("an active or unproven child is preserved instead of reclaimed", async () =
   assert.equal(reclaimed, false);
 });
 
-test("a failed release, failed terminal close, or extra terminal preserves the child", async () => {
+test("ambiguous Orca release, close, or terminal-list receipts preserve the child", async () => {
   for (const [label, ports] of [
-    ["release", { release: async () => ({ released: false }) }],
-    ["close", { close: async () => ({ closed: true, ptyKilled: false }) }],
+    [
+      "release",
+      {
+        release: async () => ({
+          result: {
+            dispatchId: "owned-dispatch",
+            state: "retained",
+            reason: "external_terminal",
+            processAction: "stopped",
+          },
+        }),
+      },
+    ],
+    [
+      "wrong-dispatch",
+      {
+        release: async () => releasedExternalTerminal("another-dispatch"),
+      },
+    ],
+    [
+      "ambiguous-release",
+      {
+        release: async () => ({
+          result: {
+            dispatchId: "owned-dispatch",
+            state: "retained",
+            reason: "external_terminal",
+          },
+        }),
+      },
+    ],
+    [
+      "close",
+      {
+        close: async () => ({
+          result: {
+            close: {
+              handle: "owned-terminal",
+              tabId: "tab-owned-terminal",
+              ptyKilled: false,
+            },
+          },
+        }),
+      },
+    ],
+    [
+      "wrong-terminal",
+      {
+        close: async () => closedTerminal("another-terminal"),
+      },
+    ],
+    [
+      "missing-tab",
+      {
+        close: async () => ({
+          result: { close: { handle: "owned-terminal", ptyKilled: true } },
+        }),
+      },
+    ],
     ["extra-terminal", { extraTerminal: true }],
+    ["remaining-terminal", { remainingTerminal: true }],
   ]) {
     let reclaimed = false;
     let listed = 0;
@@ -523,9 +604,12 @@ test("a failed release, failed terminal close, or extra terminal preserves the c
                 return "child-a";
               return "merge-a";
             },
-            release: ports.release ?? (async () => ({ released: true })),
+            release:
+              ports.release ??
+              (async (dispatchId) => releasedExternalTerminal(dispatchId)),
             close:
-              ports.close ?? (async () => ({ closed: true, ptyKilled: true })),
+              ports.close ??
+              (async (_orca, argv) => closedTerminal(argv.at(-1))),
             list: async () => ({
               result: {
                 terminals:
@@ -536,7 +620,9 @@ test("a failed release, failed terminal close, or extra terminal preserves the c
                           ? [{ handle: "other-shell" }]
                           : []),
                       ]
-                    : [],
+                    : ports.remainingTerminal
+                      ? [{ handle: "owned-terminal" }]
+                      : [],
               },
             }),
             reclaim: async () => {
@@ -544,7 +630,7 @@ test("a failed release, failed terminal close, or extra terminal preserves the c
             },
           },
         ),
-      /preserve|termination|Another or unowned/,
+      /preserve|termination|Another or unowned|connected terminal remains/,
       label,
     );
     assert.equal(reclaimed, false, label);
@@ -597,8 +683,8 @@ test("an accepted promotion can reclaim its retired Junior worktree", async () =
         if (argv[0] === "rev-parse" && argv[1] === "HEAD") return "junior-a";
         return "merge-a";
       },
-      release: async () => ({ released: true }),
-      close: async () => ({ closed: true, ptyKilled: true }),
+      release: async (dispatchId) => releasedExternalTerminal(dispatchId),
+      close: async (_orca, argv) => closedTerminal(argv.at(-1)),
       list: async () => ({
         result: {
           terminals: listed++ === 0 ? [{ handle: "junior-terminal" }] : [],

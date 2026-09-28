@@ -1029,28 +1029,34 @@ function receiptBody(receipt) {
 }
 
 function assertReleasedReceipt(receipt, dispatchId) {
-  const body = receiptBody(receipt);
-  const release = body.release ?? body;
-  const evidence = JSON.stringify(body);
+  const release = receiptBody(receipt);
+  const evidence = JSON.stringify(release);
   assert(
-    release.released === true &&
+    release.dispatchId === dispatchId &&
+      release.state === "retained" &&
+      release.reason === "external_terminal" &&
+      release.processAction === "none" &&
       !evidence.includes("terminal_stop_unverifiable") &&
       !evidence.includes("terminalStopUnverifiable"),
-    `Dispatch ${dispatchId} was not conclusively released; preserve its worktree`,
+    `Dispatch ${dispatchId} was not conclusively released as an external terminal; preserve its worktree`,
   );
 }
 
 function assertClosedReceipt(receipt, terminal) {
   const body = receiptBody(receipt);
-  const close = body.close ?? body;
+  const close = body.close;
   const evidence = JSON.stringify(body);
+  const hasTabId =
+    (typeof close?.tabId === "string" && close.tabId.length > 0) ||
+    Number.isInteger(close?.tabId);
   assert(
-    close.closed === true &&
-      close.ptyKilled !== false &&
+    close?.handle === terminal &&
+      hasTabId &&
+      close.ptyKilled === true &&
       !/"ptyKilled"\s*:\s*false/.test(evidence) &&
       !evidence.includes("terminal_stop_unverifiable") &&
       !evidence.includes("terminalStopUnverifiable"),
-    `Terminal ${terminal} did not prove termination; preserve its worktree`,
+    `Terminal ${terminal} did not prove its own PTY termination; preserve its worktree`,
   );
 }
 
@@ -1123,7 +1129,8 @@ async function proveAndCloseOwnedTerminals({
       .filter((handle) => typeof handle === "string"),
   );
   assert(
-    actual.size === expected.size &&
+    before.length === actual.size &&
+      actual.size === expected.size &&
       [...actual].every((handle) => expected.has(handle)),
     "Another or unowned terminal is connected to this worktree; preserve it without closing that session",
   );
