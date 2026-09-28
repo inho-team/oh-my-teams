@@ -198,9 +198,13 @@ export async function computeBinding(
  *
  * It does not close environment forgery: a process sharing this OS user
  * account can still start a child with `ORCA_TERMINAL_HANDLE` set to the
- * auditor's handle and pass this check. Binding the handle to the process
- * lineage that actually launched it is what B.6's design is meant to add;
- * until it lands, this remains an open gap.
+ * auditor's handle and pass this check. A lineage-bind design that would tie
+ * the handle to the process that actually launched it was drafted and then
+ * rejected (B.6, option A): the caller-controlled environment and process
+ * ancestry it would have relied on cannot itself serve as trusted evidence.
+ * Closing this gap for real needs OS-attested launch evidence from Orca
+ * (e.g. `ownerPid`/`ownerStartedAt`), which is left as a follow-up requiring
+ * Orca-side work; see docs/plan/requirements-ledger-and-audit.md (B.6).
  *
  * This function takes no environment-override argument, which removes only
  * the path where a public parameter could carry a substitute environment.
@@ -308,9 +312,12 @@ export function isPmBoundToRun(bound, callerHandle, runId) {
  * environment, so a caller sharing this OS user account can still set it to a
  * value of their choosing and pass this check, and the trusted script's own
  * integrity (its app bundle is owned by the same OS user, no code-signature
- * check is performed) is not verified. Binding the handle to the process
- * lineage that actually launched it is what B.6's design is meant to add
- * next; until it lands this remains an open gap.
+ * check is performed) is not verified. A lineage-bind design meant to close
+ * this was drafted and then rejected (B.6, option A) because the
+ * caller-controlled environment and process ancestry it relied on cannot
+ * itself serve as trusted evidence; closing this for real needs OS-attested
+ * launch evidence from Orca, left as a follow-up — see
+ * docs/plan/requirements-ledger-and-audit.md (B.6).
  *
  * This function takes no environment-override argument either, for the same
  * reason `verifiedAuditor` does not: this only removes the path where a
