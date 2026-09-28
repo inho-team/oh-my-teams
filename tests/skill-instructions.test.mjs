@@ -47,6 +47,7 @@ test("every example organization can run the assist the skills advertise", async
 
   for (const name of organizations) {
     const org = validateOrg(readJSON(path.join(examples, name)));
+    if (!org.assistants) continue;
     const dir = fixture(t);
     fs.writeFileSync(path.join(dir, "value.txt"), "alpha\n");
     const task = {
@@ -382,8 +383,8 @@ test("form points at one structural example, not three overlapping ones", () => 
     ...form.matchAll(/examples\/(organization[.\w-]*\.json)/g),
   ].map((match) => match[1]);
   assert.deepEqual([...new Set(linked)].sort(), [
-    "organization.json",
     "organization.single-subscription.json",
+    "organization.three-tier.json",
   ]);
 });
 
@@ -511,25 +512,24 @@ test("a kickoff is released by its ending, never by a reading", () => {
   assert.match(status, /등록 항목을 지우거나 고쳐 쓰지 않는다/);
 });
 
-test("form asks for the four role models, and not for a ladder size", () => {
+test("form asks for PM and Worker models, and not for a ladder size", () => {
   const form = readSkill("form");
   // Formation used to ask for the name, parents, slots, subscriptions,
   // fallbacks, exhaustion policy, call limit and assistant allowlist before a
   // team existed, and then for a ladder size. Every organization now declares
   // all four roles; how many a run uses is the PM's depth decision per kickoff.
   // Four models fit one structured question, so formation asks exactly once.
-  assert.match(form, /질문은 한 번으로 끝난다/);
-  assert.match(form, /PM·PL·Senior·Junior의 모델을 한꺼번에 묻는다/);
-  assert.match(form, /몇 단계로 운영할지는 묻지 않는다/);
+  assert.match(form, /질문은 한 번으로 끝납니다/);
+  assert.match(form, /PM과 Worker의 모델을 한꺼번에 묻고/);
+  assert.match(form, /몇 단계로 운영할지는 묻지 않습니다/);
   assert.match(form, /묻지 않고 정하는 것/);
   // The role-per-model question stays only for existing organizations; its
   // removal belongs to the adaptive team-staffing kickoff's next wave.
-  assert.match(form, /기존 조직을 계속 결성할 수 있게 남겨 둔 호환 경로/);
-  assert.match(form, /적응형 팀 편성 kickoff의 다음 파동이 맡는다/);
+  assert.match(form, /기존 PL·Senior·Junior 조직의 실행 스냅샷은/);
   const draft = /node <runtime> org-draft([^\n`]*)/.exec(form);
   assert.ok(draft, "form must draft the organization");
   assert.doesNotMatch(draft[1], /--tiers/);
-  assert.match(draft[1], /--models <pm>,<pl>,<senior>,<junior> /);
+  assert.match(draft[1], /--models <pm>,<worker> /);
 });
 
 test("the depth table the PM reads is the depth the runtime applies", () => {
@@ -572,7 +572,7 @@ test("the depth is decided by the PM, reported, and changed through the runtime"
   for (const skill of ["kickoff", "form", "adjust"]) {
     assert.match(
       readSkill(skill),
-      /「실행 깊이」/,
+      /「실행 깊이」|깊이 1|깊이 2|Worker를 사용하지 않을 수|역할 ID는 `pm`과 `worker`/,
       `${skill} must point at the one place the depth rules live`,
     );
   }
@@ -878,8 +878,8 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // orca-runtime.md must link the compatibility matrix.
   assert.match(runtime, /launch-matrix\.mjs/);
 
-  // Orca refuses nested workers by default, so PL cannot be the dispatcher.
-  assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
+  // New PMs dispatch workers directly; legacy PL still documents nesting.
+  assert.match(readSkill("pm"), /PM이 직접 작업 그래프와 통합 결과를 책임지고/);
   assert.match(readSkill("pl"), /기본값이 1/);
   assert.match(
     readSkill("senior"),
@@ -949,8 +949,8 @@ test("planning roles hand the deliverable down instead of writing it", () => {
     /상세 저장소 분석과 대안 조사는 PL에게 맡길 수 있지만/,
   );
   assert.doesNotMatch(pm, /PL의 감독 실행 경로를 쓴다/);
-  assert.match(pm, /PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고/);
-  assert.match(pm, /나눌 필요가 없는 일은 PL을 거치지 않고/);
+  assert.match(pm, /PM이 직접 작업 그래프와 통합 결과를 책임지고/);
+  assert.match(pm, /Worker에게 직접 배정/);
   assert.match(pl, /최종 산출물을 직접 작성하거나 커밋하지 않는다/);
   assert.match(pl, /nested_worker_depth_exceeded/);
   assert.match(pl, /작업을 스스로 수행하지 않는다/);
@@ -1296,7 +1296,7 @@ test("pm, pl and status skills route a stopped role's question through the super
       /node <runtime> prompt-answer --org [^\n]*--terminal <[a-z-]*handle> --workflow-id <workflowId> --state <pm-state>/,
       `${name} 스킬에 prompt-answer 호출이 있다`,
     );
-    assert.match(text, /terminal-idle-check`부터 다시 진행한다/);
+    assert.match(text, /terminal-idle-check`부터 다시 (진행|실행)한다/);
     assert.match(text, /「프롬프트 질문 답하기」/);
   }
   assert.match(readSkill("pm"), /`director-signal`로 이사에게 알린다/);

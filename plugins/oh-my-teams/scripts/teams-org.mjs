@@ -119,7 +119,7 @@ import {
   shadowModelCheck,
   shadowStatusFilter,
 } from "./jev.mjs";
-import { draftOrganization } from "./org-draft.mjs";
+import { draftOrganization, draftThreeTierOrganization } from "./org-draft.mjs";
 import {
   bindKickoffRun,
   cleanupKickoffBranches,
@@ -160,7 +160,8 @@ import {
 } from "./resources.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
-  org-draft --name NAME --models provider:model,... --output FILE [--tiers 1-4]
+  org-draft --name NAME --models PM,WORKER --output FILE [--tiers 1-4 (legacy)]
+            (four model choices without --tiers retain the previous format)
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
   preset --org FILE --name opus-first|balanced|single-subscription|advisor-codex|advisor-claude --revision N
@@ -273,7 +274,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                    acknowledged here; the timeout defaults to the organization's
                    policy.supervision.progressCheckMs; pass the returned
                    deliveryId as --ack on the next wait)
-  work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role junior]
+  work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role worker]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
   assist --org FILE --task FILE --repo DIR --state DIR --role ROLE
@@ -1483,11 +1484,15 @@ async function writeDraft(args, execute) {
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
   assert(!fs.existsSync(output), "Draft output exists; choose a new path");
-  const organization = draftOrganization({
-    name: args.name,
-    tiers: args.tiers === undefined ? undefined : Number(args.tiers),
-    models: args.models.split(","),
-  });
+  const models = args.models.split(",");
+  const organization =
+    args.tiers === undefined && models.length === 2
+      ? draftThreeTierOrganization({ name: args.name, models })
+      : draftOrganization({
+          name: args.name,
+          tiers: args.tiers === undefined ? undefined : Number(args.tiers),
+          models,
+        });
   const projectDir = path.dirname(output);
   const defaults = await resolveHostDefaults({ project: projectDir });
   if (defaults.codex?.error) {

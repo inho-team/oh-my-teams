@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   DIRECTOR_ROLE,
   ROLE_LADDER,
+  ACTIVE_ROLES,
   ROLES,
   ROOT_ROLE,
   foldRole,
@@ -94,7 +95,7 @@ test("DIRECTOR_ROLE is 'director' and sits above pm in ROLE_LADDER", () => {
   // director is not in ROLES (감독 worker 목록)
   assert.equal(ROLES.includes(DIRECTOR_ROLE), false);
   // ROLE_LADDER contains all ROLES after director
-  assert.deepEqual(ROLE_LADDER.slice(1), ROLES);
+  assert.deepEqual(ROLE_LADDER.slice(1), ACTIVE_ROLES);
 });
 
 test("director does not appear in foldRole or resolveRole: existing folding is unchanged", () => {

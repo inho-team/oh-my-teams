@@ -1,9 +1,11 @@
 ---
 name: junior
-description: Orca 조직에서 기능 구현과 좁은 편집·반복 실무를 직접 수행하고 결과를 책임진다. 저장된 Claude·Codex·Flash 프로필을 사용한다.
+description: 기존 kickoff의 Junior 역할 스냅샷을 완료하기 위한 호환 스킬이다. 신규 조직의 구현은 Worker가 맡는다.
 ---
 
 # Junior — 구현
+
+이 스킬은 기존 Junior 역할로 시작한 kickoff에만 적용합니다. 신규 조직에서는 Worker가 구현을 맡고 PM에게 결과를 보고합니다.
 
 조직 설정의 구독·모델·호출 한도를 그대로 사용한다. Junior는 배정된 기능의 구현과 테스트 결과를 끝까지 책임진다.
 

@@ -1,6 +1,6 @@
 ---
 name: form
-description: 최초 oh my teams 상설 조직을 네 역할의 모델만 물어 구성하고, 나머지는 비용이 늘지 않는 기본값으로 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
+description: 최초 oh my teams 상설 조직을 PM과 Worker의 모델로 구성하고, 나머지는 비용이 늘지 않는 기본값으로 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
 ---
 
 # 팀 결성
@@ -11,9 +11,9 @@ description: 최초 oh my teams 상설 조직을 네 역할의 모델만 물어 
 
 ## 묻는 것
 
-조직이 없으면 **네 역할(PM·PL·Senior·Junior)이 각각 어떤 모델을 쓸지만** 묻는다. 몇 단계로 운영할지는 묻지 않는다. 조직은 항상 네 역할을 모두 두고, 실제로 몇 개의 역할을 쓸지는 kickoff마다 PM이 과제의 난이도를 보고 실행 깊이로 정하기 때문이다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 이 역할별 모델 질문은 기존 조직을 계속 결성할 수 있게 남겨 둔 호환 경로이며, 질문 자체를 없애는 결정은 적응형 팀 편성 kickoff의 다음 파동이 맡는다.
+조직이 없으면 **PM과 Worker가 각각 어떤 모델을 쓸지만** 묻는다. 이사는 조직 파일의 실행 역할이 아니라 사용자와 대화하는 호스트 세션입니다. 새 조직은 PM과 Worker만 선언하며, PM이 과제에 따라 Worker를 사용하지 않을 수 있습니다. 기존 PL·Senior·Junior 조직의 실행 스냅샷은 완료될 때까지 그대로 유지합니다.
 
-묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 한 번으로 끝난다. 구조화된 선택 도구는 한 번에 질문 네 개까지 담을 수 있으므로 PM·PL·Senior·Junior의 모델을 한꺼번에 묻는다. 번호를 매긴 선택지로 묻는 호스트에서도 네 개를 한 번에 제시한다.
+묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 한 번으로 끝납니다. PM과 Worker의 모델을 한꺼번에 묻고, 몇 단계로 운영할지는 묻지 않습니다.
 
 구독이 부족해 특정 역할을 아예 둘 수 없는 조직은 결성 후 `adjust`에서 그 역할을 뺀다. 뺀 역할이 맡던 일은 서열을 따라 위로 올라가 남은 가장 가까운 역할이 이어받으며, 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 역할 이름은 바꿀 수 없다. 실패 라우팅, 검토 요구사항과 스킬이 이 이름으로 역할을 지목하기 때문이다.
 
@@ -68,13 +68,13 @@ Gemini는 다른 모델과 달리 강도를 비워 둘 수 없다. Agy에는 강
 현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 초안 파일은 새 경로에 쓰며, 이미 있는 파일에는 쓰지 않는다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
 
 ```text
-node <runtime> org-draft --name <project-dir-name> --models <pm>,<pl>,<senior>,<junior> --output <draft.json>
+node <runtime> org-draft --name <project-dir-name> --models <pm>,<worker> --output <draft.json>
 node <runtime> init --org <project>/.omt/organization.json --from <draft.json>
 node <runtime> show --org <project>/.omt/organization.json
 ```
 
 `init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 질문을 처음부터 다시 시작하지 않는다.
 
-결성을 보고할 때에는 역할별로 배정된 모델을 적는다. 자유 입력으로 `provider:default`를 받아 모델이 `null`인 프로필이 있으면 `host-defaults`를 다시 실행해 얻은 현재 해석값을 함께 적는다. 예를 들어 "PL: Codex 기본(지금은 gpt-6-astra, 계정 기본값을 따름)"처럼 저장값과 현재 해석값을 구분하고, Claude의 해석값이 `null`이면 확인하지 못했다고 적는다. Gemini를 고른 역할이 있으면 "Junior: Gemini 3.8 Flash, 강도 medium(Gemini는 강도가 필수라 결성 때 정함)"처럼 정한 강도를 함께 적는다. 이어서 위 목록에서 묻지 않고 정한 값을 짧게 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 저장된 파일의 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서 확인할 수 있다.
+결성을 보고할 때에는 PM과 Worker에 배정된 모델을 적는다. `provider:default`를 받아 모델이 `null`인 프로필은 `host-defaults`로 확인한 현재 해석값과 저장값을 구분해 알린다. 이어서 묻지 않고 정한 값을 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 새 구조는 [`../../examples/organization.three-tier.json`](../../examples/organization.three-tier.json)에서 확인할 수 있습니다. 기존 네 역할 조직은 새로운 조직으로 자동 변경하지 않는다.
 
 `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다. 조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 kickoff 등록부가 놓이는 자리가 된다. 한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있으며, form 자체는 kickoff를 등록하지 않는다. 자세한 계약은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)에 있다.

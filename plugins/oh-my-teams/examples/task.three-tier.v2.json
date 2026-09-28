@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "revision": 1,
+  "kind": "edit",
+  "id": "worker-change",
+  "goal": "Implement a scoped change and verify its behavior.",
+  "instruction": "Make the change within the listed file and preserve existing callers.",
+  "nonGoals": ["Change unrelated behavior"],
+  "constraints": ["Keep the public API compatible."],
+  "files": ["src/change.mjs"],
+  "checks": [["node", "--test", "tests/change.test.mjs"]],
+  "acceptance": [
+    {
+      "id": "behavior",
+      "description": "The targeted tests pass.",
+      "method": "check",
+      "checkIndexes": [0]
+    },
+    {
+      "id": "compatibility",
+      "description": "Existing callers remain compatible.",
+      "method": "review"
+    }
+  ],
+  "dependencies": [],
+  "contractRefs": [],
+  "contextRefs": [],
+  "openQuestions": [],
+  "reviewRequirements": [
+    {
+      "id": "independent-review",
+      "kind": "agent-review",
+      "role": "worker",
+      "criteria": ["compatibility"]
+    }
+  ],
+  "environment": "project-lockfile-and-fixtures",
+  "baseRef": "origin/main",
+  "risk": "normal"
+}

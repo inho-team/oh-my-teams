@@ -117,10 +117,11 @@ export function kickoffBriefPrompt(briefPath) {
  * instead, and Junior implements what it is given without delegating further.
  */
 export const DISPATCH_AUTHORITY = Object.freeze({
-  pm: ["pl", "senior", "junior"],
+  pm: ["pl", "senior", "junior", "worker"],
   pl: ["senior", "junior"],
   senior: [],
   junior: [],
+  worker: [],
 });
 
 /**
@@ -195,6 +196,7 @@ const ROLE_NAMES = {
   pl: "PL",
   senior: "Senior",
   junior: "Junior",
+  worker: "Worker",
 };
 const skillsDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -748,7 +750,10 @@ export function roleSpec(
     ? ROLE_NAMES[parent]
     : `이사${director?.terminalHandle ? ` (${director.terminalHandle})` : ""}`;
   const inherited = ROLES.filter(
-    (other) => !declared.includes(other) && foldRole(declared, other) === role,
+    (other) =>
+      (other !== "worker" || Object.hasOwn(org.roles, "worker")) &&
+      !declared.includes(other) &&
+      foldRole(declared, other) === role,
   );
   const dispatchable = [
     ...new Set(

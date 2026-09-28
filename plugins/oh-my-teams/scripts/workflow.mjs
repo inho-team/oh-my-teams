@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import {
+  ACTIVE_FULL_DEPTH,
   FULL_DEPTH,
   ROLES,
   assert,
@@ -214,7 +215,8 @@ function createInitialState(request, org, tasks) {
   const roleByTask = Object.fromEntries(
     request.tasks.map((item, index) => [tasks[index].id, item.role]),
   );
-  const depth = request.depth ?? FULL_DEPTH;
+  const depth =
+    request.depth ?? (Object.hasOwn(org.roles, "worker") ? 2 : FULL_DEPTH);
   const roles = depthRoles(definedRoles(org), depth);
   return {
     schemaVersion: 1,
@@ -267,6 +269,17 @@ export async function createWorkflow(
 ) {
   validateWorkflowRequest(request);
   validateOrg(org);
+  assert(
+    !Object.hasOwn(org.roles, "worker") ||
+      request.depth === undefined ||
+      request.depth <= ACTIVE_FULL_DEPTH,
+    `Worker organization depth must be 1..${ACTIVE_FULL_DEPTH}`,
+  );
+  assert(
+    !Object.hasOwn(org.roles, "worker") ||
+      request.tasks.every((item) => ["pm", "worker"].includes(item.role)),
+    "Worker organization tasks must use pm or worker roles",
+  );
   const repo = fs.realpathSync(path.resolve(baseDir, request.repo));
   const tasks = await freezeTasks(request, baseDir, repo);
   let integrationTask = null;

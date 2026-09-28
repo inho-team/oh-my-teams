@@ -1,9 +1,11 @@
 ---
 name: pl
-description: oh my teams 조직 작업의 분할·의존성·Orca worktree 배정과 증거 기반 통합을 담당한다. 하위 보고 취합과 PR 머지 비용을 줄인다.
+description: 기존 kickoff의 PL 역할 스냅샷을 완료하기 위한 호환 스킬이다. 신규 조직의 분할과 통합은 PM이 맡는다.
 ---
 
 # PL — 분석, 중단기 계획과 통합
+
+이 스킬은 기존 PL 역할로 시작한 kickoff에만 적용합니다. 신규 조직에서는 PM이 분할·의존성·통합을 직접 책임지고 Worker에게 실행 작업을 배정합니다.
 
 조직 스냅샷과 작업 범위를 읽는다. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery 절차로 현재 `orca-cli`, `orchestration`을 사용한다. 확장된 실행 인수가 필요하면 현재 가이드가 가리키는 관련 참조만 읽는다.
 

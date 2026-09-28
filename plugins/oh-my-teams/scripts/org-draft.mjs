@@ -1,5 +1,6 @@
 /** Drafts a first organization from a ladder size and one model per tier. */
 import {
+  ACTIVE_ROLES,
   DEPTH_ROLES,
   FULL_DEPTH,
   SUPERVISION_DEFAULTS,
@@ -80,10 +81,24 @@ function profileId({ provider, model }) {
  * @throws {Error} When the ladder, a choice, or the result is invalid.
  */
 export function draftOrganization({ name, tiers = FULL_DEPTH, models }) {
-  // Formation declares every role; how many a run uses is chosen per kickoff.
-  // A smaller ladder stays available for an organization that cannot staff one.
   const roles = DEPTH_ROLES[tiers];
   assert(roles, `tiers must be 1..${FULL_DEPTH}`);
+  return buildOrganization(name, roles, models);
+}
+
+/**
+ * Forms the Director–PM–Worker organization without legacy middle ranks.
+ *
+ * @param {object} request - New organization name and PM/Worker model choices.
+ * @param {string} request.name - Organization name.
+ * @param {string[]} request.models - PM and Worker model choices, in that order.
+ * @returns {object} Validated two-role organization.
+ */
+export function draftThreeTierOrganization({ name, models }) {
+  return buildOrganization(name, ACTIVE_ROLES, models);
+}
+
+function buildOrganization(name, roles, models) {
   assert(
     Array.isArray(models) && models.length === roles.length,
     `Choose exactly one model per tier: ${roles.length} expected`,
