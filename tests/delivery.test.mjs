@@ -374,7 +374,10 @@ test("deliver refuses a redelivery whose new head has no confirmed fidelity chec
     await git(fixture.project, "rev-parse", "HEAD"),
     first.mergeCommit,
   );
-  assert.equal(listKickoffs(fixture.org).kickoffs[0].delivered.head, fixture.head);
+  assert.equal(
+    listKickoffs(fixture.org).kickoffs[0].delivered.head,
+    fixture.head,
+  );
 });
 
 test("deliver refuses a same-head redelivery once the organization declares an auditor with no acceptance recorded yet (early return does not skip the audit gate)", async (t) => {
@@ -408,7 +411,10 @@ test("deliver refuses a same-head redelivery once the organization declares an a
     await git(fixture.project, "rev-parse", "HEAD"),
     first.mergeCommit,
   );
-  assert.equal(listKickoffs(fixture.org).kickoffs[0].delivered.head, fixture.head);
+  assert.equal(
+    listKickoffs(fixture.org).kickoffs[0].delivered.head,
+    fixture.head,
+  );
 });
 
 test("deliver refuses a moved head, an unready owner, and a conflict", async (t) => {
