@@ -3204,6 +3204,19 @@ export async function executeCommand(args, execute) {
           `The auditor cannot run from ${target}, which this kickoff's PM or a worker already uses; ` +
             "open it in a separate worktree so the audit stays independent of the work it reviews",
         );
+        // command.provider is already known here, before
+        // resolveAuditorLaunchExecution/readLaunchEnvironment/openRoleTerminal
+        // run: an agy-configured auditor profile is refused at this point
+        // and no trusted-Orca probe or terminal spawn happens for it.
+        // PROVIDER_IDS does not restrict org.auditor to "claude"
+        // (providers/index.mjs), so this check, not the schema, is what
+        // closes that gap.
+        assert(
+          command.provider !== "agy",
+          "role-terminal --role auditor refuses to open: this organization's auditor profile is configured " +
+            "with the agy provider. Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요하다(아직 구현되지 않았습니다); " +
+            "configure org.auditor with a non-agy profile before launching the auditor",
+        );
       }
       const launchedAt = new Date().toISOString();
       assertWorktreeUnshared(
@@ -3239,9 +3252,10 @@ export async function executeCommand(args, execute) {
       // launch-matrix's judgment when the launched runner is "agy"
       // (launch-matrix.mjs). The auditor is normally configured on a Claude
       // profile, but org.auditor's provider is not schema-restricted to
-      // "claude" (providers/index.mjs's PROVIDER_IDS admits agy too), so an
-      // agy-configured auditor is possible; that residual gap is unresolved
-      // and tracked separately, not closed by omitting this probe.
+      // "claude" (providers/index.mjs's PROVIDER_IDS admits agy too); the
+      // agy case never reaches this probe at all, because the
+      // command.provider assertion above refuses it earlier, inside the
+      // auditorEntry block, before resolveAuditorLaunchExecution runs.
       // `homedir` is likewise read from `os.userInfo()` rather than left at
       // readLaunchEnvironment's own `os.homedir()` default, so the auditor
       // branch's trust-record lookups cannot be redirected through an

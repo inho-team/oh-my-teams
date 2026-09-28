@@ -17,7 +17,10 @@ import {
   listKickoffs,
   registerKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
-import { recordLaunch } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
+import {
+  readLaunches,
+  recordLaunch,
+} from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import { requirementsPresent } from "../plugins/oh-my-teams/scripts/requirements.mjs";
 import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 import {
@@ -1065,6 +1068,142 @@ test(
     );
   },
 );
+
+test(
+  "role-terminal --role auditor refuses an agy-provider auditor profile before any trusted-Orca probe, " +
+    "terminal open, or launch record runs, with or without --allow-unverified, while a non-auditor role " +
+    "on the same agy profile reaches its ordinary spawn path unaffected",
+  async (t) => {
+    const fixture = kickoff(t);
+    const org = readJSON(fixture.org);
+    org.auditor = { profile: "agy-oss" };
+    writeJSON(fixture.org, org);
+
+    const originalCwd = process.cwd();
+    t.after(() => process.chdir(originalCwd));
+    process.chdir(fixture.dir);
+
+    const auditorDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-agy-"));
+    t.after(() => fs.rmSync(auditorDir, { recursive: true, force: true }));
+
+    const roleTerminalAuditor = (extraArgs = []) =>
+      main([
+        "role-terminal",
+        "--org",
+        fixture.org,
+        "--role",
+        "auditor",
+        "--worktree",
+        `path:${auditorDir}`,
+        "--state",
+        fixture.entry.pm.stateDir,
+        ...extraArgs,
+      ]);
+
+    // agy-oss's "agy" provider must be refused before
+    // resolveAuditorLaunchExecution/readLaunchEnvironment ever run: were the
+    // trusted-Orca probe or a real terminal spawn reached instead, this
+    // in-process call would try to talk to whatever Orca/agy happens to be
+    // on this machine, which is exactly what the rejection below proves did
+    // not happen.
+    const launchesBefore = readLaunches(fixture.org).length;
+    await assert.rejects(
+      roleTerminalAuditor(),
+      /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
+    );
+    await assert.rejects(
+      roleTerminalAuditor(["--allow-unverified", "I approve this launch"]),
+      /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
+    );
+
+    // recordAuditorLaunch (kickoff-registry) never ran: the kickoff entry
+    // still carries no `auditor` field.
+    const [afterEntry] = listKickoffs(fixture.org, fixture.worktreeId).kickoffs;
+    assert.equal(afterEntry.auditor, undefined);
+    // recordLaunchSafely (usage-ledger), which only runs once openRoleTerminal
+    // has already returned, never ran either.
+    assert.equal(readLaunches(fixture.org).length, launchesBefore);
+
+    // Contrast: a non-auditor role on the very same agy profile is not
+    // touched by this refusal. `senior` is configured on `agy-flash` (an
+    // "agy" provider) by the example organization already, with no
+    // org.auditor override needed. Its role-terminal reaches its ordinary,
+    // pre-existing PATH-based spawn attempt, which this test only lets run
+    // against a missing executable (a plain ENOENT, not any Orca/agy
+    // process), so it stays a safe, local failure rather than the agy
+    // refusal above.
+    const workerDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "omt-audit-agy-worker-"),
+    );
+    t.after(() => fs.rmSync(workerDir, { recursive: true, force: true }));
+    initRepo(workerDir);
+    await assert.rejects(
+      () =>
+        main([
+          "role-terminal",
+          "--org",
+          fixture.org,
+          "--role",
+          "senior",
+          "--worktree",
+          `path:${workerDir}`,
+          "--orca",
+          path.join(workerDir, "missing-orca"),
+        ]),
+      (err) => {
+        assert.doesNotMatch(
+          err.message,
+          /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
+        );
+        assert.match(err.message, /ENOENT/);
+        return true;
+      },
+    );
+  },
+);
+
+// readTrustedOrcaVersion(options = {}) (orca-adapter.mjs) exposes injection
+// points, but only for tests: production callers, this role-terminal
+// handler included, must call it with none. That means the handler has no
+// parameter through which a test could make the trusted-Orca probe below
+// actually throw, return null, or return a non-semver value while running
+// the real role-terminal command path — doing so would require adding a
+// new public injection option to teams-org.mjs, which msg_431a3c562ca5
+// asked to be reported before building rather than added unasked. What can
+// be checked without one is that the handler still wires
+// readOrcaVersion/skipAgyVersion/throwOnUnverifiedOrca into
+// readLaunchEnvironment for the auditor branch, so a refactor cannot drop
+// that wiring silently; readLaunchEnvironment's own throw/null/empty-value
+// fail-closed behavior for each of those is exercised directly, without a
+// real Orca process, by tests/role-terminal.test.mjs's
+// assertFailsClosedOnUnverifiedOrca cases.
+test("role-terminal handler wires readOrcaVersion/skipAgyVersion/throwOnUnverifiedOrca into readLaunchEnvironment for the auditor branch", () => {
+  const source = fs.readFileSync(
+    "plugins/oh-my-teams/scripts/teams-org.mjs",
+    "utf8",
+  );
+  const resolveCallStart = source.indexOf(
+    "resolveAuditorLaunchExecution({ auditorEntry",
+  );
+  assert.notEqual(
+    resolveCallStart,
+    -1,
+    "resolveAuditorLaunchExecution call not found",
+  );
+  const envCallStart = source.indexOf(
+    "const env = await readLaunchEnvironment({",
+    resolveCallStart,
+  );
+  assert.notEqual(envCallStart, -1, "readLaunchEnvironment call not found");
+  const envCallEnd = source.indexOf("});", envCallStart);
+  const envCall = source.slice(envCallStart, envCallEnd);
+  assert.match(
+    envCall,
+    /readOrcaVersion:\s*\(\)\s*=>\s*readTrustedOrcaVersion\(\)/,
+  );
+  assert.match(envCall, /skipAgyVersion:\s*true/);
+  assert.match(envCall, /throwOnUnverifiedOrca:\s*true/);
+});
 
 // CLI registration for audit-objection/audit-response/audit-ruling/
 // audit-checked/audit-accept (PM item 3): objection/ruling/checked/accept are
