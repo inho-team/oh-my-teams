@@ -9,7 +9,6 @@ import {
   _codexRolloutCache,
   answerHeadless,
   codexRolloutModel,
-  headlessCommand,
   headlessDetail,
   headlessStatus,
   listHeadless,
@@ -140,116 +139,6 @@ function start(box, provider, workerId, prompt, extra = {}) {
     ...(extra.timeoutMs ? { timeoutMs: extra.timeoutMs } : {}),
   });
 }
-
-test("each provider's headless command, first turn and resumed", () => {
-  const prompt = "do it";
-  assert.deepEqual(
-    headlessCommand({
-      provider: "claude",
-      binary: ["claude"],
-      model: "sonnet",
-      effort: "high",
-      prompt,
-    }),
-    {
-      argv: [
-        "claude",
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-        "--model",
-        "sonnet",
-        "--effort",
-        "high",
-      ],
-      stdin: prompt,
-    },
-  );
-  assert.deepEqual(
-    headlessCommand({
-      provider: "claude",
-      binary: ["claude"],
-      prompt,
-      session: "s1",
-    }).argv.slice(-2),
-    ["--resume", "s1"],
-  );
-  assert.deepEqual(
-    headlessCommand({
-      provider: "codex",
-      binary: ["codex"],
-      model: "gpt-5.6-sol",
-      effort: "low",
-      prompt,
-      session: "t1",
-    }),
-    {
-      argv: [
-        "codex",
-        "exec",
-        "resume",
-        "t1",
-        "--json",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "-m",
-        "gpt-5.6-sol",
-        "-c",
-        "model_reasoning_effort=low",
-        prompt,
-      ],
-      stdin: null,
-    },
-  );
-  assert.deepEqual(
-    headlessCommand({
-      provider: "agy",
-      binary: ["agy"],
-      model: "gemini-3.8-flash-high",
-      prompt,
-      session: "c1",
-    }),
-    {
-      argv: [
-        "agy",
-        "--output-format",
-        "stream-json",
-        "--dangerously-skip-permissions",
-        "--conversation",
-        "c1",
-        "--model",
-        "gemini-3.8-flash-high",
-        "-p",
-        prompt,
-      ],
-      stdin: null,
-    },
-  );
-  // timeoutMs가 없으면 --print-timeout을 삽입하지 않는다.
-  assert.ok(
-    !headlessCommand({
-      provider: "agy",
-      binary: ["agy"],
-      prompt,
-    }).argv.includes("--print-timeout"),
-    "agy without timeoutMs must not include --print-timeout",
-  );
-  // timeoutMs를 주면 printTimeout(timeoutMs) 값이 argv에 들어간다.
-  const ptArgv = headlessCommand({
-    provider: "agy",
-    binary: ["agy"],
-    prompt,
-    timeoutMs: 60000,
-  }).argv;
-  const ptIdx = ptArgv.indexOf("--print-timeout");
-  assert.ok(ptIdx !== -1, "agy with timeoutMs must include --print-timeout");
-  assert.equal(ptArgv[ptIdx + 1], "55s"); // 60000 - 5000 = 55000ms = 55s
-  assert.throws(
-    () => headlessCommand({ provider: "ollama", binary: ["ollama"], prompt }),
-    /no headless runtime/,
-  );
-});
 
 test("the last marker line decides the outcome, and the model is judged", () => {
   const stream = [

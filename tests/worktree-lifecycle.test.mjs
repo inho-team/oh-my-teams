@@ -9,6 +9,7 @@ import { createWorktreeWithRoleSession } from "../plugins/oh-my-teams/scripts/or
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { predictLaunchPath } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
 import { runTurn } from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
+import * as headlessRuntime from "../plugins/oh-my-teams/scripts/headless.mjs";
 import {
   answerHeadless,
   startHeadlessWorker,
@@ -1135,6 +1136,17 @@ test("direct headless exports fail closed", () => {
     () => answerHeadless("/legacy", "old", "continue"),
     /Headless follow-up turns were removed/,
   );
+});
+
+test("headless record reader has no retained launch implementation", () => {
+  const runtime = fs.readFileSync(
+    path.resolve("plugins/oh-my-teams/scripts/headless.mjs"),
+    "utf8",
+  );
+  assert.equal(Object.hasOwn(headlessRuntime, "headlessCommand"), false);
+  assert.doesNotMatch(runtime, /\blaunchTurn\b/);
+  assert.doesNotMatch(runtime, /\bspawn\s*\(/);
+  assert.doesNotMatch(runtime, /headless-runner\.mjs/);
 });
 
 test("headless runner rejects public and node entry execution before any provider spawn", async (t) => {
