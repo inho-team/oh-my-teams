@@ -83,19 +83,126 @@ test("document-envelope.schema.json is valid JSON and requires every 3.2 envelop
   assert.deepEqual([...envelope.required].sort(), [...ENVELOPE_FIELDS].sort());
 });
 
-for (const { file, bodyFields } of DOCUMENT_TYPES) {
-  test(`${file} is valid JSON and requires every 3.2 envelope and body field`, () => {
-    const doc = schema(file);
-    const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
-    assert.deepEqual([...doc.required].sort(), expected);
-    for (const field of bodyFields) {
-      assert.ok(
-        Object.hasOwn(doc.properties, field),
-        `${file} must declare a property for required field ${field}`,
-      );
-    }
-  });
-}
+test("document-kickoff-brief-ref.schema.json is valid JSON and requires every 3.2 envelope and body field", () => {
+  const doc = schema("document-kickoff-brief-ref.schema.json");
+  const bodyFields = [
+    "briefPath",
+    "acceptanceSummary",
+    "nonGoals",
+    "constraints",
+    "kickoffEntryRef",
+  ];
+  const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
+  assert.deepEqual([...doc.required].sort(), expected);
+  for (const field of bodyFields) {
+    assert.ok(
+      Object.hasOwn(doc.properties, field),
+      `document-kickoff-brief-ref.schema.json must declare a property for required field ${field}`,
+    );
+  }
+});
+
+test("document-design-contract.schema.json is valid JSON and requires every 3.2 envelope and body field", () => {
+  const doc = schema("document-design-contract.schema.json");
+  const bodyFields = [
+    "problemStatement",
+    "decisions",
+    "openQuestions",
+    "reviewRequirementRef",
+  ];
+  const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
+  assert.deepEqual([...doc.required].sort(), expected);
+  for (const field of bodyFields) {
+    assert.ok(
+      Object.hasOwn(doc.properties, field),
+      `document-design-contract.schema.json must declare a property for required field ${field}`,
+    );
+  }
+});
+
+test("document-workflow-task-ref.schema.json is valid JSON and requires every 3.2 envelope and body field", () => {
+  const doc = schema("document-workflow-task-ref.schema.json");
+  const bodyFields = ["workflowRef", "taskRef", "attemptRefs", "designRef"];
+  const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
+  assert.deepEqual([...doc.required].sort(), expected);
+  for (const field of bodyFields) {
+    assert.ok(
+      Object.hasOwn(doc.properties, field),
+      `document-workflow-task-ref.schema.json must declare a property for required field ${field}`,
+    );
+  }
+});
+
+test("document-integration-ref.schema.json is valid JSON and requires every 3.2 envelope and body field", () => {
+  const doc = schema("document-integration-ref.schema.json");
+  const bodyFields = ["integrationTaskRef", "taskHashRef", "extensionHistory"];
+  const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
+  assert.deepEqual([...doc.required].sort(), expected);
+  for (const field of bodyFields) {
+    assert.ok(
+      Object.hasOwn(doc.properties, field),
+      `document-integration-ref.schema.json must declare a property for required field ${field}`,
+    );
+  }
+});
+
+test("document-review-ref.schema.json is valid JSON and requires every 3.2 envelope and body field", () => {
+  const doc = schema("document-review-ref.schema.json");
+  const bodyFields = ["reviewFileRef", "conclusion", "criteriaRefs"];
+  const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
+  assert.deepEqual([...doc.required].sort(), expected);
+  for (const field of bodyFields) {
+    assert.ok(
+      Object.hasOwn(doc.properties, field),
+      `document-review-ref.schema.json must declare a property for required field ${field}`,
+    );
+  }
+});
+
+test("document-acceptance-ref.schema.json is valid JSON and requires every 3.2 envelope and body field", () => {
+  const doc = schema("document-acceptance-ref.schema.json");
+  const bodyFields = ["decisionFileRef", "acceptedBy", "criteriaSatisfied"];
+  const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
+  assert.deepEqual([...doc.required].sort(), expected);
+  for (const field of bodyFields) {
+    assert.ok(
+      Object.hasOwn(doc.properties, field),
+      `document-acceptance-ref.schema.json must declare a property for required field ${field}`,
+    );
+  }
+});
+
+test("document-delivery-ref.schema.json is valid JSON and requires every 3.2 envelope and body field", () => {
+  const doc = schema("document-delivery-ref.schema.json");
+  const bodyFields = ["evidenceRef", "reportRef", "deliveredCommit"];
+  const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
+  assert.deepEqual([...doc.required].sort(), expected);
+  for (const field of bodyFields) {
+    assert.ok(
+      Object.hasOwn(doc.properties, field),
+      `document-delivery-ref.schema.json must declare a property for required field ${field}`,
+    );
+  }
+});
+
+test("document-closure-record.schema.json is valid JSON and requires every 3.2 envelope and body field", () => {
+  const doc = schema("document-closure-record.schema.json");
+  const bodyFields = [
+    "directorSignalRef",
+    "kickoffArchiveRef",
+    "outcome",
+    "incidentRefs",
+    "lessonCandidateRefs",
+  ];
+  const expected = [...ENVELOPE_FIELDS, ...bodyFields].sort();
+  assert.deepEqual([...doc.required].sort(), expected);
+  for (const field of bodyFields) {
+    assert.ok(
+      Object.hasOwn(doc.properties, field),
+      `document-closure-record.schema.json must declare a property for required field ${field}`,
+    );
+  }
+});
 
 test("workflow-task-ref requires designRef even though its value may be null", () => {
   const doc = schema("document-workflow-task-ref.schema.json");
