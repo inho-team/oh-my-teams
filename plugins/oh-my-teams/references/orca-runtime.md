@@ -59,7 +59,11 @@ agy --model claude-opus-4-6-thinking ...
 {
   "message": "관측한 내용",
   "evidence": "receipt ...",
-  "signal": { "kind": "execution-unconfigured", "code": "timeout", "message": "래퍼가 돌려준 문장" }
+  "signal": {
+    "kind": "execution-unconfigured",
+    "code": "timeout",
+    "message": "래퍼가 돌려준 문장"
+  }
 }
 ```
 
@@ -92,11 +96,11 @@ node <runtime> worker-start --org <organization.json> --role <pl|senior|junior> 
 
 그다음 역할 프로필에서 시작 경로와 Orca agent, 모델, 강도를 정한다.
 
-| 실행기           | 시작 경로                                                                                                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude·Codex·Agy | 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 모델·강도·권한 우회 플래그를 담은 명령의 터미널을 열고, 그 터미널을 `--terminal`로 넘긴다. `--terminal` 없이 호출하면 거부한다. |
+| 실행기                       | 시작 경로                                                                                                                                                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude·Codex·Agy             | 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 모델·강도·권한 우회 플래그를 담은 명령의 터미널을 열고, 그 터미널을 `--terminal`로 넘긴다. `--terminal` 없이 호출하면 거부한다.                                       |
 | Agy(모델·플랫폼 조합에 따라) | `scripts/launch-matrix.mjs`의 호환성 표가 시작 경로를 정한다. 표가 `headless`를 돌려주면 `headless-start`로 실행하고, `blocked`를 돌려주면 이유 코드와 `nextAction`을 보고하며 터미널을 만들지 않는다(아래 Agy 대기 판정 문단). |
-| Ollama           | 대화형 Orca agent가 없으므로 감독 worker로 띄우지 않고 `work` 하네스로 실행한다.                                                                                           |
+| Ollama                       | 대화형 Orca agent가 없으므로 감독 worker로 띄우지 않고 `work` 하네스로 실행한다.                                                                                                                                                |
 
 Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권한 우회 플래그를 보장할 수 없기 때문이다. 자세한 근거는 아래 「역할 탭 제목」 절의 권한 우회 플래그 문단에 있다.
 
@@ -113,10 +117,10 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 시작 결과의 `binding`에는 `via`, `modelRequested`, `effortRequested`, `modelProof`, `screenCheck`가 남는다. `via`는 항상 `terminal`이며, `modelProof`는 다음 둘 중 하나다.
 
-| 값            | 뜻                                                                                                       | 다음 행동                                                                                                                                   |
-| ------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 값            | 뜻                                                                                                    | 다음 행동                                                                                                                                   |
+| ------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `unproven`    | 프로필 모델로 연 터미널에 작업을 넘겼다. Orca는 `--terminal` 시작의 receipt에 모델을 기록하지 않는다. | 화면에서 모델을 확인하기 전에는 요청 모델로 실행 중이라고 보고하지 않는다.                                                                  |
-| `unrequested` | 프로필 모델이 `null`이라 모델을 요청하지 않았다.                                                         | 보고서에 특정 모델명을 쓰지 않고 계정 기본값이라고 적는다. 현재 해석값이 필요하면 `host-defaults` 결과를 `현재 해석값`으로 구분해 덧붙인다. |
+| `unrequested` | 프로필 모델이 `null`이라 모델을 요청하지 않았다.                                                      | 보고서에 특정 모델명을 쓰지 않고 계정 기본값이라고 적는다. 현재 해석값이 필요하면 `host-defaults` 결과를 `현재 해석값`으로 구분해 덧붙인다. |
 
 `work` 하네스가 쓰는 `matched`와 `mismatched`는 이 래퍼에서 나오지 않는다. 모델의 증거는 receipt가 아니라 화면이므로, `screenCheck`가 `required`이면 `role-terminal` 결과의 `screen`을 확인한 데 이어 시작 직후 `worker-read --dispatch <id> --source terminal`이나 `terminal read --screen`으로 대화형 화면에 표시된 현재 모델을 다시 확인하고, `modelRequested`와 다르면 추가 지시를 보내지 않고 상위에 보고한다.
 
@@ -235,13 +239,13 @@ node <runtime> prompt-answer --org <organization.json> --terminal <handle> --wor
 1. `--wait-submit <초>`를 붙여 텍스트를 한 번만 보낸다. `stages`에 `turn_started`가 있으면 제출된 것이다(`submitted`).
 2. 없으면 `terminal read --screen`으로 화면을 읽고 입력 상자를 본다. 입력 상자는 화면 맨 아래에서 `❯`, `›`, `>`로 시작하는 줄이다. 응답의 `source`가 `screen`일 때에만 그 화면을 믿는다. Orca가 화면을 그리지 못하면 `screen-unavailable`과 함께 누적 출력을 돌려주는데, 여기에는 반복해 그린 줄이 조각으로 쌓여 있어서 입력 상자의 내용을 알 수 없다. `source`가 `screen-unavailable`이거나 응답에 없으면 빈 화면으로 취급하고 `unclear`로 판정한다.
 
-| 영수증과 화면 | 판정 | 동작 |
-|---|---|---|
-| 입력 상자에 승인한 텍스트만 남아 있다 | `unsubmitted` | Enter를 한 번 보낸다 |
-| 입력 상자가 비었고 텍스트가 기록에 보인다 | `already-started` | 아무것도 보내지 않는다 |
-| 입력 상자에 다른 내용이 있다 | `foreign-input` | 아무것도 보내지 않는다. Enter가 그 내용을 제출하기 때문이다 |
-| 화면이 판정하지 못한다(입력 상자가 없거나, `source`가 `screen`이 아니다) | `unclear` | 아래 3번 |
-| Orca가 거부하거나 응답하지 않았다 | `failed` | 오류 원문을 남기고 다시 보내지 않는다 |
+| 영수증과 화면                                                            | 판정              | 동작                                                        |
+| ------------------------------------------------------------------------ | ----------------- | ----------------------------------------------------------- |
+| 입력 상자에 승인한 텍스트만 남아 있다                                    | `unsubmitted`     | Enter를 한 번 보낸다                                        |
+| 입력 상자가 비었고 텍스트가 기록에 보인다                                | `already-started` | 아무것도 보내지 않는다                                      |
+| 입력 상자에 다른 내용이 있다                                             | `foreign-input`   | 아무것도 보내지 않는다. Enter가 그 내용을 제출하기 때문이다 |
+| 화면이 판정하지 못한다(입력 상자가 없거나, `source`가 `screen`이 아니다) | `unclear`         | 아래 3번                                                    |
+| Orca가 거부하거나 응답하지 않았다                                        | `failed`          | 오류 원문을 남기고 다시 보내지 않는다                       |
 
 3. `unclear`이면 같은 명령에 영수증의 `--retry-request <requestId>`를 붙여 한 번 다시 실행하고 판정한다. 같은 요청 ID는 관측만 다시 하고 텍스트를 다시 입력하지 않는다. 셸 터미널에서 실제 ID로 반복했을 때 `replayed: true`가 오고 화면에 명령이 한 번만 남는 것을 확인했다. Claude 터미널에서는 `input_accepted`로 끝난 요청을 이 방법으로 다시 관측하자 `turn_started`가 추가되었다. 그래도 결정되지 않으면 Enter 없이 `unclear`와 `requestId`를 보고한다.
 4. Enter는 승인한 텍스트만 입력 상자에 남은 것이 화면에서 확인된 때에만 한 번 보낸다. Enter 뒤에도 미제출이면 다시 누르지 않고 `unsubmitted`로 보고한다.
@@ -316,7 +320,7 @@ node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <
 
 | action         | 행동                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wait`         | 다시 `supervision-wait`로 기다린다. `reason`이 `already-escalated`이면 같은 정체를 다시 보고하지 않고, 사용자 보고에는 `display`를 그대로 적는다.                                                                                                                                                                                                                                                                                             |
+| `wait`         | 다시 `supervision-wait`로 기다린다. `reason`이 `already-escalated`이면 같은 정체를 다시 보고하지 않고, 사용자 보고에는 `display`를 그대로 적는다.                                                                                                                                                                                                                                                                                         |
 | `ask-progress` | `<orca> orchestration send --to dispatch:<id> --type question --subject "진행 상황 요청" --body "현재 단계, 끝낸 항목과 남은 항목, 장애물을 알려 주세요." --json`으로 묻고, 요청 수를 하나 늘린다.                                                                                                                                                                                                                                        |
 | `inspect`      | `worker-show`와 `worker-read --dispatch <id> --source auto --limit <n>`으로 상태와 최근 출력을 확인하고 `inspections`를 하나 늘린다. 확인에서 새 활동을 찾았으면 관측값을 고쳐 다시 판정한다.                                                                                                                                                                                                                                             |
 | `escalate`     | `worker-read`의 제한된 출력, liveness, 무응답 시간과 보낸 요청을 증거로 붙여 상위에 보고한다. PL은 `orchestration send --type escalation`으로 PM에게, PM은 사용자에게 보고한다. `failureClassify`가 `true`이면 그 증거로 `failure-classify`를 실행한다. 보고한 시각을 `escalatedAt`으로, 판정의 `reason`을 `escalatedReason`으로 기록한다. 같은 종료나 같은 입력 대기는 다시 보고하지 않고, 보고한 뒤 사실이 바뀌었을 때만 다시 보고한다. |
@@ -343,13 +347,13 @@ worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 
 
 2. **판정에 따른 행동:** 결과의 `verdict`에 따라 행동한다.
 
-   | verdict   | 행동                                                                                                                                                                         |
-   | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | `handoff` | 사용 한도로 turn이 끝났다. 3단계로 간다.                                                                                                                                     |
+   | verdict   | 행동                                                                                                                                                                            |
+   | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `handoff` | 사용 한도로 turn이 끝났다. 3단계로 간다.                                                                                                                                        |
    | `retry`   | provider의 용량 부족으로 turn이 끝났다. `limitKind: "capacity"`로 정산하면 `provider-capacity` 경로가 되며, 잠시 뒤 같은 프로필로 `workflow-retry`한다. 프로필을 바꾸지 않는다. |
-   | `wait`    | provider가 아직 스스로 재시도하고 있다. 아무것도 하지 않고 다음 감독 주기에 다시 판정한다.                                                                                    |
-   | `none`    | 한도로 끝나지 않았다. 무응답 감독 절차를 그대로 따른다.                                                                                                                       |
-   | `unknown` | 세션 기록도 화면도 읽지 못했다. 한도로 추정하지 않고 무응답 감독의 `inspect`나 `escalate`로 보낸다.                                                                           |
+   | `wait`    | provider가 아직 스스로 재시도하고 있다. 아무것도 하지 않고 다음 감독 주기에 다시 판정한다.                                                                                      |
+   | `none`    | 한도로 끝나지 않았다. 무응답 감독 절차를 그대로 따른다.                                                                                                                         |
+   | `unknown` | 세션 기록도 화면도 읽지 못했다. 한도로 추정하지 않고 무응답 감독의 `inspect`나 `escalate`로 보낸다.                                                                             |
 
    provider가 `claude`이고 화면을 읽었으면(`--terminal`을 넘겼으면) 결과에 `overload` 값이 함께 온다. 이 값은 `verdict`와 별개이며 `verdict`가 `none`이어도 `true`일 수 있다. Claude의 `API Error: 529 Overloaded`는 provider의 용량 부족(`retry`, 잠시 뒤 같은 프로필로 자동 재시도)과 다른 경로를 타야 하므로 `verdict`에 섞이지 않는다. `overload`가 `true`이면 이 단계가 아니라 위 「무응답 worker 감독」 1단계로 돌아가 `providerOverload`를 관측 파일에 옮긴다. Director는 PM의 화면도 같은 문장으로 판정하므로, `director-watch` 결과의 kickoff마다 `providerOverload`가 `provider-overloaded`/`none`/`unknown` 가운데 하나로 함께 온다.
 
@@ -374,6 +378,7 @@ worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 
    ```
 
    런타임은 워크트리의 git 상태로 `snapshot-<n>.json`을 만들고 task를 다시 대기 상태로 둔다. 이 handoff 뒤의 첫 실행은 시도 예산을 쓰지 않는다. 정책이 `fallback`이면 사용자에게 묻지 않고 곧바로 수행하며, 수행한 뒤 이사에게 `director-signal --kind progress`로 task, 멈춘 프로필, 이어받은 프로필, 한도가 풀리는 시각을 알린다.
+
 6. **이어서 실행:** `workflow-resume`의 `dispatch-ready`에 나온 `profile`과 `worktree`로 같은 워크트리에 fallback을 실행한다. `role-terminal`, `worker-start`와 `headless-start`에는 같은 `--workflow-id`, `--state`, `--workflow-task`와 `--profile <fallback>`을 넘기며, 기록된 handoff 대상이 아닌 프로필은 런타임이 거부한다. 지시문에는 남은 일을 끝내라는 목표만 쓰면 된다. 래퍼가 handoff 이력, `checkpoint.md`와 snapshot 경로, "먼저 worktree와 대조하라"는 지시를 머리글에 붙인다. 이후 이 task의 재시도도 같은 fallback으로 실행한다.
 
    ```text
@@ -421,14 +426,16 @@ node <runtime> usage-report --org <project>/.omt/organization.json --all
 node <runtime> doc-resolve-kickoff --org <project>/.omt/organization.json --worktree <pm-worktree-id>
 node <runtime> doc-id --kickoff-hash <hex64> [--workflow-id <id>] --stage <stageSlug> --doc-type <docType> --local-id <localId> [--revision <n>]
 node <runtime> doc-show --state <pm-worktree>/.omt --doc-id <docId>
-node <runtime> doc-save --state <pm-worktree>/.omt --doc <envelope.json> [--expected-revision <n>] [--refs <ref1,ref2,...>]
+node <runtime> doc-save --state <pm-worktree>/.omt --doc <envelope.json> [--expected-revision <n>] [--refs <ref1,ref2,...>] [--org <project>/.omt/organization.json]
 ```
 
 - `doc-resolve-kickoff`은 `resolveKickoffHash(orgFile, worktreeId)`를 그대로 호출해 `{ kickoffHash }`를 반환한다. worktree가 지배하는 활성 kickoff이 없으면 오류로 거부하며, release된 kickoff의 문서는 이 명령이 아니라 그 kickoff의 closure-record `kickoffId`로 직접 조립한다.
 - `doc-id`는 `buildDocId`/`buildDocRef`를 감싼 순수 빌더다. 파일시스템에 접근하지 않으며, `--revision`을 주면 응답에 `docRef`도 함께 담는다. `--workflow-id`를 생략하면 kickoff 범위 문서(`workflowId: null`, docId의 두 번째 segment는 `none`)를 만든다.
 - `doc-show`는 `documentState(stateDir, docId)`의 필드(`exists`, 존재할 때 `revision`/`hash`/`state`/`kickoffId`/`workflowId`)에 더해, 문서의 실제 폴더 경로를 `path` 필드로 함께 반환한다. 이 경로는 `documents.mjs`의 비공개 `documentDirectory` 공식(`<stateDir>/documents/<kickoffHash>/<workflowId ?? "none">/<stageFolderName(stageSlug)>/<docType>/<localId>`)을 그대로 재구현한 것이며, 이 조립 공식은 design 3.5절이 고정한 공개 계약이므로 재구현이 안전하다.
 - `doc-save`는 저장 전에 `assertDocumentAuthority`로 design 3.4절의 작성 권한·독립성을 검사한 뒤 `saveDocument(stateDir, doc, { expectedRevision, refs })`를 호출한다. `--doc`은 전체 envelope JSON 파일 경로이며, `--refs`는 검증할 `omt-doc:` 문서 참조만 쉼표로 구분해 전달한다. `saveDocument`가 호출하는 `validateReference`는 `omt-doc:`으로 시작하지 않는 참조를 즉시 거부하므로, legacy 참조(`validateLegacyRef`, org 인자가 필요한 별도 export 함수)는 이 옵션으로 검증되지 않는다.
-- `assertDocumentAuthority`는 design 3.4절 표를 stage/docType 조합별 허용 역할 표로 옮겨 `doc.author.role`을 검사하고(표에 없는 조합, 예: `06. 인도`의 `delivery-ref`는 표가 어느 역할에도 배정하지 않아 제한하지 않는다), 이미 존재하는 문서를 갱신할 때는 그 문서의 첫 revision을 쓴 실행만 다음 revision을 쓸 수 있는지 확인한다(`05. 수용`은 "PM 전용"일 뿐 특정 PM 실행에 고정되지 않으므로 예외이고, PL은 "배정 관련 필드만" 수정할 수 있어 문서 전체를 자기 것으로 고정하는 이 검사에서 예외다). `review/review-ref` 문서는 본문의 `reviewFileRef`가 `stateDir` 안의 실제 review 기록을 가리키면 그 기록의 `implementationExecutionId`가 이 문서의 `author.executionId`와 같은지 검사해, 같은 실행이 구현과 검토를 모두 맡은 문서를 거부한다(review.schema.json이 이미 강제하는 독립성 검사를 문서 계층에도 얹은 것). `design/design-contract`는 PM이 이번 실행에 하위 역할이 없을 때만 직접 쓸 수 있다는 조건이 있지만, `doc-save`는 이번 실행의 역할 목록을 알 방법이 없어 그 조건을 판정하지 않고 PM 작성을 허용한다.
+- `assertDocumentAuthority`는 design 3.4절 표를 stage/docType 조합별 허용 역할 표로 옮겨 `doc.author.role`을 검사하고(표에 없는 조합, 예: `06. 인도`의 `delivery-ref`는 표가 어느 역할에도 배정하지 않아 제한하지 않는다), 이미 존재하는 문서를 갱신할 때는 그 문서의 첫 revision을 쓴 실행만 다음 revision을 쓸 수 있는지 확인한다(`05. 수용`은 "PM 전용"일 뿐 특정 PM 실행에 고정되지 않으므로 예외이고, PL은 "배정 관련 필드만" 수정할 수 있어 문서 전체를 자기 것으로 고정하는 이 검사에서 예외다). `review/review-ref` 문서는 본문의 `reviewFileRef`가 `stateDir` 안의 실제 review 기록을 가리키면 그 기록의 `implementationExecutionId`가 이 문서의 `author.executionId`와 같은지 검사해, 같은 실행이 구현과 검토를 모두 맡은 문서를 거부한다(review.schema.json이 이미 강제하는 독립성 검사를 문서 계층에도 얹은 것). `design/design-contract`는 PM이 이번 실행에 하위 역할이 없을 때만 직접 쓸 수 있다는 로스터 조건이 있다(design 3.4.2절). `assertDocumentAuthority`는 이 조건을 판정하기 위해, PM이 `design/design-contract`를 쓰는 저장에서만 이번 실행의 역할 목록을 다음 두 갈래로 얻는다. `doc.workflowId`가 있으면 `readWorkflow`가 돌려주는 워크플로 스냅샷의 `state.roles`를(없으면 같은 스냅샷의 `organization`으로 `definedRoles`를 구해) 쓰고, 없으면 `doc-save`의 `--org`가 가리키는 조직 파일로 `definedRoles`를 구해 쓴다. `canonicalRole`로 정규화한 이 목록에 `pl`·`senior`·`junior` 가운데 하나라도 있으면 저장을 거부하며, `doc.workflowId`가 없는데 `--org`도 주어지지 않았거나 `--org`를 읽지 못하거나 `doc.workflowId`가 가리키는 워크플로가 없으면 이 조건을 판정하지 않고 저장 자체를 거부한다. 이 로스터 조건은 `design/design-contract`를 PM이 쓸 때만 판정되며, 다른 stage/docType 조합에는 적용되지 않는다.
+
+PL의 "배정 관련 필드만"이라는 수정 범위(design 3.4.3절)도 own-document 검사와 별도로 `assertDocumentAuthority`가 판정한다. own-document 검사 자체는 여전히 PL을 예외로 둬 PM이 쓴 첫 revision을 다른 실행의 PL이 이어 쓰는 정상 흐름을 막지 않지만, PL이 `implementation/workflow-task-ref` 또는 `implementation/integration-ref`의 다음 revision을 쓸 때는 직전 revision과 비교해 각 docType이 허용한 필드(`workflow-task-ref`는 `attemptRefs`, `integration-ref`는 `taskHashRef`·`extensionHistory`)만 달라야 저장을 허용한다. `revision`·`basedOnRevision`·`createdAt`·`author` 네 필드는 저장 계층이 강제하거나 호출마다 자연히 달라지는 값이라 비교에서 항상 제외하며, 비교는 `JSON.stringify` 동등 비교를 쓴다. 나머지 필드가 하나라도 다르면 거부한다.
 
 ## `review-record`/`gate-check`/`accept`/`merge-check`/`workflow-accept`의 `--org` 판정 절차
 
