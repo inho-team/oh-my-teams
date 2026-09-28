@@ -180,8 +180,8 @@ grep -rn "writeJSON(\|writeFileSync(\|appendFileSync(\|renameSync(" plugins/oh-m
 | 역할 | 작성 | 검토 | 수정 | 독립성 제약 |
 |---|---|---|---|---|
 | Director | `01. 기획`(kickoff-brief-ref), `07. 종료` | 없음(최종 `close`가 판정을 대체) | 자기가 쓴 문서만 | 이사만 `close`·병합을 수행한다는 조직 규칙을 그대로 따름 |
-| PM | `01. 기획`(kickoff 등록), `03. 구현`(workflow request), `05. 수용`. `02. 설계`는 `skills/pm/SKILL.md:46`("이번 실행에 하위 역할이 하나라도 있으면 PM은 최종 산출물을 직접 작성하지 않는다. 산출물은 그 일을 맡을 수 있는 가장 낮은 역할에게 배정한다")이 규정한 조건을 그대로 적용한다. 조건은 Senior의 유무가 아니라 "이번 실행에 하위 역할이 하나라도 있는지"이므로, Senior는 없지만 Junior만 있는 실행에서도 PM은 `02. 설계`를 직접 쓰지 않는다. 실제로 누가 맡는지(예: Junior가 초안을 쓰고 Senior 부재 시 PL·PM이 검토만 맡는지)는 이번 실행의 역할 목록과 각 역할 SKILL.md의 한계(`junior/SKILL.md`의 "구조를 이해해야 하는 설계 판단은 직접 결론 내리지 않는다")에 따라 배정 시점에 정해지며, 이 설계 문서는 배정 대상을 미리 고정하지 않는다. PM 직접 작성은 이번 실행의 역할 목록에 하위 역할이 하나도 없을 때만 허용한다 | 없음 | 자기가 쓴 문서, `05. 수용`은 PM 전용 | `acceptOutcomeLocked`가 요구하는 대로 모든 필요 review가 끝나야 작성 가능 |
-| PL | `03. 구현`(attempt 배정) | 없음(배정만) | 배정 관련 필드만 | Junior/Senior 산출물을 대신 승인하지 않음 |
+| PM | `01. 기획`(kickoff 등록), `03. 구현`(workflow request), `05. 수용`. `02. 설계`는 `skills/pm/SKILL.md:46`("이번 실행에 하위 역할이 하나라도 있으면 PM은 최종 산출물을 직접 작성하지 않는다. 산출물은 그 일을 맡을 수 있는 가장 낮은 역할에게 배정한다")이 규정한 조건을 그대로 적용한다. 조건은 Senior의 유무가 아니라 "이번 실행에 하위 역할이 하나라도 있는지"이므로, Senior는 없지만 Junior만 있는 실행에서도 PM은 `02. 설계`를 직접 쓰지 않는다. 실제로 누가 맡는지(예: Junior가 초안을 쓰고 Senior 부재 시 PL·PM이 검토만 맡는지)는 이번 실행의 역할 목록과 각 역할 SKILL.md의 한계(`junior/SKILL.md`의 "구조를 이해해야 하는 설계 판단은 직접 결론 내리지 않는다")에 따라 배정 시점에 정해지며, 이 설계 문서는 배정 대상을 미리 고정하지 않는다. PM 직접 작성은 이번 실행의 역할 목록에 하위 역할이 하나도 없을 때만 허용한다(판정에 쓸 입력의 출처와 입력이 없을 때의 거부 규칙은 3.4.2절이 확정한다) | 없음 | 자기가 쓴 문서, `05. 수용`은 PM 전용 | `acceptOutcomeLocked`가 요구하는 대로 모든 필요 review가 끝나야 작성 가능 |
+| PL | `03. 구현`(attempt 배정) | 없음(배정만) | 배정 관련 필드만(문서 유형별 필드 목록은 3.4.3절이 확정한다) | Junior/Senior 산출물을 대신 승인하지 않음 |
 | Senior | `02. 설계`, `03. 구현`(자기 배정분), `04. 검토`(다른 실행의 산출물) | `04. 검토` | 자기가 작성한 문서만, 검토 문서는 배정된 Senior만 | `senior/SKILL.md`의 "자신이 설계·작성한 변경을 독립 검토로 승인하지 않는다"는 한계를 그대로 반영해, 같은 실행 신원이 작성자이자 검토자인 문서는 거부한다(`implementationExecutionId !== reviewer.executionId` 검사를 문서 계층에도 적용) |
 | Junior | `03. 구현`(배정된 구현) | 없음 | 자기가 작성한 문서만 | 검토·수용 문서를 절대 갱신하지 않음(`junior/SKILL.md`의 한계와 동일) |
 
@@ -190,6 +190,30 @@ grep -rn "writeJSON(\|writeFileSync(\|appendFileSync(\|renameSync(" plugins/oh-m
 #### 3.4.1 호출자 신원 인증의 한계
 
 이 설계의 모든 권한·독립성 검사(`author.executionId`가 실제로 그 역할인지, `reviewer.executionId`가 구현자와 다른지)는 문서를 쓰는 프로세스가 스스로 밝힌 `executionId`가 진짜라는 전제 위에 있다. 이 전제는 새로 만드는 것이 아니라 기존 시스템이 이미 안고 있는 한계를 그대로 물려받는다. `references/orca-runtime.md:212`(「호출자 식별의 한계」 절)는 "호출한 터미널은 환경 변수 `ORCA_TERMINAL_HANDLE`로만 알 수 있고, 이 값이 진짜인지 증명하는 수단은 없다"고 명시하며, "위조를 막는 일은 Orca가 호출자를 인증하는 기능을 제공해야 가능하다"고 밝힌다. `skills/pl/SKILL.md:99`도 검증 캐시에 대해 "해시와 로그는 전송 무결성 확인이며 악의적 로컬 작성자를 인증하지는 않는다"고 같은 한계를 명시한다. 이 설계가 제안하는 문서 저장 계층의 권한 검사도 같은 성격이다. 즉 감독 관계가 없는 실행의 실수(다른 역할 폴더에 잘못 쓰는 시도 등)는 막지만, 같은 머신에서 `executionId`를 일부러 위조하는 프로세스는 막지 못한다. 이 설계는 Orca가 호출자를 인증하는 새 기능을 전제하지 않으며, 그런 기능을 이 kickoff 범위에서 새로 만들지도 않는다.
+
+#### 3.4.2 PM 로스터 조건의 입력과 판정
+
+3.4절 PM 행이 규정하는 로스터 조건("이번 실행의 역할 목록에 하위 역할이 하나도 없을 때만 PM이 `02. 설계`를 직접 쓸 수 있다", `skills/pm/SKILL.md:46`)은 doc-save가 받는 입력(`--state`, `--doc`)만으로는 판정할 수 없었다(`w2-05-cli-wiring-review-2.json`의 `design-contract-pm-roster-condition-unenforced` finding). 이 절은 그 판정에 쓸 입력의 출처와, 입력이 없거나 읽을 수 없을 때의 동작을 확정한다. 역할이나 실행 신원을 추정하는 규칙은 두지 않으며, 이미 기록된 값만 읽는다.
+
+"이번 실행의 역할 목록"은 새 개념이 아니라 `status.mjs`의 `runRoles`가 이미 같은 이름으로 판정하는 값이다. 워크플로가 있으면 그 워크플로가 현재 묶고 있는 역할 목록을, 없으면 조직이 선언한 전체 역할 목록을 쓴다는 것이 그 함수가 이미 세운 원칙이며, 이 절은 같은 원칙을 doc-save에도 그대로 적용한다.
+
+1. `doc.workflowId`가 있으면 `readWorkflow(stateDir, doc.workflowId)`(`workflow.mjs:343`)가 돌려주는 스냅샷을 쓴다. 스냅샷의 `state.roles`가 있으면(`setWorkflowDepth`가 depth를 바꿀 때마다 기록하는 값, `workflow.mjs:2042`) 그 값을 쓰고, 없으면 같은 스냅샷의 `organization` 필드로 `definedRoles(organization)`(`core.mjs:136-137`)을 구해서 쓴다. 워크플로 디렉터리는 생성 시점에 이미 조직 파일 사본을 갖고 있고(`createWorkflow`가 쓰는 `organization.json`, `workflow.mjs:302`) `readWorkflowSnapshot`이 그 사본을 다시 읽어 스냅샷의 `organization` 필드에 담으므로(`workflow-store.mjs:170`), 이 갈래는 doc-save에 새 CLI 인자를 요구하지 않는다.
+2. `doc.workflowId`가 없으면(설계 문서는 보통 워크플로가 만들어지기 전인 `02. 설계` 단계에서 쓰이므로 실제로는 이 갈래가 쓰인다) doc-save가 받는 `--org`로 조직 파일을 읽어 `definedRoles(org)`을 쓴다. 이 인자는 다른 CLI case가 게이트 판정에 이미 쓰는 `--org`(`resolveGateKickoffHash`)와 같은 성격의 선택 인자를 doc-save에도 추가한 것이며, 새 계약을 발명하지 않는다.
+
+두 갈래 가운데 어느 쪽으로도 역할 목록을 얻지 못하면, 즉 `doc.workflowId`가 없는데 `--org`도 주어지지 않았거나, 주어진 `--org`를 JSON으로 읽지 못하거나, `doc.workflowId`가 가리키는 워크플로가 존재하지 않으면, doc-save는 이 조건을 통과시키지 않고 저장 자체를 거부한다. 이는 `resolveGateKickoffHash`가 조직 파일을 읽지 못했을 때 예외를 던지고 대상 항목을 찾지 못했을 때 assert로 거부하는 것과 같은 fail-closed 원칙이며(3.7절 5번 항목), 새로 만든 예외가 아니다. 즉 입력이 없다는 사실은 PM 작성을 허용하는 근거가 아니라 저장을 거부하는 근거다.
+
+얻은 역할 목록을 `canonicalRole`(`core.mjs:47`)로 정규화했을 때 `pl`·`senior`·`junior` 가운데 하나라도 있으면, `author.role === "pm"`이고 `${stage}/${docType}`이 `design/design-contract`인 저장을 거부한다. 하나도 없으면 허용한다. 이 판정은 이미 기록된 `state.roles`와 조직의 `roles`만 읽으며, `executionId`가 실제로 그 역할인지, 이번 실행이 그 역할을 정말로 수행 중인지는 확인하지 않는다. 3.4.1절이 인정하는 호출자 신원 한계를 그대로 물려받는다.
+
+#### 3.4.3 PL 필드 단위 수정 범위
+
+3.4절 PL 행이 규정하는 "배정 관련 필드만"이라는 수정 범위는, PL이 own-document 검사의 예외로 작성 권한을 갖는 `03. 구현`의 두 문서 유형(`workflow-task-ref`, `integration-ref`) 각각에서 3.2절 본문 스키마의 필드 이름으로 다음과 같이 고정한다(`pl-field-scope-restriction-unenforced` finding).
+
+- `implementation/workflow-task-ref`: `attemptRefs`만. `document-workflow-task-ref.schema.json`의 `$comment`가 `workflowRef`는 "written once and immutable"로, `taskRef`는 "append-only per revision"(대상 자체가 새 revision을 추가할 뿐 이 필드가 가리키는 값은 그 시점에 고정된다)으로, `designRef`는 한 kickoff에 하나뿐인 설계 문서를 가리키는 필수 키로 각각 밝혀, 셋 다 문서의 정체성에 속한다. `attemptRefs`만 `workflow-reserve`가 발급하는 `attemptId`(3.13절)를 담아 PL이 attempt를 배정할 때마다 바뀌는 필드다.
+- `implementation/integration-ref`: `taskHashRef`와 `extensionHistory[]` 두 필드만. `document-integration-ref.schema.json`의 `$comment`가 "One entry per extendIntegrationChecks call"이라고 밝히듯, 하나의 `extendIntegrationChecks` 호출이 이 둘을 함께 갱신하므로 둘을 분리하지 않는다. `integrationTaskRef`는 3.7절 7번 항목이 이 문서의 `localId`로 고정한, 통합 task 자신의 id이므로 다음 revision에서 바뀌면 안 된다.
+
+판정 규칙은 다음과 같다. PL이 쓰는 다음 revision에서 위에 나열한 필드를 제외한 나머지 모든 봉투·본문 필드가 직전 revision과 완전히 같아야 저장을 허용하고, 하나라도 다르면 거부한다. 동등성 비교는 `JSON.stringify(직전 값) === JSON.stringify(다음 값)` 관용구를 쓴다. 이는 새 deep-equal 구현이 아니라 이 저장소가 이미 쓰는 비교 방식(`gates.mjs:342`, `evidence.mjs:366`, `evidence.mjs:422`, `workflow-store.mjs:20`)을 그대로 재사용한 것이며, AGENTS.md의 "런타임에서 강제하는 값이나 검사 로직을 스킬 문서에 중복해서 선언하지 않는다"는 원칙과도 같은 방향이다.
+
+이 규칙은 PL이 이미 작성 권한을 가진 두 docType 안에서만 적용된다. `DOCUMENT_AUTHOR_ROLES`는 여전히 다른 docType에 `pl`을 배정하지 않으므로 이 규칙이 PL의 상위 작성 권한 경계를 넓히지 않으며, own-document 검사를 없애는 것이 아니라 그 예외 범위를 "문서 전체"에서 위에 나열한 필드로 좁히는 것이다.
 
 ### 3.5 경로와 독립된 문서 식별자
 
@@ -418,6 +442,8 @@ Orca 자체의 Goal/Run/Task/Dispatch 판정, 정산 로직은 오케스트레�
 |---|---|---|
 | 정상 생성·참조·갱신 | `01. 기획` → `07. 종료`까지 정상 흐름으로 문서를 만들고 서로 참조할 때 모두 성공한다 | 기본 동작 |
 | 권한 없는 수정 | Junior가 `04. 검토` 문서를, Senior가 자신이 작성한 `02. 설계`를 스스로 승인하는 시도가 거부된다 | 3.4절 |
+| PM 로스터 조건 | 이번 실행의 역할 목록(`doc.workflowId`가 있으면 그 워크플로 스냅샷의 `state.roles`/`organization`, 없으면 `--org`)에 `pl`·`senior`·`junior` 가운데 하나라도 있으면 PM의 `design/design-contract` 저장이 거부되고, 하나도 없으면 성공한다. `doc.workflowId`가 없는데 `--org`도 없거나 `--org`를 읽지 못하면, 또는 `doc.workflowId`가 가리키는 워크플로가 없으면 이 조건을 판정하지 않고 저장 자체가 거부된다 | 3.4절, 3.4.2절 |
+| PL 필드 단위 수정 범위 | PL이 `workflow-task-ref`의 `attemptRefs`만 바꾼 다음 revision은 성공하고, 같은 revision에서 `workflowRef`·`taskRef`·`designRef` 가운데 하나라도 함께 바뀌면 거부된다. `integration-ref`는 `taskHashRef`·`extensionHistory` 외의 필드(`integrationTaskRef`)가 함께 바뀌면 거부된다 | 3.4절, 3.4.3절 |
 | 오래된 revision | `expectedRevision`이 현재보다 낮은 값으로 갱신을 시도하면 거부된다 | 3.7절 |
 | 깨진 참조 | 존재하지 않는 `docId`를 가리키는 `*Ref`가 저장 시 거부된다 | 3.6절 |
 | 다른 kickoff 참조 | 다른 `kickoffHash`의 문서를 가리키는 참조가 거부된다 | 3.6절 |
