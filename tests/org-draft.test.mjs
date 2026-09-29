@@ -64,14 +64,13 @@ test("a draft spends nothing beyond the models the user chose", () => {
   });
   // Formation asks for models only. Anything else it saved without asking has
   // to be the least costly value, so a user who never opens adjust is never
-  // billed for a fallback, a parallel slot, or an assistant they did not pick.
+  // billed for a fallback or a parallel slot they did not pick.
   for (const binding of Object.values(org.roles)) {
     assert.equal(binding.concurrency, DRAFT_DEFAULTS.concurrency);
     assert.equal(binding.attempts, 1);
     assert.deepEqual(binding.fallbacks, []);
   }
   assert.equal(org.policy.onExhaustion, "stop");
-  assert.equal(org.assistants, undefined);
 
   // Effort is left to each CLI until adjust sets it.
   for (const profile of Object.values(org.profiles)) {

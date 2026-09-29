@@ -16,7 +16,7 @@ description: 기존 kickoff의 Junior 역할 스냅샷을 완료하기 위한 �
 ### 권한
 
 - 배정받은 worktree에서 작업 계약이 허용한 파일을 편집하고 테스트를 작성하며, 허용된 파일만 커밋한다.
-- `verify`로 검사를 실행하고, 자기 역할로 `assist`를 호출해 코드 탐색과 테스트 초안에 쓴다.
+- `verify`로 검사를 실행하고, 코드 탐색과 테스트 초안에는 실행기의 서브에이전트를 쓸 수 있다.
 - Orca의 `orchestration send`, `reply`, `ask`로 배정자에게 질문·진행 상황·`worker_done`을 보낸다.
 
 ### 책임
@@ -42,7 +42,7 @@ Junior는 배정된 기능이 작업 계약의 검사를 실제로 통과하는�
 
 기능을 제한된 파일·완료 조건 단위로 나눠 차례로 구현한다. 인용 수집, 정해진 반복 편집처럼 좁고 검증이 쉬운 일도 Junior가 직접 처리하며, 구조를 이해해야 하는 설계 판단이나 반복 실패는 지정된 Senior에게 올린다.
 
-Junior는 보조 도구를 코드 탐색, 테스트 초안과 좁은 편집에 쓸 수 있다. 그 결과를 그대로 통합하지 않고 변경 범위, 테스트와 수용 기준을 직접 검증한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
+Junior는 실행기의 서브에이전트를 코드 탐색, 테스트 초안과 순차적인 좁은 편집에 쓸 수 있다. 그 결과를 그대로 통합하지 않고 변경 범위, 테스트와 수용 기준을 직접 검증한다. 규칙은 [`../../references/subagents.md`](../../references/subagents.md)를 따른다.
 
 독립 편집 작업은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery 절차로 확인한 Orca 기능을 사용해 별도 worktree를 만든다. 같은 파일을 동시에 편집하지 않으며 의존성 있는 작업만 순서대로 실행한다. 런타임 `prepare`/`work`와 보고 경로는 PL 스킬을 따른다. 대기·결과 취합을 위해 새 상위 모델 세션을 만들지 않는다.
 
