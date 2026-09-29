@@ -69,6 +69,7 @@ import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
 import {
   auditAccept,
   auditChecked,
+  pickDeclaredIdentity,
   auditObjection,
   auditResponse,
   auditRuling,
@@ -3387,6 +3388,7 @@ export async function executeCommand(args, execute) {
     case "requirements-fidelity-confirm":
       return requirementsFidelityConfirm(args.org, args.worktree);
     case "audit-objection": {
+      const payload = readJSON(args.from);
       const {
         checkpoint,
         target,
@@ -3395,7 +3397,7 @@ export async function executeCommand(args, execute) {
         rebuttalRequested,
         resultHead,
         repo,
-      } = readJSON(args.from);
+      } = payload;
       return auditObjection(args.org, args.worktree, {
         checkpoint,
         target,
@@ -3404,6 +3406,7 @@ export async function executeCommand(args, execute) {
         rebuttalRequested,
         resultHead,
         repo,
+        declared: pickDeclaredIdentity(payload),
       });
     }
     case "audit-response": {
@@ -3434,30 +3437,38 @@ export async function executeCommand(args, execute) {
       // until B.6's process-lineage binding lands, and the trusted script's
       // own integrity (its app bundle, owned by that same OS user) is not
       // verified either.
-      const { checkpoint, objectionId, argument, evidenceRefs } = readJSON(
-        args.from,
-      );
+      const payload = readJSON(args.from);
+      const { checkpoint, objectionId, argument, evidenceRefs } = payload;
       return auditResponse(args.org, args.worktree, {
         checkpoint,
         objectionId,
         argument,
         evidenceRefs,
+        declared: pickDeclaredIdentity(payload),
       });
     }
     case "audit-ruling": {
+      const payload = readJSON(args.from);
       const { checkpoint, objectionId, respondedAgainst, verdict, reason } =
-        readJSON(args.from);
+        payload;
       return auditRuling(args.org, args.worktree, {
         checkpoint,
         objectionId,
         respondedAgainst,
         verdict,
         reason,
+        declared: pickDeclaredIdentity(payload),
       });
     }
     case "audit-checked": {
-      const { checked } = readJSON(args.from);
-      return auditChecked(args.org, args.worktree, args.checkpoint, checked);
+      const payload = readJSON(args.from);
+      return auditChecked(
+        args.org,
+        args.worktree,
+        args.checkpoint,
+        payload.checked,
+        pickDeclaredIdentity(payload),
+      );
     }
     case "audit-accept":
       return auditAccept(

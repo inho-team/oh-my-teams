@@ -40,8 +40,11 @@ import {
   auditChecked,
   auditObjection,
   auditResponse,
+  assertDeclaredIdentity,
   auditRuling,
+  hasUnresolvedObjections,
   hasValidAcceptance,
+  pickDeclaredIdentity,
   isPmBoundToRun,
   readAudit,
   verifiedPm,
@@ -4567,3 +4570,364 @@ test(
     );
   },
 );
+
+// D3 (checklist 7, finding d3-no-verified-caller): every objection, response,
+// ruling and checked item stores the runtime-verified caller, and a payload
+// that declares a different identity is refused before anything is recorded.
+const BRIEF_ITEMS = [
+  { type: "statement", id: "s1" },
+  { type: "criterion", id: "c1" },
+];
+
+async function d3BriefObjection(fixture) {
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "brief",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 is not clearly derived from the brief",
+      rebuttalRequested: "point to the brief section it comes from",
+    }),
+  );
+  return readAudit(
+    fixture.org,
+    fixture.worktreeId,
+  ).checkpoints.brief.objections.at(-1).id;
+}
+
+function d3ResponseRequest(fixture, objectionId, extra = {}) {
+  const evidencePath = "d3-evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "brief section 2\n");
+  return {
+    checkpoint: "brief",
+    objectionId,
+    argument: "c1 traces to brief section 2",
+    evidenceRefs: [
+      {
+        path: evidencePath,
+        sha256: fileSha256(path.join(fixture.dir, evidencePath)),
+      },
+    ],
+    ...extra,
+  };
+}
+
+function d3WriteRequest(fixture, name, body) {
+  const file = path.join(fixture.dir, `${name}.json`);
+  fs.writeFileSync(file, JSON.stringify(body));
+  return file;
+}
+
+function d3RunAudit(
+  fixture,
+  command,
+  requestFile,
+  { handle, cwd, extra = [] },
+) {
+  return runCli(
+    [
+      command,
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      ...extra,
+      "--from",
+      requestFile,
+    ],
+    { cwd: cwd ?? fixture.dir, env: { ORCA_TERMINAL_HANDLE: handle ?? null } },
+  );
+}
+
+function d3Counts(fixture, checkpoint = "brief") {
+  const record = readAudit(fixture.org, fixture.worktreeId).checkpoints[
+    checkpoint
+  ];
+  return {
+    objections: record.objections.length,
+    responses: record.responses.length,
+    rulings: record.rulings.length,
+    checked: record.checked.length,
+  };
+}
+
+test("D3 (a,b): objection, response, ruling and checked items each store the runtime-verified caller", async (t) => {
+  const fixture = kickoff(t);
+  const objectionId = await d3BriefObjection(fixture);
+  const { audit } = await withCwd(fixture.dir, () =>
+    auditResponse(
+      fixture.org,
+      fixture.worktreeId,
+      d3ResponseRequest(fixture, objectionId),
+    ),
+  );
+  const responseId = audit.checkpoints.brief.responses.at(-1).id;
+  await withOrcaHandle(fixture.auditorHandle, async () => {
+    await auditRuling(fixture.org, fixture.worktreeId, {
+      checkpoint: "brief",
+      objectionId,
+      respondedAgainst: responseId,
+      verdict: "persuaded",
+      reason: "evidence supports the claim",
+    });
+    await auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS);
+  });
+  const record = readAudit(fixture.org, fixture.worktreeId).checkpoints.brief;
+  const auditor = { role: AUDITOR_ROLE, handle: fixture.auditorHandle };
+  assert.deepEqual(record.objections[0].verifiedCaller, auditor);
+  assert.deepEqual(record.responses[0].verifiedCaller, {
+    role: "director",
+    checkoutPath: fixture.dir,
+  });
+  assert.deepEqual(record.rulings[0].verifiedCaller, auditor);
+  assert.deepEqual(
+    record.checked.map(({ type, id, verifiedCaller }) => ({
+      type,
+      id,
+      verifiedCaller,
+    })),
+    BRIEF_ITEMS.map((item) => ({ ...item, verifiedCaller: auditor })),
+  );
+});
+
+test("D3 (a): the outcome checkpoint's objection and ruling store the verified auditor too", async (t) => {
+  const fixture = kickoff(t);
+  fs.writeFileSync(path.join(fixture.dir, "evidence.txt"), "proof\n");
+  await objectAndResolve(fixture, {
+    resultHead: fixture.head,
+    evidencePath: "evidence.txt",
+  });
+  const record = readAudit(fixture.org, fixture.worktreeId).checkpoints.outcome;
+  const auditor = { role: AUDITOR_ROLE, handle: fixture.auditorHandle };
+  assert.deepEqual(record.objections[0].verifiedCaller, auditor);
+  assert.deepEqual(record.rulings[0].verifiedCaller, auditor);
+});
+
+test("D3 (c): a narrower or different-auditor re-send keeps each existing checked item's type:id and first verifiedCaller", async (t) => {
+  const fixture = kickoff(t);
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS),
+  );
+  const before = readAudit(fixture.org, fixture.worktreeId).checkpoints.brief
+    .checked;
+  const second = "term_auditor_second";
+  recordLaunch(fixture.org, {
+    via: "role-terminal",
+    role: AUDITOR_ROLE,
+    terminal: second,
+    stateDir: fixture.entry.pm.stateDir,
+  });
+  await withOrcaHandle(second, () =>
+    auditChecked(fixture.org, fixture.worktreeId, "brief", [BRIEF_ITEMS[0]]),
+  );
+  assert.deepEqual(
+    readAudit(fixture.org, fixture.worktreeId).checkpoints.brief.checked,
+    before,
+  );
+  await withOrcaHandle(second, () =>
+    auditChecked(fixture.org, fixture.worktreeId, "brief", [
+      ...BRIEF_ITEMS,
+      { type: "criterion", id: "c2" },
+    ]),
+  );
+  const after = readAudit(fixture.org, fixture.worktreeId).checkpoints.brief
+    .checked;
+  assert.deepEqual(after.slice(0, 2), before);
+  assert.deepEqual(after[2], {
+    type: "criterion",
+    id: "c2",
+    verifiedCaller: { role: AUDITOR_ROLE, handle: second },
+  });
+});
+
+test("D3 (d): a --from payload declaring another identity is refused by each audit CLI command with no record added", async (t) => {
+  const fixture = kickoff(t);
+  const objectionId = await d3BriefObjection(fixture);
+  const forged = {
+    actor: "term_someone_else",
+    raisedBy: { role: AUDITOR_ROLE, handle: "term_someone_else" },
+  };
+  const responseFile = d3WriteRequest(
+    fixture,
+    "d3-response",
+    d3ResponseRequest(fixture, objectionId, { respondedBy: "term_pm_forged" }),
+  );
+  const objectionFile = d3WriteRequest(fixture, "d3-objection", {
+    checkpoint: "brief",
+    target: { type: "criterion", id: "c1" },
+    kind: "gap",
+    description: "another gap",
+    rebuttalRequested: "explain it",
+    ...forged,
+  });
+  const checkedFile = d3WriteRequest(fixture, "d3-checked", {
+    checked: BRIEF_ITEMS,
+    terminal: "term_someone_else",
+  });
+  const before = d3Counts(fixture);
+  const refusals = [
+    d3RunAudit(fixture, "audit-objection", objectionFile, {
+      handle: fixture.auditorHandle,
+    }),
+    d3RunAudit(fixture, "audit-response", responseFile, {}),
+    d3RunAudit(fixture, "audit-checked", checkedFile, {
+      handle: fixture.auditorHandle,
+      extra: ["--checkpoint", "brief"],
+    }),
+  ];
+  for (const refused of refusals) {
+    assert.notEqual(refused.code, 0, refused.stdout);
+    assert.match(refused.stderr, /does not match the runtime-verified caller/);
+  }
+  assert.deepEqual(d3Counts(fixture), before);
+
+  const { audit } = await withCwd(fixture.dir, () =>
+    auditResponse(
+      fixture.org,
+      fixture.worktreeId,
+      d3ResponseRequest(fixture, objectionId),
+    ),
+  );
+  const rulingFile = d3WriteRequest(fixture, "d3-ruling", {
+    checkpoint: "brief",
+    objectionId,
+    respondedAgainst: audit.checkpoints.brief.responses.at(-1).id,
+    verdict: "persuaded",
+    reason: "evidence supports the claim",
+    verifiedCaller: { role: AUDITOR_ROLE, handle: "term_someone_else" },
+  });
+  const beforeRuling = d3Counts(fixture);
+  const refusedRuling = d3RunAudit(fixture, "audit-ruling", rulingFile, {
+    handle: fixture.auditorHandle,
+  });
+  assert.notEqual(refusedRuling.code, 0, refusedRuling.stdout);
+  assert.match(
+    refusedRuling.stderr,
+    /does not match the runtime-verified caller/,
+  );
+  assert.deepEqual(d3Counts(fixture), beforeRuling);
+});
+
+test("D3 (d): the PM-role (outcome) and director-role (brief) checks refuse a mismatched declared identity, reached without a real Orca", () => {
+  const pm = { role: "pm", handle: "term_pm_real" };
+  const director = { role: "director", checkoutPath: "/checkout/real" };
+  for (const [declared, caller] of [
+    [{ respondedBy: "term_pm_forged" }, pm],
+    [{ actor: { role: "pm", handle: "term_pm_forged" } }, pm],
+    [{ verifiedCaller: { role: "director", handle: "term_pm_real" } }, pm],
+    [{ respondedBy: "/checkout/other" }, director],
+    [{ actor: {} }, director],
+    [{ actor: 7 }, director],
+    [{ terminal: "" }, pm],
+  ]) {
+    assert.throws(
+      () => assertDeclaredIdentity(declared, caller),
+      /does not match the runtime-verified caller/,
+      JSON.stringify(declared),
+    );
+  }
+  assert.throws(
+    () =>
+      assertDeclaredIdentity(pickDeclaredIdentity({ actor: "x" }), {
+        role: "pm",
+        handle: "y",
+      }),
+    /does not match/,
+  );
+});
+
+test("D3 (e): a payload declaring exactly the verified identity is accepted and only the verified value is stored", async (t) => {
+  const fixture = kickoff(t);
+  const objectionFile = d3WriteRequest(fixture, "d3-objection-ok", {
+    checkpoint: "brief",
+    target: { type: "criterion", id: "c1" },
+    kind: "gap",
+    description: "criterion c1 is not clearly derived from the brief",
+    rebuttalRequested: "point to the brief section it comes from",
+    actor: fixture.auditorHandle,
+    verifiedCaller: { role: AUDITOR_ROLE, handle: fixture.auditorHandle },
+  });
+  const accepted = d3RunAudit(fixture, "audit-objection", objectionFile, {
+    handle: fixture.auditorHandle,
+  });
+  assert.equal(accepted.code, 0, accepted.stderr);
+  const [objection] = readAudit(fixture.org, fixture.worktreeId).checkpoints
+    .brief.objections;
+  assert.deepEqual(objection.verifiedCaller, {
+    role: AUDITOR_ROLE,
+    handle: fixture.auditorHandle,
+  });
+  assert.equal(Object.hasOwn(objection, "actor"), false);
+  assert.equal(Object.hasOwn(objection, "raisedBy"), false);
+  assert.deepEqual(
+    pickDeclaredIdentity({ checkpoint: "brief", actor: "a", x: 1 }),
+    { actor: "a" },
+  );
+});
+
+test("D3 (f): audit records written before verifiedCaller existed stay valid per judgement function, and rewriting never invents one", async (t) => {
+  const fixture = kickoff(t);
+  const objectionId = await d3BriefObjection(fixture);
+  const { audit } = await withCwd(fixture.dir, () =>
+    auditResponse(
+      fixture.org,
+      fixture.worktreeId,
+      d3ResponseRequest(fixture, objectionId),
+    ),
+  );
+  await withOrcaHandle(fixture.auditorHandle, async () => {
+    await auditRuling(fixture.org, fixture.worktreeId, {
+      checkpoint: "brief",
+      objectionId,
+      respondedAgainst: audit.checkpoints.brief.responses.at(-1).id,
+      verdict: "persuaded",
+      reason: "evidence supports the claim",
+    });
+    await auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS);
+    await auditAccept(fixture.org, fixture.worktreeId, "brief");
+  });
+  const legacy = readAudit(fixture.org, fixture.worktreeId);
+  const brief = legacy.checkpoints.brief;
+  for (const list of [
+    brief.objections,
+    brief.responses,
+    brief.rulings,
+    brief.checked,
+  ]) {
+    for (const item of list) delete item.verifiedCaller;
+  }
+  writeJSON(auditFilePath(fixture.org, fixture.worktreeId), legacy);
+
+  assert.equal(
+    hasUnresolvedObjections(fixture.org, fixture.worktreeId, "brief"),
+    false,
+  );
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "brief"),
+    true,
+  );
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS),
+  );
+  const rewritten = readAudit(fixture.org, fixture.worktreeId).checkpoints
+    .brief;
+  assert.deepEqual(rewritten.checked, BRIEF_ITEMS);
+  assert.equal(rewritten.objections[0].verifiedCaller, undefined);
+  assert.equal(rewritten.responses[0].verifiedCaller, undefined);
+  assert.equal(rewritten.rulings[0].verifiedCaller, undefined);
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "brief"),
+    true,
+  );
+});
+
+test("D3 (g): a PM-shaped or unlaunched handle still cannot record an auditor-only command", async (t) => {
+  const fixture = kickoff(t);
+  await assert.rejects(
+    withOrcaHandle(fixture.pmHandle, () =>
+      auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS),
+    ),
+    /is not the auditor terminal launched/,
+  );
+  assert.equal(d3Counts(fixture).checked, 0);
+});

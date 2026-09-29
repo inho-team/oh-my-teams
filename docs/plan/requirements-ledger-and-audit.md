@@ -374,7 +374,7 @@ if (command.role === AUDITOR_ROLE) {
 
 이 검증에는 **어느 저장소의 HEAD와 대조할지**가 필요하므로, 위 함수들은 모두 호출자가 명시하는 `repo` 인자(또는 request 필드)를 받는다 — `kickoff-registry.mjs`의 `entry.pm.path`(PM 워크트리)에서 자동으로 유도하지 않는다. PM이 브리프를 작성·조율하는 워크트리와 실제 구현이 이루어지는 워크트리(예: 이 문서를 담고 있는 `139-auditor-impl` 같은 작업 워크트리)가 서로 다를 수 있기 때문에, 자동 유도는 엉뚱한 저장소의 HEAD와 대조하는 결함으로 이어진다. `repo`를 채우는 방식(CLI의 `process.cwd()` 기본값 vs `--repo` 신규 인자)은 아직 CLI 배선 시점의 결정 사항으로 남아 있다.
 
-`objections`·`responses`·`rulings`는 각각 `id`/`objectionId`/`respondedAgainst`로 연결된다. `raisedBy`/`respondedBy` 같은 자기선언 필드는 두지 않는다 — 신원은 **호출자의 `process.env.ORCA_TERMINAL_HANDLE`을 런타임이 매 호출마다 확인해서** 별도로 부여한다(B.6). 기록에는 신원 확인 결과만 요약해 남긴다(예: `verifiedCaller: "auditor"|"pm"|"director"`).
+`objections`·`responses`·`rulings`는 각각 `id`/`objectionId`/`respondedAgainst`로 연결된다. `raisedBy`/`respondedBy` 같은 자기선언 필드는 두지 않는다 — 신원은 **호출자의 `process.env.ORCA_TERMINAL_HANDLE`을 런타임이 매 호출마다 확인해서** 별도로 부여한다(B.6). 기록에는 신원 확인 결과만 `verifiedCaller` 객체로 남긴다. 감사관(objection·ruling·checked 항목)과 PM(outcome response)은 `{role, handle}`, 이사(brief response)는 `{role: "director", checkoutPath}`이며, 값은 항상 런타임이 확인한 것이다. `--from` JSON 본문이 `actor`·`raisedBy`·`respondedBy`·`ruledBy`·`verifiedCaller`·`terminal` 중 하나로 신원을 선언하면, 검증값(handle 또는 checkoutPath, 또는 role·handle·checkoutPath가 모두 같은 객체)과 다를 때 기록 전에 거부한다. 같아도 선언값은 저장하지 않는다. `checked` 항목은 새 항목에만 `verifiedCaller`를 붙이고, 이미 기록된 항목의 `type:id`와 최초 `verifiedCaller`는 이후 호출이 바꾸거나 줄이지 못한다. 이 필드가 생기기 전에 쓴 기록에는 `verifiedCaller`가 없으며, 그대로 유효하게 읽고 다시 쓸 때에도 지어 넣지 않는다.
 
 ### B.4 이의·응답·판정 수용 규칙(수용 기준 `audit-persuasion`; 보충 계약 3 4항)
 

@@ -383,8 +383,9 @@ export async function verifiedPm(orgFile, worktreeId) {
  * @param {string} request.rebuttalRequested - What would resolve it.
  * @param {string} [request.resultHead] - Result HEAD; required for "outcome".
  * @param {string} [request.repo] - Workspace `resultHead` is checked against; required for "outcome".
+ * @param {object} [request.declared] - Identity fields the caller's payload declared; see `assertDeclaredIdentity`.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
- * @throws {Error} When identity fails or the request is malformed.
+ * @throws {Error} When identity fails, a declared identity differs from the verified one, or the request is malformed.
  */
 export async function auditObjection(
   orgFile,
@@ -397,6 +398,7 @@ export async function auditObjection(
     rebuttalRequested,
     resultHead,
     repo,
+    declared,
   },
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
@@ -418,6 +420,7 @@ export async function auditObjection(
     role: AUDITOR_ROLE,
     handle: verifiedAuditor(orgFile, worktreeId),
   };
+  assertDeclaredIdentity(declared, verifiedCaller);
   const ledger = requireLedger(orgFile, worktreeId);
   return withAudit(orgFile, worktreeId, async (audit) => {
     const record = audit.checkpoints[checkpoint];
@@ -458,13 +461,14 @@ export async function auditObjection(
  * @param {string} request.objectionId - Objection being answered.
  * @param {string} request.argument - Substantive argument, not a bare claim of completion.
  * @param {{path: string, sha256: string}[]} request.evidenceRefs - Cited evidence.
+ * @param {object} [request.declared] - Identity fields the caller's payload declared; see `assertDeclaredIdentity`.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails, the objection is unknown, or fields are missing.
  */
 export async function auditResponse(
   orgFile,
   worktreeId,
-  { checkpoint, objectionId, argument, evidenceRefs },
+  { checkpoint, objectionId, argument, evidenceRefs, declared },
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
@@ -491,6 +495,7 @@ export async function auditResponse(
     await verifiedPm(orgFile, worktreeId);
     verifiedCaller = { role: "pm", handle: process.env.ORCA_TERMINAL_HANDLE };
   }
+  assertDeclaredIdentity(declared, verifiedCaller);
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];
     assert(
@@ -525,13 +530,14 @@ export async function auditResponse(
  * @param {string} request.respondedAgainst - Response id the ruling addresses; must be the latest.
  * @param {string} request.verdict - "persuaded" or "not-persuaded".
  * @param {string} request.reason - Why.
+ * @param {object} [request.declared] - Identity fields the caller's payload declared; see `assertDeclaredIdentity`.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails, or the ruling targets a stale response.
  */
 export async function auditRuling(
   orgFile,
   worktreeId,
-  { checkpoint, objectionId, respondedAgainst, verdict, reason },
+  { checkpoint, objectionId, respondedAgainst, verdict, reason, declared },
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
@@ -543,6 +549,7 @@ export async function auditRuling(
     role: AUDITOR_ROLE,
     handle: verifiedAuditor(orgFile, worktreeId),
   };
+  assertDeclaredIdentity(declared, verifiedCaller);
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];
     const latest = latestResponse(record, objectionId);
@@ -578,9 +585,17 @@ export async function auditRuling(
  * @param {string} worktreeId - PM worktree of the kickoff under audit.
  * @param {string} checkpoint - "brief" or "outcome".
  * @param {{type: string, id: string}[]} checked - Items checked.
+ * @param {object} [declared] - Identity fields the caller's payload declared; see `assertDeclaredIdentity`.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
+ * @throws {Error} When identity fails or a declared identity differs from the verified one.
  */
-export async function auditChecked(orgFile, worktreeId, checkpoint, checked) {
+export async function auditChecked(
+  orgFile,
+  worktreeId,
+  checkpoint,
+  checked,
+  declared,
+) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
     Array.isArray(checked) &&
@@ -590,7 +605,11 @@ export async function auditChecked(orgFile, worktreeId, checkpoint, checked) {
       ),
     "checked must be a {type, id} array",
   );
-  verifiedAuditor(orgFile, worktreeId);
+  const verifiedCaller = {
+    role: AUDITOR_ROLE,
+    handle: verifiedAuditor(orgFile, worktreeId),
+  };
+  assertDeclaredIdentity(declared, verifiedCaller);
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];
     // Merged, not overwritten (D3): a later call naming a narrower set of
@@ -600,12 +619,81 @@ export async function auditChecked(orgFile, worktreeId, checkpoint, checked) {
     const merged = new Map(
       record.checked.map((item) => [`${item.type}:${item.id}`, item]),
     );
-    for (const item of checked) merged.set(`${item.type}:${item.id}`, item);
+    // An item already on record keeps its first verifiedCaller; only a new
+    // item is stamped, so a later call can neither shrink coverage nor
+    // re-attribute what an earlier call recorded. Items recorded before this
+    // field existed stay without it and are never given one retroactively.
+    for (const item of checked) {
+      const key = `${item.type}:${item.id}`;
+      if (!merged.has(key)) {
+        merged.set(key, { type: item.type, id: item.id, verifiedCaller });
+      }
+    }
     record.checked = [...merged.values()];
     const file = auditFile(orgFile, worktreeId);
     writeJSON(file, audit);
     return { recorded: true, audit };
   });
+}
+
+const DECLARED_IDENTITY_FIELDS = [
+  "actor",
+  "raisedBy",
+  "respondedBy",
+  "ruledBy",
+  "verifiedCaller",
+  "terminal",
+];
+const VERIFIED_CALLER_KEYS = ["role", "handle", "checkoutPath"];
+
+/**
+ * Picks the self-declared identity fields out of a CLI payload. Identity is
+ * always taken from the runtime's own verification (B.3), so these fields are
+ * never stored; they are only compared by `assertDeclaredIdentity`.
+ *
+ * @param {object} payload - Parsed `--from` JSON body.
+ * @returns {object} The declared identity fields the payload carries, if any.
+ */
+export function pickDeclaredIdentity(payload) {
+  const declared = {};
+  for (const field of DECLARED_IDENTITY_FIELDS) {
+    if (payload && Object.hasOwn(payload, field))
+      declared[field] = payload[field];
+  }
+  return declared;
+}
+
+/**
+ * Rejects a record write whose payload declares an identity that is not the
+ * one the runtime verified. A declared value matches only as the verified
+ * handle or checkout path, or as an object whose role/handle/checkoutPath all
+ * equal the verified caller's. Nothing declared is ever stored.
+ *
+ * @param {object} [declared] - Result of `pickDeclaredIdentity`.
+ * @param {{role: string, handle?: string, checkoutPath?: string|null}} verifiedCaller - Runtime-verified caller.
+ * @returns {void}
+ * @throws {Error} When any declared identity field differs from the verified caller.
+ */
+export function assertDeclaredIdentity(declared, verifiedCaller) {
+  for (const [field, value] of Object.entries(declared ?? {})) {
+    const matches =
+      typeof value === "string"
+        ? value !== "" &&
+          (value === verifiedCaller.handle ||
+            value === verifiedCaller.checkoutPath)
+        : value !== null &&
+          typeof value === "object" &&
+          Object.keys(value).length > 0 &&
+          Object.keys(value).every(
+            (key) =>
+              VERIFIED_CALLER_KEYS.includes(key) &&
+              value[key] === verifiedCaller[key],
+          );
+    assert(
+      matches,
+      `Declared ${field} does not match the runtime-verified caller (${verifiedCaller.role}); identity is never taken from the payload`,
+    );
+  }
 }
 
 function checkedCovers(checked, ledger) {
