@@ -77,10 +77,30 @@ function workerWorkspace(row) {
   return row?.projection?.workspace?.id ?? row?.resource?.worktreeId ?? null;
 }
 
+function workerInCandidate(row, id, location) {
+  const workspace = workerWorkspace(row);
+  return (
+    workspace === id ||
+    (location && workspace === location) ||
+    (location &&
+      typeof workspace === "string" &&
+      workspace.endsWith(`::${location}`))
+  );
+}
+
 function cleanWorker(row) {
   return (
     row?.projection?.liveness?.verdict === "exited" &&
     row.terminalState === "released"
+  );
+}
+
+function settledContextDispatch(row) {
+  return (
+    row?.workerState === "unsupervised" &&
+    ["completed", "failed"].includes(row.dispatchStatus) &&
+    row.terminalState === "retained" &&
+    row.projection?.liveness?.reason === "unsupervised_settled"
   );
 }
 
@@ -170,7 +190,9 @@ export function evaluateKickoffCleanup(entry, observed) {
       null;
     const gitState = observed.git?.[id] ?? null;
     const attached = terminals.filter((terminal) => terminal.worktreeId === id);
-    const assigned = workers.filter((worker) => workerWorkspace(worker) === id);
+    const assigned = workers.filter((worker) =>
+      workerInCandidate(worker, id, location),
+    );
     const reasons = [];
     if (!inventoryComplete) reasons.push("inventory-incomplete");
     if (!item) reasons.push("orca-worktree-unlisted");
@@ -294,6 +316,74 @@ async function gitObservation(location, delivered, projectDir, gitCommand) {
   }
 }
 
+async function allWorkerObservations(executable, orca, requiredRunId) {
+  const runs = [];
+  let cursor;
+  const seen = new Set();
+  do {
+    const args = ["orchestration", "run-list", "--limit", "100"];
+    if (cursor) args.push("--cursor", cursor);
+    const result = receiptBody(await orca(executable, args));
+    assert(Array.isArray(result.runs), "Orca Run inventory is unavailable");
+    runs.push(...result.runs);
+    cursor = result.nextCursor ?? null;
+    assert(!cursor || !seen.has(cursor), "Orca Run inventory cursor repeated");
+    if (cursor) seen.add(cursor);
+  } while (cursor);
+  const workers = [];
+  const ids = [
+    ...new Set([
+      ...runs.map((run) => run.id),
+      ...(requiredRunId ? [requiredRunId] : []),
+    ]),
+  ];
+  assert(
+    ids.every((id) => typeof id === "string" && id),
+    "Orca Run inventory has an invalid ID",
+  );
+  for (let offset = 0; offset < ids.length; offset += 8) {
+    const batch = ids.slice(offset, offset + 8);
+    const listed = await Promise.all(
+      batch.map(async (runId) => {
+        const rows = [];
+        let pageCursor;
+        const pageSeen = new Set();
+        do {
+          const args = [
+            "orchestration",
+            "worker-list",
+            "--run",
+            runId,
+            "--include-remote",
+            "--limit",
+            "100",
+          ];
+          if (pageCursor) args.push("--cursor", pageCursor);
+          const result = receiptBody(await orca(executable, args));
+          assert(
+            Array.isArray(result.workers),
+            `Orca worker inventory for ${runId} is unavailable`,
+          );
+          rows.push(...result.workers);
+          pageCursor = result.page?.hasMore ? result.page.nextCursor : null;
+          assert(
+            !result.page?.hasMore || pageCursor,
+            `Orca worker inventory for ${runId} is truncated`,
+          );
+          assert(
+            !pageCursor || !pageSeen.has(pageCursor),
+            `Orca worker cursor repeated for ${runId}`,
+          );
+          if (pageCursor) pageSeen.add(pageCursor);
+        } while (pageCursor);
+        return rows;
+      }),
+    );
+    workers.push(...listed.flat());
+  }
+  return { result: { workers } };
+}
+
 /**
  * Reads active or archived kickoff candidates without changing Orca or Git state.
  *
@@ -303,7 +393,11 @@ async function gitObservation(location, delivered, projectDir, gitCommand) {
  */
 export async function scanKickoffCleanup(
   { orgFile, worktreeId, archiveFile, executable },
-  { orca = runOrcaJson, gitCommand = git } = {},
+  {
+    orca = runOrcaJson,
+    gitCommand = git,
+    workerInventory = allWorkerObservations,
+  } = {},
 ) {
   const entry = archiveFile
     ? archivedEntry(orgFile, archiveFile, worktreeId)
@@ -314,15 +408,7 @@ export async function scanKickoffCleanup(
   const results = await Promise.allSettled([
     orca(selected, ["worktree", "ps"]),
     orca(selected, ["terminal", "list"]),
-    entry.runId
-      ? orca(selected, [
-          "orchestration",
-          "worker-list",
-          "--run",
-          entry.runId,
-          "--include-remote",
-        ])
-      : Promise.resolve(null),
+    workerInventory(selected, orca, entry.runId),
   ]);
   const values = results.map((result, index) => {
     if (result.status === "fulfilled") return result.value?.result ?? null;
@@ -343,9 +429,17 @@ export async function scanKickoffCleanup(
     errors.push("worktree-inventory-unavailable");
   if (!Array.isArray(terminalResult?.terminals))
     errors.push("terminal-inventory-unavailable");
-  if (entry.runId && !Array.isArray(workerResult?.workers))
+  if (!Array.isArray(workerResult?.workers))
     errors.push("worker-inventory-unavailable");
-  if (workerResult?.page?.hasMore) errors.push("worker-inventory-truncated");
+  if (
+    workers.some(
+      (worker) =>
+        !workerWorkspace(worker) &&
+        !cleanWorker(worker) &&
+        !settledContextDispatch(worker),
+    )
+  )
+    errors.push("worker-workspace-unattributed");
   if (treeResult?.truncated || terminalResult?.truncated)
     errors.push("orca-inventory-truncated");
   const remoteHostsOmitted = Boolean(

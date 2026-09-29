@@ -85,6 +85,27 @@ test("dirty, ignored, undelivered, and live evidence preserves its own candidate
   ]);
 });
 
+test("a worker workspace reported as a path still blocks its candidate", () => {
+  const input = observed();
+  input.workers = [
+    exited(pm),
+    {
+      dispatchId: "dispatch-path",
+      projection: {
+        workspace: { id: "/tmp/child" },
+        liveness: { verdict: "live" },
+      },
+      terminalState: "active",
+    },
+  ];
+  const result = evaluateKickoffCleanup(entry, input);
+  assert.equal(result.candidates[1].status, "preserve");
+  assert.ok(
+    result.candidates[1].reasons.includes("worker-unsettled-or-unverifiable"),
+  );
+  assert.deepEqual(result.candidates[1].workerDispatches, ["dispatch-path"]);
+});
+
 test("missing process proof and incomplete inventories refuse reclamation", () => {
   const input = observed();
   input.workers = [];
@@ -267,6 +288,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
     delivery: { mode: "none" },
   });
   let childPresent = true;
+  let foreignWorker = true;
   const orca = async (_executable, args) => ({
     result:
       args[0] === "worktree"
@@ -290,7 +312,50 @@ test("a completed archive retains child identity for read-only partial cleanup r
                 : []),
             ],
           }
-        : { terminals: [] },
+        : args[0] === "terminal"
+          ? { terminals: [] }
+          : args[1] === "run-list"
+            ? args.includes("--cursor")
+              ? { runs: [{ id: "run-another-kickoff" }], nextCursor: null }
+              : { runs: [{ id: "run-first-page" }], nextCursor: "next-runs" }
+            : args.includes("run-first-page")
+              ? {
+                  workers: [
+                    {
+                      dispatchId: "context-only",
+                      workerState: "unsupervised",
+                      dispatchStatus: "failed",
+                      terminalState: "retained",
+                      projection: {
+                        liveness: {
+                          verdict: "unverifiable",
+                          reason: "unsupervised_settled",
+                        },
+                      },
+                    },
+                  ],
+                  page: { hasMore: false },
+                }
+              : !args.includes("--cursor")
+                ? {
+                    workers: [],
+                    page: { hasMore: true, nextCursor: "next-workers" },
+                  }
+                : {
+                    workers: foreignWorker
+                      ? [
+                          {
+                            dispatchId: "dispatch-elsewhere",
+                            projection: {
+                              workspace: { id: childId },
+                              liveness: { verdict: "running" },
+                            },
+                            terminalState: "active",
+                          },
+                        ]
+                      : [],
+                    page: { hasMore: false },
+                  },
   });
   const cleanup = await scanKickoffCleanup(
     { orgFile, worktreeId: pmId },
@@ -300,6 +365,13 @@ test("a completed archive retains child identity for read-only partial cleanup r
     cleanup.candidates.map((candidate) => candidate.status),
     ["preserve", "preserve"],
   );
+  assert.ok(
+    cleanup.candidates[1].reasons.includes("worker-unsettled-or-unverifiable"),
+  );
+  assert.deepEqual(cleanup.candidates[1].workerDispatches, [
+    "dispatch-elsewhere",
+  ]);
+  assert.equal(cleanup.inventoryComplete, true);
   const released = releaseKickoff(orgFile, {
     worktreeId: pmId,
     reason: "completed",
@@ -311,6 +383,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
     "child-fixture-instance",
   );
   childPresent = false;
+  foreignWorker = false;
   fs.rmSync(childPath, { recursive: true });
   const rescanned = await scanKickoffCleanup(
     {
