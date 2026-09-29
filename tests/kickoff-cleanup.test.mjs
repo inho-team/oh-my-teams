@@ -289,6 +289,10 @@ test("a completed archive retains child identity for read-only partial cleanup r
   });
   let childPresent = true;
   let foreignWorker = true;
+  let contextLiveness = {
+    verdict: "unverifiable",
+    reason: "unsupervised_settled",
+  };
   const orca = async (_executable, args) => ({
     result:
       args[0] === "worktree"
@@ -326,24 +330,14 @@ test("a completed archive retains child identity for read-only partial cleanup r
                       workerState: "unsupervised",
                       dispatchStatus: "failed",
                       terminalState: "retained",
-                      projection: {
-                        liveness: {
-                          verdict: "unverifiable",
-                          reason: "unsupervised_settled",
-                        },
-                      },
+                      projection: { liveness: contextLiveness },
                     },
                     {
                       dispatchId: "context-only-exited",
                       workerState: "unsupervised",
                       dispatchStatus: "failed",
                       terminalState: "retained",
-                      projection: {
-                        liveness: {
-                          verdict: "exited",
-                          source: "execution_host",
-                        },
-                      },
+                      projection: { liveness: { verdict: "exited" } },
                     },
                   ],
                   page: { hasMore: false },
@@ -384,6 +378,14 @@ test("a completed archive retains child identity for read-only partial cleanup r
     "dispatch-elsewhere",
   ]);
   assert.equal(cleanup.inventoryComplete, true);
+  contextLiveness = { verdict: "live", reason: "unsupervised_settled" };
+  const contradictory = await scanKickoffCleanup(
+    { orgFile, worktreeId: pmId },
+    { orca },
+  );
+  assert.equal(contradictory.inventoryComplete, false);
+  assert.ok(contradictory.errors.includes("worker-workspace-unattributed"));
+  contextLiveness = { verdict: "unverifiable", reason: "unsupervised_settled" };
   const released = releaseKickoff(orgFile, {
     worktreeId: pmId,
     reason: "completed",

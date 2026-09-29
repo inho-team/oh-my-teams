@@ -100,8 +100,9 @@ function settledContextDispatch(row) {
     row?.workerState === "unsupervised" &&
     ["completed", "failed"].includes(row.dispatchStatus) &&
     row.terminalState === "retained" &&
-    (row.projection?.liveness?.reason === "unsupervised_settled" ||
-      row.projection?.liveness?.verdict === "exited")
+    (row.projection?.liveness?.verdict === "exited" ||
+      (row.projection?.liveness?.verdict === "unverifiable" &&
+        row.projection.liveness.reason === "unsupervised_settled"))
   );
 }
 
