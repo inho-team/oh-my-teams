@@ -13,10 +13,10 @@ description: 서열 밖에서 이사가 여는 선택적 검토자로서 브리�
 
 ### 권한
 
-- `audit-objection --org <org> --worktree <감사 대상 kickoff의 worktreeId> --checkpoint brief|outcome --from <objection.json>`으로 statement·criterion이나 결과에 이의를 제기한다.
-- `audit-ruling --org <org> --worktree <worktreeId> --from <ruling.json>`으로 상대의 응답이 이의를 해소했는지 판정한다(`verdict`: `persuaded` 또는 `not-persuaded`).
+- `audit-objection --org <org> --worktree <감사 대상 kickoff의 worktreeId> --from <objection.json>`으로 statement·criterion이나 결과에 이의를 제기한다. `checkpoint`(`brief` 또는 `outcome`)는 `--from` JSON 본문에 적는다.
+- `audit-ruling --org <org> --worktree <worktreeId> --from <ruling.json>`으로 상대의 응답이 이의를 해소했는지 판정한다. `checkpoint`와 `verdict`(`persuaded` 또는 `not-persuaded`)는 `--from` JSON 본문에 적는다.
 - `audit-checked --org <org> --worktree <worktreeId> --checkpoint brief|outcome --from <checked.json>`으로 실제로 검토한 statement·criterion 목록을 기록한다.
-- `audit-accept --org <org> --worktree <worktreeId> --checkpoint brief|outcome --head <검증할 HEAD> --repo <대조할 저장소 경로>`로 [B.4의 여섯 조건](../../../../docs/plan/requirements-ledger-and-audit.md)을 전부 만족하는 체크포인트를 수용한다.
+- `audit-accept --org <org> --worktree <worktreeId> --checkpoint brief`로 [B.4의 여섯 조건](../../../../docs/plan/requirements-ledger-and-audit.md)을 전부 만족하는 브리프 체크포인트를 수용한다. 결과 체크포인트는 `audit-accept --org <org> --worktree <worktreeId> --checkpoint outcome --head <검증할 HEAD> --repo <대조할 저장소 경로>`로 수용하며, `--head`와 `--repo`는 `outcome`에서만 필요하다.
 
 ### 책임
 
@@ -45,18 +45,18 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role audit
 기준 확정(`kickoff-claim`) 직후, 구현 착수 전에 진행한다. `org.auditor`가 있는 조직은 브리프 감사 수용(`checkpoints.brief.acceptance`, `boundHash === hash({ledgerHash})`) 없이는 `worker-start`로 구현 역할을 배정할 수 없다.
 
 1. `audit-checked --checkpoint brief`로 원장의 모든 statement·criterion을 검토했음을 기록한다.
-2. 문구·범위가 맞지 않거나 근거가 불충분하면 `audit-objection --checkpoint brief`로 이의를 남긴다.
-3. director의 `audit-response --checkpoint brief`를 기다린다.
-4. 응답이 이의를 해소했으면 `audit-ruling --verdict persuaded`, 해소하지 못했으면 `--verdict not-persuaded`로 판정한다. `not-persuaded`가 남아 있으면 수용할 수 없다.
-5. 모든 이의가 해소되면 `audit-accept --checkpoint brief`로 수용한다. 이사 받은함에 progress 신호가 자동으로 남는다.
+2. 문구·범위가 맞지 않거나 근거가 불충분하면 `audit-objection`을 실행하고 `--from` JSON 본문의 `checkpoint`를 `brief`로 적어 이의를 남긴다.
+3. director가 `--from` JSON 본문의 `checkpoint`를 `brief`로 적어 실행하는 `audit-response`를 기다린다.
+4. 응답이 이의를 해소했으면 `audit-ruling`을 실행하고 `--from` JSON 본문의 `verdict`를 `persuaded`로, 해소하지 못했으면 `not-persuaded`로 적어 판정한다. `not-persuaded`가 남아 있으면 수용할 수 없다.
+5. 모든 이의가 해소되면 `audit-accept --checkpoint brief`로 수용한다. 이 명령은 감사 기록 파일에 수용을 기록할 뿐 이사 받은함에 신호를 자동으로 남기지 않으므로, 이사에게 알려야 하면 한계 절에 적은 대로 감사가 이사에게 직접 신호를 보낸다.
 
 ## 결과 감사(checkpoint: outcome)
 
 `requirements-fidelity`와 (director의) `requirements-present`·`requirements-fidelity-confirm` 이후에 진행한다. 결과 감사 수용은 close-ready 발신에서 처음 요구된다. `audit-objection`은 `workflow-accept` 전에도 낼 수 있고, `workflow-accept`는 이 kickoff의 결과 감사에 해소되지 않은 이의가 있으면 거부한다. `audit-accept --checkpoint outcome`은 `workflow-accept`가 결과 저장소를 확정한 뒤에만 기록되며, 그 저장소와 다른 `--repo`는 거부된다.
 
 1. `audit-checked --checkpoint outcome`으로 결과를 검토했음을 기록한다.
-2. 제시된 증거가 statement·criterion과 어긋나면 `audit-objection --checkpoint outcome`으로 이의를 남긴다.
-3. PM의 `audit-response --checkpoint outcome`을 기다린다. PM이 새 증거나 논거 없이 완료만 재선언하면 `not-persuaded`로 판정해도 된다.
-4. 이의가 모두 해소되면 `audit-accept --checkpoint outcome`으로 수용한다.
+2. 제시된 증거가 statement·criterion과 어긋나면 `audit-objection`을 실행하고 `--from` JSON 본문의 `checkpoint`를 `outcome`으로 적어 이의를 남긴다.
+3. PM이 `--from` JSON 본문의 `checkpoint`를 `outcome`으로 적어 실행하는 `audit-response`를 기다린다. PM이 새 증거나 논거 없이 완료만 재선언하면 `not-persuaded`로 판정해도 된다.
+4. 이의가 모두 해소되면 `audit-accept --checkpoint outcome --head <검증할 HEAD> --repo <대조할 저장소 경로>`로 수용한다.
 
 원장(ledgerHash)·결과 HEAD·증거 지문(evidenceFingerprint) 중 하나라도 이후에 바뀌면 이 수용은 자동으로 무효가 되므로, PM이 제시를 다시 추가하거나 결과가 바뀌면 결과 감사를 다시 받아야 한다.
