@@ -394,3 +394,66 @@ test("acceptWorkflowIntegration forwards kickoffHash and its own id to gateCheck
     "integration-decision",
   );
 });
+
+test("refreshGateCache sets pending and preserves old review records if evidence fails", async (t) => {
+  const dir = await repo(t),
+    stateDir = path.join(dir, ".omt");
+  const definedTask = task("pending-test");
+  const report = await passingReport(dir, stateDir, definedTask, "impl-run");
+  const decision = {
+    schemaVersion: 1,
+    id: "decision-1",
+    decider: { kind: "pm", executionId: "pm-1" },
+    criteria: ["check"],
+    basis: "Passed",
+  };
+
+  const { gateStatus } = await acceptOutcome(
+    dir,
+    definedTask,
+    report,
+    decision,
+    stateDir,
+  );
+  assert.equal(gateStatus.gates["outcome-accepted"].status, "passed");
+
+  // modify evidence to fail
+  report.evidence.status = "failed";
+  const { refreshGateCache } =
+    await import("../plugins/oh-my-teams/scripts/gates.mjs");
+  const updatedStatus = await refreshGateCache(
+    dir,
+    definedTask,
+    report,
+    stateDir,
+  );
+  assert.equal(updatedStatus.gates["outcome-accepted"].status, "pending");
+  assert.equal(updatedStatus.state, "submitted");
+  assert.equal(updatedStatus.gates["checks-passed"].status, "pending");
+});
+
+test("refreshGateCache succeeds and sets accepted when everything is valid", async (t) => {
+  const dir = await repo(t),
+    stateDir = path.join(dir, ".omt");
+  const definedTask = task("refresh-test");
+  const report = await passingReport(dir, stateDir, definedTask, "impl-run");
+  const decision = {
+    schemaVersion: 1,
+    id: "decision-1",
+    decider: { kind: "pm", executionId: "pm-1" },
+    criteria: ["check"],
+    basis: "Passed",
+  };
+
+  await acceptOutcome(dir, definedTask, report, decision, stateDir);
+  const { refreshGateCache } =
+    await import("../plugins/oh-my-teams/scripts/gates.mjs");
+  const updatedStatus = await refreshGateCache(
+    dir,
+    definedTask,
+    report,
+    stateDir,
+  );
+  assert.equal(updatedStatus.gates["outcome-accepted"].status, "passed");
+  assert.equal(updatedStatus.state, "accepted");
+});

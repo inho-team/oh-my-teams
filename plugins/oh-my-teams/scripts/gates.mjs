@@ -624,3 +624,76 @@ async function acceptOutcomeLocked(
   writeJSON(gateFile(stateDir, task.id), gateStatus);
   return { decision: record, gateStatus };
 }
+
+/**
+ * Refreshes the stale gate cache after verifying source evidence, review records, and decision records.
+ * In case of failure or missing records, writes a pending cache instead of trusting previous accepted cache.
+ *
+ * @param {string} repo - Current implementation workspace.
+ * @param {object} task - Trusted task v2 contract.
+ * @param {object} report - Passing implementation report.
+ * @param {string} stateDir - Directory containing PM state.
+ * @param {object} [options]
+ * @param {boolean} [options.requirePassed=true]
+ * @param {string} [options.kickoffHash]
+ * @param {?string} [options.workflowId]
+ * @returns {Promise<object>} The new gate status.
+ */
+export async function refreshGateCache(
+  repo,
+  task,
+  report,
+  stateDir,
+  options = {},
+) {
+  return withAsyncFileLock(
+    path.join(stateDir, "gates-write.lock"),
+    () => refreshGateCacheLocked(repo, task, report, stateDir, options),
+    "Gate cache refresh in progress",
+  );
+}
+
+async function refreshGateCacheLocked(
+  repo,
+  task,
+  report,
+  stateDir,
+  { requirePassed = true, kickoffHash, workflowId = null } = {},
+) {
+  let gateStatus;
+  try {
+    gateStatus = await gateCheck(repo, task, report, stateDir, {
+      requirePassed,
+      kickoffHash,
+      workflowId,
+    });
+  } catch (error) {
+    const errorTaskHash = (() => {
+      try {
+        return taskHash(task);
+      } catch (e) {
+        return null;
+      }
+    })();
+    gateStatus = {
+      taskId: task?.id ?? null,
+      runId: report?.runId ?? null,
+      evidenceKey: report?.evidence?.key ?? null,
+      state: "submitted",
+      gates: {
+        "contract-ready": { status: "pending", taskHash: errorTaskHash },
+        "checks-passed": {
+          status: "pending",
+          evidenceKey: report?.evidence?.key ?? null,
+        },
+        "review-complete": { status: "pending" },
+        "outcome-accepted": { status: "pending", decisionId: null },
+      },
+    };
+  }
+
+  if (task && task.id) {
+    writeJSON(gateFile(stateDir, task.id), gateStatus);
+  }
+  return gateStatus;
+}
