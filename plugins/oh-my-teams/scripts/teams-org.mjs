@@ -1470,15 +1470,67 @@ function assertDirectRoleTerminalBinding({ org, target, args }) {
 }
 
 /**
+ * Lists the worktree paths recorded by the workflow tasks under a kickoff's PM
+ * state directory: the path half of each task's `<repo-id>::<path>` receipt.
+ * A worker that never wrote a launch-ledger line still shows up here. A
+ * workflow state that exists but cannot be read is a refusal, not a skipped
+ * entry, so a corrupt state cannot silently shrink the independence check.
+ *
+ * @param {string} stateDir - The kickoff's PM `.omt` state directory.
+ * @returns {string[]} Receipt worktree paths of every workflow task.
+ * @throws {Error} With `preCreateRefusal` when a workflow state cannot be read.
+ */
+function workflowReceiptWorktreePaths(stateDir) {
+  const root = path.join(stateDir, "workflows");
+  if (!fs.existsSync(root)) return [];
+  const paths = [];
+  for (const name of fs.readdirSync(root)) {
+    // Only a directory is a workflow; a stray file (e.g. .DS_Store) is not.
+    if (!fs.lstatSync(path.join(root, name)).isDirectory()) continue;
+    const file = path.join(root, name, "state.json");
+    let state;
+    try {
+      state = readJSON(file);
+      assert(
+        state?.tasks !== null &&
+          typeof state?.tasks === "object" &&
+          !Array.isArray(state.tasks),
+        "malformed state",
+      );
+    } catch (error) {
+      const refusal = new Error(
+        `The auditor cannot be placed: workflow ${name} under ${stateDir} cannot be read (${error.message}), ` +
+          "so its workers' worktrees cannot be ruled out",
+      );
+      refusal.preCreateRefusal = { reason: "auditor-independence" };
+      throw refusal;
+    }
+    for (const item of Object.values(state.tasks)) {
+      for (const worktreeId of [
+        item?.worktreeId,
+        item?.execution?.worktreeId,
+      ]) {
+        const separator = String(worktreeId ?? "").indexOf("::");
+        if (separator > 0) paths.push(String(worktreeId).slice(separator + 2));
+      }
+    }
+  }
+  return paths;
+}
+
+/**
  * Lists the paths a kickoff's auditor worktree must stay independent of: the
- * kickoff's own PM worktree, and every non-auditor worktree this same
- * kickoff has already launched. Shared by role-terminal's own D4 check and
- * createRoleWorktree's pre-open D4 check (director msg_e96fa626ec49,
- * msg_8c39242a6c89), so both compare against the same list.
+ * kickoff's own PM worktree, every non-auditor worktree this same kickoff has
+ * already launched, and every worktree a workflow task of this kickoff
+ * recorded in its receipt, so a worker absent from the launch ledger is still
+ * covered. Shared by role-terminal's own D4 check and createRoleWorktree's
+ * pre-open D4 check (director msg_e96fa626ec49, msg_8c39242a6c89), so both
+ * compare against the same list.
  *
  * @param {string} orgFile - Resolved organization.json path.
  * @param {object} auditorEntry - The audited kickoff's registry entry.
  * @returns {string[]} Paths the auditor's own target must not share identity with.
+ * @throws {Error} With `preCreateRefusal` when a workflow state cannot be read.
  */
 function auditorIndependenceForbiddenPaths(orgFile, auditorEntry) {
   return [
@@ -1491,6 +1543,7 @@ function auditorIndependenceForbiddenPaths(orgFile, auditorEntry) {
           line.worktreePath,
       )
       .map((line) => line.worktreePath),
+    ...workflowReceiptWorktreePaths(auditorEntry.pm.stateDir),
   ];
 }
 
@@ -1873,10 +1926,20 @@ export async function createRoleWorktree(
           // terminal-open port is never called at all for the rejected
           // worktree -- whether or not `open` is real or injected.
           if (isAuditorRole) {
-            const forbidden = auditorIndependenceForbiddenPaths(
-              path.resolve(args.org),
-              auditorEntry,
-            );
+            let forbidden;
+            try {
+              forbidden = auditorIndependenceForbiddenPaths(
+                path.resolve(args.org),
+                auditorEntry,
+              );
+            } catch (error) {
+              // An unreadable workflow state is refused before any terminal
+              // exists, exactly like a path collision: reclaim the worktree.
+              if (error.preCreateRefusal) {
+                return { ready: false, sessionObserved: false };
+              }
+              throw error;
+            }
             if (sharesWorktreeWithAny(workspace.path, forbidden)) {
               return { ready: false, sessionObserved: false };
             }

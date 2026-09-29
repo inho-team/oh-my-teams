@@ -4931,3 +4931,143 @@ test("D3 (g): a PM-shaped or unlaunched handle still cannot record an auditor-on
   );
   assert.equal(d3Counts(fixture).checked, 0);
 });
+
+// D4 (finding d4-auditor-independence-string-compare, the parts the earlier
+// exact/nested/symlink tests do not reach): the forbidden list now also holds
+// every worktree a workflow task of this kickoff recorded in its receipt, so a
+// worker with no launch-ledger line is covered, and an unreadable workflow
+// state refuses instead of shrinking the list.
+async function d4AuditorFixture(t) {
+  const fixture = kickoff(t, "wt-1", { auditor: { profile: "agy-oss" } });
+  const originalCwd = process.cwd();
+  t.after(() => process.chdir(originalCwd));
+  process.chdir(fixture.dir);
+  const workerDir = realTempDir(t, "omt-d4-worker-");
+  const auditorDir = realTempDir(t, "omt-d4-auditor-");
+  const roleTerminal = (worktree) =>
+    main([
+      "role-terminal",
+      "--org",
+      fixture.org,
+      "--role",
+      "auditor",
+      "--worktree",
+      `path:${worktree}`,
+      "--state",
+      fixture.entry.pm.stateDir,
+    ]);
+  // The org's auditor profile uses the agy provider, which role-terminal
+  // refuses right after the D4 path check and before any terminal or trusted
+  // Orca is touched. An independent path therefore ends in this refusal, which
+  // proves the D4 check let it by without ever opening a session.
+  const passesD4 = (worktree) =>
+    assert.rejects(
+      () => roleTerminal(worktree),
+      /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
+    );
+  return { fixture, workerDir, auditorDir, roleTerminal, passesD4 };
+}
+
+async function d4RecordReceipt(fixture, workflowId, worktreePath) {
+  await createFixtureWorkflow(fixture, workflowId);
+  const file = path.join(
+    fixture.entry.pm.stateDir,
+    "workflows",
+    workflowId,
+    "state.json",
+  );
+  const state = readJSON(file);
+  state.tasks.a.worktreeId = `wt-receipt::${worktreePath}`;
+  writeJSON(file, state);
+  return file;
+}
+
+test("D4: role-terminal --role auditor refuses a worktree only a workflow task receipt records, including nested and symlinked spellings", async (t) => {
+  const { fixture, workerDir, auditorDir, roleTerminal, passesD4 } =
+    await d4AuditorFixture(t);
+  await d4RecordReceipt(fixture, "wf-d4-receipt", workerDir);
+  assert.equal(
+    readLaunches(fixture.org).some((line) => line.worktreePath === workerDir),
+    false,
+    "the worker must have no launch-ledger line for this to prove the receipt path",
+  );
+  await assert.rejects(
+    () => roleTerminal(workerDir),
+    /PM or a worker already uses/,
+  );
+  const nested = path.join(workerDir, "deep", "nested");
+  fs.mkdirSync(nested, { recursive: true });
+  await assert.rejects(
+    () => roleTerminal(nested),
+    /PM or a worker already uses/,
+  );
+  const alias = path.join(realTempDir(t, "omt-d4-alias-"), "alias");
+  fs.symlinkSync(workerDir, alias, "dir");
+  await assert.rejects(
+    () => roleTerminal(alias),
+    /PM or a worker already uses/,
+  );
+  await passesD4(auditorDir);
+});
+
+test("D4: role-terminal --role auditor refuses an unreadable workflow state instead of ignoring it (fail closed)", async (t) => {
+  const { fixture, workerDir, auditorDir, roleTerminal, passesD4 } =
+    await d4AuditorFixture(t);
+  const file = await d4RecordReceipt(fixture, "wf-d4-corrupt", workerDir);
+  await passesD4(auditorDir);
+  // A stray regular file under workflows/ (e.g. macOS's .DS_Store) is not a
+  // workflow, so it must not refuse an otherwise independent path.
+  const workflows = path.join(fixture.entry.pm.stateDir, "workflows");
+  fs.writeFileSync(path.join(workflows, ".DS_Store"), "not a workflow");
+  await passesD4(auditorDir);
+  // A directory with no state.json is a workflow that cannot be read.
+  const empty = path.join(workflows, "wf-d4-empty");
+  fs.mkdirSync(empty);
+  await assert.rejects(
+    () => roleTerminal(auditorDir),
+    /workflow wf-d4-empty .* cannot be read/,
+  );
+  fs.rmdirSync(empty);
+  fs.writeFileSync(file, "{ not json");
+  await assert.rejects(
+    () => roleTerminal(auditorDir),
+    /workflow wf-d4-corrupt .* cannot be read/,
+  );
+  // typeof null and typeof [] are both "object", so a state whose tasks is
+  // null or an array must be refused as malformed too, not crash later.
+  for (const tasks of [null, []]) {
+    fs.writeFileSync(file, JSON.stringify({ tasks }));
+    await assert.rejects(
+      () => roleTerminal(auditorDir),
+      /workflow wf-d4-corrupt .* cannot be read \(malformed state\)/,
+    );
+  }
+});
+
+test("D4: role-terminal --role auditor refuses a differently-cased spelling of a launch-ledger worker's worktree (case-insensitive filesystems only)", async (t) => {
+  const { fixture, workerDir, auditorDir, roleTerminal, passesD4 } =
+    await d4AuditorFixture(t);
+  if (!isFilesystemCaseInsensitive(path.dirname(workerDir))) {
+    t.skip(
+      "this filesystem is case-sensitive, so a case variant is a different path",
+    );
+    return;
+  }
+  recordLaunch(fixture.org, {
+    via: "worker-start",
+    role: "senior",
+    stateDir: fixture.entry.pm.stateDir,
+    worktreePath: workerDir,
+    callerCwd: workerDir,
+  });
+  const variant = path.join(
+    path.dirname(workerDir),
+    path.basename(workerDir).toUpperCase(),
+  );
+  assert.notEqual(variant, workerDir);
+  await assert.rejects(
+    () => roleTerminal(variant),
+    /PM or a worker already uses/,
+  );
+  await passesD4(auditorDir);
+});
