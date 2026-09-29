@@ -11,7 +11,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createWorktree,
+  discoverOrcaRuntime,
+  isTrustedOrcaExecute,
   readTrustedOrcaVersion,
+  reclaimWorktree,
   resolveTrustedOrcaScriptPath,
   runOrcaJson,
   runTrustedOrcaJson,
@@ -356,6 +360,98 @@ test("runOrcaJson refuses outright when passed TRUSTED_ORCA_EXECUTABLE_PLACEHOLD
     0,
     "runOrcaJson must refuse the placeholder before spawning anything",
   );
+});
+
+test("T2 runOrcaJson, discovery, worktree create and reclaim refuse the placeholder without a runner trustedOrcaExecute built, and run it with one", async () => {
+  let generalCalls = 0;
+  const general = async () => {
+    generalCalls += 1;
+    return { code: 0, stdout: '{"ok":true,"result":{}}', stderr: "" };
+  };
+  const refused = /reached the general, PATH-based runOrcaJson/;
+  // A general runner, and no runner at all (the default `run`), both refuse.
+  await assert.rejects(
+    () =>
+      runOrcaJson(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER, ["status"], {
+        execute: general,
+      }),
+    refused,
+  );
+  await assert.rejects(
+    () => runOrcaJson(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER, ["status"]),
+    refused,
+  );
+  await assert.rejects(
+    () => discoverOrcaRuntime(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER, general),
+    refused,
+  );
+  await assert.rejects(
+    () =>
+      createWorktree("/repo", {
+        name: "x",
+        base: "abc",
+        executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+        execute: general,
+      }),
+    refused,
+  );
+  await assert.rejects(
+    () =>
+      reclaimWorktree("/repo", {
+        id: "wt",
+        executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+        execute: general,
+      }),
+    refused,
+  );
+  assert.equal(generalCalls, 0);
+
+  // A function that merely looks like the trusted runner is not one.
+  const lookalike = async (argv) => general(argv);
+  assert.equal(isTrustedOrcaExecute(lookalike), false);
+  await assert.rejects(
+    () =>
+      runOrcaJson(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER, ["status"], {
+        execute: lookalike,
+      }),
+    refused,
+  );
+
+  // The runner trustedOrcaExecute built is accepted with the placeholder, and
+  // it replaces argv[0] with the pinned interpreter and resolved script.
+  const calls = [];
+  const { execute } = invocationOf({
+    spawnExecute: async (argv) => {
+      calls.push({ argv });
+      return { code: 0, stdout: '{"ok":true,"result":{}}', stderr: "" };
+    },
+  });
+  assert.equal(isTrustedOrcaExecute(execute), true);
+  const parsed = await runOrcaJson(
+    TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    ["status"],
+    {
+      execute,
+    },
+  );
+  assert.equal(parsed.ok, true);
+  assert.equal(calls[0].argv[0], "/bin/bash");
+  assert.ok(!calls[0].argv.includes(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER));
+});
+
+test("readTrustedOrcaVersion reuses only a runner trustedOrcaExecute built", async () => {
+  await assert.rejects(
+    () => readTrustedOrcaVersion({ execute: async () => ({ code: 0 }) }),
+    /only reuses a runner trustedOrcaExecute built/,
+  );
+  const { execute, calls } = invocationOf({
+    spawnExecute: async (argv) => {
+      calls.push({ argv });
+      return { code: 0, stdout: "1.4.210\n", stderr: "" };
+    },
+  });
+  assert.equal(await readTrustedOrcaVersion({ execute }), "1.4.210");
+  assert.equal(calls.length, 1);
 });
 
 // runTrustedOrcaJson is the single entry point identity confirmation

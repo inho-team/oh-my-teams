@@ -94,6 +94,7 @@ import {
   discoverOrcaRuntime,
   findActiveDispatch,
   injectTask,
+  isTrustedOrcaExecute,
   readTrustedOrcaVersion,
   reclaimWorktree,
   releaseWorker,
@@ -1107,17 +1108,30 @@ async function compatibilityPrepare(args) {
   };
 }
 
-async function preflightRoleWorktree(args, organization, environment, matrix) {
+async function preflightRoleWorktree(
+  args,
+  organization,
+  environment,
+  matrix,
+  trustedLaunch = null,
+) {
   const command = roleCommand(organization, args.role, {
     profile: args.profile,
   });
   const worktreePath = args.worktree
     ? pathFromWorktreeId(args.worktree)
     : undefined;
-  const env = await environment({
-    worktreePath,
-    orcaExecutable: args.orca,
-  });
+  // The auditor reads its environment exactly as role-terminal's auditor
+  // branch does, through the launch's own trusted runner and never args.orca.
+  const env = await environment(
+    trustedLaunch
+      ? {
+          worktreePath,
+          orcaExecutable: trustedLaunch.versionExecutable,
+          ...auditorLaunchEnvironmentInputs(trustedLaunch.execute),
+        }
+      : { worktreePath, orcaExecutable: args.orca },
+  );
   const prediction = matrix({
     runner: command.provider,
     model: command.modelRequested,
@@ -1561,6 +1575,7 @@ function auditorIndependenceForbiddenPaths(orgFile, auditorEntry) {
  * @param {Function} [ports.git=gitEvidence] - Git evidence reader.
  * @param {Function} [ports.closures=readTerminalClosures] - Durable closure-proof reader.
  * @param {Function} [ports.recordClosure=recordTerminalClosure] - Closure-proof writer.
+ * @param {Function} [ports.auditorLaunch=resolveAuditorLaunchExecution] - Builds the auditor's one trusted runner, for tests only.
  * @returns {Promise<object>} Worktree identity and proven role terminal.
  */
 export async function createRoleWorktree(
@@ -1581,6 +1596,7 @@ export async function createRoleWorktree(
     release = releaseWorker,
     close = runOrcaJson,
     list = runOrcaJson,
+    auditorLaunch = resolveAuditorLaunchExecution,
   } = {},
 ) {
   // The auditor is out-of-ladder (role-terminal's own comment: it never
@@ -1735,6 +1751,7 @@ export async function createRoleWorktree(
   // organization.json read that may since disagree with it.
   let organizationForPreflight = preflightOrganization;
   let auditorEntry = null;
+  let auditorTrustedLaunch = null;
   if (isAuditorRole) {
     const stateDir = path.resolve(args.state);
     auditorEntry = listKickoffs(path.resolve(args.org)).kickoffs.find(
@@ -1777,6 +1794,14 @@ export async function createRoleWorktree(
       auditorEntry,
       process.cwd(),
       "role-worktree-create --role auditor",
+    );
+    // One trusted runner serves the whole launch: the preflight version
+    // read, worktree create and discovery, the internal role-terminal open,
+    // and any automatic reclaim. Selecting it here, before any Orca create
+    // runs, makes an unresolvable or untrusted script refuse with zero
+    // worktrees created.
+    auditorTrustedLaunch = assertTrustedAuditorLaunch(
+      auditorLaunch({ auditorEntry, orcaArg: args.orca }),
     );
     organizationForPreflight = {
       ...preflightOrganization,
@@ -1824,6 +1849,7 @@ export async function createRoleWorktree(
     organizationForPreflight,
     environment,
     matrix,
+    auditorTrustedLaunch,
   );
   assert(
     !args.worktree || reusable,
@@ -1843,6 +1869,12 @@ export async function createRoleWorktree(
         // and only this marker, to open a session in a worktree that has no
         // earlier via="role-terminal" ledger line yet.
         viaRoleWorktreeCreate: true,
+        // Hands the internal role-terminal the launch's own trusted runner,
+        // so terminal calls and any reclaim share one instance. Never
+        // reachable through the CLI: ALLOWED_OPTIONS has no such key.
+        ...(auditorTrustedLaunch
+          ? { trustedLaunch: auditorTrustedLaunch }
+          : {}),
       }));
   const existingRoleWorktree = Boolean(
     args.worktree && (promotion || reusable),
@@ -1916,7 +1948,14 @@ export async function createRoleWorktree(
         name: args.name,
         base: args.base,
         setup: args.setup ?? "inherit",
-        executable: args.orca,
+        // The auditor never uses --orca or a PATH runner: create, discovery
+        // and reclaim all run through the launch's trusted runner.
+        executable: auditorTrustedLaunch
+          ? auditorTrustedLaunch.executable
+          : args.orca,
+        ...(auditorTrustedLaunch
+          ? { execute: auditorTrustedLaunch.execute }
+          : {}),
         openRoleSession: async (workspace) => {
           // D4 pre-check (director msg_e96fa626ec49, msg_8c39242a6c89): the
           // injected `open` port, when a caller supplies one, replaces this
@@ -3136,13 +3175,15 @@ function assertRequirementsDirectorAuthority(entry, orgFile, checkoutArg, use) {
  * validates and then directly executes the fixed trusted script with a
  * pinned interpreter and an allowlisted environment (B.6, decision B). It
  * also returns `versionExecutable`, the same trusted script's resolved real
- * path (from `resolveScriptPath`, not the placeholder), for the one caller
- * that reads `executable` directly rather than through the paired `execute`:
- * `readLaunchEnvironment`'s own `orca --version` probe, which does not, and
- * must not, receive this launch's trusted `execute` (see the `role-terminal`
- * case's comment for why). Passing the placeholder there instead would make
- * that probe fail outright, since the placeholder is deliberately not a real
- * executable name.
+ * path (from `resolveScriptPath`, not the placeholder). The auditor launch's
+ * `readLaunchEnvironment` no longer runs that path itself: it reads the Orca
+ * version through `auditorLaunchEnvironmentInputs(execute)`, whose
+ * `readOrcaVersion` is `readTrustedOrcaVersion({ execute })`, so the version
+ * probe uses this same trusted runner and `orcaExecutable` is passed only
+ * for shape. One returned runner serves the whole launch: the preflight
+ * version read, worktree create and discovery, the internal `role-terminal`
+ * open (handed over as `trustedLaunch`), every terminal call, and any
+ * automatic reclaim.
  *
  * Outside the auditor branch, the caller's own `--orca` (or its absence)
  * passes through unchanged for both `executable` and `versionExecutable`, no
@@ -3175,6 +3216,41 @@ export function resolveAuditorLaunchExecution({
     execute: trustedExecuteFactory(),
     versionExecutable: resolveScriptPath(),
   };
+}
+
+/**
+ * Inputs the auditor launch passes to `readLaunchEnvironment`, shared by
+ * role-worktree-create's preflight and role-terminal's auditor branch so the
+ * two cannot read the environment differently.
+ *
+ * The Orca version is read through `execute`, the one trusted runner this
+ * launch holds; the agy probe is skipped, the home directory comes from
+ * `os.userInfo()` rather than an inheritable `HOME`, and an unverified Orca
+ * version throws instead of being tolerated.
+ *
+ * @param {Function} execute - Runner `trustedOrcaExecute` built for this launch.
+ * @returns {{readOrcaVersion: Function, skipAgyVersion: true, homedir: string, throwOnUnverifiedOrca: true}}
+ *   Options for `readLaunchEnvironment`.
+ */
+export function auditorLaunchEnvironmentInputs(execute) {
+  return {
+    readOrcaVersion: () => readTrustedOrcaVersion({ execute }),
+    skipAgyVersion: true,
+    homedir: os.userInfo().homedir,
+    throwOnUnverifiedOrca: true,
+  };
+}
+
+// Accepts an auditor launch role-worktree-create built and refuses anything
+// whose runner is not one trustedOrcaExecute made, so no caller can slip a
+// general runner in beside the trusted placeholder.
+function assertTrustedAuditorLaunch(launch) {
+  assert(
+    launch?.executable === TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER &&
+      isTrustedOrcaExecute(launch.execute),
+    "The auditor launch must use the placeholder executable with a runner trustedOrcaExecute built",
+  );
+  return launch;
 }
 
 /**
@@ -3872,21 +3948,30 @@ export async function executeCommand(args, execute) {
         executable: auditorExecutable,
         execute: auditorExecute,
         versionExecutable,
-      } = resolveAuditorLaunchExecution({ auditorEntry, orcaArg: args.orca });
+      } = auditorEntry && args.trustedLaunch
+        ? assertTrustedAuditorLaunch(args.trustedLaunch)
+        : resolveAuditorLaunchExecution({ auditorEntry, orcaArg: args.orca });
       // 실제 환경에서 매트릭스 입력값을 읽습니다.
       // 알 수 없는 값은 'unknown'으로 전달하여 표가 unverified로 처리합니다.
-      const env = await readLaunchEnvironment({
-        worktreePath: target ?? undefined,
-        orcaExecutable: versionExecutable,
-        ...(auditorEntry
-          ? {
-              readOrcaVersion: () => readTrustedOrcaVersion(),
-              skipAgyVersion: true,
-              homedir: os.userInfo().homedir,
-              throwOnUnverifiedOrca: true,
-            }
-          : {}),
-      });
+      let env;
+      try {
+        env = await readLaunchEnvironment({
+          worktreePath: target ?? undefined,
+          orcaExecutable: versionExecutable,
+          ...(auditorEntry
+            ? auditorLaunchEnvironmentInputs(auditorExecute)
+            : {}),
+        });
+      } catch (error) {
+        // The auditor's environment read runs only Orca's --version, before
+        // openRoleTerminal creates any terminal, so a refusal here (an
+        // unverified version, an unresolvable trusted script) proves no
+        // session exists and the caller may reclaim a fresh worktree.
+        if (auditorEntry) {
+          error.preCreateRefusal = { reason: "auditor-launch-environment" };
+        }
+        throw error;
+      }
       const opened = await openRoleTerminal({
         worktree: args.worktree,
         command,

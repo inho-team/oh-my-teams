@@ -19,6 +19,7 @@ import {
   launchLine,
   locateCommand,
   openRoleTerminal,
+  readLaunchEnvironment,
   roleTitle,
   trustQuestion,
   untouchedShell,
@@ -27,11 +28,17 @@ import {
 } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 import {
   ALLOWED_OPTIONS,
+  auditorLaunchEnvironmentInputs,
   freshenTerminal,
   main,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { findActiveDispatch } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import {
+  findActiveDispatch,
+  isTrustedOrcaExecute,
+  trustedOrcaExecute,
+  TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+} from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import {
   readLaunches,
   recordLaunch,
@@ -372,6 +379,108 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
   assert.deepEqual(orca.closes(), []);
   assert.equal(opened.title, "[Senior] wt");
   assert.equal(opened.titlePinned, true);
+});
+
+// The runner an auditor launch holds: trustedOrcaExecute over a fake Orca, with
+// script resolution injected so no real install is needed. Every Orca call the
+// launch makes reaches `spawned` as [/bin/bash, --noprofile, --norc, script, ...].
+function trustedFakeOrca(screens) {
+  const orca = fakeOrca(screens);
+  const spawned = [];
+  const execute = trustedOrcaExecute({
+    platform: "darwin",
+    candidates: ["/fake/orca"],
+    exists: () => true,
+    realpath: () => "/fake/orca-real",
+    expectedRealpaths: { "/fake/orca": "/fake/orca-real" },
+    userInfo: () => ({ homedir: "/fake/home", username: "tester" }),
+    spawnExecute: async (argv, options) => {
+      spawned.push(argv);
+      // The launch's own version read, which fakeOrca's terminal-only script
+      // does not play.
+      if (argv[4] === "--version")
+        return { code: 0, stdout: "1.4.210\n", stderr: "", timedOut: false };
+      return orca.execute(argv.slice(3), options);
+    },
+  });
+  return { ...orca, execute, spawned };
+}
+
+test("T1 the trusted placeholder opens a role terminal through the trusted runner: create, read, wait, rename and list all go through it", async () => {
+  const command = roleCommand(example(), "senior");
+  const orca = trustedFakeOrca([
+    [`${PROMPT} ${typedFor(command)}`, "Antigravity", ">"],
+  ]);
+  // The launch environment is read with the inputs the auditor branch and
+  // role-worktree-create's preflight share, so its version read runs on this
+  // same runner instance before the terminal is opened.
+  const env = await readLaunchEnvironment({
+    orcaExecutable: "/fake/orca-real",
+    ...auditorLaunchEnvironmentInputs(orca.execute),
+  });
+  assert.equal(env.orcaVersion, "1.4.210");
+  assert.equal(orca.spawned.length, 1);
+  assert.equal(orca.spawned[0][4], "--version");
+  const opened = await openRoleTerminal({
+    worktree: "id:repo::/tmp/wt",
+    command,
+    executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    execute: orca.execute,
+    ...fast,
+  });
+  assert.equal(opened.ready, true);
+  assert.equal(opened.terminal, "term_1");
+  assert.equal(orca.creates().length, 1);
+  const verbs = new Set(orca.calls.map((call) => call[1]));
+  for (const verb of ["create", "read", "wait", "rename", "list"])
+    assert.ok(verbs.has(verb), `terminal ${verb} was not issued`);
+  // Every call became the pinned interpreter and the resolved script; the
+  // placeholder never reached a process.
+  assert.ok(orca.spawned.length >= 6);
+  for (const argv of orca.spawned) {
+    assert.deepEqual(argv.slice(0, 4), [
+      "/bin/bash",
+      "--noprofile",
+      "--norc",
+      "/fake/orca-real",
+    ]);
+    assert.ok(!argv.includes(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER));
+  }
+  // The version read plus every terminal call: one runner saw all of them.
+  assert.equal(orca.spawned.length, 1 + orca.calls.length);
+  assert.equal(isTrustedOrcaExecute(orca.execute), true);
+});
+
+test("T2 the trusted placeholder with a general runner, or none, is refused as a pre-create refusal before any Orca call", async () => {
+  const command = roleCommand(example(), "senior");
+  let generalCalls = 0;
+  const general = async () => {
+    generalCalls += 1;
+    return { code: 0, stdout: '{"ok":true,"result":{}}', stderr: "" };
+  };
+  for (const runner of [{ execute: general }, {}]) {
+    await assert.rejects(
+      () =>
+        openRoleTerminal({
+          worktree: "id:repo::/tmp/wt",
+          command,
+          executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+          ...runner,
+          ...fast,
+        }),
+      (error) => {
+        assert.match(
+          error.message,
+          /reached the general, PATH-based runOrcaJson/,
+        );
+        assert.deepEqual(error.preCreateRefusal, {
+          reason: "untrusted-orca-executor",
+        });
+        return true;
+      },
+    );
+  }
+  assert.equal(generalCalls, 0);
 });
 
 test("a typed but unsubmitted command is sent Enter exactly once", async () => {

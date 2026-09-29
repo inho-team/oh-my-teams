@@ -33,6 +33,7 @@ import {
   recordRefusal,
 } from "./prompt-supervision.mjs";
 import {
+  assertTrustedOrcaPairing,
   checkTerminalIdle,
   findActiveDispatch,
   runOrcaJson,
@@ -904,6 +905,15 @@ export async function openRoleTerminal({
     Array.isArray(command?.argv) && command.argv.length > 0,
     "role-terminal needs a role command",
   );
+  // The trusted placeholder must travel with the runner trustedOrcaExecute
+  // built. Refusing here, before the first Orca call, proves no terminal
+  // exists, so the caller may reclaim a worktree it just created.
+  try {
+    assertTrustedOrcaPairing(executable, execute);
+  } catch (cause) {
+    cause.preCreateRefusal = { reason: "untrusted-orca-executor" };
+    throw cause;
+  }
   const { typed, columns } = launchLine(command);
   const isCompoundCommand = columns !== null;
   const matrixResult = predictLaunchPath({

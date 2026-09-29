@@ -178,6 +178,43 @@ const TRUSTED_ORCA_REALPATHS = Object.freeze({
 export const TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER =
   "__omt_trusted_orca_execution_only__";
 
+// Runners `trustedOrcaExecute` built. Membership is the only proof that a
+// function validated the trusted script and pins its interpreter and
+// environment, so it lives here, unexported, and cannot be forged by a caller.
+const TRUSTED_EXECUTORS = new WeakSet();
+
+/**
+ * Tells whether a function is a runner `trustedOrcaExecute` built.
+ *
+ * @param {unknown} execute - Candidate command runner.
+ * @returns {boolean} True only for a runner this module registered.
+ */
+export function isTrustedOrcaExecute(execute) {
+  return typeof execute === "function" && TRUSTED_EXECUTORS.has(execute);
+}
+
+/**
+ * Refuses the placeholder executable unless it travels with a runner that
+ * `trustedOrcaExecute` built. A general `execute` (the default `run` or any
+ * other function) or a missing one would resolve the placeholder on PATH.
+ *
+ * @param {string} executable - Executable an Orca call is about to use.
+ * @param {Function} [execute] - Command runner paired with it.
+ * @returns {void}
+ * @throws {Error} When the placeholder is paired with anything but a trusted runner.
+ */
+export function assertTrustedOrcaPairing(executable, execute) {
+  assert(
+    executable !== TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER ||
+      isTrustedOrcaExecute(execute),
+    "TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER reached the general, PATH-based " +
+      "runOrcaJson without the runner trustedOrcaExecute built; it is not a " +
+      "real executable name. Pair it with that runner (or call " +
+      "runTrustedOrcaJson), so a caller that forgot half of the pair fails " +
+      "here rather than silently resolving this placeholder on PATH.",
+  );
+}
+
 /**
  * Finds and validates the script that identity confirmation and auditor
  * launch trust, ignoring every caller-controlled input `selectOrcaExecutable`
@@ -323,7 +360,7 @@ export function trustedOrcaExecute({
     USER: info.username,
     LOGNAME: info.username,
   });
-  return function invokeTrustedOrca(argv, callOptions = {}) {
+  const invokeTrustedOrca = function invokeTrustedOrca(argv, callOptions = {}) {
     assert(
       Array.isArray(argv) && argv.length > 0,
       "Trusted Orca invocation needs a non-empty argv array",
@@ -334,6 +371,8 @@ export function trustedOrcaExecute({
       { ...callOptions, env },
     );
   };
+  TRUSTED_EXECUTORS.add(invokeTrustedOrca);
+  return invokeTrustedOrca;
 }
 
 function parseJsonResponse(result, invalidMessage) {
@@ -381,14 +420,7 @@ export async function runOrcaJson(
   args,
   { cwd, timeoutMs = 60000, execute = run } = {},
 ) {
-  assert(
-    executable !== TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
-    "TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER reached the general, PATH-based " +
-      "runOrcaJson; it is not a real executable name. Call runTrustedOrcaJson " +
-      "instead, which builds and runs the trusted invocation itself, so a " +
-      "caller that forgot to also pass the paired execute function fails " +
-      "here rather than silently resolving this placeholder on PATH.",
-  );
+  assertTrustedOrcaPairing(executable, execute);
   const result = await execute([executable, ...args, "--json"], {
     cwd,
     timeoutMs,
@@ -440,13 +472,20 @@ export async function runTrustedOrcaJson(args, options = {}) {
  *
  * @param {object} [options] - Injection points, used only by tests; passed
  *   through to `trustedOrcaExecute`. Production callers must never set these.
+ * @param {Function} [options.execute] - A runner `trustedOrcaExecute` already
+ *   built, so a launch that holds one reads the version through that same
+ *   runner instead of building a second. Anything else is refused.
  * @returns {Promise<string | null>} The parsed semantic version, or `null`
  *   when the trusted script's output did not contain one.
- * @throws {Error} For a validation failure from `trustedOrcaExecute`,
- *   process failure, or timeout.
+ * @throws {Error} For a validation failure from `trustedOrcaExecute`, a
+ *   supplied `execute` it did not build, process failure, or timeout.
  */
-export async function readTrustedOrcaVersion(options = {}) {
-  const invoke = trustedOrcaExecute(options);
+export async function readTrustedOrcaVersion({ execute, ...options } = {}) {
+  assert(
+    execute === undefined || isTrustedOrcaExecute(execute),
+    "readTrustedOrcaVersion only reuses a runner trustedOrcaExecute built",
+  );
+  const invoke = execute ?? trustedOrcaExecute(options);
   const result = await invoke([
     TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
     "--version",
@@ -476,6 +515,7 @@ export async function readTrustedOrcaVersion(options = {}) {
  */
 export async function discoverOrcaRuntime(executable, execute = run) {
   const selected = selectOrcaExecutable(executable);
+  assertTrustedOrcaPairing(selected, execute);
   const version = await execute([selected, "--version"], { timeoutMs: 30000 });
   assert(
     version.code === 0 && !version.timedOut,
@@ -797,6 +837,7 @@ function orcaError(message, signal, receipt) {
 
 async function resolvedDiscovery(executable, supplied, execute) {
   const selected = selectOrcaExecutable(executable ?? supplied?.executable);
+  assertTrustedOrcaPairing(selected, execute);
   const discovery = supplied ?? (await discoverOrcaRuntime(selected, execute));
   assert(
     discovery.executable === selected && discovery.versionsMatch !== false,

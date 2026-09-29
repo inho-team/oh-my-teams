@@ -68,15 +68,19 @@ import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import {
   blockingOutcome,
+  auditorLaunchEnvironmentInputs,
   createRoleWorktree,
   main,
   resolveAuditorLaunchExecution,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import {
   createWorktreeWithRoleSession,
+  isTrustedOrcaExecute,
+  trustedOrcaExecute,
   TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { deliverKickoff } from "../plugins/oh-my-teams/scripts/delivery.mjs";
+import { readLaunchEnvironment } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 import {
   bindKickoffResultRepo,
   ledgerHash,
@@ -1665,24 +1669,23 @@ test(
     // call, not a stand-in, is what reclaims the colliding workspace.
     {
       process.chdir(fixture.dir);
-      const discovery = { executable: "orca", versionsMatch: true };
-      const calls = [];
-      const execute = async (argv) => {
-        calls.push(argv);
-        return {
-          code: 0,
-          stderr: "",
-          timedOut: false,
-          stdout: argv.includes("create")
-            ? JSON.stringify({
-                ok: true,
-                result: {
-                  worktree: { id: "wt_d4_audit", path: fixture.entry.pm.path },
-                },
-              })
-            : JSON.stringify({ ok: true, result: { removed: "wt_d4_audit" } }),
-        };
+      // The auditor's launch runs only through the one trusted runner, so
+      // the discovery receipt names the placeholder and every Orca call this
+      // real createWorktreeWithRoleSession issues lands in `calls`.
+      const discovery = {
+        executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+        versionsMatch: true,
       };
+      const trusted = trustedLaunchOver(async (orcaArgs) =>
+        orcaReply(
+          orcaArgs.includes("create")
+            ? {
+                worktree: { id: "wt_d4_audit", path: fixture.entry.pm.path },
+              }
+            : { removed: "wt_d4_audit" },
+        ),
+      );
+      const calls = trusted.spawned;
       let openCalls = 0;
       await assert.rejects(
         () =>
@@ -1692,15 +1695,16 @@ test(
               organization: () => readJSON(fixture.org),
               environment,
               matrix,
+              auditorLaunch: trusted.port,
               // Stands in only for orca-adapter's export lookup, not for its
-              // reclaim/throw contract: options.execute/discovery are the
-              // real createWorktreeWithRoleSession's own injectable ports
-              // (tests/worktree-lifecycle.test.mjs uses the same pattern).
+              // reclaim/throw contract: options.execute is the auditor's own
+              // trusted runner, and discovery is the real function's
+              // injectable port (tests/worktree-lifecycle.test.mjs uses the
+              // same pattern).
               create: (repo, options) =>
                 createWorktreeWithRoleSession(repo, {
                   ...options,
                   discovery,
-                  execute,
                 }),
               // Injected in place of role-terminal's own terminal-open call:
               // if the D4 pre-check inside createRoleWorktree's
@@ -2385,19 +2389,10 @@ test("role-worktree-create (counterexample 13, success path): a non-colliding au
   });
   fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
   const auditorDir = realTempDir(t, "omt-d2-cx13-ok-");
-  const calls = [];
-  const execute = async (argv) => {
-    calls.push(argv);
-    return {
-      code: 0,
-      stderr: "",
-      timedOut: false,
-      stdout: JSON.stringify({
-        ok: true,
-        result: { worktree: { id: "wt_d2_audit_ok", path: auditorDir } },
-      }),
-    };
-  };
+  const trusted = trustedLaunchOver(async () =>
+    orcaReply({ worktree: { id: "wt_d2_audit_ok", path: auditorDir } }),
+  );
+  const calls = trusted.spawned;
   let openCalls = 0;
   const created = await withCwd(fixture.dir, () =>
     createRoleWorktree(
@@ -2413,11 +2408,14 @@ test("role-worktree-create (counterexample 13, success path): a non-colliding au
         organization: () => readJSON(fixture.org),
         environment: d2Environment,
         matrix: d2Matrix,
+        auditorLaunch: trusted.port,
         create: (repo, options) =>
           createWorktreeWithRoleSession(repo, {
             ...options,
-            discovery: { executable: "orca", versionsMatch: true },
-            execute,
+            discovery: {
+              executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+              versionsMatch: true,
+            },
           }),
         open: async () => {
           openCalls += 1;
@@ -2440,6 +2438,493 @@ test("role-worktree-create (counterexample 13, success path): a non-colliding au
     calls.some((argv) => argv.includes("remove")),
     false,
   );
+  // The create call itself went through the trusted runner, never PATH.
+  assert.equal(calls.filter((argv) => argv.includes("create")).length, 1);
+});
+
+// --- Appendix I (k139-auditor-f3): the auditor launch runs every Orca call
+// through one trusted runner. These helpers build that runner exactly as
+// production does (trustedOrcaExecute) over test-only injected script
+// resolution and a recording fake spawn; nothing here touches a real Orca.
+
+function orcaReply(result) {
+  return {
+    code: 0,
+    stderr: "",
+    timedOut: false,
+    stdout: JSON.stringify({ ok: true, result }),
+  };
+}
+
+// `handler(orcaArgs, options)` plays Orca; `spawned` records every call the
+// trusted runner received as [script, ...orcaArgs], so an Orca call that went
+// anywhere else (a general runner, PATH) is simply absent from it.
+function trustedLaunchOver(handler) {
+  const spawned = [];
+  const execute = trustedOrcaExecute({
+    platform: "darwin",
+    candidates: ["/fake/orca"],
+    exists: () => true,
+    realpath: () => "/fake/orca-real",
+    expectedRealpaths: { "/fake/orca": "/fake/orca-real" },
+    userInfo: () => ({ homedir: os.userInfo().homedir, username: "tester" }),
+    spawnExecute: async (argv, options) => {
+      spawned.push(argv.slice(3));
+      return handler(argv.slice(4), options);
+    },
+  });
+  const launch = {
+    executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    execute,
+    versionExecutable: "/fake/orca-real",
+  };
+  return { execute, launch, spawned, port: () => launch };
+}
+
+// A fake Orca whose worktree create/remove really run `git worktree` in the
+// caller's repository, so a test can assert on the repository's actual
+// leftovers. The first `--version` is the discovery read; later ones return
+// `laterVersion`, which is how a test makes the launch's own environment read
+// unverified. `terminal` decides what the terminal verbs answer.
+function gitBackedOrca(repo, { laterVersion = "1.4.210", terminal } = {}) {
+  let versionReads = 0;
+  const fail = (stderr) => ({ code: 1, stdout: "", stderr, timedOut: false });
+  return async (orcaArgs, options) => {
+    const [noun, verb] = orcaArgs;
+    const after = (flag) => orcaArgs[orcaArgs.indexOf(flag) + 1];
+    if (noun === "--version") {
+      versionReads += 1;
+      const version = versionReads === 1 ? "1.4.210" : laterVersion;
+      return { code: 0, stdout: `${version}\n`, stderr: "", timedOut: false };
+    }
+    if (noun === "skills")
+      return { code: 0, stdout: "orca-cli guide", stderr: "", timedOut: false };
+    if (noun === "status")
+      return orcaReply({ runtime: { reachable: true, state: "ready" } });
+    if (noun === "worktree" && verb === "create") {
+      const name = after("--name");
+      const dir = `${repo}-${name}`;
+      git(options.cwd, [
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        name,
+        dir,
+        after("--base-branch"),
+      ]);
+      return orcaReply({ worktree: { id: `wt_${name}::${dir}`, path: dir } });
+    }
+    if (noun === "worktree" && verb === "remove") {
+      const id = after("--worktree").slice("id:".length);
+      const [handle, dir] = id.split("::");
+      git(options.cwd, ["worktree", "remove", "--force", dir]);
+      git(options.cwd, ["branch", "-D", handle.slice("wt_".length)]);
+      return orcaReply({ removed: id });
+    }
+    if (noun === "terminal" && terminal) return terminal(orcaArgs, fail);
+    return fail(`unexpected orca call: ${orcaArgs.join(" ")}`);
+  };
+}
+
+function gitTrace(dir) {
+  const lines = (args) => git(dir, args).split("\n").filter(Boolean);
+  return {
+    worktrees: lines(["worktree", "list", "--porcelain"]).filter((line) =>
+      line.startsWith("worktree "),
+    ),
+    branches: lines(["branch", "--format=%(refname:short)"]),
+  };
+}
+
+// Runs role-worktree-create --role auditor through the real
+// createWorktreeWithRoleSession and the real internal role-terminal command
+// (no `open` port), over a git-backed trusted fake Orca, and returns what
+// happened. `spawned` holds every Orca call the one trusted runner received.
+async function launchAuditorThroughRealPath(
+  t,
+  { profile, name, orca, realPreflight = false },
+) {
+  const fixture = kickoff(t, "wt-1", { auditor: { profile } });
+  fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
+  t.after(() =>
+    fs.rmSync(`${fixture.dir}-${name}`, { recursive: true, force: true }),
+  );
+  const trusted = trustedLaunchOver(gitBackedOrca(fixture.dir, orca));
+  const before = gitTrace(fixture.dir);
+  const sessions = [];
+  const executors = [];
+  let result = null;
+  const rejection = await withCwd(fixture.dir, async () => {
+    try {
+      result = await createRoleWorktree(
+        {
+          org: fixture.org,
+          role: "auditor",
+          state: fixture.entry.pm.stateDir,
+          repo: fixture.dir,
+          name,
+          base: fixture.head,
+        },
+        {
+          organization: () => readJSON(fixture.org),
+          // With `realPreflight` the preflight reads its environment through
+          // the real readLaunchEnvironment, so its version read lands on the
+          // trusted runner exactly as the launch's other calls do.
+          environment: realPreflight ? readLaunchEnvironment : d2Environment,
+          matrix: d2Matrix,
+          auditorLaunch: trusted.port,
+          create: (repo, options) => {
+            executors.push(options.execute);
+            return createWorktreeWithRoleSession(repo, {
+              ...options,
+              openRoleSession: async (workspace) => {
+                const session = await options.openRoleSession(workspace);
+                sessions.push(session);
+                return session;
+              },
+            });
+          },
+        },
+      );
+    } catch (error) {
+      return error;
+    }
+    return null;
+  });
+  return {
+    fixture,
+    trusted,
+    before,
+    after: gitTrace(fixture.dir),
+    sessions,
+    executors,
+    rejection,
+    result,
+  };
+}
+
+const orcaCallsOf = (spawned, ...words) =>
+  spawned.filter((call) => words.every((word, i) => call[1 + i] === word));
+
+test("T3 auditor role-worktree-create reclaims a worktree whose launch is refused before any terminal exists, through the real internal role-terminal path", async (t) => {
+  // The real role-terminal command reads its own environment: a trusted
+  // version that no longer verifies refuses the launch before terminal create.
+  const run = await launchAuditorThroughRealPath(t, {
+    profile: "claude-current",
+    name: "audit-t3-env",
+    orca: { laterVersion: "unversioned build" },
+  });
+  assert.match(run.rejection?.message ?? "", /was reclaimed/);
+  assert.deepEqual(
+    run.sessions.map((session) => session.sessionObserved),
+    [false],
+  );
+  assert.equal(
+    orcaCallsOf(run.trusted.spawned, "worktree", "create").length,
+    1,
+  );
+  assert.equal(
+    orcaCallsOf(run.trusted.spawned, "worktree", "remove").length,
+    1,
+  );
+  assert.equal(orcaCallsOf(run.trusted.spawned, "terminal").length, 0);
+  assert.equal(
+    run.rejection.workspace.id.startsWith("wt_audit-t3-env::"),
+    true,
+  );
+
+  // An agy-configured auditor is refused by role-terminal before any Orca
+  // probe or terminal; that refusal is reclaimed the same way.
+  const agy = await launchAuditorThroughRealPath(t, {
+    profile: "agy-pro",
+    name: "audit-t3-agy",
+  });
+  assert.match(agy.rejection?.message ?? "", /was reclaimed/);
+  assert.deepEqual(
+    agy.sessions.map((session) => session.sessionObserved),
+    [false],
+  );
+  assert.equal(
+    orcaCallsOf(agy.trusted.spawned, "worktree", "remove").length,
+    1,
+  );
+});
+
+test("T4 auditor creation and reclaim use the one trusted runner and leave no git worktree or branch behind", async (t) => {
+  const run = await launchAuditorThroughRealPath(t, {
+    profile: "claude-current",
+    name: "audit-t4",
+    orca: { laterVersion: "unversioned build" },
+    realPreflight: true,
+  });
+  assert.match(run.rejection?.message ?? "", /was reclaimed/);
+  // The runner createWorktree received is the launch's own trusted runner, and
+  // it is the only one that saw the preflight version read, discovery, worktree
+  // create, the internal role-terminal's version read and worktree remove: a
+  // second runner built anywhere would leave its calls out of this record.
+  assert.deepEqual(run.executors, [run.trusted.execute]);
+  assert.equal(isTrustedOrcaExecute(run.executors[0]), true);
+  const calls = run.trusted.spawned;
+  assert.ok(calls.every((call) => call[0] === "/fake/orca-real"));
+  const verbs = calls.map((call) => call.slice(1, 3).join(" "));
+  assert.deepEqual(verbs, [
+    "--version",
+    "--version",
+    "skills get",
+    "status --json",
+    "worktree create",
+    "--version",
+    "worktree remove",
+  ]);
+  // The repository itself is left exactly as it was found.
+  assert.deepEqual(run.after, run.before);
+  assert.equal(run.after.worktrees.length, 1);
+});
+
+test("T5 auditor preflight reads the environment with role-terminal's inputs and refuses before any worktree create", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
+  const args = {
+    org: fixture.org,
+    role: "auditor",
+    state: fixture.entry.pm.stateDir,
+    repo: fixture.dir,
+    name: "audit-t5",
+    base: fixture.head,
+  };
+  const attempt = async (ports, message) => {
+    const trusted =
+      ports.trusted ?? trustedLaunchOver(async () => orcaReply({}));
+    let creates = 0;
+    await withCwd(fixture.dir, () =>
+      assert.rejects(
+        () =>
+          createRoleWorktree(args, {
+            organization: () => readJSON(fixture.org),
+            environment: d2Environment,
+            matrix: d2Matrix,
+            auditorLaunch: trusted.port,
+            ...ports.override,
+            create: async () => {
+              creates += 1;
+              throw new Error("create must not run");
+            },
+          }),
+        message,
+      ),
+    );
+    assert.equal(creates, 0);
+    return trusted;
+  };
+
+  // (a) The preflight environment receives the same inputs role-terminal's
+  // auditor branch uses, with the version read routed to the launch's runner.
+  let received;
+  const trusted = await attempt(
+    {
+      override: {
+        environment: async (options) => {
+          received = options;
+          throw new Error("preflight refused");
+        },
+      },
+    },
+    /preflight refused/,
+  );
+  const expected = auditorLaunchEnvironmentInputs(trusted.execute);
+  assert.deepEqual(Object.keys(received).sort(), [
+    "homedir",
+    "orcaExecutable",
+    "readOrcaVersion",
+    "skipAgyVersion",
+    "throwOnUnverifiedOrca",
+    "worktreePath",
+  ]);
+  assert.equal(typeof received.readOrcaVersion, "function");
+  // Nothing has run on the launch's runner yet: the preflight only built the
+  // inputs before refusing.
+  assert.equal(trusted.spawned.length, 0);
+  // The preflight's version read runs on the launch's own runner instance:
+  // the call lands in that runner's record, not on a runner built afresh.
+  assert.equal(await received.readOrcaVersion().catch(() => null), null);
+  assert.deepEqual(trusted.spawned, [["/fake/orca-real", "--version"]]);
+  assert.equal(received.skipAgyVersion, expected.skipAgyVersion);
+  assert.equal(received.throwOnUnverifiedOrca, expected.throwOnUnverifiedOrca);
+  assert.equal(received.homedir, os.userInfo().homedir);
+  assert.equal(received.orcaExecutable, "/fake/orca-real");
+  // (b) An unverified trusted version refuses the real preflight read.
+  await attempt(
+    {
+      trusted: trustedLaunchOver(async () => ({
+        code: 0,
+        stdout: "unversioned build\n",
+        stderr: "",
+        timedOut: false,
+      })),
+      override: { environment: undefined },
+    },
+    /./,
+  );
+
+  // (c) A trusted script that cannot be resolved refuses before any create.
+  await attempt(
+    {
+      override: {
+        auditorLaunch: (options) =>
+          resolveAuditorLaunchExecution({
+            ...options,
+            trustedExecuteFactory: () =>
+              trustedOrcaExecute({
+                platform: "darwin",
+                candidates: ["/missing/orca"],
+                exists: () => false,
+              }),
+          }),
+      },
+    },
+    /No trusted Orca executable found/,
+  );
+
+  // (d) A runner that trustedOrcaExecute did not build is refused, even when
+  // it arrives beside the placeholder.
+  await attempt(
+    {
+      override: {
+        auditorLaunch: () => ({
+          executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+          execute: async () => orcaReply({}),
+          versionExecutable: "/fake/orca-real",
+        }),
+      },
+    },
+    /trustedOrcaExecute built/,
+  );
+});
+
+test("T6 auditor launch failure after a terminal was created preserves the worktree and reports its id", async (t) => {
+  const run = await launchAuditorThroughRealPath(t, {
+    profile: "claude-current",
+    name: "audit-t6",
+    orca: {
+      terminal: (orcaArgs, fail) =>
+        orcaArgs[1] === "create"
+          ? orcaReply({ terminal: { handle: "term_t6" } })
+          : fail("screen unavailable"),
+    },
+  });
+  assert.doesNotMatch(run.rejection?.message ?? "", /was reclaimed/);
+  assert.match(run.rejection?.message ?? "", /screen unavailable/);
+  assert.equal(
+    orcaCallsOf(run.trusted.spawned, "terminal", "create").length,
+    1,
+  );
+  assert.equal(
+    orcaCallsOf(run.trusted.spawned, "worktree", "remove").length,
+    0,
+  );
+  assert.equal(run.rejection.workspace.id.startsWith("wt_audit-t6::"), true);
+  // The worktree is still there for reconciliation.
+  assert.equal(run.after.worktrees.length, run.before.worktrees.length + 1);
+});
+
+// T7 (appendix I, section 7): the positive twin of T3~T6. The incident path is
+// worktree create followed by the real internal role-terminal, and only a
+// launch that succeeds there proves the trusted runner is wired end to end.
+test("T7 auditor role-worktree-create succeeds through the real internal role-terminal path on one trusted runner", async (t) => {
+  let typed = "";
+  const run = await launchAuditorThroughRealPath(t, {
+    profile: "claude-current",
+    name: "audit-t7",
+    orca: {
+      terminal: (orcaArgs, fail) => {
+        const verb = orcaArgs[1];
+        const reply = (result) => orcaReply(result);
+        if (verb === "create") {
+          typed = orcaArgs[orcaArgs.indexOf("--command") + 1];
+          return reply({ terminal: { handle: "term_t7" } });
+        }
+        if (verb === "read")
+          return reply({
+            terminal: {
+              source: "screen",
+              tail: [`me@host project % ${typed}`, "Claude Code", ">"],
+            },
+          });
+        if (verb === "wait") return reply({ wait: { satisfied: true } });
+        if (verb === "rename") return reply({ rename: { title: "ok" } });
+        if (verb === "list") return reply({ terminals: [] });
+        return fail(`unexpected terminal verb ${verb}`);
+      },
+    },
+    realPreflight: true,
+  });
+  assert.equal(run.rejection, null);
+  // The real internal role-terminal reported a ready session with a terminal.
+  assert.equal(run.sessions.length, 1);
+  assert.equal(run.sessions[0].ready, true);
+  assert.equal(run.sessions[0].terminal, "term_t7");
+  assert.notEqual(run.sessions[0].sessionObserved, false);
+  // Every call, from the preflight's version read through worktree create,
+  // discovery and every terminal verb, reached the one trusted runner that
+  // createWorktree was handed; none went to PATH or a general runner.
+  assert.deepEqual(run.executors, [run.trusted.execute]);
+  assert.equal(isTrustedOrcaExecute(run.executors[0]), true);
+  const calls = run.trusted.spawned;
+  assert.ok(calls.every((call) => call[0] === "/fake/orca-real"));
+  const kinds = new Set(calls.map((call) => call.slice(1, 3).join(" ")));
+  for (const kind of [
+    "--version",
+    "skills get",
+    "status --json",
+    "worktree create",
+    "terminal create",
+    "terminal read",
+    "terminal wait",
+    "terminal rename",
+    "terminal list",
+  ])
+    assert.ok(kinds.has(kind), `${kind} did not go through the trusted runner`);
+  assert.equal(orcaCallsOf(calls, "worktree", "remove").length, 0);
+  // The value createRoleWorktree returned carries the worktree and terminal
+  // the fake created, not merely what the session opener saw.
+  const worktrees = run.after.worktrees.filter(
+    (line) => !run.before.worktrees.includes(line),
+  );
+  assert.equal(worktrees.length, 1);
+  assert.match(worktrees[0], /-audit-t7$/);
+  const dir = worktrees[0].slice("worktree ".length);
+  const { result } = run;
+  // The id and path are exactly what the fake's worktree create replied.
+  const fakeDir = `${run.fixture.dir}-audit-t7`;
+  assert.equal(result.id, `wt_audit-t7::${fakeDir}`);
+  assert.equal(result.path, fakeDir);
+  assert.equal(fs.realpathSync(result.path), fs.realpathSync(dir));
+  assert.equal(result.session.ready, true);
+  assert.equal(result.session.terminal, "term_t7");
+  assert.notEqual(result.status, "blocked");
+  // Reclaim the temporary worktree through the same runner with the id that
+  // was returned, then prove the repository is back to what it was. t.after
+  // covers an assertion failure.
+  const cleanup = () => {
+    // The fixture's own cleanup may already have removed the repository.
+    if (
+      !fs.existsSync(run.fixture.dir) ||
+      !gitTrace(run.fixture.dir).worktrees.includes(`worktree ${dir}`)
+    )
+      return;
+    git(run.fixture.dir, ["worktree", "remove", "--force", dir]);
+    git(run.fixture.dir, ["branch", "-D", "audit-t7"]);
+  };
+  t.after(cleanup);
+  const removed = await run.trusted.execute(
+    ["orca", "worktree", "remove", "--worktree", `id:${result.id}`, "--json"],
+    { cwd: run.fixture.dir },
+  );
+  assert.equal(removed.code, 0);
+  assert.deepEqual(gitTrace(run.fixture.dir), run.before);
 });
 
 // readTrustedOrcaVersion(options = {}) (orca-adapter.mjs) exposes injection
@@ -2458,10 +2943,29 @@ test("role-worktree-create (counterexample 13, success path): a non-colliding au
 // real Orca process, by tests/role-terminal.test.mjs's
 // assertFailsClosedOnUnverifiedOrca cases.
 test("role-terminal handler wires readOrcaVersion/skipAgyVersion/throwOnUnverifiedOrca into readLaunchEnvironment for the auditor branch", () => {
+  // Since appendix I these four inputs come from one shared function that both
+  // role-worktree-create's preflight and this branch call, so what is checked
+  // here is that the shared function still carries all four, and that the
+  // auditor branch still reads its environment only through it.
   const source = fs.readFileSync(
     "plugins/oh-my-teams/scripts/teams-org.mjs",
     "utf8",
   );
+  const inputsStart = source.indexOf(
+    "export function auditorLaunchEnvironmentInputs(",
+  );
+  assert.notEqual(inputsStart, -1, "auditorLaunchEnvironmentInputs not found");
+  const inputs = source.slice(
+    inputsStart,
+    source.indexOf("\n}\n", inputsStart),
+  );
+  assert.match(
+    inputs,
+    /readOrcaVersion:\s*\(\)\s*=>\s*readTrustedOrcaVersion\(\{\s*execute\s*\}\)/,
+  );
+  assert.match(inputs, /skipAgyVersion:\s*true/);
+  assert.match(inputs, /throwOnUnverifiedOrca:\s*true/);
+  assert.match(inputs, /homedir:\s*os\.userInfo\(\)\.homedir/);
   const resolveCallStart = source.indexOf(
     "resolveAuditorLaunchExecution({ auditorEntry",
   );
@@ -2471,18 +2975,15 @@ test("role-terminal handler wires readOrcaVersion/skipAgyVersion/throwOnUnverifi
     "resolveAuditorLaunchExecution call not found",
   );
   const envCallStart = source.indexOf(
-    "const env = await readLaunchEnvironment({",
+    "env = await readLaunchEnvironment({",
     resolveCallStart,
   );
   assert.notEqual(envCallStart, -1, "readLaunchEnvironment call not found");
-  const envCallEnd = source.indexOf("});", envCallStart);
-  const envCall = source.slice(envCallStart, envCallEnd);
-  assert.match(
-    envCall,
-    /readOrcaVersion:\s*\(\)\s*=>\s*readTrustedOrcaVersion\(\)/,
+  const envCall = source.slice(
+    envCallStart,
+    source.indexOf("});", envCallStart),
   );
-  assert.match(envCall, /skipAgyVersion:\s*true/);
-  assert.match(envCall, /throwOnUnverifiedOrca:\s*true/);
+  assert.match(envCall, /auditorLaunchEnvironmentInputs\(auditorExecute\)/);
 });
 
 // CLI registration for audit-objection/audit-response/audit-ruling/
