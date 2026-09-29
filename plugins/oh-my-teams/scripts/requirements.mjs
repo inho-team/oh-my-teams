@@ -1166,8 +1166,8 @@ export function assertLedgerExists(orgFile, worktreeId) {
 
 /**
  * Runs every check A.5 requires before a kickoff may close: the ledger's
- * close-time completeness (`assertLedgerCloseReady`) and, when the
- * organization declares an auditor, that both the brief and outcome
+ * close-time completeness (`assertLedgerCloseReady`) and, when this kickoff's
+ * pinned `auditPolicy` calls for an auditor, that both the brief and outcome
  * checkpoints still carry a valid acceptance (B.5). This is the single call
  * `checkCloseReady`, `deliverKickoff` and `kickoff-release --reason completed`
  * each run unconditionally in their own function body; it takes no `force`
@@ -1179,15 +1179,24 @@ export function assertLedgerExists(orgFile, worktreeId) {
  * @param {string} options.head - Result HEAD the kickoff is closing at.
  * @param {string} options.repo - Workspace `head` is checked against for the outcome acceptance binding.
  * @param {string[]} [options.registeredWorktreePaths] - Kickoff worktree paths evidence must not point into.
+ * @param {object} [options.entry] - This kickoff's registry entry, required.
+ *   Its `auditPolicy` (pinned at kickoff-claim, D1, or backfilled onto a
+ *   legacy entry only through `kickoffAuditPolicyRetrofit`) decides whether
+ *   an auditor is configured, not a fresh `organization.json` read, so
+ *   removing `org.auditor` after claim cannot waive an audit this kickoff
+ *   already took on. There is no live-read fallback: an entry with no
+ *   `auditPolicy` refuses close outright, naming the retrofit command,
+ *   rather than guessing a policy from the organization's current setting.
  * @returns {Promise<{ready: boolean}>} Result once every check passes.
  * @throws {Error} When no confirmed ledger exists, the ledger is not
- *   close-ready, or (with an auditor configured) either checkpoint's
- *   acceptance is missing or no longer valid.
+ *   close-ready, this kickoff's `auditPolicy` was never pinned, or (with an
+ *   auditor configured) either checkpoint's acceptance is missing or no
+ *   longer valid.
  */
 export async function assertKickoffCloseReady(
   orgFile,
   worktreeId,
-  { head, repo, registeredWorktreePaths = [] },
+  { head, repo, registeredWorktreePaths = [], entry },
 ) {
   const ledger = assertLedgerExists(orgFile, worktreeId);
   assertLedgerCloseReady({
@@ -1196,8 +1205,14 @@ export async function assertKickoffCloseReady(
     ownerRoot: projectRoot(orgFile),
     registeredWorktreePaths,
   });
-  const org = readJSON(orgFile);
-  if (!org.auditor) return { ready: true };
+  assert(
+    entry?.auditPolicy !== undefined,
+    `Kickoff ${worktreeId} has no pinned audit policy; the director must run ` +
+      "kickoff-audit-policy-retrofit for this worktree before it can close " +
+      "(a live organization.json read is never used as a substitute)",
+  );
+  const auditorConfigured = entry.auditPolicy.auditorConfigured;
+  if (!auditorConfigured) return { ready: true };
   assert(
     await hasValidAcceptance(orgFile, worktreeId, "brief"),
     "Brief audit acceptance is missing or no longer valid; " +

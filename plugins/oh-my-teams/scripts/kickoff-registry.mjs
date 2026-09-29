@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
+  AUDITOR_ROLE,
   assert,
   hash,
   readJSON,
@@ -23,8 +24,12 @@ import {
 // documents.mjs imports listKickoffs/kickoffHashFor from this module back, a
 // circular import documents.mjs's module doc explains is safe here because
 // every use on both sides happens inside a function body, never at either
-// module's own top level (3.7 item 4).
+// module's own top level (3.7 item 4). delivery.mjs imports listKickoffs
+// etc. from this module the same way, so importing assertDirectorAuthority
+// back from delivery.mjs follows the identical, already-safe pattern.
 import { deliveryRefDocId, documentState } from "./documents.mjs";
+import { assertDirectorAuthority } from "./delivery.mjs";
+import { readLaunches } from "./usage-ledger.mjs";
 
 /** Reasons a registered kickoff may be ended, in the order they end one. */
 export const RELEASE_REASONS = ["completed", "disbanded", "taken-over"];
@@ -327,6 +332,56 @@ export function validateEntry(stored) {
       (text(entry.delivered?.head) && text(entry.delivered?.mergeCommit)),
     "Kickoff delivered must name the head and the merge commit",
   );
+  // auditPolicy is optional so entries registered before this feature existed
+  // stay readable; there is no live-organization.json fallback for those (D1,
+  // director decision msg_0b114271f1f5) — close, deliver and completed
+  // release all refuse them outright until a director backfills one with
+  // kickoffAuditPolicyRetrofit. Recorded once, either at kickoff-claim time
+  // (registerKickoff) or through that retrofit, and never overwritten by
+  // either path afterward, so removing org.auditor or re-running the retrofit
+  // cannot erase or loosen an audit obligation this kickoff already took on.
+  if (entry.auditPolicy !== undefined) {
+    const policy = entry.auditPolicy;
+    assert(
+      policy &&
+        typeof policy === "object" &&
+        typeof policy.auditorConfigured === "boolean",
+      "Kickoff auditPolicy.auditorConfigured must be a boolean when present",
+    );
+    assert(
+      ["kickoff-claim", "retrofit"].includes(policy.source),
+      'Kickoff auditPolicy.source must be "kickoff-claim" or "retrofit"',
+    );
+    assert(
+      policy.auditorConfigured ? text(policy.profile) : policy.profile === null,
+      "Kickoff auditPolicy.profile must name a profile when auditorConfigured is true, and must be null otherwise",
+    );
+    assert(
+      policy.auditorConfigured
+        ? Array.isArray(policy.fallbacks) &&
+            new Set(policy.fallbacks).size === policy.fallbacks.length &&
+            policy.fallbacks.every((id) => text(id))
+        : policy.fallbacks === null,
+      "Kickoff auditPolicy.fallbacks must be a unique profile-name array when auditorConfigured is true, and null otherwise",
+    );
+    assert(text(policy.pinnedAt), "Kickoff auditPolicy.pinnedAt required");
+    if (policy.source === "retrofit") {
+      assert(
+        ["launch-ledger", "director-attestation"].includes(
+          policy.retrofittedFrom,
+        ),
+        "Kickoff auditPolicy.retrofittedFrom must be launch-ledger or director-attestation for a retrofit",
+      );
+      assert(
+        text(policy.reason),
+        "Kickoff auditPolicy.reason required for a retrofit",
+      );
+      assert(
+        policy.retrofittedBy && text(policy.retrofittedBy.checkoutPath),
+        "Kickoff auditPolicy.retrofittedBy.checkoutPath required for a retrofit",
+      );
+    }
+  }
   // auditor is optional: recorded only once `role-terminal --role auditor`
   // successfully opens this kickoff's audit terminal (B.2).
   if (entry.auditor !== undefined) {
@@ -615,6 +670,39 @@ export function isSameOrWithinByIdentity(parent, child, options) {
 }
 
 /**
+ * Reports whether `target` shares a worktree with any of `candidates`: is
+ * identical to one, sits anywhere inside one, or one sits anywhere inside it
+ * (D4, design B.2's "pathWithin", replacing an exact string-set membership
+ * test that a symlink, a case variant, or a nested path could all defeat).
+ * Comparison is by filesystem identity via {@link isSameOrWithinByIdentity}
+ * in both directions, on `fs.realpathSync.native`'d paths; a path that
+ * cannot be resolved (already removed, or not yet created) falls back to its
+ * plain `path.resolve`d text so a missing directory still compares, rather
+ * than silently dropping out of the check.
+ *
+ * @param {string} target - Directory to test (e.g. the auditor's chosen worktree).
+ * @param {string[]} candidates - Directories `target` must stay independent of.
+ * @returns {boolean} Whether `target` shares a worktree with any candidate.
+ */
+export function sharesWorktreeWithAny(target, candidates) {
+  const resolve = (value) => {
+    try {
+      return fs.realpathSync.native(value);
+    } catch {
+      return path.resolve(value);
+    }
+  };
+  const targetResolved = resolve(target);
+  return candidates.some((candidate) => {
+    const candidateResolved = resolve(candidate);
+    return (
+      isSameOrWithinByIdentity(candidateResolved, targetResolved) ||
+      isSameOrWithinByIdentity(targetResolved, candidateResolved)
+    );
+  });
+}
+
+/**
  * Finds the registered kickoff, if any, that a PM state directory belongs to.
  *
  * Resolution is anchored on `stateDir` itself, never a caller-supplied
@@ -871,7 +959,8 @@ export function registerKickoff(orgFile, request) {
       "Brief file must exist before the kickoff is registered",
     );
     assert(fs.existsSync(orgFile), "No organization; run the form skill first");
-    const revision = validateOrg(readJSON(orgFile)).revision;
+    const organizationAtClaim = validateOrg(readJSON(orgFile));
+    const revision = organizationAtClaim.revision;
     // The organization sits at <project>/.omt/organization.json. A PM worktree
     // at the project itself is the declaring session supervising its own
     // kickoff, which is allowed only where no handoff exists and the user
@@ -927,6 +1016,28 @@ export function registerKickoff(orgFile, request) {
       runId: claim.runId ?? null,
       organizationRevision: revision,
       requirements: { ledgerHash: claimedLedgerHash },
+      // Pinned once, from this moment's organization.json (D1): close-ready
+      // and every other audit-policy consumer must read this fixed value
+      // instead of re-reading organization.json, so removing org.auditor
+      // after the fact cannot retroactively waive this kickoff's audit. The
+      // full {profile, fallbacks} shape is pinned too, not just the boolean,
+      // so role-terminal --role auditor can run from this entry alone
+      // (director decision msg_0b114271f1f5, checklist 5).
+      auditPolicy: organizationAtClaim.auditor
+        ? {
+            auditorConfigured: true,
+            profile: organizationAtClaim.auditor.profile,
+            fallbacks: organizationAtClaim.auditor.fallbacks ?? [],
+            source: "kickoff-claim",
+            pinnedAt: new Date().toISOString(),
+          }
+        : {
+            auditorConfigured: false,
+            profile: null,
+            fallbacks: null,
+            source: "kickoff-claim",
+            pinnedAt: new Date().toISOString(),
+          },
       brief,
       delivery: {
         mode: claim.delivery.mode,
@@ -1020,6 +1131,135 @@ export function recordAuditorLaunch(
     });
     writeJSON(file, updated);
     return { recorded: true, file, entry: updated };
+  });
+}
+
+/**
+ * Permanently pins the audit policy of a kickoff registered before
+ * `auditPolicy` was recorded at claim time (D1, director decision
+ * msg_0b114271f1f5).
+ *
+ * Only the kickoff's registered director may run this, from the registered
+ * checkout path (`assertDirectorAuthority`, no `force`). The director must
+ * state `auditorConfigured` explicitly; nothing here infers it from a live
+ * `organization.json` read; that inference is exactly the D1 bypass this
+ * command exists to close. The launch ledger is consulted only to refuse an
+ * attestation it already contradicts: a recorded `role-terminal --role
+ * auditor` launch for this kickoff makes `auditorConfigured: false` refused
+ * outright. An absent ledger entry proves nothing either way (the ledger can
+ * be edited directly, so it is corroborating evidence, never the sole basis)
+ * and never substitutes for the director's own statement.
+ *
+ * Once written, `auditPolicy` can never be retrofitted again: a second call
+ * for the same worktree is refused regardless of what it asks for, so a
+ * pinned policy cannot be relaxed, cleared or re-pinned after the fact. This
+ * also covers a kickoff whose `auditPolicy` was already pinned at claim time
+ * by `registerKickoff` — retrofit is only for the legacy entries that
+ * predate that pinning.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} worktreeId - PM worktree of the kickoff to retrofit.
+ * @param {object} request - Retrofit request.
+ * @param {boolean} request.auditorConfigured - Director's explicit statement.
+ * @param {string} [request.profile] - Auditor profile to pin; required, and
+ *   must name a profile declared in `organization.json`, when
+ *   `auditorConfigured` is true. Refused when `auditorConfigured` is false.
+ * @param {string[]} [request.fallbacks] - Auditor fallback profiles to pin,
+ *   each also required to name a profile in `organization.json`.
+ * @param {string} request.reason - Non-empty justification, recorded as-is.
+ * @param {string} [request.callerCwd=process.cwd()] - Caller's actual working
+ *   directory (proof, not a caller-declared value), checked against the
+ *   kickoff's registered director.
+ * @returns {{retrofitted: boolean, auditPolicy: object}} The pinned policy.
+ * @throws {Error} When the kickoff is unregistered, already has a pinned
+ *   policy, the caller is not its registered director, `reason` is empty,
+ *   `auditorConfigured` is not a boolean, the launch ledger already
+ *   contradicts an `auditorConfigured: false` statement, or a named profile
+ *   is not declared in `organization.json`.
+ */
+export function kickoffAuditPolicyRetrofit(
+  orgFile,
+  worktreeId,
+  { auditorConfigured, profile, fallbacks, reason, callerCwd = process.cwd() },
+) {
+  return withRegistry(orgFile, () => {
+    const file = locateEntry(orgFile, worktreeId);
+    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
+    const entry = validateEntry(readJSON(file));
+    assert(
+      entry.auditPolicy === undefined,
+      `Kickoff ${worktreeId} already has a pinned audit policy; ` +
+        "it cannot be re-pinned, relaxed or cleared",
+    );
+    // assertDirectorAuthority warns and allows through when entry.director is
+    // absent (a legacy accommodation other operations rely on); the director
+    // decision's "항상 등록 이사 권한" for this specific command means that
+    // accommodation does not apply here, so an unregistered-director entry
+    // is refused outright instead of silently letting anyone retrofit it.
+    assert(
+      entry.director,
+      `Kickoff ${worktreeId} has no registered director; ` +
+        "its audit policy cannot be retrofitted until a director is recorded for it",
+    );
+    assertDirectorAuthority(entry, callerCwd, "kickoff-audit-policy-retrofit");
+    assert(
+      typeof reason === "string" && reason.trim(),
+      "--reason is required and must be a non-empty justification",
+    );
+    assert(
+      typeof auditorConfigured === "boolean",
+      "--auditor-configured true|false is required as the director's explicit statement",
+    );
+    const hasAuditorLaunch = readLaunches(orgFile).some(
+      (line) =>
+        line.kickoffPmWorktreeId === entry.pm.worktreeId &&
+        line.role === AUDITOR_ROLE,
+    );
+    assert(
+      !(hasAuditorLaunch && auditorConfigured === false),
+      `The launch ledger already records an auditor session for kickoff ${worktreeId}; ` +
+        "auditorConfigured: false contradicts that history and is refused",
+    );
+    let pinnedProfile = null;
+    let pinnedFallbacks = null;
+    if (auditorConfigured) {
+      const org = readJSON(orgFile);
+      assert(
+        typeof profile === "string" &&
+          profile.trim() &&
+          Object.hasOwn(org.profiles, profile),
+        "--profile must name a profile declared in organization.json when --auditor-configured is true",
+      );
+      const fallbackList = fallbacks ?? [];
+      assert(
+        Array.isArray(fallbackList) &&
+          new Set(fallbackList).size === fallbackList.length &&
+          fallbackList.every((id) => Object.hasOwn(org.profiles, id)),
+        "--fallbacks must be unique profiles declared in organization.json",
+      );
+      pinnedProfile = profile;
+      pinnedFallbacks = fallbackList;
+    } else {
+      assert(
+        profile === undefined && fallbacks === undefined,
+        "--profile/--fallbacks are only accepted when --auditor-configured is true",
+      );
+    }
+    const auditPolicy = {
+      auditorConfigured,
+      profile: pinnedProfile,
+      fallbacks: pinnedFallbacks,
+      source: "retrofit",
+      retrofittedFrom: hasAuditorLaunch
+        ? "launch-ledger"
+        : "director-attestation",
+      reason: reason.trim(),
+      retrofittedBy: { checkoutPath: path.resolve(callerCwd) },
+      pinnedAt: new Date().toISOString(),
+    };
+    const updated = validateEntry({ ...entry, auditPolicy });
+    writeJSON(file, updated);
+    return { retrofitted: true, auditPolicy };
   });
 }
 
@@ -1264,6 +1504,7 @@ export async function releaseKickoff(
     await assertKickoffCloseReady(orgFile, worktreeId, {
       head: effectiveHead,
       repo,
+      entry,
     });
   }
   const released = withRegistry(orgFile, () => {

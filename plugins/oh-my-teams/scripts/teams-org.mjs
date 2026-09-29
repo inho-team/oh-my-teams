@@ -150,6 +150,7 @@ import {
   bindKickoffRun,
   classifyKickoffEntry,
   cleanupKickoffBranches,
+  kickoffAuditPolicyRetrofit,
   kickoffHashFor,
   listKickoffs,
   ownerProject,
@@ -158,6 +159,7 @@ import {
   recordDelivery,
   registerKickoff,
   releaseKickoff,
+  sharesWorktreeWithAny,
   verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
 import {
@@ -212,6 +214,17 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   kickoff-claim --org FILE --from CLAIM
   kickoff-show --org FILE [--worktree ID]
   kickoff-bind --org FILE --worktree ID --run ID
+  kickoff-audit-policy-retrofit --org FILE --worktree ID
+                                --auditor-configured true|false --reason TEXT
+                                [--profile NAME --fallbacks NAME[,NAME...]]
+                                (director only, run from the kickoff's registered checkout;
+                                pins a legacy entry's audit policy once, permanently — refuses
+                                a kickoff already pinned at claim time, an entry with no
+                                registered director, or --auditor-configured false when the
+                                launch ledger already records an auditor session for it;
+                                --profile/--fallbacks are required, and must each name a
+                                profile in organization.json, only when --auditor-configured
+                                is true)
   kickoff-release --org FILE --worktree ID
                   --reason completed|disbanded|taken-over [--force]
                   (also closes that kickoff's pending director signals)
@@ -458,6 +471,14 @@ export const ALLOWED_OPTIONS = {
   "kickoff-show": ["org", "worktree"],
   "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
+  "kickoff-audit-policy-retrofit": [
+    "org",
+    "worktree",
+    "auditor-configured",
+    "profile",
+    "fallbacks",
+    "reason",
+  ],
   "kickoff-release": ["org", "worktree", "reason", "force", "repo", "head"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
   "kickoff-check-close-ready": ["org", "worktree", "head", "repo"],
@@ -745,6 +766,12 @@ export const REQUIRED_OPTIONS = {
   "kickoff-show": ["org"],
   "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
+  "kickoff-audit-policy-retrofit": [
+    "org",
+    "worktree",
+    "auditor-configured",
+    "reason",
+  ],
   "kickoff-release": ["org", "worktree", "reason"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
   "kickoff-check-close-ready": ["org", "worktree", "head"],
@@ -1358,12 +1385,40 @@ export async function createRoleWorktree(
     list = runOrcaJson,
   } = {},
 ) {
+  // The auditor is out-of-ladder (role-terminal's own comment: it never
+  // folds, never runs a workflow), so it takes none of the workflow-task
+  // promotion/reuse machinery below: --state alone names the audited
+  // kickoff, exactly as role-terminal --role auditor itself requires, and
+  // creation always makes a brand-new worktree (never --worktree reuse),
+  // so its session proof is one unit with its creation (audit-worktree-create-path).
+  const isAuditorRole = args.role === AUDITOR_ROLE;
+  if (isAuditorRole) {
+    assert(
+      args.state &&
+        args["workflow-id"] === undefined &&
+        args["workflow-task"] === undefined &&
+        args["prior-workflow-id"] === undefined &&
+        args["prior-task-id"] === undefined &&
+        args.worktree === undefined,
+      "role-worktree-create --role auditor requires --state naming the audited kickoff's PM state directory, " +
+        "and accepts none of --workflow-id/--workflow-task/--prior-workflow-id/--prior-task-id/--worktree " +
+        "(the auditor never runs a workflow and always opens a brand-new worktree)",
+    );
+    // Mirrors role-terminal --role auditor's own --orca refusal (B.6, decision
+    // B): this preflight step reads a launch environment through args.orca
+    // before role-terminal's own trusted-executable check ever runs, so the
+    // same refusal must happen here too, not only downstream.
+    assert(
+      args.orca === undefined,
+      "role-worktree-create --role auditor does not accept --orca; the auditor launch always uses the trusted Orca executable",
+    );
+  }
   const workflowOptions = [
     args["workflow-id"] !== undefined,
     args["workflow-task"] !== undefined,
     args.state !== undefined,
   ];
-  const hasWorkflow = workflowOptions.some(Boolean);
+  const hasWorkflow = !isAuditorRole && workflowOptions.some(Boolean);
   assert(
     !hasWorkflow || workflowOptions.every(Boolean),
     "--workflow-id, --workflow-task, and --state must be provided together",
@@ -1477,7 +1532,48 @@ export async function createRoleWorktree(
     preflightOrganization,
     `Workflow ${args["workflow-id"]} has no frozen organization snapshot`,
   );
-  await preflightRoleWorktree(args, preflightOrganization, environment, matrix);
+  // D1/checklist 5: the matrix must predict the same pinned-policy launch
+  // the nested role-terminal call below will actually open, not a live
+  // organization.json read that may since disagree with it.
+  let organizationForPreflight = preflightOrganization;
+  if (isAuditorRole) {
+    const stateDir = path.resolve(args.state);
+    const auditorEntry = listKickoffs(path.resolve(args.org)).kickoffs.find(
+      (entry) => path.resolve(entry.pm.stateDir) === stateDir,
+    );
+    assert(
+      auditorEntry,
+      `No kickoff is registered with pm state directory ${stateDir}`,
+    );
+    assert(
+      auditorEntry.auditPolicy?.auditorConfigured === true,
+      `Kickoff ${auditorEntry.pm.worktreeId} has no pinned auditor profile; ` +
+        "the director must run kickoff-audit-policy-retrofit with --auditor-configured true " +
+        "before an auditor worktree can be created for it",
+    );
+    assert(
+      Object.hasOwn(
+        preflightOrganization.profiles,
+        auditorEntry.auditPolicy.profile,
+      ),
+      `Kickoff ${auditorEntry.pm.worktreeId}'s pinned auditor profile ` +
+        `"${auditorEntry.auditPolicy.profile}" no longer exists in organization.json; ` +
+        "it is not substituted with another profile, so the auditor worktree cannot be created",
+    );
+    organizationForPreflight = {
+      ...preflightOrganization,
+      auditor: {
+        profile: auditorEntry.auditPolicy.profile,
+        fallbacks: auditorEntry.auditPolicy.fallbacks ?? [],
+      },
+    };
+  }
+  await preflightRoleWorktree(
+    args,
+    organizationForPreflight,
+    environment,
+    matrix,
+  );
   assert(
     !args.worktree || reusable,
     "--worktree requires an accepted prior task of the same role; a promotion also preserves and closes that Senior session first",
@@ -1855,16 +1951,42 @@ async function startSupervisedWorker(args) {
   // audit checkpoint has a valid acceptance. This is the only place that
   // enforcement is checked (requirements-fidelity does not gate on it), and
   // it only applies once this launch can be tied to a registered kickoff.
-  if (org.auditor) {
-    const worktreeId = resolveLaunchKickoff(
-      listKickoffs(run.orgFile).kickoffs,
-      lazyLaunchesBackward(run.orgFile),
-      {
-        stateDir: args.state ? path.resolve(args.state) : null,
-        callerCwd: path.resolve(args.repo),
-      },
+  // D2: resolution uses the same resolved worktree path
+  // assertNotKickoffOwner already used above (selectedWorktreePath, honoring
+  // --worktree), not a raw --repo, so a --repo that is not itself the
+  // kickoff's own PM worktree (the ordinary case for a worker whose
+  // --worktree names a child worktree) still resolves to its kickoff instead
+  // of silently skipping this check. Resolution now always runs, not only
+  // when organization.json currently declares an auditor (D1): whether the
+  // check applies is decided below, from this kickoff's own pinned
+  // auditPolicy, not from that live read.
+  const kickoffs = listKickoffs(run.orgFile).kickoffs;
+  const worktreeId = resolveLaunchKickoff(
+    kickoffs,
+    lazyLaunchesBackward(run.orgFile),
+    {
+      stateDir: args.state ? path.resolve(args.state) : null,
+      callerCwd:
+        selectedWorktreePath(args.worktree ?? "current", args.repo) ??
+        path.resolve(args.repo),
+    },
+  );
+  if (worktreeId) {
+    // D1: this kickoff's pinned auditPolicy decides, not a fresh
+    // organization.json read, so removing org.auditor after claim cannot
+    // skip this precheck for a kickoff that already required an auditor.
+    // There is no live-read fallback (director decision msg_0b114271f1f5): a
+    // legacy entry with no pinned auditPolicy refuses outright, naming the
+    // retrofit command, rather than guessing from organization.json's
+    // current setting.
+    const entry = kickoffs.find((k) => k.pm.worktreeId === worktreeId);
+    assert(
+      entry?.auditPolicy !== undefined,
+      `Kickoff ${worktreeId} has no pinned audit policy; the director must run ` +
+        "kickoff-audit-policy-retrofit for this worktree before a worker can be assigned",
     );
-    if (worktreeId) {
+    const auditorConfigured = entry.auditPolicy.auditorConfigured;
+    if (auditorConfigured) {
       assert(
         await hasValidAcceptance(run.orgFile, worktreeId, "brief"),
         `Kickoff ${worktreeId} has an auditor configured but no valid brief-audit ` +
@@ -2744,6 +2866,27 @@ export async function executeCommand(args, execute) {
         worktreeId: args.worktree,
         runId: args.run,
       });
+    case "kickoff-audit-policy-retrofit": {
+      const auditorConfigured = { true: true, false: false }[
+        args["auditor-configured"]
+      ];
+      assert(
+        auditorConfigured !== undefined,
+        "--auditor-configured must be exactly true or false",
+      );
+      return kickoffAuditPolicyRetrofit(args.org, args.worktree, {
+        auditorConfigured,
+        profile: args.profile,
+        fallbacks:
+          args.fallbacks === undefined
+            ? undefined
+            : args.fallbacks
+                .split(",")
+                .map((id) => id.trim())
+                .filter(Boolean),
+        reason: args.reason,
+      });
+    }
     case "deliver":
       return deliverKickoff({
         orgFile: args.org,
@@ -3175,7 +3318,35 @@ export async function executeCommand(args, execute) {
           process.cwd(),
           "role-terminal --role auditor",
         );
-        org = readJSON(args.org);
+        // D1/checklist 5: this kickoff's pinned auditPolicy decides the
+        // profile and fallbacks, not a live organization.json read, so the
+        // launch still opens with the profile this kickoff committed to even
+        // when org.auditor was since changed or cleared entirely, and never
+        // silently substitutes another profile when the pinned one no
+        // longer exists (director decision msg_0b114271f1f5, PM supplement
+        // msg_901f9291b1d3). There is no live fallback: an entry whose
+        // auditPolicy was never pinned, or whose policy says no auditor is
+        // configured, cannot open an auditor terminal at all.
+        assert(
+          auditorEntry.auditPolicy?.auditorConfigured === true,
+          `Kickoff ${auditorEntry.pm.worktreeId} has no pinned auditor profile; ` +
+            "the director must run kickoff-audit-policy-retrofit with --auditor-configured true " +
+            "before an auditor terminal can be opened for it",
+        );
+        const pinnedOrg = readJSON(args.org);
+        assert(
+          Object.hasOwn(pinnedOrg.profiles, auditorEntry.auditPolicy.profile),
+          `Kickoff ${auditorEntry.pm.worktreeId}'s pinned auditor profile ` +
+            `"${auditorEntry.auditPolicy.profile}" no longer exists in organization.json; ` +
+            "it is not substituted with another profile, so the auditor cannot be launched",
+        );
+        org = {
+          ...pinnedOrg,
+          auditor: {
+            profile: auditorEntry.auditPolicy.profile,
+            fallbacks: auditorEntry.auditPolicy.fallbacks ?? [],
+          },
+        };
         runCtx = { orgFile: path.resolve(args.org) };
       } else {
         ({ org, run: runCtx } = launchContext(args));
@@ -3200,8 +3371,8 @@ export async function executeCommand(args, execute) {
           target,
           "role-terminal --role auditor needs a resolvable --worktree",
         );
-        const forbidden = new Set([
-          path.resolve(auditorEntry.pm.path),
+        const forbidden = [
+          auditorEntry.pm.path,
           ...readLaunches(path.resolve(args.org))
             .filter(
               (line) =>
@@ -3210,9 +3381,13 @@ export async function executeCommand(args, execute) {
                 line.worktreePath,
             )
             .map((line) => line.worktreePath),
-        ]);
+        ];
+        // D4: compares by filesystem identity, in both directions, instead
+        // of exact string-set membership, so a symlink, a case variant, or a
+        // nested path cannot pass as independent of the PM's or a worker's
+        // worktree (design B.2's pathWithin).
         assert(
-          !forbidden.has(target),
+          !sharesWorktreeWithAny(target, forbidden),
           `The auditor cannot run from ${target}, which this kickoff's PM or a worker already uses; ` +
             "open it in a separate worktree so the audit stays independent of the work it reviews",
         );
@@ -3735,8 +3910,20 @@ export async function executeCommand(args, execute) {
       );
     case "director-signal": {
       if (args.kind === "close-ready") {
-        const org = readJSON(args.org);
-        if (org.auditor) {
+        // D1: reads this kickoff's pinned auditPolicy, not a fresh
+        // organization.json, so removing org.auditor after claim cannot let
+        // close-ready pass while an outcome objection is still unresolved.
+        // There is no live-read fallback (director decision msg_0b114271f1f5):
+        // a legacy entry with no pinned auditPolicy refuses outright, naming
+        // the retrofit command.
+        const [entry] = listKickoffs(args.org, args.worktree).kickoffs;
+        assert(
+          entry?.auditPolicy !== undefined,
+          `Kickoff ${args.worktree} has no pinned audit policy; the director must run ` +
+            "kickoff-audit-policy-retrofit for this worktree before close-ready can be signaled",
+        );
+        const auditorConfigured = entry.auditPolicy.auditorConfigured;
+        if (auditorConfigured) {
           assert(
             await hasValidAcceptance(
               args.org,

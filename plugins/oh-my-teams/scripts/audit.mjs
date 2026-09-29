@@ -414,7 +414,10 @@ export async function auditObjection(
       `Objection ${name} required`,
     );
   }
-  verifiedAuditor(orgFile, worktreeId);
+  const verifiedCaller = {
+    role: AUDITOR_ROLE,
+    handle: verifiedAuditor(orgFile, worktreeId),
+  };
   const ledger = requireLedger(orgFile, worktreeId);
   return withAudit(orgFile, worktreeId, async (audit) => {
     const record = audit.checkpoints[checkpoint];
@@ -434,6 +437,7 @@ export async function auditObjection(
         description,
         rebuttalRequested,
         raisedAt: new Date().toISOString(),
+        verifiedCaller,
       },
     ];
     const file = auditFile(orgFile, worktreeId);
@@ -476,10 +480,16 @@ export async function auditResponse(
       ),
     "Response evidenceRefs required: at least one {path, sha256}",
   );
+  let verifiedCaller;
   if (checkpoint === "brief") {
-    verifiedDirector(orgFile, worktreeId);
+    const entry = verifiedDirector(orgFile, worktreeId);
+    verifiedCaller = {
+      role: DIRECTOR_ROLE,
+      checkoutPath: entry.director?.checkoutPath ?? null,
+    };
   } else {
     await verifiedPm(orgFile, worktreeId);
+    verifiedCaller = { role: "pm", handle: process.env.ORCA_TERMINAL_HANDLE };
   }
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];
@@ -495,6 +505,7 @@ export async function auditResponse(
         argument,
         evidenceRefs,
         respondedAt: new Date().toISOString(),
+        verifiedCaller,
       },
     ];
     const file = auditFile(orgFile, worktreeId);
@@ -528,7 +539,10 @@ export async function auditRuling(
     `Ruling verdict must be one of ${VERDICTS.join("/")}`,
   );
   assert(typeof reason === "string" && reason.trim(), "Ruling reason required");
-  verifiedAuditor(orgFile, worktreeId);
+  const verifiedCaller = {
+    role: AUDITOR_ROLE,
+    handle: verifiedAuditor(orgFile, worktreeId),
+  };
   return withAudit(orgFile, worktreeId, (audit) => {
     const record = audit.checkpoints[checkpoint];
     const latest = latestResponse(record, objectionId);
@@ -546,6 +560,7 @@ export async function auditRuling(
         verdict,
         reason,
         ruledAt: new Date().toISOString(),
+        verifiedCaller,
       },
     ];
     const file = auditFile(orgFile, worktreeId);
@@ -577,7 +592,16 @@ export async function auditChecked(orgFile, worktreeId, checkpoint, checked) {
   );
   verifiedAuditor(orgFile, worktreeId);
   return withAudit(orgFile, worktreeId, (audit) => {
-    audit.checkpoints[checkpoint].checked = checked;
+    const record = audit.checkpoints[checkpoint];
+    // Merged, not overwritten (D3): a later call naming a narrower set of
+    // items must not silently erase coverage an earlier call already
+    // recorded, which would let the auditor's own checked history be shrunk
+    // after the fact instead of only ever growing.
+    const merged = new Map(
+      record.checked.map((item) => [`${item.type}:${item.id}`, item]),
+    );
+    for (const item of checked) merged.set(`${item.type}:${item.id}`, item);
+    record.checked = [...merged.values()];
     const file = auditFile(orgFile, worktreeId);
     writeJSON(file, audit);
     return { recorded: true, audit };

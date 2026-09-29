@@ -133,7 +133,7 @@ export function assertDirectorAuthority(entry, callerCwd, use, force) {
 export async function checkCloseReady({ orgFile, worktreeId, head, repo }) {
   const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
   assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
-  await assertKickoffCloseReady(orgFile, worktreeId, { head, repo });
+  await assertKickoffCloseReady(orgFile, worktreeId, { head, repo, entry });
   const signal = findCloseReadySignal(orgFile, worktreeId);
   if (!signal) {
     console.warn(
@@ -193,7 +193,11 @@ export async function deliverKickoff({
   // allowed through with a warning so existing kickoffs stay closable.
   assertDirectorAuthority(entry, callerCwd, "deliver", force);
   // Ledger/audit check: unconditional, never bypassed by `force`.
-  await assertKickoffCloseReady(orgFile, worktreeId, { head, repo: source });
+  await assertKickoffCloseReady(orgFile, worktreeId, {
+    head,
+    repo: source,
+    entry,
+  });
   const delivery = entry.delivery;
   assert(
     delivery,

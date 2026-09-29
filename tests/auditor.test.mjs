@@ -17,16 +17,23 @@ import {
   isIdenticalDirectory,
   isSameOrWithin,
   isSameOrWithinByIdentity,
+  kickoffAuditPolicyRetrofit,
   kickoffEntryName,
   listKickoffs,
   registerKickoff,
   registryDirectory,
+  releaseKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
   readLaunches,
   recordLaunch,
 } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
-import { requirementsPresent } from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import {
+  assertKickoffCloseReady,
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+  requirementsPresent,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
 import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 import {
   auditAccept,
@@ -47,6 +54,7 @@ import {
   resolveAuditorLaunchExecution,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import { deliverKickoff } from "../plugins/oh-my-teams/scripts/delivery.mjs";
 
 const exampleOrg = new URL(
   "../plugins/oh-my-teams/examples/organization.json",
@@ -109,7 +117,7 @@ function initRepo(dir) {
 // terminal — enough identity plumbing for every verifiedAuditor/verifiedPm/
 // verifiedDirector check these tests exercise to pass. `dir` doubles as the
 // Git workspace resultHead/head claims are checked against.
-function kickoff(t, worktreeId = "wt-1") {
+function kickoff(t, worktreeId = "wt-1", { auditor } = {}) {
   // realpath'd: on macOS os.tmpdir() sits under a /var -> /private/var
   // symlink, and process.chdir() reports the resolved path, so an
   // un-resolved dir would never equal process.cwd() in a director-authority
@@ -122,6 +130,16 @@ function kickoff(t, worktreeId = "wt-1") {
   const org = path.join(dir, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(org), { recursive: true });
   fs.copyFileSync(exampleOrg, org);
+  // D1: registerKickoff pins auditPolicy from organizationAtClaim.auditor at
+  // claim time (kickoff-registry.mjs), with no later live-organization.json
+  // fallback, so a caller wanting an audited kickoff must set org.auditor
+  // here, before registerKickoff runs below, not by mutating the org file
+  // afterward.
+  if (auditor !== undefined) {
+    const orgConfig = readJSON(org);
+    orgConfig.auditor = auditor;
+    writeJSON(org, orgConfig);
+  }
   const brief = path.join(dir, "brief.md");
   fs.writeFileSync(brief, "goal, acceptance criteria, non-goals\n");
   const pm = path.join(dir, worktreeId);
@@ -155,6 +173,67 @@ function kickoff(t, worktreeId = "wt-1") {
     auditorHandle,
     pmHandle,
   };
+}
+
+// A kickoff shaped exactly like `kickoff()` above (real ledger, requirements
+// and, unless `director: false` is passed, a registered director), but with
+// its D1 auditPolicy stripped back off right after registration, the way an
+// entry registered before this feature existed reads today. This is the
+// fixture kickoffAuditPolicyRetrofit's own counterexamples below need: a
+// legacy entry with entry.auditPolicy === undefined, and, when
+// `auditorLaunch` is true, a recorded auditor-role launch for it (the
+// launch-ledger evidence a false auditorConfigured statement must be
+// refused against).
+function legacyKickoff(
+  t,
+  worktreeId = "wt-legacy",
+  { auditorLaunch = false, director = true } = {},
+) {
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-legacy-")),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const head = initRepo(dir);
+  const org = path.join(dir, ".omt", "organization.json");
+  fs.mkdirSync(path.dirname(org), { recursive: true });
+  fs.copyFileSync(exampleOrg, org);
+  const brief = path.join(dir, "brief.md");
+  fs.writeFileSync(brief, "goal, acceptance criteria, non-goals\n");
+  const pm = path.join(dir, worktreeId);
+  const auditorHandle = `term_auditor_${worktreeId}`;
+  // validateLedgerForClaim requires director.checkoutPath unconditionally
+  // whenever a claim carries a requirements ledger (a pre-ledger, no-director
+  // kickoff is out of scope for registerKickoff itself), so a `director:
+  // false` fixture still registers with one and strips it back off the entry
+  // afterward, the same way auditPolicy is stripped below.
+  registerKickoff(org, {
+    goal: `deliver ${worktreeId}`,
+    pm: { worktreeId, path: pm, stateDir: path.join(pm, ".omt") },
+    organizationRevision: readJSON(org).revision,
+    brief,
+    delivery: { mode: "none" },
+    requirements: minimalRequirements(org, worktreeId),
+    director: { terminalHandle: "term_director_1", checkoutPath: dir },
+  });
+  const entryPath = path.join(
+    registryDirectory(org),
+    `${kickoffEntryName(worktreeId)}.json`,
+  );
+  const legacyEntry = readJSON(entryPath);
+  delete legacyEntry.auditPolicy;
+  if (!director) delete legacyEntry.director;
+  writeJSON(entryPath, legacyEntry);
+  bindKickoffRun(org, { worktreeId, runId: "run-1" });
+  const [entry] = listKickoffs(org, worktreeId).kickoffs;
+  if (auditorLaunch) {
+    recordLaunch(org, {
+      via: "role-terminal",
+      role: AUDITOR_ROLE,
+      terminal: auditorHandle,
+      stateDir: entry.pm.stateDir,
+    });
+  }
+  return { dir, repo: dir, head, org, brief, worktreeId, entry, auditorHandle };
 }
 
 // audit.mjs's verifiedAuditor/verifiedPm read ORCA_TERMINAL_HANDLE only from
@@ -836,10 +915,9 @@ test("accept refuses while the outcome audit checkpoint has an unresolved object
 });
 
 test("worker-start refuses to assign under an audited kickoff before the brief audit is accepted, and proceeds once it is", async (t) => {
-  const fixture = kickoff(t);
-  const org = readJSON(fixture.org);
-  org.auditor = { profile: "claude-current" };
-  writeJSON(fixture.org, org);
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
   fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
 
   const missingOrca = path.join(fixture.dir, "missing-orca");
@@ -879,10 +957,9 @@ test("worker-start refuses to assign under an audited kickoff before the brief a
 });
 
 test("director-signal refuses a close-ready under an audited kickoff before the outcome audit is accepted, and proceeds once it is", async (t) => {
-  const fixture = kickoff(t);
-  const org = readJSON(fixture.org);
-  org.auditor = { profile: "claude-current" };
-  writeJSON(fixture.org, org);
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
 
   const signalClose = () =>
     main([
@@ -949,10 +1026,9 @@ test(
   "role-terminal --role auditor refuses without --state, without director authority, " +
     "from the pm's or a worker's worktree, with another kickoff's --state, and with --orca even once every other check is satisfied",
   async (t) => {
-    const fixture = kickoff(t);
-    const org = readJSON(fixture.org);
-    org.auditor = { profile: "claude-current" };
-    writeJSON(fixture.org, org);
+    const fixture = kickoff(t, "wt-1", {
+      auditor: { profile: "claude-current" },
+    });
 
     const originalCwd = process.cwd();
     t.after(() => process.chdir(originalCwd));
@@ -1079,10 +1155,7 @@ test(
     "terminal open, or launch record runs, with or without --allow-unverified, while a non-auditor role " +
     "on the same agy profile reaches its ordinary spawn path unaffected",
   async (t) => {
-    const fixture = kickoff(t);
-    const org = readJSON(fixture.org);
-    org.auditor = { profile: "agy-oss" };
-    writeJSON(fixture.org, org);
+    const fixture = kickoff(t, "wt-1", { auditor: { profile: "agy-oss" } });
 
     const originalCwd = process.cwd();
     t.after(() => process.chdir(originalCwd));
@@ -2753,3 +2826,454 @@ test("a trusted git executable is actually found among this platform's compiled-
   assert.equal(fs.existsSync(found), true);
   assert.equal(fs.lstatSync(found).isFile(), true);
 });
+
+// D1 (director decision msg_0b114271f1f5, PM supplement msg_901f9291b1d3):
+// a kickoff's audit obligation is decided once, from its registry entry's
+// auditPolicy — pinned at kickoff-claim time by registerKickoff, or
+// backfilled onto a legacy entry exactly once through
+// kickoffAuditPolicyRetrofit — and never by a fresh organization.json read.
+// The six counterexamples below are the director's own list.
+
+test(
+  "D1 #1: an auditor-pinned kickoff's close-ready, deliver and completed kickoff-release still require " +
+    "audit acceptance after org.auditor is removed from the live organization.json (no fallback substitutes for it)",
+  async (t) => {
+    const fixture = kickoff(t, "wt-1", {
+      auditor: { profile: "claude-current" },
+    });
+    assert.equal(fixture.entry.auditPolicy.auditorConfigured, true);
+
+    // Clear assertLedgerCloseReady's own fidelity gate first, so every
+    // rejection below comes from the auditPolicy-driven audit-acceptance
+    // check this test actually targets, not from a missing fidelity check.
+    await requirementsFidelity(fixture.org, fixture.worktreeId, {
+      head: fixture.head,
+      repo: fixture.dir,
+      recordedBy: "pm",
+      items: [
+        { type: "statement", id: "s1", status: "met", evidence: "README.md" },
+        { type: "criterion", id: "c1", status: "met", evidence: "README.md" },
+      ],
+    });
+    await requirementsFidelityConfirm(
+      fixture.org,
+      fixture.worktreeId,
+      fixture.dir,
+    );
+
+    // Live org no longer declares an auditor at all; only this kickoff's own
+    // pinned auditPolicy may still gate these calls.
+    const org = readJSON(fixture.org);
+    delete org.auditor;
+    writeJSON(fixture.org, org);
+
+    await assert.rejects(
+      assertKickoffCloseReady(fixture.org, fixture.worktreeId, {
+        head: fixture.head,
+        repo: fixture.dir,
+        entry: fixture.entry,
+      }),
+      /Brief audit acceptance is missing or no longer valid/,
+    );
+
+    await assert.rejects(
+      deliverKickoff({
+        orgFile: fixture.org,
+        worktreeId: fixture.worktreeId,
+        source: fixture.dir,
+        head: fixture.head,
+        callerCwd: fixture.dir,
+      }),
+      /Brief audit acceptance is missing or no longer valid/,
+    );
+
+    await assert.rejects(
+      main([
+        "director-signal",
+        "--org",
+        fixture.org,
+        "--worktree",
+        fixture.worktreeId,
+        "--kind",
+        "close-ready",
+        "--text",
+        "ready to close",
+        "--head",
+        fixture.head,
+        "--source",
+        fixture.dir,
+      ]),
+      /valid outcome-audit acceptance/,
+    );
+
+    await assert.rejects(
+      releaseKickoff(fixture.org, {
+        worktreeId: fixture.worktreeId,
+        reason: "completed",
+        head: fixture.head,
+        repo: fixture.dir,
+        callerCwd: fixture.dir,
+      }),
+      /Brief audit acceptance is missing or no longer valid/,
+    );
+  },
+);
+
+test(
+  "D1 #2: kickoffAuditPolicyRetrofit pins a legacy entry's audit policy once, checking --profile/--fallbacks " +
+    "against organization.json, and refuses to re-pin, relax or reaffirm that policy afterward",
+  async (t) => {
+    const fixture = legacyKickoff(t, "wt-legacy-1");
+    assert.equal(fixture.entry.auditPolicy, undefined);
+
+    // A profile or fallback not declared in organization.json is refused
+    // before anything is pinned.
+    assert.throws(
+      () =>
+        kickoffAuditPolicyRetrofit(fixture.org, fixture.worktreeId, {
+          auditorConfigured: true,
+          profile: "does-not-exist",
+          fallbacks: [],
+          reason: "director attests this kickoff always needed an auditor",
+          callerCwd: fixture.dir,
+        }),
+      /--profile must name a profile declared in organization\.json/,
+    );
+    assert.throws(
+      () =>
+        kickoffAuditPolicyRetrofit(fixture.org, fixture.worktreeId, {
+          auditorConfigured: true,
+          profile: "claude-current",
+          fallbacks: ["also-does-not-exist"],
+          reason: "director attests this kickoff always needed an auditor",
+          callerCwd: fixture.dir,
+        }),
+      /--fallbacks must be unique profiles declared in organization\.json/,
+    );
+
+    const result = kickoffAuditPolicyRetrofit(fixture.org, fixture.worktreeId, {
+      auditorConfigured: true,
+      profile: "claude-current",
+      fallbacks: ["codex-current"],
+      reason: "director attests this kickoff always needed an auditor",
+      callerCwd: fixture.dir,
+    });
+    assert.equal(result.retrofitted, true);
+    assert.equal(result.auditPolicy.auditorConfigured, true);
+    assert.equal(result.auditPolicy.profile, "claude-current");
+    assert.deepEqual(result.auditPolicy.fallbacks, ["codex-current"]);
+    assert.equal(result.auditPolicy.source, "retrofit");
+    assert.equal(result.auditPolicy.retrofittedFrom, "director-attestation");
+
+    // Re-pinning the very same values is refused exactly like relaxing or
+    // reaffirming it would be: once pinned, this policy is permanent.
+    for (const attempt of [
+      {
+        auditorConfigured: true,
+        profile: "claude-current",
+        fallbacks: ["codex-current"],
+        reason: "re-confirming the same policy",
+        callerCwd: fixture.dir,
+      },
+      {
+        auditorConfigured: false,
+        reason: "actually no auditor is needed",
+        callerCwd: fixture.dir,
+      },
+    ]) {
+      assert.throws(
+        () =>
+          kickoffAuditPolicyRetrofit(fixture.org, fixture.worktreeId, attempt),
+        /already has a pinned audit policy/,
+      );
+    }
+  },
+);
+
+test("D1 #2 (CLI): kickoff-audit-policy-retrofit pins once and refuses a second run from the CLI the same way", (t) => {
+  const fixture = legacyKickoff(t, "wt-legacy-cli");
+  const retrofit = (extraArgs) =>
+    runCli(
+      [
+        "kickoff-audit-policy-retrofit",
+        "--org",
+        fixture.org,
+        "--worktree",
+        fixture.worktreeId,
+        ...extraArgs,
+      ],
+      { cwd: fixture.dir },
+    );
+
+  const first = retrofit([
+    "--auditor-configured",
+    "true",
+    "--profile",
+    "claude-current",
+    "--fallbacks",
+    "codex-current,codex-luna",
+    "--reason",
+    "director backfills this legacy kickoff",
+  ]);
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(JSON.parse(first.stdout).auditPolicy.profile, /claude-current/);
+
+  const second = retrofit([
+    "--auditor-configured",
+    "false",
+    "--reason",
+    "trying to clear it",
+  ]);
+  assert.notEqual(second.code, 0);
+  assert.match(second.stderr, /already has a pinned audit policy/);
+});
+
+test(
+  "D1 #3: --auditor-configured false is refused when the launch ledger already records an auditor session " +
+    "for this kickoff, at both the function and CLI level",
+  (t) => {
+    const withLaunch = legacyKickoff(t, "wt-legacy-launch", {
+      auditorLaunch: true,
+    });
+    assert.throws(
+      () =>
+        kickoffAuditPolicyRetrofit(withLaunch.org, withLaunch.worktreeId, {
+          auditorConfigured: false,
+          reason: "no auditor is actually needed",
+          callerCwd: withLaunch.dir,
+        }),
+      /already records an auditor session/,
+    );
+
+    const cli = runCli(
+      [
+        "kickoff-audit-policy-retrofit",
+        "--org",
+        withLaunch.org,
+        "--worktree",
+        withLaunch.worktreeId,
+        "--auditor-configured",
+        "false",
+        "--reason",
+        "no auditor is actually needed",
+      ],
+      { cwd: withLaunch.dir },
+    );
+    assert.notEqual(cli.code, 0);
+    assert.match(cli.stderr, /already records an auditor session/);
+  },
+);
+
+test("D1 #4: kickoffAuditPolicyRetrofit refuses a missing --reason, an entry with no registered director, and a caller outside the director's checkout", (t) => {
+  const noReason = legacyKickoff(t, "wt-legacy-noreason");
+  assert.throws(
+    () =>
+      kickoffAuditPolicyRetrofit(noReason.org, noReason.worktreeId, {
+        auditorConfigured: true,
+        profile: "claude-current",
+        fallbacks: [],
+        reason: "",
+        callerCwd: noReason.dir,
+      }),
+    /non-empty justification/,
+  );
+
+  const noDirector = legacyKickoff(t, "wt-legacy-nodirector", {
+    director: false,
+  });
+  assert.throws(
+    () =>
+      kickoffAuditPolicyRetrofit(noDirector.org, noDirector.worktreeId, {
+        auditorConfigured: true,
+        profile: "claude-current",
+        fallbacks: [],
+        reason: "director attests this kickoff always needed an auditor",
+        callerCwd: noDirector.dir,
+      }),
+    /no registered director/,
+  );
+
+  const mismatch = legacyKickoff(t, "wt-legacy-mismatch");
+  const outsiderDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-audit-outsider-"),
+  );
+  t.after(() => fs.rmSync(outsiderDir, { recursive: true, force: true }));
+  assert.throws(
+    () =>
+      kickoffAuditPolicyRetrofit(mismatch.org, mismatch.worktreeId, {
+        auditorConfigured: true,
+        profile: "claude-current",
+        fallbacks: [],
+        reason: "director attests this kickoff always needed an auditor",
+        callerCwd: outsiderDir,
+      }),
+    /must be run from the director's checkout/,
+  );
+});
+
+test(
+  "D1 #5: a legacy kickoff with no auditor ever configured passes close-ready once its auditPolicy is " +
+    "retrofitted with --auditor-configured false",
+  async (t) => {
+    const fixture = legacyKickoff(t, "wt-legacy-none");
+
+    // Clear assertLedgerCloseReady's own fidelity gate first, so both calls
+    // below turn on the auditPolicy check this test actually targets.
+    await requirementsFidelity(fixture.org, fixture.worktreeId, {
+      head: fixture.head,
+      repo: fixture.dir,
+      recordedBy: "pm",
+      items: [
+        { type: "statement", id: "s1", status: "met", evidence: "README.md" },
+        { type: "criterion", id: "c1", status: "met", evidence: "README.md" },
+      ],
+    });
+    await requirementsFidelityConfirm(
+      fixture.org,
+      fixture.worktreeId,
+      fixture.dir,
+    );
+
+    // Before retrofit, this legacy entry's missing auditPolicy refuses
+    // close-ready outright rather than guessing from organization.json.
+    await assert.rejects(
+      assertKickoffCloseReady(fixture.org, fixture.worktreeId, {
+        head: fixture.head,
+        repo: fixture.dir,
+        entry: fixture.entry,
+      }),
+      /no pinned audit policy/,
+    );
+
+    const result = kickoffAuditPolicyRetrofit(fixture.org, fixture.worktreeId, {
+      auditorConfigured: false,
+      reason: "this kickoff never had an auditor; documenting it explicitly",
+      callerCwd: fixture.dir,
+    });
+    assert.equal(result.auditPolicy.auditorConfigured, false);
+    assert.equal(result.auditPolicy.profile, null);
+    assert.equal(result.auditPolicy.fallbacks, null);
+
+    const [retrofittedEntry] = listKickoffs(
+      fixture.org,
+      fixture.worktreeId,
+    ).kickoffs;
+    const ready = await assertKickoffCloseReady(
+      fixture.org,
+      fixture.worktreeId,
+      {
+        head: fixture.head,
+        repo: fixture.dir,
+        entry: retrofittedEntry,
+      },
+    );
+    assert.equal(ready.ready, true);
+  },
+);
+
+test(
+  "D1 #6: role-terminal --role auditor uses this kickoff's pinned auditor profile, not a live " +
+    "organization.json read — an agy-provider profile pinned at claim stays refused after org.auditor is " +
+    "changed or cleared live, and a pinned profile removed from organization.json is refused, never substituted",
+  async (t) => {
+    const fixture = kickoff(t, "wt-1", { auditor: { profile: "agy-oss" } });
+
+    const originalCwd = process.cwd();
+    t.after(() => process.chdir(originalCwd));
+    process.chdir(fixture.dir);
+
+    const auditorDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-pin-"));
+    t.after(() => fs.rmSync(auditorDir, { recursive: true, force: true }));
+
+    const roleTerminal = () =>
+      main([
+        "role-terminal",
+        "--org",
+        fixture.org,
+        "--role",
+        "auditor",
+        "--worktree",
+        `path:${auditorDir}`,
+        "--state",
+        fixture.entry.pm.stateDir,
+      ]);
+
+    // Pinned at claim as the agy-provider "agy-oss". Changing org.auditor
+    // live to a non-agy profile must not be read at all: the launch still
+    // refuses with the agy-specific message, proving the pinned profile
+    // decided it, not the live one.
+    let org = readJSON(fixture.org);
+    org.auditor = { profile: "claude-current" };
+    writeJSON(fixture.org, org);
+    await assert.rejects(
+      roleTerminal(),
+      /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
+    );
+
+    // Clearing org.auditor entirely afterward does not matter either.
+    org = readJSON(fixture.org);
+    delete org.auditor;
+    writeJSON(fixture.org, org);
+    await assert.rejects(
+      roleTerminal(),
+      /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
+    );
+
+    // The pinned profile itself vanishing from organization.json is refused
+    // outright, never substituted with another profile.
+    org = readJSON(fixture.org);
+    delete org.profiles["agy-oss"];
+    writeJSON(fixture.org, org);
+    await assert.rejects(
+      roleTerminal(),
+      /no longer exists in organization\.json/,
+    );
+  },
+);
+
+test(
+  "D1 #6 (reverse): a non-agy profile pinned at claim is still what a live organization.json override cannot " +
+    "change — only the pinned profile's own removal is what causes the refusal",
+  async (t) => {
+    const fixture = kickoff(t, "wt-1", {
+      auditor: { profile: "claude-current" },
+    });
+
+    const originalCwd = process.cwd();
+    t.after(() => process.chdir(originalCwd));
+    process.chdir(fixture.dir);
+
+    const auditorDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "omt-audit-pin2-"),
+    );
+    t.after(() => fs.rmSync(auditorDir, { recursive: true, force: true }));
+
+    const roleTerminal = () =>
+      main([
+        "role-terminal",
+        "--org",
+        fixture.org,
+        "--role",
+        "auditor",
+        "--worktree",
+        `path:${auditorDir}`,
+        "--state",
+        fixture.entry.pm.stateDir,
+      ]);
+
+    // Live org.auditor now points at a still-valid, different profile, and
+    // the pinned profile ("claude-current") is removed from organization.json.
+    // Using the live value would proceed past the "no longer exists" check
+    // (agy-oss still exists) all the way to the agy-provider refusal; seeing
+    // the "no longer exists" message instead proves the pinned profile, not
+    // the live one, was actually read.
+    const org = readJSON(fixture.org);
+    org.auditor = { profile: "agy-oss" };
+    delete org.profiles["claude-current"];
+    writeJSON(fixture.org, org);
+    await assert.rejects(
+      roleTerminal(),
+      /no longer exists in organization\.json/,
+    );
+  },
+);

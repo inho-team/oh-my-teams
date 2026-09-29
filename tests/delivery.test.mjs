@@ -7,7 +7,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { run, writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
+import {
+  AUDITOR_ROLE,
+  run,
+  writeJSON,
+} from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   listKickoffs,
   registerKickoff,
@@ -21,6 +25,12 @@ import {
   requirementsFidelity,
   requirementsFidelityConfirm,
 } from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import {
+  auditAccept,
+  auditChecked,
+  auditObjection,
+} from "../plugins/oh-my-teams/scripts/audit.mjs";
+import { recordLaunch } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import {
   deliveryRefDocId,
   resolveKickoffHash,
@@ -52,6 +62,7 @@ async function git(cwd, ...args) {
 async function kickoffProject(
   t,
   delivery = { mode: "local-merge", branch: "main" },
+  { auditor } = {},
 ) {
   const root = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-deliver-")),
@@ -69,6 +80,15 @@ async function kickoffProject(
   const org = path.join(project, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(org), { recursive: true });
   fs.copyFileSync(exampleOrg, org);
+  // D1: registerKickoff pins auditPolicy from organizationAtClaim.auditor at
+  // claim time, with no later live-organization.json fallback, so a caller
+  // wanting an audited kickoff must set org.auditor here, before
+  // registerKickoff runs below, not by mutating the org file afterward.
+  if (auditor !== undefined) {
+    const orgConfig = JSON.parse(fs.readFileSync(org, "utf8"));
+    orgConfig.auditor = auditor;
+    fs.writeFileSync(org, JSON.stringify(orgConfig, null, 2));
+  }
   const brief = path.join(project, ".omt", "brief.md");
   fs.writeFileSync(brief, "전달 범위: main에 커밋한다.\n");
 
@@ -380,7 +400,101 @@ test("deliver refuses a redelivery whose new head has no confirmed fidelity chec
   );
 });
 
-test("deliver refuses a same-head redelivery once the organization declares an auditor with no acceptance recorded yet (early return does not skip the audit gate)", async (t) => {
+test(
+  "deliver refuses a same-head redelivery of an auditor-pinned kickoff once its earlier valid " +
+    "brief-audit acceptance is invalidated by a new objection (early return does not skip the audit gate)",
+  async (t) => {
+    // D1: the auditor requirement must come from this kickoff's auditPolicy,
+    // pinned at claim time, not a live organization.json read — so org.auditor
+    // is set here, before kickoffProject's registerKickoff call, rather than
+    // mutated onto the org file after the first delivery. Because that policy
+    // can never be relaxed afterward, proving the redelivery gate still runs
+    // now needs a brief-audit acceptance that was valid for the first delivery
+    // and is invalidated afterward, rather than one simply never recorded.
+    const fixture = await kickoffProject(
+      t,
+      { mode: "local-merge", branch: "main" },
+      { auditor: { profile: "claude-current" } },
+    );
+    const [entry] = listKickoffs(fixture.org, fixture.worktreeId).kickoffs;
+    const auditorHandle = `term_auditor_${fixture.worktreeId}`;
+    recordLaunch(fixture.org, {
+      via: "role-terminal",
+      role: AUDITOR_ROLE,
+      terminal: auditorHandle,
+      stateDir: entry.pm.stateDir,
+    });
+
+    const previousHandle = process.env.ORCA_TERMINAL_HANDLE;
+    process.env.ORCA_TERMINAL_HANDLE = auditorHandle;
+    t.after(() => {
+      if (previousHandle === undefined) delete process.env.ORCA_TERMINAL_HANDLE;
+      else process.env.ORCA_TERMINAL_HANDLE = previousHandle;
+    });
+    await auditChecked(fixture.org, fixture.worktreeId, "brief", [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ]);
+    await auditAccept(
+      fixture.org,
+      fixture.worktreeId,
+      "brief",
+      undefined,
+      undefined,
+    );
+    await auditChecked(fixture.org, fixture.worktreeId, "outcome", [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ]);
+    await auditAccept(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      fixture.head,
+      fixture.worktree,
+    );
+
+    const options = {
+      orgFile: fixture.org,
+      worktreeId: fixture.worktreeId,
+      source: fixture.worktree,
+      head: fixture.head,
+    };
+    const first = await deliverKickoff(options);
+    assert.equal(first.merged, true);
+
+    // A new brief-checkpoint objection raised after acceptance makes the
+    // acceptance recorded above no longer valid (tests/auditor.test.mjs's
+    // "hasValidAcceptance refuses once a new unresolved objection is raised
+    // after acceptance" proves the same mechanism for the outcome checkpoint).
+    await auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "brief",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 needs a second look",
+      rebuttalRequested: "point to where it is met",
+    });
+
+    // Same head as the first, successful delivery: this is exactly the
+    // `entry.delivered?.head === head` branch that returns early. If that
+    // early return ran before the gate, this call would wrongly succeed
+    // despite the now-unresolved objection raised above.
+    await assert.rejects(
+      deliverKickoff(options),
+      /Brief audit acceptance is missing or no longer valid/,
+    );
+    assert.equal(
+      await git(fixture.project, "rev-parse", "HEAD"),
+      first.mergeCommit,
+    );
+    assert.equal(
+      listKickoffs(fixture.org).kickoffs[0].delivered.head,
+      fixture.head,
+    );
+  },
+);
+
+test("deliver ignores an auditor the organization adopts after this kickoff already claimed with none pinned (no live-organization.json fallback, D1)", async (t) => {
   const fixture = await kickoffProject(t);
   const options = {
     orgFile: fixture.org,
@@ -391,30 +505,20 @@ test("deliver refuses a same-head redelivery once the organization declares an a
   const first = await deliverKickoff(options);
   assert.equal(first.merged, true);
 
-  // The organization adopts an auditor after the first delivery, with no
-  // brief/outcome acceptance recorded for this kickoff yet — an unresolved
-  // audit checkpoint, the redelivery-time counterpart of the unresolved
-  // objection that `hasValidAcceptance` already refuses on its own
-  // (tests/auditor.test.mjs:346).
+  // This kickoff's auditPolicy was pinned as auditorConfigured: false at
+  // claim time, before org.auditor below was ever set. Mutating the live
+  // organization.json afterward must not retroactively impose an audit
+  // obligation this kickoff never took on (director decision
+  // msg_0b114271f1f5): there is no live-read fallback, only the pinned
+  // policy, so a same-head redelivery still succeeds instead of being
+  // refused for a missing brief-audit acceptance.
   const org = JSON.parse(fs.readFileSync(fixture.org, "utf8"));
   org.auditor = { profile: "claude-current" };
   fs.writeFileSync(fixture.org, JSON.stringify(org, null, 2));
 
-  // Same head as the first, successful delivery: this is exactly the
-  // `entry.delivered?.head === head` branch that returns early. If that
-  // early return ran before the gate, this call would wrongly succeed.
-  await assert.rejects(
-    deliverKickoff(options),
-    /Brief audit acceptance is missing or no longer valid/,
-  );
-  assert.equal(
-    await git(fixture.project, "rev-parse", "HEAD"),
-    first.mergeCommit,
-  );
-  assert.equal(
-    listKickoffs(fixture.org).kickoffs[0].delivered.head,
-    fixture.head,
-  );
+  const second = await deliverKickoff(options);
+  assert.equal(second.merged, false);
+  assert.equal(second.head, fixture.head);
 });
 
 test("deliver refuses a moved head, an unready owner, and a conflict", async (t) => {
