@@ -408,7 +408,7 @@ if (command.role === AUDITOR_ROLE) {
 
 **22:31판의 결함**: `audit-objection`/`audit-ruling`/`audit-accept`가 `--terminal <handle>` **인자**를 받아 `entry.auditor.terminalHandle`과 비교했다. 이 방식은 PM이나 이사가 감사의 handle 문자열을 그대로 복사해 `--terminal` 인자에 넣으면 통과한다 — 인자는 호출자가 마음대로 채우는 값이기 때문이다.
 
-**수정**: 인자를 받지 않는다. 대신 `prompt-supervision.mjs:1024/1106`과 정확히 같은 방식으로 **호출 프로세스 자신의 환경변수** `process.env.ORCA_TERMINAL_HANDLE`을 읽는다. 이 값은 Orca가 그 터미널을 열 때 그 터미널 프로세스에만 주입하므로, PM·이사의 프로세스에는 애초에 감사의 handle이 들어 있지 않다 — 복사해서 넘길 CLI 인자 자체가 없다.
+**수정**: 인자를 받지 않는다. 대신 `prompt-supervision.mjs:1024/1106`과 정확히 같은 방식으로 **호출 프로세스 자신의 환경변수** `process.env.ORCA_TERMINAL_HANDLE`을 읽는다. 이 값은 Orca가 그 터미널을 열 때 그 터미널 프로세스에만 주입하므로, 정상 실행 경로에서는 PM·이사의 프로세스에 감사의 handle이 들어 있지 않다 — 복사해서 넘길 CLI 인자 자체가 없다. 이 서술은 정상 경로에 한정된다. 같은 OS 사용자로 실행되는 프로세스가 환경 변수를 직접 설정하거나 `launches.jsonl`·`audits/*.json`을 직접 편집하는 경우는 이 검증이 막지 못하며, 그 범위는 `docs/SAFETY_AUDIT.md`에 적었다.
 
 ```js
 function verifiedAuditor(orgFile, targetKickoffWorktreeId, env = process.env) {

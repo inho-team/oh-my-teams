@@ -37,7 +37,7 @@
 
 ## 검증 범위와 남은 항목
 
-2026-09-28 최종 점검에서 `npm test`의 1197개 테스트, `npm run quality`의
+2026-09-28 최종 점검에서 `npm test`의 1200개 테스트, `npm run quality`의
 147개 활성 모듈·543개 공개 export 검사, `npm run format:check`의 Prettier
 검사, `npm run eval:organization`의 11개 결정적 시나리오가 모두 통과했다. 테스트는 실제 CLI 프로세스와 테스트 전용
 provider를 사용하며, 이 최종 점검에서는 추가 유료 모델을 호출하지 않았다.
@@ -66,9 +66,35 @@ Claude·Codex marketplace를 새 경로에 연결하고 1.4.0을 설치했다.
 handle을 CLI 인자로 복사해 대리 판정하는 시도뿐이다. 막지 못하는 범위는
 구현자·PM·이사 세션을 포함해 같은 OS 사용자로 실행되는 아무 프로세스가
 자신의 환경 변수에 `ORCA_TERMINAL_HANDLE`을 직접 설정하거나 `orca terminal
-send`로 감사 터미널에 명령을 넣는 경우다. 이 한계를 좁히는 lineage
+send`로 감사 터미널에 명령을 넣는 경우다. 같은 OS 사용자로 실행되는 프로세스가 launch ledger(`launches.jsonl`)나
+감사 기록(`audits/*.json`)을 직접 편집하는 경우도 막지 못한다. 이 파일들에는
+`verifiedCaller`와 감사 수용 기록이 들어 있으므로, 직접 편집한 기록은 런타임이
+검증한 기록과 파일만으로는 구별되지 않는다. 이 한계를 좁히는 lineage
 bind·session-bind 설계를 검토했으나 위조 가능한 환경·조상 프로세스 구조를
 신뢰 근거로 쓸 수 없다는 결함이 확인돼 구현하지 않기로 결정했다. 근거와
 후속 과제(Orca 쪽 `ownerPid`·`ownerStartedAt` attestation)는
 [`docs/plan/requirements-ledger-and-audit.md`의 B.6절](plan/requirements-ledger-and-audit.md)에
 남겨 두었다.
+
+## Git 실행 파일과 환경 변수의 신뢰 한계
+
+감사 결과 수용은 결과 저장소의 HEAD를 Git으로 읽어 결속하는데, 이 조회에는
+서로 다른 신뢰 수준의 두 경로가 있다.
+
+`evidence.mjs`의 `git()`과 이를 감싼 `workspaceBinding(repo).head`는 실행 파일을
+이름 `git`으로 지정하고, 호출한 프로세스의 환경 변수를 그대로 자식 프로세스에
+넘긴다. 따라서 호출자가 `PATH`를 바꾸거나 `GIT_DIR`·`GIT_WORK_TREE` 같은
+`GIT_*` 변수를 설정하면 조회 결과가 달라질 수 있다. 감사의 HEAD 결속과
+증거 fingerprint는 이 조회 결과에 의존하므로, 같은 OS 사용자로 실행되는
+프로세스가 이 값을 조작하는 경우는 현재 막지 못하는 잔여 위험이다. 이 경로를
+고정 실행 파일과 고정 환경으로 바꾸는 작업은 아직 하지 않았다.
+
+`local-adapter.mjs`의 Git 식별 조회(`--git-common-dir`)는 다르게 동작한다.
+컴파일된 후보 경로(POSIX는 `/usr/bin/git`, Windows는 Git for Windows의 `bin`
+또는 `cmd`)만 사용하고, POSIX에서는 root 소유이며 group·other가 쓸 수 없는
+일반 파일일 때만 신뢰한다. 후보 중 신뢰할 수 있는 실행 파일이 하나도 없으면
+등록되지 않은 단독 task의 자체 검사를 포함한 모든 Git 식별 조회가 실행되지
+않고 거부된다. Homebrew처럼 위 경로가 아닌 곳에만 Git이 설치된 환경에서는 이
+거부가 발생하며, 이것이 `resolveTrustedGitExecutable`의 오류 메시지가 이 절을
+가리키는 이유다. 이 신뢰 경로는 `PATH`와 호출자 환경 변수의 조작을 막을 뿐이며,
+후보 파일 자체를 수정할 권한이 있는 사용자는 막지 못한다.
