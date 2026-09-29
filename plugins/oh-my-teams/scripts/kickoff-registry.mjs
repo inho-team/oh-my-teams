@@ -367,10 +367,14 @@ export function validateEntry(stored) {
     assert(text(policy.pinnedAt), "Kickoff auditPolicy.pinnedAt required");
     if (policy.source === "retrofit") {
       assert(
-        ["launch-ledger", "director-attestation"].includes(
-          policy.retrofittedFrom,
-        ),
-        "Kickoff auditPolicy.retrofittedFrom must be launch-ledger or director-attestation for a retrofit",
+        policy.retrofittedFrom === "director-attestation",
+        "Kickoff auditPolicy.retrofittedFrom must be director-attestation for a retrofit " +
+          "(the launch ledger is corroborating evidence, never the basis, so it is recorded " +
+          "separately as corroboratingAuditorLaunch)",
+      );
+      assert(
+        typeof policy.corroboratingAuditorLaunch === "boolean",
+        "Kickoff auditPolicy.corroboratingAuditorLaunch must be a boolean for a retrofit",
       );
       assert(
         text(policy.reason),
@@ -1250,9 +1254,12 @@ export function kickoffAuditPolicyRetrofit(
       profile: pinnedProfile,
       fallbacks: pinnedFallbacks,
       source: "retrofit",
-      retrofittedFrom: hasAuditorLaunch
-        ? "launch-ledger"
-        : "director-attestation",
+      // The launch ledger is corroborating evidence, never the basis for the
+      // retrofit itself (it can be forged by direct edit); the director's own
+      // attestation, checked above, is always what grounds the pin (PM
+      // supplement msg_29270c165b0b).
+      retrofittedFrom: "director-attestation",
+      corroboratingAuditorLaunch: hasAuditorLaunch,
       reason: reason.trim(),
       retrofittedBy: { checkoutPath: path.resolve(callerCwd) },
       pinnedAt: new Date().toISOString(),

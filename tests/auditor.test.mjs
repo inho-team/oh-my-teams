@@ -2964,6 +2964,7 @@ test(
     assert.deepEqual(result.auditPolicy.fallbacks, ["codex-current"]);
     assert.equal(result.auditPolicy.source, "retrofit");
     assert.equal(result.auditPolicy.retrofittedFrom, "director-attestation");
+    assert.equal(result.auditPolicy.corroboratingAuditorLaunch, false);
 
     // Re-pinning the very same values is refused exactly like relaxing or
     // reaffirming it would be: once pinned, this policy is permanent.
@@ -3061,6 +3062,23 @@ test(
     );
     assert.notEqual(cli.code, 0);
     assert.match(cli.stderr, /already records an auditor session/);
+
+    // auditorConfigured: true does not contradict the recorded launch, so it
+    // succeeds, and the launch is recorded as corroborating evidence, not the
+    // basis (retrofittedFrom stays director-attestation either way).
+    const result = kickoffAuditPolicyRetrofit(
+      withLaunch.org,
+      withLaunch.worktreeId,
+      {
+        auditorConfigured: true,
+        profile: "claude-current",
+        fallbacks: [],
+        reason: "director attests this kickoff always needed an auditor",
+        callerCwd: withLaunch.dir,
+      },
+    );
+    assert.equal(result.auditPolicy.retrofittedFrom, "director-attestation");
+    assert.equal(result.auditPolicy.corroboratingAuditorLaunch, true);
   },
 );
 
@@ -3273,6 +3291,81 @@ test(
     writeJSON(fixture.org, org);
     await assert.rejects(
       roleTerminal(),
+      /no longer exists in organization\.json/,
+    );
+  },
+);
+
+test(
+  "D1 #7 (PM supplement msg_7d6d9df2cfb1): kickoffAuditPolicyRetrofit pins a single profile with no " +
+    "fallbacks, at both the function and CLI level, and role-terminal --role auditor refuses once that " +
+    "profile is gone rather than substituting an org.profiles entry that still exists",
+  async (t) => {
+    const fnFixture = legacyKickoff(t, "wt-legacy-nofallback-fn");
+    const fnResult = kickoffAuditPolicyRetrofit(
+      fnFixture.org,
+      fnFixture.worktreeId,
+      {
+        auditorConfigured: true,
+        profile: "claude-current",
+        reason: "director attests this kickoff needs only its primary profile",
+        callerCwd: fnFixture.dir,
+      },
+    );
+    assert.equal(fnResult.auditPolicy.profile, "claude-current");
+    assert.deepEqual(fnResult.auditPolicy.fallbacks, []);
+
+    const cliFixture = legacyKickoff(t, "wt-legacy-nofallback-cli");
+    const cli = runCli(
+      [
+        "kickoff-audit-policy-retrofit",
+        "--org",
+        cliFixture.org,
+        "--worktree",
+        cliFixture.worktreeId,
+        "--auditor-configured",
+        "true",
+        "--profile",
+        "claude-current",
+        "--reason",
+        "director attests this kickoff needs only its primary profile",
+      ],
+      { cwd: cliFixture.dir },
+    );
+    assert.equal(cli.code, 0, cli.stderr);
+    assert.deepEqual(JSON.parse(cli.stdout).auditPolicy.fallbacks, []);
+
+    const originalCwd = process.cwd();
+    t.after(() => process.chdir(originalCwd));
+    process.chdir(cliFixture.dir);
+    const [pinnedEntry] = listKickoffs(
+      cliFixture.org,
+      cliFixture.worktreeId,
+    ).kickoffs;
+    const auditorDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "omt-audit-nofallback-"),
+    );
+    t.after(() => fs.rmSync(auditorDir, { recursive: true, force: true }));
+
+    // codex-current still exists in organization.json, so a substitution
+    // would silently succeed with it; seeing "no longer exists" instead
+    // proves no fallback (there is none pinned) and no other profile was
+    // tried.
+    const org = readJSON(cliFixture.org);
+    delete org.profiles["claude-current"];
+    writeJSON(cliFixture.org, org);
+    await assert.rejects(
+      main([
+        "role-terminal",
+        "--org",
+        cliFixture.org,
+        "--role",
+        "auditor",
+        "--worktree",
+        `path:${auditorDir}`,
+        "--state",
+        pinnedEntry.pm.stateDir,
+      ]),
       /no longer exists in organization\.json/,
     );
   },
