@@ -100,7 +100,8 @@ function settledContextDispatch(row) {
     row?.workerState === "unsupervised" &&
     ["completed", "failed"].includes(row.dispatchStatus) &&
     row.terminalState === "retained" &&
-    row.projection?.liveness?.reason === "unsupervised_settled"
+    (row.projection?.liveness?.reason === "unsupervised_settled" ||
+      row.projection?.liveness?.verdict === "exited")
   );
 }
 
@@ -272,6 +273,7 @@ export function evaluateKickoffCleanup(entry, observed) {
       : "cleanup-pending",
     candidates,
     errors: observed.errors ?? [],
+    unattributedWorkers: observed.unattributedWorkers ?? [],
   };
 }
 
@@ -431,15 +433,13 @@ export async function scanKickoffCleanup(
     errors.push("terminal-inventory-unavailable");
   if (!Array.isArray(workerResult?.workers))
     errors.push("worker-inventory-unavailable");
-  if (
-    workers.some(
-      (worker) =>
-        !workerWorkspace(worker) &&
-        !cleanWorker(worker) &&
-        !settledContextDispatch(worker),
-    )
-  )
-    errors.push("worker-workspace-unattributed");
+  const unattributedWorkers = workers.filter(
+    (worker) =>
+      !workerWorkspace(worker) &&
+      !cleanWorker(worker) &&
+      !settledContextDispatch(worker),
+  );
+  if (unattributedWorkers.length) errors.push("worker-workspace-unattributed");
   if (treeResult?.truncated || terminalResult?.truncated)
     errors.push("orca-inventory-truncated");
   const remoteHostsOmitted = Boolean(
@@ -469,6 +469,15 @@ export async function scanKickoffCleanup(
     git: gitStates,
     absentPaths,
     errors,
+    unattributedWorkers: unattributedWorkers.map((worker) => ({
+      runId: worker.runId,
+      dispatchId: worker.dispatchId,
+      agentTerminalHandle: worker.agentTerminalHandle,
+      workerState: worker.workerState,
+      dispatchStatus: worker.dispatchStatus,
+      terminalState: worker.terminalState,
+      liveness: worker.projection?.liveness,
+    })),
     remoteHostsOmitted,
     hostIds: treeResult?.hostScope?.hostIds ?? [],
     inventoryComplete: errors.length === 0,

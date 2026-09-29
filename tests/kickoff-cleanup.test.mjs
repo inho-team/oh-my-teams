@@ -333,6 +333,18 @@ test("a completed archive retains child identity for read-only partial cleanup r
                         },
                       },
                     },
+                    {
+                      dispatchId: "context-only-exited",
+                      workerState: "unsupervised",
+                      dispatchStatus: "failed",
+                      terminalState: "retained",
+                      projection: {
+                        liveness: {
+                          verdict: "exited",
+                          source: "execution_host",
+                        },
+                      },
+                    },
                   ],
                   page: { hasMore: false },
                 }
