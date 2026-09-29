@@ -2013,6 +2013,145 @@ test("accept refuses a stateDir sharing the registered worktree but keeps accept
     /shares the registered kickoff's own worktree but is not the exact state directory it registered/,
   );
 
+  // (H) A directory INSIDE the registered stateDir itself, not merely
+  // somewhere else in the worktree, is refused the same way: depth from
+  // pm.path is unbounded, so nesting one level deeper than the registered
+  // `.omt` itself does not dodge this. Its evidence store still sits under
+  // `.omt/`, which `changedWorkspaceFiles` (evidence.mjs, #63) already
+  // excludes at the worktree root, so no `.git/info/exclude` entry is needed
+  // for this one to avoid a spurious "Stale evidence" masking the rejection.
+  const innerStateDir = path.join(fixture.stateDir, "inner");
+  fs.mkdirSync(innerStateDir, { recursive: true });
+  const taskH = gapTask(`${fixture.worktreeId}-h`);
+  const reportH = {
+    taskId: taskH.id,
+    taskHash: taskHash(taskH),
+    taskRevision: taskH.revision,
+    runId: "run-h",
+    evidence: await verify(fixture.pmWorktree, {
+      baseRef: taskH.baseRef,
+      commands: taskH.checks,
+      environment: taskH.environment,
+      store: path.join(innerStateDir, "evidence"),
+    }),
+  };
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        taskH,
+        reportH,
+        decisionFor("accept-b-h"),
+        innerStateDir,
+      ),
+    /shares the registered kickoff's own worktree but is not the exact state directory it registered/,
+  );
+
+  // (G) A stateDir nested at an arbitrary depth elsewhere in the worktree
+  // (not a direct child of pm.path, nor inside the registered stateDir) is
+  // refused the same way, and the anchor check runs (gates.mjs) BEFORE
+  // gateCheck/validateEvidence ever inspects the report's evidence, so this
+  // must hold regardless of whether this stateDir's own evidence files would
+  // otherwise show up as workspace drift. Both sub-scenarios are checked:
+  // without a `.git/info/exclude` entry for it (where this evidence store's
+  // own files DO show up as untracked drift to evidence.mjs) and with one
+  // (where they do not), so a future regression that moves the anchor check
+  // to run after evidence validation would surface as "Stale evidence" in the
+  // first sub-scenario instead of silently passing for the wrong reason.
+  const subPlainStateDir = path.join(fixture.pmWorktree, "sub-plain", ".omt");
+  fs.mkdirSync(subPlainStateDir, { recursive: true });
+  const taskG1 = gapTask(`${fixture.worktreeId}-g1`);
+  const reportG1 = {
+    taskId: taskG1.id,
+    taskHash: taskHash(taskG1),
+    taskRevision: taskG1.revision,
+    runId: "run-g1",
+    evidence: await verify(fixture.pmWorktree, {
+      baseRef: taskG1.baseRef,
+      commands: taskG1.checks,
+      environment: taskG1.environment,
+      store: path.join(subPlainStateDir, "evidence"),
+    }),
+  };
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        taskG1,
+        reportG1,
+        decisionFor("accept-b-g1"),
+        subPlainStateDir,
+      ),
+    /shares the registered kickoff's own worktree but is not the exact state directory it registered/,
+  );
+
+  // `pmWorktree` is a `git worktree add` checkout, so its `.git` is a text
+  // file naming the real gitdir, not a directory: `info/exclude` lives once,
+  // shared across worktrees, at the owner repository's own `.git`.
+  fs.appendFileSync(
+    path.join(fixture.owner, ".git", "info", "exclude"),
+    "sub-excluded/\n",
+  );
+  const subStateDir = path.join(fixture.pmWorktree, "sub-excluded", ".omt");
+  fs.mkdirSync(subStateDir, { recursive: true });
+  const taskG = gapTask(`${fixture.worktreeId}-g2`);
+  const reportG = {
+    taskId: taskG.id,
+    taskHash: taskHash(taskG),
+    taskRevision: taskG.revision,
+    runId: "run-g2",
+    evidence: await verify(fixture.pmWorktree, {
+      baseRef: taskG.baseRef,
+      commands: taskG.checks,
+      environment: taskG.environment,
+      store: path.join(subStateDir, "evidence"),
+    }),
+  };
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        taskG,
+        reportG,
+        decisionFor("accept-b-g"),
+        subStateDir,
+      ),
+    /shares the registered kickoff's own worktree but is not the exact state directory it registered/,
+  );
+
+  // (I) Same as G, several levels deeper, confirming depth is truly
+  // unbounded rather than merely "one level past a direct child".
+  fs.appendFileSync(
+    path.join(fixture.owner, ".git", "info", "exclude"),
+    "a/\n",
+  );
+  const deepStateDir = path.join(fixture.pmWorktree, "a", "b", "c");
+  fs.mkdirSync(deepStateDir, { recursive: true });
+  const taskI = gapTask(`${fixture.worktreeId}-i`);
+  const reportI = {
+    taskId: taskI.id,
+    taskHash: taskHash(taskI),
+    taskRevision: taskI.revision,
+    runId: "run-i",
+    evidence: await verify(fixture.pmWorktree, {
+      baseRef: taskI.baseRef,
+      commands: taskI.checks,
+      environment: taskI.environment,
+      store: path.join(deepStateDir, "evidence"),
+    }),
+  };
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        taskI,
+        reportI,
+        decisionFor("accept-b-i"),
+        deepStateDir,
+      ),
+    /shares the registered kickoff's own worktree but is not the exact state directory it registered/,
+  );
+
   // (f) A genuinely different worktree of the same owner repository (a
   // Senior/Worker child worktree's own solo task state, for instance) is not
   // registered under this kickoff and must keep accepting unchanged: the

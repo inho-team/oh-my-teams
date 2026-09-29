@@ -416,6 +416,26 @@ export function listKickoffs(orgFile, worktreeId) {
   return { active: kickoffs.length > 0, kickoffs };
 }
 
+// Both arguments must already be realpath'd. Case-insensitively compared
+// (`toLowerCase`) so a case-preserving-but-insensitive filesystem (Windows,
+// and macOS by default) cannot dodge this by spelling the same directory
+// differently, even though `path.relative` itself is a plain string
+// comparison. Depth is unbounded on purpose: `pm-wt/.omt/inner`,
+// `pm-wt/sub/.omt`, and `pm-wt/a/b/c` are all "inside" `pm-wt` the same as
+// `pm-wt/.omt` itself is.
+function isSameOrWithin(parent, child) {
+  if (parent === child) return true;
+  const normalize = (value) =>
+    process.platform === "win32" ? value.toLowerCase() : value;
+  const relative = path.relative(normalize(parent), normalize(child));
+  return (
+    relative !== "" &&
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
 /**
  * Finds the registered kickoff, if any, that a PM state directory belongs to.
  *
@@ -437,8 +457,10 @@ export function listKickoffs(orgFile, worktreeId) {
  * child worktree's own task state, for instance — resolves to `null`:
  * genuinely unregistered solo usage, where the caller's own
  * orgFile/worktreeId (if any) apply unchanged. Only a `stateDir` that sits
- * INSIDE a registered kickoff's own worktree (`pm.path`, realpath-compared)
- * but is not that kickoff's exact `pm.stateDir` is fail-closed and throws
+ * INSIDE a registered kickoff's own worktree (`pm.path`, realpath-compared,
+ * at any depth — a direct child, a nested worktree several levels down, or
+ * anything in between, not merely a direct child directory) but is not that
+ * kickoff's exact `pm.stateDir` is fail-closed and throws
  * rather than returning `null`: that is a caller pointing `--state`
  * somewhere else inside the one PM directory an audited kickoff actually
  * registered, which is exactly the accept-bypass this function exists to
@@ -506,18 +528,23 @@ export async function resolveRegisteredKickoffFromState(stateDir, options = {}) 
   });
   const match = resolvedEntries.find((r) => r.entryState === target);
   if (!match) {
-    // A directory that shares a registered kickoff's own worktree (`pm.path`)
-    // but is not the exact `pm.stateDir` it registered is still refused, not
-    // treated as an unregistered solo task: that is a caller pointing
-    // `--state` elsewhere inside the same audited PM worktree to dodge the
-    // objection check. But a stateDir in a DIFFERENT worktree of the same
-    // owner Git repository (a Senior/Worker child worktree's own task state,
-    // for instance) is ordinary unregistered solo usage and must fall through
-    // to `null`, not fail-closed, or every child worktree under an audited
-    // organization would be unable to accept at all.
+    // A directory ANYWHERE inside a registered kickoff's own worktree
+    // (`pm.path`, realpath-compared, at any depth — not only a direct child)
+    // but not the exact `pm.stateDir` it registered is still refused, not
+    // treated as an unregistered solo task: `pm-wt/.omt/inner`, `pm-wt/sub/
+    // .omt`, and `pm-wt/a/b/c` are all a caller pointing `--state` somewhere
+    // else inside the one audited PM worktree to dodge the objection check
+    // below, exactly as much as a direct child of `pm-wt` would be. A
+    // legitimate DIFFERENT worktree of the same owner Git repository (a
+    // Senior/Worker child worktree's own task state, for instance) is
+    // ordinary unregistered solo usage and must fall through to `null`, not
+    // fail-closed, or every child worktree under an audited organization
+    // would be unable to accept at all — but a worktree nested inside a
+    // registered kickoff's own `pm.path` is refused along with it, since it
+    // is still inside that same audited tree.
     const sameWorktreeOtherState = resolvedEntries.find((r) => {
       try {
-        return fs.realpathSync(r.entry.pm.path) === path.dirname(target);
+        return isSameOrWithin(fs.realpathSync(r.entry.pm.path), target);
       } catch {
         return false;
       }
