@@ -5,7 +5,10 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createWorktreeWithRoleSession } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import {
+  createWorktreeWithRoleSession,
+  reclaimWorktree,
+} from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { predictLaunchPath } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
 import { runTurn } from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
@@ -105,6 +108,32 @@ test("a new worktree is reclaimed only when role-session absence is proven", asy
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1].slice(1, 4), ["worktree", "remove", "--worktree"]);
   assert.equal(calls[1][4], "id:wt_1");
+});
+
+test("a completed cleanup uses the exact Orca identity selector without force", async () => {
+  const calls = [];
+  const execute = async (argv) => {
+    calls.push(argv);
+    return {
+      code: 0,
+      stderr: "",
+      timedOut: false,
+      stdout: JSON.stringify({ ok: true, result: { removed: true } }),
+    };
+  };
+  await reclaimWorktree("/repo", {
+    id: "repo::/repo/child",
+    identityKey: "wt2:local:instance-1",
+    discovery,
+    execute,
+  });
+  assert.deepEqual(calls[0].slice(1, 5), [
+    "worktree",
+    "remove",
+    "--worktree",
+    "identity:wt2:local:instance-1",
+  ]);
+  assert.equal(calls[0].includes("--force"), false);
 });
 
 test("an ambiguous role launch preserves the new worktree for reconciliation", async () => {

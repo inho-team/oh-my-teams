@@ -1,14 +1,18 @@
 /** Read-only reconciliation of a completed kickoff's Orca worktrees and Git evidence. */
 import fs from "node:fs";
 import path from "node:path";
-import { assert, readJSON } from "./core.mjs";
+import { assert, readJSON, withAsyncFileLock, writeJSON } from "./core.mjs";
 import { git } from "./evidence.mjs";
 import {
   listKickoffs,
   ownerProject,
   validateEntry,
 } from "./kickoff-registry.mjs";
-import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+import {
+  reclaimWorktree,
+  runOrcaJson,
+  selectOrcaExecutable,
+} from "./orca-adapter.mjs";
 import { readLaunches, readTerminalClosures } from "./usage-ledger.mjs";
 
 function archivedEntry(orgFile, archiveFile, worktreeId) {
@@ -158,6 +162,12 @@ export function evaluateKickoffCleanup(entry, observed) {
     const previous = entry.cleanup?.candidates?.find(
       (candidate) => candidate.worktreeId === id,
     );
+    const parentWorktreeId =
+      item?.parentWorktreeId ??
+      previous?.parentWorktreeId ??
+      worktrees.find((parent) => parent.childWorktreeIds?.includes(id))
+        ?.worktreeId ??
+      null;
     const gitState = observed.git?.[id] ?? null;
     const attached = terminals.filter((terminal) => terminal.worktreeId === id);
     const assigned = workers.filter((worker) => workerWorkspace(worker) === id);
@@ -205,21 +215,24 @@ export function evaluateKickoffCleanup(entry, observed) {
     if (id === entry.pm.worktreeId && !entry.releasedAt)
       reasons.push("pm-kickoff-active");
     const removed = !item && observed.absentPaths?.includes(location);
+    const hostVerified =
+      previous?.hostId && observed.hostIds?.includes(previous.hostId);
+    const absenceVerified =
+      inventoryComplete && (!observed.remoteHostsOmitted || hostVerified);
     return {
       worktreeId: id,
       path: location,
+      parentWorktreeId,
       instanceId: item?.worktreeInstanceId ?? previous?.instanceId ?? null,
+      hostId: item?.hostId ?? previous?.hostId ?? null,
       owner: entry.director?.terminalHandle ?? entry.pm.worktreeId,
       status:
-        removed && inventoryComplete && !observed.remoteHostsOmitted
+        removed && absenceVerified
           ? "already-removed"
           : reasons.length
             ? "preserve"
             : "safe-to-remove",
-      reasons:
-        removed && inventoryComplete && !observed.remoteHostsOmitted
-          ? []
-          : reasons,
+      reasons: removed && absenceVerified ? [] : reasons,
       git: gitState,
       terminalHandles: attached.map((terminal) => terminal.handle),
       workerDispatches: assigned.map((worker) => worker.dispatchId),
@@ -363,6 +376,177 @@ export async function scanKickoffCleanup(
     absentPaths,
     errors,
     remoteHostsOmitted,
+    hostIds: treeResult?.hostScope?.hostIds ?? [],
     inventoryComplete: errors.length === 0,
   });
+}
+
+function isDescendant(candidate, ancestorId, candidates) {
+  const byId = new Map(candidates.map((item) => [item.worktreeId, item]));
+  const seen = new Set();
+  let parent = candidate.parentWorktreeId;
+  while (parent && !seen.has(parent)) {
+    if (parent === ancestorId) return true;
+    seen.add(parent);
+    parent = byId.get(parent)?.parentWorktreeId;
+  }
+  return false;
+}
+
+/**
+ * Revalidates archived candidates and asks Orca to remove only proven safe worktrees.
+ * Every request and its post-removal observation are stored for later reentry.
+ *
+ * @param {object} request - Completed archive, PM worktree, and caller identity.
+ * @param {object} [ports] - Injectable read-only scanner and Orca reclaimer.
+ * @returns {Promise<object>} Durable per-candidate cleanup result.
+ */
+export async function reclaimKickoffCleanup(
+  { orgFile, worktreeId, archiveFile, executable, callerCwd = process.cwd() },
+  {
+    scan = scanKickoffCleanup,
+    show = runOrcaJson,
+    reclaim = reclaimWorktree,
+  } = {},
+) {
+  const entry = archivedEntry(orgFile, archiveFile, worktreeId);
+  assert(
+    entry.director?.checkoutPath,
+    "Completed cleanup requires a recorded director checkout",
+  );
+  assert(
+    path.resolve(callerCwd) === path.resolve(entry.director.checkoutPath),
+    "Completed cleanup must run from the recorded director checkout",
+  );
+  const archive = path.resolve(archiveFile);
+  const recordFile = path.join(
+    path.dirname(archive),
+    `cleanup-${path.basename(archive)}`,
+  );
+  const request = { orgFile, worktreeId, archiveFile: archive, executable };
+  return withAsyncFileLock(
+    `${recordFile}.lock`,
+    async () => {
+      const record = fs.existsSync(recordFile)
+        ? readJSON(recordFile)
+        : {
+            schemaVersion: 1,
+            archive,
+            worktreeId,
+            createdAt: entry.createdAt,
+            attempts: [],
+          };
+      assert(
+        record.schemaVersion === 1 &&
+          record.archive === archive &&
+          record.worktreeId === worktreeId &&
+          record.createdAt === entry.createdAt &&
+          Array.isArray(record.attempts),
+        "Cleanup record belongs to another kickoff or is malformed",
+      );
+      let latest = await scan(request);
+      record.latest = latest;
+      writeJSON(recordFile, record);
+      const ids = latest.candidates
+        .map((candidate) => candidate.worktreeId)
+        .reverse();
+      for (const id of ids) {
+        latest = await scan(request);
+        const candidate = latest.candidates.find(
+          (item) => item.worktreeId === id,
+        );
+        if (!candidate || candidate.status !== "safe-to-remove") {
+          record.latest = latest;
+          writeJSON(recordFile, record);
+          continue;
+        }
+        const pendingChild = latest.candidates.some(
+          (item) =>
+            item.worktreeId !== id &&
+            item.status !== "already-removed" &&
+            (id === worktreeId || isDescendant(item, id, latest.candidates)),
+        );
+        if (
+          pendingChild ||
+          record.attempts.some(
+            (attempt) =>
+              attempt.worktreeId === id &&
+              ["attempting", "unverified"].includes(attempt.outcome),
+          )
+        ) {
+          record.latest = latest;
+          writeJSON(recordFile, record);
+          continue;
+        }
+        const attempt = {
+          worktreeId: id,
+          instanceId: candidate.instanceId,
+          startedAt: new Date().toISOString(),
+          before: candidate,
+          outcome: "attempting",
+        };
+        record.attempts.push(attempt);
+        record.latest = latest;
+        writeJSON(recordFile, record);
+        let identityKey;
+        try {
+          attempt.showReceipt = await show(
+            selectOrcaExecutable(executable),
+            ["worktree", "show", "--worktree", `id:${id}`],
+            { cwd: ownerProject(orgFile) },
+          );
+          const shown = receiptBody(attempt.showReceipt).worktree;
+          assert(
+            shown?.id === id &&
+              shown.path === candidate.path &&
+              shown.identity?.instanceId === candidate.instanceId &&
+              shown.identity?.executionHostId === candidate.hostId &&
+              typeof shown.identity?.key === "string" &&
+              shown.identity.key,
+            `Worktree ${id} identity changed or could not be verified; preserve it`,
+          );
+          identityKey = shown.identity.key;
+        } catch (error) {
+          attempt.outcome = "refused";
+          attempt.error = error.message;
+        }
+        if (identityKey) {
+          try {
+            attempt.receipt = await reclaim(ownerProject(orgFile), {
+              id,
+              identityKey,
+              executable,
+            });
+          } catch (error) {
+            attempt.outcome = "unverified";
+            attempt.error = error.message;
+          }
+        }
+        if (attempt.outcome === "attempting") {
+          try {
+            const after = await scan(request);
+            attempt.after =
+              after.candidates.find((item) => item.worktreeId === id) ?? null;
+            attempt.outcome =
+              attempt.after?.status === "already-removed"
+                ? "removed"
+                : "unverified";
+            record.latest = after;
+          } catch (error) {
+            attempt.outcome = "unverified";
+            attempt.error = error.message;
+          }
+        }
+        writeJSON(recordFile, record);
+      }
+      try {
+        record.latest = await scan(request);
+      } catch (error) {
+        record.scanError = error.message;
+      }
+      writeJSON(recordFile, record);
+      return { recordFile, ...record };
+    },
+    "Cleanup reconciliation already in progress",
+  );
 }

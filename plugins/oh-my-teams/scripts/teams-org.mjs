@@ -133,7 +133,10 @@ import {
   releaseKickoff,
   verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
-import { scanKickoffCleanup } from "./kickoff-cleanup.mjs";
+import {
+  reclaimKickoffCleanup,
+  scanKickoffCleanup,
+} from "./kickoff-cleanup.mjs";
 import {
   buildDocId,
   buildDocRef,
@@ -189,6 +192,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                   --reason completed|disbanded|taken-over [--force]
                   (also closes that kickoff's pending director signals)
   kickoff-cleanup-candidates --org FILE --worktree ID [--history-file FILE]
+  kickoff-cleanup-reclaim --org FILE --worktree ID --history-file FILE
   kickoff-branch-cleanup --org FILE --worktree ID
                          --branches BRANCH[,BRANCH...] [--remote NAME]
                          (verifies delivery then deletes remote, local, and
@@ -431,6 +435,7 @@ export const ALLOWED_OPTIONS = {
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason", "force"],
   "kickoff-cleanup-candidates": ["org", "worktree", "history-file", "orca"],
+  "kickoff-cleanup-reclaim": ["org", "worktree", "history-file", "orca"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
   "kickoff-check-close-ready": ["org", "worktree", "head"],
   "kickoff-merge-record": [
@@ -690,6 +695,7 @@ export const REQUIRED_OPTIONS = {
   "kickoff-bind": ["org", "worktree", "run"],
   "kickoff-release": ["org", "worktree", "reason"],
   "kickoff-cleanup-candidates": ["org", "worktree"],
+  "kickoff-cleanup-reclaim": ["org", "worktree", "history-file"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
   "kickoff-check-close-ready": ["org", "worktree", "head"],
   "kickoff-merge-record": ["org", "worktree", "head", "merge-commit"],
@@ -2554,6 +2560,13 @@ export async function executeCommand(args, execute) {
       });
     case "kickoff-cleanup-candidates":
       return scanKickoffCleanup({
+        orgFile: args.org,
+        worktreeId: args.worktree,
+        archiveFile: args["history-file"],
+        executable: args.orca,
+      });
+    case "kickoff-cleanup-reclaim":
+      return reclaimKickoffCleanup({
         orgFile: args.org,
         worktreeId: args.worktree,
         archiveFile: args["history-file"],

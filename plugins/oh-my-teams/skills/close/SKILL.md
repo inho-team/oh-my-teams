@@ -73,4 +73,10 @@ node <runtime> kickoff-branch-cleanup --org <project>/.omt/organization.json --w
 node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <pm-worktree-id> --reason completed
 ```
 
+완료 보관 기록이 생긴 뒤에는 이사의 체크아웃에서 후보를 다시 확인하고 안전 판정을 받은 워크트리만 Orca로 회수한다. 명령은 후보마다 최신 증거를 다시 읽고 자식을 먼저 처리하며, Orca의 거부와 사후 확인 실패를 `<project>/.omt/history`의 정리 기록에 남긴다. 실제 회수를 확인하지 못한 후보는 재진입 때 자동으로 같은 제거 요청을 반복하지 않는다.
+
+```text
+node <runtime> kickoff-cleanup-reclaim --org <project>/.omt/organization.json --worktree <pm-worktree-id> --history-file <project>/.omt/history/kickoff-<id>.json
+```
+
 최종 기록에는 Goal 결과, 전달 방식, 사용량 스냅샷 경로, PR/MR 주소 또는 식별자, 주인 브랜치의 병합 커밋, 검사 근거, 회수·삭제한 워크트리와 보존한 후속 항목을 포함한다. 사용자에게 전달하는 문장은 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)의 기준을 따른다.
