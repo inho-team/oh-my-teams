@@ -127,7 +127,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 Codex 계정의 모델 카탈로그는 계정과 CLI 버전에 따라 달라진다. codex-cli 0.154.0(2026-09-16)의 `codex debug models`에는 `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`가 선택 가능한 모델로 들어 있었고, `config.toml`에 `model`이 없으면 이 가운데 첫 항목이 실행된다. 설치 때 `agy models`와 Codex 카탈로그로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
 
-새 조직의 구조 예제는 [PM·Worker 조직](plugins/oh-my-teams/examples/organization.three-tier.json)이다. 이전 [네 역할 예제](plugins/oh-my-teams/examples/organization.json)는 진행 중인 kickoff의 역할 스냅샷과 이전 설정을 이해하기 위한 호환 자료이며, 새 결성의 기본값이 아니다. 모든 역할의 동시 실행 슬롯은 기본 1이며, 보조 도구는 `assistants`에 명시적으로 허용한 역할만 사용할 수 있다.
+새 조직의 구조 예제는 [PM·Worker 조직](plugins/oh-my-teams/examples/organization.three-tier.json)이다. 이전 [네 역할 예제](plugins/oh-my-teams/examples/organization.json)는 진행 중인 kickoff의 역할 스냅샷과 이전 설정을 이해하기 위한 호환 자료이며, 새 결성의 기본값이 아니다. 모든 역할의 동시 실행 슬롯은 기본 1이다.
 
 Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
 
@@ -207,7 +207,6 @@ Ollama는 저장소 파일을 직접 열지 못한다. 작업 계약의 `context
 node plugins/oh-my-teams/scripts/teams-org.mjs --help
 node plugins/oh-my-teams/scripts/teams-org.mjs validate --org plugins/oh-my-teams/examples/organization.json
 node plugins/oh-my-teams/scripts/teams-org.mjs show --org plugins/oh-my-teams/examples/organization.json
-node plugins/oh-my-teams/scripts/teams-org.mjs assist --org .omt/organization.json --task <task.json> --repo <worktree> --state .omt --role junior --kind research
 node plugins/oh-my-teams/scripts/teams-org.mjs advise --org .omt/organization.json --brief <brief.json> --repo <worktree> --state .omt --role pm --kind plan
 node plugins/oh-my-teams/scripts/teams-org.mjs preset --org <project>/.omt/organization.json --name balanced --revision <revision>
 node plugins/oh-my-teams/scripts/teams-org.mjs gate-check --task <task-v2.json> --report <report.json> --repo <worktree> --state <pm-state>
@@ -228,9 +227,9 @@ npm run lint
 
 감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows에서 모델이 `gemini`로 시작하는 Agy 역할은 Orca가 그 터미널의 대기를 보고하지 않으므로 `headless-start`로 실행하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
 
-`assist`는 조직의 `assistants.<role>` 허용 목록에서 GPT-OSS-120B 프로필을 선택한다. `research`와 `checklist`는 파일을 수정하지 않고 검증된 인용과 감사 기록을 남긴다. `edit`는 호출자의 기본 모델을 바꾸지 않은 채 GPT-OSS를 한 번 호출하고, 기존 `work`와 동일한 파일 해시·허용 범위·검사·보고 관문을 적용한다. 비서 결과의 판단과 통합 책임은 호출한 역할에 남는다.
+역할은 조사, 초안과 순차적인 좁은 편집에 자기 실행기의 서브에이전트를 쓸 수 있고, 병렬 편집과 독립 검토는 별도 Worker와 워크트리로 넘긴다. 서브에이전트는 OMT 역할이 아니며 결과의 검증 책임은 호출한 역할에 있다. 규칙은 [서브에이전트 규칙](plugins/oh-my-teams/references/subagents.md)에 있고, 이전의 보조 도구 명령은 2.11.0에서 삭제되었다.
 
-`advise`는 방향이 반대인 호출이다. 조직의 `advisors.<role>` 허용 목록에 있는 비싼 모델에게 결정할 질문 하나와 12000바이트 이하의 요약, 최대 8개의 파일만 보내고 `proceed`·`revise`·`stop`·`escalate` 중 하나의 권고를 받는다. 대화 전문을 보내지 않으므로 프론티어 모델을 긴 감독 세션에 두지 않고 결정 관문에서만 쓸 수 있다. 호출은 kickoff 상태 하나당 `policy.adviceBudget`(기본값 6)회로 제한되고, 실패한 호출도 한 번으로 센다. 권고는 승인이 아니며 결정은 호출한 역할이 내린다. 계약은 [자문 호출 참조](plugins/oh-my-teams/references/advise.md)에 있다.
+`advise`는 조사를 맡기는 서브에이전트와 달리 더 비싼 모델에게 판단을 묻는 호출이다. 조직의 `advisors.<role>` 허용 목록에 있는 비싼 모델에게 결정할 질문 하나와 12000바이트 이하의 요약, 최대 8개의 파일만 보내고 `proceed`·`revise`·`stop`·`escalate` 중 하나의 권고를 받는다. 대화 전문을 보내지 않으므로 프론티어 모델을 긴 감독 세션에 두지 않고 결정 관문에서만 쓸 수 있다. 호출은 kickoff 상태 하나당 `policy.adviceBudget`(기본값 6)회로 제한되고, 실패한 호출도 한 번으로 센다. 권고는 승인이 아니며 결정은 호출한 역할이 내린다. 계약은 [자문 호출 참조](plugins/oh-my-teams/references/advise.md)에 있다.
 
 - 파일과 직전 실패만 모델에 전달하고, JSON 편집을 경로·원본 해시 대조 후 하네스가 적용한다.
 - 검사 명령은 argv 배열이다. 호출과 재시도에 한도가 있고 실패를 통과로 바꾸지 않는다. 실패 편집은 보존한다.

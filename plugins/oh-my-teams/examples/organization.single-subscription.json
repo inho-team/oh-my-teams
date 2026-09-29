@@ -37,10 +37,6 @@
       "pool": "solo"
     }
   },
-  "assistants": {
-    "pm": ["agy-oss"],
-    "junior": ["agy-oss"]
-  },
   "roles": {
     "pm": {
       "parent": null,

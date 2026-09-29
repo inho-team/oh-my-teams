@@ -33,7 +33,7 @@ node <runtime> kickoff-handoff-verify --org <organization.json> --worktree <이 
 - 신규 조직의 Worker는 `worker-start --org --role worker --workflow-id --state` 래퍼로만 시작하고 `role-spec`으로 지시문 머리글을 만듭니다. 기존 조직의 PL·Senior·Junior는 저장된 역할과 실행 깊이에 따라서만 시작합니다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인한 뒤 작업을 넘깁니다. 두 명령에는 같은 workflow와 state를 넘깁니다. Ollama 역할과 현재 계정이 아닌 프로필은 `work` 하네스를 사용하며, 실행기별 절차는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따릅니다.
 - 시도를 예약하기 전에 `terminal-idle-check`로 상태를 확인합니다. 질문으로 중단되면 PM이 `prompt-answer`로 답하고 다시 확인하며, idle 신호가 없으면 원시 `dispatch --inject`로 우회하지 않습니다. Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용합니다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, worker를 기다릴 때에는 heartbeat를 걸러 주는 `supervision-wait`를 쓰고, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
-- 보조 도구는 자기 역할로 `assist`를 호출해 자료 정리와 반론 수집에 쓴다.
+- 자료 정리와 반론 수집에는 실행기의 서브에이전트를 쓸 수 있다. 병렬 편집, 작업 계약이 필요한 일과 독립 검토는 별도 Worker에게 배정하며, 규칙은 [`../../references/subagents.md`](../../references/subagents.md)를 따른다.
 - 조직이 PM에게 자문자를 허용했으면 계획 확정, 최종 수용, 반복 실패 같은 결정 관문에서만 자기 역할로 `advise`를 호출한다.
 - 조직이 실험 Jev 판단을 켰으면 `supervision-wait`·`supervision-next`·`role-terminal`·`failure-classify`에 [`../../references/jev.md`](../../references/jev.md)가 정한 `--state`(와 `--org`·`--dispatch`)를 함께 넘긴다. 명령의 결과는 바뀌지 않으므로 기록을 읽거나 판단 근거로 쓰지 않는다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행한다.
@@ -70,7 +70,8 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 - 전체 요청을 목표·수용 기준·비목표·제약과 파일 소유권이 분명한 task v2로 나눕니다. 작은 저위험 변경은 한 task로 유지합니다. 새 task마다 워크트리를 만들지 않고, 이전 task의 수용·통합 HEAD와 모든 Run·Dispatch의 정산 및 해제, 터미널 종료, 깨끗한 Git 상태를 증명할 수 있을 때에만 `role-worktree-create --worktree <id>`로 같은 역할의 유휴 워크트리를 재사용합니다. 증거가 없거나 다른 연결 세션이 남아 있으면 보존하고 독립 편집 작업에만 새 Orca child worktree를 사용합니다. 이전 task가 다른 workflow에 속하면 `--prior-workflow-id`와 `--prior-task-id`를 함께 지정합니다. 기준 커밋과 실제 전체 worktree ID를 보관하고, 검토자는 대상의 경로와 커밋을 읽습니다([`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `역할과 워크트리` 절).
 - 신규 조직은 PM만 사용하거나 PM과 Worker를 사용합니다. 역할별 모델·계정·동시 인원과 fallback을 조직 파일에서 읽으며, 여러 Worker가 필요하면 PM이 평평한 작업 파동으로 직접 배정합니다.
 - 새로운 과금 계정이나 사용자에게 없는 모델로 자동 전환하지 않는다. 예산·할당량 소진 시 저장된 정책으로 처리한다. 조직이 선언한 fallback 프로필로 넘기는 것은 이 전환에 해당하지 않으며, 절차는 아래 「사용 한도」를 따른다.
-- PM은 자료 정리와 반론 수집을 보조 도구에 맡길 수 있으나 목표·우선순위·수용 결정은 위임하지 않는다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다.
+- PM은 자료 정리와 반론 수집을 실행기의 서브에이전트에 맡길 수 있으나 목표·우선순위·수용 결정은 위임하지 않는다. 서브에이전트와 Worker의 구분, 호출한 역할의 검증 책임과 서브에이전트가 없을 때의 처리는 [`../../references/subagents.md`](../../references/subagents.md)를 따른다.
+- Worker 실행이 필요할 때 워크트리는 같은 역할의 기존 워크트리를 안전하게 재사용할 수 있는지를 먼저 확인하고(`role-worktree-create --worktree`의 기존 증명), 수정과 재시도는 원래 워크트리에서 하며, 재사용이 불가능하고 독립 실행이 필요할 때에만 새 워크트리를 만듭니다. 감독과 회수는 Orca의 기능을 쓰며 다시 구현하지 않습니다.
 - 자문자는 PM보다 비싼 모델이므로 감독이나 보고 취합에는 부르지 않는다. 대화 전문 대신 결정할 질문과 요약만 브리프로 보내고, 자문을 따르든 따르지 않든 결정은 PM이 내린다. 호출 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
 
 제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용합니다. 일반적인 탐색·설계·복잡한 구현은 감독 Worker에게 배정합니다. 여러 작업의 분할과 통합은 PM이 직접 관리하며, 부모 대화 전문 대신 작업 조건·파일·근거 위치만 주고 [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 완료 조건부터 씁니다.
