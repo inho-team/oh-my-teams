@@ -71,7 +71,7 @@ test("no active file advertises assist or the assistants setting", () => {
     const text = fs.readFileSync(file, "utf8");
     assert.doesNotMatch(
       text,
-      /\bassistants\b|`assist`|\bassist\s+--|assist\.md|teams-org\.mjs assist/,
+      /\bassistants\b|`assist`|\bassist\s+--|assist\.md|teams-org\.mjs assist|보조 도구(?! 명령)/,
       `${path.relative(root, file)} still advertises assist`,
     );
   }
