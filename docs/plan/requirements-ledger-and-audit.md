@@ -4,6 +4,7 @@
 - 관련 이슈: [#139](https://github.com/inho-team/oh-my-teams/issues/139)
 - 관련 브리프: `.omt/briefs/139-auditor-2026-09-27.md`, 보충 계약 `t1-addendum-1.md`·`t1-addendum-2.md`·`t1-addendum-3.md`·`t1-addendum-4.md`
 - 상태: 이사가 22:31판 초안을 반려(t1-addendum-3.md)한 뒤 8개 항목을 전부 반영해 개정했고(HEAD 68eb78d), 그 개정판을 검토한 이사가 남은 모순 5개를 보충 계약 4로 지적해 해당 절만 다시 고쳤다. 구현은 이 문서를 커밋한 뒤 진행한다.
+- 구현 보충: 이 문서는 구현 전에 작성한 설계이며, 구현과 달라진 세 가지는 문서 끝의 「구현 보충」이 우선한다.
 
 ## 문제
 
@@ -530,3 +531,11 @@ files 목록 밖에서 실제로 필요한 수정은 다음과 같다 — 전부
 - `requirements-amend`가 이미 참조된 statement를 삭제하는 것은 다루지 않는다(criteria가 참조를 잃는 문제는 이번 범위 밖).
 - `implementationExecutionId`를 터미널 handle과 직접 통합하는 것은 `workflow.mjs`에 그런 역산 경로가 없다는 것을 확인했으므로 이번 범위에서 하지 않는다 — B.4가 채택한 "두 가지 서로 다른 사실"(호출자 신원 + 인용 증거의 실제 출처)로 같은 목적을 달성한다.
 - B.9의 실제 실행은 이 kickoff 완료 전에 수행한다(더 이상 범위 밖이 아니다) — PM이 3단계에서 director에게 구체적인 명령으로 요청한다.
+
+## 구현 보충 (현재 계약이 우선한다)
+
+위 본문은 구현 전에 작성한 설계이므로 원문을 그대로 두었다. 다음 세 가지는 구현 결과가 달라졌으며, 본문과 충돌하면 이 절과 정본 파일을 따른다.
+
+- **(a) audit CLI 옵션**: 본문 459~461행의 `--checkpoint`·`--target`·`--argument` 같은 개별 옵션 표기는 현재 CLI와 다르다. `audit-objection`·`audit-response`·`audit-ruling`은 `--org`, `--worktree`, `--from`만 받고, checkpoint·verdict 등은 `--from`이 가리키는 JSON 본문에 적는다. `audit-checked`는 `--checkpoint`와 `--from`을 받는다. `audit-accept`는 `--checkpoint`를 받고, `outcome` 체크포인트일 때만 `--head`와 `--repo`를 함께 받는다. 정본은 `plugins/oh-my-teams/scripts/teams-org.mjs`의 511-515행(허용 옵션), 790-797행(필수 옵션)과 `audit-*` case(3530-3620행)이다.
+- **(b) 자동 progress 신호 없음**: 본문 450행과 518행은 `audit-accept`가 이사 받은함에 progress 신호를 남긴다고 적지만, 구현된 `auditAccept`는 `sendSignal`을 호출하지 않는다. 수용 결과는 감사 기록에만 남으므로 이사가 필요하면 감사 상태를 직접 조회한다. 정본은 `plugins/oh-my-teams/scripts/audit.mjs`의 839-890행이다.
+- **(c) 고정된 `auditPolicy` 기준**: 감사 적용 여부는 `org.auditor`의 현재 값이 아니라 kickoff에 고정된 `auditPolicy`가 정하고, 감사 프로필도 그때 고정된 profile·fallbacks를 쓴다. 본문의 192·214·232·242·260·280·305·396·405·517행이 `org.auditor` 존재를 기준으로 적은 부분이 여기에 해당한다. `kickoff-claim`이 claim 시점의 값으로 정책을 고정하고, 정책이 없는 기존 kickoff는 조직 파일을 다시 읽지 않고 거부되며 이사가 `kickoff-audit-policy-retrofit`으로 고정해야 한다. 정본은 `plugins/oh-my-teams/scripts/kickoff-registry.mjs`의 1025-1040행(고정)과 1143-1269행(retrofit), `teams-org.mjs`의 2411-2430행(`worker-start`)·4407-4436행(close-ready)과 `requirements.mjs`의 1323-1355행(`assertKickoffCloseReady`)이다. `workflow.mjs`의 `resolveAuditGate`(725-745행)도 같은 기준을 따르며, 결과 감사의 미해결 이의는 정책 값과 관계없이 kickoff 문맥에서 `gates.mjs`의 663-671행이 task accept 전에 확인한다.

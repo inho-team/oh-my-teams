@@ -58,7 +58,7 @@
 
 `entry.requirements`는 `kickoff-claim`의 요청 파일에 `requirements`(draft 파일과 같은 형식의 statement·criterion·confirmation)를 함께 담아 제출하고, `validateLedgerForClaim`이 그 draft를 `director.checkoutPath`와 대조해 통과시켰을 때에만 `{ ledgerHash }`로 기록된다. 이후 `requirements-amend`로 문구를 바꾸거나 `requirements-confirm`으로 재확인하면 이 `ledgerHash`도 함께 바뀐다. 원장의 전체 스키마와 명령은 [`docs/plan/requirements-ledger-and-audit.md`](../../../docs/plan/requirements-ledger-and-audit.md)의 A절을 따른다.
 
-`entry.auditor`는 `org.auditor`가 선언된 조직에서 이사가 `role-terminal --role auditor --state <이 kickoff의 pm.stateDir>`로 감사 터미널을 열었을 때 `{ terminalHandle, openedAt }`으로 기록된다. 이 값은 이후 모든 감사 명령(`audit-objection`·`audit-response`·`audit-ruling`·`audit-checked`·`audit-accept`)이 호출자의 `ORCA_TERMINAL_HANDLE` 환경변수를 대조해 신원을 확인하는 데 쓰인다. 감사 체크포인트와 수용 규칙은 같은 문서의 B절을 따른다.
+`entry.auditor`는 이 kickoff에 고정된 `auditPolicy.auditorConfigured`가 참일 때 이사가 `role-terminal --role auditor --state <이 kickoff의 pm.stateDir>`로 감사 터미널을 열었을 때 `{ terminalHandle, openedAt }`으로 기록된다. 이 값은 이후 모든 감사 명령(`audit-objection`·`audit-response`·`audit-ruling`·`audit-checked`·`audit-accept`)이 호출자의 `ORCA_TERMINAL_HANDLE` 환경변수를 대조해 신원을 확인하는 데 쓰인다. 감사 체크포인트와 수용 규칙은 같은 문서의 B절을 따른다.
 
 ## kickoffHash와 registrationSeq
 
