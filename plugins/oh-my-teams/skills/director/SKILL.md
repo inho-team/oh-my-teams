@@ -64,6 +64,8 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 
 `org.auditor`가 선언된 조직에서는 [`auditor/SKILL.md`](../auditor/SKILL.md)가 정한 대로, 구현 착수 전에 브리프 감사 수용이, close-ready 발신 전에 결과 감사 수용이 각각 필요하다. 이사는 `role-terminal --role auditor --state <검토 대상 kickoff의 pm.stateDir> --worktree <감사 전용 워크트리>`로 감사 터미널을 열고, `brief` 체크포인트의 이의에는 이사 자신이 `audit-response`로 응답한다(`outcome` 체크포인트는 PM이 응답한다).
 
+감사 정책이 고정되지 않은 기존 kickoff에는 이사가 `kickoff-audit-policy-retrofit`을 한 번 실행한다. 감사 미설정으로 고정한 kickoff와 kickoff 없는 독립 workflow에는 필요하지 않다.
+
 ## 정형 문서
 
 ### 읽는 문서와 현재 revision 조회
