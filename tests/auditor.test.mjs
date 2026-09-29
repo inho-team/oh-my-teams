@@ -47,13 +47,18 @@ import {
   verifiedPm,
 } from "../plugins/oh-my-teams/scripts/audit.mjs";
 import { acceptOutcome } from "../plugins/oh-my-teams/scripts/gates.mjs";
+import { createWorkflow } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import {
+  createRoleWorktree,
   main,
   resolveAuditorLaunchExecution,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import {
+  createWorktreeWithRoleSession,
+  TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+} from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { deliverKickoff } from "../plugins/oh-my-teams/scripts/delivery.mjs";
 
 const exampleOrg = new URL(
@@ -1001,6 +1006,390 @@ test("director-signal refuses a close-ready under an audited kickoff before the 
   await assert.doesNotReject(signalClose);
 });
 
+test(
+  "worker-start (D2): binds a child worktree to its kickoff only by PM-path containment or a matching " +
+    "--terminal ledger line, never by --state alone, and leaves an org with no registered kickoff unaffected",
+  async (t) => {
+    const fixture = kickoff(t, "wt-1", {
+      auditor: { profile: "claude-current" },
+    });
+    // Only rule 4's mismatch check further below reads --state at all, and
+    // its identity comparison runs fs.realpathSync.native on both sides, so
+    // this, the directory it names as the bound kickoff's own stateDir, must
+    // actually exist on disk.
+    fs.mkdirSync(fixture.entry.pm.stateDir, { recursive: true });
+
+    const childDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "omt-audit-d2-child-"),
+    );
+    t.after(() => fs.rmSync(childDir, { recursive: true, force: true }));
+
+    const missingOrca = path.join(fixture.dir, "missing-orca");
+    const workerStart = (extraArgs) =>
+      main([
+        "worker-start",
+        "--repo",
+        childDir,
+        "--org",
+        fixture.org,
+        "--role",
+        "senior",
+        "--spec",
+        "x",
+        "--orca",
+        missingOrca,
+        ...extraArgs,
+      ]);
+
+    // (1) 신규 child 무기록 거부: no launch line has ever named this worktree
+    // under this --terminal, so it cannot be tied to any registered kickoff
+    // (director decision msg_c9d1afb03fd4, rule 3).
+    await assert.rejects(
+      () => workerStart(["--terminal", "term_never_recorded"]),
+      /cannot be tied to any registered kickoff/,
+    );
+
+    // Simulates the launch line role-worktree-create's own role-terminal call
+    // would have recorded when it first opened this child (that internal
+    // call, and the terminal handle it assigns, are exercised directly by the
+    // "role-terminal --role auditor" tests above; only its recorded shape
+    // matters to startSupervisedWorker's own gate, which is what is under
+    // test here).
+    recordLaunch(fixture.org, {
+      via: "role-terminal",
+      role: "senior",
+      terminal: "term_child_1",
+      stateDir: fixture.entry.pm.stateDir,
+      worktreePath: childDir,
+      callerCwd: childDir,
+    });
+
+    // (2) role-worktree-create 정상 첫 child 통과(감사 gate 적용): the exact
+    // --terminal that launch line recorded now resolves this worktree to the
+    // kickoff, and the brief-audit gate applies to it exactly as it does for
+    // a launch straight from the PM worktree (see the worker-start test
+    // above this one).
+    await assert.rejects(
+      () => workerStart(["--terminal", "term_child_1"]),
+      /no valid brief-audit acceptance yet/,
+    );
+
+    // (3) 기존 연결 child 유지: a second worker-start against the same,
+    // already-bound child (same --terminal) resolves the same way, not
+    // "cannot be tied" -- the binding is not a one-shot fluke of the first
+    // call consuming something.
+    await assert.rejects(
+      () => workerStart(["--terminal", "term_child_1"]),
+      /no valid brief-audit acceptance yet/,
+    );
+
+    // 부모 target과 자식 과거 launch가 결속되지 않고 거부되는 경우: a past
+    // launch's own recorded worktreePath sits NESTED inside this call's
+    // target, not the other way around. identicalOrWithin's parameters are
+    // (parent=recorded worktreePath, child=target), so this correctly
+    // refuses -- the reversed direction would have wrongly let a caller name
+    // any broad ancestor directory as --worktree and inherit whatever
+    // unrelated launch's worktreePath happened to sit somewhere underneath it.
+    const nestedChildDir = path.join(childDir, "nested", "deep");
+    fs.mkdirSync(nestedChildDir, { recursive: true });
+    recordLaunch(fixture.org, {
+      via: "role-terminal",
+      role: "senior",
+      terminal: "term_nested_only",
+      stateDir: fixture.entry.pm.stateDir,
+      worktreePath: nestedChildDir,
+      callerCwd: nestedChildDir,
+    });
+    await assert.rejects(
+      () => workerStart(["--terminal", "term_nested_only"]),
+      /cannot be tied to any registered kickoff/,
+    );
+
+    // 같은 terminal의 worker-start 줄만 있고 role-terminal 줄이 없는 경우
+    // 거부: only a via:"worker-start" line names this worktree and terminal.
+    // Its own kickoffPmWorktreeId came from recordLaunch's separate,
+    // --state/callerCwd-based lookup (usage-ledger.mjs's own
+    // resolveLaunchKickoff), not from a validated role-terminal call, so it
+    // must not count as binding evidence either.
+    const workerOnlyDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "omt-audit-d2-workeronly-"),
+    );
+    t.after(() => fs.rmSync(workerOnlyDir, { recursive: true, force: true }));
+    recordLaunch(fixture.org, {
+      via: "worker-start",
+      role: "senior",
+      terminal: "term_worker_only",
+      stateDir: fixture.entry.pm.stateDir,
+      worktreePath: workerOnlyDir,
+      callerCwd: workerOnlyDir,
+    });
+    await assert.rejects(
+      () =>
+        main([
+          "worker-start",
+          "--repo",
+          workerOnlyDir,
+          "--org",
+          fixture.org,
+          "--role",
+          "senior",
+          "--spec",
+          "x",
+          "--terminal",
+          "term_worker_only",
+          "--orca",
+          missingOrca,
+        ]),
+      /cannot be tied to any registered kickoff/,
+    );
+
+    // 다른 kickoff의 --state 지정 거부 (rule 4): this worktree is bound (by
+    // terminal) to the first kickoff; naming a second, real kickoff's --state
+    // must still be refused, not silently accepted as if --state alone were
+    // authoritative over the binding term_child_1 already established.
+    // launchContext itself requires a genuine, readable workflow snapshot
+    // for any --state it is given (it pairs --state with --workflow-id and
+    // calls readWorkflow), so exercising this rule via the real CLI needs an
+    // actual workflow created with createWorkflow, not just a bare directory.
+    const other = secondKickoff(fixture, "wt-d2-other");
+    t.after(() => fs.rmSync(other.dir, { recursive: true, force: true }));
+    initRepo(other.dir);
+    writeJSON(path.join(other.dir, "a.json"), {
+      schemaVersion: 2,
+      revision: 1,
+      kind: "edit",
+      id: "a",
+      goal: "noop",
+      instruction: "noop",
+      nonGoals: [],
+      constraints: [],
+      files: ["x.txt"],
+      checks: [[process.execPath, "-e", "process.exit(0)"]],
+      acceptance: [
+        {
+          id: "check",
+          description: "check",
+          method: "check",
+          checkIndexes: [0],
+        },
+      ],
+      dependencies: [],
+      contractRefs: [],
+      contextRefs: [],
+      openQuestions: [],
+      reviewRequirements: [],
+      environment: "test",
+      baseRef: "HEAD",
+      risk: "low",
+    });
+    await createWorkflow(
+      other.entry.pm.stateDir,
+      {
+        schemaVersion: 1,
+        id: "wf-d2-other",
+        goal: "unrelated kickoff's own workflow",
+        repo: ".",
+        tasks: [{ file: "a.json", role: "senior" }],
+        policy: { maxRunning: 1, maxReviewPending: 1 },
+        budget: { maxAttempts: 1, maxCalls: 4 },
+      },
+      readJSON(fixture.org),
+      other.dir,
+    );
+    await assert.rejects(
+      () =>
+        workerStart([
+          "--terminal",
+          "term_child_1",
+          "--workflow-id",
+          "wf-d2-other",
+          "--state",
+          other.entry.pm.stateDir,
+        ]),
+      /does not name the kickoff/,
+    );
+
+    // (5) A path match alone, from a *different* --terminal that never
+    // recorded anything against this worktree, is not trusted either: rule
+    // 2 requires the ledger line's own terminal to match this call's
+    // --terminal exactly, so this is refused the same way as (1), not
+    // silently reusing term_child_1's binding.
+    await assert.rejects(
+      () => workerStart(["--terminal", "term_impersonator"]),
+      /cannot be tied to any registered kickoff/,
+    );
+
+    // 같은 경로를 다른 kickoff가 재사용하고 새 세션이 ledgerError일 때 옛 줄로
+    // 결속되지 않고 거부: term_child_1's own line is still the only one this
+    // worktree ever recorded. A brand-new session at the same path, under a
+    // brand-new --terminal, whose own launch line never got written (the
+    // ledgerError case -- rule 6, tested for its own surfaced status below)
+    // looks identical, from this gate's point of view, to (1) and (5) above:
+    // there is still no line naming ITS terminal, so it is refused the same
+    // way rather than silently inheriting term_child_1's kickoff binding.
+    await assert.rejects(
+      () => workerStart(["--terminal", "term_ledgererror_session"]),
+      /cannot be tied to any registered kickoff/,
+    );
+
+    // kickoff 없는 조직 기존 동작 유지: an organization.json with no
+    // registered kickoff at all skips the binding assert entirely
+    // (kickoffs.length === 0), so an ordinary solo worktree keeps working
+    // exactly as before D2 -- reaching the same missing-Orca failure any
+    // worker-start hits once it actually tries to spawn, not a "cannot be
+    // tied" refusal.
+    const soloDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-d2-solo-")),
+    );
+    t.after(() => fs.rmSync(soloDir, { recursive: true, force: true }));
+    const soloOrg = path.join(soloDir, ".omt", "organization.json");
+    fs.mkdirSync(path.dirname(soloOrg), { recursive: true });
+    fs.copyFileSync(exampleOrg, soloOrg);
+    await assert.rejects(
+      () =>
+        main([
+          "worker-start",
+          "--repo",
+          soloDir,
+          "--org",
+          soloOrg,
+          "--role",
+          "senior",
+          "--spec",
+          "x",
+          "--terminal",
+          "term_solo",
+          "--orca",
+          missingOrca,
+        ]),
+      /Selected Orca executable failed/,
+    );
+  },
+);
+
+test("role-worktree-create (D2 rule 6): a swallowed launch-ledger write failure surfaces as a top-level blocked status, not a silent success", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
+
+  // D2/부록 F: an active kickoff exists in this organization, so a non-pm
+  // role-worktree-create now requires --workflow-id/--workflow-task/--state
+  // naming this kickoff, and --repo must be that kickoff's own PM worktree
+  // (satisfied by fixture.entry.pm.path above) -- unrelated to this test's own
+  // point (a swallowed ledger write still surfaces as a blocked status), but
+  // required to reach it.
+  writeJSON(path.join(fixture.dir, "a.json"), {
+    schemaVersion: 2,
+    revision: 1,
+    kind: "edit",
+    id: "a",
+    goal: "noop",
+    instruction: "noop",
+    nonGoals: [],
+    constraints: [],
+    files: ["x.txt"],
+    checks: [[process.execPath, "-e", "process.exit(0)"]],
+    acceptance: [
+      { id: "check", description: "check", method: "check", checkIndexes: [0] },
+    ],
+    dependencies: [],
+    contractRefs: [],
+    contextRefs: [],
+    openQuestions: [],
+    reviewRequirements: [],
+    environment: "test",
+    baseRef: "HEAD",
+    risk: "low",
+  });
+  await createWorkflow(
+    fixture.entry.pm.stateDir,
+    {
+      schemaVersion: 1,
+      id: "wf-ledger-error",
+      goal: "fixture's own workflow",
+      repo: ".",
+      tasks: [{ file: "a.json", role: "senior" }],
+      policy: { maxRunning: 1, maxReviewPending: 1 },
+      budget: { maxAttempts: 1, maxCalls: 4 },
+    },
+    readJSON(fixture.org),
+    fixture.dir,
+  );
+
+  const result = await createRoleWorktree(
+    {
+      org: fixture.org,
+      role: "senior",
+      repo: fixture.entry.pm.path,
+      "workflow-id": "wf-ledger-error",
+      "workflow-task": "a",
+      state: fixture.entry.pm.stateDir,
+      name: "task-ledger-error",
+      base: "f".repeat(40),
+    },
+    {
+      organization: () => readJSON(fixture.org),
+      environment: async () => ({
+        platform: "darwin",
+        shell: "zsh",
+        trustRecordExists: true,
+        codexTrustRecordExists: true,
+        orcaVersion: "1.4.210",
+        cliVersion: "1.2.11",
+      }),
+      matrix: () => ({
+        path: "supervised-terminal",
+        reason: [],
+        nextAction: "",
+      }),
+      create: async (_repo, options) => {
+        const session = await options.openRoleSession({
+          id: "wt_ledger_error",
+        });
+        return {
+          workspace: { id: "wt_ledger_error", path: "/repo/task-ledger-error" },
+          session,
+        };
+      },
+      // The real role-terminal handler spreads recordLaunchSafely's result
+      // (tests/worktree-lifecycle.test.mjs exercises that swallow directly,
+      // with a genuine ledger write failure) at the same top level as
+      // `ready`/`terminal`; injecting that shape here isolates what
+      // createRoleWorktree itself must do once it sees it, from how the
+      // write actually came to fail.
+      open: async () => ({
+        ready: true,
+        terminal: "term_ledger_error",
+        role: "senior",
+        worktree: "id:wt_ledger_error",
+        modelRequested: "claude-current",
+        ledgerError: "EACCES: permission denied, open '.omt/launches.jsonl'",
+      }),
+    },
+  );
+
+  assert.equal(result.status, "blocked");
+  assert.match(result.blockedReason, /task-ledger-error/);
+  assert.match(result.blockedReason, /term_ledger_error/);
+  assert.match(
+    result.blockedReason,
+    /EACCES: permission denied, open '\.omt\/launches\.jsonl'/,
+  );
+  assert.match(
+    result.blockedReason,
+    /Neither the worktree nor the session is reclaimed automatically/,
+  );
+  // The underlying session (and its worktree) are still returned untouched,
+  // not discarded, so the director can inspect exactly what was opened.
+  assert.equal(
+    result.session.ledgerError,
+    "EACCES: permission denied, open '.omt/launches.jsonl'",
+  );
+  assert.equal(result.session.terminal, "term_ledger_error");
+  assert.equal(result.id, "wt_ledger_error");
+});
+
 // A second kickoff registered under the same organization file as `fixture`,
 // with its own director checkout, so a --state belonging to it can be tried
 // from `fixture`'s director cwd (mismatched director-authority check).
@@ -1109,6 +1498,42 @@ test(
       /PM or a worker already uses/,
     );
 
+    // D4: a path nested arbitrarily deep inside the worker's worktree is not
+    // itself workerDir, so an exact string-set membership test would let it
+    // through; sharesWorktreeWithAny's ancestor walk still catches it.
+    const nestedInWorker = path.join(workerDir, "deep", "nested", "dir");
+    fs.mkdirSync(nestedInWorker, { recursive: true });
+    await assert.rejects(
+      () =>
+        roleTerminal([
+          "--worktree",
+          `path:${nestedInWorker}`,
+          "--state",
+          fixture.entry.pm.stateDir,
+        ]),
+      /PM or a worker already uses/,
+    );
+
+    // D4: a symlink to the worker's worktree resolves, through
+    // fs.realpathSync.native, to the same filesystem identity as workerDir
+    // itself, so it cannot pass as an independent path either.
+    const symlinkToWorker = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-symlink-")),
+      "alias",
+    );
+    fs.symlinkSync(workerDir, symlinkToWorker, "dir");
+    t.after(() => fs.rmSync(symlinkToWorker, { force: true }));
+    await assert.rejects(
+      () =>
+        roleTerminal([
+          "--worktree",
+          `path:${symlinkToWorker}`,
+          "--state",
+          fixture.entry.pm.stateDir,
+        ]),
+      /PM or a worker already uses/,
+    );
+
     // 다른 kickoff의 --state: same organization, a different kickoff's PM state
     // directory, tried from fixture's director cwd, not that kickoff's own.
     const other = secondKickoff(fixture, "wt-other");
@@ -1146,6 +1571,159 @@ test(
           path.join(fixture.dir, "missing-orca"),
         ]),
       /does not accept --orca/,
+    );
+  },
+);
+
+test(
+  "role-worktree-create (counterexample 13): a D4-colliding auditor workspace is reclaimed before any " +
+    "terminal-open port runs, and create() itself never runs without director authority or a matching --repo",
+  async (t) => {
+    const fixture = kickoff(t, "wt-1", {
+      auditor: { profile: "claude-current" },
+    });
+    fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
+
+    const originalCwd = process.cwd();
+    t.after(() => process.chdir(originalCwd));
+
+    const baseArgs = {
+      org: fixture.org,
+      role: "auditor",
+      state: fixture.entry.pm.stateDir,
+      name: "audit-d4",
+      base: "f".repeat(40),
+    };
+    const environment = async () => ({
+      platform: "darwin",
+      shell: "zsh",
+      trustRecordExists: true,
+      codexTrustRecordExists: true,
+      orcaVersion: "1.4.210",
+      cliVersion: "1.2.11",
+    });
+    const matrix = () => ({
+      path: "supervised-terminal",
+      reason: [],
+      nextAction: "",
+    });
+
+    // [A] The D4 collision itself, exercised through orca-adapter.mjs's own
+    // createWorktreeWithRoleSession rather than a mock that reinvents its
+    // contract: `execute` records every Orca invocation this real function
+    // issues, so this proves both that it always rejects a D4 collision
+    // (never returns a success object) and that its own "worktree remove"
+    // call, not a stand-in, is what reclaims the colliding workspace.
+    {
+      process.chdir(fixture.dir);
+      const discovery = { executable: "orca", versionsMatch: true };
+      const calls = [];
+      const execute = async (argv) => {
+        calls.push(argv);
+        return {
+          code: 0,
+          stderr: "",
+          timedOut: false,
+          stdout: argv.includes("create")
+            ? JSON.stringify({
+                ok: true,
+                result: {
+                  worktree: { id: "wt_d4_audit", path: fixture.entry.pm.path },
+                },
+              })
+            : JSON.stringify({ ok: true, result: { removed: "wt_d4_audit" } }),
+        };
+      };
+      let openCalls = 0;
+      await assert.rejects(
+        () =>
+          createRoleWorktree(
+            { ...baseArgs, repo: fixture.dir },
+            {
+              organization: () => readJSON(fixture.org),
+              environment,
+              matrix,
+              // Stands in only for orca-adapter's export lookup, not for its
+              // reclaim/throw contract: options.execute/discovery are the
+              // real createWorktreeWithRoleSession's own injectable ports
+              // (tests/worktree-lifecycle.test.mjs uses the same pattern).
+              create: (repo, options) =>
+                createWorktreeWithRoleSession(repo, {
+                  ...options,
+                  discovery,
+                  execute,
+                }),
+              // Injected in place of role-terminal's own terminal-open call:
+              // if the D4 pre-check inside createRoleWorktree's
+              // openRoleSession callback did not run before this port, a D4
+              // violation would still reach it.
+              open: async () => {
+                openCalls += 1;
+                return {
+                  ready: true,
+                  terminal: "term_d4_audit",
+                  role: "auditor",
+                  worktree: "id:wt_d4_audit",
+                  modelRequested: "claude-current",
+                };
+              },
+            },
+          ),
+        /was reclaimed/,
+      );
+      assert.equal(openCalls, 0);
+      assert.equal(calls.length, 2);
+      assert.deepEqual(calls[1].slice(1, 4), [
+        "worktree",
+        "remove",
+        "--worktree",
+      ]);
+      assert.equal(calls[1][4], "id:wt_d4_audit");
+    }
+
+    // [B] A caller without director authority, or with a --repo that is not
+    // the director's checkout, is refused before create() ever runs -- the
+    // D4 collision above never has a chance to matter for these callers.
+    const refusesBeforeCreate = async (args, cwd, messagePattern) => {
+      process.chdir(cwd);
+      let createCalls = 0;
+      await assert.rejects(
+        () =>
+          createRoleWorktree(args, {
+            organization: () => readJSON(fixture.org),
+            environment,
+            matrix,
+            create: async () => {
+              createCalls += 1;
+              throw new Error("create must not run for this caller");
+            },
+            open: async () => {
+              throw new Error("open must not run for this caller");
+            },
+          }),
+        messagePattern,
+      );
+      assert.equal(createCalls, 0);
+    };
+
+    const unauthorizedCwd = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-no-authority-")),
+    );
+    t.after(() => fs.rmSync(unauthorizedCwd, { recursive: true, force: true }));
+    await refusesBeforeCreate(
+      { ...baseArgs, repo: fixture.dir },
+      unauthorizedCwd,
+      /must be run from the director's checkout/,
+    );
+
+    const otherRepo = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-other-repo-")),
+    );
+    t.after(() => fs.rmSync(otherRepo, { recursive: true, force: true }));
+    await refusesBeforeCreate(
+      { ...baseArgs, repo: otherRepo },
+      fixture.dir,
+      /does not match kickoff .* director checkout/,
     );
   },
 );
@@ -1205,29 +1783,39 @@ test(
     // Contrast: a non-auditor role on the very same agy profile is not
     // touched by this refusal. `senior` is configured on `agy-flash` (an
     // "agy" provider) by the example organization already, with no
-    // org.auditor override needed. Its role-terminal reaches its ordinary,
-    // pre-existing PATH-based spawn attempt, which this test only lets run
-    // against a missing executable (a plain ENOENT, not any Orca/agy
-    // process), so it stays a safe, local failure rather than the agy
-    // refusal above.
-    const workerDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "omt-audit-agy-worker-"),
-    );
-    t.after(() => fs.rmSync(workerDir, { recursive: true, force: true }));
-    initRepo(workerDir);
+    // org.auditor override needed. This call targets fixture.entry.pm.path
+    // itself, run from that same directory, rather than an unrelated
+    // workerDir: assertDirectRoleTerminalBinding's direct role-terminal
+    // binding table (부록 F) now refuses a --state-less launch at any target
+    // it cannot tie to a registered kickoff, and an unrelated fresh directory
+    // is exactly such an unbound, unrecorded child (that refusal itself is
+    // covered separately by counterexample 7). The PM's own worktree, opened
+    // --state-less from the PM's own cwd, is the one row the table allows, so
+    // this contrast keeps reaching its ordinary, pre-existing PATH-based
+    // spawn attempt, which this test only lets run against a missing
+    // executable (a plain ENOENT, not any Orca/agy process), so it stays a
+    // safe, local failure rather than the agy refusal above.
+    fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
+    const seniorCwd = process.cwd();
     await assert.rejects(
-      () =>
-        main([
-          "role-terminal",
-          "--org",
-          fixture.org,
-          "--role",
-          "senior",
-          "--worktree",
-          `path:${workerDir}`,
-          "--orca",
-          path.join(workerDir, "missing-orca"),
-        ]),
+      async () => {
+        process.chdir(fixture.entry.pm.path);
+        try {
+          return await main([
+            "role-terminal",
+            "--org",
+            fixture.org,
+            "--role",
+            "senior",
+            "--worktree",
+            `path:${fixture.entry.pm.path}`,
+            "--orca",
+            path.join(fixture.entry.pm.path, "missing-orca"),
+          ]);
+        } finally {
+          process.chdir(seniorCwd);
+        }
+      },
       (err) => {
         assert.doesNotMatch(
           err.message,

@@ -150,6 +150,7 @@ import {
   bindKickoffRun,
   classifyKickoffEntry,
   cleanupKickoffBranches,
+  isSameOrWithinByIdentity,
   kickoffAuditPolicyRetrofit,
   kickoffHashFor,
   listKickoffs,
@@ -177,7 +178,6 @@ import {
   recordLaunch,
   recordTerminalClosure,
   lazyLaunchesBackward,
-  resolveLaunchKickoff,
 } from "./usage-ledger.mjs";
 import { formatUsageTable, usageReport } from "./usage-report.mjs";
 import {
@@ -1351,6 +1351,149 @@ async function proveAndCloseOwnedTerminals({
 }
 
 /**
+ * Resolves a path's `fs.realpathSync.native` form, or `null` when the path
+ * cannot be resolved (missing, or a broken symlink). A binding check that
+ * cannot verify a path must refuse rather than fall through on a lucky string
+ * match, so callers treat `null` as a mismatch, never a pass-through.
+ *
+ * @param {string} candidate - Path to resolve.
+ * @returns {string | null} Resolved path, or `null` if resolution fails.
+ */
+function realpathOrNull(candidate) {
+  try {
+    return fs.realpathSync.native(candidate);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reports whether `child` is `parent` itself, or sits anywhere inside it, by
+ * filesystem identity. Unlike a plain string comparison, this survives a
+ * symlink or path respelling; unlike {@link isSameOrWithinByIdentity} used
+ * directly, an unresolvable path on either side counts as a mismatch instead
+ * of throwing.
+ *
+ * @param {string} parent - Candidate ancestor directory.
+ * @param {string} child - Candidate descendant (or the same) directory.
+ * @returns {boolean} Whether `child` is `parent` itself or beneath it.
+ */
+function identicalOrWithin(parent, child) {
+  const parentReal = realpathOrNull(parent);
+  const childReal = realpathOrNull(child);
+  if (parentReal === null || childReal === null) return false;
+  return isSameOrWithinByIdentity(parentReal, childReal);
+}
+
+/**
+ * Applies the direct role-terminal binding table (D2/부록 F) to a non-auditor
+ * launch: decides which registered kickoff, if any, owns `target`, and
+ * refuses when the caller's --state or cwd disagrees with that ownership. A
+ * caller-supplied --state is never trusted on its own (D2, msg_c9d1afb03fd4)
+ * -- only the target worktree's own identity or an earlier role-terminal
+ * ledger line recorded there establishes the binding. Skipped entirely when
+ * no kickoff is registered in this organization at all.
+ *
+ * @param {object} params
+ * @param {string} params.org - Organization JSON path (unresolved).
+ * @param {string | null} params.target - Resolved --worktree directory, or
+ *   `null` when the selector names no directory yet.
+ * @param {object} params.args - Parsed `role-terminal` command arguments.
+ * @returns {void}
+ */
+function assertDirectRoleTerminalBinding({ org, target, args }) {
+  const orgPath = path.resolve(org);
+  const { kickoffs } = listKickoffs(orgPath);
+  if (kickoffs.length === 0) return;
+  const stateDir = args.state ? path.resolve(args.state) : null;
+  const statedEntry = stateDir
+    ? kickoffs.find(
+        (candidate) => path.resolve(candidate.pm.stateDir) === stateDir,
+      )
+    : null;
+  assert(
+    stateDir === null || statedEntry,
+    `No kickoff is registered with pm state directory ${stateDir}`,
+  );
+  assert(
+    target,
+    "role-terminal needs a resolvable --worktree while a kickoff is active in this organization",
+  );
+  const pmEntry = kickoffs.find((candidate) =>
+    identicalOrWithin(candidate.pm.path, target),
+  );
+  if (pmEntry) {
+    if (stateDir) {
+      assert(
+        statedEntry === pmEntry,
+        `--state ${args.state} does not name the kickoff (${pmEntry.pm.worktreeId}) this worktree belongs to`,
+      );
+    } else {
+      const callerCwdReal = realpathOrNull(process.cwd());
+      const pmPathReal = realpathOrNull(pmEntry.pm.path);
+      assert(
+        callerCwdReal !== null &&
+          pmPathReal !== null &&
+          callerCwdReal === pmPathReal,
+        `role-terminal without --state may only be opened from kickoff ${pmEntry.pm.worktreeId}'s own PM ` +
+          "worktree; run it from that directory, or pass --state naming the kickoff you intend",
+      );
+    }
+    return;
+  }
+  const activeWorktreeIds = new Set(
+    kickoffs.map((candidate) => candidate.pm.worktreeId),
+  );
+  const bindingLaunch = readLaunches(orgPath).findLast(
+    (line) =>
+      line.via === "role-terminal" &&
+      line.kickoffPmWorktreeId &&
+      activeWorktreeIds.has(line.kickoffPmWorktreeId) &&
+      line.worktreePath &&
+      identicalOrWithin(line.worktreePath, target),
+  );
+  // A brand-new, never-before-seen child has no binding evidence at all; only
+  // role-worktree-create's own internal open (viaRoleWorktreeCreate, never
+  // reachable through the CLI) may open its first session.
+  assert(
+    bindingLaunch || args.viaRoleWorktreeCreate === true,
+    `This launch (worktree ${target}) cannot be tied to any registered kickoff by sitting inside its PM ` +
+      "worktree or by an earlier role-terminal launch recorded there; open it with role-worktree-create first",
+  );
+  if (bindingLaunch) {
+    assert(
+      statedEntry?.pm.worktreeId === bindingLaunch.kickoffPmWorktreeId,
+      `--state must name the kickoff (${bindingLaunch.kickoffPmWorktreeId}) this worktree is already bound to`,
+    );
+  }
+}
+
+/**
+ * Lists the paths a kickoff's auditor worktree must stay independent of: the
+ * kickoff's own PM worktree, and every non-auditor worktree this same
+ * kickoff has already launched. Shared by role-terminal's own D4 check and
+ * createRoleWorktree's pre-open D4 check (director msg_e96fa626ec49,
+ * msg_8c39242a6c89), so both compare against the same list.
+ *
+ * @param {string} orgFile - Resolved organization.json path.
+ * @param {object} auditorEntry - The audited kickoff's registry entry.
+ * @returns {string[]} Paths the auditor's own target must not share identity with.
+ */
+function auditorIndependenceForbiddenPaths(orgFile, auditorEntry) {
+  return [
+    auditorEntry.pm.path,
+    ...readLaunches(orgFile)
+      .filter(
+        (line) =>
+          line.kickoffPmWorktreeId === auditorEntry.pm.worktreeId &&
+          line.role !== AUDITOR_ROLE &&
+          line.worktreePath,
+      )
+      .map((line) => line.worktreePath),
+  ];
+}
+
+/**
  * Creates one Orca child worktree only as part of opening its role session.
  * The callback reuses the same `role-terminal` implementation exposed by the
  * CLI, so a new operational path cannot accidentally bypass session proof.
@@ -1536,9 +1679,10 @@ export async function createRoleWorktree(
   // the nested role-terminal call below will actually open, not a live
   // organization.json read that may since disagree with it.
   let organizationForPreflight = preflightOrganization;
+  let auditorEntry = null;
   if (isAuditorRole) {
     const stateDir = path.resolve(args.state);
-    const auditorEntry = listKickoffs(path.resolve(args.org)).kickoffs.find(
+    auditorEntry = listKickoffs(path.resolve(args.org)).kickoffs.find(
       (entry) => path.resolve(entry.pm.stateDir) === stateDir,
     );
     assert(
@@ -1560,6 +1704,25 @@ export async function createRoleWorktree(
         `"${auditorEntry.auditPolicy.profile}" no longer exists in organization.json; ` +
         "it is not substituted with another profile, so the auditor worktree cannot be created",
     );
+    // D2/부록 F: --repo must be this kickoff's own director checkout, and the
+    // caller must actually hold that director's authority. Neither is proven
+    // by --state alone; both are checked before Orca create runs below.
+    const repoReal = realpathOrNull(path.resolve(args.repo));
+    const directorCheckoutReal = realpathOrNull(
+      path.resolve(auditorEntry.director.checkoutPath),
+    );
+    assert(
+      repoReal !== null &&
+        directorCheckoutReal !== null &&
+        repoReal === directorCheckoutReal,
+      `--repo ${args.repo} does not match kickoff ${auditorEntry.pm.worktreeId}'s director checkout ` +
+        `(${auditorEntry.director.checkoutPath}); the auditor worktree must be created from that checkout`,
+    );
+    assertDirectorAuthority(
+      auditorEntry,
+      process.cwd(),
+      "role-worktree-create --role auditor",
+    );
     organizationForPreflight = {
       ...preflightOrganization,
       auditor: {
@@ -1567,6 +1730,39 @@ export async function createRoleWorktree(
         fallbacks: auditorEntry.auditPolicy.fallbacks ?? [],
       },
     };
+  } else {
+    // D2/부록 F: an active kickoff exists in this organization, so a non-PM
+    // role's worktree must be tied to one by a registered --state, and that
+    // --state's --repo must actually be its PM worktree -- otherwise any
+    // caller could name another kickoff's --workflow-id/--workflow-task/
+    // --state and pair it with an unrelated --repo (counterexamples 4/15).
+    // role: pm's own first worktree is the only role that predates any
+    // registered kickoff to tie itself to.
+    const { kickoffs } = listKickoffs(path.resolve(args.org));
+    if (kickoffs.length > 0) {
+      assert(
+        hasWorkflow || args.role === "pm",
+        `An active kickoff exists in this organization; role-worktree-create for role "${args.role}" ` +
+          "requires --workflow-id, --workflow-task, and --state (role: pm's first worktree is the only exception)",
+      );
+      if (hasWorkflow) {
+        const stateDir = path.resolve(args.state);
+        const statedEntry = kickoffs.find(
+          (candidate) => path.resolve(candidate.pm.stateDir) === stateDir,
+        );
+        assert(
+          statedEntry,
+          `No kickoff is registered with pm state directory ${stateDir}`,
+        );
+        const repoReal = realpathOrNull(path.resolve(args.repo));
+        const pmPathReal = realpathOrNull(path.resolve(statedEntry.pm.path));
+        assert(
+          repoReal !== null && pmPathReal !== null && repoReal === pmPathReal,
+          `--repo ${args.repo} does not match kickoff ${statedEntry.pm.worktreeId}'s PM worktree ` +
+            `(${statedEntry.pm.path})`,
+        );
+      }
+    }
   }
   await preflightRoleWorktree(
     args,
@@ -1585,6 +1781,13 @@ export async function createRoleWorktree(
         ...args,
         command: "role-terminal",
         worktree: `id:${workspace.id}`,
+        // Marks this as role-worktree-create's own internal first-session
+        // open, never reachable through the CLI (role-terminal's
+        // ALLOWED_OPTIONS has no such key; validateArgs would reject it).
+        // role-terminal's general-branch binding check trusts this marker,
+        // and only this marker, to open a session in a worktree that has no
+        // earlier via="role-terminal" ledger line yet.
+        viaRoleWorktreeCreate: true,
       }));
   const existingRoleWorktree = Boolean(
     args.worktree && (promotion || reusable),
@@ -1660,13 +1863,38 @@ export async function createRoleWorktree(
         setup: args.setup ?? "inherit",
         executable: args.orca,
         openRoleSession: async (workspace) => {
+          // D4 pre-check (director msg_e96fa626ec49, msg_8c39242a6c89): the
+          // injected `open` port, when a caller supplies one, replaces this
+          // whole role-terminal call, so role-terminal's own D4 check
+          // (3648-3679) never runs against an injected open. This repeats
+          // that same independence check directly against the fresh
+          // workspace.path first, so a D4 violation is caught -- and the
+          // terminal-open port is never called at all for the rejected
+          // worktree -- whether or not `open` is real or injected.
+          if (isAuditorRole) {
+            const forbidden = auditorIndependenceForbiddenPaths(
+              path.resolve(args.org),
+              auditorEntry,
+            );
+            if (sharesWorktreeWithAny(workspace.path, forbidden)) {
+              return { ready: false, sessionObserved: false };
+            }
+          }
           let opened;
           try {
             opened = await openRoleSession(workspace);
           } catch (error) {
-            // The matrix refuses before creating a terminal. Other throws may
-            // follow a terminal/process creation and must stay for reconciliation.
-            if (error.matrixRefusal) {
+            // The matrix refuses before creating a terminal, and so does the
+            // auditor's agy-provider independence check (role-terminal's
+            // preCreateRefusal, 부록 F): both happen before any terminal
+            // exists, so both are safe to reclaim automatically here. The D4
+            // path check above already covers the auditor-independence
+            // refusal for both real and injected `open`; this catch stays as
+            // the reclaim path for the real role-terminal call's own D4
+            // throw too, in case it is ever reached directly. Other throws
+            // may follow a terminal/process creation and must stay for
+            // reconciliation.
+            if (error.matrixRefusal || error.preCreateRefusal) {
               return { ready: false, sessionObserved: false };
             }
             throw error;
@@ -1710,6 +1938,26 @@ export async function createRoleWorktree(
         }
       : {}),
     ...(transition ? { transition: transition.transition } : {}),
+    // D2 rule 6 (director decision, msg_ebb6ab8a8f6b): recordLaunchSafely
+    // swallows a launch-ledger write failure so the session itself still
+    // opens; without a top-level marker here, `main`'s blockingOutcome never
+    // sees it and process.exitCode stays 0 even though this worktree now has
+    // no launch line for D2's own terminal-binding lookup to find later.
+    // "blocked" is BLOCKING_STATUSES' existing value that fits (the worktree
+    // and session both exist but must not be treated as a usable assignment
+    // until the director looks at them); nothing here reclaims either one
+    // automatically.
+    ...(created.session?.ledgerError
+      ? {
+          status: "blocked",
+          blockedReason:
+            `role-worktree-create opened worktree ${created.workspace.path} and terminal ` +
+            `${created.session.terminal ?? "(none observed)"}, but the launch ledger write failed: ` +
+            `${created.session.ledgerError}. Neither the worktree nor the session is reclaimed ` +
+            "automatically; the director must inspect them and decide whether to retry the launch " +
+            "or discard this worktree.",
+        }
+      : {}),
   };
 }
 
@@ -1951,26 +2199,110 @@ async function startSupervisedWorker(args) {
   // audit checkpoint has a valid acceptance. This is the only place that
   // enforcement is checked (requirements-fidelity does not gate on it), and
   // it only applies once this launch can be tied to a registered kickoff.
-  // D2: resolution uses the same resolved worktree path
-  // assertNotKickoffOwner already used above (selectedWorktreePath, honoring
-  // --worktree), not a raw --repo, so a --repo that is not itself the
-  // kickoff's own PM worktree (the ordinary case for a worker whose
-  // --worktree names a child worktree) still resolves to its kickoff instead
-  // of silently skipping this check. Resolution now always runs, not only
-  // when organization.json currently declares an auditor (D1): whether the
-  // check applies is decided below, from this kickoff's own pinned
-  // auditPolicy, not from that live read.
+  //
+  // D2 (director decision, msg_c9d1afb03fd4): a caller-supplied --state alone
+  // never establishes that binding, because nothing before this call proves
+  // --state names the kickoff that actually owns the target worktree -- a
+  // worker could otherwise name any other active kickoff's --state and
+  // inherit its audit policy (or lack of one). Binding instead follows the
+  // target worktree's own identity:
+  //   1. it sits at or inside a registered kickoff's own PM worktree
+  //      (pm.path), or
+  //   2. an earlier ledger line -- written only by role-worktree-create's own
+  //      role-terminal call, which validates --state/--workflow-id/--task
+  //      before recording anything -- named this exact --terminal handle and
+  //      a worktreePath at or inside the target. The caller does supply
+  //      --terminal here, to say which of its own sessions is starting, but
+  //      what this check trusts is not that bare claim: it is the recorded
+  //      line.terminal value in an actual via="role-terminal" ledger line,
+  //      one that was only ever written with the handle Orca itself assigned
+  //      when that session's own role-terminal call opened it (confirmed
+  //      against role-terminal.mjs's openRoleTerminal and orca-adapter.mjs's
+  //      startWorker/assertTerminalIdle). A caller cannot make a stale line
+  //      left by an unrelated kickoff match just by repeating its --terminal
+  //      value, because that value must also equal the one Orca assigned to
+  //      that specific ledger line's own session.
+  // A path-only match from a *different* terminal is never trusted for (2).
+  // If neither resolves this launch to a kickoff while any kickoff is
+  // active, the launch is refused regardless of --state (rule 3). If it does
+  // resolve, a --state that names a different kickoff is refused too (rule
+  // 4). Every identity comparison here treats a realpath failure as a
+  // mismatch, not a pass-through (rule 5) -- unlike sharesWorktreeWithAny
+  // (kickoff-registry.mjs), whose plain-path.resolve fallback is the correct
+  // direction for D4's over-detection goal but the wrong direction here,
+  // where the safe failure is refusing a launch this cannot verify, not
+  // waving it through on a lucky string match.
+  const target =
+    selectedWorktreePath(args.worktree ?? "current", args.repo) ??
+    path.resolve(args.repo);
+  const realpathOrNull = (candidate) => {
+    try {
+      return fs.realpathSync.native(candidate);
+    } catch {
+      return null;
+    }
+  };
+  const identicalOrWithin = (parent, child) => {
+    const parentReal = realpathOrNull(parent);
+    const childReal = realpathOrNull(child);
+    if (parentReal === null || childReal === null) return false;
+    return isSameOrWithinByIdentity(parentReal, childReal);
+  };
   const kickoffs = listKickoffs(run.orgFile).kickoffs;
-  const worktreeId = resolveLaunchKickoff(
-    kickoffs,
-    lazyLaunchesBackward(run.orgFile),
-    {
-      stateDir: args.state ? path.resolve(args.state) : null,
-      callerCwd:
-        selectedWorktreePath(args.worktree ?? "current", args.repo) ??
-        path.resolve(args.repo),
-    },
+  let entry = kickoffs.find((candidate) =>
+    identicalOrWithin(candidate.pm.path, target),
   );
+  if (!entry && args.terminal) {
+    const activeWorktreeIds = new Set(
+      kickoffs.map((candidate) => candidate.pm.worktreeId),
+    );
+    const bindingLaunch = readLaunches(run.orgFile).findLast(
+      (line) =>
+        // Only a role-terminal-via line is trusted as binding evidence: that
+        // command validates --state/--workflow-id/--task before recording
+        // anything, while a worker-start-via line's own kickoffPmWorktreeId
+        // was computed by recordLaunch's plain --state/callerCwd lookup
+        // (usage-ledger.mjs's resolveLaunchKickoff), independent of this
+        // gate -- trusting it here would let that weaker, unrelated
+        // computation feed straight back into this one.
+        line.via === "role-terminal" &&
+        line.terminal === args.terminal &&
+        line.kickoffPmWorktreeId &&
+        activeWorktreeIds.has(line.kickoffPmWorktreeId) &&
+        line.worktreePath &&
+        // parent=line.worktreePath, child=target: the CALLER's target must be
+        // the recorded worktree itself or nested inside it, not the other
+        // way around -- else a caller naming some broad ancestor directory as
+        // --worktree could match any old, unrelated launch whose recorded
+        // worktreePath merely happens to sit somewhere underneath it.
+        identicalOrWithin(line.worktreePath, target),
+    );
+    entry = bindingLaunch
+      ? kickoffs.find(
+          (candidate) =>
+            candidate.pm.worktreeId === bindingLaunch.kickoffPmWorktreeId,
+        )
+      : undefined;
+  }
+  assert(
+    entry !== undefined || kickoffs.length === 0,
+    `This launch (worktree ${target}) cannot be tied to any registered kickoff, either by sitting inside ` +
+      "its PM worktree or by an earlier role-worktree-create launch recorded under this same --terminal; " +
+      "a caller-supplied --state does not establish ownership on its own. Open this worktree under the " +
+      "intended kickoff with role-worktree-create, or reuse the --terminal it recorded there.",
+  );
+  if (entry !== undefined && args.state) {
+    const declaredStateDir = realpathOrNull(args.state);
+    const boundStateDir = realpathOrNull(entry.pm.stateDir);
+    assert(
+      declaredStateDir !== null &&
+        boundStateDir !== null &&
+        declaredStateDir === boundStateDir,
+      `--state ${args.state} does not name the kickoff (${entry.pm.worktreeId}) this worktree is actually ` +
+        "bound to; refusing rather than silently preferring either value",
+    );
+  }
+  const worktreeId = entry?.pm.worktreeId ?? null;
   if (worktreeId) {
     // D1: this kickoff's pinned auditPolicy decides, not a fresh
     // organization.json read, so removing org.auditor after claim cannot
@@ -1979,9 +2311,8 @@ async function startSupervisedWorker(args) {
     // legacy entry with no pinned auditPolicy refuses outright, naming the
     // retrofit command, rather than guessing from organization.json's
     // current setting.
-    const entry = kickoffs.find((k) => k.pm.worktreeId === worktreeId);
     assert(
-      entry?.auditPolicy !== undefined,
+      entry.auditPolicy !== undefined,
       `Kickoff ${worktreeId} has no pinned audit policy; the director must run ` +
         "kickoff-audit-policy-retrofit for this worktree before a worker can be assigned",
     );
@@ -3371,39 +3702,44 @@ export async function executeCommand(args, execute) {
           target,
           "role-terminal --role auditor needs a resolvable --worktree",
         );
-        const forbidden = [
-          auditorEntry.pm.path,
-          ...readLaunches(path.resolve(args.org))
-            .filter(
-              (line) =>
-                line.kickoffPmWorktreeId === auditorEntry.pm.worktreeId &&
-                line.role !== AUDITOR_ROLE &&
-                line.worktreePath,
-            )
-            .map((line) => line.worktreePath),
-        ];
+        const forbidden = auditorIndependenceForbiddenPaths(
+          path.resolve(args.org),
+          auditorEntry,
+        );
         // D4: compares by filesystem identity, in both directions, instead
         // of exact string-set membership, so a symlink, a case variant, or a
         // nested path cannot pass as independent of the PM's or a worker's
-        // worktree (design B.2's pathWithin).
-        assert(
-          !sharesWorktreeWithAny(target, forbidden),
-          `The auditor cannot run from ${target}, which this kickoff's PM or a worker already uses; ` +
-            "open it in a separate worktree so the audit stays independent of the work it reviews",
-        );
+        // worktree (design B.2's pathWithin). This refusal happens before any
+        // terminal is opened, so it carries preCreateRefusal (부록 F): when
+        // role-worktree-create's own openRoleSession wrapper catches it, it
+        // reclaims the freshly created worktree instead of preserving a
+        // worktree that never got a working session.
+        if (sharesWorktreeWithAny(target, forbidden)) {
+          const refusal = new Error(
+            `The auditor cannot run from ${target}, which this kickoff's PM or a worker already uses; ` +
+              "open it in a separate worktree so the audit stays independent of the work it reviews",
+          );
+          refusal.preCreateRefusal = { reason: "auditor-independence" };
+          throw refusal;
+        }
         // command.provider is already known here, before
         // resolveAuditorLaunchExecution/readLaunchEnvironment/openRoleTerminal
         // run: an agy-configured auditor profile is refused at this point
         // and no trusted-Orca probe or terminal spawn happens for it.
         // PROVIDER_IDS does not restrict org.auditor to "claude"
         // (providers/index.mjs), so this check, not the schema, is what
-        // closes that gap.
-        assert(
-          command.provider !== "agy",
-          "role-terminal --role auditor refuses to open: this organization's auditor profile is configured " +
-            "with the agy provider. Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요하다(아직 구현되지 않았습니다); " +
-            "configure org.auditor with a non-agy profile before launching the auditor",
-        );
+        // closes that gap. Also preCreateRefusal, for the same reason above.
+        if (command.provider === "agy") {
+          const refusal = new Error(
+            "role-terminal --role auditor refuses to open: this organization's auditor profile is configured " +
+              "with the agy provider. Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요하다(아직 구현되지 않았습니다); " +
+              "configure org.auditor with a non-agy profile before launching the auditor",
+          );
+          refusal.preCreateRefusal = { reason: "auditor-agy-provider" };
+          throw refusal;
+        }
+      } else {
+        assertDirectRoleTerminalBinding({ org: args.org, target, args });
       }
       const launchedAt = new Date().toISOString();
       assertWorktreeUnshared(
