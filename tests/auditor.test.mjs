@@ -77,7 +77,11 @@ import {
   TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { deliverKickoff } from "../plugins/oh-my-teams/scripts/delivery.mjs";
-import { bindKickoffResultRepo } from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import {
+  bindKickoffResultRepo,
+  ledgerHash,
+  readLedger,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
 
 const exampleOrg = new URL(
   "../plugins/oh-my-teams/examples/organization.json",
@@ -5145,6 +5149,123 @@ test("workflow-accept records the result repository from a real single-task acce
   git(fixture.dir, ["commit", "-q", "--allow-empty", "-m", "moves HEAD"]);
   await assert.rejects(() => signalCloseReady(fixture));
   assert.deepEqual(fs.readFileSync(staged.file), decisionBytes);
+});
+
+test("h1: a new outcome objection after a recorded outcome acceptance makes close-ready and deliver each refuse, on the same HEAD and ledger", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  await acceptStaged(await stageAcceptedTask(fixture, "wf-h1"));
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: fixture.head,
+    repo: fixture.dir,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "README.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "README.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(
+    fixture.org,
+    fixture.worktreeId,
+    fixture.dir,
+  );
+  await withOrcaHandle(fixture.auditorHandle, async () => {
+    await auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "brief",
+      OUTCOME_CHECKED,
+    );
+    await auditAccept(fixture.org, fixture.worktreeId, "brief");
+  });
+  await auditorAcceptsOutcome(fixture);
+
+  const closeReady = () =>
+    assertKickoffCloseReady(fixture.org, fixture.worktreeId, {
+      head: fixture.head,
+      repo: fixture.dir,
+      entry: fixture.entry,
+    });
+  const deliver = () =>
+    deliverKickoff({
+      orgFile: fixture.org,
+      worktreeId: fixture.worktreeId,
+      source: fixture.dir,
+      head: fixture.head,
+      callerCwd: fixture.dir,
+    });
+
+  // Before the objection: close-ready passes, and deliver gets past the audit
+  // gate to the delivery-mode check (this kickoff asks for no delivery).
+  await assert.doesNotReject(closeReady);
+  await assert.rejects(deliver, /asked for no delivery into the project/);
+
+  const headBefore = git(fixture.dir, ["rev-parse", "HEAD"]);
+  const ledgerBefore = ledgerHash(readLedger(fixture.org, fixture.worktreeId));
+  const request = path.join(fixture.dir, "h1-objection.json");
+  writeJSON(request, {
+    checkpoint: "outcome",
+    target: { type: "criterion", id: "c1" },
+    kind: "gap",
+    description: "criterion c1 is not delivered after all",
+    rebuttalRequested: "show where it is delivered",
+    resultHead: fixture.head,
+    repo: fixture.repo,
+  });
+  const objected = runCli(
+    [
+      "audit-objection",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--from",
+      request,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: fixture.auditorHandle } },
+  );
+  assert.equal(objected.code, 0, objected.stderr);
+  assert.equal(JSON.parse(objected.stdout).recorded, true);
+  // Only the objection changed: same HEAD, same ledger.
+  assert.equal(git(fixture.dir, ["rev-parse", "HEAD"]), headBefore);
+  assert.equal(
+    ledgerHash(readLedger(fixture.org, fixture.worktreeId)),
+    ledgerBefore,
+  );
+
+  const refusal = /Outcome audit acceptance is missing or no longer valid/;
+  await assert.rejects(closeReady, refusal);
+  await assert.rejects(deliver, refusal);
+});
+
+test("h2: worker-start under a kickoff with no pinned audit policy is refused by name with the retrofit command, not by an incidental TypeError", async (t) => {
+  const fixture = legacyKickoff(t, "wt-legacy");
+  fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
+  await assert.rejects(
+    () =>
+      main([
+        "worker-start",
+        "--repo",
+        fixture.entry.pm.path,
+        "--org",
+        fixture.org,
+        "--role",
+        "senior",
+        "--spec",
+        "x",
+        "--terminal",
+        "term_worker_1",
+        "--orca",
+        path.join(fixture.dir, "missing-orca"),
+      ]),
+    (error) => {
+      assert.equal(error instanceof TypeError, false);
+      assert.match(error.message, /no pinned audit policy/);
+      assert.match(error.message, /kickoff-audit-policy-retrofit/);
+      return true;
+    },
+  );
 });
 
 test("workflow-accept refuses an unresolved outcome objection raised before acceptance, through the CLI without --org too, and leaves state.json untouched", async (t) => {
