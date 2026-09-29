@@ -51,6 +51,7 @@ import { createWorkflow } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import {
+  blockingOutcome,
   createRoleWorktree,
   main,
   resolveAuditorLaunchExecution,
@@ -1370,6 +1371,9 @@ test("role-worktree-create (D2 rule 6): a swallowed launch-ledger write failure 
   );
 
   assert.equal(result.status, "blocked");
+  // The CLI's own exit-status decision, given the result untouched: main sets
+  // process.exitCode = 1 exactly when this is true.
+  assert.equal(blockingOutcome(result), true);
   assert.match(result.blockedReason, /task-ledger-error/);
   assert.match(result.blockedReason, /term_ledger_error/);
   assert.match(

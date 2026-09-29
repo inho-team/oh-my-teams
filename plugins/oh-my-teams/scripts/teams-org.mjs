@@ -4393,7 +4393,14 @@ const PROMPT_ANSWER_BLOCKING = ["refused", "escalate", "unresolved"];
 // acceptance commands report `gateStatus`. Reading only the top-level `status`
 // left a settled failure and a revoked approval exiting 0, so a calling
 // script saw success. Each known shape is checked explicitly.
-function blockingOutcome(output) {
+/**
+ * Tells whether a command's printed output makes the CLI exit non-zero.
+ *
+ * @param {unknown} output - The value a command returned before it is printed.
+ * @returns {boolean} `true` when the output carries a failed or blocked status
+ *   in any of the known envelope shapes.
+ */
+export function blockingOutcome(output) {
   if (!output || typeof output !== "object") return false;
   if (output.event === "prompt-answer")
     return PROMPT_ANSWER_BLOCKING.includes(output.status);
