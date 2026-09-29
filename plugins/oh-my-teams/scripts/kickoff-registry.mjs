@@ -416,23 +416,54 @@ export function listKickoffs(orgFile, worktreeId) {
   return { active: kickoffs.length > 0, kickoffs };
 }
 
-// Both arguments must already be realpath'd. Case-insensitively compared
-// (`toLowerCase`) so a case-preserving-but-insensitive filesystem (Windows,
-// and macOS by default) cannot dodge this by spelling the same directory
-// differently, even though `path.relative` itself is a plain string
-// comparison. Depth is unbounded on purpose: `pm-wt/.omt/inner`,
-// `pm-wt/sub/.omt`, and `pm-wt/a/b/c` are all "inside" `pm-wt` the same as
-// `pm-wt/.omt` itself is.
-function isSameOrWithin(parent, child) {
-  if (parent === child) return true;
+/**
+ * Reports whether `child` is `parent` itself, or sits anywhere inside it.
+ *
+ * Both arguments must already be realpath'd. On `platform: "win32"` they are
+ * case-insensitively compared (`toLowerCase`) BEFORE anything else, since
+ * Windows' case-preserving-but-insensitive filesystem would otherwise let two
+ * spellings of the identical directory compare unequal. macOS's own default
+ * filesystem is also case-insensitive-but-preserving, yet needs no such
+ * normalization here: every caller compares two `fs.realpathSync` results,
+ * and realpath already returns the volume's own on-disk casing for both, so
+ * two spellings of one directory realpath to the identical string before
+ * this function ever sees them (unlike on Windows, where Node's `fs`
+ * realpath does not canonicalize case). Depth is unbounded on purpose:
+ * `pm-wt/.omt/inner`, `pm-wt/sub/.omt`, and `pm-wt/a/b/c` are all "inside"
+ * `pm-wt` the same as `pm-wt/.omt` itself is.
+ *
+ * @param {string} parent - Realpath'd candidate ancestor directory.
+ * @param {string} child - Realpath'd candidate descendant (or the same) directory.
+ * @param {object} [options] - Injectable Node `path` implementation and platform.
+ * @param {typeof import("node:path")} [options.path] - `path`/`path.win32`/
+ *   `path.posix`, so a unit test can exercise Windows-shaped comparisons on
+ *   any host, including this one.
+ * @param {string} [options.platform] - `process.platform` by default; pass
+ *   `"win32"` alongside `options.path` to test the case-insensitive branch
+ *   on a non-Windows host.
+ * @returns {boolean} Whether `child` is `parent` itself or a path beneath it.
+ */
+export function isSameOrWithin(
+  parent,
+  child,
+  { path: pathImpl = path, platform = process.platform } = {},
+) {
   const normalize = (value) =>
-    process.platform === "win32" ? value.toLowerCase() : value;
-  const relative = path.relative(normalize(parent), normalize(child));
+    platform === "win32" ? value.toLowerCase() : value;
+  const normalizedParent = normalize(parent);
+  const normalizedChild = normalize(child);
+  // Compared as normalized strings, not the raw `parent`/`child` arguments:
+  // on `platform: "win32"` two differently-cased spellings of the identical
+  // directory must count as the same directory, which a raw `===` here would
+  // miss (and which `path.relative` resolving to `""` also signals, but only
+  // once it is fed the normalized values below, not the raw ones).
+  if (normalizedParent === normalizedChild) return true;
+  const relative = pathImpl.relative(normalizedParent, normalizedChild);
   return (
     relative !== "" &&
     relative !== ".." &&
-    !relative.startsWith(`..${path.sep}`) &&
-    !path.isAbsolute(relative)
+    !relative.startsWith(`..${pathImpl.sep}`) &&
+    !pathImpl.isAbsolute(relative)
   );
 }
 

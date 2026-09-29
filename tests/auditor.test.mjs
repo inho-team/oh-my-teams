@@ -14,6 +14,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   bindKickoffRun,
+  isSameOrWithin,
   kickoffEntryName,
   listKickoffs,
   registerKickoff,
@@ -1979,6 +1980,31 @@ test("registered PM stateDir: acceptOutcome resolves the kickoff from stateDir i
     fixture.stateDir,
   );
   assert.equal(recorded.status, "accepted");
+});
+
+test("isSameOrWithin: case-insensitive Windows-shaped comparisons (path.win32 injected) and POSIX comparisons", () => {
+  const win32 = { path: path.win32, platform: "win32" };
+  // Identical directory spelled with different casing counts as the same
+  // directory (not merely "child inside parent"): a raw `===` on the
+  // un-normalized arguments would miss this, since Windows' filesystem is
+  // case-preserving, not case-normalizing.
+  assert.equal(isSameOrWithin("C:\\A\\PM", "c:\\a\\pm", win32), true);
+  // A directory nested arbitrarily deep inside the parent.
+  assert.equal(isSameOrWithin("c:\\a\\pm", "c:\\a\\pm\\x\\.omt", win32), true);
+  // A sibling directory that merely shares a name prefix is not "inside".
+  assert.equal(isSameOrWithin("c:\\a\\pm", "C:\\a\\pm-other", win32), false);
+  // The parent's own ancestor is not "inside" it either.
+  assert.equal(isSameOrWithin("c:\\a\\pm", "C:\\a", win32), false);
+  // An identically-spelled path on a different drive is unrelated.
+  assert.equal(isSameOrWithin("c:\\a\\pm", "D:\\a\\pm", win32), false);
+
+  // Same shapes on POSIX, with `path.posix`/`platform: "linux"` injected so
+  // these assertions hold regardless of which host actually runs the suite.
+  const posix = { path: path.posix, platform: "linux" };
+  assert.equal(isSameOrWithin("/a/pm", "/a/pm", posix), true);
+  assert.equal(isSameOrWithin("/a/pm", "/a/pm/x/.omt", posix), true);
+  assert.equal(isSameOrWithin("/a/pm", "/a/pm-other", posix), false);
+  assert.equal(isSameOrWithin("/a/pm", "/a", posix), false);
 });
 
 test("accept refuses a stateDir sharing the registered worktree but keeps accepting a separate unregistered worktree unchanged", async (t) => {
