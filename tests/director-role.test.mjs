@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   DIRECTOR_ROLE,
   ROLE_LADDER,
+  ACTIVE_ROLES,
   ROLES,
   ROOT_ROLE,
   foldRole,
@@ -40,6 +41,11 @@ import {
   ACCEPTED_RISK_AUTHORITIES,
   validateReviewInput,
 } from "../plugins/oh-my-teams/scripts/gates.mjs";
+import {
+  deliveryRefDocId,
+  resolveKickoffHash,
+  saveDocument,
+} from "../plugins/oh-my-teams/scripts/documents.mjs";
 
 const example = () =>
   readJSON(
@@ -94,7 +100,7 @@ test("DIRECTOR_ROLE is 'director' and sits above pm in ROLE_LADDER", () => {
   // director is not in ROLES (감독 worker 목록)
   assert.equal(ROLES.includes(DIRECTOR_ROLE), false);
   // ROLE_LADDER contains all ROLES after director
-  assert.deepEqual(ROLE_LADDER.slice(1), ROLES);
+  assert.deepEqual(ROLE_LADDER.slice(1), ACTIVE_ROLES);
 });
 
 test("director does not appear in foldRole or resolveRole: existing folding is unchanged", () => {
@@ -689,6 +695,25 @@ test("a recorded real merge commit lets cleanup delete the merged branch", (t) =
   });
   assert.equal(recorded.entry.delivered.head, fixture.head);
   assert.equal(recorded.entry.delivered.mergeCommit, mergeCommit);
+
+  // Save the delivery-ref document before cleanup
+  const kickoffHash = resolveKickoffHash(fixture.org, "wt-git");
+  const docId = deliveryRefDocId(kickoffHash, mergeCommit);
+  const [entry] = listKickoffs(fixture.org, "wt-git").kickoffs;
+  saveDocument(entry.pm.stateDir, {
+    schemaVersion: 1,
+    docId,
+    stage: "delivery",
+    kickoffId: kickoffHash,
+    workflowId: null,
+    revision: 1,
+    state: "resolved",
+    author: { role: "pm", executionId: "exec-1" },
+    createdAt: new Date().toISOString(),
+    basedOnRevision: null,
+    reason: "delivery recorded",
+    deliveredCommit: mergeCommit,
+  });
 
   const result = cleanUp(fixture);
   assert.deepEqual(result.deleted, ["feat/work"]);

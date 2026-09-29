@@ -127,7 +127,7 @@
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
         "kind": { "const": "agent-review" },
-        "role": { "const": "senior" },
+        "role": { "enum": ["senior", "worker"] },
         "criteria": {
           "type": "array",
           "minItems": 1,

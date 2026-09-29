@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams `01. 기획` kickoff-brief-ref document v1",
+  "$comment": "docs/plan/structured-omt-documents.md 3.2 (01. 기획 row), 3.7 item 7 (kickoff-brief-ref localId is the fixed constant \"kickoff\").",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "docId",
+    "stage",
+    "kickoffId",
+    "workflowId",
+    "revision",
+    "state",
+    "author",
+    "createdAt",
+    "basedOnRevision",
+    "reason",
+    "briefPath",
+    "acceptanceSummary",
+    "nonGoals",
+    "constraints",
+    "kickoffEntryRef"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "docId": { "type": "string", "minLength": 1 },
+    "stage": { "const": "planning" },
+    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflowId": {
+      "const": null,
+      "$comment": "3.7 item 4: kickoff-brief-ref is written before a workflow exists for this kickoff."
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": { "enum": ["open", "in-review", "resolved"] },
+    "author": { "$ref": "#/$defs/author" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "basedOnRevision": {
+      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "briefPath": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "Path to the accepted brief markdown file this kickoff was formed from."
+    },
+    "acceptanceSummary": { "type": "string", "minLength": 1 },
+    "nonGoals": { "$ref": "#/$defs/strings" },
+    "constraints": { "$ref": "#/$defs/strings" },
+    "kickoffEntryRef": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "Relative path to the kickoff registry entry file (1.2 table #3, `<project>/.omt/kickoffs/<sha256(worktreeId)>.json`). Not hash-pinned like the task.schema.json `ref` shape: the entry is overwritten in place as the kickoff progresses (bind, delivered, ...), so a content hash captured at doc-write time would go stale immediately."
+    }
+  },
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": {
+          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+        },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "strings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

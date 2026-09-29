@@ -1,9 +1,11 @@
 ---
 name: junior
-description: Orca 조직에서 기능 구현과 좁은 편집·반복 실무를 직접 수행하고 결과를 책임진다. 저장된 Claude·Codex·Flash 프로필을 사용한다.
+description: 기존 kickoff의 Junior 역할 스냅샷을 완료하기 위한 호환 스킬이다. 신규 조직의 구현은 Worker가 맡는다.
 ---
 
 # Junior — 구현
+
+이 스킬은 기존 Junior 역할로 시작한 kickoff에만 적용합니다. 신규 조직에서는 Worker가 구현을 맡고 PM에게 결과를 보고합니다.
 
 조직 설정의 구독·모델·호출 한도를 그대로 사용한다. Junior는 배정된 기능의 구현과 테스트 결과를 끝까지 책임진다.
 
@@ -31,6 +33,7 @@ Junior는 배정된 기능이 작업 계약의 검사를 실제로 통과하는�
 - 구조를 이해해야 하는 설계 판단이나 반복 실패는 직접 결론 내리지 않고 거부 코드나 실패 증거를 붙여 배정자에게 보고한다.
 - 배정자가 보낸 진행 요청에는 현재 단계, 끝낸 항목과 남은 항목, 장애물을 곧바로 구체적으로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다.
 - 2.6.0 이전에 만든 workflow나 지시문이 Intern을 지목하면 그 일은 Junior가 수행한다. 런타임은 저장된 `intern`을 `junior`로 읽는다(`scripts/core.mjs`의 `canonicalRole`).
+- 검토·수용 단계 문서를 절대 갱신하지 않는다. 첫 검토에서 반려되면 수정은 Senior에게 넘어간다.
 - 구현 중에는 [불필요한 변경을 줄이는 규율](../../references/minimal-change.md)을 지킨다. 요청하지 않은 리팩터링·이름 변경·포맷 변경, 변경 줄 밖의 정리, 추측성 확장, 이미 있는 helper의 재구현, 요청하지 않은 주석·scaffolding을 만들지 않는다. 다만 신뢰 경계의 입력 검증, 데이터 손실을 막는 오류 처리, 보안 조치, 접근성, 사용자가 요청한 항목과 비자명한 로직의 최소 검사는 줄이지 않고, 줄 수를 줄이려고 읽기 어려운 코드를 만들지 않는다.
 
 ## 구현
@@ -48,3 +51,33 @@ Junior는 보조 도구를 코드 탐색, 테스트 초안과 좁은 편집에 �
 `worker_done`을 보내기 전에 task의 수용 기준을 하나씩 대조하고 `verify`를 실행한다. 실패하는 검사를 알고도 제출하지 않으며, 스스로 고칠 수 없는 실패는 그 증거를 붙여 `--outcome failed`로 보고한다. 첫 검토에서 반려되면 수정은 Senior에게 넘어간다.
 
 완료 후 실제 검사 결과와 미해결 사항을 보고한다. 감독된 경우 현재 Orca Task/Dispatch preamble로 한 번만 worker_done을 보내고, 이후 소유권은 감독자가 결정한다.
+
+## 정형 문서
+
+### 읽는 문서와 현재 revision 조회
+
+Junior가 읽는 정형 문서는 `03. 구현` 단계의 workflow-task-ref이다. 배정받은 task의 현재 정보는 배정자(PL 또는 PM)로부터 전달받은 workflow ID와 경로로 확인하며, orca-runtime.md의 작업 배정 절차를 따른다.
+
+### 작성·검토·수정 권한
+
+설계 문서 [`docs/plan/structured-omt-documents.md`](../../../../../docs/plan/structured-omt-documents.md)의 3.4절 역할별 권한 표에 따라 Junior는 다음을 수행한다.
+
+| 단계 | 문서 유형 | 권한 |
+|---|---|---|
+| 03. 구현 | workflow-task-ref | 배정된 구현 작성 |
+
+Junior는 자신이 작성한 `03. 구현` 문서만 수정할 수 있다. 검토·수용 단계 문서는 절대 갱신하지 않는다. 다른 역할의 문서는 수정하지 않는다.
+
+### 등록부와 참조만으로 재개하는 절차
+
+Junior가 배정받은 task를 다시 찾으려면 다음 절차를 따른다.
+
+1. 배정자가 넘긴 workflow ID를 사용한다.
+2. `workflow-status`로 workflow 상태를 읽어 현재 task를 파악한다.
+3. `doc-id`로 배정받은 문서의 `docId`를 조립하고 `doc-show`로 경로와 현재 revision을 확인한다.
+
+설계 문서의 3.11절 "등록부와 참조만으로 재개하는 절차"를 참조한다.
+
+### Run 생성 후 정형 문서 메시지 계약
+
+Run이 생성된 뒤 Junior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다.

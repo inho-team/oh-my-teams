@@ -117,10 +117,11 @@ export function kickoffBriefPrompt(briefPath) {
  * instead, and Junior implements what it is given without delegating further.
  */
 export const DISPATCH_AUTHORITY = Object.freeze({
-  pm: ["pl", "senior", "junior"],
+  pm: ["pl", "senior", "junior", "worker"],
   pl: ["senior", "junior"],
   senior: [],
   junior: [],
+  worker: [],
 });
 
 /**
@@ -195,6 +196,7 @@ const ROLE_NAMES = {
   pl: "PL",
   senior: "Senior",
   junior: "Junior",
+  worker: "Worker",
 };
 const skillsDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -363,13 +365,12 @@ export function resolveRoleLaunch(
   const profileId = roleProfileId(org, role, handoffProfile);
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
-  // A runner profile reaches its fixed account only through the runner, which
-  // headless-start verifies. Handing it to an interactive terminal would run
-  // whatever Codex login that terminal has, and nothing would record it.
+  // A runner profile reaches its fixed account only through its runner. An
+  // interactive terminal would instead run whichever Codex login it has.
   assert(
     !profile.runner,
     `Role ${role} profile ${profileId} runs through the ${profile.runner?.kind} runner; ` +
-      "worker-start cannot hand it to an interactive terminal, so start it with headless-start",
+      "there is no supported interactive Orca terminal path for that profile",
   );
   const { agent, via } = ORCA_LAUNCH[profile.provider];
   assert(
@@ -662,7 +663,7 @@ export function directorCommand(
   // terminal it would run as whoever is logged in, without a record.
   assert(
     !profile.runner,
-    `Director profile ${id} runs through an OpenCodex runner, which only headless-start supports`,
+    `Director profile ${id} runs through an OpenCodex runner with no supported interactive Orca terminal path`,
   );
   return {
     role: DIRECTOR_ROLE,
@@ -748,7 +749,10 @@ export function roleSpec(
     ? ROLE_NAMES[parent]
     : `이사${director?.terminalHandle ? ` (${director.terminalHandle})` : ""}`;
   const inherited = ROLES.filter(
-    (other) => !declared.includes(other) && foldRole(declared, other) === role,
+    (other) =>
+      (other !== "worker" || Object.hasOwn(org.roles, "worker")) &&
+      !declared.includes(other) &&
+      foldRole(declared, other) === role,
   );
   const dispatchable = [
     ...new Set(

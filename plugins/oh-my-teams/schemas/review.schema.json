@@ -23,7 +23,7 @@
       "required": ["kind", "role", "executionId"],
       "properties": {
         "kind": { "const": "agent-review" },
-        "role": { "const": "senior" },
+        "role": { "enum": ["senior", "worker"] },
         "executionId": { "type": "string", "minLength": 1 }
       }
     },

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams `03. 구현` integration-ref document v1 (multi-task workflow only)",
+  "$comment": "docs/plan/structured-omt-documents.md 3.1 (integration task kept as its own docType, not merged into workflow-task-ref), 3.2 (03. 구현 multi-task row), 3.7 item 7 (localId = integration task's own id).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "docId",
+    "stage",
+    "kickoffId",
+    "workflowId",
+    "revision",
+    "state",
+    "author",
+    "createdAt",
+    "basedOnRevision",
+    "reason",
+    "integrationTaskRef",
+    "taskHashRef",
+    "extensionHistory"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "docId": { "type": "string", "minLength": 1 },
+    "stage": { "const": "implementation" },
+    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflowId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "$comment": "Never null: an integration task only exists once a multi-task workflow has been created (3.1 확정된 결정)."
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": { "enum": ["open", "in-review", "resolved"] },
+    "author": { "$ref": "#/$defs/author" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "basedOnRevision": {
+      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "integrationTaskRef": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "$comment": "The integration task's own id (workflow.mjs:278-279 guarantees it never collides with a component task id)."
+    },
+    "taskHashRef": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "$comment": "The `taskHash` pinned to `state.integration.taskHash` at the time this revision was written (3.1, workflow.mjs:691-694)."
+    },
+    "extensionHistory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["taskHash", "reason"],
+        "properties": {
+          "taskHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      },
+      "$comment": "One entry per extendIntegrationChecks call (3.2: taskHash + reason at that call)."
+    }
+  },
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": {
+          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+        },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

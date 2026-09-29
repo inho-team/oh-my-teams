@@ -153,6 +153,9 @@ test("the CLI writes a draft init accepts, and never over an existing file", asy
   assert.equal(first.code, 0, first.stderr);
 
   const org = path.join(dir, ".omt", "organization.json");
+  // init is a separate save action from org-draft, so it names its own
+  // explicit evidence for the draft's claude:default host-default profile
+  // rather than inheriting org-draft's --models as proof of that intent.
   const init = await run([
     process.execPath,
     cli,
@@ -161,6 +164,8 @@ test("the CLI writes a draft init accepts, and never over an existing file", asy
     org,
     "--from",
     draft,
+    "--host-default",
+    "claude-default",
   ]);
   assert.equal(init.code, 0, init.stderr);
   assert.equal(readJSON(org).roles.junior.parent, "pm");

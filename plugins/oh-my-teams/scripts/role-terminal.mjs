@@ -255,6 +255,7 @@ export const ROLE_TITLE_TAGS = Object.freeze({
   pl: "[PL]",
   senior: "[Senior]",
   junior: "[Junior]",
+  worker: "[Worker]",
 });
 
 /**
@@ -880,7 +881,7 @@ export async function openRoleTerminal({
     allowUnverified,
     allowUnverifiedApproval,
   });
-  if (matrixResult.path === "blocked" || matrixResult.path === "headless") {
+  if (matrixResult.path === "blocked") {
     const err = new Error(
       `Role ${command.role} (profile=${command.profile}, runner=${command.provider}, platform=${platform}, shell=${shell}) ` +
         `launch refused by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,

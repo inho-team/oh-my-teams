@@ -180,7 +180,8 @@ function validateReviewRequirements(task, acceptanceIds) {
     );
     reviewIds.add(review.id);
     assert(
-      review.kind === "agent-review" && review.role === "senior",
+      review.kind === "agent-review" &&
+        ["senior", "worker"].includes(review.role),
       `Unsupported review requirement: ${review.id}`,
     );
     assert(

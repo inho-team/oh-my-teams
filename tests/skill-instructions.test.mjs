@@ -17,6 +17,7 @@ import {
   parseModelChoice,
   draftOrganization,
 } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { fetchModelCatalog } from "../plugins/oh-my-teams/scripts/model-catalog.mjs";
 import {
   roleCommand,
   roleSpec,
@@ -46,6 +47,7 @@ test("every example organization can run the assist the skills advertise", async
 
   for (const name of organizations) {
     const org = validateOrg(readJSON(path.join(examples, name)));
+    if (!org.assistants) continue;
     const dir = fixture(t);
     fs.writeFileSync(path.join(dir, "value.txt"), "alpha\n");
     const task = {
@@ -381,8 +383,8 @@ test("form points at one structural example, not three overlapping ones", () => 
     ...form.matchAll(/examples\/(organization[.\w-]*\.json)/g),
   ].map((match) => match[1]);
   assert.deepEqual([...new Set(linked)].sort(), [
-    "organization.json",
     "organization.single-subscription.json",
+    "organization.three-tier.json",
   ]);
 });
 
@@ -510,21 +512,24 @@ test("a kickoff is released by its ending, never by a reading", () => {
   assert.match(status, /등록 항목을 지우거나 고쳐 쓰지 않는다/);
 });
 
-test("form asks for the four role models, and not for a ladder size", () => {
+test("form asks for PM and Worker models, and not for a ladder size", () => {
   const form = readSkill("form");
   // Formation used to ask for the name, parents, slots, subscriptions,
   // fallbacks, exhaustion policy, call limit and assistant allowlist before a
   // team existed, and then for a ladder size. Every organization now declares
   // all four roles; how many a run uses is the PM's depth decision per kickoff.
   // Four models fit one structured question, so formation asks exactly once.
-  assert.match(form, /질문은 한 번으로 끝난다/);
-  assert.match(form, /PM·PL·Senior·Junior의 모델을 한꺼번에 묻는다/);
-  assert.match(form, /몇 단계로 운영할지는 묻지 않는다/);
+  assert.match(form, /질문은 한 번으로 끝납니다/);
+  assert.match(form, /PM과 Worker의 모델을 한꺼번에 묻고/);
+  assert.match(form, /몇 단계로 운영할지는 묻지 않습니다/);
   assert.match(form, /묻지 않고 정하는 것/);
+  // The role-per-model question stays only for existing organizations; its
+  // removal belongs to the adaptive team-staffing kickoff's next wave.
+  assert.match(form, /기존 PL·Senior·Junior 조직의 실행 스냅샷은/);
   const draft = /node <runtime> org-draft([^\n`]*)/.exec(form);
   assert.ok(draft, "form must draft the organization");
   assert.doesNotMatch(draft[1], /--tiers/);
-  assert.match(draft[1], /--models <pm>,<pl>,<senior>,<junior> /);
+  assert.match(draft[1], /--models <pm>,<worker> /);
 });
 
 test("the depth table the PM reads is the depth the runtime applies", () => {
@@ -567,125 +572,131 @@ test("the depth is decided by the PM, reported, and changed through the runtime"
   for (const skill of ["kickoff", "form", "adjust"]) {
     assert.match(
       readSkill(skill),
-      /「실행 깊이」/,
+      /「실행 깊이」|깊이 1|깊이 2|Worker를 사용하지 않을 수|역할 ID는 `pm`과 `worker`/,
       `${skill} must point at the one place the depth rules live`,
     );
   }
 });
 
-test("every model form offers is a choice org-draft accepts, Gemini included", () => {
-  // The table header changed from "| 역할 | 선택지 |" to "| 역할 | 선택지 (표시 이름 → 저장 값) |".
-  const table = readSkill("form")
-    .split("| 역할 | 선택지 (표시 이름 → 저장 값) |")[1]
-    ?.split("\n\n")[0];
-  assert.ok(table, "form must keep its model option table with the new header");
-
-  // Expected stored values per role, matching the brief table exactly (order included).
-  const EXPECTED = {
-    pm: [
-      "claude:fable",
-      "claude:opus",
-      "codex:gpt-6-astra",
-      "agy:gemini-3.1-pro-high",
-    ],
-    pl: [
-      "claude:opus",
-      "codex:gpt-5.6-sol",
-      "agy:gemini-3.1-pro-high",
-      "claude:sonnet",
-      "codex:gpt-5.6-terra",
-    ],
-    senior: [
-      "claude:sonnet",
-      "codex:gpt-5.6-terra",
-      "agy:gemini-3.1-pro-high",
-      "agy:claude-opus-4-6-thinking",
-    ],
-    junior: [
-      "claude:haiku",
-      "codex:gpt-5.6-luna",
-      "agy:gemini-3.8-flash-medium",
-      "agy:claude-sonnet-4-6",
-    ],
+test("every model-catalog choice form documents is one org-draft accepts, Gemini included", async () => {
+  // form no longer offers a fixed table: it builds choices from a live
+  // `model-catalog` query at ask time. This test stubs that query the same
+  // way tests/model-catalog.test.mjs does, then checks that every choice the
+  // documented rules would produce round-trips through parseModelChoice,
+  // draftOrganization and roleCommand exactly the way form/SKILL.md says.
+  const fakeExecute = async (argv) => {
+    const key = argv.join(" ");
+    const table = {
+      "claude --version": {
+        code: 0,
+        stdout: "2.1.283 (Claude Code)\n",
+        stderr: "",
+        timedOut: false,
+      },
+      "codex --version": {
+        code: 0,
+        stdout: "codex-cli 0.157.1\n",
+        stderr: "",
+        timedOut: false,
+      },
+      "codex debug models": {
+        code: 0,
+        stdout: JSON.stringify({
+          models: [
+            {
+              slug: "gpt-6-astra",
+              visibility: "list",
+              priority: 1,
+              display_name: "GPT-6-Astra",
+              supported_reasoning_levels: [{ effort: "low" }],
+            },
+          ],
+        }),
+        stderr: "",
+        timedOut: false,
+      },
+      "agy --version": {
+        code: 0,
+        stdout: "1.2.12\n",
+        stderr: "",
+        timedOut: false,
+      },
+      "agy models": {
+        code: 0,
+        stdout: "gemini-3.1-pro-high\tGemini 3.1 Pro (High)\n",
+        stderr: "Fetching available models...\n",
+        timedOut: false,
+      },
+    };
+    assert.ok(Object.hasOwn(table, key), `no fake response for: ${key}`);
+    return table[key];
   };
 
-  // Parse each role row from the table and compare against EXPECTED.
-  const ROLE_KO = {
-    PM: "pm",
-    PL: "pl",
-    Senior: "senior",
-    Junior: "junior",
-  };
-  const found = {};
-  for (const [line] of table.matchAll(/^\| ([A-Za-z]+) \|([^|]+)\|$/gm)) {
-    const roleKo = line.match(/^\| ([A-Za-z]+) \|/)?.[1];
-    const role = ROLE_KO[roleKo];
-    if (!role) continue;
-    const rowValues = [...line.matchAll(/`([a-z]+:[a-z0-9._-]+)`/g)].map(
-      (m) => m[1],
+  const catalog = await fetchModelCatalog({ execute: fakeExecute });
+
+  // Claude has no listing command: form documents this as reading
+  // status "unavailable" with reasonCode "no-catalog-interface" and falling
+  // back to the customary aliases it names explicitly.
+  assert.equal(catalog.claude.status, "unavailable");
+  assert.equal(catalog.claude.reasonCode, "no-catalog-interface");
+  const CLAUDE_ALIASES = ["fable", "opus", "sonnet", "haiku"];
+  const form = readSkill("form");
+  for (const alias of CLAUDE_ALIASES) {
+    assert.match(
+      form,
+      new RegExp(`\`${alias}\``),
+      `form must name the Claude alias ${alias} it falls back to`,
     );
-    assert.deepEqual(
-      rowValues,
-      EXPECTED[role],
-      `form table row for ${role} does not match brief`,
-    );
-    found[role] = true;
   }
-  // Every role must appear exactly once: a missing row must fail the test.
-  assert.deepEqual(
-    Object.keys(found),
-    Object.keys(EXPECTED),
-    "form table is missing one or more role rows",
-  );
 
-  // All offered values must be parseable by parseModelChoice.
-  const allOffered = Object.values(EXPECTED).flat();
+  // Codex and Agy both answered "ok": their choices come straight from the
+  // catalog's models array, exactly as form/SKILL.md describes.
+  assert.equal(catalog.codex.status, "ok");
+  assert.equal(catalog.agy.status, "ok");
+  const codexChoices = catalog.codex.models.map((m) => `codex:${m.id}`);
+  const agyChoices = catalog.agy.models.map((m) => `agy:${m.id}`);
+  assert.deepEqual(codexChoices, ["codex:gpt-6-astra"]);
+  assert.deepEqual(agyChoices, ["agy:gemini-3.1-pro-high"]);
+
+  // Gemini IDs the catalog returns already carry their effort suffix, so a
+  // choice built straight from `id` never needs a separate --effort value.
+  assert.ok(agyChoices[0].endsWith("-high"));
+
+  const allOffered = [
+    ...CLAUDE_ALIASES.map((alias) => `claude:${alias}`),
+    ...codexChoices,
+    ...agyChoices,
+  ];
   for (const choice of allOffered) {
     assert.doesNotThrow(() => parseModelChoice(choice), choice);
   }
 
-  // Gemini checks: agy:gemini-3.1-pro-high and agy:gemini-3.8-flash-medium offered,
-  // but NOT agy:gemini-3.8-flash-high (wrong effort level in table).
-  assert.ok(allOffered.includes("agy:gemini-3.1-pro-high"));
-  assert.ok(allOffered.includes("agy:gemini-3.8-flash-medium"));
-  assert.ok(!allOffered.includes("agy:gemini-3.8-flash-high"));
-
-  // Gemini effort rules must remain documented.
-  const form = readSkill("form");
-  assert.match(form, /requires --effort/);
-  assert.match(form, /결성 보고에 반드시 적고/);
-
-  // Verify that org-draft accepts each value and role-command builds correct argv.
-  // Each choice drives: provider CLI + permission-bypass flag + --model <model>.
-  // For agy Gemini IDs the model string already encodes the effort suffix.
+  // Verify org-draft accepts each value and role-command builds correct argv:
+  // provider CLI + permission-bypass flag + --model <model>.
   const BYPASS = {
     claude: "--dangerously-skip-permissions",
     codex: "--dangerously-bypass-approvals-and-sandbox",
     agy: "--dangerously-skip-permissions",
   };
-  for (const [role, choices] of Object.entries(EXPECTED)) {
-    for (const choice of choices) {
-      const { provider, model } = parseModelChoice(choice);
-      // Build a minimal 4-role org using this choice for the target role,
-      // filling the other three slots with a compatible placeholder.
-      const PLACEHOLDERS = {
-        pm: "claude:fable",
-        pl: "claude:opus",
-        senior: "claude:sonnet",
-        junior: "claude:haiku",
-      };
+  const PLACEHOLDERS = {
+    pm: "claude:fable",
+    pl: "claude:opus",
+    senior: "claude:sonnet",
+    junior: "claude:haiku",
+  };
+  for (const choice of allOffered) {
+    const { provider, model } = parseModelChoice(choice);
+    for (const role of ["pm", "pl", "senior", "junior"]) {
       const slots = ["pm", "pl", "senior", "junior"].map((r) =>
         r === role ? choice : PLACEHOLDERS[r],
       );
       const org = draftOrganization({ name: "test", models: slots });
       const cmd = roleCommand(org, role);
-      // argv[0] is the bare CLI name.
       assert.equal(
         cmd.argv[0],
         provider,
         `${choice}: expected provider ${provider}`,
       );
-      // argv[1] is always the permission bypass flag.
       assert.equal(
         cmd.argv[1],
         BYPASS[provider],
@@ -702,6 +713,10 @@ test("every model form offers is a choice org-draft accepts, Gemini included", (
       }
     }
   }
+
+  // Gemini effort rules must remain documented.
+  assert.match(form, /requires --effort/);
+  assert.match(form, /결성 보고에 반드시 적고/);
 });
 
 test("effort is set in adjust, which carries the ranges form no longer does", () => {
@@ -824,11 +839,43 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // built for one role is accepted as the role the run folded it onto.
   assert.match(
     runtime,
-    /node <runtime> role-terminal --org <organization\.json> --role <역할> --worktree id:<worktreeId> --workflow-id <workflowId> --state <pm-state>/,
+    new RegExp(
+      [
+        "node <runtime> role-worktree-create --org <organization\\.json>",
+        " --role <역할> --repo <pm-worktree> --name <name> --base <base-sha>",
+        " --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>",
+      ].join(""),
+    ),
   );
   assert.doesNotMatch(readSkill("pl"), /custom argv/);
   assert.match(runtime, /감독 worker로 띄울 수 없고[^\n]*`work` 하네스/);
   assert.match(runtime, /대괄호/);
+  assert.doesNotMatch(runtime, /Windows에서 Agy는 신뢰 상태와 무관하게/);
+  assert.doesNotMatch(
+    runtime,
+    /표가 `headless`를 돌려주면 `headless-start`로 실행/,
+  );
+  const agents = fs.readFileSync(path.join(root, "AGENTS.md"), "utf8");
+  const archivedHeadlessPlan = fs.readFileSync(
+    path.join(root, "docs/plan/headless-runtime.md"),
+    "utf8",
+  );
+  assert.doesNotMatch(agents, /headless-runtime\.md.*예외/);
+  assert.match(archivedHeadlessPlan, /보관 기록: 제거된 비대화형 감독 런타임/);
+  assert.match(
+    archivedHeadlessPlan,
+    /새 역할 실행을 시작하거나 재개하지 않는다/,
+  );
+  assert.match(archivedHeadlessPlan, /제거된 명령 표면/);
+  const runtimeSource = fs.readFileSync(
+    path.join(root, "plugins/oh-my-teams/scripts/teams-org.mjs"),
+    "utf8",
+  );
+  const help = runtimeSource.slice(
+    runtimeSource.indexOf("const HELP ="),
+    runtimeSource.indexOf("`;", runtimeSource.indexOf("const HELP =")),
+  );
+  assert.doesNotMatch(help, /headless-start|headless-answer/);
   for (const role of ["pm", "pl"]) {
     assert.match(
       readSkill(role),
@@ -839,7 +886,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     // matrix decides the launch path and skills link the matrix table.
     assert.match(
       readSkill(role),
-      /호환성 표\(`scripts\/launch-matrix\.mjs`\)가 `headless`로 정한 역할은 `headless-start`로 실행/,
+      /호환성 표\(`scripts\/launch-matrix\.mjs`\)가 `blocked`를 돌려주는 프로필은 세션 없는 대체 실행을 시작하지 않고/,
     );
     // Skills and orca-runtime.md must link launch-matrix.mjs.
     assert.match(readSkill(role), /launch-matrix\.mjs/);
@@ -850,7 +897,10 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     );
     // An Agy terminal never reports tui-idle, and the inject workaround
     // escapes worker-stop and model checks.
-    assert.match(readSkill(role), /원시 `dispatch --inject`로 우회하지 않고/);
+    assert.match(
+      readSkill(role),
+      /원시 `dispatch --inject`로 우회하지 (?:않고|않습니다)/,
+    );
     // #41: a released reservation keeps its attempt spent, so the idle check
     // runs before the attempt is reserved.
     assert.match(readSkill(role), /예약하기 전에 `terminal-idle-check`/);
@@ -863,8 +913,8 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // orca-runtime.md must link the compatibility matrix.
   assert.match(runtime, /launch-matrix\.mjs/);
 
-  // Orca refuses nested workers by default, so PL cannot be the dispatcher.
-  assert.match(readSkill("pm"), /NESTED_WORKER_MAX_DEPTH` 기본값 1/);
+  // New PMs dispatch workers directly; legacy PL still documents nesting.
+  assert.match(readSkill("pm"), /PM이 직접 작업 그래프와 통합 결과를 책임지고/);
   assert.match(readSkill("pl"), /기본값이 1/);
   assert.match(
     readSkill("senior"),
@@ -876,7 +926,7 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   assert.match(readReference("kickoff-registry.md"), /인계에 실패한 것이다/);
   assert.match(
     readReference("kickoff-registry.md"),
-    /worktree create --agent`를 쓰지 않고/,
+    /`role-worktree-create --brief <브리프 경로>`/,
   );
 });
 
@@ -898,31 +948,27 @@ test("form says what a default model runs today and reads Codex models at ask ti
   assert.match(form, /서열을 매기지 않는다/);
 });
 
-test("form does not hardcode catalog Codex IDs outside the choice table", () => {
+test("form does not hardcode catalog Codex IDs except as marked examples", () => {
   const form = readSkill("form");
-  // The table is the only sanctioned place for confirmed Codex IDs.
-  // Exception: the PL guidance sentence is required by brief criterion 2 —
-  // it tells structured-tool hosts to hint Codex Terra as a free-input value.
-  // gpt-6-astra is exempted: it appears in the host-defaults example sentence
-  // that the existing test ("form says what a default model runs today") requires.
-  const PL_GUIDANCE_KO = "자유 입력으로 `codex:gpt-5.6-terra`";
-  // Confirm the PL guidance is present in the document.
-  assert.ok(
-    form.includes(PL_GUIDANCE_KO),
-    "form must keep the PL Codex Terra free-input guidance (brief criterion 2)",
-  );
-  const tableSection = form
-    .split("| 역할 | 선택지 (표시 이름 → 저장 값) |")[1]
-    ?.split("\n\n")[0];
-  // Remove the table and the one allowed PL guidance occurrence, then check
-  // that no other catalog IDs are hardcoded outside the table.
-  const bodyOutsideTable = form
-    .replace(tableSection ?? "", "")
-    .replace(PL_GUIDANCE_KO, "");
+  // The old choice table pinned gpt-5.6-sol/-terra/-luna as confirmed IDs.
+  // Choices now come only from a live model-catalog query, so none of those
+  // stale IDs may appear anywhere in the document.
   for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
     assert.ok(
-      !bodyOutsideTable.includes(id),
-      `form hardcodes ${id} outside the choice table`,
+      !form.includes(id),
+      `form hardcodes ${id} outside a live model-catalog query`,
+    );
+  }
+  // gpt-6-astra is the one Codex ID the document keeps, and it must always
+  // sit inside a sentence that marks it explicitly as an example, not as a
+  // confirmed catalog choice.
+  const lines = [...form.matchAll(/^.*gpt-6-astra.*$/gm)];
+  assert.ok(lines.length > 0, "form must still show the gpt-6-astra example");
+  for (const [line] of lines) {
+    assert.match(
+      line,
+      /예를 들어|예:/,
+      `gpt-6-astra must stay inside an example sentence: ${line}`,
     );
   }
 });
@@ -938,8 +984,8 @@ test("planning roles hand the deliverable down instead of writing it", () => {
     /상세 저장소 분석과 대안 조사는 PL에게 맡길 수 있지만/,
   );
   assert.doesNotMatch(pm, /PL의 감독 실행 경로를 쓴다/);
-  assert.match(pm, /PL에게는 분할·의존성·작업 파동·통합과 검증만 맡기고/);
-  assert.match(pm, /나눌 필요가 없는 일은 PL을 거치지 않고/);
+  assert.match(pm, /PM이 직접 작업 그래프와 통합 결과를 책임지고/);
+  assert.match(pm, /Worker에게 직접 배정/);
   assert.match(pl, /최종 산출물을 직접 작성하거나 커밋하지 않는다/);
   assert.match(pl, /nested_worker_depth_exceeded/);
   assert.match(pl, /작업을 스스로 수행하지 않는다/);
@@ -1243,7 +1289,7 @@ test("skills cut review-rework loops and wasted context", () => {
   const runtime = readReference("orca-runtime.md");
   // A Junior implementation goes up after its first rejected review.
   assert.match(pm, /Junior 구현이 검토에서 한 번 반려된 일/);
-  assert.match(pm, /첫 검토에서 반려되면 수정을 Junior에게 다시 맡기지 않고/);
+  assert.match(pm, /첫 검토에서 반려되어 Senior의 별도 소유권이 필요하면/);
   assert.doesNotMatch(pm, /반복해서 실패한 일/);
   // Reviewers list every finding at once, then re-review only the fix diff.
   assert.match(senior, /첫 검토에서는 발견한 finding을 한 번에 모두 적고/);
@@ -1285,7 +1331,7 @@ test("pm, pl and status skills route a stopped role's question through the super
       /node <runtime> prompt-answer --org [^\n]*--terminal <[a-z-]*handle> --workflow-id <workflowId> --state <pm-state>/,
       `${name} 스킬에 prompt-answer 호출이 있다`,
     );
-    assert.match(text, /terminal-idle-check`부터 다시 진행한다/);
+    assert.match(text, /terminal-idle-check`부터 다시 (진행|실행)한다/);
     assert.match(text, /「프롬프트 질문 답하기」/);
   }
   assert.match(readSkill("pm"), /`director-signal`로 이사에게 알린다/);

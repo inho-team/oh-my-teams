@@ -19,20 +19,22 @@ node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <i
 
 `kickoff-show`에 같은 목표가 이미 있으면 새로 시작하지 않고 기록된 PM 워크트리에서 재개한다. 다른 목표는 함께 진행해도 되지만, 같은 구독을 쓰는 kickoff가 늘면 할당량을 함께 소모한다는 점을 사용자에게 알린다. 이사가 시작하는 kickoff의 요청 파일에는 `director: {terminalHandle, checkoutPath}`를 적는다. 다른 이름의 키는 무시되고 이사 기록 없이 등록되므로 결과의 `warnings`를 확인한다. `kickoff-claim`은 같은 워크트리가 이미 kickoff를 감독하고 있거나 요청 파일에 전달 방식(`delivery`)이 없으면 실패하므로 그 결과를 성공으로 보고하지 않는다. 요청 파일의 형식, 병렬 kickoff의 비용, 인계 절차와 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
-이사는 목표를 확정해 브리프로 넘기고 PM 워크트리를 만든 뒤, 등록하고 인계 사실을 알린다. PM은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `PM 실행` 절에 따라 `role-terminal`로 PM 프로필의 명령을 실행한 새 터미널에서 띄운다. `orca worktree create --agent`나 `terminal create --command`를 직접 호출해 띄우지 않으며, `role-terminal`이 `ready: false`를 돌려주거나 PM 프로필의 모델을 전달할 수 없거나 화면의 모델이 다르면 멈추고 보고한다. 이사는 PM을 대신 맡지 않는다.
+이사는 목표를 확정해 브리프로 넘기고 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `PM 실행` 절에 따라 `role-worktree-create`로 PM 워크트리 생성과 PM 역할 세션 증명을 한 호출로 수행한 뒤에만 등록하고 인계 사실을 알린다. 이 명령은 `role-terminal`의 `ready: true`와 역할 터미널을 확인해야 성공하며, 세션이 없다는 실패가 명확하면 Orca로 새 워크트리를 회수한다. 터미널이나 프로세스 상태가 불명확하면 회수하지 않고 멈춰 보고한다. `orca worktree create --agent`나 `terminal create --command`를 직접 호출해 띄우지 않는다. 이사는 PM을 대신 맡지 않는다.
 
 **이사는 PM을 대신 맡지 않는다.** 이사는 PM을 대신 맡지 않는다는 원칙에 따라, PM을 띄우지 못했다는 이유로 이사가 Goal을 만들거나 Run을 바인딩하거나 `worker-start`를 호출하지 않는다. 그러면 이사의 대화 맥락과 모델이 PM 프로필을 대신하고, 종료 절차가 회수할 PM 워크트리도 사라진다. 이사가 PM을 겸하는 경우는 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)의 「인계할 수 없는 호스트」 절이 정한 조건을 충족하고 사용자가 승인했을 때뿐이다. 감독은 이사 세션에서 시작하지 않는다. 네이티브 Goal은 PM 세션이 브리프를 읽고 하나 만들며, Run도 같은 세션에서 바인딩한 뒤 `kickoff-bind`로 등록부에 적는다. 이 분리는 취향이 아니라 `worker-start`가 Run에 바인딩된 coordinator 터미널만 허용하기 때문에 필요하다. 등록을 건너뛴 kickoff는 `status`·`close`·`disband`가 찾지 못하므로 반드시 등록한다.
 
 Goal의 objective에는 사용자가 원하는 결과, 측정 가능한 수용 기준, 비목표, 필수 검사와 요청된 전달 범위를 포함한다. 전달 범위에는 결과를 원본 프로젝트의 어느 브랜치에 어떤 방식(`local-merge`, `pull-request`, `none`)으로 넣을지를 반드시 포함한다. 이 값은 종료할 때 주인 체크아웃에 병합하는 허가가 되므로, 브리프에 문장으로 적고 등록 요청의 `delivery`에도 같은 값을 적는다. 이 가운데 사용자 요청과 저장소 상태에서 확정할 수 없는 항목은 이사가 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 한 번에 확인해 브리프에 담고, PM 세션은 그 브리프로 Goal을 만든다. 확인하지 못한 수용 기준을 추측해 채우지 않으며, 사용자가 이미 답한 항목을 PM 세션에서 다시 묻지 않는다. 브리프는 [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 수용 기준을 맨 앞에 두고, 범위·제약·전달 방식과 근거를 뒤에 쓴다. 사용자가 토큰 예산을 명시하지 않았다면 임의의 토큰 예산을 설정하지 않는다. 네이티브 Goal이 없는 호스트에서는 같은 계약을 oh my teams workflow와 Orca Run에 보존하되, 네이티브 기능이 있는 것처럼 보고하지 않는다.
 
-kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이고, PM·PL·Senior·Junior는 그 아래의 실행 주체다.
+kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이고, 신규 조직에서는 PM과 Worker가 그 아래의 실행 주체입니다. 기존 조직의 진행 중인 kickoff에는 저장된 역할 계약을 계속 적용합니다.
 
 ## 실행 주기
+
+[pm](../pm/SKILL.md)의 「실행 깊이」에서 신규 조직과 이전 kickoff의 실행 규칙을 구분합니다.
 
 [pm](../pm/SKILL.md)과 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)을 읽고 다음 주기를 수행한다.
 
 1. 원래 Goal과 현재 저장소 상태를 대조하고, 아직 충족되지 않은 수용 기준 가운데 다음으로 의미 있는 작업을 선택한다.
-2. PM이 과제 난이도로 정한 실행 깊이의 역할만 활성화하여 구현·검토·통합을 진행하고, 판단이 바뀌면 깊이를 조정한다. 깊이의 기준과 변경 규칙은 [pm](../pm/SKILL.md)의 「실행 깊이」를 따른다. 독립 편집에는 Orca child worktree를 사용한다. 역할은 원시 `orca orchestration worker-start`가 아니라 `worker-start --org --role --workflow-id --state` 래퍼로만 띄우고, 산출물은 PM·PL이 아니라 이번 실행의 역할 가운데 그 일을 맡을 수 있는 가장 낮은 역할이 만든다.
+2. 신규 조직에서는 PM이 목표를 분할하고 의존성과 통합을 책임지며, 필요한 구현·설계·독립 검토를 Worker에게 배정합니다. 구현과 독립 검토는 별도 실행 ID와 워크트리를 사용합니다. 독립 편집에는 Orca child worktree를 사용하고, Worker는 `worker-start --org --role worker --workflow-id --state` 래퍼로만 시작합니다. 기존 조직은 저장된 역할 목록과 실행 깊이를 따릅니다.
 3. 각 주기마다 코드 변경, 새 검사 결과, 검토 결과, 명확해진 장애물 중 하나 이상의 확인 가능한 진전을 남긴다.
 4. 실패하면 같은 시도를 무한 반복하지 않는다. 실패 원인과 시도를 기록하고 접근 방법이나 담당 역할을 바꾼다. `work` 실행·attempt마다 적용되는 provider 호출 한도, workflow의 호출 예산과 attempt 한도, 사용자가 정한 중단 조건을 지킨다. 대화형 역할 터미널의 턴은 이 한도에 세지 않으므로, 사용량은 `usage-report`로 따로 확인한다.
 5. worker를 기다리는 동안 `supervision-wait`의 대기 시간이 끝날 때마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.

@@ -343,7 +343,9 @@ export async function work(
   org,
   task,
   {
-    role: requestedRole = "junior",
+    role: requestedRole = Object.hasOwn(org.roles, "worker")
+      ? "worker"
+      : "junior",
     stateDir,
     call = invoke,
     workflowId,
