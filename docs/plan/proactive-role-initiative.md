@@ -278,7 +278,7 @@ Orca가 소유한 생명주기는 OMT가 복제하지 않습니다(`P/references
 
 - **문서 revision**: 2. 직전 revision 1은 PL 최종 검토 2가 15개 finding을 `open`으로 남겼습니다(`proactive-pl-final-review2.json`).
 - **작성자**: 회복 workflow `proactive-role-initiative-recovery-r15`의 단일 작성 실행(Senior, 조직 revision 15). 독립 검토자와 검토 revision은 이 커밋 뒤에 기록하며, 작성자는 이 문서를 스스로 승인하지 않습니다.
-- **검사 상태**: `npm run sync`, `npm run lint`, `npm test`는 PM의 자원 슬롯 확인 뒤에 실행하며, 이 절을 쓰는 시점에는 **미실행**입니다. 결과와 최종 커밋 HEAD는 PM 보고와 handoff checkpoint에 적습니다.
+- **검사 상태**: PM이 확보한 test 슬롯에서 `npm run format`, `npm run sync`, `npm run lint`, `npm test`를 실행했고 모두 종료 코드 0입니다. `sync`는 변경과 누락이 없었고, `npm test`는 1039개 중 통과 1002, 실패 0, 건너뜀 37이었습니다. 이 문서를 처음 커밋한 HEAD는 2bf62de이며, 최종 커밋 HEAD는 PM 보고와 handoff checkpoint에 적습니다.
 - **선행 조건**: ready-timeout 복구 커밋 `04e423f`는 현재 main(4c43b24)의 조상 병합에 포함되어 있으므로, 남은 조건은 이 설계 HEAD에서의 `npm test` 통과와 독립 검토입니다. 게이트(`gates/proactive-design.json`의 `checks-passed`와 `review-complete`)는 이 문서의 승인으로 바뀌지 않으며 PM이 다시 판정합니다.
 - **남은 구현 단계**: §8의 표가 정한 검사 추가, 결정 기록 형식, eval 시나리오, 감사 역할 계약 연동입니다. 모두 별도 kickoff이며 이 문서에서 구현하지 않습니다.
 
