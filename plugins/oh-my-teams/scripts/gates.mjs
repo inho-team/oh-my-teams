@@ -13,6 +13,7 @@ import { taskHash, validateTask } from "./contracts.mjs";
 import { validateEvidence } from "./evidence.mjs";
 import { hasUnresolvedObjections } from "./audit.mjs";
 import { buildDocId, documentState } from "./documents.mjs";
+import { resolveRegisteredKickoffFromState } from "./kickoff-registry.mjs";
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 // RegExp#test turns a missing value into the string "undefined", which the
@@ -536,13 +537,21 @@ async function recordReviewLocked(
 /**
  * Records PM acceptance after every required review gate is complete.
  *
- * When `orgFile`/`worktreeId` name a kickoff under a requirements/audit
- * ledger, also refuses while the kickoff's outcome audit checkpoint has an
- * unresolved objection (B.5: this check applies to every task's accept, not
- * only the last one, and does not require an audit acceptance to already
- * exist — a kickoff with tasks left can still accept its first one before
- * outcome audit even starts). Omitting them (no kickoff/ledger in play)
- * skips the check entirely.
+ * `stateDir` is resolved against the kickoff registry through
+ * {@link module:kickoff-registry.resolveRegisteredKickoffFromState}, which
+ * this never skips: an `orgFile`/`worktreeId` naming a different kickoff than
+ * the one `stateDir` is actually registered under is refused, and omitting
+ * them no longer bypasses the registered kickoff's own values. This closes a
+ * caller that imports this public export directly and never passes them at
+ * all, not only the CLI's own `--org`/`--worktree` flags. When the resolved
+ * kickoff's organization also has an audit ledger, acceptance then refuses
+ * while the kickoff's outcome audit checkpoint has an unresolved objection
+ * (B.5: this check applies to every task's accept, not only the last one, and
+ * does not require an audit acceptance to already exist — a kickoff with
+ * tasks left can still accept its first one before outcome audit even
+ * starts). A `stateDir` that resolves to no registered kickoff (a solo task,
+ * or one this registry never saw) falls back to whatever `orgFile`/
+ * `worktreeId` the caller passed, unchanged.
  *
  * @param {string} repo - Current implementation workspace.
  * @param {object} task - Trusted task v2 contract.
@@ -556,7 +565,8 @@ async function recordReviewLocked(
  * @param {?string} [options.workflowId] - See `gateCheck`'s `options.workflowId`.
  * @returns {Promise<object>} Acceptance decision and accepted gate status.
  * @throws {Error} For incomplete reviews, criteria, duplicate IDs, stale source,
- *   or an unresolved outcome audit objection.
+ *   an orgFile/worktreeId that mismatches the resolved registration, or an
+ *   unresolved outcome audit objection.
  */
 export async function acceptOutcome(
   repo,
@@ -605,8 +615,43 @@ async function acceptOutcomeLocked(
     "Acceptance basis required",
   );
 
+  // A caller's own orgFile/worktreeId (or the absence of them) is never taken
+  // on trust: stateDir itself is resolved against the kickoff registry, since
+  // a caller cannot swap stateDir the way it could swap a `--repo` or omit a
+  // `--org` to skip the objection check below (docs/plan B.5, the public
+  // `acceptOutcome` export included, since nothing here reads from argv).
+  const registered = await resolveRegisteredKickoffFromState(stateDir);
+  let effectiveOrgFile = orgFile;
+  let effectiveWorktreeId = worktreeId;
+  let effectiveKickoffHash = kickoffHash;
+  if (registered) {
+    assert(
+      orgFile === undefined ||
+        path.resolve(orgFile) === path.resolve(registered.orgFile),
+      "acceptOutcome orgFile does not match this state directory's registered kickoff",
+    );
+    assert(
+      worktreeId === undefined || worktreeId === registered.worktreeId,
+      "acceptOutcome worktreeId does not match this state directory's registered kickoff",
+    );
+    effectiveOrgFile = registered.orgFile;
+    effectiveWorktreeId = registered.worktreeId;
+    // A resolved kickoffHash is authoritative, not merely a default: a caller
+    // may not substitute one of its own choosing once stateDir names a real
+    // registered kickoff. A legacy entry that resolves no hash at all leaves
+    // nothing to check the caller's value against, so it passes through
+    // unchanged (the existing behaviour for a caller that never resolves one).
+    if (registered.kickoffHash !== undefined) {
+      assert(
+        kickoffHash === undefined || kickoffHash === registered.kickoffHash,
+        "acceptOutcome kickoffHash does not match this state directory's registered kickoff",
+      );
+      effectiveKickoffHash = registered.kickoffHash;
+    }
+  }
+
   const current = await gateCheck(repo, task, report, stateDir, {
-    kickoffHash,
+    kickoffHash: effectiveKickoffHash,
     workflowId,
   });
   assert(
@@ -615,9 +660,9 @@ async function acceptOutcomeLocked(
     ),
     "Required reviews are incomplete",
   );
-  if (orgFile && worktreeId) {
+  if (effectiveOrgFile && effectiveWorktreeId) {
     assert(
-      !hasUnresolvedObjections(orgFile, worktreeId, "outcome"),
+      !hasUnresolvedObjections(effectiveOrgFile, effectiveWorktreeId, "outcome"),
       "The outcome audit checkpoint has an unresolved objection; it must be " +
         "ruled persuaded (audit-ruling) before this task can be accepted",
     );
@@ -637,7 +682,7 @@ async function acceptOutcomeLocked(
   };
   writeJSON(target, record);
   const gateStatus = await gateCheck(repo, task, report, stateDir, {
-    kickoffHash,
+    kickoffHash: effectiveKickoffHash,
     workflowId,
   });
   writeJSON(gateFile(stateDir, task.id), gateStatus);

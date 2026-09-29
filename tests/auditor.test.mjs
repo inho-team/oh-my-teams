@@ -14,8 +14,10 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   bindKickoffRun,
+  kickoffEntryName,
   listKickoffs,
   registerKickoff,
+  registryDirectory,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
   readLaunches,
@@ -1748,4 +1750,558 @@ test("resolveAuditorLaunchExecution: auditor branch always returns the trusted i
   // trusted script path at all.
   assert.equal(factoryCalls, 1);
   assert.equal(resolveScriptPathCalls, 1);
+});
+
+// --- accept-bypass fail-closed minimal counterexamples -------------------
+// kickoff()'s `pm` path is a plain subdirectory of the owner repo, never a
+// real Git worktree, so it cannot exercise resolveRegisteredKickoffFromState's
+// git-common-dir-based worktree identification at all: that check needs
+// `pm.stateDir` to sit inside an actual `git worktree add` checkout. This
+// fixture builds one, with its `.omt` created up front (a registered
+// stateDir that never gets created on disk is not this check's concern) and
+// named after the PM worktree's own root so it falls inside
+// changedWorkspaceFiles' repo-root `.omt` exception the same way a real PM
+// worktree's state directory would.
+function registeredKickoffProject(t, worktreeId) {
+  const root = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-registered-")),
+  );
+  t.after(() =>
+    fs.rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 200,
+    }),
+  );
+  const owner = path.join(root, "owner");
+  fs.mkdirSync(owner, { recursive: true });
+  initRepo(owner);
+  const org = path.join(owner, ".omt", "organization.json");
+  fs.mkdirSync(path.dirname(org), { recursive: true });
+  fs.copyFileSync(exampleOrg, org);
+  const brief = path.join(owner, ".omt", "brief.md");
+  fs.writeFileSync(brief, "goal, acceptance criteria, non-goals\n");
+
+  const pmWorktree = path.join(root, "pm-wt");
+  git(owner, [
+    "worktree",
+    "add",
+    "-q",
+    "-b",
+    `${worktreeId}-branch`,
+    pmWorktree,
+  ]);
+  const stateDir = path.join(pmWorktree, ".omt");
+  fs.mkdirSync(stateDir, { recursive: true });
+  const head = git(pmWorktree, ["rev-parse", "HEAD"]);
+  const auditorHandle = `term_auditor_${worktreeId}`;
+
+  registerKickoff(org, {
+    goal: `deliver ${worktreeId}`,
+    pm: { worktreeId, path: pmWorktree, stateDir },
+    organizationRevision: readJSON(org).revision,
+    brief,
+    delivery: { mode: "none" },
+    requirements: minimalRequirements(org, worktreeId),
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath: owner,
+    },
+  });
+  bindKickoffRun(org, { worktreeId, runId: `run-${worktreeId}` });
+  const [entry] = listKickoffs(org, worktreeId).kickoffs;
+  recordLaunch(org, {
+    via: "role-terminal",
+    role: AUDITOR_ROLE,
+    terminal: auditorHandle,
+    stateDir: entry.pm.stateDir,
+  });
+
+  return {
+    root,
+    owner,
+    org,
+    brief,
+    pmWorktree,
+    // Aliases so this fixture also fits the existing objectAndResolve/
+    // recordOutcomeResponseDirectly helpers above, which read fixture.repo
+    // and fixture.dir.
+    repo: pmWorktree,
+    dir: pmWorktree,
+    stateDir,
+    worktreeId,
+    entry,
+    auditorHandle,
+    head,
+  };
+}
+
+async function passingReportFor(fixture, task, runId) {
+  return {
+    taskId: task.id,
+    taskHash: taskHash(task),
+    taskRevision: task.revision,
+    runId,
+    evidence: await verify(fixture.pmWorktree, {
+      baseRef: task.baseRef,
+      commands: task.checks,
+      environment: task.environment,
+      store: path.join(fixture.stateDir, "evidence"),
+    }),
+  };
+}
+
+function decisionFor(id) {
+  return {
+    schemaVersion: 1,
+    id,
+    decider: { kind: "pm", executionId: "pm-1" },
+    criteria: ["check"],
+    basis: "Check passed",
+  };
+}
+
+test("registered PM stateDir: acceptOutcome resolves the kickoff from stateDir itself and refuses on any option mismatch or unresolved objection", async (t) => {
+  const fixture = registeredKickoffProject(t, "wt-registered-a");
+  const task = gapTask(fixture.worktreeId);
+  // Written before verify() runs, so the workspace tree the report's
+  // evidence binds to already includes it; writing it after would make the
+  // later, second acceptOutcome call see stale evidence (evidence.mjs's
+  // validateEvidence compares against the tree verify() actually recorded).
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.pmWorktree, evidencePath), "proof\n");
+  const report = await passingReportFor(fixture, task, "run-a");
+
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.pmWorktree,
+    }),
+  );
+
+  // (a) Omitting every option still identifies the registered kickoff from
+  // stateDir alone, so the unresolved objection still refuses acceptance —
+  // a direct import of the public API cannot dodge it either.
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        task,
+        report,
+        decisionFor("accept-a-1"),
+        fixture.stateDir,
+      ),
+    /outcome audit checkpoint has an unresolved objection/,
+  );
+
+  // (c) A caller-supplied orgFile that names a different (non-existent)
+  // organization than the one stateDir actually resolves to is refused
+  // before the objection check even runs.
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        task,
+        report,
+        decisionFor("accept-a-2"),
+        fixture.stateDir,
+        { orgFile: path.join(fixture.root, "does-not-exist.json") },
+      ),
+    /orgFile does not match this state directory's registered kickoff/,
+  );
+
+  // A caller-supplied worktreeId that names a different kickoff is refused.
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        task,
+        report,
+        decisionFor("accept-a-3"),
+        fixture.stateDir,
+        { worktreeId: "some-other-worktree" },
+      ),
+    /worktreeId does not match this state directory's registered kickoff/,
+  );
+
+  // (o) A caller-supplied kickoffHash that does not match the registered
+  // kickoff's own hash is refused.
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        task,
+        report,
+        decisionFor("accept-a-4"),
+        fixture.stateDir,
+        { kickoffHash: "f".repeat(64) },
+      ),
+    /kickoffHash does not match this state directory's registered kickoff/,
+  );
+
+  // (h) Once the objection is resolved, omitting every option still
+  // succeeds: the registry, not the caller, supplies orgFile/worktreeId/
+  // kickoffHash.
+  const objectionId = readAudit(fixture.org, fixture.worktreeId).checkpoints
+    .outcome.objections.at(-1).id;
+  const { audit } = recordOutcomeResponseDirectly(fixture, {
+    objectionId,
+    argument: "c1 is delivered; see the cited evidence",
+    evidenceRefs: [
+      {
+        path: evidencePath,
+        sha256: fileSha256(path.join(fixture.pmWorktree, evidencePath)),
+      },
+    ],
+  });
+  const responseId = audit.checkpoints.outcome.responses.at(-1).id;
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditRuling(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      objectionId,
+      respondedAgainst: responseId,
+      verdict: "persuaded",
+      reason: "evidence supports the claim",
+    }),
+  );
+
+  const { decision: recorded } = await acceptOutcome(
+    fixture.pmWorktree,
+    task,
+    report,
+    decisionFor("accept-a-5"),
+    fixture.stateDir,
+  );
+  assert.equal(recorded.status, "accepted");
+});
+
+test("accept refuses a stateDir sharing the registered worktree but keeps accepting a separate unregistered worktree unchanged", async (t) => {
+  const fixture = registeredKickoffProject(t, "wt-registered-b");
+
+  // (m) A directory that shares the registered kickoff's own worktree but is
+  // not the exact stateDir it registered is refused, not treated as solo.
+  const otherStateDir = path.join(fixture.pmWorktree, ".omt-other");
+  fs.mkdirSync(otherStateDir, { recursive: true });
+  const taskM = gapTask(`${fixture.worktreeId}-m`);
+  const reportM = {
+    taskId: taskM.id,
+    taskHash: taskHash(taskM),
+    taskRevision: taskM.revision,
+    runId: "run-m",
+    evidence: await verify(fixture.pmWorktree, {
+      baseRef: taskM.baseRef,
+      commands: taskM.checks,
+      environment: taskM.environment,
+      store: path.join(otherStateDir, "evidence"),
+    }),
+  };
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        taskM,
+        reportM,
+        decisionFor("accept-b-m"),
+        otherStateDir,
+      ),
+    /shares the registered kickoff's own worktree but is not the exact state directory it registered/,
+  );
+
+  // (f) A genuinely different worktree of the same owner repository (a
+  // Senior/Worker child worktree's own solo task state, for instance) is not
+  // registered under this kickoff and must keep accepting unchanged: the
+  // fail-closed scope covers the registered kickoff's own worktree only.
+  const childWorktree = path.join(fixture.root, "child-wt");
+  git(fixture.owner, [
+    "worktree",
+    "add",
+    "-q",
+    "-b",
+    "child-branch",
+    childWorktree,
+  ]);
+  const childStateDir = path.join(childWorktree, ".omt");
+  fs.mkdirSync(childStateDir, { recursive: true });
+  const taskF = gapTask(`${fixture.worktreeId}-f`);
+  const reportF = {
+    taskId: taskF.id,
+    taskHash: taskHash(taskF),
+    taskRevision: taskF.revision,
+    runId: "run-f",
+    evidence: await verify(childWorktree, {
+      baseRef: taskF.baseRef,
+      commands: taskF.checks,
+      environment: taskF.environment,
+      store: path.join(childStateDir, "evidence"),
+    }),
+  };
+  const { decision: recordedF } = await acceptOutcome(
+    childWorktree,
+    taskF,
+    reportF,
+    decisionFor("accept-b-f"),
+    childStateDir,
+  );
+  assert.equal(recordedF.status, "accepted");
+});
+
+test("accept refuses when the registered entry is an integrity-failure (registered after documentSystemActivatedAt but missing registrationSeq)", async (t) => {
+  const fixture = registeredKickoffProject(t, "wt-registered-c");
+  // Backdating documentSystemActivatedAt ahead of the entry's own createdAt
+  // reclassifies its (perfectly normal) missing-registrationSeq shape as an
+  // integrity-failure instead of ordinary legacy leniency.
+  const org = readJSON(fixture.org);
+  org.documentSystemActivatedAt = "2000-01-01T00:00:00Z";
+  writeJSON(fixture.org, org);
+  const entryPath = path.join(
+    registryDirectory(fixture.org),
+    `${kickoffEntryName(fixture.worktreeId)}.json`,
+  );
+  const entry = readJSON(entryPath);
+  delete entry.registrationSeq;
+  writeJSON(entryPath, entry);
+
+  const task = gapTask(fixture.worktreeId);
+  const report = await passingReportFor(fixture, task, "run-c");
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        task,
+        report,
+        decisionFor("accept-c-1"),
+        fixture.stateDir,
+      ),
+    /failed its integrity classification/,
+  );
+});
+
+test("accept refuses when the owner organization.json cannot be parsed or fails schema validation", async (t) => {
+  const fixture = registeredKickoffProject(t, "wt-registered-d");
+  const task = gapTask(fixture.worktreeId);
+  const report = await passingReportFor(fixture, task, "run-d");
+
+  fs.writeFileSync(fixture.org, "{not json");
+  await assert.rejects(() =>
+    acceptOutcome(
+      fixture.pmWorktree,
+      task,
+      report,
+      decisionFor("accept-d-1"),
+      fixture.stateDir,
+    ),
+  );
+
+  writeJSON(fixture.org, { schemaVersion: 1 });
+  await assert.rejects(() =>
+    acceptOutcome(
+      fixture.pmWorktree,
+      task,
+      report,
+      decisionFor("accept-d-2"),
+      fixture.stateDir,
+    ),
+  );
+});
+
+test("teams-org.mjs accept: the registered-kickoff anchor lookup never invokes a fake git planted first in PATH", async (t) => {
+  const fixture = registeredKickoffProject(t, "wt-registered-e");
+  const task = gapTask(fixture.worktreeId);
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.pmWorktree, evidencePath), "proof\n");
+  const report = await passingReportFor(fixture, task, "run-e");
+
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.pmWorktree,
+    }),
+  );
+
+  const taskFile = path.join(fixture.root, "task-e.json");
+  const reportFile = path.join(fixture.root, "report-e.json");
+  const decisionFile = path.join(fixture.root, "decision-e.json");
+  writeJSON(taskFile, task);
+  writeJSON(reportFile, report);
+  writeJSON(decisionFile, decisionFor("accept-e-1"));
+
+  const fakeBinDir = path.join(fixture.root, "fake-bin");
+  fs.mkdirSync(fakeBinDir, { recursive: true });
+  const callLog = path.join(fixture.root, "fake-git-calls.log");
+  // Records its own argv, then delegates to the real trusted git so the rest
+  // of accept's flow still runs to completion instead of aborting on the
+  // first PATH-resolved git call; only the recorded argv is inspected below.
+  fs.writeFileSync(
+    path.join(fakeBinDir, "git"),
+    `#!/bin/sh\necho "$@" >> "${callLog}"\nexec /usr/bin/git "$@"\n`,
+  );
+  fs.chmodSync(path.join(fakeBinDir, "git"), 0o755);
+
+  const result = runCli(
+    [
+      "accept",
+      "--repo",
+      fixture.pmWorktree,
+      "--task",
+      taskFile,
+      "--report",
+      reportFile,
+      "--decision",
+      decisionFile,
+      "--state",
+      fixture.stateDir,
+    ],
+    {
+      cwd: fixture.pmWorktree,
+      env: { PATH: `${fakeBinDir}:${process.env.PATH}` },
+    },
+  );
+
+  assert.notEqual(result.code, 0, "must still refuse for the unresolved objection");
+  assert.match(result.stderr, /unresolved objection/i);
+
+  const calls = fs.existsSync(callLog)
+    ? fs.readFileSync(callLog, "utf8").split("\n").filter(Boolean)
+    : [];
+  // Known limitation: evidence.mjs's own `git()` helper still spawns "git" by
+  // bare name (PATH-resolved), so validateEvidence's fingerprint recompute
+  // does run through the fake git above — that residual PATH exposure in the
+  // evidence layer is a separately tracked follow-up, out of this test's
+  // scope. What this test asserts is narrower: the registered-kickoff anchor
+  // lookup (`resolveGitCommonDir` in local-adapter.mjs) never does, because it
+  // always spawns the compiled-in trusted absolute path
+  // (`resolveTrustedGitExecutable`) instead of a PATH-resolved "git", so no
+  // recorded call here ever asks for `--git-common-dir`.
+  assert.equal(
+    calls.some((line) => line.includes("--git-common-dir")),
+    false,
+    "the registered-kickoff anchor lookup must never invoke a PATH-resolved git",
+  );
+});
+
+test("teams-org.mjs accept: forged GIT_DIR/GIT_COMMON_DIR/GIT_WORK_TREE cannot steer the registered-kickoff anchor lookup, and accept still refuses", async (t) => {
+  const fixture = registeredKickoffProject(t, "wt-registered-g");
+  const decoyRepo = path.join(fixture.root, "decoy-repo");
+  fs.mkdirSync(decoyRepo, { recursive: true });
+  initRepo(decoyRepo);
+  const forgedGitEnv = {
+    GIT_DIR: path.join(decoyRepo, ".git"),
+    GIT_COMMON_DIR: path.join(decoyRepo, ".git"),
+    GIT_WORK_TREE: decoyRepo,
+  };
+
+  // Part A: the anchor lookup (kickoff-registry.mjs's
+  // resolveRegisteredKickoffFromState, anchored on local-adapter.mjs's
+  // resolveGitCommonDir) always spawns the compiled-in trusted git path with
+  // a fixed, caller-uncontrollable environment, so it never reads GIT_DIR/
+  // GIT_COMMON_DIR/GIT_WORK_TREE at all. Run it in a fresh child process
+  // (not this test's own process) with and without those forged, and assert
+  // its return value is identical either way — a direct, deterministic
+  // check of the anchor lookup alone, independent of anything evidence.mjs
+  // does afterwards.
+  const probeSource =
+    "import { resolveRegisteredKickoffFromState } from " +
+    JSON.stringify(
+      path.join(
+        process.cwd(),
+        "plugins/oh-my-teams/scripts/kickoff-registry.mjs",
+      ),
+    ) +
+    ";\n" +
+    "const resolved = await resolveRegisteredKickoffFromState(process.argv[1]);\n" +
+    "process.stdout.write(JSON.stringify(resolved));\n";
+  const runProbe = (env) =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        ["--input-type=module", "-e", probeSource, fixture.stateDir],
+        { encoding: "utf8", env: { ...process.env, ...env } },
+      ),
+    );
+  const clean = runProbe({});
+  const forged = runProbe(forgedGitEnv);
+  assert.deepEqual(forged, clean);
+  assert.equal(clean.worktreeId, fixture.worktreeId);
+
+  // Part B: at the CLI level, accept must not silently succeed while an
+  // objection is unresolved, but this test does not assert exit 0 for the
+  // no-objection case: evidence.mjs's own `git()` helper (kept reverted per
+  // PM msg_6bd1ad2003fb) still spawns "git" through the caller's inherited
+  // process environment, so it also inherits these same forged GIT_DIR/
+  // GIT_COMMON_DIR/GIT_WORK_TREE and can recompute a different HEAD/base
+  // from the decoy repo. A "Stale evidence" rejection here is that existing,
+  // separately tracked evidence-layer environment exposure, NOT evidence
+  // that the anchor lookup was steered to the decoy (part A above already
+  // proves it was not). Only the unresolved-objection rejection is the
+  // property this half actually needs; a stale-evidence rejection is
+  // accepted as an equally safe (if noisier) outcome of the same forgery.
+  const task = gapTask(fixture.worktreeId);
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.pmWorktree, evidencePath), "proof\n");
+  const report = await passingReportFor(fixture, task, "run-g");
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.pmWorktree,
+    }),
+  );
+  const taskFile = path.join(fixture.root, "task-g.json");
+  const reportFile = path.join(fixture.root, "report-g.json");
+  const decisionFile = path.join(fixture.root, "decision-g.json");
+  writeJSON(taskFile, task);
+  writeJSON(reportFile, report);
+  writeJSON(decisionFile, decisionFor("accept-g-1"));
+
+  const result = runCli(
+    [
+      "accept",
+      "--repo",
+      fixture.pmWorktree,
+      "--task",
+      taskFile,
+      "--report",
+      reportFile,
+      "--decision",
+      decisionFile,
+      "--state",
+      fixture.stateDir,
+    ],
+    { cwd: fixture.pmWorktree, env: forgedGitEnv },
+  );
+  assert.notEqual(result.code, 0, "must not accept while an objection is unresolved");
+  assert.match(
+    result.stderr,
+    /unresolved objection|Stale evidence/i,
+    `unexpected rejection reason: ${result.stderr}`,
+  );
+});
+
+// Confirms the trusted-git candidate this platform actually resolves is
+// real, so a CI runner whose Git lives somewhere else fails this assertion
+// loudly instead of silently falling through to "no trusted git" fail-closed
+// everywhere else.
+test("a trusted git executable is actually found among this platform's compiled-in candidates", async () => {
+  const { resolveTrustedGitExecutable } = await import(
+    "../plugins/oh-my-teams/scripts/local-adapter.mjs"
+  );
+  const found = resolveTrustedGitExecutable();
+  assert.equal(path.isAbsolute(found), true);
+  assert.equal(fs.existsSync(found), true);
+  assert.equal(fs.lstatSync(found).isFile(), true);
 });

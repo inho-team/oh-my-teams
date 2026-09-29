@@ -1,4 +1,6 @@
 /** Local execution adapter: plain Git worktrees and one-shot provider calls. */
+import fs from "node:fs";
+import path from "node:path";
 import { assert, run } from "./core.mjs";
 import { invoke } from "./providers.mjs";
 import {
@@ -6,6 +8,87 @@ import {
   assertWorkerReceipt,
   assertWorkspaceReceipt,
 } from "./execution.mjs";
+
+// Compiled-in trust anchors for the `git` binary a Git-identity lookup runs,
+// never derived from `PATH`, `process.env`, or any other value a caller could
+// hold at the time this process started (a caller poisoning `PATH` before
+// this module is even imported defeats a load-time snapshot the same way it
+// defeats a live environment lookup, since both still resolve the executable
+// by name through some inherited environment). Each candidate is checked by
+// {@link isTrustedGitExecutable} for being a real, non-symlink file that this
+// same-user process cannot itself have written, so nothing here claims to
+// prove who is calling, only that the `git` invoked is not one the calling
+// argv/environment could have substituted. A user with permission to modify
+// one of these paths directly (or to run as root) already has the standing to
+// forge whatever this check would otherwise report; that is filesystem
+// compromise, not the environment/argument spoofing this defends against, and
+// is out of scope the same way a corrupted `/usr/bin/git` binary would be.
+// Order matches GitHub's own windows-latest runner image: its
+// Install-Git.ps1 provisioning script adds `C:\Program Files\Git\bin` to the
+// machine PATH (github/actions/runner-images, images/windows/scripts/build/
+// Install-Git.ps1, lines 407-409), so `bin\git.exe` is checked first and
+// `cmd\git.exe` second. This is provisioning-script evidence, not a local
+// Windows measurement; the runner's actual layout is confirmed in the
+// director's PR CI, not in this repository.
+const TRUSTED_GIT_CANDIDATES = Object.freeze(
+  process.platform === "win32"
+    ? [
+        "C:\\Program Files\\Git\\bin\\git.exe",
+        "C:\\Program Files\\Git\\cmd\\git.exe",
+      ]
+    : ["/usr/bin/git"],
+);
+
+// POSIX: owned by root and writable by neither group nor other, so no
+// same-user process could have planted or altered it. Windows has no
+// equivalent ownership/mode model available here, so existence as a regular,
+// non-symlink file at one of the fixed candidate paths is the whole check.
+function isTrustedGitExecutable(candidate) {
+  if (!path.isAbsolute(candidate)) return false;
+  let stat;
+  try {
+    stat = fs.lstatSync(candidate);
+  } catch {
+    return false;
+  }
+  if (!stat.isFile()) return false;
+  if (process.platform === "win32") return true;
+  return stat.uid === 0 && (stat.mode & 0o022) === 0;
+}
+
+/**
+ * Picks the first compiled-in candidate path that is actually present and
+ * passes {@link isTrustedGitExecutable} on this platform.
+ *
+ * Exported so a test can assert this platform's CI runner actually has one of
+ * {@link TRUSTED_GIT_CANDIDATES}: silently falling through to "no trusted git"
+ * everywhere else in the suite would look identical to every accept refusing
+ * for the right reason, instead of this wrong one.
+ *
+ * @returns {string} Absolute path to the trusted `git` executable.
+ * @throws {Error} When no candidate for this platform qualifies; callers must
+ *   treat this as fail-closed rather than falling back to a `PATH` lookup.
+ */
+export function resolveTrustedGitExecutable() {
+  const found = TRUSTED_GIT_CANDIDATES.find(isTrustedGitExecutable);
+  if (found) return found;
+  throw new Error(
+    "No trusted git executable found among: " +
+      `${TRUSTED_GIT_CANDIDATES.join(", ")}. Every Git-identity lookup this ` +
+      "adapter performs — including a solo (unregistered) task's own check — " +
+      "fails closed without one; see docs/SAFETY_AUDIT.md for this limitation.",
+  );
+}
+
+// A fixed, caller-uncontrollable child environment: nothing here is read from
+// this process's own `process.env` (live or snapshotted), so a caller cannot
+// widen it by setting anything before or after this module loads. POSIX needs
+// nothing at all for `git rev-parse`; Windows conventionally needs `SystemRoot`
+// for its own DLL loader, so that one fixed value is included rather than
+// omitted and discovered missing on some future Windows-only failure.
+const FIXED_CHILD_ENV = Object.freeze(
+  process.platform === "win32" ? { SystemRoot: "C:\\Windows" } : {},
+);
 
 // `core.mjs` kills the child on timeout or output overflow and then settles the
 // call itself when no `close` arrives, so these are the results where the exit
@@ -101,6 +184,53 @@ export function translateLocalCode(code, message) {
     code: normalized,
     message: explanation || `The local runtime reported ${normalized}`,
   });
+}
+
+/**
+ * Resolves the absolute path Git itself calls the common (main) `.git`
+ * directory of whatever repository `cwd` sits inside, following linked
+ * worktrees back to their owner.
+ *
+ * A caller-supplied `--repo` can be swapped for a different repository, so a
+ * trust decision anchored on one is not safe; this anchors on `cwd` itself
+ * (typically a PM's own `--state` directory), which nothing forwarded through
+ * unrelated arguments can redirect. For the same reason, this never spawns
+ * `git` by bare name through a caller-mutable `PATH` (which could shadow the
+ * real `git` with one of the caller's own choosing, defeating the anchor);
+ * it always runs {@link resolveTrustedGitExecutable}'s fixed absolute path
+ * with {@link FIXED_CHILD_ENV}, a caller-uncontrollable fixed environment, so
+ * `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_CEILING_DIRECTORIES`,
+ * `PATH`, and every other variable a caller could hold (whether set before or
+ * after this process started) play no part in what this lookup reports.
+ *
+ * @param {string} cwd - Directory to resolve the common dir from.
+ * @param {object} [options] - Injectable runner, for tests.
+ * @param {Function} [options.execute=run] - Runs the underlying `git` call.
+ * @returns {Promise<string | null>} Absolute common-dir path, or `null` when
+ *   `cwd` is not inside a Git working tree.
+ * @throws {Error} When no trusted `git` executable is found, or the lookup
+ *   fails for any other reason (timeout, a non-git-repository error the
+ *   caller must not silently treat as "no repo").
+ */
+export async function resolveGitCommonDir(cwd, { execute = run } = {}) {
+  assert(
+    typeof cwd === "string" && cwd.trim(),
+    "A directory is required to resolve its Git common dir",
+  );
+  const gitPath = resolveTrustedGitExecutable();
+  const result = await execute(
+    [gitPath, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+    { cwd, env: FIXED_CHILD_ENV, timeoutMs: 30000 },
+  );
+  if (result.code === 0 && !result.timedOut) {
+    return String(result.stdout).trim();
+  }
+  if (!result.timedOut && /not a git repository/i.test(String(result.stderr ?? ""))) {
+    return null;
+  }
+  throw new Error(
+    `Git common-dir lookup failed for ${cwd}: ${result.stderr || result.stdout || `exit ${result.code}`}`,
+  );
 }
 
 /**

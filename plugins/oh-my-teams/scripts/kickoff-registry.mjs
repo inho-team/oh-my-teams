@@ -13,6 +13,7 @@ import {
   writeJSON,
 } from "./core.mjs";
 import { closeKickoffSignals } from "./director.mjs";
+import { resolveGitCommonDir } from "./local-adapter.mjs";
 import {
   assertKickoffCloseReady,
   confirmedLedgerFromClaim,
@@ -413,6 +414,144 @@ export function listKickoffs(orgFile, worktreeId) {
     // File names are digests, so order by the id they stand for.
     .sort((a, b) => (a.pm.worktreeId < b.pm.worktreeId ? -1 : 1));
   return { active: kickoffs.length > 0, kickoffs };
+}
+
+/**
+ * Finds the registered kickoff, if any, that a PM state directory belongs to.
+ *
+ * Resolution is anchored on `stateDir` itself, never a caller-supplied
+ * `--repo` (which a caller could swap for a different repository), using
+ * {@link resolveGitCommonDir} to find the owner project the same way Git
+ * would. Whether the owner organization has an auditor at all plays no part
+ * in this lookup (structured-omt-documents.md/requirements-ledger-and-audit.md
+ * B.5): "registered" is the only question, since an organization with no
+ * audit activity already has no unresolved objections for a caller to skip.
+ * Comparison uses `fs.realpathSync` on both sides because a registered entry's
+ * `pm.stateDir` is stored only `path.resolve`d, not realpath'd, so a symlinked
+ * `--state` would otherwise compare unequal to its own registration.
+ *
+ * A `stateDir` outside any Git working tree, whose owner project has no
+ * `.omt/organization.json`, whose organization has never registered any
+ * kickoff at all, or that sits in a DIFFERENT worktree of the owner Git
+ * repository than any registered kickoff's own `pm.path` — a Senior/Worker
+ * child worktree's own task state, for instance — resolves to `null`:
+ * genuinely unregistered solo usage, where the caller's own
+ * orgFile/worktreeId (if any) apply unchanged. Only a `stateDir` that sits
+ * INSIDE a registered kickoff's own worktree (`pm.path`, realpath-compared)
+ * but is not that kickoff's exact `pm.stateDir` is fail-closed and throws
+ * rather than returning `null`: that is a caller pointing `--state`
+ * somewhere else inside the one PM directory an audited kickoff actually
+ * registered, which is exactly the accept-bypass this function exists to
+ * close, not a legitimate sibling task. The same fail-closed rule covers a
+ * Git call failing for a reason other than "not a git repository", a
+ * malformed `organization.json` (validated with {@link validateOrg}, so a
+ * structurally broken org file cannot silently steer
+ * {@link classifyKickoffEntry} the way one of its fields being read
+ * `undefined` could), a registry entry that fails validation, and a matched
+ * entry that {@link classifyKickoffEntry} calls `"integrity-failure"`
+ * (registered after the structured document system activated but missing
+ * its `registrationSeq`, so it is not ordinary legacy leniency). An entry
+ * whose own recorded `pm.stateDir` can no longer be resolved is not simply
+ * dropped from consideration either: when its recorded path is (string-)
+ * identical to `stateDir` it still counts as a match (an attacker cannot
+ * defeat this check by deleting exactly the entry that should have matched),
+ * while any other, unrelated entry with a broken `pm.stateDir` is ignored, so
+ * one kickoff's stale bookkeeping never blocks a lookup for a different,
+ * healthy one.
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory to identify.
+ * @param {object} [options] - Injectable runner, for tests.
+ * @param {Function} [options.execute] - Passed through to {@link resolveGitCommonDir}.
+ * @returns {Promise<{orgFile: string, worktreeId: string, kickoffHash: (string|undefined)} | null>}
+ *   The kickoff this state directory is registered under, or `null`.
+ * @throws {Error} On any failure other than "not inside a Git repository" or
+ *   "no organization.json (or no registered kickoff at all) beside the owner project".
+ */
+export async function resolveRegisteredKickoffFromState(stateDir, options = {}) {
+  assert(
+    typeof stateDir === "string" && stateDir.trim(),
+    "PM state directory required to resolve its registered kickoff",
+  );
+  const commonDir = await resolveGitCommonDir(stateDir, options);
+  if (commonDir === null) return null;
+  const candidateOrgFile = path.join(
+    path.dirname(commonDir),
+    ".omt",
+    "organization.json",
+  );
+  if (!fs.existsSync(candidateOrgFile)) return null;
+  const org = validateOrg(readJSON(candidateOrgFile));
+  const { kickoffs } = listKickoffs(candidateOrgFile);
+  if (kickoffs.length === 0) return null;
+  const target = fs.realpathSync(stateDir);
+  const targetResolved = path.resolve(stateDir);
+  const resolvedEntries = kickoffs.map((entry) => {
+    const entryResolved = path.resolve(entry.pm.stateDir);
+    let entryState;
+    try {
+      entryState = fs.realpathSync(entry.pm.stateDir);
+    } catch {
+      // An entry whose own recorded stateDir cannot be resolved is not
+      // silently dropped: if its recorded path is literally this `stateDir`
+      // (string-resolved, not realpath'd, since that is exactly what just
+      // failed), it is treated as matching anyway, because an attacker
+      // deleting/breaking their own registered entry to dodge the objection
+      // check below must not work. Any OTHER entry with an unrelated broken
+      // stateDir is simply irrelevant to this lookup and must not block it
+      // (an unregistered child/solo stateDir sitting beside a kickoff whose
+      // own directory happens to be missing, for instance).
+      entryState = entryResolved === targetResolved ? target : null;
+    }
+    return { entry, entryState };
+  });
+  const match = resolvedEntries.find((r) => r.entryState === target);
+  if (!match) {
+    // A directory that shares a registered kickoff's own worktree (`pm.path`)
+    // but is not the exact `pm.stateDir` it registered is still refused, not
+    // treated as an unregistered solo task: that is a caller pointing
+    // `--state` elsewhere inside the same audited PM worktree to dodge the
+    // objection check. But a stateDir in a DIFFERENT worktree of the same
+    // owner Git repository (a Senior/Worker child worktree's own task state,
+    // for instance) is ordinary unregistered solo usage and must fall through
+    // to `null`, not fail-closed, or every child worktree under an audited
+    // organization would be unable to accept at all.
+    const sameWorktreeOtherState = resolvedEntries.find((r) => {
+      try {
+        return fs.realpathSync(r.entry.pm.path) === path.dirname(target);
+      } catch {
+        return false;
+      }
+    });
+    if (!sameWorktreeOtherState) return null;
+    throw new Error(
+      `${stateDir} sits inside worktree ${sameWorktreeOtherState.entry.pm.path}, ` +
+        `whose registered kickoff (${sameWorktreeOtherState.entry.pm.worktreeId}) ` +
+        `names a different pm.stateDir; refusing to accept from a directory ` +
+        "that shares the registered kickoff's own worktree but is not the " +
+        "exact state directory it registered",
+    );
+  }
+  // classifyKickoffEntry (not a bare registrationSeq check) tells apart an
+  // entry that predates the structured document system ("legacy", expected
+  // and safe to give no kickoffHash) from one that postdates it yet still has
+  // no registrationSeq ("integrity-failure"): a registry that should have
+  // stamped one and did not, which this refuses to treat as ordinary legacy
+  // leniency.
+  const classification = classifyKickoffEntry(match.entry, org);
+  assert(
+    classification !== "integrity-failure",
+    `Kickoff registry entry for worktree ${match.entry.pm.worktreeId} failed ` +
+      "its integrity classification (registered after the structured " +
+      "document system activated but has no registrationSeq); refusing to " +
+      "trust it for acceptance",
+  );
+  const kickoffHash =
+    classification === "current" ? kickoffHashFor(match.entry) : undefined;
+  return {
+    orgFile: candidateOrgFile,
+    worktreeId: match.entry.pm.worktreeId,
+    kickoffHash,
+  };
 }
 
 /**
