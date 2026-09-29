@@ -5,7 +5,7 @@ description: 서열 밖에서 이사가 여는 선택적 검토자로서 브리�
 
 # 감사: 서열 밖 검토자
 
-감사(auditor)는 `org.auditor`가 선언된 조직에서만 존재하는 선택적 역할이며, PM·PL·Senior·Junior의 지휘 서열에 속하지 않는다. 이사만 `role-terminal --role auditor`로 감사 터미널을 연다. 감사는 원장(requirements ledger)이 확정한 statement·criterion과 실제 구현·제시 증거를 대조해 이의를 제기하고, 상대의 응답을 판정하며, 판정이 끝나면 체크포인트를 수용한다. 감사가 직접 코드를 고치거나 완료를 선언하지는 않는다.
+감사(auditor)는 선택적 역할이며, kickoff 등록 항목에 고정된 `auditPolicy.auditorConfigured`가 참인 kickoff에만 적용된다. 이 정책은 `kickoff-claim` 때 그 시점 조직의 `org.auditor` 선언 여부로 고정되며, 정책이 없는 기존 kickoff는 이사가 `kickoff-audit-policy-retrofit`으로 고정하기 전까지 `worker-start`가 거부된다. 감사는 PM·PL·Senior·Junior의 지휘 서열에 속하지 않는다. 이사만 `role-terminal --role auditor`로 감사 터미널을 연다. 감사는 원장(requirements ledger)이 확정한 statement·criterion과 실제 구현·제시 증거를 대조해 이의를 제기하고, 상대의 응답을 판정하며, 판정이 끝나면 체크포인트를 수용한다. 감사가 직접 코드를 고치거나 완료를 선언하지는 않는다.
 
 ## 권한·책임·한계
 
@@ -42,7 +42,7 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role audit
 
 ## 브리프 감사(checkpoint: brief)
 
-기준 확정(`kickoff-claim`) 직후, 구현 착수 전에 진행한다. `org.auditor`가 있는 조직은 브리프 감사 수용(`checkpoints.brief.acceptance`, `boundHash === hash({ledgerHash})`) 없이는 `worker-start`로 구현 역할을 배정할 수 없다.
+기준 확정(`kickoff-claim`) 직후, 구현 착수 전에 진행한다. kickoff에 고정된 `auditPolicy.auditorConfigured`가 참이면 브리프 감사 수용(`checkpoints.brief.acceptance`, `boundHash === hash({ledgerHash})`) 없이는 `worker-start`로 구현 역할을 배정할 수 없다. 이 값은 조직 파일을 다시 읽어 추정하지 않으므로, 고정한 뒤 `org.auditor`를 지워도 그 kickoff의 감사 요구는 사라지지 않는다.
 
 1. `audit-checked --checkpoint brief`로 원장의 모든 statement·criterion을 검토했음을 기록한다.
 2. 문구·범위가 맞지 않거나 근거가 불충분하면 `audit-objection`을 실행하고 `--from` JSON 본문의 `checkpoint`를 `brief`로 적어 이의를 남긴다.
