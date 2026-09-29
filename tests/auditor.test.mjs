@@ -14,7 +14,9 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   bindKickoffRun,
+  isIdenticalDirectory,
   isSameOrWithin,
+  isSameOrWithinByIdentity,
   kickoffEntryName,
   listKickoffs,
   registerKickoff,
@@ -1949,8 +1951,10 @@ test("registered PM stateDir: acceptOutcome resolves the kickoff from stateDir i
   // (h) Once the objection is resolved, omitting every option still
   // succeeds: the registry, not the caller, supplies orgFile/worktreeId/
   // kickoffHash.
-  const objectionId = readAudit(fixture.org, fixture.worktreeId).checkpoints
-    .outcome.objections.at(-1).id;
+  const objectionId = readAudit(
+    fixture.org,
+    fixture.worktreeId,
+  ).checkpoints.outcome.objections.at(-1).id;
   const { audit } = recordOutcomeResponseDirectly(fixture, {
     objectionId,
     argument: "c1 is delivered; see the cited evidence",
@@ -2005,6 +2009,98 @@ test("isSameOrWithin: case-insensitive Windows-shaped comparisons (path.win32 in
   assert.equal(isSameOrWithin("/a/pm", "/a/pm/x/.omt", posix), true);
   assert.equal(isSameOrWithin("/a/pm", "/a/pm-other", posix), false);
   assert.equal(isSameOrWithin("/a/pm", "/a", posix), false);
+});
+
+test("isIdenticalDirectory: prefers real device+inode identity, and falls back to a STRICT (never casefolded) text match only when the inode cannot be trusted", (t) => {
+  const root = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-identical-dir-")),
+  );
+  t.after(() =>
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10 }),
+  );
+  const dirA = path.join(root, "pm-wt");
+  const dirB = path.join(root, "pm-wt-other");
+  fs.mkdirSync(dirA);
+  fs.mkdirSync(dirB);
+
+  // Real, distinct sibling directories are never conflated by dev/ino, and a
+  // directory is identical to itself, with no injected stat at all: this is
+  // the actual filesystem, not a simulation.
+  assert.equal(isIdenticalDirectory(dirA, dirB), false);
+  assert.equal(isIdenticalDirectory(dirA, dirA), true);
+
+  // ino: 0n on either side is treated as untrustworthy (some Windows
+  // filesystems report it for paths they track no real inode for), so
+  // comparison drops to a byte-for-byte text match instead of either
+  // declaring a false match or refusing to decide.
+  const unreliableStat = () => ({ dev: 1n, ino: 0n });
+  assert.equal(
+    isIdenticalDirectory(dirA, dirA, { stat: unreliableStat }),
+    true,
+    "identical text still counts as the same directory once inode is unreliable",
+  );
+  assert.equal(
+    isIdenticalDirectory(dirA, dirB, { stat: unreliableStat }),
+    false,
+    "different text is still different once inode is unreliable",
+  );
+  // Exact-match identity must NOT casefold once the inode is unreliable:
+  // Windows can configure a directory to be case-sensitive, so
+  // `C:\A\PM` and `c:\a\pm` can be two genuinely distinct directories even
+  // there. Treating them as identical here would let a differently-cased
+  // directory be misidentified as the registered stateDir and dodge its
+  // unresolved objection entirely -- this is the accept-bypass the director
+  // flagged when a prior draft of this test asserted `true` here instead.
+  // Real Windows inode-reliability and per-directory case-sensitivity
+  // behavior is confirmed by this repository's own Windows CI runner, not
+  // simulated in this test.
+  assert.equal(
+    isIdenticalDirectory("C:\\A\\PM", "c:\\a\\pm", { stat: unreliableStat }),
+    false,
+    "exact-match identity must not casefold two differently-cased paths even when the inode is unreliable",
+  );
+});
+
+test("isSameOrWithinByIdentity: allows a casefold-only ancestor match once the inode is untrustworthy, unlike isIdenticalDirectory's exact-match role", () => {
+  const unreliableStat = () => ({ dev: 1n, ino: 0n });
+  // Forward-slash-separated pseudo-Windows paths, not backslash ones: the
+  // ancestor walk itself always uses this host's own `path.dirname` (it has
+  // no injectable `path` implementation the way `isSameOrWithin` does), and
+  // this suite may run on a POSIX host, whose `path.dirname` does not treat
+  // `\` as a separator. `platform: "win32"` here drives only the casefold
+  // normalization inside the per-step comparison, independent of that.
+
+  // Same directory, same casing: matches regardless of inode reliability.
+  assert.equal(
+    isSameOrWithinByIdentity("c:/pm/pm-wt", "c:/pm/pm-wt", {
+      platform: "win32",
+      stat: unreliableStat,
+    }),
+    true,
+  );
+  // A genuinely nested child, reached through a casefold-only spelling of
+  // its ancestor, is still recognized as "inside" once the inode cannot be
+  // trusted: unlike exact-match identity, casefold-equating an ancestor here
+  // only ever produces an ANCESTOR refusal ("shares the registered
+  // worktree"), never an exact-match acceptance, so over-broad matching is
+  // the safe direction to err in. Real Windows inode-reliability and
+  // per-directory case-sensitivity behavior is confirmed by this
+  // repository's own Windows CI runner, not simulated in this test.
+  assert.equal(
+    isSameOrWithinByIdentity("C:/PM/PM-WT", "c:/pm/pm-wt/.omt/inner", {
+      platform: "win32",
+      stat: unreliableStat,
+    }),
+    true,
+  );
+  // An unrelated sibling never casefold-matches, inode-unreliable or not.
+  assert.equal(
+    isSameOrWithinByIdentity("C:/PM/PM-WT", "c:/pm/pm-wt-other", {
+      platform: "win32",
+      stat: unreliableStat,
+    }),
+    false,
+  );
 });
 
 test("accept refuses a stateDir sharing the registered worktree but keeps accepting a separate unregistered worktree unchanged", async (t) => {
@@ -2216,6 +2312,186 @@ test("accept refuses a stateDir sharing the registered worktree but keeps accept
   assert.equal(recordedF.status, "accepted");
 });
 
+// Detects, on the actual filesystem under test, whether a directory created
+// with one casing can also be reached by spelling its name in another case:
+// true on a case-preserving-but-insensitive volume (macOS's/Windows' default
+// filesystems), false on a case-sensitive one (most Linux filesystems, as CI
+// runs on), where the uppercased probe name never exists at all. The probe
+// name is hex-only so `.toUpperCase()` actually changes it (a name with no
+// letters would trivially "pass" on a case-sensitive filesystem too).
+function isFilesystemCaseInsensitive(dir) {
+  const name = `case-probe-${crypto.randomBytes(4).toString("hex")}`;
+  const probe = path.join(dir, name);
+  fs.mkdirSync(probe);
+  try {
+    return fs.existsSync(path.join(dir, name.toUpperCase()));
+  } finally {
+    fs.rmSync(probe, { recursive: true, force: true });
+  }
+}
+
+test("accept identifies a differently-cased spelling of the registered stateDir as itself, not an anchor mismatch (case-insensitive filesystems only)", async (t) => {
+  const fixture = registeredKickoffProject(t, "wt-registered-h");
+  if (!isFilesystemCaseInsensitive(fixture.root)) {
+    t.skip(
+      "this filesystem is case-sensitive, so a differently-cased path does not name the same on-disk directory to begin with",
+    );
+    return;
+  }
+
+  const task = gapTask(`${fixture.worktreeId}-case`);
+  const evidencePath = "evidence-case.txt";
+  fs.writeFileSync(path.join(fixture.pmWorktree, evidencePath), "proof\n");
+  const report = await passingReportFor(fixture, task, "run-case");
+
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.pmWorktree,
+    }),
+  );
+
+  const upperWorktree = path.join(
+    path.dirname(fixture.pmWorktree),
+    path.basename(fixture.pmWorktree).toUpperCase(),
+  );
+
+  // (M) The registered stateDir itself, spelled with its worktree segment
+  // uppercased, is still the exact registered directory: identified by
+  // device+inode, since `fs.realpathSync.native`'s own text canonicalization
+  // is not trusted alone to have already normalized this. The unresolved
+  // objection refuses it, not the "sits inside worktree ... but is not the
+  // exact state directory" anchor message a text-only comparison used to
+  // produce for this same directory.
+  const stateDirViaUpperWorktree = path.join(upperWorktree, ".omt");
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        task,
+        report,
+        decisionFor("accept-h-m"),
+        stateDirViaUpperWorktree,
+      ),
+    /outcome audit checkpoint has an unresolved objection/,
+  );
+
+  // (O) The registered stateDir spelled with only its own ".omt" segment
+  // uppercased is the same directory too, and is refused the same way.
+  const stateDirViaUpperOmt = path.join(fixture.pmWorktree, ".OMT");
+  await assert.rejects(
+    () =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        task,
+        report,
+        decisionFor("accept-h-o"),
+        stateDirViaUpperOmt,
+      ),
+    /outcome audit checkpoint has an unresolved objection/,
+  );
+
+  // Once the objection is resolved, accept succeeds through the
+  // differently-cased spelling too: it is genuinely the same registration,
+  // not merely tolerated by some separate anchor exception.
+  const objectionId = readAudit(
+    fixture.org,
+    fixture.worktreeId,
+  ).checkpoints.outcome.objections.at(-1).id;
+  const { audit } = recordOutcomeResponseDirectly(fixture, {
+    objectionId,
+    argument: "c1 is delivered; see the cited evidence",
+    evidenceRefs: [
+      {
+        path: evidencePath,
+        sha256: fileSha256(path.join(fixture.pmWorktree, evidencePath)),
+      },
+    ],
+  });
+  const responseId = audit.checkpoints.outcome.responses.at(-1).id;
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditRuling(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      objectionId,
+      respondedAgainst: responseId,
+      verdict: "persuaded",
+      reason: "evidence supports the claim",
+    }),
+  );
+  const { decision: recorded } = await acceptOutcome(
+    fixture.pmWorktree,
+    task,
+    report,
+    decisionFor("accept-h-resolved"),
+    stateDirViaUpperWorktree,
+  );
+  assert.equal(recorded.status, "accepted");
+});
+
+test("accept still refuses a genuinely different nested stateDir reached through a differently-cased spelling (case-insensitive filesystems only)", async (t) => {
+  const fixture = registeredKickoffProject(t, "wt-registered-i");
+  if (!isFilesystemCaseInsensitive(fixture.root)) {
+    t.skip(
+      "this filesystem is case-sensitive, so a differently-cased path does not name the same on-disk directory to begin with",
+    );
+    return;
+  }
+
+  const upperWorktree = path.join(
+    path.dirname(fixture.pmWorktree),
+    path.basename(fixture.pmWorktree).toUpperCase(),
+  );
+
+  const cases = [
+    // (N) Genuinely nested one level inside the registered stateDir, reached
+    // through the worktree segment uppercased.
+    { label: "n", stateDir: path.join(upperWorktree, ".omt", "inner") },
+    // Same nesting, reached instead through the stateDir's own ".omt"
+    // segment uppercased.
+    {
+      label: "omt-inner",
+      stateDir: path.join(fixture.pmWorktree, ".OMT", "inner"),
+    },
+    // A different subdirectory of the worktree entirely (not inside the
+    // registered stateDir at all), reached through the uppercased worktree.
+    { label: "sub", stateDir: path.join(upperWorktree, "sub", ".omt") },
+  ];
+
+  for (const { label, stateDir } of cases) {
+    fs.mkdirSync(stateDir, { recursive: true });
+    const task = gapTask(`${fixture.worktreeId}-${label}`);
+    const report = {
+      taskId: task.id,
+      taskHash: taskHash(task),
+      taskRevision: task.revision,
+      runId: `run-${label}`,
+      evidence: await verify(fixture.pmWorktree, {
+        baseRef: task.baseRef,
+        commands: task.checks,
+        environment: task.environment,
+        store: path.join(stateDir, "evidence"),
+      }),
+    };
+    await assert.rejects(
+      () =>
+        acceptOutcome(
+          fixture.pmWorktree,
+          task,
+          report,
+          decisionFor(`accept-i-${label}`),
+          stateDir,
+        ),
+      /shares the registered kickoff's own worktree but is not the exact state directory it registered/,
+      `case ${label} must be refused as sharing the registered worktree, not silently accepted`,
+    );
+  }
+});
+
 test("accept refuses when the registered entry is an integrity-failure (registered after documentSystemActivatedAt but missing registrationSeq)", async (t) => {
   const fixture = registeredKickoffProject(t, "wt-registered-c");
   // Backdating documentSystemActivatedAt ahead of the entry's own createdAt
@@ -2333,7 +2609,11 @@ test("teams-org.mjs accept: the registered-kickoff anchor lookup never invokes a
     },
   );
 
-  assert.notEqual(result.code, 0, "must still refuse for the unresolved objection");
+  assert.notEqual(
+    result.code,
+    0,
+    "must still refuse for the unresolved objection",
+  );
   assert.match(result.stderr, /unresolved objection/i);
 
   const calls = fs.existsSync(callLog)
@@ -2449,7 +2729,11 @@ test("teams-org.mjs accept: forged GIT_DIR/GIT_COMMON_DIR/GIT_WORK_TREE cannot s
     ],
     { cwd: fixture.pmWorktree, env: forgedGitEnv },
   );
-  assert.notEqual(result.code, 0, "must not accept while an objection is unresolved");
+  assert.notEqual(
+    result.code,
+    0,
+    "must not accept while an objection is unresolved",
+  );
   assert.match(
     result.stderr,
     /unresolved objection|Stale evidence/i,
@@ -2462,9 +2746,8 @@ test("teams-org.mjs accept: forged GIT_DIR/GIT_COMMON_DIR/GIT_WORK_TREE cannot s
 // loudly instead of silently falling through to "no trusted git" fail-closed
 // everywhere else.
 test("a trusted git executable is actually found among this platform's compiled-in candidates", async () => {
-  const { resolveTrustedGitExecutable } = await import(
-    "../plugins/oh-my-teams/scripts/local-adapter.mjs"
-  );
+  const { resolveTrustedGitExecutable } =
+    await import("../plugins/oh-my-teams/scripts/local-adapter.mjs");
   const found = resolveTrustedGitExecutable();
   assert.equal(path.isAbsolute(found), true);
   assert.equal(fs.existsSync(found), true);

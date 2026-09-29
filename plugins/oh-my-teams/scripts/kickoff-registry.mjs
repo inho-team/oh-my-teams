@@ -417,23 +417,34 @@ export function listKickoffs(orgFile, worktreeId) {
 }
 
 /**
- * Reports whether `child` is `parent` itself, or sits anywhere inside it.
+ * Reports whether `child` is `parent` itself, or sits anywhere inside it, by
+ * comparing their text. Standalone general-purpose helper, kept and tested
+ * as its own text-only comparison; {@link resolveRegisteredKickoffFromState}
+ * does not call this function directly, since it needs the exact-match and
+ * ancestor roles kept apart with different fallbacks
+ * ({@link isIdenticalDirectory}, {@link isSameOrWithinByIdentity}) rather
+ * than one shared comparison.
  *
- * Both arguments must already be realpath'd. On `platform: "win32"` they are
- * case-insensitively compared (`toLowerCase`) BEFORE anything else, since
+ * Both arguments should be resolved with `fs.realpathSync.native`, not the
+ * plain `fs.realpathSync`: verified on macOS, whose default filesystem is
+ * case-preserving-but-insensitive same as Windows', `fs.realpathSync`'s own
+ * JS implementation returns the input spelling unchanged instead of the
+ * volume's own on-disk casing (an existing `CaseTest/Inner` resolved through
+ * `casetest/inner` comes back `casetest/inner`), while `fs.realpathSync.native`
+ * returns `CaseTest/Inner`. On `platform: "win32"` this function additionally
+ * case-insensitively compares (`toLowerCase`) BEFORE anything else, since
  * Windows' case-preserving-but-insensitive filesystem would otherwise let two
- * spellings of the identical directory compare unequal. macOS's own default
- * filesystem is also case-insensitive-but-preserving, yet needs no such
- * normalization here: every caller compares two `fs.realpathSync` results,
- * and realpath already returns the volume's own on-disk casing for both, so
- * two spellings of one directory realpath to the identical string before
- * this function ever sees them (unlike on Windows, where Node's `fs`
- * realpath does not canonicalize case). Depth is unbounded on purpose:
- * `pm-wt/.omt/inner`, `pm-wt/sub/.omt`, and `pm-wt/a/b/c` are all "inside"
- * `pm-wt` the same as `pm-wt/.omt` itself is.
+ * spellings of the identical directory compare unequal; this normalization is
+ * NOT applied on other platforms (macOS, Linux, ...) even though macOS's own
+ * default filesystem shares the same case-insensitive-but-preserving trait,
+ * because a case-SENSITIVE volume (most Linux filesystems) can hold two
+ * genuinely distinct directories differing only by case, and lowercasing
+ * unconditionally would wrongly call them the same. Depth is unbounded on
+ * purpose: `pm-wt/.omt/inner`, `pm-wt/sub/.omt`, and `pm-wt/a/b/c` are all
+ * "inside" `pm-wt` the same as `pm-wt/.omt` itself is.
  *
- * @param {string} parent - Realpath'd candidate ancestor directory.
- * @param {string} child - Realpath'd candidate descendant (or the same) directory.
+ * @param {string} parent - `fs.realpathSync.native`'d candidate ancestor directory.
+ * @param {string} child - `fs.realpathSync.native`'d candidate descendant (or the same) directory.
  * @param {object} [options] - Injectable Node `path` implementation and platform.
  * @param {typeof import("node:path")} [options.path] - `path`/`path.win32`/
  *   `path.posix`, so a unit test can exercise Windows-shaped comparisons on
@@ -468,6 +479,142 @@ export function isSameOrWithin(
 }
 
 /**
+ * Compares two paths by device+inode, returning `true`/`false` when both
+ * sides report a trustworthy inode, or `null` when the comparison cannot be
+ * trusted at all -- either path failed to stat, or either side reports
+ * `ino: 0n`. Several Windows filesystems report `ino: 0` for paths they do
+ * not track a real inode number for, and treating two such zeroes as equal
+ * would call unrelated directories the same; a caller receiving `null` must
+ * fall back to some other comparison rather than reading it as "not the same
+ * directory".
+ *
+ * Stats with `{ bigint: true }`, not the default `number` stat: Node's
+ * default `number` inode can lose precision past `Number.MAX_SAFE_INTEGER`
+ * on a 64-bit inode, which would risk two distinct large inodes coinciding
+ * after rounding; `bigint` compares the full value exactly.
+ *
+ * @param {string} a - First directory path.
+ * @param {string} b - Second directory path.
+ * @param {object} [options] - Injectable stat function, for tests.
+ * @param {(path: string) => {dev: bigint, ino: bigint}} [options.stat] -
+ *   `fs.statSync(path, { bigint: true })` by default; pass a fake to
+ *   simulate an unreliable (`ino: 0n`) stat without a real filesystem that
+ *   reports one.
+ * @returns {boolean | null} Device+inode equality, or `null` if the
+ *   comparison is not trustworthy.
+ */
+function sameDirectoryByInode(a, b, { stat = defaultBigIntStat } = {}) {
+  let statA;
+  let statB;
+  try {
+    statA = stat(a);
+    statB = stat(b);
+  } catch {
+    return null;
+  }
+  if (statA.ino === 0n || statB.ino === 0n) return null;
+  return statA.dev === statB.dev && statA.ino === statB.ino;
+}
+
+function defaultBigIntStat(target) {
+  return fs.statSync(target, { bigint: true });
+}
+
+/**
+ * Reports whether `a` and `b` name the identical on-disk directory, for
+ * EXACT-MATCH use only (recognizing a registered kickoff's own stateDir as
+ * itself) -- never for "is this inside that worktree"
+ * ({@link isSameOrWithinByIdentity} answers that, deliberately with a
+ * different, more permissive fallback). Prefers {@link sameDirectoryByInode},
+ * which is immune to case, Unicode normalization, or any other respelling
+ * neither realpath implementation canonicalizes; only when that comparison
+ * is untrustworthy (an unreliable/zero inode, or a stat failure) does this
+ * fall back to a byte-for-byte `===` of `a` and `b`, deliberately WITHOUT
+ * win32-lowercase normalization: Windows can configure a directory to be
+ * case-sensitive, so `C:\PM\.omt` and `C:\PM\.OMT` can be two genuinely
+ * distinct directories even there, and casefold-equating them in this
+ * exact-match role would let an attacker's differently-cased directory be
+ * misidentified as the registered stateDir, dodging its unresolved
+ * objection entirely -- the exact accept-bypass this whole check exists to
+ * close. Actual Windows inode-reliability and per-directory case-sensitivity
+ * behavior is confirmed by this repository's own Windows CI runner, not
+ * simulated in this file's unit tests.
+ *
+ * @param {string} a - First `fs.realpathSync.native`'d directory.
+ * @param {string} b - Second `fs.realpathSync.native`'d directory.
+ * @param {object} [options] - Injectable stat function, for tests.
+ * @param {Function} [options.stat] - Forwarded to {@link sameDirectoryByInode}.
+ * @returns {boolean} Whether `a` and `b` are the same directory.
+ */
+export function isIdenticalDirectory(a, b, { stat } = {}) {
+  const byInode = sameDirectoryByInode(a, b, { stat });
+  if (byInode !== null) return byInode;
+  return a === b;
+}
+
+/**
+ * Compares two paths for EXACT-MATCH-OR-CASEFOLD equality: device+inode
+ * identity when trustworthy, else a win32-lowercase-normalized (unnormalized
+ * elsewhere) text comparison. This is deliberately more permissive than
+ * {@link isIdenticalDirectory} and must only ever back
+ * {@link isSameOrWithinByIdentity}'s per-ancestor comparison, never exact
+ * stateDir identity: a directory this function calls "the same" as
+ * `pm.path` purely by casefold, but that is not actually byte-identical to
+ * it, still only ever earns an ANCESTOR match (the caller's `--state` is
+ * refused as "inside the registered worktree"), never an exact-match
+ * acceptance -- over-rejection, the safe direction to err in when an inode
+ * cannot be trusted.
+ *
+ * @param {string} a - First `fs.realpathSync.native`'d directory.
+ * @param {string} b - Second `fs.realpathSync.native`'d directory.
+ * @param {object} [options] - Injectable platform and stat function, for tests.
+ * @param {string} [options.platform] - `process.platform` by default; pass
+ *   `"win32"` to test the casefold fallback on a non-Windows host.
+ * @param {Function} [options.stat] - Forwarded to {@link sameDirectoryByInode}.
+ * @returns {boolean} Whether `a` and `b` are the same directory, allowing a
+ *   casefold match when inode identity cannot be trusted.
+ */
+function sameDirectoryOrCasefold(
+  a,
+  b,
+  { platform = process.platform, stat } = {},
+) {
+  const byInode = sameDirectoryByInode(a, b, { stat });
+  if (byInode !== null) return byInode;
+  const normalize = (value) =>
+    platform === "win32" ? value.toLowerCase() : value;
+  return normalize(a) === normalize(b);
+}
+
+/**
+ * Reports whether `child` is `parent` itself, or sits anywhere inside it, by
+ * walking from `child` up through `path.dirname` (stopping once it stops
+ * changing, i.e. the filesystem root) and testing each ancestor -- including
+ * `child` itself -- against `parent` with {@link sameDirectoryOrCasefold}
+ * (NOT {@link isIdenticalDirectory}: see that function's own doc for why the
+ * two must never share a comparison, only its name suggests otherwise).
+ * Each step prefers device+inode identity and falls back to a casefold text
+ * comparison only where that step's inode comparison is untrustworthy, so a
+ * respelling neither realpath implementation canonicalizes is still caught
+ * without an unreliable inode manufacturing a false EXACT match (it can
+ * still manufacture a false ANCESTOR match, which is the safe direction).
+ *
+ * @param {string} parent - `fs.realpathSync.native`'d candidate ancestor directory.
+ * @param {string} child - `fs.realpathSync.native`'d candidate descendant (or the same) directory.
+ * @param {object} [options] - Forwarded to {@link sameDirectoryOrCasefold}.
+ * @returns {boolean} Whether `child` is `parent` itself or a path beneath it.
+ */
+export function isSameOrWithinByIdentity(parent, child, options) {
+  let current = child;
+  for (;;) {
+    if (sameDirectoryOrCasefold(parent, current, options)) return true;
+    const up = path.dirname(current);
+    if (up === current) return false;
+    current = up;
+  }
+}
+
+/**
  * Finds the registered kickoff, if any, that a PM state directory belongs to.
  *
  * Resolution is anchored on `stateDir` itself, never a caller-supplied
@@ -477,9 +624,28 @@ export function isSameOrWithin(
  * in this lookup (structured-omt-documents.md/requirements-ledger-and-audit.md
  * B.5): "registered" is the only question, since an organization with no
  * audit activity already has no unresolved objections for a caller to skip.
- * Comparison uses `fs.realpathSync` on both sides because a registered entry's
- * `pm.stateDir` is stored only `path.resolve`d, not realpath'd, so a symlinked
- * `--state` would otherwise compare unequal to its own registration.
+ * Both `target` and every entry's `pm.stateDir`/`pm.path` are resolved with
+ * `fs.realpathSync.native`, not the plain `fs.realpathSync`, because a
+ * registered entry's `pm.stateDir` is stored only `path.resolve`d, not
+ * realpath'd, so a symlinked `--state` would otherwise compare unequal to its
+ * own registration -- and because the plain `fs.realpathSync` does not
+ * canonicalize case on a case-preserving-but-insensitive filesystem (macOS's
+ * default one included, verified directly: an existing `CaseTest/Inner`
+ * resolved through `casetest/inner` comes back `casetest/inner`, unchanged,
+ * from `fs.realpathSync`, while `fs.realpathSync.native` returns the on-disk
+ * `CaseTest/Inner`). Neither exact-match nor the same-worktree check below
+ * stops at that realpath text, though, and the two deliberately do NOT share
+ * one comparison function: exact-match uses {@link isIdenticalDirectory},
+ * which prefers device+inode identity and drops to a byte-for-byte (never
+ * casefolded) text comparison only where the inode comparison is
+ * untrustworthy, so a `--state` differing from its own registration only by
+ * case is never misidentified as the registered stateDir itself (Windows can
+ * configure a directory case-sensitive, so two such spellings can be
+ * genuinely distinct there, and casefold-equating them here would be an
+ * accept-bypass in its own right). The same-worktree check instead uses
+ * {@link isSameOrWithinByIdentity}, which is allowed a casefold fallback
+ * where the inode is untrustworthy, since its only failure direction is
+ * over-rejection ("shares the registered worktree"), the safe one to err in.
  *
  * A `stateDir` outside any Git working tree, whose owner project has no
  * `.omt/organization.json`, whose organization has never registered any
@@ -520,7 +686,10 @@ export function isSameOrWithin(
  * @throws {Error} On any failure other than "not inside a Git repository" or
  *   "no organization.json (or no registered kickoff at all) beside the owner project".
  */
-export async function resolveRegisteredKickoffFromState(stateDir, options = {}) {
+export async function resolveRegisteredKickoffFromState(
+  stateDir,
+  options = {},
+) {
   assert(
     typeof stateDir === "string" && stateDir.trim(),
     "PM state directory required to resolve its registered kickoff",
@@ -536,13 +705,13 @@ export async function resolveRegisteredKickoffFromState(stateDir, options = {}) 
   const org = validateOrg(readJSON(candidateOrgFile));
   const { kickoffs } = listKickoffs(candidateOrgFile);
   if (kickoffs.length === 0) return null;
-  const target = fs.realpathSync(stateDir);
+  const target = fs.realpathSync.native(stateDir);
   const targetResolved = path.resolve(stateDir);
   const resolvedEntries = kickoffs.map((entry) => {
     const entryResolved = path.resolve(entry.pm.stateDir);
     let entryState;
     try {
-      entryState = fs.realpathSync(entry.pm.stateDir);
+      entryState = fs.realpathSync.native(entry.pm.stateDir);
     } catch {
       // An entry whose own recorded stateDir cannot be resolved is not
       // silently dropped: if its recorded path is literally this `stateDir`
@@ -557,7 +726,9 @@ export async function resolveRegisteredKickoffFromState(stateDir, options = {}) 
     }
     return { entry, entryState };
   });
-  const match = resolvedEntries.find((r) => r.entryState === target);
+  const match = resolvedEntries.find(
+    (r) => r.entryState !== null && isIdenticalDirectory(r.entryState, target),
+  );
   if (!match) {
     // A directory ANYWHERE inside a registered kickoff's own worktree
     // (`pm.path`, realpath-compared, at any depth — not only a direct child)
@@ -572,10 +743,17 @@ export async function resolveRegisteredKickoffFromState(stateDir, options = {}) 
     // fail-closed, or every child worktree under an audited organization
     // would be unable to accept at all — but a worktree nested inside a
     // registered kickoff's own `pm.path` is refused along with it, since it
-    // is still inside that same audited tree.
+    // is still inside that same audited tree. Walked with
+    // `isSameOrWithinByIdentity`, which favors device+inode identity per
+    // ancestor step and drops to a CASEFOLD text comparison (deliberately
+    // more permissive than the exact-match check above) only where that
+    // step's inode comparison is untrustworthy: an over-broad "shares this
+    // worktree" refusal here is the safe failure direction, unlike exact
+    // match, where the same permissiveness would be an accept-bypass.
     const sameWorktreeOtherState = resolvedEntries.find((r) => {
       try {
-        return isSameOrWithin(fs.realpathSync(r.entry.pm.path), target);
+        const pmPath = fs.realpathSync.native(r.entry.pm.path);
+        return isSameOrWithinByIdentity(pmPath, target);
       } catch {
         return false;
       }

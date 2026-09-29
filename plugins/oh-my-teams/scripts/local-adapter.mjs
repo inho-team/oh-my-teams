@@ -225,7 +225,10 @@ export async function resolveGitCommonDir(cwd, { execute = run } = {}) {
   if (result.code === 0 && !result.timedOut) {
     return String(result.stdout).trim();
   }
-  if (!result.timedOut && /not a git repository/i.test(String(result.stderr ?? ""))) {
+  if (
+    !result.timedOut &&
+    /not a git repository/i.test(String(result.stderr ?? ""))
+  ) {
     return null;
   }
   throw new Error(

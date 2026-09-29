@@ -662,7 +662,11 @@ async function acceptOutcomeLocked(
   );
   if (effectiveOrgFile && effectiveWorktreeId) {
     assert(
-      !hasUnresolvedObjections(effectiveOrgFile, effectiveWorktreeId, "outcome"),
+      !hasUnresolvedObjections(
+        effectiveOrgFile,
+        effectiveWorktreeId,
+        "outcome",
+      ),
       "The outcome audit checkpoint has an unresolved objection; it must be " +
         "ruled persuaded (audit-ruling) before this task can be accepted",
     );

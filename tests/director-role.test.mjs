@@ -1307,7 +1307,11 @@ test("Worker 경로: 원장 미완결과 감사 outcome 미해결 이의는 clos
       { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
     ],
   });
-  await requirementsFidelityConfirm(fixture.org, fixture.worktreeId, process.cwd());
+  await requirementsFidelityConfirm(
+    fixture.org,
+    fixture.worktreeId,
+    process.cwd(),
+  );
 
   // 원장은 이제 close-ready지만 org.auditor가 선언돼 있고 brief 수용이 아직
   // 없으므로 여전히 거부된다.
@@ -1413,7 +1417,11 @@ test("Worker 경로: 원장 close-ready와 감사 brief·outcome 수용을 모�
       { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
     ],
   });
-  await requirementsFidelityConfirm(fixture.org, fixture.worktreeId, process.cwd());
+  await requirementsFidelityConfirm(
+    fixture.org,
+    fixture.worktreeId,
+    process.cwd(),
+  );
 
   const checked = [
     { type: "statement", id: "s1" },
