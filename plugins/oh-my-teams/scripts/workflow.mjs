@@ -22,6 +22,11 @@ import { git } from "./evidence.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { assertFailureSignal } from "./execution.mjs";
 import { gateCheck } from "./gates.mjs";
+import { hasUnresolvedObjections } from "./audit.mjs";
+import {
+  listKickoffs,
+  resolveRegisteredKickoffFromState,
+} from "./kickoff-registry.mjs";
 import {
   profilesShareLimit,
   writeHandoffSnapshot,
@@ -619,10 +624,157 @@ function deriveWorkflowStatus(state) {
   return "ready";
 }
 
+// realpath of a directory, or null when it no longer resolves (a removed
+// worktree cannot be a result repository).
+function realpathOrNull(target) {
+  try {
+    return fs.realpathSync.native(path.resolve(target));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves the repository an audit binds this workflow's result to.
+ *
+ * The caller's `callerRepo` only ever selects among candidates this function
+ * derives from recorded state; it never creates one (B.3). Three cases:
+ * a recorded decision fixes the answer to `decision.checkoutPath`; a workflow
+ * that requires integration has no recorded candidate before acceptance, so
+ * `callerRepo` is returned as an unverified candidate that the caller must
+ * still pass through `gateCheck` before recording it (task receipt paths are
+ * never used there); any other workflow's only candidate is the one worktree
+ * all of its accepted tasks recorded (blocked and failed tasks are excluded).
+ * `callerRepo` is compared with it, never used to choose among several.
+ *
+ * @param {object} state - Workflow state.
+ * @param {string} [callerRepo] - Repository the caller named.
+ * @returns {string} Real path of the result repository.
+ * @throws {Error} When the decision predates result-repository binding, no candidate exists, or `callerRepo` is not one.
+ */
+export function resolveResultRepo(state, callerRepo) {
+  const caller =
+    callerRepo === undefined ? undefined : realpathOrNull(callerRepo);
+  assert(
+    callerRepo === undefined || caller !== null,
+    `Result repository ${callerRepo} does not resolve to a directory`,
+  );
+  const decision = state.integration?.decision;
+  if (decision) {
+    assert(
+      typeof decision.checkoutPath === "string" && decision.checkoutPath,
+      "This workflow was accepted before its result repository was recorded, " +
+        "so the decision cannot name it; the director must decide how to close it",
+    );
+    assert(
+      caller === undefined || caller === decision.checkoutPath,
+      `Result repository ${callerRepo} is not the one this workflow was accepted with (${decision.checkoutPath})`,
+    );
+    return decision.checkoutPath;
+  }
+  if (state.integration?.required) {
+    assert(
+      caller,
+      "This workflow requires integration; pass the integration checkout as the result repository",
+    );
+    return caller;
+  }
+  // Every receipt path of every accepted task counts, and one that no longer
+  // resolves is refused rather than dropped: discarding a vanished worktree
+  // would turn two candidates into one and let the survivor through.
+  const receipts = Object.values(state.tasks)
+    .filter((item) => item.state === "accepted")
+    .flatMap((item) => [item.worktreeId, item.execution?.worktreeId])
+    .filter((id) => String(id ?? "").includes("::"))
+    .map((id) => String(id).slice(String(id).indexOf("::") + 2));
+  assert(
+    receipts.length > 0,
+    "No accepted task recorded a result worktree, so the result repository cannot be determined",
+  );
+  const resolved = receipts.map(realpathOrNull);
+  assert(
+    resolved.every((value) => value !== null),
+    "An accepted task's result worktree no longer resolves, so the result repository cannot be determined",
+  );
+  const candidates = [...new Set(resolved)];
+  assert(
+    candidates.length === 1,
+    `The accepted tasks' result worktrees differ (${candidates.join(", ")}), so the result repository cannot be determined`,
+  );
+  assert(
+    caller === undefined || caller === candidates[0],
+    `Result repository ${callerRepo} is not the worktree of this workflow's accepted tasks (${candidates[0]})`,
+  );
+  return candidates[0];
+}
+
+// The repository an acceptance verifies and records, fixed once so gateCheck
+// and the recorded checkoutPath name the same real path. A decision saved
+// before checkoutPath existed cannot be compared, so it only needs the
+// caller's repository to resolve.
+function acceptanceRepo(state, repo) {
+  const decision = state.integration?.decision;
+  if (decision && !decision.checkoutPath) {
+    const real = realpathOrNull(repo);
+    assert(real, `Result repository ${repo} does not resolve to a directory`);
+    return real;
+  }
+  return resolveResultRepo(state, repo);
+}
+
+// The kickoff this state directory is registered under, resolved from the
+// registry rather than from any caller argument (B.5, no --org bypass), with
+// its pinned audit policy. `null` for a state directory no kickoff owns.
+async function resolveAuditGate(stateDir) {
+  const registered = await resolveRegisteredKickoffFromState(stateDir);
+  if (!registered) return null;
+  const [entry] = listKickoffs(
+    registered.orgFile,
+    registered.worktreeId,
+  ).kickoffs;
+  assert(
+    entry?.auditPolicy !== undefined,
+    `Kickoff ${registered.worktreeId} has no pinned audit policy; the director must run ` +
+      "kickoff-audit-policy-retrofit for this worktree before a workflow can be accepted",
+  );
+  return {
+    orgFile: registered.orgFile,
+    worktreeId: registered.worktreeId,
+    configured: entry.auditPolicy.auditorConfigured === true,
+    source: entry.auditPolicy.source,
+  };
+}
+
+// Only the pinned policy and unresolved outcome objections are checked here
+// (director decision G-1); acceptance existence and the HEAD/ledgerHash
+// binding belong to close-ready and the final delivery gate.
+function assertNoUnresolvedOutcomeObjection(audit) {
+  if (!audit?.configured) return;
+  assert(
+    !hasUnresolvedObjections(audit.orgFile, audit.worktreeId, "outcome"),
+    "The outcome audit checkpoint has an unresolved objection; it must be " +
+      "ruled persuaded (audit-ruling) before this workflow can be accepted",
+  );
+}
+
+// What a decision records about the audit that governed it: nothing for a
+// workflow no kickoff owns, the policy for one it does, and the result
+// repository only when an auditor is configured.
+function auditDecisionFields(audit, checkoutPath) {
+  if (!audit) return {};
+  return {
+    auditGate: {
+      mode: audit.configured ? "configured" : "not-configured",
+      source: audit.source,
+    },
+    ...(audit.configured ? { checkoutPath } : {}),
+  };
+}
+
 // A workflow created without integration (one task and no integrationTask)
 // is closed by its task's own review and PM acceptance. workflow-accept used to
 // demand the integration file regardless, so such a workflow could not close.
-function acceptWithoutIntegration(stateDir, id, expectedRevision) {
+function acceptWithoutIntegration(stateDir, id, expectedRevision, audit, repo) {
   return withWorkflowUpdate(stateDir, id, () => {
     const { state, dir } = readWorkflow(stateDir, id);
     assert(
@@ -638,10 +790,16 @@ function acceptWithoutIntegration(stateDir, id, expectedRevision) {
         "This workflow has no integration task, so each task's review and PM acceptance close it",
     );
     if (state.integration.decision) return state;
+    // Resolved after the pending check and before any write, so a refusal
+    // leaves the stored state untouched.
+    const checkoutPath = audit?.configured
+      ? resolveResultRepo(state, repo)
+      : undefined;
     state.integration.decision = {
       runId: null,
       evidenceKey: null,
       decisionId: null,
+      ...auditDecisionFields(audit, checkoutPath),
       componentResults: Object.fromEntries(
         Object.entries(state.tasks).map(([taskId, item]) => [
           taskId,
@@ -698,8 +856,16 @@ export async function acceptWorkflowIntegration(
     snapshot.state.revision === expectedRevision,
     "Workflow changed; read state again",
   );
+  const audit = await resolveAuditGate(stateDir);
+  assertNoUnresolvedOutcomeObjection(audit);
   if (!snapshot.state.integration?.required) {
-    return acceptWithoutIntegration(stateDir, id, expectedRevision);
+    return acceptWithoutIntegration(
+      stateDir,
+      id,
+      expectedRevision,
+      audit,
+      repo,
+    );
   }
   assert(
     repo && report,
@@ -721,7 +887,8 @@ export async function acceptWorkflowIntegration(
     ),
     "All component tasks must be accepted first",
   );
-  const gates = await gateCheck(repo, task, report, stateDir, {
+  const resultRepo = acceptanceRepo(snapshot.state, repo);
+  const gates = await gateCheck(resultRepo, task, report, stateDir, {
     kickoffHash,
     workflowId: id,
   });
@@ -734,7 +901,7 @@ export async function acceptWorkflowIntegration(
   let testFileWarning;
   if (Array.isArray(snapshot.state.integration.testFilesAtCreation)) {
     const known = new Set(snapshot.state.integration.testFilesAtCreation);
-    const added = (await trackedTestFiles(repo)).filter(
+    const added = (await trackedTestFiles(resultRepo)).filter(
       (file) => !known.has(file),
     );
     if (added.length > 0) {
@@ -754,6 +921,8 @@ export async function acceptWorkflowIntegration(
       runId: report.runId,
       evidenceKey: report.evidence.key,
       decisionId: gates.gates["outcome-accepted"].decisionId,
+      // gateCheck has just passed on this repository, so it is verified now.
+      ...auditDecisionFields(audit, resultRepo),
       ...(testFileWarning ? { warnings: [testFileWarning] } : {}),
       componentResults: Object.fromEntries(
         Object.entries(state.tasks).map(([taskId, item]) => [

@@ -64,6 +64,8 @@ import {
   auditObjection,
 } from "../plugins/oh-my-teams/scripts/audit.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
+import { acceptWorkflowIntegration } from "../plugins/oh-my-teams/scripts/workflow.mjs";
+import { acceptTaskThroughRuntime } from "./accepted-workflow-fixture.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import {
   deliveryRefDocId,
@@ -1337,6 +1339,22 @@ test("Worker 경로: 원장 미완결과 감사 outcome 미해결 이의는 clos
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(fixture.org, fixture.worktreeId, "brief"),
   );
+  // The result repository is fixed by a workflow accepted through the runtime
+  // path (Appendix G) before the objection is recorded, so the assertions
+  // below still meet the outcome-acceptance refusal, not the binding one.
+  const staged = await acceptTaskThroughRuntime({
+    org: fixture.org,
+    stateDir: path.join(fixture.worktree, ".omt"),
+    taskDir: fixture.worktree,
+    workflowId: "wf-worker-gap",
+    resultRepo: fixture.worktree,
+    role: "worker",
+  });
+  await acceptWorkflowIntegration(
+    staged.stateDir,
+    staged.workflowId,
+    staged.revision,
+  );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditObjection(fixture.org, fixture.worktreeId, {
       checkpoint: "outcome",
@@ -1432,6 +1450,21 @@ test("Worker 경로: 원장 close-ready와 감사 brief·outcome 수용을 모�
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(fixture.org, fixture.worktreeId, "brief"),
+  );
+  // The result repository is fixed by a workflow accepted through the runtime
+  // path (Appendix G): task acceptance, then workflow-accept.
+  const staged = await acceptTaskThroughRuntime({
+    org: fixture.org,
+    stateDir: path.join(fixture.worktree, ".omt"),
+    taskDir: fixture.worktree,
+    workflowId: "wf-worker-ok",
+    resultRepo: fixture.worktree,
+    role: "worker",
+  });
+  await acceptWorkflowIntegration(
+    staged.stateDir,
+    staged.workflowId,
+    staged.revision,
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditChecked(fixture.org, fixture.worktreeId, "outcome", checked),

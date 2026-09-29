@@ -25,6 +25,7 @@ import {
 import { canonicalize } from "./contracts.mjs";
 import { workspaceBinding } from "./evidence.mjs";
 import { hasValidAcceptance } from "./audit.mjs";
+import { resolveResultRepo } from "./workflow.mjs";
 
 const SCOPES = ["equal", "narrower"];
 const FIDELITY_STATUSES = ["met", "unmet"];
@@ -1164,6 +1165,132 @@ export function assertLedgerExists(orgFile, worktreeId) {
   return ledger;
 }
 
+// Every workflow state stored under a kickoff's PM state directory. Fails
+// closed like the auditor-independence check: a directory whose state cannot
+// be read is refused rather than skipped, while a stray file (e.g. .DS_Store)
+// is not a workflow and is ignored.
+function readKickoffWorkflowStates(stateDir) {
+  const root = path.join(stateDir, "workflows");
+  if (!fs.existsSync(root)) return [];
+  return fs
+    .readdirSync(root)
+    .filter((name) => fs.lstatSync(path.join(root, name)).isDirectory())
+    .map((name) => {
+      let state;
+      try {
+        state = readJSON(path.join(root, name, "state.json"));
+        assert(
+          state?.tasks !== null &&
+            typeof state?.tasks === "object" &&
+            !Array.isArray(state.tasks),
+          "malformed state",
+        );
+      } catch (error) {
+        throw new Error(
+          `Workflow ${name} under ${stateDir} cannot be read (${error.message}), ` +
+            "so this kickoff's result repository cannot be determined",
+        );
+      }
+      return state;
+    });
+}
+
+/**
+ * Reads the result repository a kickoff's accepted workflows were closed
+ * with, from its own `pm.stateDir`; the caller supplies no state to read.
+ *
+ * @param {object} entry - The kickoff's registry entry.
+ * @returns {string|undefined} The recorded `decision.checkoutPath`, or `undefined` when no workflow of this kickoff has been accepted yet.
+ * @throws {Error} When a state cannot be read, an accepted decision names no `checkoutPath` (it predates the binding), or accepted workflows name different ones.
+ */
+export function resolveKickoffResultRepo(entry) {
+  const decided = readKickoffWorkflowStates(entry.pm.stateDir).filter(
+    (state) => state.integration?.decision,
+  );
+  if (decided.length === 0) return undefined;
+  const paths = decided.map((state) => state.integration.decision.checkoutPath);
+  assert(
+    paths.every((value) => typeof value === "string" && value),
+    "An accepted workflow of this kickoff predates result-repository binding, " +
+      "so its decision cannot name the repository an audit binds to; the director must decide how to close it",
+  );
+  assert(
+    new Set(paths).size === 1,
+    `Accepted workflows of this kickoff name different result repositories (${[...new Set(paths)].join(", ")})`,
+  );
+  return paths[0];
+}
+
+/**
+ * Binds a consumer's `--repo` to the kickoff's result repository when its
+ * pinned policy configures an auditor; otherwise returns `callerRepo`
+ * unchanged. The caller's value is only compared with what recorded state
+ * derives and is never a source of the repository (B.3).
+ *
+ * After acceptance the repository is the accepted workflows' `checkoutPath`.
+ * Before acceptance, only an outcome objection may pass `allowPending`: the
+ * caller's repository must be a candidate of a not-yet-accepted workflow (its
+ * accepted tasks' worktrees, or, when integration is required and nothing is
+ * recorded yet, any repository whose real HEAD the objection binding checks).
+ * That is safe because an objection only blocks: it is lifted only by a
+ * ruling, never by the repository it names.
+ *
+ * @param {object} entry - The kickoff's registry entry.
+ * @param {string} [callerRepo] - Repository the caller named.
+ * @param {object} [options] - Phase options.
+ * @param {boolean} [options.allowPending=false] - Permit a caller repository before any workflow was accepted (outcome objection only).
+ * @returns {string|undefined} Real path of the repository the binding must use.
+ * @throws {Error} When the repository is undetermined, differs from the recorded one, or is not a pending candidate.
+ */
+export function bindKickoffResultRepo(
+  entry,
+  callerRepo,
+  { allowPending = false } = {},
+) {
+  if (entry.auditPolicy?.auditorConfigured !== true) return callerRepo;
+  const recorded = resolveKickoffResultRepo(entry);
+  if (recorded !== undefined) {
+    let caller;
+    try {
+      caller =
+        callerRepo === undefined
+          ? undefined
+          : fs.realpathSync.native(path.resolve(callerRepo));
+    } catch {
+      caller = null;
+    }
+    assert(
+      callerRepo === undefined || caller === recorded,
+      `Repository ${callerRepo} is not the result repository this kickoff's workflow was accepted with (${recorded})`,
+    );
+    return recorded;
+  }
+  assert(
+    allowPending,
+    "No workflow of this kickoff has been accepted, so its result repository is not determined; " +
+      "run workflow-accept first",
+  );
+  assert(
+    callerRepo !== undefined,
+    "A repository is required before any workflow of this kickoff is accepted",
+  );
+  // A workflow that ended blocked or failed never produces a result, so it
+  // is not a candidate; retrying it puts it back among the live ones.
+  const live = readKickoffWorkflowStates(entry.pm.stateDir).filter(
+    (state) => !["blocked", "failed"].includes(state.status),
+  );
+  for (const state of live) {
+    try {
+      return resolveResultRepo(state, callerRepo);
+    } catch {
+      // Not this workflow's candidate; try the next.
+    }
+  }
+  throw new Error(
+    `Repository ${callerRepo} is not a candidate result repository of any live workflow of this kickoff`,
+  );
+}
+
 /**
  * Runs every check A.5 requires before a kickoff may close: the ledger's
  * close-time completeness (`assertLedgerCloseReady`) and, when this kickoff's
@@ -1218,8 +1345,9 @@ export async function assertKickoffCloseReady(
     "Brief audit acceptance is missing or no longer valid; " +
       "run audit-accept for the brief checkpoint before closing",
   );
+  const resultRepo = bindKickoffResultRepo(entry, repo);
   assert(
-    await hasValidAcceptance(orgFile, worktreeId, "outcome", head, repo),
+    await hasValidAcceptance(orgFile, worktreeId, "outcome", head, resultRepo),
     "Outcome audit acceptance is missing or no longer valid; " +
       "run audit-accept for the outcome checkpoint before closing",
   );

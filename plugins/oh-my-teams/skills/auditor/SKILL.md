@@ -52,7 +52,7 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role audit
 
 ## 결과 감사(checkpoint: outcome)
 
-`requirements-fidelity`와 (director의) `requirements-present`·`requirements-fidelity-confirm` 이후에 진행한다. 결과 감사 수용은 close-ready 발신에서 처음 요구된다.
+`requirements-fidelity`와 (director의) `requirements-present`·`requirements-fidelity-confirm` 이후에 진행한다. 결과 감사 수용은 close-ready 발신에서 처음 요구된다. `audit-objection`은 `workflow-accept` 전에도 낼 수 있고, `workflow-accept`는 이 kickoff의 결과 감사에 해소되지 않은 이의가 있으면 거부한다. `audit-accept --checkpoint outcome`은 `workflow-accept`가 결과 저장소를 확정한 뒤에만 기록되며, 그 저장소와 다른 `--repo`는 거부된다.
 
 1. `audit-checked --checkpoint outcome`으로 결과를 검토했음을 기록한다.
 2. 제시된 증거가 statement·criterion과 어긋나면 `audit-objection --checkpoint outcome`으로 이의를 남긴다.

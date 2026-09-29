@@ -77,6 +77,7 @@ import {
 } from "./audit.mjs";
 import {
   readDraft,
+  bindKickoffResultRepo,
   requirementsAmend,
   requirementsConfirm,
   requirementsConfirmDraft,
@@ -4340,7 +4341,9 @@ export async function executeCommand(args, execute) {
               args.worktree,
               "outcome",
               args.head,
-              args.source,
+              // The result repository comes from the recorded workflow
+              // decision; --source is only compared with it (B.3).
+              bindKickoffResultRepo(entry, args.source),
             ),
             "close-ready requires a valid outcome-audit acceptance for this kickoff; " +
               "resolve the outcome audit checkpoint (audit-response/audit-ruling/audit-accept) " +

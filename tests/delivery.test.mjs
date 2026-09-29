@@ -38,6 +38,8 @@ import {
 } from "../plugins/oh-my-teams/scripts/documents.mjs";
 import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { minimalRequirements } from "./requirements-draft-fixture.mjs";
+import { acceptTaskThroughRuntime } from "./accepted-workflow-fixture.mjs";
+import { acceptWorkflowIntegration } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 
 const exampleOrg = path.resolve(
   "plugins/oh-my-teams/examples/organization.json",
@@ -441,6 +443,20 @@ test(
       "brief",
       undefined,
       undefined,
+    );
+    // The result repository is fixed by a workflow accepted through the
+    // runtime path (Appendix G): task acceptance, then workflow-accept.
+    const staged = await acceptTaskThroughRuntime({
+      org: fixture.org,
+      stateDir: entry.pm.stateDir,
+      taskDir: fixture.worktree,
+      workflowId: "wf-redelivery",
+      resultRepo: fixture.worktree,
+    });
+    await acceptWorkflowIntegration(
+      staged.stateDir,
+      staged.workflowId,
+      staged.revision,
     );
     await auditChecked(fixture.org, fixture.worktreeId, "outcome", [
       { type: "statement", id: "s1" },

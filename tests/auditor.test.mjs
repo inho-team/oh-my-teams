@@ -36,6 +36,14 @@ import {
 } from "../plugins/oh-my-teams/scripts/requirements.mjs";
 import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 import {
+  acceptComponentTask,
+  acceptTaskThroughRuntime,
+  createSingleTaskWorkflow,
+  withUntrackedHidden,
+  createSingleTaskWorkflow as createStateWorkflow,
+  taskBody,
+} from "./accepted-workflow-fixture.mjs";
+import {
   auditAccept,
   auditChecked,
   auditObjection,
@@ -50,7 +58,12 @@ import {
   verifiedPm,
 } from "../plugins/oh-my-teams/scripts/audit.mjs";
 import { acceptOutcome } from "../plugins/oh-my-teams/scripts/gates.mjs";
-import { createWorkflow } from "../plugins/oh-my-teams/scripts/workflow.mjs";
+import {
+  acceptWorkflowIntegration,
+  createWorkflow,
+  readWorkflow,
+  resolveResultRepo,
+} from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { verify } from "../plugins/oh-my-teams/scripts/evidence.mjs";
 import { taskHash } from "../plugins/oh-my-teams/scripts/contracts.mjs";
 import {
@@ -64,6 +77,7 @@ import {
   TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { deliverKickoff } from "../plugins/oh-my-teams/scripts/delivery.mjs";
+import { bindKickoffResultRepo } from "../plugins/oh-my-teams/scripts/requirements.mjs";
 
 const exampleOrg = new URL(
   "../plugins/oh-my-teams/examples/organization.json",
@@ -969,6 +983,8 @@ test("director-signal refuses a close-ready under an audited kickoff before the 
   const fixture = kickoff(t, "wt-1", {
     auditor: { profile: "claude-current" },
   });
+  // The result repository is fixed by an accepted workflow (Appendix G).
+  await acceptStaged(await stageAcceptedTask(fixture, "wf-signal"));
 
   const signalClose = () =>
     main([
@@ -1908,46 +1924,6 @@ async function assertPassesBinding(launch) {
 // read happens before any binding check, so a --state without one would fail
 // there instead of reaching the rule under test. `repoDir` is the Git
 // directory the task file lives in.
-async function createStateWorkflow(org, stateDir, repoDir, workflowId) {
-  writeJSON(path.join(repoDir, "a.json"), {
-    schemaVersion: 2,
-    revision: 1,
-    kind: "edit",
-    id: "a",
-    goal: "noop",
-    instruction: "noop",
-    nonGoals: [],
-    constraints: [],
-    files: ["x.txt"],
-    checks: [[process.execPath, "-e", "process.exit(0)"]],
-    acceptance: [
-      { id: "check", description: "check", method: "check", checkIndexes: [0] },
-    ],
-    dependencies: [],
-    contractRefs: [],
-    contextRefs: [],
-    openQuestions: [],
-    reviewRequirements: [],
-    environment: "test",
-    baseRef: "HEAD",
-    risk: "low",
-  });
-  await createWorkflow(
-    stateDir,
-    {
-      schemaVersion: 1,
-      id: workflowId,
-      goal: "fixture's own workflow",
-      repo: ".",
-      tasks: [{ file: "a.json", role: "senior" }],
-      policy: { maxRunning: 1, maxReviewPending: 1 },
-      budget: { maxAttempts: 1, maxCalls: 4 },
-    },
-    readJSON(org),
-    repoDir,
-  );
-}
-
 // The same, for `fixture`'s own kickoff.
 function createFixtureWorkflow(fixture, workflowId) {
   return createStateWorkflow(
@@ -4042,6 +4018,8 @@ test(
       auditor: { profile: "claude-current" },
     });
     assert.equal(fixture.entry.auditPolicy.auditorConfigured, true);
+    // The result repository is fixed by an accepted workflow (Appendix G).
+    await acceptStaged(await stageAcceptedTask(fixture, "wf-d1"));
 
     // Clear assertLedgerCloseReady's own fidelity gate first, so every
     // rejection below comes from the auditPolicy-driven audit-acceptance
@@ -5070,4 +5048,544 @@ test("D4: role-terminal --role auditor refuses a differently-cased spelling of a
     /PM or a worker already uses/,
   );
   await passesD4(auditorDir);
+});
+
+// Appendix G: workflow-accept's audit checks and the result repository.
+
+const OUTCOME_CHECKED = [
+  { type: "statement", id: "s1" },
+  { type: "criterion", id: "c1" },
+];
+
+// Takes the fixture workflow's only task to accepted through the runtime path
+// (tests/accepted-workflow-fixture.mjs: attach, settle, real evidence,
+// acceptOutcome, resume), with a receipt naming `worktreePath`; the workflow
+// decision then comes from the real acceptWorkflowIntegration, as in the test
+// "workflow-accept records the result repository from a real single-task
+// acceptance, and close-ready then passes with it (G-1 end to end)".
+async function stageAcceptedTask(
+  fixture,
+  workflowId,
+  { worktreePath = fixture.repo, stateDir = fixture.entry.pm.stateDir } = {},
+) {
+  return acceptTaskThroughRuntime({
+    org: fixture.org,
+    stateDir,
+    taskDir: fixture.dir,
+    workflowId,
+    resultRepo: worktreePath,
+  });
+}
+
+const acceptStaged = (staged, repo) =>
+  acceptWorkflowIntegration(
+    staged.stateDir,
+    staged.workflowId,
+    staged.revision,
+    repo,
+  );
+
+const auditorAcceptsOutcome = (
+  fixture,
+  repo = fixture.repo,
+  head = fixture.head,
+) =>
+  withOrcaHandle(fixture.auditorHandle, async () => {
+    await auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      OUTCOME_CHECKED,
+    );
+    return auditAccept(fixture.org, fixture.worktreeId, "outcome", head, repo);
+  });
+
+const signalCloseReady = (fixture) =>
+  main([
+    "director-signal",
+    "--org",
+    fixture.org,
+    "--worktree",
+    fixture.worktreeId,
+    "--kind",
+    "close-ready",
+    "--text",
+    "ready to close",
+    "--head",
+    fixture.head,
+    "--source",
+    fixture.repo,
+  ]);
+
+test("workflow-accept records the result repository from a real single-task acceptance, and close-ready then passes with it (G-1 end to end)", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  const staged = await stageAcceptedTask(fixture, "wf-e2e");
+  // Before workflow-accept the repository is undetermined, so no outcome
+  // acceptance is recorded (checklist 21).
+  await assert.rejects(
+    () => auditorAcceptsOutcome(fixture),
+    /result repository is not determined/,
+  );
+  const accepted = await acceptStaged(staged);
+  assert.equal(
+    accepted.integration.decision.checkoutPath,
+    fs.realpathSync(fixture.repo),
+  );
+  assert.deepEqual(accepted.integration.decision.auditGate, {
+    mode: "configured",
+    source: fixture.entry.auditPolicy.source,
+  });
+  await auditorAcceptsOutcome(fixture);
+  await assert.doesNotReject(() => signalCloseReady(fixture));
+  // Counterexample 4: a real HEAD change after workflow-accept leaves the
+  // accepted decision alone, and close-ready then refuses.
+  const decisionBytes = fs.readFileSync(staged.file);
+  git(fixture.dir, ["commit", "-q", "--allow-empty", "-m", "moves HEAD"]);
+  await assert.rejects(() => signalCloseReady(fixture));
+  assert.deepEqual(fs.readFileSync(staged.file), decisionBytes);
+});
+
+test("workflow-accept refuses an unresolved outcome objection raised before acceptance, through the CLI without --org too, and leaves state.json untouched", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  const staged = await stageAcceptedTask(fixture, "wf-objection");
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "the result does not show c1",
+      rebuttalRequested: "point at the evidence for c1",
+      resultHead: fixture.head,
+      repo: fixture.repo,
+    }),
+  );
+  const before = fs.readFileSync(staged.file);
+  await assert.rejects(() => acceptStaged(staged), /unresolved objection/);
+  // Counterexample 8: no --org to omit, and the registry still resolves the
+  // kickoff from --state, so the objection check cannot be skipped.
+  await assert.rejects(
+    () =>
+      main([
+        "workflow-accept",
+        "--state",
+        staged.stateDir,
+        "--id",
+        staged.workflowId,
+        "--revision",
+        String(staged.revision),
+      ]),
+    /unresolved objection/,
+  );
+  assert.deepEqual(fs.readFileSync(staged.file), before);
+});
+
+test("an outcome objection before workflow-accept is admitted only for a possible result repository (it only blocks; a ruling lifts it)", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  const raise = (repo) =>
+    withOrcaHandle(fixture.auditorHandle, () =>
+      auditObjection(fixture.org, fixture.worktreeId, {
+        checkpoint: "outcome",
+        target: { type: "criterion", id: "c1" },
+        kind: "gap",
+        description: "gap",
+        rebuttalRequested: "show it",
+        resultHead: fixture.head,
+        repo,
+      }),
+    );
+  // No workflow of this kickoff exists yet: nothing can be a candidate.
+  await assert.rejects(() => raise(fixture.repo), /not a candidate/);
+  const other = realTempDir(t, "omt-g-other-");
+  const otherHead = initRepo(other);
+  const staged = await stageAcceptedTask(fixture, "wf-candidate");
+  // Counterexample 6: a repository the recorded state does not name.
+  await assert.rejects(
+    () =>
+      withOrcaHandle(fixture.auditorHandle, () =>
+        auditObjection(fixture.org, fixture.worktreeId, {
+          checkpoint: "outcome",
+          target: { type: "criterion", id: "c1" },
+          kind: "gap",
+          description: "gap",
+          rebuttalRequested: "show it",
+          resultHead: otherHead,
+          repo: other,
+        }),
+      ),
+    /not a candidate/,
+  );
+  await assert.doesNotReject(() => raise(fixture.repo));
+  // A workflow that ended blocked is not a candidate: retrying revives it.
+  const state = readJSON(staged.file);
+  state.status = "blocked";
+  writeJSON(staged.file, state);
+  await assert.rejects(() => raise(fixture.repo), /not a candidate/);
+});
+
+test("workflow-accept without an auditor duty keeps its old behaviour, and a kickoff whose audit policy was never pinned refuses with the retrofit command", async (t) => {
+  // Not configured: pinned false, so nothing about the result repository is
+  // recorded and a mismatched receipt does not matter.
+  const plain = kickoff(t, "wt-plain");
+  const plainStaged = await stageAcceptedTask(plain, "wf-plain");
+  const plainDecision = (await acceptStaged(plainStaged)).integration.decision;
+  assert.deepEqual(plainDecision.auditGate, {
+    mode: "not-configured",
+    source: plain.entry.auditPolicy.source,
+  });
+  assert.equal("checkoutPath" in plainDecision, false);
+  // Consumers of a not-configured kickoff pass the caller's value through.
+  assert.equal(bindKickoffResultRepo(plain.entry, "/any/repo"), "/any/repo");
+
+  // No kickoff owns the state directory: no audit fields at all.
+  const owner = kickoff(t, "wt-owner", {
+    auditor: { profile: "claude-current" },
+  });
+  const loose = realTempDir(t, "omt-g-loose-");
+  initRepo(loose);
+  const looseState = path.join(loose, ".omt");
+  const looseStaged = await stageAcceptedTask(owner, "wf-loose", {
+    stateDir: looseState,
+  });
+  const looseDecision = (await acceptStaged(looseStaged)).integration.decision;
+  assert.equal("auditGate" in looseDecision, false);
+  assert.equal("checkoutPath" in looseDecision, false);
+
+  // A registered kickoff with no pinned policy is refused outright.
+  const legacy = legacyKickoff(t, "wt-legacy");
+  const legacyStaged = await stageAcceptedTask(legacy, "wf-legacy");
+  const before = fs.readFileSync(legacyStaged.file);
+  await assert.rejects(
+    () => acceptStaged(legacyStaged),
+    /no pinned audit policy.*kickoff-audit-policy-retrofit/,
+  );
+  assert.deepEqual(fs.readFileSync(legacyStaged.file), before);
+});
+
+test("the recorded result repository binds every outcome consumer: another repository, an older decision and disagreeing workflows are refused", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  const staged = await stageAcceptedTask(fixture, "wf-bound");
+  await acceptStaged(staged);
+  // A clone, so it holds the commit the workflow's tasks pin as their base;
+  // an unrelated init commit only matches that hash when both are made within
+  // the same second.
+  const other = realTempDir(t, "omt-g-consumer-other-");
+  git(other, ["clone", "-q", fixture.dir, "."]);
+  git(other, ["config", "user.email", "auditor-test@example.com"]);
+  git(other, ["config", "user.name", "Auditor Test"]);
+  git(other, ["commit", "-q", "--allow-empty", "-m", "other repository"]);
+  const otherHead = git(other, ["rev-parse", "HEAD"]);
+  // Counterexample 5 and 6: another repository, forged as the caller's value.
+  await assert.rejects(
+    () => auditorAcceptsOutcome(fixture, other, otherHead),
+    /not the result repository/,
+  );
+  await assert.rejects(
+    () =>
+      withOrcaHandle(fixture.auditorHandle, () =>
+        auditObjection(fixture.org, fixture.worktreeId, {
+          checkpoint: "outcome",
+          target: { type: "criterion", id: "c1" },
+          kind: "gap",
+          description: "gap",
+          rebuttalRequested: "show it",
+          resultHead: otherHead,
+          repo: other,
+        }),
+      ),
+    /not the result repository/,
+  );
+  // The caller may omit the repository: the recorded one is used.
+  assert.equal(
+    bindKickoffResultRepo(fixture.entry, undefined),
+    fs.realpathSync(fixture.repo),
+  );
+  // Two accepted workflows that recorded different repositories disagree.
+  const second = await stageAcceptedTask(fixture, "wf-second", {
+    worktreePath: other,
+  });
+  await acceptStaged(second);
+  assert.throws(
+    () => bindKickoffResultRepo(fixture.entry, fixture.repo),
+    /different result repositories/,
+  );
+  fs.rmSync(path.dirname(second.file), { recursive: true });
+  // Counterexample 7: a decision saved before checkoutPath existed cannot
+  // name the repository, so this configured kickoff refuses it.
+  const state = readJSON(staged.file);
+  delete state.integration.decision.checkoutPath;
+  writeJSON(staged.file, state);
+  assert.throws(
+    () => bindKickoffResultRepo(fixture.entry, fixture.repo),
+    /predates result-repository binding/,
+  );
+  await assert.rejects(
+    () => signalCloseReady(fixture),
+    /predates result-repository binding/,
+  );
+});
+
+test("resolveResultRepo: one recorded worktree is the only candidate, and the caller's value never widens it", async (t) => {
+  const repoA = realTempDir(t, "omt-g-a-");
+  const repoB = realTempDir(t, "omt-g-b-");
+  const task = (state, worktreeId, execution) => ({
+    state,
+    worktreeId,
+    ...(execution ? { execution: { worktreeId: execution } } : {}),
+  });
+  const workflow = (tasks, integration = {}) => ({ tasks, integration });
+  const one = workflow({ a: task("accepted", `wt::${repoA}`) });
+  assert.equal(resolveResultRepo(one), repoA);
+  assert.equal(resolveResultRepo(one, repoA), repoA);
+  // Counterexample 6: a forged caller value is compared, never adopted.
+  assert.throws(() => resolveResultRepo(one, repoB), /not the worktree/);
+  // A symlink spelling of the same repository is the same repository.
+  const alias = path.join(realTempDir(t, "omt-g-alias-"), "alias");
+  fs.symlinkSync(repoA, alias, "dir");
+  assert.equal(resolveResultRepo(one, alias), repoA);
+  // Condition 5: different receipt repositories cannot be decided, with or
+  // without a caller value, including a task whose two receipts disagree.
+  const two = workflow({
+    a: task("accepted", `wt::${repoA}`),
+    b: task("accepted", `wt::${repoB}`),
+  });
+  assert.throws(() => resolveResultRepo(two), /differ/);
+  assert.throws(() => resolveResultRepo(two, repoA), /differ/);
+  const split = workflow({
+    a: task("accepted", `wt::${repoA}`, `wt::${repoB}`),
+  });
+  assert.throws(() => resolveResultRepo(split), /differ/);
+  // A vanished worktree is refused, not dropped (which would leave one).
+  const gone = path.join(repoB, "gone");
+  const vanished = workflow({
+    a: task("accepted", `wt::${repoA}`),
+    b: task("accepted", `wt::${gone}`),
+  });
+  assert.throws(() => resolveResultRepo(vanished, repoA), /no longer resolves/);
+  // A blocked or failed task is never a candidate.
+  const failed = workflow({
+    a: task("accepted", `wt::${repoA}`),
+    b: task("failed", `wt::${repoB}`),
+  });
+  assert.equal(resolveResultRepo(failed), repoA);
+  assert.throws(() => resolveResultRepo(workflow({})), /No accepted task/);
+});
+
+test("resolveResultRepo: integration required takes the caller's checkout as an unverified candidate only, and a recorded decision fixes the answer", async (t) => {
+  const repoA = realTempDir(t, "omt-g-int-a-");
+  const repoB = realTempDir(t, "omt-g-int-b-");
+  const receipt = { a: { state: "accepted", worktreeId: `wt::${repoB}` } };
+  const required = { tasks: receipt, integration: { required: true } };
+  // Task receipt paths are never the result repository here.
+  assert.throws(() => resolveResultRepo(required), /requires integration/);
+  assert.equal(resolveResultRepo(required, repoA), repoA);
+  assert.throws(
+    () => resolveResultRepo(required, path.join(repoA, "missing")),
+    /does not resolve/,
+  );
+  const decided = {
+    tasks: receipt,
+    integration: { required: true, decision: { checkoutPath: repoA } },
+  };
+  assert.equal(resolveResultRepo(decided, repoA), repoA);
+  assert.throws(
+    () => resolveResultRepo(decided, repoB),
+    /not the one this workflow was accepted with/,
+  );
+  assert.throws(
+    () =>
+      resolveResultRepo(
+        { tasks: receipt, integration: { decision: {} } },
+        repoA,
+      ),
+    /accepted before its result repository was recorded/,
+  );
+});
+
+// A real integration-required workflow inside the audited fixture: one
+// component task settled and accepted, the frozen integration task verified
+// and accepted, so only workflow-accept itself is left to call.
+async function integrationRequiredWorkflow(fixture, workflowId) {
+  const stateDir = fixture.entry.pm.stateDir;
+  writeJSON(path.join(fixture.dir, "a.json"), taskBody("a"));
+  writeJSON(
+    path.join(fixture.dir, "integration.json"),
+    taskBody("integration"),
+  );
+  await createWorkflow(
+    stateDir,
+    {
+      schemaVersion: 1,
+      id: workflowId,
+      goal: "integration required",
+      repo: ".",
+      integrationTask: "integration.json",
+      tasks: [{ file: "a.json", role: "junior" }],
+      policy: { maxRunning: 1, maxReviewPending: 1 },
+      budget: { maxAttempts: 1, maxCalls: 4 },
+    },
+    readJSON(fixture.org),
+    fixture.dir,
+  );
+  await acceptComponentTask({
+    stateDir,
+    workflowId,
+    taskId: "a",
+    resultRepo: fixture.dir,
+  });
+  const snapshot = readWorkflow(stateDir, workflowId);
+  const frozen = readJSON(path.join(snapshot.dir, "integration-task.json"));
+  const report = {
+    taskId: frozen.id,
+    taskHash: taskHash(frozen),
+    taskRevision: 1,
+    runId: "integration-run",
+    evidence: await verify(fixture.dir, {
+      baseRef: frozen.baseRef,
+      commands: frozen.checks,
+      environment: frozen.environment,
+      store: path.join(stateDir, "evidence"),
+    }),
+  };
+  await acceptOutcome(
+    fixture.dir,
+    frozen,
+    report,
+    {
+      schemaVersion: 1,
+      id: "integration-decision",
+      decider: { kind: "pm", executionId: "pm" },
+      criteria: ["check"],
+      basis: "combined check passed",
+    },
+    stateDir,
+  );
+  return {
+    stateDir,
+    workflowId,
+    report,
+    revision: snapshot.state.revision,
+    file: path.join(snapshot.dir, "state.json"),
+  };
+}
+
+test("workflow-accept with integration required: the checkout is resolved once, verified by gateCheck, and recorded as its real path (counterexamples a, b, c)", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  // The workflow-accept gateCheck re-reads the workspace fingerprint, so the
+  // untracked fixture files stay hidden for the whole test.
+  await withUntrackedHidden(fixture.dir, async () => {
+    const wf = await integrationRequiredWorkflow(fixture, "wf-integration");
+    const accept = (repo) =>
+      acceptWorkflowIntegration(
+        wf.stateDir,
+        wf.workflowId,
+        wf.revision,
+        repo,
+        wf.report,
+      );
+    const before = fs.readFileSync(wf.file);
+    // (b) A checkout that does not resolve is refused before any gateCheck and
+    // before any write.
+    await assert.rejects(
+      () => accept(path.join(fixture.dir, "missing-checkout")),
+      /does not resolve to a directory/,
+    );
+    assert.deepEqual(fs.readFileSync(wf.file), before);
+    // (a) A symlink spelling is accepted and recorded as the real path.
+    const alias = path.join(realTempDir(t, "omt-g-int-alias-"), "alias");
+    fs.symlinkSync(fixture.dir, alias, "dir");
+    const accepted = await accept(alias);
+    assert.equal(
+      accepted.integration.decision.checkoutPath,
+      fs.realpathSync(fixture.dir),
+    );
+    // (c) With a decision recorded, another checkout is refused and the
+    // recorded state stays as it was.
+    const decided = fs.readFileSync(wf.file);
+    const other = realTempDir(t, "omt-g-int-other-");
+    initRepo(other);
+    await assert.rejects(
+      () =>
+        acceptWorkflowIntegration(
+          wf.stateDir,
+          wf.workflowId,
+          readWorkflow(wf.stateDir, wf.workflowId).state.revision,
+          other,
+          wf.report,
+        ),
+      /not the one this workflow was accepted with/,
+    );
+    assert.deepEqual(fs.readFileSync(wf.file), decided);
+  });
+});
+
+test("withUntrackedHidden restores the exclude file byte for byte on success and failure, and refuses a repository outside the temp directory", async (t) => {
+  const exclude = (repo) => path.join(repo, ".git", "info", "exclude");
+  const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file) : null);
+
+  // The file existed with content that does not end in a newline.
+  const withContent = realTempDir(t, "omt-hide-content-");
+  initRepo(withContent);
+  fs.writeFileSync(exclude(withContent), "node_modules");
+  const contentBefore = read(exclude(withContent));
+  await withUntrackedHidden(withContent, async () => {
+    assert.match(read(exclude(withContent)).toString(), /\n\*\n$/);
+  });
+  assert.deepEqual(read(exclude(withContent)), contentBefore);
+
+  // The file did not exist: it is deleted again, on success and on a throw.
+  const absent = realTempDir(t, "omt-hide-absent-");
+  initRepo(absent);
+  fs.rmSync(exclude(absent), { force: true });
+  await withUntrackedHidden(absent, async () => {
+    assert.equal(read(exclude(absent)).toString(), "*\n");
+  });
+  assert.equal(read(exclude(absent)), null);
+  await assert.rejects(
+    () =>
+      withUntrackedHidden(absent, async () => {
+        throw new Error("work failed");
+      }),
+    /work failed/,
+  );
+  assert.equal(read(exclude(absent)), null);
+
+  // A failing check (verify reports failed, acceptOutcome refuses) restores it.
+  const failing = realTempDir(t, "omt-hide-failing-");
+  initRepo(failing);
+  const failingBefore = read(exclude(failing));
+  const org = path.join(failing, ".omt", "organization.json");
+  fs.mkdirSync(path.dirname(org), { recursive: true });
+  fs.copyFileSync(exampleOrg, org);
+  const stateDir = path.join(failing, ".omt");
+  await createSingleTaskWorkflow(org, stateDir, failing, "wf-failing", {
+    checks: [[process.execPath, "-e", "process.exit(1)"]],
+  });
+  await assert.rejects(() =>
+    acceptComponentTask({
+      stateDir,
+      workflowId: "wf-failing",
+      taskId: "a",
+      resultRepo: failing,
+    }),
+  );
+  assert.deepEqual(read(exclude(failing)), failingBefore);
+
+  // A repository outside the temporary directory is refused untouched.
+  const real = path.join(process.cwd(), ".git");
+  const cwdBefore = fs.existsSync(real);
+  await assert.rejects(
+    () => withUntrackedHidden(process.cwd(), async () => {}),
+    /not inside/,
+  );
+  assert.equal(fs.existsSync(real), cwdBefore);
 });

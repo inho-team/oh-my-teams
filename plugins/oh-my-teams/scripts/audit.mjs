@@ -24,6 +24,7 @@ import {
 } from "./core.mjs";
 import { canonicalize, readReference } from "./contracts.mjs";
 import {
+  bindKickoffResultRepo,
   ledgerHash as computeLedgerHash,
   readLedger,
 } from "./requirements.mjs";
@@ -422,6 +423,19 @@ export async function auditObjection(
   };
   assertDeclaredIdentity(declared, verifiedCaller);
   const ledger = requireLedger(orgFile, worktreeId);
+  // An outcome objection may be raised before workflow-accept (allowPending):
+  // an objection only blocks, and a ruling is the only thing that lifts it,
+  // never the repository it names, so an unverified candidate repository is
+  // safe here where an acceptance would not be. computeBinding still checks
+  // that repository's real HEAD against the declared resultHead.
+  const boundRepo =
+    checkpoint === "outcome"
+      ? bindKickoffResultRepo(
+          listKickoffs(orgFile, worktreeId).kickoffs[0],
+          repo,
+          { allowPending: true },
+        )
+      : repo;
   return withAudit(orgFile, worktreeId, async (audit) => {
     const record = audit.checkpoints[checkpoint];
     record.binding = await computeBinding(
@@ -429,7 +443,7 @@ export async function auditObjection(
       ledger,
       audit,
       resultHead,
-      repo,
+      boundRepo,
     );
     record.objections = [
       ...record.objections,
@@ -833,6 +847,15 @@ export async function auditAccept(
   verifiedAuditor(orgFile, worktreeId);
   const ledger = requireLedger(orgFile, worktreeId);
   const ownerRoot = ownerProject(orgFile);
+  // An outcome acceptance pins the result HEAD, so it is only recorded once
+  // workflow-accept has fixed the result repository (no allowPending).
+  const boundRepo =
+    checkpoint === "outcome"
+      ? bindKickoffResultRepo(
+          listKickoffs(orgFile, worktreeId).kickoffs[0],
+          repo,
+        )
+      : repo;
   return withAudit(orgFile, worktreeId, async (audit) => {
     const check = await auditAccepted({
       audit,
@@ -840,7 +863,7 @@ export async function auditAccept(
       ledger,
       ownerRoot,
       resultHead,
-      repo,
+      repo: boundRepo,
     });
     assert(
       check.accepted,
