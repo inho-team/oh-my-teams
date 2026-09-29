@@ -144,7 +144,16 @@ function initRepo(dir) {
 // terminal — enough identity plumbing for every verifiedAuditor/verifiedPm/
 // verifiedDirector check these tests exercise to pass. `dir` doubles as the
 // Git workspace resultHead/head claims are checked against.
-function kickoff(t, worktreeId = "wt-1", { auditor } = {}) {
+//
+// With `deliverable: true` the kickoff can really be delivered: `dir` becomes
+// the owner checkout on `main` (also the director's checkout), `repo` a linked
+// worktree on branch `kick` holding one extra commit, `head` that commit, and
+// the delivery mode `local-merge` into `main`.
+function kickoff(
+  t,
+  worktreeId = "wt-1",
+  { auditor, deliverable = false } = {},
+) {
   // realpath'd: on macOS os.tmpdir() sits under a /var -> /private/var
   // symlink, and process.chdir() reports the resolved path, so an
   // un-resolved dir would never equal process.cwd() in a director-authority
@@ -153,7 +162,18 @@ function kickoff(t, worktreeId = "wt-1", { auditor } = {}) {
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-")),
   );
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const head = initRepo(dir);
+  let head = initRepo(dir);
+  let repo = dir;
+  if (deliverable) {
+    git(dir, ["branch", "-M", "main"]);
+    repo = `${dir}-kick`;
+    t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+    git(dir, ["worktree", "add", "-q", "-b", "kick", repo]);
+    fs.writeFileSync(path.join(repo, "result.md"), "delivered result\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-q", "-m", "result"]);
+    head = git(repo, ["rev-parse", "HEAD"]);
+  }
   const org = path.join(dir, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(org), { recursive: true });
   fs.copyFileSync(exampleOrg, org);
@@ -177,7 +197,9 @@ function kickoff(t, worktreeId = "wt-1", { auditor } = {}) {
     pm: { worktreeId, path: pm, stateDir: path.join(pm, ".omt") },
     organizationRevision: readJSON(org).revision,
     brief,
-    delivery: { mode: "none" },
+    delivery: deliverable
+      ? { mode: "local-merge", branch: "main" }
+      : { mode: "none" },
     requirements: minimalRequirements(org, worktreeId),
     director: { terminalHandle: "term_director_1", checkoutPath: dir },
   });
@@ -191,7 +213,7 @@ function kickoff(t, worktreeId = "wt-1", { auditor } = {}) {
   });
   return {
     dir,
-    repo: dir,
+    repo,
     head,
     org,
     brief,
@@ -5154,11 +5176,12 @@ test("workflow-accept records the result repository from a real single-task acce
 test("h1: a new outcome objection after a recorded outcome acceptance makes close-ready and deliver each refuse, on the same HEAD and ledger", async (t) => {
   const fixture = kickoff(t, "wt-1", {
     auditor: { profile: "claude-current" },
+    deliverable: true,
   });
   await acceptStaged(await stageAcceptedTask(fixture, "wf-h1"));
   await requirementsFidelity(fixture.org, fixture.worktreeId, {
     head: fixture.head,
-    repo: fixture.dir,
+    repo: fixture.repo,
     recordedBy: "pm",
     items: [
       { type: "statement", id: "s1", status: "met", evidence: "README.md" },
@@ -5184,24 +5207,35 @@ test("h1: a new outcome objection after a recorded outcome acceptance makes clos
   const closeReady = () =>
     assertKickoffCloseReady(fixture.org, fixture.worktreeId, {
       head: fixture.head,
-      repo: fixture.dir,
+      repo: fixture.repo,
       entry: fixture.entry,
     });
   const deliver = () =>
     deliverKickoff({
       orgFile: fixture.org,
       worktreeId: fixture.worktreeId,
-      source: fixture.dir,
+      source: fixture.repo,
       head: fixture.head,
       callerCwd: fixture.dir,
     });
 
-  // Before the objection: close-ready passes, and deliver gets past the audit
-  // gate to the delivery-mode check (this kickoff asks for no delivery).
+  // Before the objection: close-ready passes and deliver really succeeds,
+  // merging the verified result HEAD into the owner checkout's main.
   await assert.doesNotReject(closeReady);
-  await assert.rejects(deliver, /asked for no delivery into the project/);
+  await assert.doesNotReject(() => signalCloseReady(fixture));
+  const delivered = await deliver();
+  assert.equal(delivered.delivered, true);
+  assert.equal(delivered.merged, true);
+  assert.equal(delivered.branch, "main");
+  assert.equal(delivered.head, fixture.head);
+  assert.equal(delivered.mergeCommit, git(fixture.dir, ["rev-parse", "HEAD"]));
+  git(fixture.dir, ["merge-base", "--is-ancestor", fixture.head, "main"]);
+  assert.equal(
+    fs.readFileSync(path.join(fixture.dir, "result.md"), "utf8"),
+    "delivered result\n",
+  );
 
-  const headBefore = git(fixture.dir, ["rev-parse", "HEAD"]);
+  const headBefore = git(fixture.repo, ["rev-parse", "HEAD"]);
   const ledgerBefore = ledgerHash(readLedger(fixture.org, fixture.worktreeId));
   const request = path.join(fixture.dir, "h1-objection.json");
   writeJSON(request, {
@@ -5228,7 +5262,7 @@ test("h1: a new outcome objection after a recorded outcome acceptance makes clos
   assert.equal(objected.code, 0, objected.stderr);
   assert.equal(JSON.parse(objected.stdout).recorded, true);
   // Only the objection changed: same HEAD, same ledger.
-  assert.equal(git(fixture.dir, ["rev-parse", "HEAD"]), headBefore);
+  assert.equal(git(fixture.repo, ["rev-parse", "HEAD"]), headBefore);
   assert.equal(
     ledgerHash(readLedger(fixture.org, fixture.worktreeId)),
     ledgerBefore,
