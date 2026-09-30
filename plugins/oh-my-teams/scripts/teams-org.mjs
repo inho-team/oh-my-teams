@@ -57,7 +57,7 @@ import {
 } from "./role-terminal.mjs";
 import { predictLaunchPath } from "./launch-matrix.mjs";
 import { answerPrompt } from "./prompt-supervision.mjs";
-import { advise, assist, draft, validateTask, work } from "./worker.mjs";
+import { advise, draft, validateTask, work } from "./worker.mjs";
 import {
   aggregate,
   git as gitEvidence,
@@ -338,8 +338,6 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role worker]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
-  assist --org FILE --task FILE --repo DIR --state DIR --role ROLE
-         --kind research|checklist|edit [--profile PROFILE]
   advise --org FILE --brief FILE --repo DIR --state DIR --role ROLE
          --kind plan|design|review|unblock [--profile PROFILE]
          (read-only advisor call; spends one slot of policy.adviceBudget)
@@ -644,7 +642,6 @@ export const ALLOWED_OPTIONS = {
   ],
   work: ["org", "task", "repo", "state", "role", "workflow-id", "attempt-id"],
   draft: ["org", "task", "repo", "kind"],
-  assist: ["org", "task", "repo", "state", "role", "kind", "profile"],
   advise: ["org", "brief", "repo", "state", "role", "kind", "profile"],
   verify: ["task", "repo", "state", "timeout-ms"],
   "merge-check": [
@@ -839,7 +836,6 @@ export const REQUIRED_OPTIONS = {
   "supervision-wait": ["run"],
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
-  assist: ["org", "task", "repo", "state", "role", "kind"],
   advise: ["org", "brief", "repo", "state", "role", "kind"],
   verify: ["task", "repo", "state"],
   "merge-check": ["evidence", "task", "repo", "base"],
@@ -4119,18 +4115,6 @@ export async function executeCommand(args, execute) {
         readJSON(args.org),
         readJSON(args.task),
         { kind: args.kind || "citations" },
-      );
-    case "assist":
-      return assist(
-        path.resolve(args.repo),
-        readJSON(args.org),
-        readJSON(args.task),
-        {
-          role: args.role,
-          kind: args.kind,
-          stateDir: path.resolve(args.state),
-          profileId: args.profile,
-        },
       );
     case "advise":
       return advise(

@@ -285,7 +285,7 @@ kickoff-claim(원장 확정, ledgerHash 고정)
 
 ### B.1 조직 스키마
 
-`organization.schema.json`에 `roles`·`assistants`·`advisors`와 형제인 최상위 선택 필드를 추가한다.
+`organization.schema.json`에 `roles`·`advisors`와 형제인 최상위 선택 필드를 추가한다.
 
 ```jsonc
 "auditor": {

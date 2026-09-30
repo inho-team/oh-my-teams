@@ -153,8 +153,6 @@ test("a director command refuses what it cannot open", () => {
 test("a director opens as a visible split of the calling terminal and the tab is titled", async () => {
   const command = directorCommand(example(), { profile: "claude-current" });
   const orca = fakeOrca([
-    [PROMPT],
-    [PROMPT, `${PROMPT} ${command.command}`],
     [`${PROMPT} ${command.command}`, "╭ Claude Code ╮", "│ opus │", "> "],
   ]);
   const opened = await openDirectorTerminal({

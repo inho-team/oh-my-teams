@@ -64,7 +64,6 @@ function astraLedOrg() {
   for (const [role, profile] of Object.entries(profiles)) {
     org.roles[role] = { ...org.roles[role], profile, fallbacks: [] };
   }
-  delete org.assistants;
   return validateOrg(org);
 }
 
@@ -295,7 +294,7 @@ test("organization validation guards the advisor allowlist and budget", () => {
   );
 });
 
-test("the advise command takes a brief and requires the same six inputs as assist", () => {
+test("the advise command takes a brief and requires six inputs", () => {
   assert.deepEqual(REQUIRED_OPTIONS.advise, [
     "org",
     "brief",

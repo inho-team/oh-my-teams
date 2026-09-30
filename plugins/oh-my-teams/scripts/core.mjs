@@ -881,23 +881,6 @@ export function validateOrg(org) {
     validateRole(role, org.roles[role], org);
   }
 
-  if (org.assistants) {
-    for (const [role, profiles] of Object.entries(org.assistants)) {
-      assert(Object.hasOwn(org.roles, role), `Unknown assistant role: ${role}`);
-      assert(
-        Array.isArray(profiles) &&
-          profiles.length > 0 &&
-          new Set(profiles).size === profiles.length &&
-          profiles.every(
-            (profile) =>
-              Object.hasOwn(org.profiles, profile) &&
-              org.profiles[profile].model === "gpt-oss-120b-medium",
-          ),
-        `Invalid assistant profiles: ${role}`,
-      );
-    }
-  }
-
   if (org.advisors) {
     for (const [role, profiles] of Object.entries(org.advisors)) {
       assert(Object.hasOwn(org.roles, role), `Unknown advisor role: ${role}`);
@@ -1177,7 +1160,7 @@ export function migrateLegacyOrg(org) {
     for (const binding of Object.values(migrated.roles)) {
       if (binding.parent === role) binding.parent = successor;
     }
-    for (const key of ["assistants", "advisors"]) {
+    for (const key of ["advisors"]) {
       if (!migrated[key]?.[role]) continue;
       migrated[key][successor] ??= migrated[key][role];
       delete migrated[key][role];
@@ -1223,8 +1206,11 @@ export function saveOrg(file, org, { update = false, expectedRevision } = {}) {
         assert(!update, "No organization; run the form skill first");
       }
 
+      // `assistants` configured the removed assist command; a saved revision
+      // drops it so an old file stops carrying a setting that does nothing.
+      const { assistants: _removed, ...current } = org;
       const next = validateOrg({
-        ...org,
+        ...current,
         revision: previous ? previous.revision + 1 : 1,
       });
       if (previous) {

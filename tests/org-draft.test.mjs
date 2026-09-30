@@ -8,14 +8,12 @@ import {
   DEPTH_ROLES,
   readJSON,
   resolveRole,
-  run,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
+import { executeCommand } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import {
   DRAFT_DEFAULTS,
   draftOrganization,
 } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
-
-const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
 
 function models(count) {
   return Array.from({ length: count }, () => "claude:default");
@@ -64,14 +62,13 @@ test("a draft spends nothing beyond the models the user chose", () => {
   });
   // Formation asks for models only. Anything else it saved without asking has
   // to be the least costly value, so a user who never opens adjust is never
-  // billed for a fallback, a parallel slot, or an assistant they did not pick.
+  // billed for a fallback or a parallel slot they did not pick.
   for (const binding of Object.values(org.roles)) {
     assert.equal(binding.concurrency, DRAFT_DEFAULTS.concurrency);
     assert.equal(binding.attempts, 1);
     assert.deepEqual(binding.fallbacks, []);
   }
   assert.equal(org.policy.onExhaustion, "stop");
-  assert.equal(org.assistants, undefined);
 
   // Effort is left to each CLI until adjust sets it.
   for (const profile of Object.values(org.profiles)) {
@@ -133,46 +130,50 @@ test("a draft refuses what it cannot fill in without asking", () => {
   );
 });
 
-test("the CLI writes a draft init accepts, and never over an existing file", async (t) => {
+test("draft and init save through a fixed catalog, without overwriting", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-draft-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const draft = path.join(dir, "draft.json");
-  const args = [
-    "org-draft",
-    "--name",
-    "team",
-    "--tiers",
-    "2",
-    "--models",
-    "claude:default,agy:gemini-3.8-flash-high",
-    "--output",
-    draft,
-  ];
+  const args = {
+    command: "org-draft",
+    name: "team",
+    tiers: "2",
+    models: "claude:default,agy:gemini-3.8-flash-high",
+    output: draft,
+  };
+  const execute = async (argv) => {
+    const key = argv.join(" ");
+    if (key === "claude --version") {
+      return { code: 0, stdout: "Claude Code test version", stderr: "" };
+    }
+    if (key === "agy models") {
+      return {
+        code: 0,
+        stdout: "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n",
+        stderr: "",
+      };
+    }
+    return { code: 1, stdout: "", stderr: "spawn codex ENOENT" };
+  };
 
-  const first = await run([process.execPath, cli, ...args]);
-  assert.equal(first.code, 0, first.stderr);
+  await executeCommand(args, execute);
 
   const org = path.join(dir, ".omt", "organization.json");
   // init is a separate save action from org-draft, so it names its own
   // explicit evidence for the draft's claude:default host-default profile
   // rather than inheriting org-draft's --models as proof of that intent.
-  const init = await run([
-    process.execPath,
-    cli,
-    "init",
-    "--org",
-    org,
-    "--from",
-    draft,
-    "--host-default",
-    "claude-default",
-  ]);
-  assert.equal(init.code, 0, init.stderr);
+  await executeCommand(
+    {
+      command: "init",
+      org,
+      from: draft,
+      "host-default": "claude-default",
+    },
+    execute,
+  );
   assert.equal(readJSON(org).roles.junior.parent, "pm");
 
   // The draft path could be the live organization file; overwriting it would
   // bypass the rule that init never replaces an existing organization.
-  const second = await run([process.execPath, cli, ...args]);
-  assert.equal(second.code, 1);
-  assert.match(second.stderr, /Draft output exists/);
+  await assert.rejects(executeCommand(args, execute), /Draft output exists/);
 });
