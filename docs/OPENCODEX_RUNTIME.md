@@ -125,7 +125,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 1. 먼저 `runtime-doctor`와 같은 진단을 합니다. 런타임이 이미 정상(`runtimeHealthy`)이면 아무것도 바꾸지 않고 결과에 `reused: true`를 담아 돌려줍니다. 카탈로그의 다른 검사가 실패했더라도 정상 런타임은 다시 설치하지 않습니다.
 2. 정상이 아니면 `~/.omt/runtime/opencodex/locks/<지문>.lock`을 잡고 `staging/<지문>-<임의 ID>` 디렉터리에 `package.json`과 `package-lock.json`을 복사한 뒤 `npm ci`를 실행합니다(제한 시간 180초).
-3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 15초 안에 응답하는지 확인합니다. 임시 홈은 `~/.omt/runtime/opencodex/health-<uuid>/` 아래에 만들어지며, 성공과 실패 모두에서 정리됩니다. `HOME`, `USERPROFILE`, `OPENCODEX_HOME`, `CODEX_HOME`은 모든 플랫폼에서 임시 경로로 격리합니다. Windows에서는 `HOMEDRIVE`와 `HOMEPATH`도 임시 경로로 바꿉니다. 이 계산은 CI의 windows-latest에서 단위 테스트로 확인했지만(`tests/dependencies.test.mjs`의 "the isolated health environment maps each variable to its own temporary path", posixOnly 아님), 실제 사용자 HOME에서 실행한 결과와 실제 OpenCodex가 이 값을 홈으로 해석하는지는 **미검증**입니다(opencodex-followups-health.md, opencodex-followups-windows.md). `APPDATA`와 `LOCALAPPDATA`는 이 격리 대상이 아니라서 부모 프로세스의 값이 그대로 상속되며, OpenCodex가 이 두 변수를 실제로 쓰는지는 확인하지 않았습니다. 그 밖의 플랫폼에서는 `HOMEDRIVE`·`HOMEPATH`를 물려받지 않도록 제거합니다. macOS에서는 실제 사용자 HOME의 읽기와 쓰기를 `sandbox-exec`로 모두 차단한 채 실행해도 상태 확인이 `ready`가 되는 것을 확인했습니다(같은 문서의 「가짜 HOME 실측」, macOS 전용 실험).
+3. 설치된 `ocx --version` 출력에 고정된 버전이 들어 있는지, 동봉된 Bun이 실행되는지 확인하고, 격리된 임시 홈에서 `ocx start`를 띄워 `/healthz`가 60초 안에 응답하는지 확인합니다. 임시 홈은 `~/.omt/runtime/opencodex/health-<uuid>/` 아래에 만들어지며, 성공과 실패 모두에서 정리됩니다. `HOME`, `USERPROFILE`, `OPENCODEX_HOME`, `CODEX_HOME`은 모든 플랫폼에서 임시 경로로 격리합니다. Windows에서는 `HOMEDRIVE`와 `HOMEPATH`도 임시 경로로 바꿉니다. 이 계산은 CI의 windows-latest에서 단위 테스트로 확인했지만(`tests/dependencies.test.mjs`의 "the isolated health environment maps each variable to its own temporary path", posixOnly 아님), 실제 사용자 HOME에서 실행한 결과와 실제 OpenCodex가 이 값을 홈으로 해석하는지는 **미검증**입니다(opencodex-followups-health.md, opencodex-followups-windows.md). `APPDATA`와 `LOCALAPPDATA`는 이 격리 대상이 아니라서 부모 프로세스의 값이 그대로 상속되며, OpenCodex가 이 두 변수를 실제로 쓰는지는 확인하지 않았습니다. 그 밖의 플랫폼에서는 `HOMEDRIVE`·`HOMEPATH`를 물려받지 않도록 제거합니다. macOS에서는 실제 사용자 HOME의 읽기와 쓰기를 `sandbox-exec`로 모두 차단한 채 실행해도 상태 확인이 `ready`가 되는 것을 확인했습니다(같은 문서의 「가짜 HOME 실측」, macOS 전용 실험).
 4. 모두 통과하면 `staging`을 `runtimes/<지문>`으로 옮기고, 활성 포인터 `active.json`을 임시 파일 교체 방식으로 갱신한 뒤 다시 진단한 결과에 `installed: true`를 담아 돌려줍니다.
 5. 성공과 실패에 관계없이 이번 실행의 `staging` 디렉터리는 마지막에 삭제합니다.
 
@@ -170,7 +170,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 | `runtime-npm-install-failed: <npm stderr>` | `npm ci`가 실패했거나 제한 시간을 넘겼습니다. |
 | `runtime-version-mismatch` | 설치된 `ocx --version` 출력에 `plugins/oh-my-teams/package.json`에 고정된 버전이 들어 있지 않습니다. |
 | `runtime-bun-unavailable` | 동봉된 Bun 실행 파일이 종료 코드 0으로 끝나지 않았습니다. |
-| `runtime-health-check-failed` | 격리된 임시 홈에서 띄운 `ocx start`가 15초 안에 `/healthz`에 정상 응답하지 않았습니다. |
+| `runtime-health-check-failed` | 격리된 임시 홈에서 띄운 `ocx start`가 60초 안에 `/healthz`에 정상 응답하지 않았습니다. |
 | `runtime-install-locked` | 같은 지문의 설치 잠금을 다른 프로세스가 잡고 있습니다. |
 
 ### runtime-repair
