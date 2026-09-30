@@ -35,12 +35,24 @@ const posixOnly = {
   skip: process.platform === "win32" && "the fake Orca is a POSIX script",
 };
 
-function writeFakeOrca(dir, terminal) {
+function writeFakeOrca(dir, terminal, { commandLog, terminalState = {} } = {}) {
   const file = path.join(dir, "fake-orca.mjs");
+  const listedTerminal = JSON.stringify({
+    handle: terminal,
+    agentIdentity: "agy",
+    status: "running",
+    lastOutputAt: "2026-09-26T00:00:00Z",
+    ...terminalState,
+  });
+  const recordCommand = commandLog
+    ? `fs.appendFileSync(${JSON.stringify(commandLog)}, JSON.stringify(argv) + "\\n");`
+    : "";
   fs.writeFileSync(
     file,
     `#!${process.execPath}
+import fs from "node:fs";
 const argv = process.argv.slice(2);
+${recordCommand}
 function reply(result, code) {
   process.stdout.write(JSON.stringify({ ok: code !== 1, result }));
   process.exit(code ?? 0);
@@ -66,14 +78,7 @@ if (argv[0] === "--version") {
   });
 } else if (argv[0] === "terminal" && argv[1] === "list") {
   reply({
-    terminals: [
-      {
-        handle: "${terminal}",
-        agentIdentity: "agy",
-        status: "running",
-        lastOutputAt: "2026-09-26T00:00:00Z",
-      },
-    ],
+    terminals: [${listedTerminal}],
   });
 } else {
   process.stdout.write(JSON.stringify({ ok: true, result: {} }));
@@ -384,6 +389,73 @@ test(
         assert.equal(detail.diagnostics.terminalState.agentIdentity, "agy");
         return true;
       },
+    );
+  },
+);
+
+test(
+  "a ready, non-orphaned terminal that times out is refused before worker-start creates a Dispatch",
+  posixOnly,
+  async (t) => {
+    const dir = tempDir(t);
+    const commandLog = path.join(dir, "fake-orca-commands.jsonl");
+    const fakeOrca = writeFakeOrca(dir, "term_ready_1", {
+      commandLog,
+      terminalState: {
+        ready: true,
+        orphaned: false,
+        connected: true,
+        writable: true,
+      },
+    });
+    const orgFile = path.join(dir, "organization.json");
+    writeJSON(
+      orgFile,
+      readJSON(
+        new URL(
+          "../plugins/oh-my-teams/examples/organization.json",
+          import.meta.url,
+        ),
+      ),
+    );
+
+    await assert.rejects(
+      main([
+        "worker-start",
+        "--repo",
+        dir,
+        "--org",
+        orgFile,
+        "--role",
+        "pl",
+        "--spec",
+        "이어서 한다",
+        "--terminal",
+        "term_ready_1",
+        "--orca",
+        fakeOrca,
+      ]),
+      (error) => {
+        assert.match(error.message, /did not report tui-idle within 20000ms/);
+        const [, ...rest] = error.message.split("\n");
+        const detail = JSON.parse(rest.join("\n"));
+        assert.equal(detail.signal.code, "timeout");
+        assert.equal(detail.diagnostics.terminalState.ready, true);
+        assert.equal(detail.diagnostics.terminalState.orphaned, false);
+        return true;
+      },
+    );
+
+    const commands = fs
+      .readFileSync(commandLog, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.ok(commands.some((argv) => argv.includes("tui-idle")));
+    assert.ok(
+      !commands.some(
+        (argv) => argv[0] === "orchestration" && argv[1] === "worker-start",
+      ),
     );
   },
 );
