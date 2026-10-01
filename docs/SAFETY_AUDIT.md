@@ -38,8 +38,8 @@
 ## 검증 범위와 남은 항목
 
 이 문서가 적는 수치는 소스에서 센 정적 계수이며 실행 결과가 아니다. 현재
-계수는 `npm test`의 최상위 테스트 선언 1241개, `npm run quality`의
-149개 활성 모듈·558개 공개 export, `npm run eval:organization`의 11개 결정적 시나리오다. 통과 여부는 각 명령을 실행한 기록의 종료 코드와 pass·fail·skipped
+계수는 `npm test`의 최상위 테스트 선언 1252개, `npm run quality`의
+149개 활성 모듈·559개 공개 export, `npm run eval:organization`의 11개 결정적 시나리오다. 통과 여부는 각 명령을 실행한 기록의 종료 코드와 pass·fail·skipped
 수로 확인한다. 2026-09-28 최종 점검에서는 `npm test`, `npm run quality`,
 `npm run format:check`, `npm run eval:organization`을 실행해 모두 통과했으며, 그
 날의 테스트 수는 위의 현재 계수와 같다고 보장하지 않는다. 테스트는 실제 CLI 프로세스와
@@ -103,15 +103,31 @@ bind·session-bind 설계를 검토했으나 위조 가능한 환경·조상 프
 후보 파일 자체를 수정할 권한이 있는 사용자는 막지 못한다.
 
 복수 결과 저장소를 확정하는 증명(`requirements.mjs`의 `proveResultRepoContainment`)의
-Git 호출은 같은 파일의 `runGit` 한 함수에만 있다. 이 함수도 실행 파일을 이름
-`git`으로 지정하고 `PATH`와 `GIT_*` 환경을 그대로 상속한다. 상속된 `GIT_DIR`이
-다른 저장소를 가리키면 모든 후보가 같은 저장소로 읽혀서 확정 저장소가 다른
-후보와 구별되지 않거나 수용 head를 찾지 못하므로 증명은 거부로 끝난다(두 경우를
-직접 실행해 확인했다). `PATH` 앞에 놓인 가짜 `git`은 증명을 거짓으로 통과시킬 수
-있으며, 이는 `evidence.mjs`와 같은 종류인 같은 OS 사용자 수준의 위조 한계다.
+Git 호출은 같은 파일의 `runGit` 한 함수에만 있고, 이 함수는 `local-adapter.mjs`의
+`runTrustedGitSync`만 호출한다. 이 실행기는 위의 `resolveTrustedGitExecutable`이 고른
+고정 경로만 실행하고, 자식 프로세스에는 `process.env`의 어떤 값도 넘기지 않으며
+(POSIX는 빈 환경, Windows는 `SystemRoot` 하나), 30초 시간 제한을 둔다. 신뢰할 수
+있는 실행 파일이 없으면 `PATH`의 `git`으로 넘어가지 않고 증명을 거부한다. 따라서
+Homebrew처럼 위 후보 경로 밖에만 Git이 설치된 환경에서는 결과 저장소를 확정할 수
+없다. 테스트(`tests/auditor.test.mjs`의 f7-6b·f7-6c·f7-6d, `tests/execution-port.test.mjs`)는
+다음을 고정한다. `PATH` 앞의 가짜 `git`이나 위조한 `GIT_DIR`·`GIT_WORK_TREE`·
+`GIT_COMMON_DIR`가 있어도 거부 결과와 확정 결과가 같다. 신뢰 실행기 부재, 시간
+초과, 프로세스 사망, 실제 Git 오류(손상된 커밋 객체, 빠진 중간 커밋)는 모두
+거부로 끝나며, 이때 registry·audit·PM state 파일 바이트가 바뀌지 않는다. 신뢰
+실행기 부재·시간 초과·프로세스 사망은 실제로 만들 수 없어 테스트가 띄운 자식
+프로세스 안에서 `child_process.spawnSync`와 `fs.lstatSync`를 바꿔 주입한다. 이
+주입은 테스트 쪽에만 있으며, 호출자가 증명의 실행기를 바꿀 인자·환경 변수·CLI
+옵션은 없다.
+
 증명은 종료 코드 0과 1만 Git의 답으로 인정한다. 부재 커밋은 `rev-parse --verify
 --quiet`가, 비조상은 `merge-base --is-ancestor`가 1을 낼 때에만 "포함하지 못함"으로
 세고, 그 밖의 종료 코드·실행 실패·시간 초과는 증명 실패로 거부한다.
+
+이 실행기가 막는 것은 실행 파일 선택과 환경 변수를 통한 조작까지다. Git이 읽는
+대상은 격리하지 않는다. 실측으로 확인한 바로는 후보 저장소의 자체 설정(`core.bare`
+등)이 Git의 답을 바꾸고, 저장소가 아닌 하위 디렉터리는 상위 저장소로 해석된다.
+시간 제한은 Git 자식에게만 종료 신호를 보내며 Git이 띄운 하위 프로세스의 회수는
+보장하지 않는다. 신뢰 후보 `git` 파일을 직접 수정할 수 있는 사용자는 막지 못한다.
 
 `kickoff-registry.mjs`의 `tryGit`은 0이 아닌 모든 종료를 같은 `null`로 돌려주므로
 `isAncestor`는 Git 오류도 "조상 아님"으로 읽는다. 다만 이 함수를 쓰는 병합 기록
@@ -120,5 +136,5 @@ Git 호출은 같은 파일의 `runGit` 한 함수에만 있다. 이 함수도 �
 `push --delete`와 `branch --delete`가 실패한 경우만 들어간다. 따라서 Git 오류가 병합이나 조상 관계를 거짓으로 증명하는
 방향으로 쓰이는 곳은 코드를 읽어 확인한 범위에서 없다.
 
-이 호출들을 `local-adapter.mjs`의 신뢰 실행기로 바꾸는 일은 이사가 승인한 후속
-task f7c에서 수행한다. 그 전까지 위 한계가 남아 있다.
+`evidence.mjs`의 `git()`과 `kickoff-registry.mjs`의 `tryGit`은 이 실행기로 바꾸지
+않았다. 두 함수가 `PATH`와 `GIT_*` 환경을 그대로 상속하는 한계는 그대로 남아 있다.

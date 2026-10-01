@@ -1,4 +1,5 @@
 /** Local execution adapter: plain Git worktrees and one-shot provider calls. */
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { assert, run } from "./core.mjs";
@@ -234,6 +235,61 @@ export async function resolveGitCommonDir(cwd, { execute = run } = {}) {
   throw new Error(
     `Git common-dir lookup failed for ${cwd}: ${result.stderr || result.stdout || `exit ${result.code}`}`,
   );
+}
+
+/**
+ * Runs one `git` command synchronously through the same trust anchors
+ * {@link resolveGitCommonDir} uses, for callers that must decide on Git's own
+ * answer and cannot let the caller's environment change it.
+ *
+ * Trust boundary: the executable is only ever {@link resolveTrustedGitExecutable}'s
+ * fixed absolute path (never a `PATH` lookup) and the child environment is only
+ * {@link FIXED_CHILD_ENV}, so `PATH`, `GIT_DIR`, `GIT_WORK_TREE`,
+ * `GIT_COMMON_DIR` and every other variable this process holds play no part.
+ * It reads no `process.env`, and with no trusted executable it throws instead
+ * of falling back to a `PATH` lookup (fail closed).
+ *
+ * Limits: this does not isolate Git from the repository it is pointed at.
+ * Git still reads that repository's own config (a local `core.bare` changes
+ * what `rev-parse --is-bare-repository` answers) and finds the repository from
+ * `repo` as Git itself does, so a directory inside another repository resolves
+ * to that one. The timeout signals the Git child only; reclaiming processes Git
+ * started is not something this function guarantees. Output is capped by Node's
+ * default `maxBuffer`, and a larger output is reported as a failed run (`status`
+ * null).
+ *
+ * @param {string} repo - Directory the command runs in.
+ * @param {string[]} args - Git arguments, without the executable.
+ * @param {object} [options] - Run options.
+ * @param {number} [options.timeoutMs=30000] - Time limit for the child.
+ * @returns {{status: number | null, timedOut: boolean, stdout: string}} Exit
+ *   code (`null` when the process could not run, was killed by a signal, or
+ *   timed out), whether the time limit was what ended it, and its stdout.
+ * @throws {Error} When no trusted `git` executable is found or the arguments
+ *   are invalid; callers must treat this as a refusal, never as "no answer".
+ */
+export function runTrustedGitSync(repo, args, { timeoutMs = 30000 } = {}) {
+  assert(
+    typeof repo === "string" && repo.trim(),
+    "A directory is required to run a trusted Git command",
+  );
+  assert(
+    Array.isArray(args) && args.every((arg) => typeof arg === "string"),
+    "Trusted Git arguments must be an array of strings",
+  );
+  const gitPath = resolveTrustedGitExecutable();
+  const result = spawnSync(gitPath, args, {
+    cwd: repo,
+    env: FIXED_CHILD_ENV,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+    timeout: timeoutMs,
+  });
+  return {
+    status: result.error ? null : result.status,
+    timedOut: result.error?.code === "ETIMEDOUT",
+    stdout: result.stdout ?? "",
+  };
 }
 
 /**

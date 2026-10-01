@@ -1,11 +1,12 @@
 /** Auditor checkpoints: objection/response/ruling records and acceptance gates. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   AUDITOR_ROLE,
   fileSha256,
@@ -6961,139 +6962,425 @@ test("f7-6: a repository that is not a candidate, misses an accepted head, or is
   });
 });
 
-test("f7-6b: only Git's clear exit code 1 counts as not containing a head; any other Git failure refuses the decision", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("the fake git shim is a POSIX shell script and needs which(1)");
-    return;
-  }
-  const fixture = await f7Kickoff(t);
-  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  const shimDir = realTempDir(t, "omt-f7-shim-");
-  const shim = path.join(shimDir, "git");
-  // Fails the chosen subcommand with the chosen exit code in one repository only.
-  fs.writeFileSync(
-    shim,
-    `#!/bin/sh\nif [ "$(pwd -P)" = "$F7_BAD_REPO" ] && [ "$1" = "$F7_BAD_CMD" ]; then exit "$F7_BAD_CODE"; fi\nexec "${realGit}" "$@"\n`,
-    { mode: 0o755 },
+// f7-6b and f7-6c used to fake Git failures with a POSIX shim first on PATH. The
+// proof now runs only the trusted git through the local adapter, so such a shim
+// can no longer cause any failure. The tests that replace them check the same
+// counterexamples at the new boundary: a real Git error wherever Git can
+// produce one, and an injected fault only for what cannot be made for real here
+// (no trusted git, a timeout, a dying process). The injection lives in a child
+// process that loads a preload module replacing that process's own
+// child_process.spawnSync and fs.lstatSync; the production code has no hook, and
+// no caller, CLI flag or environment variable can pick another executor.
+
+const F7_PRELOAD = [
+  'import childProcess from "node:child_process";',
+  'import fs from "node:fs";',
+  'import { syncBuiltinESMExports } from "node:module";',
+  'const fault = JSON.parse(process.env.F7_FAULT || "null");',
+  "const log = process.env.F7_CALL_LOG;",
+  "const spawn = childProcess.spawnSync;",
+  "const lstat = fs.lstatSync;",
+  "childProcess.spawnSync = (file, args, options) => {",
+  "  if (log) {",
+  '    fs.appendFileSync(log, JSON.stringify({ file, args, cwd: options?.cwd ?? null }) + "\\n");',
+  "  }",
+  '  if (fault && fault.mode !== "absent" && Array.isArray(args) && options?.cwd &&',
+  "      fs.realpathSync(options.cwd) === fault.repo &&",
+  "      fault.args.every((arg, index) => args[index] === arg)) {",
+  '    if (fault.mode === "death") {',
+  '      return { status: null, signal: "SIGKILL", stdout: "", stderr: "" };',
+  "    }",
+  '    const error = Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT" });',
+  '    return { error, status: null, signal: "SIGTERM", stdout: "", stderr: "" };',
+  "  }",
+  "  return spawn(file, args, options);",
+  "};",
+  'if (fault?.mode === "absent") {',
+  "  fs.lstatSync = (target, ...rest) => {",
+  "    if (/(^|[\\\\/])git(\\.exe)?$/i.test(String(target))) {",
+  '      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });',
+  "    }",
+  "    return lstat(target, ...rest);",
+  "  };",
+  "}",
+  "syncBuiltinESMExports();",
+  "",
+].join("\n");
+
+const F7_PROBE = [
+  `import { kickoffResultRepoDecide } from ${JSON.stringify(
+    pathToFileURL(
+      path.resolve("plugins/oh-my-teams/scripts/kickoff-registry.mjs"),
+    ).href,
+  )};`,
+  "const [org, worktreeId, repo] = process.argv.slice(2);",
+  "let out;",
+  "try {",
+  `  out = kickoffResultRepoDecide(org, worktreeId, { repo, reason: ${JSON.stringify(F7_REASON)} });`,
+  "} catch (error) {",
+  "  out = { error: error.message };",
+  "}",
+  "process.stdout.write(JSON.stringify(out));",
+  "",
+].join("\n");
+
+// Returns a function that runs kickoffResultRepoDecide for `repo` in a fresh
+// child process whose cwd is the director's checkout. `fault` is injected by the
+// preload ({mode: "absent"}, or {mode: "timeout" | "death", repo, args} for one
+// Git call in one repository); `env` is merged onto the child's environment.
+// The result is the decision or the error message, plus every spawnSync call
+// the child made.
+function f7ChildDecider(t) {
+  const kit = realTempDir(t, "omt-f7-child-");
+  fs.writeFileSync(path.join(kit, "preload.mjs"), F7_PRELOAD);
+  fs.writeFileSync(path.join(kit, "probe.mjs"), F7_PROBE);
+  let counter = 0;
+  return (fixture, repo, { fault, env } = {}) => {
+    counter += 1;
+    const log = path.join(kit, `calls-${counter}.jsonl`);
+    const injected = fault?.repo
+      ? { ...fault, repo: fs.realpathSync(fault.repo) }
+      : (fault ?? null);
+    const stdout = execFileSync(
+      process.execPath,
+      [
+        "--import",
+        pathToFileURL(path.join(kit, "preload.mjs")).href,
+        path.join(kit, "probe.mjs"),
+        fixture.org,
+        fixture.worktreeId,
+        repo,
+      ],
+      {
+        cwd: fixture.dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...env,
+          F7_CALL_LOG: log,
+          F7_FAULT: JSON.stringify(injected),
+        },
+      },
+    );
+    const calls = fs.existsSync(log)
+      ? fs
+          .readFileSync(log, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      : [];
+    return { ...JSON.parse(stdout), calls };
+  };
+}
+
+// The spawn calls whose leading arguments are `args`, optionally in one directory.
+const f7Calls = (calls, args, cwd) =>
+  calls.filter(
+    (call) =>
+      args.every((arg, index) => call.args?.[index] === arg) &&
+      (cwd === undefined ||
+        (call.cwd && fs.realpathSync(call.cwd) === fs.realpathSync(cwd))),
   );
-  const saved = { ...process.env };
-  const shimmed = async (badRepo, cmd, code, check) => {
-    process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH}`;
-    process.env.F7_BAD_REPO = fs.realpathSync(badRepo);
-    process.env.F7_BAD_CMD = cmd;
-    process.env.F7_BAD_CODE = String(code);
-    try {
-      await check();
-    } finally {
-      for (const key of ["PATH", "F7_BAD_REPO", "F7_BAD_CMD", "F7_BAD_CODE"]) {
-        if (saved[key] === undefined) delete process.env[key];
-        else process.env[key] = saved[key];
+
+// The loose object file of a commit; the fixture repositories hold few enough
+// objects for Git to keep every one of them loose. The objects directory is
+// asked of Git because a fixture checkout can be a linked worktree.
+function f7LooseObject(repo, sha) {
+  const objects = git(repo, [
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-path",
+    "objects",
+  ]);
+  const file = path.join(objects, sha.slice(0, 2), sha.slice(2));
+  assert.equal(fs.existsSync(file), true, `${sha} must be a loose object`);
+  fs.chmodSync(file, 0o666);
+  return file;
+}
+
+const f7Corrupt = (repo, sha) =>
+  fs.writeFileSync(f7LooseObject(repo, sha), "not a zlib stream\n");
+const f7Remove = (repo, sha) => fs.rmSync(f7LooseObject(repo, sha));
+
+function f7Commit(repo, message) {
+  git(repo, ["commit", "-q", "--allow-empty", "-m", message]);
+  return git(repo, ["rev-parse", "HEAD"]);
+}
+
+// What real Git answers for a command, so each fixture is shown to produce
+// exactly the exit code its test relies on.
+const f7GitStatus = (repo, args) =>
+  spawnSync("git", args, { cwd: repo, stdio: "ignore" }).status;
+
+const f7Verify = (sha) => [
+  "rev-parse",
+  "--verify",
+  "--quiet",
+  `${sha}^{commit}`,
+];
+
+const F7_VERIFY_ERROR =
+  /Git could not decide whether commit [0-9a-f]{40} exists in (.*) \(exit 128\)/;
+const F7_ANCESTOR_ERROR =
+  /Git could not decide whether [0-9a-f]{40} is an ancestor of HEAD in (.*) \(exit 128\)/;
+
+test("f7-6b (replaces PATH-shim f7-6b, a): with no trusted git the proof is refused for either repository and records keep their bytes", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const decide = f7ChildDecider(t);
+  await assertUnchanged(fixture, async () => {
+    for (const repo of [fixture.repo, fixture.impl]) {
+      const outcome = decide(fixture, repo, { fault: { mode: "absent" } });
+      assert.equal(outcome.decision, undefined);
+      assert.match(
+        outcome.error,
+        /result repository proof cannot run Git in .*No trusted git executable found/s,
+      );
+      // Not by path and not by name: no git was spawned for the proof at all.
+      assert.deepEqual(f7Calls(outcome.calls, ["rev-parse"]), []);
+      assert.deepEqual(f7Calls(outcome.calls, ["merge-base"]), []);
+    }
+  });
+  // Without the fault the same child decides the same repository normally.
+  const normal = decide(fixture, fixture.repo);
+  assert.equal(normal.decision.repo, fs.realpathSync(fixture.repo));
+});
+
+test("f7-6b (replaces PATH-shim f7-6b, b d e f): a real Git error in only rev-parse --verify or only merge-base refuses either repository, bytes unchanged", async (t) => {
+  // Each scenario damages one repository of a fresh fixture, then decides
+  // fixture.repo. `real` is the repository where Git must report the error.
+  const scenarios = [
+    {
+      name: "verify error in the other candidate",
+      pattern: F7_VERIFY_ERROR,
+      real: (fixture) => fixture.impl,
+      damage: (fixture) => {
+        // The commit that is both impl's HEAD and an accepted head: `rev-parse
+        // HEAD` still answers, `rev-parse --verify <it>^{commit}` cannot read it.
+        const head = git(fixture.impl, ["rev-parse", "HEAD"]);
+        f7Corrupt(fixture.impl, head);
+        assert.equal(f7GitStatus(fixture.impl, ["rev-parse", "HEAD"]), 0);
+        assert.equal(f7GitStatus(fixture.impl, f7Verify(head)), 128);
+      },
+    },
+    {
+      name: "verify error in the chosen repository",
+      pattern: F7_VERIFY_ERROR,
+      real: (fixture) => fixture.repo,
+      damage: (fixture) => {
+        // The proof checks the accepted heads in sorted order, so damaging the
+        // first one makes its commit check fail before any merge-base runs;
+        // damaging a later one could let merge-base fail first (it also reads
+        // parents), and that would be the other scenario.
+        const accepted = [
+          git(fixture.impl, ["rev-parse", "HEAD"]),
+          git(fixture.repo, ["rev-parse", "HEAD"]),
+        ].sort();
+        f7Corrupt(fixture.repo, accepted[0]);
+        assert.equal(f7GitStatus(fixture.repo, ["rev-parse", "HEAD"]), 0);
+        assert.equal(f7GitStatus(fixture.repo, f7Verify(accepted[0])), 128);
+      },
+    },
+    {
+      name: "merge-base error in the other candidate",
+      pattern: F7_ANCESTOR_ERROR,
+      real: (fixture) => fixture.impl,
+      damage: (fixture) => {
+        const accepted = git(fixture.impl, ["rev-parse", "HEAD"]);
+        const lost = f7Commit(fixture.impl, "lost");
+        f7Commit(fixture.impl, "tip");
+        f7Remove(fixture.impl, lost);
+        // HEAD answers and the accepted commit itself is intact; only walking
+        // from HEAD down to it hits the missing commit.
+        assert.equal(f7GitStatus(fixture.impl, ["rev-parse", "HEAD"]), 0);
+        assert.equal(f7GitStatus(fixture.impl, f7Verify(accepted)), 0);
+        assert.equal(
+          f7GitStatus(fixture.impl, [
+            "merge-base",
+            "--is-ancestor",
+            accepted,
+            "HEAD",
+          ]),
+          128,
+        );
+      },
+    },
+    {
+      name: "merge-base error in the chosen repository",
+      pattern: F7_ANCESTOR_ERROR,
+      real: (fixture) => fixture.repo,
+      damage: (fixture) => {
+        const accepted = git(fixture.impl, ["rev-parse", "HEAD"]);
+        const lost = f7Commit(fixture.repo, "lost");
+        f7Commit(fixture.repo, "tip");
+        f7Remove(fixture.repo, lost);
+        assert.equal(f7GitStatus(fixture.repo, ["rev-parse", "HEAD"]), 0);
+        assert.equal(f7GitStatus(fixture.repo, f7Verify(accepted)), 0);
+        assert.equal(
+          f7GitStatus(fixture.repo, [
+            "merge-base",
+            "--is-ancestor",
+            accepted,
+            "HEAD",
+          ]),
+          128,
+        );
+      },
+    },
+  ];
+  for (const scenario of scenarios) {
+    const fixture = await f7Kickoff(t);
+    scenario.damage(fixture);
+    await assertUnchanged(fixture, async () => {
+      const error = await f7Decide(fixture, fixture.repo).then(
+        () => assert.fail(`${scenario.name}: the proof must be refused`),
+        (caught) => caught,
+      );
+      const match = scenario.pattern.exec(error.message);
+      assert.ok(
+        match,
+        `${scenario.name}: unexpected refusal: ${error.message}`,
+      );
+      // The refusal names the repository where Git failed, and it is not the
+      // other kind of failure or the ordinary "does not contain" answer.
+      assert.equal(match[1], fs.realpathSync(scenario.real(fixture)));
+      const unlike =
+        scenario.pattern === F7_VERIFY_ERROR
+          ? F7_ANCESTOR_ERROR
+          : F7_VERIFY_ERROR;
+      assert.doesNotMatch(error.message, unlike);
+      assert.doesNotMatch(error.message, /does not contain|cannot be read/);
+    });
+  }
+});
+
+test("f7-6c (replaces PATH-shim f7-6c, c d f): a timeout or a dying Git process at any proof call refuses either repository, bytes unchanged", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const decide = f7ChildDecider(t);
+  const calls = [
+    {
+      args: ["rev-parse", "HEAD"],
+      pattern: /HEAD of (candidate )?.* cannot be read/,
+    },
+    {
+      args: ["rev-parse", "--verify"],
+      pattern:
+        /could not decide whether commit [0-9a-f]{40} exists in .* \(exit none\)/,
+    },
+    {
+      args: ["merge-base"],
+      pattern:
+        /could not decide whether [0-9a-f]{40} is an ancestor of HEAD in .* \(exit none\)/,
+    },
+  ];
+  await assertUnchanged(fixture, async () => {
+    for (const mode of ["timeout", "death"]) {
+      for (const repo of [fixture.repo, fixture.impl]) {
+        for (const { args, pattern } of calls) {
+          const label = `${mode} of git ${args.join(" ")} in ${repo}`;
+          const outcome = decide(fixture, fixture.repo, {
+            fault: { mode, repo, args },
+          });
+          assert.equal(outcome.decision, undefined, `${label} must refuse`);
+          assert.match(outcome.error, pattern, label);
+          assert.ok(
+            outcome.error.includes(repo),
+            `${label} must name the repository`,
+          );
+          // The injected fault was really reached by the proof.
+          assert.ok(f7Calls(outcome.calls, args, repo).length > 0, label);
+        }
       }
     }
-  };
-  await assertUnchanged(fixture, async () => {
-    // A Git error in the other candidate must not prove the chosen one exclusive.
-    await shimmed(fixture.impl, "merge-base", 128, () =>
-      assert.rejects(() => f7Decide(fixture, fixture.repo), /could not decide/),
-    );
-    await shimmed(fixture.impl, "rev-parse", 128, () =>
-      assert.rejects(
-        () => f7Decide(fixture, fixture.repo),
-        /cannot be read|could not decide/,
-      ),
-    );
-    // So must an error in the chosen repository itself.
-    await shimmed(fixture.repo, "merge-base", 128, () =>
-      assert.rejects(() => f7Decide(fixture, fixture.repo), /could not decide/),
-    );
   });
-  // With a clear exit code 1 from Git the same repositories are decided normally.
-  await shimmed(fixture.impl, "unrelated", 128, async () => {
-    const { decision } = await f7Decide(fixture, fixture.repo);
-    assert.equal(decision.repo, fs.realpathSync(fixture.repo));
+  const normal = decide(fixture, fixture.repo);
+  assert.equal(normal.decision.repo, fs.realpathSync(fixture.repo));
+});
+
+test("f7-6c (replaces PATH-shim f7-6c, g): Git's clear exit code 1 still counts as not containing, so the same repository is confirmed", async (t) => {
+  const fixture = await f7Kickoff(t);
+  // The accepted head the other candidate lacks: real Git says exit 1 for it.
+  const lacking = git(fixture.repo, ["rev-parse", "HEAD"]);
+  assert.equal(f7GitStatus(fixture.impl, f7Verify(lacking)), 1);
+  const { decision } = await f7Decide(fixture, fixture.repo);
+  assert.equal(decision.repo, fs.realpathSync(fixture.repo));
+  assert.equal(decision.headAtDecision, lacking);
+  assert.deepEqual(decision.proof.others, [
+    { repo: fixture.impl, missing: [lacking] },
+  ]);
+});
+
+// Decides in children with and without `env`, comparing what the proof
+// reports. Refusals are compared message for message against a clean run; the
+// confirmation is compared against what real Git says about the repositories.
+function f7AssertPollutionHasNoEffect(t, fixture, env) {
+  const decide = f7ChildDecider(t);
+  const proofCalls = (calls) =>
+    calls.filter(
+      (call) =>
+        f7Calls([call], ["merge-base", "--is-ancestor"]).length > 0 ||
+        f7Calls([call], ["rev-parse", "--verify", "--quiet"]).length > 0,
+    );
+  for (const repo of [fixture.impl, path.join(fixture.dir, "not-recorded")]) {
+    const clean = decide(fixture, repo);
+    const polluted = decide(fixture, repo, { env });
+    assert.equal(typeof clean.error, "string");
+    assert.equal(polluted.error, clean.error);
+  }
+  assert.match(
+    decide(fixture, fixture.impl, { env }).error,
+    /does not contain accepted head/,
+  );
+  const lacking = git(fixture.repo, ["rev-parse", "HEAD"]);
+  const confirmed = decide(fixture, fixture.repo, { env });
+  assert.equal(confirmed.error, undefined);
+  assert.equal(confirmed.decision.repo, fs.realpathSync(fixture.repo));
+  assert.equal(confirmed.decision.headAtDecision, lacking);
+  assert.deepEqual(confirmed.decision.proof.others, [
+    { repo: fixture.impl, missing: [lacking] },
+  ]);
+  // Every Git call of the proof ran the same absolute executable and none ran
+  // by the bare name `git`, which is what PATH and the environment steer.
+  const calls = proofCalls(confirmed.calls);
+  assert.ok(calls.length > 0);
+  for (const call of calls) {
+    assert.equal(path.isAbsolute(call.file), true, call.file);
+  }
+  assert.equal(new Set(calls.map((call) => call.file)).size, 1);
+}
+
+test("f7-6d (new, pollution): forged GIT_DIR, GIT_WORK_TREE and GIT_COMMON_DIR change neither the refusals nor the confirmation of the proof", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const decoy = realTempDir(t, "omt-f7-decoy-");
+  initRepo(decoy);
+  f7Commit(decoy, "decoy only");
+  f7AssertPollutionHasNoEffect(t, fixture, {
+    GIT_DIR: path.join(decoy, ".git"),
+    GIT_WORK_TREE: decoy,
+    GIT_COMMON_DIR: path.join(decoy, ".git"),
   });
 });
 
-test("f7-6c: a failure of only the commit check, by exit code or by the process dying, refuses the decision for either repository", async (t) => {
+test("f7-6d (new, pollution): a fake git first on PATH is never run by the proof, whatever it answers", async (t) => {
   if (process.platform === "win32") {
-    t.skip("the fake git shim is a POSIX shell script and needs which(1)");
+    t.skip("the fake git on PATH is a POSIX shell script");
     return;
   }
   const fixture = await f7Kickoff(t);
-  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  const shimDir = realTempDir(t, "omt-f7-shim-");
-  // Breaks only `rev-parse --verify ...` in one repository: `rev-parse HEAD`
-  // and every other subcommand still reach the real git, so the failure can
-  // only be seen by the commit-existence check inside the proof.
+  const fakeDir = realTempDir(t, "omt-f7-fake-");
+  const fakeLog = path.join(fakeDir, "calls.log");
   fs.writeFileSync(
-    path.join(shimDir, "git"),
-    [
-      "#!/bin/sh",
-      'if [ "$(pwd -P)" = "$F7_BAD_REPO" ] && [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ]; then',
-      '  if [ "$F7_BAD_MODE" = "signal" ]; then kill -9 $$; fi',
-      '  exit "$F7_BAD_CODE"',
-      "fi",
-      `exec "${realGit}" "$@"`,
-      "",
-    ].join("\n"),
+    path.join(fakeDir, "git"),
+    `#!/bin/sh\necho "$@" >> "${fakeLog}"\nexit 99\n`,
     { mode: 0o755 },
   );
-  const saved = { ...process.env };
-  const shimmed = async (badRepo, mode, code, check) => {
-    process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH}`;
-    process.env.F7_BAD_REPO = fs.realpathSync(badRepo);
-    process.env.F7_BAD_MODE = mode;
-    process.env.F7_BAD_CODE = String(code);
-    try {
-      await check();
-    } finally {
-      for (const key of ["PATH", "F7_BAD_REPO", "F7_BAD_MODE", "F7_BAD_CODE"]) {
-        if (saved[key] === undefined) delete process.env[key];
-        else process.env[key] = saved[key];
-      }
-    }
-  };
-  const refused = (pattern) => () =>
-    assert.rejects(() => f7Decide(fixture, fixture.repo), pattern);
-  await assertUnchanged(fixture, async () => {
-    // Another candidate: a Git error must not count as "does not contain".
-    await shimmed(
-      fixture.impl,
-      "exit",
-      128,
-      refused(/could not decide whether commit .* exists/),
-    );
-    await shimmed(
-      fixture.impl,
-      "exit",
-      2,
-      refused(/could not decide whether commit .* exists/),
-    );
-    await shimmed(
-      fixture.impl,
-      "signal",
-      0,
-      refused(/could not decide whether commit .* exists in .* \(exit none\)/),
-    );
-    // The chosen repository itself.
-    await shimmed(
-      fixture.repo,
-      "exit",
-      128,
-      refused(/could not decide whether commit .* exists/),
-    );
-    await shimmed(
-      fixture.repo,
-      "signal",
-      0,
-      refused(/could not decide whether commit .* exists in .* \(exit none\)/),
-    );
+  f7AssertPollutionHasNoEffect(t, fixture, {
+    PATH: `${fakeDir}${path.delimiter}${process.env.PATH}`,
   });
-  // Git's clear answer 1 (the commit is absent) still counts as "does not contain".
-  await shimmed(fixture.impl, "exit", 1, async () => {
-    const { decision } = await f7Decide(fixture, fixture.repo);
-    assert.equal(decision.repo, fs.realpathSync(fixture.repo));
-  });
+  // No proof call reached it (other, unrelated Git users may have).
+  const reached = fs.existsSync(fakeLog)
+    ? fs.readFileSync(fakeLog, "utf8")
+    : "";
+  assert.doesNotMatch(reached, /merge-base|--verify/);
 });
 
 test("f7-7: after a decision every consumer binds to that one repository, at its HEAD only, and a different path is refused", async (t) => {

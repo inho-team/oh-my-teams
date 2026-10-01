@@ -9,7 +9,6 @@
  * claim's own director identity, closing the deadlock described in A.2.
  */
 import crypto from "node:crypto";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -26,6 +25,7 @@ import {
 import { canonicalize, taskHash } from "./contracts.mjs";
 import { workspaceBinding } from "./evidence.mjs";
 import { hasValidAcceptance } from "./audit.mjs";
+import { runTrustedGitSync } from "./local-adapter.mjs";
 import { resolveResultRepo } from "./workflow.mjs";
 
 const SCOPES = ["equal", "narrower"];
@@ -1433,20 +1433,23 @@ export function collectAcceptedResults(stateDir, decidedStates) {
   return { workflowSet, heads: [...heads].sort() };
 }
 
-// The only place this module runs Git, so a trusted executor can replace it
-// later. It inherits the caller's PATH and GIT_* variables, like evidence.mjs.
+// The only place this module runs Git. It goes through the local adapter's
+// trusted executor: a fixed absolute git path, a fixed child environment and a
+// time limit, so PATH and GIT_* variables cannot change the proof. Without a
+// trusted git the proof is refused rather than run with another one.
 // Returns the exit status (null when Git could not run or timed out) and stdout.
+// evidence.mjs and kickoff-registry.mjs run Git by their own means and are not
+// covered by this.
 function runGit(repo, args) {
-  const result = spawnSync("git", args, {
-    cwd: repo,
-    stdio: ["ignore", "pipe", "pipe"],
-    encoding: "utf8",
-    timeout: 30000,
-  });
-  return {
-    status: result.error ? null : result.status,
-    stdout: (result.stdout ?? "").trim(),
-  };
+  let result;
+  try {
+    result = runTrustedGitSync(repo, args);
+  } catch (error) {
+    throw new Error(
+      `The result repository proof cannot run Git in ${repo}: ${error.message}`,
+    );
+  }
+  return { status: result.status, stdout: result.stdout.trim() };
 }
 
 // Reads HEAD; null when Git cannot report it.
