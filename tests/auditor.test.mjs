@@ -6961,168 +6961,140 @@ test("f7-6: a repository that is not a candidate, misses an accepted head, or is
   });
 });
 
-test(
-  "f7-6b: only Git's clear exit code 1 counts as not containing a head; any other Git failure refuses the decision",
-  {
-    skip:
-      process.platform === "win32" &&
-      "the fake git shim is a POSIX shell script and needs which(1)",
-  },
-  async (t) => {
-    const fixture = await f7Kickoff(t);
-    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-    const shimDir = realTempDir(t, "omt-f7-shim-");
-    const shim = path.join(shimDir, "git");
-    // Fails the chosen subcommand with the chosen exit code in one repository only.
-    fs.writeFileSync(
-      shim,
-      `#!/bin/sh\nif [ "$(pwd -P)" = "$F7_BAD_REPO" ] && [ "$1" = "$F7_BAD_CMD" ]; then exit "$F7_BAD_CODE"; fi\nexec "${realGit}" "$@"\n`,
-      { mode: 0o755 },
-    );
-    const saved = { ...process.env };
-    const shimmed = async (badRepo, cmd, code, check) => {
-      process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH}`;
-      process.env.F7_BAD_REPO = fs.realpathSync(badRepo);
-      process.env.F7_BAD_CMD = cmd;
-      process.env.F7_BAD_CODE = String(code);
-      try {
-        await check();
-      } finally {
-        for (const key of [
-          "PATH",
-          "F7_BAD_REPO",
-          "F7_BAD_CMD",
-          "F7_BAD_CODE",
-        ]) {
-          if (saved[key] === undefined) delete process.env[key];
-          else process.env[key] = saved[key];
-        }
+test("f7-6b: only Git's clear exit code 1 counts as not containing a head; any other Git failure refuses the decision", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("the fake git shim is a POSIX shell script and needs which(1)");
+    return;
+  }
+  const fixture = await f7Kickoff(t);
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const shimDir = realTempDir(t, "omt-f7-shim-");
+  const shim = path.join(shimDir, "git");
+  // Fails the chosen subcommand with the chosen exit code in one repository only.
+  fs.writeFileSync(
+    shim,
+    `#!/bin/sh\nif [ "$(pwd -P)" = "$F7_BAD_REPO" ] && [ "$1" = "$F7_BAD_CMD" ]; then exit "$F7_BAD_CODE"; fi\nexec "${realGit}" "$@"\n`,
+    { mode: 0o755 },
+  );
+  const saved = { ...process.env };
+  const shimmed = async (badRepo, cmd, code, check) => {
+    process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH}`;
+    process.env.F7_BAD_REPO = fs.realpathSync(badRepo);
+    process.env.F7_BAD_CMD = cmd;
+    process.env.F7_BAD_CODE = String(code);
+    try {
+      await check();
+    } finally {
+      for (const key of ["PATH", "F7_BAD_REPO", "F7_BAD_CMD", "F7_BAD_CODE"]) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
       }
-    };
-    await assertUnchanged(fixture, async () => {
-      // A Git error in the other candidate must not prove the chosen one exclusive.
-      await shimmed(fixture.impl, "merge-base", 128, () =>
-        assert.rejects(
-          () => f7Decide(fixture, fixture.repo),
-          /could not decide/,
-        ),
-      );
-      await shimmed(fixture.impl, "rev-parse", 128, () =>
-        assert.rejects(
-          () => f7Decide(fixture, fixture.repo),
-          /cannot be read|could not decide/,
-        ),
-      );
-      // So must an error in the chosen repository itself.
-      await shimmed(fixture.repo, "merge-base", 128, () =>
-        assert.rejects(
-          () => f7Decide(fixture, fixture.repo),
-          /could not decide/,
-        ),
-      );
-    });
-    // With a clear exit code 1 from Git the same repositories are decided normally.
-    await shimmed(fixture.impl, "unrelated", 128, async () => {
-      const { decision } = await f7Decide(fixture, fixture.repo);
-      assert.equal(decision.repo, fs.realpathSync(fixture.repo));
-    });
-  },
-);
+    }
+  };
+  await assertUnchanged(fixture, async () => {
+    // A Git error in the other candidate must not prove the chosen one exclusive.
+    await shimmed(fixture.impl, "merge-base", 128, () =>
+      assert.rejects(() => f7Decide(fixture, fixture.repo), /could not decide/),
+    );
+    await shimmed(fixture.impl, "rev-parse", 128, () =>
+      assert.rejects(
+        () => f7Decide(fixture, fixture.repo),
+        /cannot be read|could not decide/,
+      ),
+    );
+    // So must an error in the chosen repository itself.
+    await shimmed(fixture.repo, "merge-base", 128, () =>
+      assert.rejects(() => f7Decide(fixture, fixture.repo), /could not decide/),
+    );
+  });
+  // With a clear exit code 1 from Git the same repositories are decided normally.
+  await shimmed(fixture.impl, "unrelated", 128, async () => {
+    const { decision } = await f7Decide(fixture, fixture.repo);
+    assert.equal(decision.repo, fs.realpathSync(fixture.repo));
+  });
+});
 
-test(
-  "f7-6c: a failure of only the commit check, by exit code or by the process dying, refuses the decision for either repository",
-  {
-    skip:
-      process.platform === "win32" &&
-      "the fake git shim is a POSIX shell script and needs which(1)",
-  },
-  async (t) => {
-    const fixture = await f7Kickoff(t);
-    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-    const shimDir = realTempDir(t, "omt-f7-shim-");
-    // Breaks only `rev-parse --verify ...` in one repository: `rev-parse HEAD`
-    // and every other subcommand still reach the real git, so the failure can
-    // only be seen by the commit-existence check inside the proof.
-    fs.writeFileSync(
-      path.join(shimDir, "git"),
-      [
-        "#!/bin/sh",
-        'if [ "$(pwd -P)" = "$F7_BAD_REPO" ] && [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ]; then',
-        '  if [ "$F7_BAD_MODE" = "signal" ]; then kill -9 $$; fi',
-        '  exit "$F7_BAD_CODE"',
-        "fi",
-        `exec "${realGit}" "$@"`,
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
-    const saved = { ...process.env };
-    const shimmed = async (badRepo, mode, code, check) => {
-      process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH}`;
-      process.env.F7_BAD_REPO = fs.realpathSync(badRepo);
-      process.env.F7_BAD_MODE = mode;
-      process.env.F7_BAD_CODE = String(code);
-      try {
-        await check();
-      } finally {
-        for (const key of [
-          "PATH",
-          "F7_BAD_REPO",
-          "F7_BAD_MODE",
-          "F7_BAD_CODE",
-        ]) {
-          if (saved[key] === undefined) delete process.env[key];
-          else process.env[key] = saved[key];
-        }
+test("f7-6c: a failure of only the commit check, by exit code or by the process dying, refuses the decision for either repository", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("the fake git shim is a POSIX shell script and needs which(1)");
+    return;
+  }
+  const fixture = await f7Kickoff(t);
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const shimDir = realTempDir(t, "omt-f7-shim-");
+  // Breaks only `rev-parse --verify ...` in one repository: `rev-parse HEAD`
+  // and every other subcommand still reach the real git, so the failure can
+  // only be seen by the commit-existence check inside the proof.
+  fs.writeFileSync(
+    path.join(shimDir, "git"),
+    [
+      "#!/bin/sh",
+      'if [ "$(pwd -P)" = "$F7_BAD_REPO" ] && [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ]; then',
+      '  if [ "$F7_BAD_MODE" = "signal" ]; then kill -9 $$; fi',
+      '  exit "$F7_BAD_CODE"',
+      "fi",
+      `exec "${realGit}" "$@"`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  const saved = { ...process.env };
+  const shimmed = async (badRepo, mode, code, check) => {
+    process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH}`;
+    process.env.F7_BAD_REPO = fs.realpathSync(badRepo);
+    process.env.F7_BAD_MODE = mode;
+    process.env.F7_BAD_CODE = String(code);
+    try {
+      await check();
+    } finally {
+      for (const key of ["PATH", "F7_BAD_REPO", "F7_BAD_MODE", "F7_BAD_CODE"]) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
       }
-    };
-    const refused = (pattern) => () =>
-      assert.rejects(() => f7Decide(fixture, fixture.repo), pattern);
-    await assertUnchanged(fixture, async () => {
-      // Another candidate: a Git error must not count as "does not contain".
-      await shimmed(
-        fixture.impl,
-        "exit",
-        128,
-        refused(/could not decide whether commit .* exists/),
-      );
-      await shimmed(
-        fixture.impl,
-        "exit",
-        2,
-        refused(/could not decide whether commit .* exists/),
-      );
-      await shimmed(
-        fixture.impl,
-        "signal",
-        0,
-        refused(
-          /could not decide whether commit .* exists in .* \(exit none\)/,
-        ),
-      );
-      // The chosen repository itself.
-      await shimmed(
-        fixture.repo,
-        "exit",
-        128,
-        refused(/could not decide whether commit .* exists/),
-      );
-      await shimmed(
-        fixture.repo,
-        "signal",
-        0,
-        refused(
-          /could not decide whether commit .* exists in .* \(exit none\)/,
-        ),
-      );
-    });
-    // Git's clear answer 1 (the commit is absent) still counts as "does not contain".
-    await shimmed(fixture.impl, "exit", 1, async () => {
-      const { decision } = await f7Decide(fixture, fixture.repo);
-      assert.equal(decision.repo, fs.realpathSync(fixture.repo));
-    });
-  },
-);
+    }
+  };
+  const refused = (pattern) => () =>
+    assert.rejects(() => f7Decide(fixture, fixture.repo), pattern);
+  await assertUnchanged(fixture, async () => {
+    // Another candidate: a Git error must not count as "does not contain".
+    await shimmed(
+      fixture.impl,
+      "exit",
+      128,
+      refused(/could not decide whether commit .* exists/),
+    );
+    await shimmed(
+      fixture.impl,
+      "exit",
+      2,
+      refused(/could not decide whether commit .* exists/),
+    );
+    await shimmed(
+      fixture.impl,
+      "signal",
+      0,
+      refused(/could not decide whether commit .* exists in .* \(exit none\)/),
+    );
+    // The chosen repository itself.
+    await shimmed(
+      fixture.repo,
+      "exit",
+      128,
+      refused(/could not decide whether commit .* exists/),
+    );
+    await shimmed(
+      fixture.repo,
+      "signal",
+      0,
+      refused(/could not decide whether commit .* exists in .* \(exit none\)/),
+    );
+  });
+  // Git's clear answer 1 (the commit is absent) still counts as "does not contain".
+  await shimmed(fixture.impl, "exit", 1, async () => {
+    const { decision } = await f7Decide(fixture, fixture.repo);
+    assert.equal(decision.repo, fs.realpathSync(fixture.repo));
+  });
+});
 
 test("f7-7: after a decision every consumer binds to that one repository, at its HEAD only, and a different path is refused", async (t) => {
   const fixture = await f7Kickoff(t);
