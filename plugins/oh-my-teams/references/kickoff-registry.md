@@ -60,6 +60,10 @@
 
 `entry.auditor`는 이 kickoff에 고정된 `auditPolicy.auditorConfigured`가 참일 때 이사가 `role-terminal --role auditor --state <이 kickoff의 pm.stateDir>`로 감사 터미널을 열었을 때 `{ terminalHandle, openedAt }`으로 기록된다. 이 값은 이후 모든 감사 명령(`audit-objection`·`audit-response`·`audit-ruling`·`audit-checked`·`audit-accept`)이 호출자의 `ORCA_TERMINAL_HANDLE` 환경변수를 대조해 신원을 확인하는 데 쓰인다. 감사 체크포인트와 수용 규칙은 같은 문서의 B절을 따른다.
 
+## 복수 결과 저장소 확정(resultRepoDecisions)
+
+`entry.resultRepoDecisions`는 accepted workflow들이 서로 다른 결과 저장소를 기록했을 때 이사가 하나로 확정한 기록을 담는 선택 배열이다. `kickoff-result-repo-decide --org --worktree --repo --reason`만 이 배열 끝에 항목을 추가하며, 기존 항목은 고치거나 지우지 않는다. 이사 권한은 호출 프로세스의 작업 디렉터리로만 확인하고 `--force`는 없다. 항목은 확정 시점의 workflow 집합 지문(`workflowSet`)과 Git 포함 증명(`proof`)을 함께 저장하며, 같은 지문의 재결정은 거부된다. 이후 모든 결과 저장소 결속은 `resolveKickoffResultRepo`가 지문을 다시 계산해 항목과 대조하고 증명을 다시 실행한 뒤에야 그 저장소를 돌려준다. 정본은 `plugins/oh-my-teams/scripts/kickoff-registry.mjs`의 `kickoffResultRepoDecide`(1328행)와 `requirements.mjs`의 `resolveKickoffResultRepo`(1611행)이다. 필드 모양은 `validateEntry`가 검사한다. 수용 head를 얻는 방식과 위조 한계는 [`docs/plan/requirements-ledger-and-audit.md`](../../../docs/plan/requirements-ledger-and-audit.md)의 「구현 보충」 (d)를 따른다.
+
 ## kickoffHash와 registrationSeq
 
 구조화된 `.omt` 문서 시스템([`docs/plan/structured-omt-documents.md`](../../../docs/plan/structured-omt-documents.md))은 문서를 kickoff 하나에 묶기 위해 각 kickoff를 가리키는 고정된 해시값인 kickoffHash를 쓴다. 이 값을 `pm.worktreeId`와 `createdAt`만으로 만들면 같은 밀리초에 두 kickoff가 등록될 때 값이 겹칠 수 있으므로, 등록 항목에 `registrationSeq`라는 필드를 더해 그 문제를 막는다.

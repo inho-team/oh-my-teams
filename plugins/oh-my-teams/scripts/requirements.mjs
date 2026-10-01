@@ -9,6 +9,7 @@
  * claim's own director identity, closing the deadlock described in A.2.
  */
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -22,7 +23,7 @@ import {
   withFileLock,
   writeJSON,
 } from "./core.mjs";
-import { canonicalize } from "./contracts.mjs";
+import { canonicalize, taskHash } from "./contracts.mjs";
 import { workspaceBinding } from "./evidence.mjs";
 import { hasValidAcceptance } from "./audit.mjs";
 import { resolveResultRepo } from "./workflow.mjs";
@@ -1195,30 +1196,462 @@ function readKickoffWorkflowStates(stateDir) {
     });
 }
 
+const HEAD_PATTERN = /^[0-9a-f]{40}$/;
+
+function ambiguityError(message, candidates) {
+  return Object.assign(new Error(message), {
+    code: "result-repo-ambiguous",
+    candidates,
+  });
+}
+
+function readFileJSON(file, label) {
+  assert(fs.existsSync(file), `${label} is missing (${file})`);
+  try {
+    return readJSON(file);
+  } catch (error) {
+    throw new Error(`${label} cannot be read (${error.message})`);
+  }
+}
+
+// Every top-level `<state>/reports/*.json`, parsed. A report that cannot be
+// parsed is refused instead of skipped: it might have been the one report
+// that matched, so skipping it could make another report look unique.
+function readKickoffReports(stateDir) {
+  const root = path.join(stateDir, "reports");
+  if (!fs.existsSync(root)) return [];
+  return fs
+    .readdirSync(root)
+    .filter((name) => name.endsWith(".json"))
+    .filter((name) => fs.lstatSync(path.join(root, name)).isFile())
+    .sort()
+    .map((name) => ({
+      file: path.join(root, name),
+      report: readFileJSON(path.join(root, name), `Report ${name}`),
+    }));
+}
+
+// Cross-checks one accepted task (or integration task) against its decision
+// file, gate record and unique report, and returns the identifying
+// fingerprint of that chain. Nothing here recomputes a fingerprint from the
+// current workspace: an accepted head is, by definition, usually not the
+// repository's current HEAD any more.
+function acceptedChain(stateDir, reports, expected) {
+  const { label, taskId, revision, hashValue, executionId, decisionId } =
+    expected;
+  assert(
+    typeof executionId === "string" && executionId,
+    `${label} names no execution that implemented it`,
+  );
+  assert(
+    typeof decisionId === "string" && decisionId,
+    `${label} names no acceptance decision`,
+  );
+  const decisionPath = path.join(stateDir, "decisions", `${decisionId}.json`);
+  const decision = readFileJSON(
+    decisionPath,
+    `${label} decision ${decisionId}`,
+  );
+  assert(
+    decision.id === decisionId &&
+      decision.status === "accepted" &&
+      decision.taskId === taskId &&
+      decision.taskRevision === revision &&
+      decision.taskHash === hashValue &&
+      decision.implementationExecutionId === executionId &&
+      typeof decision.evidenceKey === "string" &&
+      decision.evidenceKey,
+    `${label} decision ${decisionId} does not match its task, revision, contract hash and execution`,
+  );
+  const gate = readFileJSON(
+    path.join(stateDir, "gates", `${taskId}.json`),
+    `${label} gate record`,
+  );
+  assert(
+    gate.taskId === taskId &&
+      gate.state === "accepted" &&
+      gate.runId === executionId &&
+      gate.evidenceKey === decision.evidenceKey &&
+      gate.gates?.["contract-ready"]?.taskHash === hashValue &&
+      gate.gates?.["outcome-accepted"]?.decisionId === decisionId,
+    `${label} gate record does not match its decision, execution, contract hash and evidence key`,
+  );
+  const matching = reports.filter(
+    ({ report }) =>
+      report?.taskId === taskId &&
+      report.taskRevision === revision &&
+      report.taskHash === hashValue &&
+      report.runId === executionId &&
+      report.evidence?.key === decision.evidenceKey,
+  );
+  assert(
+    matching.length === 1,
+    `${label} must match exactly one report under ${path.join(stateDir, "reports")}, found ${matching.length}`,
+  );
+  const [{ file, report }] = matching;
+  const evidence = report.evidence;
+  assert(
+    evidence.schemaVersion === 1 &&
+      evidence.status === "passed" &&
+      evidence.fingerprint &&
+      typeof evidence.fingerprint === "object" &&
+      hash(evidence.fingerprint) === evidence.key &&
+      report.head === evidence.fingerprint.head &&
+      HEAD_PATTERN.test(report.head),
+    `${label} report ${path.basename(file)} is not passed evidence whose fingerprint hashes to its key and names its head`,
+  );
+  return {
+    taskId,
+    revision,
+    taskHash: hashValue,
+    executionId,
+    decisionSha256: fileSha256(decisionPath),
+    evidenceKey: decision.evidenceKey,
+    reportFile: path.relative(stateDir, file),
+    head: report.head,
+  };
+}
+
 /**
- * Reads the result repository a kickoff's accepted workflows were closed
- * with, from its own `pm.stateDir`; the caller supplies no state to read.
+ * Computes the identifying fingerprint of every accepted workflow of a
+ * kickoff (`workflowSet`) and the heads their accepted tasks were verified
+ * at. The chain of each accepted task is cross-checked between the workflow
+ * state, its `decisions/<id>.json`, its `gates/<taskId>.json` and the single
+ * `<state>/reports/*.json` report whose runId and evidence key match; the
+ * report's recorded fingerprint is only checked against its own key hash,
+ * never recomputed from the current workspace, and the `evidence/<key>.json`
+ * cache is not consulted. Files are read only.
+ *
+ * The PM state is writable by the same OS user, so this guards against
+ * accidental corruption and inconsistency, not against a deliberately
+ * consistent forgery (the same limit as B.6).
+ *
+ * @param {string} stateDir - The kickoff's PM state directory.
+ * @param {object[]} decidedStates - Accepted workflow states, each with `integration.decision.checkoutPath`.
+ * @returns {{workflowSet: object[], heads: string[]}} Fingerprints sorted by workflow id, and the unique accepted heads.
+ * @throws {Error} When any file is missing, unparseable, duplicated or inconsistent.
+ */
+export function collectAcceptedResults(stateDir, decidedStates) {
+  const reports = readKickoffReports(stateDir);
+  const workflowSet = [...decidedStates]
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    .map((state) => {
+      const { decision } = state.integration;
+      const name = `Workflow ${state.id}`;
+      const taskIds = Object.keys(state.tasks).sort();
+      assert(
+        isDeepStrictEqual(
+          taskIds,
+          Object.keys(decision.componentResults ?? {}).sort(),
+        ),
+        `${name} decision names different component tasks than its state`,
+      );
+      const tasks = taskIds.map((taskId) => {
+        const task = state.tasks[taskId];
+        const result = decision.componentResults[taskId];
+        assert(
+          task.state === "accepted" &&
+            task.revision === result.revision &&
+            task.attemptId === result.attemptId &&
+            task.acceptedResult === result.acceptedResult,
+          `${name} task ${taskId} is not accepted as its decision records`,
+        );
+        return {
+          ...acceptedChain(stateDir, reports, {
+            label: `${name} task ${taskId}`,
+            taskId,
+            revision: task.revision,
+            hashValue: task.taskHash,
+            executionId: task.execution?.executionId,
+            decisionId: task.acceptedResult,
+          }),
+          attemptId: task.attemptId,
+          acceptedResult: task.acceptedResult,
+        };
+      });
+      const required = state.integration.required === true;
+      const item = {
+        id: state.id,
+        checkoutPath: decision.checkoutPath,
+        integrationRequired: required,
+        tasks,
+      };
+      if (!required) {
+        assert(
+          decision.runId === null &&
+            decision.evidenceKey === null &&
+            decision.decisionId === null,
+          `${name} needs no integration but its decision names a run, evidence key or decision id`,
+        );
+        return item;
+      }
+      const taskFile = path.join(
+        stateDir,
+        "workflows",
+        state.id,
+        "integration-task.json",
+      );
+      const integrationTask = readFileJSON(
+        taskFile,
+        `${name} integration task`,
+      );
+      const integrationHash = taskHash(integrationTask);
+      assert(
+        integrationHash === state.integration.taskHash,
+        `${name} integration contract differs from the hash its state froze`,
+      );
+      const chain = acceptedChain(stateDir, reports, {
+        label: `${name} integration`,
+        taskId: integrationTask.id,
+        revision: integrationTask.revision ?? 1,
+        hashValue: integrationHash,
+        executionId: decision.runId,
+        decisionId: decision.decisionId,
+      });
+      assert(
+        chain.evidenceKey === decision.evidenceKey,
+        `${name} integration decision names a different evidence key than its acceptance`,
+      );
+      item.integration = {
+        taskId: chain.taskId,
+        taskHash: chain.taskHash,
+        runId: chain.executionId,
+        evidenceKey: chain.evidenceKey,
+        decisionId: decision.decisionId,
+        decisionSha256: chain.decisionSha256,
+        reportFile: chain.reportFile,
+        head: chain.head,
+      };
+      return item;
+    });
+  const heads = new Set(
+    workflowSet.flatMap((item) => [
+      ...item.tasks.map((task) => task.head),
+      ...(item.integration ? [item.integration.head] : []),
+    ]),
+  );
+  return { workflowSet, heads: [...heads].sort() };
+}
+
+// The only place this module runs Git, so a trusted executor can replace it
+// later. It inherits the caller's PATH and GIT_* variables, like evidence.mjs.
+// Returns the exit status (null when Git could not run or timed out) and stdout.
+function runGit(repo, args) {
+  const result = spawnSync("git", args, {
+    cwd: repo,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  return {
+    status: result.error ? null : result.status,
+    stdout: (result.stdout ?? "").trim(),
+  };
+}
+
+// Reads HEAD; null when Git cannot report it.
+function readHead(repo) {
+  const { status, stdout } = runGit(repo, ["rev-parse", "HEAD"]);
+  return status === 0 && stdout ? stdout : null;
+}
+
+// Runs a check whose exit code 1 is Git's clear "no" and 0 is "yes". Any other
+// outcome (another exit code, a failed launch, a timeout) is not an answer.
+function gitYesNo(repo, args, what) {
+  const { status } = runGit(repo, args);
+  assert(
+    status === 0 || status === 1,
+    `Git could not decide ${what} in ${repo} (exit ${status ?? "none"})`,
+  );
+  return status === 0;
+}
+
+// Heads that Git clearly reports as absent or not an ancestor of HEAD.
+function missingHeads(repo, heads) {
+  return heads.filter(
+    (head) =>
+      !gitYesNo(
+        repo,
+        ["rev-parse", "--verify", "--quiet", `${head}^{commit}`],
+        `whether commit ${head} exists`,
+      ) ||
+      !gitYesNo(
+        repo,
+        ["merge-base", "--is-ancestor", head, "HEAD"],
+        `whether ${head} is an ancestor of HEAD`,
+      ),
+  );
+}
+
+/**
+ * Proves, from the repositories' real Git state, that `repo` is the only
+ * candidate whose HEAD contains every accepted head. `repo` must be a
+ * candidate, its HEAD must be readable and equal to or descend from every
+ * head, and every other candidate's HEAD must fail to contain at least one.
+ * Two candidates that both contain everything are ambiguous and refused, as
+ * is any candidate that cannot be read.
+ *
+ * @param {string} repo - Real path of the repository to prove.
+ * @param {string[]} candidates - Every result repository the accepted workflows recorded.
+ * @param {string[]} acceptedHeads - Heads the accepted tasks were verified at.
+ * @returns {{headAtDecision: string, proof: object}} `repo`'s HEAD and the containment proof.
+ * @throws {Error} When any part of the proof fails.
+ */
+export function proveResultRepoContainment(repo, candidates, acceptedHeads) {
+  assert(
+    candidates.includes(repo),
+    `${repo} is not a result repository any accepted workflow recorded (${candidates.join(", ")})`,
+  );
+  assert(acceptedHeads.length > 0, "No accepted head to prove containment of");
+  const headAtDecision = readHead(repo);
+  assert(headAtDecision, `The HEAD of ${repo} cannot be read`);
+  const uncontained = missingHeads(repo, acceptedHeads);
+  assert(
+    uncontained.length === 0,
+    `${repo} (HEAD ${headAtDecision}) does not contain accepted head(s) ${uncontained.join(", ")}`,
+  );
+  const others = candidates
+    .filter((candidate) => candidate !== repo)
+    .map((candidate) => {
+      assert(
+        readHead(candidate),
+        `The HEAD of candidate ${candidate} cannot be read`,
+      );
+      const missing = missingHeads(candidate, acceptedHeads);
+      assert(
+        missing.length > 0,
+        `Candidate ${candidate} also contains every accepted head, so the result repository stays ambiguous; ` +
+          "the director must reconcile the repositories first",
+      );
+      return { repo: candidate, missing };
+    });
+  return {
+    headAtDecision,
+    proof: { acceptedHeads: [...acceptedHeads], contained: true, others },
+  };
+}
+
+/**
+ * Reads the accepted workflows of a kickoff and the result repositories they
+ * recorded, without judging whether they agree.
  *
  * @param {object} entry - The kickoff's registry entry.
- * @returns {string|undefined} The recorded `decision.checkoutPath`, or `undefined` when no workflow of this kickoff has been accepted yet.
- * @throws {Error} When a state cannot be read, an accepted decision names no `checkoutPath` (it predates the binding), or accepted workflows name different ones.
+ * @returns {{decided: object[], candidates: string[]}} Accepted workflow states and the distinct recorded checkout paths.
+ * @throws {Error} When a state cannot be read or a decision predates result-repository binding.
  */
-export function resolveKickoffResultRepo(entry) {
+export function readKickoffResultRepoCandidates(entry) {
   const decided = readKickoffWorkflowStates(entry.pm.stateDir).filter(
     (state) => state.integration?.decision,
   );
-  if (decided.length === 0) return undefined;
   const paths = decided.map((state) => state.integration.decision.checkoutPath);
   assert(
     paths.every((value) => typeof value === "string" && value),
     "An accepted workflow of this kickoff predates result-repository binding, " +
       "so its decision cannot name the repository an audit binds to; the director must decide how to close it",
   );
-  assert(
-    new Set(paths).size === 1,
-    `Accepted workflows of this kickoff name different result repositories (${[...new Set(paths)].join(", ")})`,
+  return { decided, candidates: [...new Set(paths)] };
+}
+
+// Names the dotted paths at which two JSON values differ.
+function differingFields(a, b, prefix = "") {
+  if (isDeepStrictEqual(a, b)) return [];
+  const plain = (value) =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+  if (plain(a) && plain(b)) {
+    return [...new Set([...Object.keys(a), ...Object.keys(b)])].flatMap((key) =>
+      differingFields(a[key], b[key], `${prefix}${key}.`),
+    );
+  }
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+    return a.flatMap((item, index) =>
+      differingFields(item, b[index], `${prefix}${index}.`),
+    );
+  }
+  return [prefix.replace(/\.$/, "") || "(set)"];
+}
+
+// Describes how the accepted workflows now differ from a recorded workflowSet:
+// workflows added or removed, and the fields that changed in the others.
+function describeSetChange(recorded, current) {
+  const byId = (set) => new Map(set.map((item) => [item.id, item]));
+  const before = byId(recorded);
+  const after = byId(current);
+  const parts = [];
+  const added = [...after.keys()].filter((id) => !before.has(id));
+  const removed = [...before.keys()].filter((id) => !after.has(id));
+  if (added.length > 0)
+    parts.push(`workflows accepted since: ${added.join(", ")}`);
+  if (removed.length > 0)
+    parts.push(`workflows no longer accepted: ${removed.join(", ")}`);
+  for (const [id, item] of after) {
+    if (!before.has(id)) continue;
+    const fields = differingFields(before.get(id), item);
+    if (fields.length > 0) parts.push(`${id}: ${fields.join(", ")}`);
+  }
+  return parts.join("; ") || "(unidentified)";
+}
+
+/**
+ * Reads the result repository a kickoff's accepted workflows were closed
+ * with, from its own `pm.stateDir`; the caller supplies no state to read.
+ *
+ * When the accepted workflows recorded one repository it is returned as is.
+ * When they recorded several, the only exception is a director's
+ * `kickoff-result-repo-decide` record whose `workflowSet` fingerprint equals
+ * the one recomputed from the current state and whose containment proof still
+ * holds against the repositories' current HEADs; anything else is refused
+ * with code `result-repo-ambiguous`.
+ *
+ * @param {object} entry - The kickoff's registry entry.
+ * @returns {string|undefined} The recorded `decision.checkoutPath`, or `undefined` when no workflow of this kickoff has been accepted yet.
+ * @throws {Error} When a state cannot be read, an accepted decision names no `checkoutPath`
+ *   (it predates the binding), or accepted workflows name different ones
+ *   without a valid director decision (code `result-repo-ambiguous`, with `candidates`).
+ */
+export function resolveKickoffResultRepo(entry) {
+  const { decided, candidates } = readKickoffResultRepoCandidates(entry);
+  if (decided.length === 0) return undefined;
+  if (candidates.length === 1) return candidates[0];
+  const list = candidates.join(", ");
+  const refuse = (reason) =>
+    ambiguityError(
+      `Accepted workflows of this kickoff name different result repositories (${list}); ${reason}. ` +
+        "The director must run kickoff-result-repo-decide",
+      candidates,
+    );
+  let collected;
+  try {
+    collected = collectAcceptedResults(entry.pm.stateDir, decided);
+  } catch (error) {
+    throw refuse(
+      `their accepted results cannot be verified (${error.message})`,
+    );
+  }
+  const decisions = entry.resultRepoDecisions ?? [];
+  const matching = decisions.filter((item) =>
+    isDeepStrictEqual(item.workflowSet, collected.workflowSet),
   );
-  return paths[0];
+  if (matching.length === 0) {
+    const latest = decisions.at(-1);
+    throw refuse(
+      latest === undefined
+        ? "no result repository decision is recorded"
+        : `the recorded decision no longer matches the accepted results (changed: ${describeSetChange(latest.workflowSet, collected.workflowSet)})`,
+    );
+  }
+  if (matching.length > 1) {
+    throw refuse(
+      "more than one recorded decision fixes the same accepted results",
+    );
+  }
+  try {
+    proveResultRepoContainment(matching[0].repo, candidates, collected.heads);
+  } catch (error) {
+    throw refuse(
+      `the recorded decision's proof no longer holds (${error.message})`,
+    );
+  }
+  return matching[0].repo;
 }
 
 /**

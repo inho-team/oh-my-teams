@@ -386,7 +386,11 @@ export async function verifiedPm(orgFile, worktreeId) {
  * @param {string} [request.repo] - Workspace `resultHead` is checked against; required for "outcome".
  * @param {object} [request.declared] - Identity fields the caller's payload declared; see `assertDeclaredIdentity`.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
- * @throws {Error} When identity fails, a declared identity differs from the verified one, or the request is malformed.
+ *   An outcome objection made while the result repository is ambiguous
+ *   (code `result-repo-ambiguous`) carries a `bindingDefect` instead of a binding.
+ * @throws {Error} When identity fails, a declared identity differs from the verified one,
+ *   the request is malformed, or binding fails for any reason other than an
+ *   ambiguous result repository.
  */
 export async function auditObjection(
   orgFile,
@@ -428,23 +432,39 @@ export async function auditObjection(
   // never the repository it names, so an unverified candidate repository is
   // safe here where an acceptance would not be. computeBinding still checks
   // that repository's real HEAD against the declared resultHead.
-  const boundRepo =
-    checkpoint === "outcome"
-      ? bindKickoffResultRepo(
-          listKickoffs(orgFile, worktreeId).kickoffs[0],
-          repo,
-          { allowPending: true },
-        )
-      : repo;
+  // A repository ambiguity (code result-repo-ambiguous) is itself recordable as
+  // an outcome objection: the objection carries a bindingDefect, names no
+  // repository, and leaves record.binding untouched, so it can only block.
+  // Every other binding error still refuses before anything is written.
+  let boundRepo = repo;
+  let bindingDefect;
+  if (checkpoint === "outcome") {
+    try {
+      boundRepo = bindKickoffResultRepo(
+        listKickoffs(orgFile, worktreeId).kickoffs[0],
+        repo,
+        { allowPending: true },
+      );
+    } catch (error) {
+      if (error?.code !== "result-repo-ambiguous") throw error;
+      bindingDefect = {
+        code: error.code,
+        message: error.message,
+        candidates: error.candidates,
+      };
+    }
+  }
   return withAudit(orgFile, worktreeId, async (audit) => {
     const record = audit.checkpoints[checkpoint];
-    record.binding = await computeBinding(
-      checkpoint,
-      ledger,
-      audit,
-      resultHead,
-      boundRepo,
-    );
+    if (bindingDefect === undefined) {
+      record.binding = await computeBinding(
+        checkpoint,
+        ledger,
+        audit,
+        resultHead,
+        boundRepo,
+      );
+    }
     record.objections = [
       ...record.objections,
       {
@@ -455,6 +475,7 @@ export async function auditObjection(
         rebuttalRequested,
         raisedAt: new Date().toISOString(),
         verifiedCaller,
+        ...(bindingDefect === undefined ? {} : { bindingDefect }),
       },
     ];
     const file = auditFile(orgFile, worktreeId);

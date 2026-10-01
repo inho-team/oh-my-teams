@@ -17,7 +17,10 @@ import { closeKickoffSignals } from "./director.mjs";
 import { resolveGitCommonDir } from "./local-adapter.mjs";
 import {
   assertKickoffCloseReady,
+  collectAcceptedResults,
   confirmedLedgerFromClaim,
+  proveResultRepoContainment,
+  readKickoffResultRepoCandidates,
   validateLedgerForClaim,
   writeConfirmedLedger,
 } from "./requirements.mjs";
@@ -383,6 +386,33 @@ export function validateEntry(stored) {
       assert(
         policy.retrofittedBy && text(policy.retrofittedBy.checkoutPath),
         "Kickoff auditPolicy.retrofittedBy.checkoutPath required for a retrofit",
+      );
+    }
+  }
+  // resultRepoDecisions is optional and append-only: only
+  // kickoffResultRepoDecide writes it, once per distinct set of accepted results.
+  if (entry.resultRepoDecisions !== undefined) {
+    assert(
+      Array.isArray(entry.resultRepoDecisions),
+      "Kickoff resultRepoDecisions must be an array when present",
+    );
+    for (const item of entry.resultRepoDecisions) {
+      assert(
+        item &&
+          text(item.id) &&
+          text(item.repo) &&
+          text(item.headAtDecision) &&
+          Array.isArray(item.workflowSet) &&
+          item.workflowSet.length > 0 &&
+          item.workflowSet.every(
+            (flow) => flow && text(flow.id) && text(flow.checkoutPath),
+          ) &&
+          item.proof &&
+          typeof item.proof === "object" &&
+          text(item.reason) &&
+          text(item.decidedAt) &&
+          text(item.director?.checkoutPath),
+        "Kickoff resultRepoDecisions items require id, repo, headAtDecision, workflowSet, proof, reason, decidedAt and director.checkoutPath",
       );
     }
   }
@@ -1267,6 +1297,95 @@ export function kickoffAuditPolicyRetrofit(
     const updated = validateEntry({ ...entry, auditPolicy });
     writeJSON(file, updated);
     return { retrofitted: true, auditPolicy };
+  });
+}
+
+/**
+ * Records, append-only, the one result repository a director has proven to
+ * contain every accepted head when a kickoff's accepted workflows recorded
+ * different ones (`resultRepoDecisions`). Every later binding of that
+ * kickoff's result repository (audit objection and acceptance, close-ready,
+ * deliver, completed release) goes through `resolveKickoffResultRepo`, which
+ * honours this record only while its `workflowSet` fingerprint still equals
+ * the one recomputed from the current state.
+ *
+ * Authority is the registered director's checkout, read from this process's
+ * own `process.cwd()`; there is no `callerCwd` parameter and no `--force`.
+ * Nothing is written unless every check passes, existing records and the
+ * workflow state are never modified, and a second decision for the same
+ * accepted results is refused.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} worktreeId - PM worktree of the kickoff.
+ * @param {object} request - Decision request.
+ * @param {string} request.repo - Result repository to fix; must be one of the recorded checkout paths.
+ * @param {string} request.reason - Non-empty justification, recorded as-is.
+ * @returns {{decided: boolean, decision: object}} The appended record.
+ * @throws {Error} When the kickoff or its director is missing, the caller is not at the
+ *   director's checkout, `reason` is empty, only one repository was recorded,
+ *   the same accepted results were already decided, or the proof fails.
+ */
+export function kickoffResultRepoDecide(orgFile, worktreeId, { repo, reason }) {
+  return withRegistry(orgFile, () => {
+    const file = locateEntry(orgFile, worktreeId);
+    assert(file, `Worktree ${worktreeId} supervises no registered kickoff`);
+    const entry = validateEntry(readJSON(file));
+    assert(
+      entry.director,
+      `Kickoff ${worktreeId} has no registered director; ` +
+        "its result repository cannot be decided until a director is recorded for it",
+    );
+    assertDirectorAuthority(entry, process.cwd(), "kickoff-result-repo-decide");
+    assert(
+      typeof reason === "string" && reason.trim(),
+      "--reason is required and must be a non-empty justification",
+    );
+    assert(
+      typeof repo === "string" && repo.trim(),
+      "--repo is required and must name a recorded result repository",
+    );
+    let realRepo;
+    try {
+      realRepo = fs.realpathSync.native(path.resolve(repo));
+    } catch {
+      throw new Error(`--repo ${repo} does not resolve to a directory`);
+    }
+    const { decided, candidates } = readKickoffResultRepoCandidates(entry);
+    assert(decided.length > 0, "No workflow of this kickoff has been accepted");
+    assert(
+      candidates.length > 1,
+      "The accepted workflows recorded one result repository; there is nothing to decide",
+    );
+    const collected = collectAcceptedResults(entry.pm.stateDir, decided);
+    const decisions = entry.resultRepoDecisions ?? [];
+    assert(
+      !decisions.some((item) =>
+        isDeepStrictEqual(item.workflowSet, collected.workflowSet),
+      ),
+      "A result repository was already decided for these accepted results; " +
+        "a decision cannot be changed for the same set of accepted workflows",
+    );
+    const { headAtDecision, proof } = proveResultRepoContainment(
+      realRepo,
+      candidates,
+      collected.heads,
+    );
+    const decision = {
+      id: crypto.randomUUID(),
+      repo: realRepo,
+      headAtDecision,
+      workflowSet: collected.workflowSet,
+      proof,
+      reason: reason.trim(),
+      decidedAt: new Date().toISOString(),
+      director: { checkoutPath: path.resolve(process.cwd()) },
+    };
+    const updated = validateEntry({
+      ...entry,
+      resultRepoDecisions: [...decisions, decision],
+    });
+    writeJSON(file, updated);
+    return { decided: true, decision };
   });
 }
 

@@ -383,6 +383,46 @@ test("an entry named after its id by an earlier release stays closable", async (
   assert.deepEqual(ids(fixture), []);
 });
 
+test("f7: resultRepoDecisions must be an array of complete records, and the registry refuses a malformed one", (t) => {
+  const fixture = project(t);
+  const file = path.join(registryDirectory(fixture.org), "wt-decisions.json");
+  const record = {
+    id: "decision-1",
+    repo: "/repo",
+    headAtDecision: "a".repeat(40),
+    workflowSet: [{ id: "wf", checkoutPath: "/repo" }],
+    proof: { contained: true },
+    reason: "merged",
+    decidedAt: "2026-10-01T00:00:00.000Z",
+    director: { checkoutPath: "/director" },
+  };
+  const write = (resultRepoDecisions) =>
+    writeJSON(
+      file,
+      legacyEntryFor(fixture, "wt-decisions", { resultRepoDecisions }),
+    );
+  write([record]);
+  assert.deepEqual(ids(fixture), ["wt-decisions"]);
+  const malformed = [
+    "not-an-array",
+    [null],
+    [{ ...record, repo: "" }],
+    [{ ...record, workflowSet: [] }],
+    [{ ...record, workflowSet: [{ id: "wf" }] }],
+    [{ ...record, proof: null }],
+    [{ ...record, reason: " " }],
+    [{ ...record, director: {} }],
+  ];
+  for (const value of malformed) {
+    write(value);
+    assert.throws(
+      () => ids(fixture),
+      /resultRepoDecisions/,
+      JSON.stringify(value),
+    );
+  }
+});
+
 test("compat-not-bypass: a legacy entry with no requirements ledger refuses to complete", async (t) => {
   const fixture = project(t);
   const entry = legacyEntryFor(fixture, "wt-legacy-close");

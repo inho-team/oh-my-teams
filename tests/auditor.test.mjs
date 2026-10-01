@@ -19,6 +19,7 @@ import {
   isSameOrWithinByIdentity,
   kickoffAuditPolicyRetrofit,
   kickoffEntryName,
+  kickoffResultRepoDecide,
   listKickoffs,
   registerKickoff,
   registryDirectory,
@@ -39,6 +40,7 @@ import {
   acceptComponentTask,
   acceptTaskThroughRuntime,
   createSingleTaskWorkflow,
+  recordAcceptanceRef,
   withUntrackedHidden,
   createSingleTaskWorkflow as createStateWorkflow,
   taskBody,
@@ -5593,7 +5595,11 @@ const OUTCOME_CHECKED = [
 async function stageAcceptedTask(
   fixture,
   workflowId,
-  { worktreePath = fixture.repo, stateDir = fixture.entry.pm.stateDir } = {},
+  {
+    worktreePath = fixture.repo,
+    stateDir = fixture.entry.pm.stateDir,
+    taskId,
+  } = {},
 ) {
   return acceptTaskThroughRuntime({
     org: fixture.org,
@@ -5601,6 +5607,7 @@ async function stageAcceptedTask(
     taskDir: fixture.dir,
     workflowId,
     resultRepo: worktreePath,
+    taskId,
   });
 }
 
@@ -6244,4 +6251,954 @@ test("withUntrackedHidden restores the exclude file byte for byte on success and
     /not inside/,
   );
   assert.equal(fs.existsSync(real), cwdBefore);
+});
+
+// #139 f7: the director's append-only decision of one result repository when a
+// kickoff's accepted workflows recorded several (kickoffResultRepoDecide).
+
+// Every file under the registry, the audit records and the PM state, so a
+// refusal can prove it changed none of them.
+function f7Bytes(fixture) {
+  const roots = [
+    registryDirectory(fixture.org),
+    path.join(path.dirname(fixture.org), "audits"),
+    fixture.entry.pm.stateDir,
+  ];
+  const files = new Map();
+  const walk = (entry) => {
+    if (!fs.existsSync(entry)) return;
+    if (fs.lstatSync(entry).isDirectory()) {
+      for (const name of fs.readdirSync(entry)) walk(path.join(entry, name));
+    } else {
+      files.set(entry, fs.readFileSync(entry).toString("base64"));
+    }
+  };
+  for (const root of roots) walk(root);
+  return files;
+}
+
+async function assertUnchanged(fixture, work) {
+  const before = f7Bytes(fixture);
+  await work();
+  assert.deepEqual(f7Bytes(fixture), before);
+}
+
+// audit-accept without first recording `checked`, so a refusal can be shown to
+// have written nothing (the binding check runs before any coverage check).
+const f7AuditAccept = (fixture, repo, head) =>
+  withOrcaHandle(fixture.auditorHandle, () =>
+    auditAccept(fixture.org, fixture.worktreeId, "outcome", head, repo),
+  );
+
+const F7_REASON = "the integration checkout contains every accepted head";
+
+const f7Decide = (fixture, repo, reason = F7_REASON) =>
+  withCwd(fixture.dir, () =>
+    kickoffResultRepoDecide(fixture.org, fixture.worktreeId, { repo, reason }),
+  );
+
+const f7Resolve = (fixture) =>
+  bindKickoffResultRepo(
+    listKickoffs(fixture.org, fixture.worktreeId).kickoffs[0],
+    undefined,
+  );
+
+const f7Ambiguous = { code: "result-repo-ambiguous" };
+
+// Two accepted workflows that recorded different result repositories: `impl`
+// (a clone, one commit ahead of the base) and the kickoff's own worktree
+// `fixture.repo`, which merges impl's commit and so contains every accepted
+// head. With `merge: false` no repository contains them all.
+async function f7Kickoff(t, { merge = true, integration = false } = {}) {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+    deliverable: true,
+  });
+  const impl = realTempDir(t, "omt-f7-impl-");
+  git(impl, ["clone", "-q", fixture.dir, "."]);
+  git(impl, ["config", "user.email", "auditor-test@example.com"]);
+  git(impl, ["config", "user.name", "Auditor Test"]);
+  git(impl, ["commit", "-q", "--allow-empty", "-m", "impl work"]);
+  const implStaged = await stageAcceptedTask(fixture, "wf-impl", {
+    worktreePath: impl,
+    taskId: "impl-task",
+  });
+  await acceptStaged(implStaged);
+  if (merge) {
+    git(fixture.repo, ["pull", "-q", "--no-rebase", "--no-edit", impl, "HEAD"]);
+  }
+  let mainStaged;
+  if (integration) {
+    await f7IntegrationWorkflow(fixture, "wf-integration");
+  } else {
+    mainStaged = await stageAcceptedTask(fixture, "wf-main", {
+      worktreePath: fixture.repo,
+      taskId: "main-task",
+    });
+    await acceptStaged(mainStaged);
+  }
+  return {
+    ...fixture,
+    head: git(fixture.repo, ["rev-parse", "HEAD"]),
+    impl,
+    implStaged,
+    mainStaged,
+  };
+}
+
+// An integration-required workflow accepted in the kickoff's own worktree,
+// with the integration report kept under <state>/reports like the others.
+async function f7IntegrationWorkflow(fixture, workflowId) {
+  const stateDir = fixture.entry.pm.stateDir;
+  const repo = fixture.repo;
+  writeJSON(path.join(fixture.dir, "int-comp.json"), taskBody("int-comp"));
+  writeJSON(path.join(fixture.dir, "int-final.json"), taskBody("int-final"));
+  await createWorkflow(
+    stateDir,
+    {
+      schemaVersion: 1,
+      id: workflowId,
+      goal: "integration required",
+      repo: ".",
+      integrationTask: "int-final.json",
+      tasks: [{ file: "int-comp.json", role: "junior" }],
+      policy: { maxRunning: 1, maxReviewPending: 1 },
+      budget: { maxAttempts: 1, maxCalls: 4 },
+    },
+    readJSON(fixture.org),
+    fixture.dir,
+  );
+  await acceptComponentTask({
+    stateDir,
+    workflowId,
+    taskId: "int-comp",
+    resultRepo: repo,
+  });
+  await withUntrackedHidden(repo, async () => {
+    const snapshot = readWorkflow(stateDir, workflowId);
+    const frozen = readJSON(path.join(snapshot.dir, "integration-task.json"));
+    const report = {
+      taskId: frozen.id,
+      taskHash: taskHash(frozen),
+      taskRevision: 1,
+      runId: `${workflowId}-integration-run`,
+      evidence: await verify(repo, {
+        baseRef: frozen.baseRef,
+        commands: frozen.checks,
+        environment: frozen.environment,
+        store: path.join(stateDir, "evidence"),
+      }),
+    };
+    const decisionId = `${workflowId}-integration-decision`;
+    await recordAcceptanceRef(stateDir, workflowId, decisionId);
+    await acceptOutcome(
+      repo,
+      frozen,
+      report,
+      {
+        schemaVersion: 1,
+        id: decisionId,
+        decider: { kind: "pm", executionId: "pm" },
+        criteria: ["check"],
+        basis: "combined check passed",
+      },
+      stateDir,
+      { workflowId },
+    );
+    writeJSON(path.join(stateDir, "reports", `${report.runId}.json`), {
+      schemaVersion: 1,
+      ...report,
+      head: report.evidence.fingerprint.head,
+    });
+    await acceptWorkflowIntegration(
+      stateDir,
+      workflowId,
+      snapshot.state.revision,
+      repo,
+      report,
+    );
+  });
+}
+
+// The ledger, fidelity and brief audit a kickoff needs before its close gates
+// reach the outcome acceptance (the h1 test's own setup).
+async function f7CompleteBriefSide(fixture) {
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: fixture.head,
+    repo: fixture.repo,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "README.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "README.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(
+    fixture.org,
+    fixture.worktreeId,
+    fixture.dir,
+  );
+  await withOrcaHandle(fixture.auditorHandle, async () => {
+    await auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "brief",
+      OUTCOME_CHECKED,
+    );
+    await auditAccept(fixture.org, fixture.worktreeId, "brief");
+  });
+}
+
+const f7CloseReady = (fixture, repo = fixture.repo) =>
+  assertKickoffCloseReady(fixture.org, fixture.worktreeId, {
+    head: fixture.head,
+    repo,
+    entry: listKickoffs(fixture.org, fixture.worktreeId).kickoffs[0],
+  });
+
+const f7Deliver = (fixture, source = fixture.repo) =>
+  deliverKickoff({
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source,
+    head: fixture.head,
+    callerCwd: fixture.dir,
+  });
+
+const f7Release = (fixture, repo = fixture.repo) =>
+  releaseKickoff(fixture.org, {
+    worktreeId: fixture.worktreeId,
+    reason: "completed",
+    head: fixture.head,
+    repo,
+    callerCwd: fixture.dir,
+  });
+
+const f7Objection = (fixture, repo = fixture.repo) =>
+  withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "the result repository is not determined",
+      rebuttalRequested: "name the repository that holds every accepted head",
+      resultHead: fixture.head,
+      repo,
+    }),
+  );
+
+test("f7-1: with no decision record, audit-accept, close-ready, deliver and completed release all refuse two recorded result repositories and change nothing", async (t) => {
+  const fixture = await f7Kickoff(t);
+  await f7CompleteBriefSide(fixture);
+  await assertUnchanged(fixture, async () => {
+    await assert.rejects(
+      () => f7AuditAccept(fixture, fixture.repo, fixture.head),
+      f7Ambiguous,
+    );
+    await assert.rejects(() => f7CloseReady(fixture), f7Ambiguous);
+    await assert.rejects(() => f7Deliver(fixture), f7Ambiguous);
+    await assert.rejects(() => f7Release(fixture), f7Ambiguous);
+    await assert.rejects(
+      () => signalCloseReady(fixture),
+      /different result repositories/,
+    );
+  });
+  const error = await f7CloseReady(fixture).catch((caught) => caught);
+  assert.deepEqual(
+    [...error.candidates].sort(),
+    [fs.realpathSync(fixture.impl), fs.realpathSync(fixture.repo)].sort(),
+  );
+  assert.match(error.message, /kickoff-result-repo-decide/);
+});
+
+test("f7-2: an outcome objection records the ambiguity as a bindingDefect without touching binding or checked; any other binding error still refuses", async (t) => {
+  const fixture = await f7Kickoff(t);
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditChecked(fixture.org, fixture.worktreeId, "outcome", OUTCOME_CHECKED),
+  );
+  const before = readAudit(fixture.org, fixture.worktreeId).checkpoints.outcome;
+  const { recorded } = await f7Objection(fixture);
+  assert.equal(recorded, true);
+  const after = readAudit(fixture.org, fixture.worktreeId).checkpoints.outcome;
+  assert.equal(after.objections.length, 1);
+  const [objection] = after.objections;
+  assert.equal(objection.bindingDefect.code, "result-repo-ambiguous");
+  assert.match(objection.bindingDefect.message, /kickoff-result-repo-decide/);
+  assert.equal(objection.bindingDefect.candidates.length, 2);
+  assert.deepEqual(after.binding, before.binding);
+  assert.deepEqual(after.checked, before.checked);
+  assert.equal(after.acceptance, null);
+  // An ordinary objection carries no bindingDefect.
+  const single = kickoff(t, "wt-2", { auditor: { profile: "claude-current" } });
+  await acceptStaged(await stageAcceptedTask(single, "wf-single"));
+  await withOrcaHandle(single.auditorHandle, () =>
+    auditObjection(single.org, single.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "gap",
+      rebuttalRequested: "show it",
+      resultHead: single.head,
+      repo: single.repo,
+    }),
+  );
+  assert.equal(
+    "bindingDefect" in
+      readAudit(single.org, single.worktreeId).checkpoints.outcome
+        .objections[0],
+    false,
+  );
+});
+
+test("f7-2: binding errors other than the ambiguity are refused and leave the audit record unchanged", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const other = realTempDir(t, "omt-f7-other-");
+  git(other, ["clone", "-q", fixture.dir, "."]);
+  // A decision that predates result-repository binding is a different error.
+  const original = fs.readFileSync(fixture.implStaged.file);
+  const state = readJSON(fixture.implStaged.file);
+  delete state.integration.decision.checkoutPath;
+  writeJSON(fixture.implStaged.file, state);
+  await assertUnchanged(fixture, () =>
+    assert.rejects(() => f7Objection(fixture), /predates result-repository/),
+  );
+  fs.writeFileSync(fixture.implStaged.file, original);
+  // After a decision, a caller repository that is not the decided one is refused.
+  await f7Decide(fixture, fixture.repo);
+  await assertUnchanged(fixture, () =>
+    assert.rejects(
+      () => f7Objection(fixture, other),
+      /not the result repository/,
+    ),
+  );
+});
+
+test("f7-3: a bindingDefect objection blocks acceptance until ruled persuaded, and persuaded alone does not choose a repository", async (t) => {
+  const fixture = await f7Kickoff(t);
+  await f7Objection(fixture);
+  const evidencePath = "evidence.txt";
+  fs.writeFileSync(path.join(fixture.dir, evidencePath), "proof\n");
+  const objectionId = readAudit(fixture.org, fixture.worktreeId).checkpoints
+    .outcome.objections[0].id;
+  const respond = () =>
+    recordOutcomeResponseDirectly(fixture, {
+      objectionId,
+      argument: "the integration checkout contains every accepted head",
+      evidenceRefs: [
+        {
+          path: evidencePath,
+          sha256: fileSha256(path.join(fixture.dir, evidencePath)),
+        },
+      ],
+    }).response.id;
+  const rule = (respondedAgainst, verdict) =>
+    withOrcaHandle(fixture.auditorHandle, () =>
+      auditRuling(fixture.org, fixture.worktreeId, {
+        checkpoint: "outcome",
+        objectionId,
+        respondedAgainst,
+        verdict,
+        reason: "ruling",
+      }),
+    );
+  // not-persuaded: the objection stays unresolved, so no acceptance path works.
+  await rule(respond(), "not-persuaded");
+  assert.equal(
+    hasUnresolvedObjections(fixture.org, fixture.worktreeId, "outcome"),
+    true,
+  );
+  await assert.rejects(
+    () => f7AuditAccept(fixture, fixture.repo, fixture.head),
+    /unresolved|result-repo|different result repositories/,
+  );
+  await assert.rejects(
+    () =>
+      stageAcceptedTask(fixture, "wf-more", {
+        worktreePath: fixture.repo,
+        taskId: "more-task",
+      }),
+    /unresolved objection/,
+  );
+  // persuaded, but nothing decided yet: audit-accept still refuses.
+  await rule(respond(), "persuaded");
+  assert.equal(
+    hasUnresolvedObjections(fixture.org, fixture.worktreeId, "outcome"),
+    false,
+  );
+  await assert.rejects(
+    () => f7AuditAccept(fixture, fixture.repo, fixture.head),
+    f7Ambiguous,
+  );
+  // persuaded and decided: acceptance holds for the decided repository and HEAD.
+  await f7Decide(fixture, fixture.repo);
+  const { accepted } = await auditorAcceptsOutcome(
+    fixture,
+    fixture.repo,
+    fixture.head,
+  );
+  assert.ok(accepted);
+  assert.equal(
+    await hasValidAcceptance(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      fixture.head,
+      fs.realpathSync(fixture.repo),
+    ),
+    true,
+  );
+});
+
+test("f7-4: only the registered director's checkout may decide, with no callerCwd or --force way around it, and a blank reason is refused", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const elsewhere = realTempDir(t, "omt-f7-elsewhere-");
+  await assertUnchanged(fixture, async () => {
+    await assert.rejects(
+      () =>
+        withCwd(elsewhere, () =>
+          kickoffResultRepoDecide(fixture.org, fixture.worktreeId, {
+            repo: fixture.repo,
+            reason: F7_REASON,
+            callerCwd: fixture.dir,
+          }),
+        ),
+      /must be run from the director's checkout/,
+    );
+    for (const reason of ["", "   ", null]) {
+      await assert.rejects(
+        () => f7Decide(fixture, fixture.repo, reason),
+        /--reason is required/,
+      );
+    }
+    await assert.rejects(
+      () =>
+        withCwd(fixture.dir, () =>
+          kickoffResultRepoDecide(fixture.org, "wt-missing", {
+            repo: fixture.repo,
+            reason: F7_REASON,
+          }),
+        ),
+      /supervises no registered kickoff/,
+    );
+  });
+  // The API names no caller directory: it takes the organization, the
+  // worktree and one request object.
+  assert.equal(kickoffResultRepoDecide.length, 3);
+  const args = [
+    "kickoff-result-repo-decide",
+    "--org",
+    fixture.org,
+    "--worktree",
+    fixture.worktreeId,
+    "--repo",
+    fixture.repo,
+    "--reason",
+    F7_REASON,
+  ];
+  await assertUnchanged(fixture, () => {
+    const forced = runCli([...args, "--force"], { cwd: fixture.dir });
+    assert.notEqual(forced.code, 0);
+    assert.match(forced.stderr, /force/);
+    const wrongCwd = runCli(args, { cwd: elsewhere });
+    assert.notEqual(wrongCwd.code, 0);
+    assert.match(wrongCwd.stderr, /director's checkout/);
+  });
+  // A kickoff with no registered director cannot be decided at all.
+  const legacy = legacyKickoff(t, "wt-nodirector", { director: false });
+  await assertUnchanged(legacy, () =>
+    assert.rejects(
+      () =>
+        withCwd(legacy.dir, () =>
+          kickoffResultRepoDecide(legacy.org, legacy.worktreeId, {
+            repo: legacy.dir,
+            reason: F7_REASON,
+          }),
+        ),
+      /no registered director/,
+    ),
+  );
+  // From the director's checkout the CLI records the decision.
+  const decided = runCli(args, { cwd: fixture.dir });
+  assert.equal(decided.code, 0, decided.stderr);
+  assert.equal(JSON.parse(decided.stdout).decided, true);
+  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+});
+
+// Each mutation breaks one link of an accepted task's chain; decide must then
+// refuse and write nothing. `file` is read, changed and restored by the test.
+function f7Mutations(fixture) {
+  const stateDir = fixture.entry.pm.stateDir;
+  const decisionFile = path.join(
+    stateDir,
+    "decisions",
+    "accept-wf-impl-impl-task.json",
+  );
+  const gateFile = path.join(stateDir, "gates", "impl-task.json");
+  const reportFile = path.join(stateDir, "reports", "wf-impl-impl-task.json");
+  const edit = (file, change) => () => {
+    const value = readJSON(file);
+    change(value);
+    writeJSON(file, value);
+  };
+  return [
+    ["decision file missing", () => fs.rmSync(decisionFile)],
+    ["gate file missing", () => fs.rmSync(gateFile)],
+    ["no matching report", () => fs.rmSync(reportFile)],
+    [
+      "two matching reports",
+      () =>
+        fs.copyFileSync(reportFile, path.join(stateDir, "reports", "dup.json")),
+    ],
+    [
+      "unparseable report",
+      () => fs.writeFileSync(path.join(stateDir, "reports", "bad.json"), "{"),
+    ],
+    [
+      "decision taskHash",
+      edit(decisionFile, (value) => (value.taskHash = "0".repeat(64))),
+    ],
+    [
+      "decision revision",
+      edit(decisionFile, (value) => (value.taskRevision = 2)),
+    ],
+    [
+      "decision executionId",
+      edit(decisionFile, (value) => (value.implementationExecutionId = "x")),
+    ],
+    ["decision id", edit(decisionFile, (value) => (value.id = "other"))],
+    [
+      "decision status",
+      edit(decisionFile, (value) => (value.status = "rejected")),
+    ],
+    ["gate runId", edit(gateFile, (value) => (value.runId = "x"))],
+    ["gate evidenceKey", edit(gateFile, (value) => (value.evidenceKey = "x"))],
+    [
+      "gate contract hash",
+      edit(
+        gateFile,
+        (value) => (value.gates["contract-ready"].taskHash = "0".repeat(64)),
+      ),
+    ],
+    [
+      "gate decisionId",
+      edit(
+        gateFile,
+        (value) => (value.gates["outcome-accepted"].decisionId = "x"),
+      ),
+    ],
+    [
+      "report fingerprint no longer hashes to its key",
+      edit(
+        reportFile,
+        (value) => (value.evidence.fingerprint.environment = "forged"),
+      ),
+    ],
+    [
+      "report head differs from fingerprint",
+      edit(reportFile, (value) => (value.head = "1".repeat(40))),
+    ],
+    [
+      "report evidence not passed",
+      edit(reportFile, (value) => (value.evidence.status = "failed")),
+    ],
+    [
+      "workflow task taskHash",
+      edit(
+        fixture.implStaged.file,
+        (value) => (value.tasks["impl-task"].taskHash = "0".repeat(64)),
+      ),
+    ],
+    [
+      "non-integration decision names a run",
+      edit(
+        fixture.implStaged.file,
+        (value) => (value.integration.decision.runId = "run-x"),
+      ),
+    ],
+    [
+      "non-integration decision names a decision id",
+      edit(
+        fixture.implStaged.file,
+        (value) => (value.integration.decision.decisionId = "x"),
+      ),
+    ],
+  ];
+}
+
+test("f7-5: decide fails closed on a broken accepted chain and passes once it is intact without cache or old HEAD", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const stateDir = fixture.entry.pm.stateDir;
+  for (const [name, mutate] of f7Mutations(fixture)) {
+    const saved = f7Bytes(fixture);
+    mutate();
+    await assertUnchanged(fixture, () =>
+      assert.rejects(
+        () => f7Decide(fixture, fixture.repo),
+        (error) => {
+          assert.ok(error instanceof Error, name);
+          return true;
+        },
+        name,
+      ),
+    );
+    // Put back exactly what was there, files the mutation removed included.
+    for (const [file] of f7Bytes(fixture)) {
+      if (!saved.has(file)) fs.rmSync(file);
+    }
+    for (const [file, content] of saved) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, Buffer.from(content, "base64"));
+    }
+    assert.deepEqual(f7Bytes(fixture), saved, name);
+  }
+  // Positive: the evidence cache is gone and the repository's HEAD has moved
+  // past every accepted head, yet the recorded chain alone proves containment.
+  fs.rmSync(path.join(stateDir, "evidence"), { recursive: true, force: true });
+  git(fixture.repo, ["commit", "-q", "--allow-empty", "-m", "later work"]);
+  const { decision } = await f7Decide(fixture, fixture.repo);
+  assert.equal(
+    decision.headAtDecision,
+    git(fixture.repo, ["rev-parse", "HEAD"]),
+  );
+  assert.notEqual(decision.headAtDecision, fixture.head);
+  assert.ok(
+    decision.proof.acceptedHeads.includes(
+      git(fixture.impl, ["rev-parse", "HEAD"]),
+    ),
+  );
+});
+
+test("f7-5: an integration-required workflow's decision, gate and report are cross-checked too, and its head is among the proven heads", async (t) => {
+  const fixture = await f7Kickoff(t, { integration: true });
+  const stateDir = fixture.entry.pm.stateDir;
+  const gateFile = path.join(stateDir, "gates", "int-final.json");
+  const reportFile = path.join(
+    stateDir,
+    "reports",
+    "wf-integration-integration-run.json",
+  );
+  const decisionFile = path.join(
+    stateDir,
+    "decisions",
+    "wf-integration-integration-decision.json",
+  );
+  const cases = [
+    ["integration gate runId", gateFile, (value) => (value.runId = "x")],
+    [
+      "integration decision hash",
+      decisionFile,
+      (value) => (value.taskHash = "0".repeat(64)),
+    ],
+    [
+      "integration report key",
+      reportFile,
+      (value) => (value.evidence.key = "0".repeat(64)),
+    ],
+  ];
+  for (const [name, file, change] of cases) {
+    const original = fs.readFileSync(file);
+    const value = readJSON(file);
+    change(value);
+    writeJSON(file, value);
+    await assertUnchanged(fixture, () =>
+      assert.rejects(() => f7Decide(fixture, fixture.repo), Error, name),
+    );
+    fs.writeFileSync(file, original);
+  }
+  fs.rmSync(reportFile);
+  await assertUnchanged(fixture, () =>
+    assert.rejects(() => f7Decide(fixture, fixture.repo), /exactly one report/),
+  );
+});
+
+test("f7-6: a repository that is not a candidate, misses an accepted head, or is not the only one containing them is refused", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const outside = realTempDir(t, "omt-f7-outside-");
+  git(outside, ["clone", "-q", fixture.dir, "."]);
+  await assertUnchanged(fixture, async () => {
+    await assert.rejects(
+      () => f7Decide(fixture, outside),
+      /not a result repository any accepted workflow recorded/,
+    );
+    await assert.rejects(
+      () => f7Decide(fixture, path.join(outside, "missing")),
+      /does not resolve to a directory/,
+    );
+    await assert.rejects(
+      () => f7Decide(fixture, fixture.impl),
+      /does not contain accepted head/,
+    );
+  });
+  // Both candidates now contain every accepted head: ambiguous, so refused.
+  git(fixture.impl, [
+    "pull",
+    "-q",
+    "--no-rebase",
+    "--no-edit",
+    fixture.repo,
+    "HEAD",
+  ]);
+  await assertUnchanged(fixture, async () => {
+    await assert.rejects(
+      () => f7Decide(fixture, fixture.repo),
+      /also contains every accepted head/,
+    );
+    await assert.rejects(
+      () => f7Decide(fixture, fixture.impl),
+      /also contains every accepted head/,
+    );
+  });
+  // Without the merge, an accepted head is not even a commit of the repository.
+  const apart = await f7Kickoff(t, { merge: false });
+  await assertUnchanged(apart, async () => {
+    await assert.rejects(
+      () => f7Decide(apart, apart.repo),
+      /does not contain accepted head/,
+    );
+    await assert.rejects(
+      () => f7Decide(apart, apart.impl),
+      /does not contain accepted head/,
+    );
+  });
+});
+
+test("f7-6b: only Git's clear exit code 1 counts as not containing a head; any other Git failure refuses the decision", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const shimDir = realTempDir(t, "omt-f7-shim-");
+  const shim = path.join(shimDir, "git");
+  // Fails the chosen subcommand with the chosen exit code in one repository only.
+  fs.writeFileSync(
+    shim,
+    `#!/bin/sh\nif [ "$(pwd -P)" = "$F7_BAD_REPO" ] && [ "$1" = "$F7_BAD_CMD" ]; then exit "$F7_BAD_CODE"; fi\nexec "${realGit}" "$@"\n`,
+    { mode: 0o755 },
+  );
+  const saved = { ...process.env };
+  const shimmed = async (badRepo, cmd, code, check) => {
+    process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH}`;
+    process.env.F7_BAD_REPO = fs.realpathSync(badRepo);
+    process.env.F7_BAD_CMD = cmd;
+    process.env.F7_BAD_CODE = String(code);
+    try {
+      await check();
+    } finally {
+      for (const key of ["PATH", "F7_BAD_REPO", "F7_BAD_CMD", "F7_BAD_CODE"]) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+    }
+  };
+  await assertUnchanged(fixture, async () => {
+    // A Git error in the other candidate must not prove the chosen one exclusive.
+    await shimmed(fixture.impl, "merge-base", 128, () =>
+      assert.rejects(() => f7Decide(fixture, fixture.repo), /could not decide/),
+    );
+    await shimmed(fixture.impl, "rev-parse", 128, () =>
+      assert.rejects(
+        () => f7Decide(fixture, fixture.repo),
+        /cannot be read|could not decide/,
+      ),
+    );
+    // So must an error in the chosen repository itself.
+    await shimmed(fixture.repo, "merge-base", 128, () =>
+      assert.rejects(() => f7Decide(fixture, fixture.repo), /could not decide/),
+    );
+  });
+  // With a clear exit code 1 from Git the same repositories are decided normally.
+  await shimmed(fixture.impl, "unrelated", 128, async () => {
+    const { decision } = await f7Decide(fixture, fixture.repo);
+    assert.equal(decision.repo, fs.realpathSync(fixture.repo));
+  });
+});
+
+test("f7-7: after a decision every consumer binds to that one repository, at its HEAD only, and a different path is refused", async (t) => {
+  const fixture = await f7Kickoff(t);
+  await f7CompleteBriefSide(fixture);
+  const stateBefore = f7Bytes(fixture);
+  const { decision } = await f7Decide(fixture, fixture.repo);
+  const real = fs.realpathSync(fixture.repo);
+  assert.equal(decision.repo, real);
+  assert.equal(f7Resolve(fixture), real);
+  // Only the registry entry gained the record; workflow state is untouched.
+  const stateDir = fixture.entry.pm.stateDir;
+  for (const [file, content] of stateBefore) {
+    if (file.startsWith(stateDir))
+      assert.equal(f7Bytes(fixture).get(file), content);
+  }
+  // The caller's value is only compared, never a source.
+  const stranger = realTempDir(t, "omt-f7-stranger-");
+  git(stranger, ["clone", "-q", fixture.dir, "."]);
+  await assertUnchanged(fixture, async () => {
+    await assert.rejects(
+      () => f7Objection(fixture, stranger),
+      /not the result repository/,
+    );
+    await assert.rejects(
+      () => f7AuditAccept(fixture, stranger, fixture.head),
+      /not the result repository/,
+    );
+    await assert.rejects(
+      () => f7CloseReady(fixture, fixture.impl),
+      /not the result repository/,
+    );
+    await assert.rejects(
+      () => f7Deliver(fixture, fixture.impl),
+      /not the result repository/,
+    );
+  });
+  await auditorAcceptsOutcome(fixture, fixture.repo, fixture.head);
+  await assert.doesNotReject(() => f7CloseReady(fixture));
+  await assert.doesNotReject(() => signalCloseReady(fixture));
+  // The acceptance is bound to the HEAD it was made at.
+  await assert.rejects(
+    () => auditorAcceptsOutcome(fixture, fixture.repo, FORGED_HEAD),
+    Error,
+  );
+  const delivered = await f7Deliver(fixture);
+  assert.equal(delivered.delivered, true);
+  assert.equal(delivered.head, fixture.head);
+  // Completed release now clears the result repository and close-ready gates
+  // and stops only at the delivery document this fixture never writes.
+  await assert.rejects(
+    () => f7Release(fixture),
+    /delivery-ref document is not committed yet/,
+  );
+});
+
+test("f7-7: the same binding holds when one accepted workflow required integration", async (t) => {
+  const fixture = await f7Kickoff(t, { integration: true });
+  const { decision } = await f7Decide(fixture, fixture.repo);
+  const integrationHead = decision.workflowSet.find(
+    (item) => item.id === "wf-integration",
+  ).integration.head;
+  assert.ok(decision.proof.acceptedHeads.includes(integrationHead));
+  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  await assert.rejects(
+    () => f7Objection(fixture, fixture.impl),
+    /not the result repository/,
+  );
+  await assert.doesNotReject(() =>
+    auditorAcceptsOutcome(fixture, fixture.repo, fixture.head),
+  );
+});
+
+test("f7-8: a decision is append-only, cannot be repeated for the same accepted results, and stops binding when those results change", async (t) => {
+  const fixture = await f7Kickoff(t);
+  const stateDir = fixture.entry.pm.stateDir;
+  const stateBefore = f7Bytes(fixture);
+  const first = (await f7Decide(fixture, fixture.repo)).decision;
+  for (const [file, content] of stateBefore) {
+    if (file.startsWith(stateDir))
+      assert.equal(f7Bytes(fixture).get(file), content, file);
+  }
+  await assertUnchanged(fixture, () =>
+    assert.rejects(
+      () => f7Decide(fixture, fixture.repo),
+      /already decided for these accepted results/,
+    ),
+  );
+  // A decision file edited after the record: the fingerprint no longer matches.
+  const decisionFile = path.join(
+    stateDir,
+    "decisions",
+    "accept-wf-main-main-task.json",
+  );
+  const original = fs.readFileSync(decisionFile);
+  writeJSON(decisionFile, { ...readJSON(decisionFile), note: "edited" });
+  await assertUnchanged(fixture, () =>
+    assert.throws(
+      () => f7Resolve(fixture),
+      (error) => {
+        assert.equal(error.code, "result-repo-ambiguous");
+        assert.match(error.message, /wf-main: tasks\.0\.decisionSha256/);
+        return true;
+      },
+    ),
+  );
+  fs.writeFileSync(decisionFile, original);
+  // A duplicated matching report and a changed gate evidence key.
+  const reportFile = path.join(stateDir, "reports", "wf-main-main-task.json");
+  fs.copyFileSync(reportFile, path.join(stateDir, "reports", "dup.json"));
+  await assert.throws(() => f7Resolve(fixture), f7Ambiguous);
+  fs.rmSync(path.join(stateDir, "reports", "dup.json"));
+  const gateFile = path.join(stateDir, "gates", "main-task.json");
+  const gateOriginal = fs.readFileSync(gateFile);
+  writeJSON(gateFile, { ...readJSON(gateFile), evidenceKey: "x" });
+  await assert.throws(() => f7Resolve(fixture), f7Ambiguous);
+  fs.writeFileSync(gateFile, gateOriginal);
+  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  // A newly accepted workflow changes the set: the old record stops binding,
+  // naming the workflow, until a new record is appended next to it.
+  await acceptStaged(
+    await stageAcceptedTask(fixture, "wf-third", {
+      worktreePath: fixture.repo,
+      taskId: "third-task",
+    }),
+  );
+  await assert.throws(
+    () => f7Resolve(fixture),
+    (error) => {
+      assert.equal(error.code, "result-repo-ambiguous");
+      assert.match(error.message, /workflows accepted since: wf-third/);
+      return true;
+    },
+  );
+  const second = (await f7Decide(fixture, fixture.repo)).decision;
+  const records = listKickoffs(fixture.org, fixture.worktreeId).kickoffs[0]
+    .resultRepoDecisions;
+  assert.equal(records.length, 2);
+  assert.deepEqual(records[0], first);
+  assert.deepEqual(records[1], second);
+  assert.notEqual(first.id, second.id);
+  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+});
+
+test("f7-9: a repository whose HEAD moved off the accepted heads, or a hand-edited registry record, stops binding", async (t) => {
+  const fixture = await f7Kickoff(t);
+  await f7Decide(fixture, fixture.repo);
+  const entryFile = path.join(
+    registryDirectory(fixture.org),
+    `${kickoffEntryName(fixture.worktreeId)}.json`,
+  );
+  const original = fs.readFileSync(entryFile);
+  const base = git(fixture.dir, ["rev-parse", "main"]);
+  const tip = git(fixture.repo, ["rev-parse", "HEAD"]);
+  git(fixture.repo, ["reset", "-q", "--hard", base]);
+  await assert.throws(
+    () => f7Resolve(fixture),
+    (error) => {
+      assert.equal(error.code, "result-repo-ambiguous");
+      assert.match(error.message, /no longer holds/);
+      return true;
+    },
+  );
+  git(fixture.repo, ["reset", "-q", "--hard", tip]);
+  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  // The record's repo changed by hand to the other candidate.
+  const entry = readJSON(entryFile);
+  entry.resultRepoDecisions[0].repo = fs.realpathSync(fixture.impl);
+  writeJSON(entryFile, entry);
+  await assert.throws(() => f7Resolve(fixture), f7Ambiguous);
+  // The record's fingerprint edited by hand.
+  const edited = readJSON(entryFile);
+  edited.resultRepoDecisions[0].repo = fs.realpathSync(fixture.repo);
+  edited.resultRepoDecisions[0].workflowSet[0].tasks[0].head = "2".repeat(40);
+  writeJSON(entryFile, edited);
+  await assert.throws(() => f7Resolve(fixture), f7Ambiguous);
+  fs.writeFileSync(entryFile, original);
+  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+});
+
+test("f7-10: a single recorded result repository behaves as before and needs neither reports nor a decision", async (t) => {
+  const fixture = kickoff(t, "wt-1", {
+    auditor: { profile: "claude-current" },
+  });
+  await acceptStaged(await stageAcceptedTask(fixture, "wf-only"));
+  fs.rmSync(path.join(fixture.entry.pm.stateDir, "reports"), {
+    recursive: true,
+    force: true,
+  });
+  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  await assertUnchanged(fixture, () =>
+    assert.rejects(() => f7Decide(fixture, fixture.repo), /nothing to decide/),
+  );
 });

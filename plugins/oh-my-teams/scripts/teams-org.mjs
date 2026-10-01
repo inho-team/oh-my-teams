@@ -155,6 +155,7 @@ import {
   cleanupKickoffBranches,
   isSameOrWithinByIdentity,
   kickoffAuditPolicyRetrofit,
+  kickoffResultRepoDecide,
   kickoffHashFor,
   listKickoffs,
   ownerProject,
@@ -217,6 +218,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   kickoff-claim --org FILE --from CLAIM
   kickoff-show --org FILE [--worktree ID]
   kickoff-bind --org FILE --worktree ID --run ID
+  kickoff-result-repo-decide --org FILE --worktree ID --repo PATH --reason TEXT
+                             (director only, run from the kickoff's registered checkout;
+                             when accepted workflows recorded different result repositories,
+                             proves from Git which one contains every accepted head and records
+                             it append-only; the same accepted results cannot be decided twice)
   kickoff-audit-policy-retrofit --org FILE --worktree ID
                                 --auditor-configured true|false --reason TEXT
                                 [--profile NAME --fallbacks NAME[,NAME...]]
@@ -472,6 +478,7 @@ export const ALLOWED_OPTIONS = {
   "kickoff-show": ["org", "worktree"],
   "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
+  "kickoff-result-repo-decide": ["org", "worktree", "repo", "reason"],
   "kickoff-audit-policy-retrofit": [
     "org",
     "worktree",
@@ -766,6 +773,7 @@ export const REQUIRED_OPTIONS = {
   "kickoff-show": ["org"],
   "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
+  "kickoff-result-repo-decide": ["org", "worktree", "repo", "reason"],
   "kickoff-audit-policy-retrofit": [
     "org",
     "worktree",
@@ -3333,6 +3341,11 @@ export async function executeCommand(args, execute) {
       return bindKickoffRun(args.org, {
         worktreeId: args.worktree,
         runId: args.run,
+      });
+    case "kickoff-result-repo-decide":
+      return kickoffResultRepoDecide(args.org, args.worktree, {
+        repo: args.repo,
+        reason: args.reason,
       });
     case "kickoff-audit-policy-retrofit": {
       const auditorConfigured = { true: true, false: false }[

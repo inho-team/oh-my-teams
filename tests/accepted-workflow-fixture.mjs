@@ -67,6 +67,7 @@ export function taskBody(id) {
  * @param {object} [options] - Task overrides.
  * @param {string[][]} [options.checks] - Check commands replacing the default passing one.
  * @param {string} [options.role] - Role of the task (a worker organization needs "worker").
+ * @param {string} [options.taskId] - Task identifier; workflows of one state directory that must both stay accepted need distinct ones, because a gate record is keyed by it.
  * @returns {Promise<object>} The created workflow.
  */
 export async function createSingleTaskWorkflow(
@@ -74,10 +75,10 @@ export async function createSingleTaskWorkflow(
   stateDir,
   repoDir,
   workflowId,
-  { checks, role = "senior" } = {},
+  { checks, role = "senior", taskId = "a" } = {},
 ) {
-  writeJSON(path.join(repoDir, "a.json"), {
-    ...taskBody("a"),
+  writeJSON(path.join(repoDir, `${taskId}.json`), {
+    ...taskBody(taskId),
     ...(checks === undefined ? {} : { checks }),
   });
   return createWorkflow(
@@ -87,7 +88,7 @@ export async function createSingleTaskWorkflow(
       id: workflowId,
       goal: "fixture's own workflow",
       repo: ".",
-      tasks: [{ file: "a.json", role }],
+      tasks: [{ file: `${taskId}.json`, role }],
       policy: { maxRunning: 1, maxReviewPending: 1 },
       budget: { maxAttempts: 1, maxCalls: 4 },
     },
@@ -140,6 +141,46 @@ export async function withUntrackedHidden(repo, work) {
     else fs.writeFileSync(exclude, original);
     if (createdDir)
       fs.rmSync(path.dirname(exclude), { recursive: true, force: true });
+  }
+}
+
+/**
+ * Saves the acceptance-ref document a registered kickoff's outcome-accepted
+ * gate requires before `acceptOutcome` runs for a workflow's task; a state
+ * directory no kickoff owns needs none, so nothing is written for it.
+ *
+ * @param {string} stateDir - PM state directory.
+ * @param {string} workflowId - Workflow the accepted task belongs to.
+ * @param {string} decisionId - Decision id the acceptance will use.
+ * @returns {Promise<void>} Settles once the document, if any, is saved.
+ */
+export async function recordAcceptanceRef(stateDir, workflowId, decisionId) {
+  // Fixture-only ordering: under a registered kickoff the outcome-accepted
+  // gate also requires the acceptance-ref document, and the decision id is
+  // chosen here, so the document goes in before acceptOutcome. This is not
+  // evidence of the production order nor of which CLI role may write it.
+  const registered = await resolveRegisteredKickoffFromState(stateDir);
+  const kickoffHash = registered?.kickoffHash;
+  if (kickoffHash !== undefined) {
+    saveDocument(stateDir, {
+      schemaVersion: 1,
+      docId: buildDocId({
+        kickoffHash,
+        workflowId,
+        stageSlug: "acceptance",
+        docType: "acceptance-ref",
+        localId: decisionId,
+      }),
+      stage: "acceptance",
+      kickoffId: kickoffHash,
+      workflowId,
+      revision: 1,
+      state: "resolved",
+      author: { role: "pm", executionId: "pm" },
+      createdAt: new Date().toISOString(),
+      basedOnRevision: null,
+      reason: "accepted-workflow fixture",
+    });
   }
 }
 
@@ -203,34 +244,16 @@ export async function acceptComponentTask({
         store: path.join(stateDir, "evidence"),
       }),
     };
+    // The accepted report, kept where the result-repository decision looks for
+    // it (`<state>/reports/*.json`); reports are written by the PM, not by verify.
+    fs.mkdirSync(path.join(stateDir, "reports"), { recursive: true });
+    writeJSON(path.join(stateDir, "reports", `${runId}.json`), {
+      schemaVersion: 1,
+      ...report,
+      head: report.evidence.fingerprint.head,
+    });
     const decisionId = `accept-${workflowId}-${taskId}`;
-    // Fixture-only ordering: under a registered kickoff the outcome-accepted
-    // gate also requires the acceptance-ref document, and the decision id is
-    // chosen here, so the document goes in before acceptOutcome. This is not
-    // evidence of the production order nor of which CLI role may write it.
-    const registered = await resolveRegisteredKickoffFromState(stateDir);
-    const kickoffHash = registered?.kickoffHash;
-    if (kickoffHash !== undefined) {
-      saveDocument(stateDir, {
-        schemaVersion: 1,
-        docId: buildDocId({
-          kickoffHash,
-          workflowId,
-          stageSlug: "acceptance",
-          docType: "acceptance-ref",
-          localId: decisionId,
-        }),
-        stage: "acceptance",
-        kickoffId: kickoffHash,
-        workflowId,
-        revision: 1,
-        state: "resolved",
-        author: { role: "pm", executionId: "pm" },
-        createdAt: new Date().toISOString(),
-        basedOnRevision: null,
-        reason: "accepted-workflow fixture",
-      });
-    }
+    await recordAcceptanceRef(stateDir, workflowId, decisionId);
     await acceptOutcome(
       resultRepo,
       task,
@@ -267,6 +290,7 @@ export async function acceptComponentTask({
  * @param {string} options.workflowId - Workflow identifier.
  * @param {string} options.resultRepo - Repository the task's receipt names.
  * @param {string} [options.role] - Role of the task, see `createSingleTaskWorkflow`.
+ * @param {string} [options.taskId] - Task identifier, see `createSingleTaskWorkflow`.
  * @returns {Promise<{stateDir: string, workflowId: string, revision: number, file: string}>} Where the workflow now stands.
  */
 export async function acceptTaskThroughRuntime({
@@ -276,7 +300,11 @@ export async function acceptTaskThroughRuntime({
   workflowId,
   resultRepo,
   role,
+  taskId = "a",
 }) {
-  await createSingleTaskWorkflow(org, stateDir, taskDir, workflowId, { role });
-  return acceptComponentTask({ stateDir, workflowId, taskId: "a", resultRepo });
+  await createSingleTaskWorkflow(org, stateDir, taskDir, workflowId, {
+    role,
+    taskId,
+  });
+  return acceptComponentTask({ stateDir, workflowId, taskId, resultRepo });
 }

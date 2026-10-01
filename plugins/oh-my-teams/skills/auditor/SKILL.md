@@ -54,6 +54,8 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role audit
 
 `requirements-fidelity`와 (director의) `requirements-present`·`requirements-fidelity-confirm` 이후에 진행한다. 결과 감사 수용은 close-ready 발신에서 처음 요구된다. `audit-objection`은 `workflow-accept` 전에도 낼 수 있고, `workflow-accept`는 이 kickoff의 결과 감사에 해소되지 않은 이의가 있으면 거부한다. `audit-accept --checkpoint outcome`은 `workflow-accept`가 결과 저장소를 확정한 뒤에만 기록되며, 그 저장소와 다른 `--repo`는 거부된다.
 
+결과 저장소가 모호하면(accepted workflow들이 서로 다른 저장소를 기록했는데 이사의 확정 기록이 없을 때) `audit-objection`은 오류로 끝나지 않고 `bindingDefect`를 단 outcome 이의로 기록된다. 이 이의는 결과 저장소를 지정하지 않고 checkpoint 결속도 바꾸지 않으므로 수용을 막기만 한다. `audit-accept`는 이사가 `kickoff-result-repo-decide`로 저장소를 확정하기 전까지 거부된다. 정본은 `plugins/oh-my-teams/scripts/audit.mjs`의 `auditObjection`(395행)이다.
+
 1. `audit-checked --checkpoint outcome`으로 결과를 검토했음을 기록한다.
 2. 제시된 증거가 statement·criterion과 어긋나면 `audit-objection`을 실행하고 `--from` JSON 본문의 `checkpoint`를 `outcome`으로 적어 이의를 남긴다.
 3. PM이 `--from` JSON 본문의 `checkpoint`를 `outcome`으로 적어 실행하는 `audit-response`를 기다린다. PM이 새 증거나 논거 없이 완료만 재선언하면 `not-persuaded`로 판정해도 된다.
