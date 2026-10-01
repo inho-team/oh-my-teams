@@ -38,7 +38,7 @@
 ## 검증 범위와 남은 항목
 
 이 문서가 적는 수치는 소스에서 센 정적 계수이며 실행 결과가 아니다. 현재
-계수는 `npm test`의 최상위 테스트 선언 1240개, `npm run quality`의
+계수는 `npm test`의 최상위 테스트 선언 1241개, `npm run quality`의
 149개 활성 모듈·558개 공개 export, `npm run eval:organization`의 11개 결정적 시나리오다. 통과 여부는 각 명령을 실행한 기록의 종료 코드와 pass·fail·skipped
 수로 확인한다. 2026-09-28 최종 점검에서는 `npm test`, `npm run quality`,
 `npm run format:check`, `npm run eval:organization`을 실행해 모두 통과했으며, 그
@@ -101,3 +101,23 @@ bind·session-bind 설계를 검토했으나 위조 가능한 환경·조상 프
 거부가 발생하며, 이것이 `resolveTrustedGitExecutable`의 오류 메시지가 이 절을
 가리키는 이유다. 이 신뢰 경로는 `PATH`와 호출자 환경 변수의 조작을 막을 뿐이며,
 후보 파일 자체를 수정할 권한이 있는 사용자는 막지 못한다.
+
+복수 결과 저장소를 확정하는 증명(`requirements.mjs`의 `proveResultRepoContainment`)의
+Git 호출은 같은 파일의 `runGit` 한 함수에만 있다. 이 함수도 실행 파일을 이름
+`git`으로 지정하고 `PATH`와 `GIT_*` 환경을 그대로 상속한다. 상속된 `GIT_DIR`이
+다른 저장소를 가리키면 모든 후보가 같은 저장소로 읽혀서 확정 저장소가 다른
+후보와 구별되지 않거나 수용 head를 찾지 못하므로 증명은 거부로 끝난다(두 경우를
+직접 실행해 확인했다). `PATH` 앞에 놓인 가짜 `git`은 증명을 거짓으로 통과시킬 수
+있으며, 이는 `evidence.mjs`와 같은 종류인 같은 OS 사용자 수준의 위조 한계다.
+증명은 종료 코드 0과 1만 Git의 답으로 인정한다. 부재 커밋은 `rev-parse --verify
+--quiet`가, 비조상은 `merge-base --is-ancestor`가 1을 낼 때에만 "포함하지 못함"으로
+세고, 그 밖의 종료 코드·실행 실패·시간 초과는 증명 실패로 거부한다.
+
+`kickoff-registry.mjs`의 `tryGit`은 0이 아닌 모든 종료를 같은 `null`로 돌려주므로
+`isAncestor`는 Git 오류도 "조상 아님"으로 읽는다. 다만 이 함수를 쓰는 병합 기록
+검증은 `null`이 되면 기록을 거부하고, 브랜치 정리는 `null`이면 삭제하지 않고
+오류 목록에 남긴다. 따라서 Git 오류가 병합이나 조상 관계를 거짓으로 증명하는
+방향으로 쓰이는 곳은 코드를 읽어 확인한 범위에서 없다.
+
+이 호출들을 `local-adapter.mjs`의 신뢰 실행기로 바꾸는 일은 이사가 승인한 후속
+task f7c에서 수행한다. 그 전까지 위 한계가 남아 있다.
