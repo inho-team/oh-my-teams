@@ -160,7 +160,8 @@ function initRepo(dir) {
 //
 // That forced restore must not hide a test that forgot its own: when the body
 // ends with a changed cwd, one of its hooks has to chdir back to the start
-// directory (observed through process.chdir), or the test fails. The restore
+// directory (the last chdir its hooks make, observed through process.chdir),
+// or the test fails. The restore
 // is never retried and a failing hook is never swallowed.
 const START_CWD = process.cwd();
 function sameDirectory(left, right) {
@@ -181,12 +182,12 @@ function test(name, fn) {
       },
     });
     const realChdir = process.chdir;
+    // Only chdir calls made by the after hooks count, and the last one wins,
+    // so a round trip inside the body (withCwd) never vouches for a restore.
+    let inHooks = false;
     let hooksRestored = false;
-    let ownRestore = false;
     process.chdir = (directory) => {
-      if (!ownRestore && sameDirectory(directory, START_CWD)) {
-        hooksRestored = true;
-      }
+      if (inHooks) hooksRestored = sameDirectory(directory, START_CWD);
       return realChdir.call(process, directory);
     };
     let leaked = false;
@@ -198,12 +199,8 @@ function test(name, fn) {
     }
     try {
       leaked = process.cwd() !== START_CWD;
-      ownRestore = true;
-      try {
-        realChdir.call(process, START_CWD);
-      } finally {
-        ownRestore = false;
-      }
+      realChdir.call(process, START_CWD);
+      inHooks = true;
       for (const hook of hooks) {
         try {
           await hook(t);

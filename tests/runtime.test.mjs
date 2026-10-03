@@ -713,6 +713,7 @@ test("concurrent edits cannot both accept the same revision", async (t) => {
   assert.equal(results.filter((r) => r.code === 0).length, 1);
   const rejected = results.filter((r) => r.code !== 0);
   assert.equal(rejected.length, 1, JSON.stringify(results));
+  assert.equal(rejected[0].code, 1, JSON.stringify(results));
   // core.mjs: the lock contention message, or the revision check after the lock.
   assert.match(
     rejected[0].stderr,
