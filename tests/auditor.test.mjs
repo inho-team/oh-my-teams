@@ -154,13 +154,71 @@ function initRepo(dir) {
 // node:test runs t.after hooks in registration order. A directory fixture
 // registers its removal before the test body can register a cwd restore, and
 // Windows cannot delete the current directory (EBUSY), which also left every
-// later test running inside a removed directory. This wrapper registers the
-// restore as every test's first hook, so it always runs before any removal.
+// later test running inside a removed directory. This wrapper therefore takes
+// over the test's t.after hooks: it runs them itself, in registration order,
+// after bringing the cwd back, so no removal can run inside the cwd.
+//
+// That forced restore must not hide a test that forgot its own: when the body
+// ends with a changed cwd, one of its hooks has to chdir back to the start
+// directory (observed through process.chdir), or the test fails. The restore
+// is never retried and a failing hook is never swallowed.
 const START_CWD = process.cwd();
+function sameDirectory(left, right) {
+  try {
+    return fs.realpathSync.native(left) === fs.realpathSync.native(right);
+  } catch {
+    return false;
+  }
+}
 function test(name, fn) {
-  return nodeTest(name, (t) => {
-    t.after(() => process.chdir(START_CWD));
-    return fn(t);
+  return nodeTest(name, async (t) => {
+    const hooks = [];
+    const context = new Proxy(t, {
+      get(target, property) {
+        if (property === "after") return (hook) => void hooks.push(hook);
+        const value = target[property];
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const realChdir = process.chdir;
+    let hooksRestored = false;
+    let ownRestore = false;
+    process.chdir = (directory) => {
+      if (!ownRestore && sameDirectory(directory, START_CWD)) {
+        hooksRestored = true;
+      }
+      return realChdir.call(process, directory);
+    };
+    let leaked = false;
+    let failure;
+    try {
+      await fn(context);
+    } catch (error) {
+      failure = { error };
+    }
+    try {
+      leaked = process.cwd() !== START_CWD;
+      ownRestore = true;
+      try {
+        realChdir.call(process, START_CWD);
+      } finally {
+        ownRestore = false;
+      }
+      for (const hook of hooks) {
+        try {
+          await hook(t);
+        } catch (error) {
+          failure ??= { error };
+        }
+      }
+    } finally {
+      process.chdir = realChdir;
+    }
+    if (failure) throw failure.error;
+    assert.ok(
+      !leaked || hooksRestored,
+      "the test changed process.cwd() and never restored it in an after hook",
+    );
   });
 }
 // Hooks of a test run after beforeEach/afterEach of the same test, so a cwd
