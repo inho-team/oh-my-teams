@@ -1,4 +1,6 @@
 /** Version-matched, narrow adapter for the external Orca CLI. */
+import { existsSync, realpathSync } from "node:fs";
+import os from "node:os";
 import { assert, hash, run } from "./core.mjs";
 import {
   assertFailureSignal,
@@ -135,6 +137,244 @@ export function selectOrcaExecutable(explicit, env = process.env) {
   return "orca";
 }
 
+/**
+ * Fixed, per-platform install paths trusted for identity confirmation and
+ * auditor launch. Each path must resist tampering by the same OS user that
+ * runs this process: on macOS, `/usr/local/bin/orca` is a symlink owned by
+ * `root:wheel` inside a `root:wheel`, mode-755 directory, so an ordinary
+ * user account cannot repoint or replace it. No such path has been
+ * confirmed for Windows or Linux, so both list stay empty on purpose;
+ * `resolveTrustedOrcaScriptPath` fails closed there rather than fall back to
+ * an unverified guess.
+ */
+const TRUSTED_ORCA_PATHS = Object.freeze({
+  darwin: Object.freeze(["/usr/local/bin/orca"]),
+  linux: Object.freeze([]),
+  win32: Object.freeze([]),
+});
+
+/**
+ * The real file each trusted candidate path must resolve to. `/usr/local/bin/orca`
+ * is itself only a symlink; the script it points at is what actually runs, so
+ * naming that target here is what lets `resolveTrustedOrcaScriptPath` reject a
+ * candidate whose symlink was repointed after this table was written, even
+ * though the candidate path itself still exists.
+ */
+const TRUSTED_ORCA_REALPATHS = Object.freeze({
+  darwin: Object.freeze({
+    "/usr/local/bin/orca": "/Applications/Orca.app/Contents/Resources/bin/orca",
+  }),
+});
+
+/**
+ * Placeholder passed where an executable argument is required but ignored:
+ * `trustedOrcaExecute`'s wrapped runner always substitutes the resolved
+ * script, never this string. Deliberately not a plausible binary name (such
+ * as "orca") so that a caller who forgets to also pass the paired `execute`
+ * function does not silently fall through to whatever `orca` happens to
+ * resolve to on PATH; `runOrcaJson` additionally refuses outright if this
+ * value ever reaches it as `executable`.
+ */
+export const TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER =
+  "__omt_trusted_orca_execution_only__";
+
+// Runners `trustedOrcaExecute` built. Membership is the only proof that a
+// function validated the trusted script and pins its interpreter and
+// environment, so it lives here, unexported, and cannot be forged by a caller.
+const TRUSTED_EXECUTORS = new WeakSet();
+
+/**
+ * Tells whether a function is a runner `trustedOrcaExecute` built.
+ *
+ * @param {unknown} execute - Candidate command runner.
+ * @returns {boolean} True only for a runner this module registered.
+ */
+export function isTrustedOrcaExecute(execute) {
+  return typeof execute === "function" && TRUSTED_EXECUTORS.has(execute);
+}
+
+/**
+ * Refuses the placeholder executable unless it travels with a runner that
+ * `trustedOrcaExecute` built. A general `execute` (the default `run` or any
+ * other function) or a missing one would resolve the placeholder on PATH.
+ *
+ * @param {string} executable - Executable an Orca call is about to use.
+ * @param {Function} [execute] - Command runner paired with it.
+ * @returns {void}
+ * @throws {Error} When the placeholder is paired with anything but a trusted runner.
+ */
+export function assertTrustedOrcaPairing(executable, execute) {
+  assert(
+    executable !== TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER ||
+      isTrustedOrcaExecute(execute),
+    "TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER reached the general, PATH-based " +
+      "runOrcaJson without the runner trustedOrcaExecute built; it is not a " +
+      "real executable name. Pair it with that runner (or call " +
+      "runTrustedOrcaJson), so a caller that forgot half of the pair fails " +
+      "here rather than silently resolving this placeholder on PATH.",
+  );
+}
+
+/**
+ * Finds and validates the script that identity confirmation and auditor
+ * launch trust, ignoring every caller-controlled input `selectOrcaExecutable`
+ * accepts.
+ *
+ * Unlike `selectOrcaExecutable`, this never reads a `--orca` argument,
+ * `ORCA_CLI_COMMAND`, `ORCA_DEV_REPO_ROOT`, or `PATH`: any of those can be
+ * set by another process sharing this OS user account, which would let a
+ * forged executable stand in for Orca on a path that confirms identity. Only
+ * a fixed, per-platform path list (`TRUSTED_ORCA_PATHS`) is consulted, and
+ * the first path that exists on disk is checked against the real file it is
+ * expected to resolve to (`TRUSTED_ORCA_REALPATHS`); this rejects a symlink
+ * that was repointed since that table was written, even though the symlink
+ * path itself still exists. When no listed path exists, or its realpath does
+ * not match, this throws rather than fall back to a guess, since a wrong
+ * executable here would defeat the identity check it is meant to support.
+ *
+ * This function only locates and validates a path string. It does not
+ * execute anything, so it does not by itself close the ways that *running*
+ * this path can still be redirected (PATH search inside the script's own
+ * `#!/usr/bin/env bash` shebang, `BASH_ENV`, or environment variables the
+ * downstream CLI reads, such as `ORCA_USER_DATA_PATH` or `HOME`). Only
+ * `trustedOrcaExecute`, which runs the validated path with a fixed
+ * interpreter and an allowlisted environment, closes those. Nor does this
+ * confirm the script's own integrity: on macOS, `/Applications/Orca.app` is
+ * owned by the invoking user and could have been replaced by that same user
+ * before this check ever runs, and no code-signature check is performed.
+ *
+ * @param {object} [options] - Injection points, used only by tests.
+ * @param {string} [options.platform=process.platform] - Platform to select for.
+ * @param {string[]} [options.candidates] - Path list to check, overriding
+ *   `TRUSTED_ORCA_PATHS[platform]`. Production callers must never set this.
+ * @param {(path: string) => boolean} [options.exists] - Existence check,
+ *   overriding `existsSync`. Production callers must never set this.
+ * @param {(path: string) => string} [options.realpath] - Symlink resolver,
+ *   overriding `realpathSync`. Production callers must never set this.
+ * @param {Record<string, string>} [options.expectedRealpaths] - Expected
+ *   realpath per candidate, overriding `TRUSTED_ORCA_REALPATHS[platform]`.
+ *   Production callers must never set this.
+ * @returns {string} The resolved, validated real path of the trusted script.
+ * @throws {Error} When no trusted path is known for the platform, none of
+ *   the known paths exist, or the existing path's realpath does not match
+ *   the recorded target.
+ */
+export function resolveTrustedOrcaScriptPath({
+  platform = process.platform,
+  candidates,
+  exists = existsSync,
+  realpath = realpathSync,
+  expectedRealpaths,
+} = {}) {
+  const paths = candidates ?? TRUSTED_ORCA_PATHS[platform] ?? [];
+  const found = paths.find((path) => exists(path));
+  if (!found) {
+    throw new Error(
+      `No trusted Orca executable found for platform "${platform}". ` +
+        "Identity confirmation and auditor launch refuse to fall back to " +
+        "--orca, ORCA_CLI_COMMAND, ORCA_DEV_REPO_ROOT, or PATH, since any " +
+        "of those can be forged by a process sharing this OS user account.",
+    );
+  }
+  const expectedMap =
+    expectedRealpaths ?? TRUSTED_ORCA_REALPATHS[platform] ?? {};
+  const expected = expectedMap[found];
+  const resolved = realpath(found);
+  if (!expected || resolved !== expected) {
+    throw new Error(
+      `Trusted Orca path "${found}" resolved to "${resolved}", not the ` +
+        `expected "${expected ?? "(no expected target registered for this candidate)"}". ` +
+        "Refusing to trust a symlink target that does not match the recorded install layout.",
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Builds a command runner that executes the validated trusted Orca script
+ * directly, closing the ways `resolveTrustedOrcaScriptPath` alone leaves
+ * open: the script's own `#!/usr/bin/env bash` shebang searches `PATH` for
+ * `bash` (and, inside the script, for `dirname`/`readlink`), a non-interactive
+ * bash also reads `BASH_ENV`, and the CLI process the script eventually execs
+ * reads environment variables such as `ORCA_USER_DATA_PATH` and `HOME` to
+ * find the runtime state it trusts.
+ *
+ * The returned function has the same `(argv, options) => Promise<result>`
+ * shape `runOrcaJson`, `openRoleTerminal`, and `readLaunchEnvironment` already
+ * accept as an injectable `execute`, so a caller substitutes it there instead
+ * of changing what executable name it passes; the name in `argv[0]` is
+ * discarded; only the arguments after it are kept. Every call spawns
+ * `/bin/bash` by absolute path (SIP-protected on macOS, not found via `PATH`)
+ * with `--noprofile --norc` and the resolved script path, and replaces
+ * `options.env` with a fixed allowlist: `PATH` pinned to the system
+ * directories the script's internal `dirname`/`readlink` calls need,
+ * `HOME`/`USER`/`LOGNAME` read from `os.userInfo()` rather than the calling
+ * process's environment, and every `ORCA_*`, `NODE_OPTIONS`, `BASH_ENV`,
+ * `ENV`, `XDG_*`, and `ELECTRON_*` variable dropped rather than inherited.
+ *
+ * What this closes: the caller can no longer redirect *which* file runs, or
+ * *what that run reads*, through an argument, `PATH`, or an inherited
+ * environment variable. What this does not close: whether the validated
+ * script itself, and the app bundle it belongs to, are what they claim to be
+ * (no code-signature check is performed, and the bundle is owned by the same
+ * OS user this process runs as), and binding a session handle such as
+ * `ORCA_TERMINAL_HANDLE` to the process lineage that actually produced it,
+ * which is separate, still-open design work.
+ *
+ * @param {object} [options] - Injection points, used only by tests.
+ * @param {string} [options.platform=process.platform] - Passed to `resolveTrustedOrcaScriptPath`.
+ * @param {string[]} [options.candidates] - Passed to `resolveTrustedOrcaScriptPath`.
+ * @param {(path: string) => boolean} [options.exists] - Passed to `resolveTrustedOrcaScriptPath`.
+ * @param {(path: string) => string} [options.realpath] - Passed to `resolveTrustedOrcaScriptPath`.
+ * @param {Record<string, string>} [options.expectedRealpaths] - Passed to `resolveTrustedOrcaScriptPath`.
+ * @param {() => {homedir: string, username: string}} [options.userInfo=os.userInfo] -
+ *   Identity source for the allowlisted `HOME`/`USER`/`LOGNAME`, overriding `os.userInfo`.
+ *   Production callers must never set this.
+ * @param {Function} [options.spawnExecute=run] - The actual process runner the
+ *   built invocation delegates to, overriding `run`. Production callers must never set this.
+ * @returns {(argv: string[], options?: object) => Promise<object>} Runner that
+ *   ignores `argv[0]` and spawns the validated script with a fixed interpreter
+ *   and allowlisted environment.
+ * @throws {Error} When `resolveTrustedOrcaScriptPath` refuses, propagated immediately.
+ */
+export function trustedOrcaExecute({
+  platform,
+  candidates,
+  exists,
+  realpath,
+  expectedRealpaths,
+  userInfo = os.userInfo,
+  spawnExecute = run,
+} = {}) {
+  const scriptPath = resolveTrustedOrcaScriptPath({
+    platform,
+    candidates,
+    exists,
+    realpath,
+    expectedRealpaths,
+  });
+  const info = userInfo();
+  const env = Object.freeze({
+    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+    HOME: info.homedir,
+    USER: info.username,
+    LOGNAME: info.username,
+  });
+  const invokeTrustedOrca = function invokeTrustedOrca(argv, callOptions = {}) {
+    assert(
+      Array.isArray(argv) && argv.length > 0,
+      "Trusted Orca invocation needs a non-empty argv array",
+    );
+    const [, ...orcaArgs] = argv;
+    return spawnExecute(
+      ["/bin/bash", "--noprofile", "--norc", scriptPath, ...orcaArgs],
+      { ...callOptions, env },
+    );
+  };
+  TRUSTED_EXECUTORS.add(invokeTrustedOrca);
+  return invokeTrustedOrca;
+}
+
 function parseJsonResponse(result, invalidMessage) {
   try {
     return JSON.parse(result.stdout);
@@ -143,24 +383,7 @@ function parseJsonResponse(result, invalidMessage) {
   }
 }
 
-/**
- * Executes one Orca JSON command and validates its transport envelope.
- *
- * @param {string} executable - Previously selected Orca executable.
- * @param {string[]} args - Orca subcommand and literal arguments, without `--json`.
- * @param {object} [options] - Working directory, timeout, and injectable runner.
- * @returns {Promise<object>} Parsed Orca envelope whose `ok` value is not false.
- * @throws {Error} For process failure, timeout, invalid JSON, or `ok: false`.
- */
-export async function runOrcaJson(
-  executable,
-  args,
-  { cwd, timeoutMs = 60000, execute = run } = {},
-) {
-  const result = await execute([executable, ...args, "--json"], {
-    cwd,
-    timeoutMs,
-  });
+function interpretOrcaJsonResult(result) {
   if (result.code !== 0 || result.timedOut) {
     const detail = result.stderr || result.stdout || "Orca command failed";
     throw orcaError(
@@ -182,6 +405,107 @@ export async function runOrcaJson(
 }
 
 /**
+ * Executes one Orca JSON command and validates its transport envelope.
+ *
+ * @param {string} executable - Previously selected Orca executable.
+ * @param {string[]} args - Orca subcommand and literal arguments, without `--json`.
+ * @param {object} [options] - Working directory, timeout, and injectable runner.
+ * @returns {Promise<object>} Parsed Orca envelope whose `ok` value is not false.
+ * @throws {Error} For process failure, timeout, invalid JSON, `ok: false`, or
+ *   when `executable` is `TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER` (use
+ *   `runTrustedOrcaJson` instead).
+ */
+export async function runOrcaJson(
+  executable,
+  args,
+  { cwd, timeoutMs = 60000, execute = run } = {},
+) {
+  assertTrustedOrcaPairing(executable, execute);
+  const result = await execute([executable, ...args, "--json"], {
+    cwd,
+    timeoutMs,
+  });
+  return interpretOrcaJsonResult(result);
+}
+
+/**
+ * Executes one Orca JSON command through the fixed, trusted, allowlisted
+ * invocation `trustedOrcaExecute` builds, and validates its transport
+ * envelope exactly as `runOrcaJson` does.
+ *
+ * Unlike `runOrcaJson`, no caller-supplied executable or execute function
+ * ever reaches this: the trusted runner is built here, once, from
+ * `trustedOrcaExecute`, so there is no separate executable/execute pair for
+ * a caller to forget half of. This is what identity confirmation
+ * (`verifiedPm`) and auditor launch should call instead of composing
+ * `runOrcaJson` with a separately injected trusted `execute`.
+ *
+ * @param {string[]} args - Orca subcommand and literal arguments, without `--json`.
+ * @param {object} [options] - Injection points, used only by tests; passed
+ *   through to `trustedOrcaExecute`. Production callers must never set these.
+ * @returns {Promise<object>} Parsed Orca envelope whose `ok` value is not false.
+ * @throws {Error} For a validation failure from `trustedOrcaExecute`,
+ *   process failure, timeout, invalid JSON, or `ok: false`.
+ */
+export async function runTrustedOrcaJson(args, options = {}) {
+  const invoke = trustedOrcaExecute(options);
+  const result = await invoke([
+    TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    ...args,
+    "--json",
+  ]);
+  return interpretOrcaJsonResult(result);
+}
+
+/**
+ * Reads the trusted Orca script's own `--version` output through the same
+ * trusted, allowlisted invocation `runTrustedOrcaJson` uses, so auditor
+ * launch's version probe cannot be redirected the way running
+ * `resolveTrustedOrcaScriptPath`'s resolved path through a plain, uninjected
+ * `execute` still could: the script's own `#!/usr/bin/env bash` shebang PATH
+ * search, `BASH_ENV`, and an inherited `HOME` all stay closed here exactly as
+ * they do for `runTrustedOrcaJson` (B.6, decision B).
+ *
+ * `--version` is not a JSON command, so this does not go through
+ * `interpretOrcaJsonResult`: it reads the same free-text version token
+ * `readLaunchEnvironment`'s own probe already parses.
+ *
+ * @param {object} [options] - Injection points, used only by tests; passed
+ *   through to `trustedOrcaExecute`. Production callers must never set these.
+ * @param {Function} [options.execute] - A runner `trustedOrcaExecute` already
+ *   built, so a launch that holds one reads the version through that same
+ *   runner instead of building a second. Anything else is refused.
+ * @returns {Promise<string | null>} The parsed semantic version, or `null`
+ *   when the trusted script's output did not contain one.
+ * @throws {Error} For a validation failure from `trustedOrcaExecute`, a
+ *   supplied `execute` it did not build, process failure, or timeout.
+ */
+export async function readTrustedOrcaVersion({ execute, ...options } = {}) {
+  assert(
+    execute === undefined || isTrustedOrcaExecute(execute),
+    "readTrustedOrcaVersion only reuses a runner trustedOrcaExecute built",
+  );
+  const invoke = execute ?? trustedOrcaExecute(options);
+  const result = await invoke([
+    TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    "--version",
+  ]);
+  if (result.code !== 0 || result.timedOut) {
+    const detail = result.stderr || result.stdout || "Orca --version failed";
+    throw orcaError(
+      detail,
+      translateOrcaFailure(
+        result.timedOut ? "start_unknown" : "runtime_error",
+        detail,
+      ),
+    );
+  }
+  const text = String(result.stdout ?? "").trim();
+  const token = text.split(/\s+/).find((t) => /^\d+\.\d+\.\d+/.test(t));
+  return token ?? null;
+}
+
+/**
  * Captures CLI/runtime versions and the version-matched Orca guide hash.
  *
  * @param {string} [executable] - Explicit Orca executable, if already selected.
@@ -191,6 +515,7 @@ export async function runOrcaJson(
  */
 export async function discoverOrcaRuntime(executable, execute = run) {
   const selected = selectOrcaExecutable(executable);
+  assertTrustedOrcaPairing(selected, execute);
   const version = await execute([selected, "--version"], { timeoutMs: 30000 });
   assert(
     version.code === 0 && !version.timedOut,
@@ -512,6 +837,7 @@ function orcaError(message, signal, receipt) {
 
 async function resolvedDiscovery(executable, supplied, execute) {
   const selected = selectOrcaExecutable(executable ?? supplied?.executable);
+  assertTrustedOrcaPairing(selected, execute);
   const discovery = supplied ?? (await discoverOrcaRuntime(selected, execute));
   assert(
     discovery.executable === selected && discovery.versionsMatch !== false,

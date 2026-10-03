@@ -695,8 +695,30 @@ test("concurrent edits cannot both accept the same revision", async (t) => {
     "--revision",
     "1",
   ];
-  const results = await Promise.all([run(argv), run(argv)]);
+  // Only these two children get an environment with no claude, codex or agy
+  // executable, so the save path sees every catalog as not installed (the
+  // same condition as a CI runner) instead of the host's live agy models. The
+  // parent process.env is left alone. Case variants of the keys are removed
+  // first because Windows Node reads the first of several case-only twins.
+  const empty = path.join(dir, "no-executors");
+  fs.mkdirSync(empty);
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !["PATH", "APPDATA"].includes(key.toUpperCase()),
+    ),
+  );
+  env.PATH = empty;
+  env.APPDATA = empty;
+  const results = await Promise.all([run(argv, { env }), run(argv, { env })]);
   assert.equal(results.filter((r) => r.code === 0).length, 1);
+  const rejected = results.filter((r) => r.code !== 0);
+  assert.equal(rejected.length, 1, JSON.stringify(results));
+  assert.equal(rejected[0].code, 1, JSON.stringify(results));
+  // core.mjs: the lock contention message, or the revision check after the lock.
+  assert.match(
+    rejected[0].stderr,
+    /Organization update in progress; read it again before editing|Organization changed; read it again before editing/,
+  );
   assert.equal(readJSON(file).revision, 2);
 });
 test("429 in successful source code is not quota exhaustion", async () => {

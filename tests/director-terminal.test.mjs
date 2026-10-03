@@ -24,6 +24,7 @@ import {
   REQUIRED_OPTIONS,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
@@ -308,6 +309,7 @@ function claim(fixture, worktreeId, terminalHandle) {
     organizationRevision: readJSON(fixture.org).revision,
     brief: fixture.brief,
     delivery: { mode: "none" },
+    requirements: minimalRequirements(fixture.org, worktreeId),
     director: { terminalHandle, checkoutPath: fixture.dir },
   };
 }

@@ -59,7 +59,23 @@ export const canonicalRole = (role) => LEGACY_ROLE_ALIASES[role] ?? role;
 export const DIRECTOR_ROLE = "director";
 
 /**
- * New Director–PM–Worker hierarchy; legacy role identifiers remain in `ROLES`.
+ * The optional, out-of-ladder role that audits a kickoff's requirements ledger.
+ *
+ * An auditor is declared through `org.auditor`, not `org.roles`, and never
+ * folds, depths, or dispatches like a role in `ROLES`. It follows the same
+ * out-of-ladder precedent as `DIRECTOR_ROLE`.
+ */
+export const AUDITOR_ROLE = "auditor";
+
+/**
+ * Full seniority ladder from most to least senior, including the director.
+ *
+ * `ROLES` lists only the roles an organization may bind and launch as workers.
+ * `ROLE_LADDER` adds the director so that authority checks and header
+ * generation can express "above PM" without mixing director into the folding
+ * or depth logic that `ROLES` drives. New organizations use the
+ * Director–PM–Worker hierarchy; legacy role identifiers remain in `ROLES`
+ * for saved runs.
  */
 export const ROLE_LADDER = Object.freeze([DIRECTOR_ROLE, ...ACTIVE_ROLES]);
 
@@ -202,6 +218,17 @@ export const hash = (value) =>
     .createHash("sha256")
     .update(typeof value === "string" ? value : JSON.stringify(value))
     .digest("hex");
+
+/**
+ * Produces a SHA-256 digest of a file's raw bytes, for binary evidence such as
+ * screenshots that `hash` would otherwise corrupt by treating it as JSON.
+ *
+ * @param {string} file - Absolute path to hash; the caller opens it through `inside()` first.
+ * @returns {string} Lowercase hexadecimal SHA-256 digest.
+ * @throws {Error} When the file cannot be read.
+ */
+export const fileSha256 = (file) =>
+  crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 
 /**
  * Reads a UTF-8 JSON document, accepting an optional byte-order mark.
@@ -865,6 +892,25 @@ export function validateOrg(org) {
         `Invalid advisor profiles: ${role}`,
       );
     }
+  }
+
+  if (org.auditor) {
+    assert(
+      typeof org.auditor.profile === "string" &&
+        org.auditor.profile.trim() &&
+        Object.hasOwn(org.profiles, org.auditor.profile),
+      "auditor.profile must name a profile declared in org.profiles",
+    );
+    assert(
+      org.auditor.fallbacks === undefined ||
+        (Array.isArray(org.auditor.fallbacks) &&
+          new Set(org.auditor.fallbacks).size ===
+            org.auditor.fallbacks.length &&
+          org.auditor.fallbacks.every((profile) =>
+            Object.hasOwn(org.profiles, profile),
+          )),
+      "auditor.fallbacks must be unique profiles declared in org.profiles",
+    );
   }
 
   assert(

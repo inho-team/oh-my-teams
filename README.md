@@ -21,7 +21,7 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 
 **2.8.3 변경:** 실험 기능으로 TypeSafe Jev shadow 판단을 추가했다. 조직의 `policy.experimental.jev`를 켜면 `supervision-wait`, `supervision-next`, `role-terminal`, `failure-classify`가 명령 안에서 Jev에게 좁은 판단을 묻고 `<state>/judgments`에 기록한다. 명령의 결과와 게이트는 바뀌지 않으며, 블록이 없으면 꺼져 있다. 규칙은 [Jev 실험 기능](plugins/oh-my-teams/references/jev.md)에 있다.
 
-**2.8.0 변경:** 감독과 검토에 드는 토큰을 줄였다. Claude 역할 터미널은 `--autocompact 250k`로 열리며, 값은 조직의 `policy.claudeAutoCompact`로 바꿀 수 있다. 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 감독 역할은 heartbeat만 온 경우에는 깨어나지 않는 `supervision-wait`로 worker를 기다린다. Junior 구현은 첫 검토에서 반려되면 Senior에게 넘어가고, 검토자는 첫 검토에서 finding을 한 번에 모두 적으며 재검토에서는 수정 diff만 확인한다. 이사의 신호함에서는 `progress` 신호가 미처리 목록에 남지 않고, 새 `close-ready`가 이전 것을 대체하며, `kickoff-release`가 그 kickoff에 남은 신호를 정리한다. OpenCodex runner 프로필은 runner를 거치는 `headless-start`로만 실행하며, `role-command`와 `worker-start`는 runner 없이 실행하지 않도록 거부한다.
+**2.8.0 변경:** 감독과 검토에 드는 토큰을 줄였다. Claude 역할 터미널은 `--autocompact 250k`로 열리며, 값은 조직의 `policy.claudeAutoCompact`로 바꿀 수 있다. 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 감독 역할은 heartbeat만 온 경우에는 깨어나지 않는 `supervision-wait`로 worker를 기다린다. Junior 구현은 첫 검토에서 반려되면 Senior에게 넘어가고, 검토자는 첫 검토에서 finding을 한 번에 모두 적으며 재검토에서는 수정 diff만 확인한다. 이사의 신호함에서는 `progress` 신호가 미처리 목록에 남지 않고, 새 `close-ready`가 이전 것을 대체하며, `kickoff-release`가 그 kickoff에 남은 신호를 정리한다. OpenCodex runner 프로필은 runner를 거치는 `headless-start`로만 실행하며, `role-command`와 `worker-start`는 runner 없이 실행하지 않도록 거부한다. (이후 `headless-start` 실행 경로가 제거되어 현재는 실행 경로가 아니다.)
 
 **2.6.1 변경:** 구현 task의 담당을 추론 강도로 정한다. 설계와 구현이 한 번에 필요한 상위 등급 구현은 Senior가 직접 맡고, 닫힌 범위의 구현은 Junior가 맡는다. Senior가 구현한 task는 다른 Senior 실행이나 PL·PM이 검토한다. 기준은 [pm](plugins/oh-my-teams/skills/pm/SKILL.md)의 「구현 등급」에 있다.
 
@@ -201,7 +201,7 @@ Ollama는 저장소 파일을 직접 열지 못한다. 작업 계약의 `context
 
 ## 실행과 검증
 
-역할별 사용량은 `usage-report`가 각 CLI가 이미 남긴 세션 기록에서 읽는다. 역할을 띄우는 `role-terminal`, `worker-start`, `headless-start`가 `<project>/.omt/usage/launches.jsonl`에 어느 역할을 어디서 띄웠는지 적고, 보고서는 그 기록으로 세션을 역할에 연결한다. 메시지 본문은 읽지 않는다. Agy 대화형 세션은 토큰 사용량이 기록되지 않아 `unmeasured`로 표시되므로, 사용량이 중요한 kickoff에서는 Agy 역할을 `headless-start`로 실행한다. 자세한 기준은 [`orca-runtime.md`](plugins/oh-my-teams/references/orca-runtime.md)의 「사용량 측정」 절에 있다.
+역할별 사용량은 `usage-report`가 각 CLI가 이미 남긴 세션 기록에서 읽는다. 역할을 띄우는 `role-terminal`, `worker-start`가 `<project>/.omt/usage/launches.jsonl`에 어느 역할을 어디서 띄웠는지 적고, 보고서는 그 기록으로 세션을 역할에 연결한다. 제거된 `headless-start`가 남긴 과거 기록은 읽기 전용으로 보존되며 보고서가 그대로 읽지만, 새 실행 경로는 아니다. 메시지 본문은 읽지 않는다. Agy 대화형 세션은 토큰 사용량이 기록되지 않아 `unmeasured`로 표시된다. 자세한 기준은 [`orca-runtime.md`](plugins/oh-my-teams/references/orca-runtime.md)의 「사용량 측정」 절에 있다.
 
 ```text
 node plugins/oh-my-teams/scripts/teams-org.mjs --help
@@ -225,7 +225,9 @@ npm run lint
 
 제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 PM state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.
 
-감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows에서 모델이 `gemini`로 시작하는 Agy 역할은 Orca가 그 터미널의 대기를 보고하지 않으므로 `headless-start`로 실행하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
+감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows의 Agy 역할은 역할 터미널 경로가 검증되지 않아 실행 matrix가 거부하므로 PM에게 보고하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
+
+감사 정책(`org.auditor`의 선언 여부)은 kickoff를 claim할 때 그 kickoff에 고정되며, 이후 조직 파일을 고쳐도 이미 고정된 정책은 바뀌지 않는다. 정책이 고정되지 않은 채 등록된 기존 kickoff는 이사가 `kickoff-audit-policy-retrofit`을 한 번 실행해 정책을 고정해야 `worker-start`, close-ready, `workflow-accept`가 진행된다. 2026-09-29 기준으로 #139 외에 등록된 기존 kickoff 4건이 병합 뒤 이 일회성 절차를 거쳐야 한다. 감사 미설정(`auditorConfigured`가 false)으로 고정한 kickoff와 kickoff 없이 만든 독립 workflow는 기존 동작을 그대로 유지한다. 이 고정은 정책 결속일 뿐이며 감사자의 신원을 증명했다거나 기록을 위조할 수 없다는 뜻이 아니다.
 
 역할은 조사, 초안과 순차적인 좁은 편집에 자기 실행기의 서브에이전트를 쓸 수 있고, 병렬 편집과 독립 검토는 별도 Worker와 워크트리로 넘긴다. 서브에이전트는 OMT 역할이 아니며 결과의 검증 책임은 호출한 역할에 있다. 규칙은 [서브에이전트 규칙](plugins/oh-my-teams/references/subagents.md)에 있고, 이전의 보조 도구 명령은 2.11.0에서 삭제되었다.
 

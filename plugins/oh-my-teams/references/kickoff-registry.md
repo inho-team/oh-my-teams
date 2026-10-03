@@ -52,6 +52,18 @@
 
 단일 kickoff 시절의 `.omt/active-kickoff.json`이 남아 있으면 등록부를 처음 읽거나 쓸 때 그 PM 워크트리의 항목으로 옮겨지므로, 그 kickoff도 그대로 종료할 수 있다. 등록 항목의 키를 `pm`과 `selfPm`으로 바꾸기 전에 `coordinator`와 `selfCoordinator`로 기록된 항목과 요청 파일도 새 키로 읽으며, 항목은 다음에 기록될 때 새 키로 저장된다. 옛 키와 새 키가 함께 있고 값이 다르면 어느 쪽이 맞는지 판단할 수 없으므로 거부한다.
 
+## entry.requirements와 entry.auditor
+
+이 두 필드는 등록 요청 파일에 적는 값이 아니라, `kickoff-claim`과 `role-terminal --role auditor`가 각각 그 이후에 채우는 필드다.
+
+`entry.requirements`는 `kickoff-claim`의 요청 파일에 `requirements`(draft 파일과 같은 형식의 statement·criterion·confirmation)를 함께 담아 제출하고, `validateLedgerForClaim`이 그 draft를 `director.checkoutPath`와 대조해 통과시켰을 때에만 `{ ledgerHash }`로 기록된다. 이후 `requirements-amend`로 문구를 바꾸거나 `requirements-confirm`으로 재확인하면 이 `ledgerHash`도 함께 바뀐다. 원장의 전체 스키마와 명령은 [`docs/plan/requirements-ledger-and-audit.md`](../../../docs/plan/requirements-ledger-and-audit.md)의 A절을 따른다.
+
+`entry.auditor`는 이 kickoff에 고정된 `auditPolicy.auditorConfigured`가 참일 때 이사가 `role-terminal --role auditor --state <이 kickoff의 pm.stateDir>`로 감사 터미널을 열었을 때 `{ terminalHandle, openedAt }`으로 기록된다. 이 값은 이후 모든 감사 명령(`audit-objection`·`audit-response`·`audit-ruling`·`audit-checked`·`audit-accept`)이 호출자의 `ORCA_TERMINAL_HANDLE` 환경변수를 대조해 신원을 확인하는 데 쓰인다. 감사 체크포인트와 수용 규칙은 같은 문서의 B절을 따른다.
+
+## 복수 결과 저장소 확정(resultRepoDecisions)
+
+`entry.resultRepoDecisions`는 accepted workflow들이 서로 다른 결과 저장소를 기록했을 때 이사가 하나로 확정한 기록을 담는 선택 배열이다. `kickoff-result-repo-decide --org --worktree --repo --reason`만 이 배열 끝에 항목을 추가하며, 기존 항목은 고치거나 지우지 않는다. 이사 권한은 호출 프로세스의 작업 디렉터리로만 확인하고 `--force`는 없다. 항목은 확정 시점의 workflow 집합 지문(`workflowSet`)과 Git 포함 증명(`proof`)을 함께 저장하며, 같은 지문의 재결정은 거부된다. 이후 모든 결과 저장소 결속은 `resolveKickoffResultRepo`가 지문을 다시 계산해 항목과 대조하고 증명을 다시 실행한 뒤에야 그 저장소를 돌려준다. 정본은 `plugins/oh-my-teams/scripts/kickoff-registry.mjs`의 `kickoffResultRepoDecide`(1328행)와 `requirements.mjs`의 `resolveKickoffResultRepo`(1611행)이다. 필드 모양은 `validateEntry`가 검사한다. 수용 head를 얻는 방식과 위조 한계는 [`docs/plan/requirements-ledger-and-audit.md`](../../../docs/plan/requirements-ledger-and-audit.md)의 「구현 보충」 (d)를 따른다.
+
 ## kickoffHash와 registrationSeq
 
 구조화된 `.omt` 문서 시스템([`docs/plan/structured-omt-documents.md`](../../../docs/plan/structured-omt-documents.md))은 문서를 kickoff 하나에 묶기 위해 각 kickoff를 가리키는 고정된 해시값인 kickoffHash를 쓴다. 이 값을 `pm.worktreeId`와 `createdAt`만으로 만들면 같은 밀리초에 두 kickoff가 등록될 때 값이 겹칠 수 있으므로, 등록 항목에 `registrationSeq`라는 필드를 더해 그 문제를 막는다.

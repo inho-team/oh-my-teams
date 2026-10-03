@@ -19,6 +19,7 @@ import {
   launchLine,
   locateCommand,
   openRoleTerminal,
+  readLaunchEnvironment,
   roleTitle,
   trustQuestion,
   untouchedShell,
@@ -27,11 +28,17 @@ import {
 } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
 import {
   ALLOWED_OPTIONS,
+  auditorLaunchEnvironmentInputs,
   freshenTerminal,
   main,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { findActiveDispatch } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import {
+  findActiveDispatch,
+  isTrustedOrcaExecute,
+  trustedOrcaExecute,
+  TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+} from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import {
   readLaunches,
   recordLaunch,
@@ -372,6 +379,108 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
   assert.deepEqual(orca.closes(), []);
   assert.equal(opened.title, "[Senior] wt");
   assert.equal(opened.titlePinned, true);
+});
+
+// The runner an auditor launch holds: trustedOrcaExecute over a fake Orca, with
+// script resolution injected so no real install is needed. Every Orca call the
+// launch makes reaches `spawned` as [/bin/bash, --noprofile, --norc, script, ...].
+function trustedFakeOrca(screens) {
+  const orca = fakeOrca(screens);
+  const spawned = [];
+  const execute = trustedOrcaExecute({
+    platform: "darwin",
+    candidates: ["/fake/orca"],
+    exists: () => true,
+    realpath: () => "/fake/orca-real",
+    expectedRealpaths: { "/fake/orca": "/fake/orca-real" },
+    userInfo: () => ({ homedir: "/fake/home", username: "tester" }),
+    spawnExecute: async (argv, options) => {
+      spawned.push(argv);
+      // The launch's own version read, which fakeOrca's terminal-only script
+      // does not play.
+      if (argv[4] === "--version")
+        return { code: 0, stdout: "1.4.210\n", stderr: "", timedOut: false };
+      return orca.execute(argv.slice(3), options);
+    },
+  });
+  return { ...orca, execute, spawned };
+}
+
+test("T1 the trusted placeholder opens a role terminal through the trusted runner: create, read, wait, rename and list all go through it", async () => {
+  const command = roleCommand(example(), "senior");
+  const orca = trustedFakeOrca([
+    [`${PROMPT} ${typedFor(command)}`, "Antigravity", ">"],
+  ]);
+  // The launch environment is read with the inputs the auditor branch and
+  // role-worktree-create's preflight share, so its version read runs on this
+  // same runner instance before the terminal is opened.
+  const env = await readLaunchEnvironment({
+    orcaExecutable: "/fake/orca-real",
+    ...auditorLaunchEnvironmentInputs(orca.execute),
+  });
+  assert.equal(env.orcaVersion, "1.4.210");
+  assert.equal(orca.spawned.length, 1);
+  assert.equal(orca.spawned[0][4], "--version");
+  const opened = await openRoleTerminal({
+    worktree: "id:repo::/tmp/wt",
+    command,
+    executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    execute: orca.execute,
+    ...fast,
+  });
+  assert.equal(opened.ready, true);
+  assert.equal(opened.terminal, "term_1");
+  assert.equal(orca.creates().length, 1);
+  const verbs = new Set(orca.calls.map((call) => call[1]));
+  for (const verb of ["create", "read", "wait", "rename", "list"])
+    assert.ok(verbs.has(verb), `terminal ${verb} was not issued`);
+  // Every call became the pinned interpreter and the resolved script; the
+  // placeholder never reached a process.
+  assert.ok(orca.spawned.length >= 6);
+  for (const argv of orca.spawned) {
+    assert.deepEqual(argv.slice(0, 4), [
+      "/bin/bash",
+      "--noprofile",
+      "--norc",
+      "/fake/orca-real",
+    ]);
+    assert.ok(!argv.includes(TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER));
+  }
+  // The version read plus every terminal call: one runner saw all of them.
+  assert.equal(orca.spawned.length, 1 + orca.calls.length);
+  assert.equal(isTrustedOrcaExecute(orca.execute), true);
+});
+
+test("T2 the trusted placeholder with a general runner, or none, is refused as a pre-create refusal before any Orca call", async () => {
+  const command = roleCommand(example(), "senior");
+  let generalCalls = 0;
+  const general = async () => {
+    generalCalls += 1;
+    return { code: 0, stdout: '{"ok":true,"result":{}}', stderr: "" };
+  };
+  for (const runner of [{ execute: general }, {}]) {
+    await assert.rejects(
+      () =>
+        openRoleTerminal({
+          worktree: "id:repo::/tmp/wt",
+          command,
+          executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+          ...runner,
+          ...fast,
+        }),
+      (error) => {
+        assert.match(
+          error.message,
+          /reached the general, PATH-based runOrcaJson/,
+        );
+        assert.deepEqual(error.preCreateRefusal, {
+          reason: "untrusted-orca-executor",
+        });
+        return true;
+      },
+    );
+  }
+  assert.equal(generalCalls, 0);
 });
 
 test("a typed but unsubmitted command is sent Enter exactly once", async () => {
@@ -1172,6 +1281,148 @@ test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
   assert.equal(env3.trustRecordExists, "unknown");
   assert.equal(env3.skipDangerousModePermissionPrompt, "unknown");
   assert.equal(env3.codexTrustRecordExists, "unknown");
+});
+
+// B.6, decision B, item 2/3: readLaunchEnvironment의 감사 launch 분기는
+// orcaExecutable/execute를 통한 일반 Orca --version 조회를 완전히 건너뛰고
+// readOrcaVersion 콜백(전용 신뢰 실행기)만으로 orcaVersion을 채워야 하며,
+// skipAgyVersion=true일 때는 agy --version 조회 자체를 실행하지 않아야 한다.
+// execute를 PATH의 가짜 agy/orca를 흉내 내되 절대 호출되면 안 되는 지점으로
+// 주입해 두고, 실제로 호출되지 않았음을 spawn 기록으로 단언한다.
+test("readLaunchEnvironment: readOrcaVersion이 있으면 execute를 통한 orca --version을 실행하지 않고, skipAgyVersion이면 agy --version도 실행하지 않는다", async () => {
+  const { readLaunchEnvironment } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+
+  const executeCalls = [];
+  // 호출되면 즉시 기록만 남기고 실패를 반환한다: 이 execute가 절대 불리지
+  // 않는다는 것이 이 테스트의 단언이므로, 성공을 반환해도 무방하지만 실패로
+  // 두어 "우연히 orcaVersion/cliVersion이 채워져 통과하는" 거짓 양성을 막는다.
+  const forgedExecute = async (argv) => {
+    executeCalls.push(argv);
+    return { code: 1, stdout: "", stderr: "must never run" };
+  };
+  let readOrcaVersionCalls = 0;
+  const readOrcaVersion = async () => {
+    readOrcaVersionCalls += 1;
+    return "9.9.9";
+  };
+
+  const env = await readLaunchEnvironment({
+    worktreePath: "/nonexistent-auditor-worktree",
+    homedir: "/nonexistent-auditor-home",
+    orcaExecutable: "/tmp/forged-orca-for-omt-role-terminal-test",
+    execute: forgedExecute,
+    readOrcaVersion,
+    skipAgyVersion: true,
+  });
+
+  assert.equal(
+    readOrcaVersionCalls,
+    1,
+    "readOrcaVersion은 정확히 한 번 호출된다",
+  );
+  assert.equal(
+    env.orcaVersion,
+    "9.9.9",
+    "orcaVersion은 readOrcaVersion의 값을 따른다",
+  );
+  assert.equal(
+    env.cliVersion,
+    "unknown",
+    "skipAgyVersion이면 cliVersion은 unknown이다",
+  );
+  assert.deepEqual(
+    executeCalls,
+    [],
+    "orcaExecutable/agy를 향한 execute는 단 한 번도 호출되지 않는다",
+  );
+});
+
+// B.6, decision B, msg_f2bc63e31bc2/msg_f12840182482: 감사 launch는 신뢰
+// 버전 조회가 검증된 semver를 내놓지 못하면 openRoleTerminal을 호출하기 전에
+// 거부되어야 한다. readTrustedOrcaVersion의 계약(throw 또는 semver 문자열
+// 또는 null)에 따라, throw·null·빈 값은 모두 readLaunchEnvironment 안에서
+// orcaVersion === "unknown"으로 수렴하므로 각 실패 모드를 개별 테스트로
+// 재현해 같은 검사 지점이 전부 잡아낸다는 것을 확인한다. (저장소 관례상
+// tests/repository-metadata.test.mjs가 정적으로 `test(` 선언 개수를 세므로,
+// 동적으로 test()를 생성하는 반복문 대신 각 케이스를 개별 top-level
+// test로 풀어 쓴다.)
+async function assertFailsClosedOnUnverifiedOrca(readOrcaVersion) {
+  const { readLaunchEnvironment } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+
+  await assert.rejects(
+    () =>
+      readLaunchEnvironment({
+        worktreePath: "/nonexistent-auditor-worktree",
+        homedir: "/nonexistent-auditor-home",
+        readOrcaVersion,
+        skipAgyVersion: true,
+        throwOnUnverifiedOrca: true,
+      }),
+    /refuses to open|allow-unverified cannot lift/,
+  );
+
+  // 비감사 경로는 throwOnUnverifiedOrca를 넘기지 않으므로, 같은
+  // readOrcaVersion 실패가 있어도 조용히 orcaVersion "unknown"으로
+  // 반환을 마쳐야 한다(반례 h: 기존 동작 불변).
+  const env = await readLaunchEnvironment({
+    worktreePath: "/nonexistent-auditor-worktree",
+    homedir: "/nonexistent-auditor-home",
+    readOrcaVersion,
+    skipAgyVersion: true,
+  });
+  assert.equal(env.orcaVersion, "unknown");
+}
+
+test(
+  "readLaunchEnvironment: throwOnUnverifiedOrca=true이고 readOrcaVersion이 throw하면 " +
+    "거부하고, 일반 역할에서는 orcaVersion이 unknown이어도 거부하지 않는다",
+  async () => {
+    await assertFailsClosedOnUnverifiedOrca(async () => {
+      throw new Error("trusted script exited non-zero");
+    });
+  },
+);
+
+test(
+  "readLaunchEnvironment: throwOnUnverifiedOrca=true이고 readOrcaVersion이 null을 내놓으면 " +
+    "거부하고, 일반 역할에서는 orcaVersion이 unknown이어도 거부하지 않는다",
+  async () => {
+    await assertFailsClosedOnUnverifiedOrca(async () => null);
+  },
+);
+
+test(
+  "readLaunchEnvironment: throwOnUnverifiedOrca=true이고 readOrcaVersion이 빈 값을 내놓으면 " +
+    "거부하고, 일반 역할에서는 orcaVersion이 unknown이어도 거부하지 않는다",
+  async () => {
+    await assertFailsClosedOnUnverifiedOrca(async () => "");
+  },
+);
+
+// --allow-unverified가 이 거부를 풀 수 없다는 것은 코드 구조로 보장된다:
+// teams-org.mjs의 role-terminal 감사 분기는 allowUnverifiedApproval을
+// readLaunchEnvironment에 전혀 전달하지 않으므로(grep으로 확인), 이 함수에는
+// 애초에 그 값을 받아 검사를 우회할 매개변수가 없다. throwOnUnverifiedOrca가
+// 다른 옵션과 무관하게 무조건 적용된다는 것은 위 테스트가 이미 보여준다.
+test("readLaunchEnvironment는 throwOnUnverifiedOrca를 우회할 매개변수를 받지 않는다(allow-unverified 등가 옵션 없음)", async () => {
+  const { readLaunchEnvironment } =
+    await import("../plugins/oh-my-teams/scripts/role-terminal.mjs");
+  await assert.rejects(
+    () =>
+      readLaunchEnvironment({
+        worktreePath: "/nonexistent-auditor-worktree",
+        homedir: "/nonexistent-auditor-home",
+        readOrcaVersion: async () => null,
+        skipAgyVersion: true,
+        throwOnUnverifiedOrca: true,
+        // 존재하지 않는 옵션을 흉내 내 넘겨도 거부를 풀 수 없어야 한다.
+        allowUnverified: "user approved anyway",
+        allowUnverifiedApproval: "user approved anyway",
+      }),
+    /refuses to open|allow-unverified cannot lift/,
+  );
 });
 
 test("readLaunchEnvironment Codex 신뢰 기록 읽기: true·false·unknown", async () => {

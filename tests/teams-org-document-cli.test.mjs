@@ -38,6 +38,7 @@ import {
   registerKickoff,
   registryDirectory,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
 const exampleOrgPath = path.resolve(
@@ -100,6 +101,11 @@ function claimFor(fixture, worktreeId, wt, delivery = { mode: "none" }) {
     organizationRevision: readJSON(fixture.orgFile).revision,
     brief: fixture.brief,
     delivery,
+    requirements: minimalRequirements(fixture.orgFile, worktreeId),
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath: wt.repoDir,
+    },
   };
 }
 
@@ -1484,6 +1490,13 @@ test("kickoff-branch-cleanup forwards --org as cleanupKickoffBranches' orgFile, 
     organizationRevision: readJSON(orgFile).revision,
     brief,
     delivery: { mode: "local-merge", branch: "feat/kickoff-work" },
+    requirements: minimalRequirements(orgFile, worktreeId),
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      // macOS의 tmpdir는 /var가 /private/var의 심볼릭 링크라서, subprocess cwd가
+      // 돌려주는 실경로와 맞추려면 checkoutPath도 realpath로 저장해야 한다.
+      checkoutPath: fs.realpathSync(dir),
+    },
   });
   activateInThePast(orgFile);
   demote(orgFile, worktreeId, { delivered: { head, mergeCommit } });
