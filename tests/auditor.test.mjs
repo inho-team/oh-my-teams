@@ -1,12 +1,12 @@
 /** Auditor checkpoints: objection/response/ruling records and acceptance gates. */
-import test from "node:test";
+import nodeTest, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   AUDITOR_ROLE,
   fileSha256,
@@ -84,6 +84,8 @@ import {
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import { deliverKickoff } from "../plugins/oh-my-teams/scripts/delivery.mjs";
 import { readLaunchEnvironment } from "../plugins/oh-my-teams/scripts/role-terminal.mjs";
+import { predictLaunchPath } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
+import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import {
   bindKickoffResultRepo,
   ledgerHash,
@@ -99,7 +101,9 @@ const exampleOrg = new URL(
 // actual HEAD, for the forged/stale-head counterexamples below.
 const FORGED_HEAD = "0".repeat(40);
 
-const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
+// Anchored on this file, never on process.cwd(), which other tests change.
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const cli = path.join(REPO_ROOT, "plugins/oh-my-teams/scripts/teams-org.mjs");
 
 // Runs the teams-org CLI as a real child process (never `run-use`), returning
 // its exit code and streams instead of throwing, so a rejection test can
@@ -147,6 +151,31 @@ function initRepo(dir) {
   return git(dir, ["rev-parse", "HEAD"]);
 }
 
+// node:test runs t.after hooks in registration order. A directory fixture
+// registers its removal before the test body can register a cwd restore, and
+// Windows cannot delete the current directory (EBUSY), which also left every
+// later test running inside a removed directory. This wrapper registers the
+// restore as every test's first hook, so it always runs before any removal.
+const START_CWD = process.cwd();
+function test(name, fn) {
+  return nodeTest(name, (t) => {
+    t.after(() => process.chdir(START_CWD));
+    return fn(t);
+  });
+}
+// Hooks of a test run after beforeEach/afterEach of the same test, so a cwd
+// the restore above failed to bring back is caught when the next test starts
+// (and after the last one), on every platform.
+function assertCwdRestored() {
+  assert.equal(
+    process.cwd(),
+    START_CWD,
+    "a previous test left process.cwd() changed",
+  );
+}
+beforeEach(assertCwdRestored);
+after(assertCwdRestored);
+
 // A registered kickoff with a director, a bound Run, and a launched auditor
 // terminal — enough identity plumbing for every verifiedAuditor/verifiedPm/
 // verifiedDirector check these tests exercise to pass. `dir` doubles as the
@@ -165,7 +194,7 @@ function kickoff(
   // symlink, and process.chdir() reports the resolved path, so an
   // un-resolved dir would never equal process.cwd() in a director-authority
   // check.
-  const dir = fs.realpathSync(
+  const dir = fs.realpathSync.native(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-")),
   );
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -245,7 +274,7 @@ function legacyKickoff(
   worktreeId = "wt-legacy",
   { auditorLaunch = false, director = true } = {},
 ) {
-  const dir = fs.realpathSync(
+  const dir = fs.realpathSync.native(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-legacy-")),
   );
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -1291,7 +1320,7 @@ test(
     // exactly as before D2 -- reaching the same missing-Orca failure any
     // worker-start hits once it actually tries to spawn, not a "cannot be
     // tied" refusal.
-    const soloDir = fs.realpathSync(
+    const soloDir = fs.realpathSync.native(
       fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-d2-solo-")),
     );
     t.after(() => fs.rmSync(soloDir, { recursive: true, force: true }));
@@ -1762,7 +1791,7 @@ test(
       assert.equal(createCalls, 0);
     };
 
-    const unauthorizedCwd = fs.realpathSync(
+    const unauthorizedCwd = fs.realpathSync.native(
       fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-no-authority-")),
     );
     t.after(() => fs.rmSync(unauthorizedCwd, { recursive: true, force: true }));
@@ -1772,7 +1801,7 @@ test(
       /must be run from the director's checkout/,
     );
 
-    const otherRepo = fs.realpathSync(
+    const otherRepo = fs.realpathSync.native(
       fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-other-repo-")),
     );
     t.after(() => fs.rmSync(otherRepo, { recursive: true, force: true }));
@@ -1877,7 +1906,14 @@ test(
           err.message,
           /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
         );
-        assert.match(err.message, /ENOENT/);
+        assert.doesNotMatch(err.message, BINDING_REFUSED);
+        if (process.platform === "win32") {
+          // The matrix refuses a non-auditor agy role on win32 before any spawn.
+          seniorWin32MatrixRefusal();
+          assert.match(err.message, new RegExp(AGY_WIN32_REASON));
+        } else {
+          assert.match(err.message, /ENOENT/);
+        }
         return true;
       },
     );
@@ -1899,7 +1935,9 @@ const BINDING_REFUSED =
   /cannot be tied to any registered kickoff|does not name the kickoff|must name the kickoff|may only be opened from kickoff|No kickoff is registered/;
 
 function realTempDir(t, prefix) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const dir = fs.realpathSync.native(
+    fs.mkdtempSync(path.join(os.tmpdir(), prefix)),
+  );
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -1943,11 +1981,42 @@ async function directSeniorLaunch(fixture, cwd, worktree, extraArgs = []) {
   );
 }
 
+// The example organization's senior runs on an agy profile, which the launch
+// matrix refuses on win32. A launch the binding table lets through therefore
+// ends at that matrix refusal there (the binding check runs first: teams-org.mjs
+// assertDirectRoleTerminalBinding precedes role-terminal.mjs openRoleTerminal's
+// matrix check) and at the ordinary ENOENT spawn failure everywhere else.
+const AGY_WIN32_REASON = "agy-interactive-terminal-unavailable";
+
+// What the launch matrix answers for the example organization's senior on
+// win32 with no trust record, from the public predictor alone.
+function seniorWin32MatrixRefusal() {
+  const command = roleCommand(readJSON(fileURLToPath(exampleOrg)), "senior");
+  const matrix = predictLaunchPath({
+    runner: command.provider,
+    model: command.modelRequested,
+    platform: "win32",
+    shell: "powershell",
+    trustRecordExists: false,
+    codexTrustRecordExists: "unknown",
+  });
+  assert.equal(matrix.path, "blocked");
+  assert.deepEqual(matrix.reason, [AGY_WIN32_REASON]);
+  return matrix;
+}
+
 // Passing the binding table means reaching the ordinary spawn failure.
 async function assertPassesBinding(launch) {
   await assert.rejects(launch, (error) => {
     assert.doesNotMatch(error.message, BINDING_REFUSED);
-    assert.match(error.message, /ENOENT/);
+    if (process.platform === "win32") {
+      seniorWin32MatrixRefusal();
+      assert.match(error.message, new RegExp(AGY_WIN32_REASON));
+      assert.equal(error.matrixRefusal?.path, "blocked");
+      assert.deepEqual(error.matrixRefusal?.reason, [AGY_WIN32_REASON]);
+    } else {
+      assert.match(error.message, /ENOENT/);
+    }
     return true;
   });
 }
@@ -2345,14 +2414,16 @@ test("role-worktree-create (counterexample 9): a normal first child under its ow
     name: "d2-cx9",
     base: "f".repeat(40),
   };
+  const sessions = [];
   const ports = (open) => ({
     organization: () => readJSON(fixture.org),
     environment: d2Environment,
     matrix: d2Matrix,
-    create: async (_repo, options) => ({
-      workspace,
-      session: await options.openRoleSession(workspace),
-    }),
+    create: async (_repo, options) => {
+      const session = await options.openRoleSession(workspace);
+      sessions.push(session);
+      return { workspace, session };
+    },
     ...(open ? { open } : {}),
   });
 
@@ -2376,14 +2447,37 @@ test("role-worktree-create (counterexample 9): a normal first child under its ow
   // Real role-terminal open (missing Orca): the child has no ledger line yet,
   // so only the internal marker lets it past the binding table; the failure is
   // the ordinary spawn error, not a binding refusal.
-  await assertPassesBinding(
+  const realOpen = () =>
     withCwd(fixture.entry.pm.path, () =>
       createRoleWorktree(
         { ...baseArgs, orca: path.join(fixture.dir, "missing-orca") },
         ports(),
       ),
-    ),
-  );
+    );
+  if (process.platform !== "win32") {
+    await assertPassesBinding(realOpen());
+    return;
+  }
+  // On win32 the senior's agy profile is refused by the launch matrix after
+  // the binding table, and the refusal is not thrown: the open wrapper turns a
+  // matrix refusal into a "no session observed" result, which this injected
+  // create() hands back instead of the adapter's reclaim-and-throw. A binding
+  // refusal is thrown (it is no matrix refusal), so a resolved no-session
+  // result is the proof that the binding table was passed.
+  const sessionsBefore = sessions.length;
+  const refused = await realOpen();
+  assert.equal(sessions.length, sessionsBefore + 1);
+  assert.deepEqual(sessions.at(-1), { ready: false, sessionObserved: false });
+  assert.deepEqual(refused.session, { ready: false, sessionObserved: false });
+  assert.equal(refused.status, undefined);
+  assert.equal(refused.path, childDir);
+  assert.equal(refused.id, workspace.id);
+  // The same no-session result also comes from the D4 shared-worktree branch
+  // of the open wrapper, which only runs for the auditor role; this launch is
+  // the senior's, and its open wrapper was reached (recorded above).
+  assert.equal(baseArgs.role, "senior");
+  // And the matrix is what refuses this launch, by its reason code.
+  seniorWin32MatrixRefusal();
 });
 
 test("role-worktree-create (counterexample 13, success path): a non-colliding auditor workspace is created and opened without any reclaim", async (t) => {
@@ -2904,7 +2998,10 @@ test("T7 auditor role-worktree-create succeeds through the real internal role-te
   const fakeDir = `${run.fixture.dir}-audit-t7`;
   assert.equal(result.id, `wt_audit-t7::${fakeDir}`);
   assert.equal(result.path, fakeDir);
-  assert.equal(fs.realpathSync(result.path), fs.realpathSync(dir));
+  assert.equal(
+    fs.realpathSync.native(result.path),
+    fs.realpathSync.native(dir),
+  );
   assert.equal(result.session.ready, true);
   assert.equal(result.session.terminal, "term_t7");
   assert.notEqual(result.status, "blocked");
@@ -2950,10 +3047,7 @@ test("role-terminal handler wires readOrcaVersion/skipAgyVersion/throwOnUnverifi
   // role-worktree-create's preflight and this branch call, so what is checked
   // here is that the shared function still carries all four, and that the
   // auditor branch still reads its environment only through it.
-  const source = fs.readFileSync(
-    "plugins/oh-my-teams/scripts/teams-org.mjs",
-    "utf8",
-  );
+  const source = fs.readFileSync(cli, "utf8");
   const inputsStart = source.indexOf(
     "export function auditorLaunchEnvironmentInputs(",
   );
@@ -3545,7 +3639,7 @@ test("resolveAuditorLaunchExecution: auditor branch always returns the trusted i
 // changedWorkspaceFiles' repo-root `.omt` exception the same way a real PM
 // worktree's state directory would.
 function registeredKickoffProject(t, worktreeId) {
-  const root = fs.realpathSync(
+  const root = fs.realpathSync.native(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-registered-")),
   );
   t.after(() =>
@@ -3765,6 +3859,80 @@ test("registered PM stateDir: acceptOutcome resolves the kickoff from stateDir i
   assert.equal(recorded.status, "accepted");
 });
 
+// The objection is recorded so that an orgFile accepted by the identity check
+// is observable: the next check the call reaches is the unresolved objection.
+async function acceptWithObjection(t, label) {
+  const fixture = registeredKickoffProject(t, label);
+  const task = gapTask(fixture.worktreeId);
+  const report = await passingReportFor(fixture, task, "run-org");
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 does not look delivered",
+      rebuttalRequested: "show where it is delivered",
+      resultHead: fixture.head,
+      repo: fixture.pmWorktree,
+    }),
+  );
+  return {
+    fixture,
+    accept: (decisionId, orgFile) =>
+      acceptOutcome(
+        fixture.pmWorktree,
+        task,
+        report,
+        decisionFor(decisionId),
+        fixture.stateDir,
+        { orgFile },
+      ),
+  };
+}
+
+const ORG_FILE_MISMATCH =
+  /orgFile does not match this state directory's registered kickoff/;
+const UNRESOLVED_OBJECTION =
+  /outcome audit checkpoint has an unresolved objection/;
+
+test("acceptOutcome orgFile identity (a): the same organization file under a symlinked spelling is not refused and reaches the next check", async (t) => {
+  const { fixture, accept } = await acceptWithObjection(t, "wt-org-same-a");
+  const link = path.join(fixture.root, "org-link");
+  fs.symlinkSync(path.dirname(fixture.org), link, "junction");
+  const respelled = path.join(link, path.basename(fixture.org));
+  assert.notEqual(path.resolve(respelled), path.resolve(fixture.org));
+  assert.equal(
+    fs.realpathSync.native(respelled),
+    fs.realpathSync.native(fixture.org),
+  );
+  await assert.rejects(
+    () => accept("accept-org-a", respelled),
+    UNRESOLVED_OBJECTION,
+  );
+});
+
+test("acceptOutcome orgFile identity (b): another project's organization file is refused with the existing message", async (t) => {
+  const { accept } = await acceptWithObjection(t, "wt-org-other-b");
+  const other = registeredKickoffProject(t, "wt-org-other-b2");
+  assert.equal(fs.existsSync(other.org), true);
+  await assert.rejects(
+    () => accept("accept-org-b", other.org),
+    ORG_FILE_MISMATCH,
+  );
+});
+
+test("acceptOutcome orgFile identity (c): an organization file path that cannot be resolved is refused", async (t) => {
+  const { fixture, accept } = await acceptWithObjection(t, "wt-org-missing-c");
+  await assert.rejects(
+    () =>
+      accept(
+        "accept-org-c",
+        path.join(fixture.root, "no-such-dir", "organization.json"),
+      ),
+    ORG_FILE_MISMATCH,
+  );
+});
+
 test("isSameOrWithin: case-insensitive Windows-shaped comparisons (path.win32 injected) and POSIX comparisons", () => {
   const win32 = { path: path.win32, platform: "win32" };
   // Identical directory spelled with different casing counts as the same
@@ -3791,7 +3959,7 @@ test("isSameOrWithin: case-insensitive Windows-shaped comparisons (path.win32 in
 });
 
 test("isIdenticalDirectory: prefers real device+inode identity, and falls back to a STRICT (never casefolded) text match only when the inode cannot be trusted", (t) => {
-  const root = fs.realpathSync(
+  const root = fs.realpathSync.native(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-identical-dir-")),
   );
   t.after(() =>
@@ -4437,10 +4605,12 @@ test("teams-org.mjs accept: forged GIT_DIR/GIT_COMMON_DIR/GIT_WORK_TREE cannot s
   const probeSource =
     "import { resolveRegisteredKickoffFromState } from " +
     JSON.stringify(
-      path.join(
-        process.cwd(),
-        "plugins/oh-my-teams/scripts/kickoff-registry.mjs",
-      ),
+      pathToFileURL(
+        path.join(
+          REPO_ROOT,
+          "plugins/oh-my-teams/scripts/kickoff-registry.mjs",
+        ),
+      ).href,
     ) +
     ";\n" +
     "const resolved = await resolveRegisteredKickoffFromState(process.argv[1]);\n" +
@@ -5666,7 +5836,7 @@ test("workflow-accept records the result repository from a real single-task acce
   const accepted = await acceptStaged(staged);
   assert.equal(
     accepted.integration.decision.checkoutPath,
-    fs.realpathSync(fixture.repo),
+    fs.realpathSync.native(fixture.repo),
   );
   assert.deepEqual(accepted.integration.decision.auditGate, {
     mode: "configured",
@@ -5969,7 +6139,7 @@ test("the recorded result repository binds every outcome consumer: another repos
   // The caller may omit the repository: the recorded one is used.
   assert.equal(
     bindKickoffResultRepo(fixture.entry, undefined),
-    fs.realpathSync(fixture.repo),
+    fs.realpathSync.native(fixture.repo),
   );
   // Two accepted workflows that recorded different repositories disagree.
   const second = await stageAcceptedTask(fixture, "wf-second", {
@@ -6170,7 +6340,7 @@ test("workflow-accept with integration required: the checkout is resolved once, 
     const accepted = await accept(alias);
     assert.equal(
       accepted.integration.decision.checkoutPath,
-      fs.realpathSync(fixture.dir),
+      fs.realpathSync.native(fixture.dir),
     );
     // (c) With a decision recorded, another checkout is refused and the
     // recorded state stays as it was.
@@ -6245,10 +6415,10 @@ test("withUntrackedHidden restores the exclude file byte for byte on success and
   assert.deepEqual(read(exclude(failing)), failingBefore);
 
   // A repository outside the temporary directory is refused untouched.
-  const real = path.join(process.cwd(), ".git");
+  const real = path.join(REPO_ROOT, ".git");
   const cwdBefore = fs.existsSync(real);
   await assert.rejects(
-    () => withUntrackedHidden(process.cwd(), async () => {}),
+    () => withUntrackedHidden(REPO_ROOT, async () => {}),
     /not inside/,
   );
   assert.equal(fs.existsSync(real), cwdBefore);
@@ -6506,7 +6676,10 @@ test("f7-1: with no decision record, audit-accept, close-ready, deliver and comp
   const error = await f7CloseReady(fixture).catch((caught) => caught);
   assert.deepEqual(
     [...error.candidates].sort(),
-    [fs.realpathSync(fixture.impl), fs.realpathSync(fixture.repo)].sort(),
+    [
+      fs.realpathSync.native(fixture.impl),
+      fs.realpathSync.native(fixture.repo),
+    ].sort(),
   );
   assert.match(error.message, /kickoff-result-repo-decide/);
 });
@@ -6643,7 +6816,7 @@ test("f7-3: a bindingDefect objection blocks acceptance until ruled persuaded, a
       fixture.worktreeId,
       "outcome",
       fixture.head,
-      fs.realpathSync(fixture.repo),
+      fs.realpathSync.native(fixture.repo),
     ),
     true,
   );
@@ -6721,7 +6894,7 @@ test("f7-4: only the registered director's checkout may decide, with no callerCw
   const decided = runCli(args, { cwd: fixture.dir });
   assert.equal(decided.code, 0, decided.stderr);
   assert.equal(JSON.parse(decided.stdout).decided, true);
-  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  assert.equal(f7Resolve(fixture), fs.realpathSync.native(fixture.repo));
 });
 
 // Each mutation breaks one link of an accepted task's chain; decide must then
@@ -6981,12 +7154,13 @@ const F7_PRELOAD = [
   "const spawn = childProcess.spawnSync;",
   "const lstat = fs.lstatSync;",
   "childProcess.spawnSync = (file, args, options) => {",
+  '  const hit = Boolean(fault && fault.mode !== "absent" && Array.isArray(args) && options?.cwd &&',
+  "      fs.realpathSync.native(options.cwd) === fault.repo &&",
+  "      fault.args.every((arg, index) => args[index] === arg));",
   "  if (log) {",
-  '    fs.appendFileSync(log, JSON.stringify({ file, args, cwd: options?.cwd ?? null }) + "\\n");',
+  '    fs.appendFileSync(log, JSON.stringify({ file, args, cwd: options?.cwd ?? null, injected: hit }) + "\\n");',
   "  }",
-  '  if (fault && fault.mode !== "absent" && Array.isArray(args) && options?.cwd &&',
-  "      fs.realpathSync(options.cwd) === fault.repo &&",
-  "      fault.args.every((arg, index) => args[index] === arg)) {",
+  "  if (hit) {",
   '    if (fault.mode === "death") {',
   '      return { status: null, signal: "SIGKILL", stdout: "", stderr: "" };',
   "    }",
@@ -7010,7 +7184,7 @@ const F7_PRELOAD = [
 const F7_PROBE = [
   `import { kickoffResultRepoDecide } from ${JSON.stringify(
     pathToFileURL(
-      path.resolve("plugins/oh-my-teams/scripts/kickoff-registry.mjs"),
+      path.join(REPO_ROOT, "plugins/oh-my-teams/scripts/kickoff-registry.mjs"),
     ).href,
   )};`,
   "const [org, worktreeId, repo] = process.argv.slice(2);",
@@ -7039,7 +7213,7 @@ function f7ChildDecider(t) {
     counter += 1;
     const log = path.join(kit, `calls-${counter}.jsonl`);
     const injected = fault?.repo
-      ? { ...fault, repo: fs.realpathSync(fault.repo) }
+      ? { ...fault, repo: fs.realpathSync.native(fault.repo) }
       : (fault ?? null);
     const stdout = execFileSync(
       process.execPath,
@@ -7069,6 +7243,15 @@ function f7ChildDecider(t) {
           .filter(Boolean)
           .map((line) => JSON.parse(line))
       : [];
+    // An injection that never fired would let the test pass on a real answer
+    // from Git, so a timeout or death fault must have intercepted a call.
+    if (injected?.mode === "timeout" || injected?.mode === "death") {
+      assert.equal(
+        calls.some((call) => call.injected === true),
+        true,
+        `the ${injected.mode} fault intercepted no call in ${injected.repo}`,
+      );
+    }
     return { ...JSON.parse(stdout), calls };
   };
 }
@@ -7079,7 +7262,8 @@ const f7Calls = (calls, args, cwd) =>
     (call) =>
       args.every((arg, index) => call.args?.[index] === arg) &&
       (cwd === undefined ||
-        (call.cwd && fs.realpathSync(call.cwd) === fs.realpathSync(cwd))),
+        (call.cwd &&
+          fs.realpathSync.native(call.cwd) === fs.realpathSync.native(cwd))),
   );
 
 // The loose object file of a commit; the fixture repositories hold few enough
@@ -7142,7 +7326,7 @@ test("f7-6b (replaces PATH-shim f7-6b, a): with no trusted git the proof is refu
   });
   // Without the fault the same child decides the same repository normally.
   const normal = decide(fixture, fixture.repo);
-  assert.equal(normal.decision.repo, fs.realpathSync(fixture.repo));
+  assert.equal(normal.decision.repo, fs.realpathSync.native(fixture.repo));
 });
 
 test("f7-6b (replaces PATH-shim f7-6b, b d e f): a real Git error in only rev-parse --verify or only merge-base refuses either repository, bytes unchanged", async (t) => {
@@ -7242,7 +7426,7 @@ test("f7-6b (replaces PATH-shim f7-6b, b d e f): a real Git error in only rev-pa
       );
       // The refusal names the repository where Git failed, and it is not the
       // other kind of failure or the ordinary "does not contain" answer.
-      assert.equal(match[1], fs.realpathSync(scenario.real(fixture)));
+      assert.equal(match[1], fs.realpathSync.native(scenario.real(fixture)));
       const unlike =
         scenario.pattern === F7_VERIFY_ERROR
           ? F7_ANCESTOR_ERROR
@@ -7293,7 +7477,7 @@ test("f7-6c (replaces PATH-shim f7-6c, c d f): a timeout or a dying Git process 
     }
   });
   const normal = decide(fixture, fixture.repo);
-  assert.equal(normal.decision.repo, fs.realpathSync(fixture.repo));
+  assert.equal(normal.decision.repo, fs.realpathSync.native(fixture.repo));
 });
 
 test("f7-6c (replaces PATH-shim f7-6c, g): Git's clear exit code 1 still counts as not containing, so the same repository is confirmed", async (t) => {
@@ -7302,7 +7486,7 @@ test("f7-6c (replaces PATH-shim f7-6c, g): Git's clear exit code 1 still counts 
   const lacking = git(fixture.repo, ["rev-parse", "HEAD"]);
   assert.equal(f7GitStatus(fixture.impl, f7Verify(lacking)), 1);
   const { decision } = await f7Decide(fixture, fixture.repo);
-  assert.equal(decision.repo, fs.realpathSync(fixture.repo));
+  assert.equal(decision.repo, fs.realpathSync.native(fixture.repo));
   assert.equal(decision.headAtDecision, lacking);
   assert.deepEqual(decision.proof.others, [
     { repo: fixture.impl, missing: [lacking] },
@@ -7333,7 +7517,7 @@ function f7AssertPollutionHasNoEffect(t, fixture, env) {
   const lacking = git(fixture.repo, ["rev-parse", "HEAD"]);
   const confirmed = decide(fixture, fixture.repo, { env });
   assert.equal(confirmed.error, undefined);
-  assert.equal(confirmed.decision.repo, fs.realpathSync(fixture.repo));
+  assert.equal(confirmed.decision.repo, fs.realpathSync.native(fixture.repo));
   assert.equal(confirmed.decision.headAtDecision, lacking);
   assert.deepEqual(confirmed.decision.proof.others, [
     { repo: fixture.impl, missing: [lacking] },
@@ -7388,7 +7572,7 @@ test("f7-7: after a decision every consumer binds to that one repository, at its
   await f7CompleteBriefSide(fixture);
   const stateBefore = f7Bytes(fixture);
   const { decision } = await f7Decide(fixture, fixture.repo);
-  const real = fs.realpathSync(fixture.repo);
+  const real = fs.realpathSync.native(fixture.repo);
   assert.equal(decision.repo, real);
   assert.equal(f7Resolve(fixture), real);
   // Only the registry entry gained the record; workflow state is untouched.
@@ -7444,7 +7628,7 @@ test("f7-7: the same binding holds when one accepted workflow required integrati
     (item) => item.id === "wf-integration",
   ).integration.head;
   assert.ok(decision.proof.acceptedHeads.includes(integrationHead));
-  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  assert.equal(f7Resolve(fixture), fs.realpathSync.native(fixture.repo));
   await assert.rejects(
     () => f7Objection(fixture, fixture.impl),
     /not the result repository/,
@@ -7498,7 +7682,7 @@ test("f7-8: a decision is append-only, cannot be repeated for the same accepted 
   writeJSON(gateFile, { ...readJSON(gateFile), evidenceKey: "x" });
   await assert.throws(() => f7Resolve(fixture), f7Ambiguous);
   fs.writeFileSync(gateFile, gateOriginal);
-  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  assert.equal(f7Resolve(fixture), fs.realpathSync.native(fixture.repo));
   // A newly accepted workflow changes the set: the old record stops binding,
   // naming the workflow, until a new record is appended next to it.
   await acceptStaged(
@@ -7522,7 +7706,7 @@ test("f7-8: a decision is append-only, cannot be repeated for the same accepted 
   assert.deepEqual(records[0], first);
   assert.deepEqual(records[1], second);
   assert.notEqual(first.id, second.id);
-  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  assert.equal(f7Resolve(fixture), fs.realpathSync.native(fixture.repo));
 });
 
 test("f7-9: a repository whose HEAD moved off the accepted heads, or a hand-edited registry record, stops binding", async (t) => {
@@ -7545,20 +7729,20 @@ test("f7-9: a repository whose HEAD moved off the accepted heads, or a hand-edit
     },
   );
   git(fixture.repo, ["reset", "-q", "--hard", tip]);
-  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  assert.equal(f7Resolve(fixture), fs.realpathSync.native(fixture.repo));
   // The record's repo changed by hand to the other candidate.
   const entry = readJSON(entryFile);
-  entry.resultRepoDecisions[0].repo = fs.realpathSync(fixture.impl);
+  entry.resultRepoDecisions[0].repo = fs.realpathSync.native(fixture.impl);
   writeJSON(entryFile, entry);
   await assert.throws(() => f7Resolve(fixture), f7Ambiguous);
   // The record's fingerprint edited by hand.
   const edited = readJSON(entryFile);
-  edited.resultRepoDecisions[0].repo = fs.realpathSync(fixture.repo);
+  edited.resultRepoDecisions[0].repo = fs.realpathSync.native(fixture.repo);
   edited.resultRepoDecisions[0].workflowSet[0].tasks[0].head = "2".repeat(40);
   writeJSON(entryFile, edited);
   await assert.throws(() => f7Resolve(fixture), f7Ambiguous);
   fs.writeFileSync(entryFile, original);
-  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  assert.equal(f7Resolve(fixture), fs.realpathSync.native(fixture.repo));
 });
 
 test("f7-10: a single recorded result repository behaves as before and needs neither reports nor a decision", async (t) => {
@@ -7570,7 +7754,7 @@ test("f7-10: a single recorded result repository behaves as before and needs nei
     recursive: true,
     force: true,
   });
-  assert.equal(f7Resolve(fixture), fs.realpathSync(fixture.repo));
+  assert.equal(f7Resolve(fixture), fs.realpathSync.native(fixture.repo));
   await assertUnchanged(fixture, () =>
     assert.rejects(() => f7Decide(fixture, fixture.repo), /nothing to decide/),
   );

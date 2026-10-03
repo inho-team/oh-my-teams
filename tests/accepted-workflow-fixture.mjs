@@ -111,8 +111,8 @@ export async function createSingleTaskWorkflow(
  * @throws {Error} When `repo` is not strictly inside the temporary directory.
  */
 export async function withUntrackedHidden(repo, work) {
-  const tmp = fs.realpathSync(os.tmpdir());
-  const real = fs.realpathSync(repo);
+  const tmp = fs.realpathSync.native(os.tmpdir());
+  const real = fs.realpathSync.native(repo);
   if (!real.startsWith(`${tmp}${path.sep}`)) {
     throw new Error(
       `Refusing to edit the exclude file of ${real}: not inside ${tmp}`,

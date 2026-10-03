@@ -13,7 +13,10 @@ import { taskHash, validateTask } from "./contracts.mjs";
 import { validateEvidence } from "./evidence.mjs";
 import { hasUnresolvedObjections } from "./audit.mjs";
 import { buildDocId, documentState } from "./documents.mjs";
-import { resolveRegisteredKickoffFromState } from "./kickoff-registry.mjs";
+import {
+  isIdenticalDirectory,
+  resolveRegisteredKickoffFromState,
+} from "./kickoff-registry.mjs";
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 // RegExp#test turns a missing value into the string "undefined", which the
@@ -534,6 +537,22 @@ async function recordReviewLocked(
   return { review: record, gateStatus };
 }
 
+// Whether two spellings name the same organization file: both are resolved
+// with `fs.realpathSync.native` (so a symlinked prefix or a Windows 8.3 name
+// compares equal to the on-disk spelling) and then compared by identity.
+// A path that cannot be resolved is never the same file (fail closed).
+function sameOrgFile(candidate, registered) {
+  let a;
+  let b;
+  try {
+    a = fs.realpathSync.native(candidate);
+    b = fs.realpathSync.native(registered);
+  } catch {
+    return false;
+  }
+  return isIdenticalDirectory(a, b);
+}
+
 /**
  * Records PM acceptance after every required review gate is complete.
  *
@@ -626,8 +645,7 @@ async function acceptOutcomeLocked(
   let effectiveKickoffHash = kickoffHash;
   if (registered) {
     assert(
-      orgFile === undefined ||
-        path.resolve(orgFile) === path.resolve(registered.orgFile),
+      orgFile === undefined || sameOrgFile(orgFile, registered.orgFile),
       "acceptOutcome orgFile does not match this state directory's registered kickoff",
     );
     assert(

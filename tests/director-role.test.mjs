@@ -802,7 +802,7 @@ function gitProject(t) {
   // macOS resolves the temporary directory through a symlink; the authority
   // check compares paths as written, so the fixture uses the resolved one.
   const raw = project(t);
-  const dir = fs.realpathSync(raw.dir);
+  const dir = fs.realpathSync.native(raw.dir);
   const fixture = {
     ...raw,
     dir,
@@ -1199,7 +1199,7 @@ function workerGapTask(worktreeId) {
 // deliverKickoff이 오너 브랜치에 실제로 병합하는 경로까지 확인해야 하므로
 // tests/delivery.test.mjs의 kickoffProject와 같은 실제 git worktree 구조를 쓴다.
 async function workerAuditedProject(t, worktreeId) {
-  const root = fs.realpathSync(
+  const root = fs.realpathSync.native(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-worker-audit-")),
   );
   t.after(() =>
