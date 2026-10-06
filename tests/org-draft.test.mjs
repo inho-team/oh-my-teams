@@ -9,10 +9,12 @@ import {
   readJSON,
   resolveRole,
   run,
+  validateOrg,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   DRAFT_DEFAULTS,
   draftOrganization,
+  draftResourceOrganization,
 } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 
 const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
@@ -131,6 +133,49 @@ test("a draft refuses what it cannot fill in without asking", () => {
     () => draftOrganization({ name: "t", tiers: 1, models: ["opus"] }),
     /provider:model/,
   );
+});
+
+test("a resource draft records verified subscription capacity without role models", () => {
+  const org = draftResourceOrganization({
+    name: "team",
+    resources: ["codex", "agy"],
+    concurrency: 2,
+    maxCalls: 5,
+  });
+
+  assert.equal(org.profiles, undefined);
+  assert.deepEqual(Object.keys(org.resources).sort(), [
+    "agy-current",
+    "codex-current",
+  ]);
+  assert.equal(org.resources["codex-current"].pool, "codex-current");
+  assert.equal(org.resources["agy-current"].concurrency, 2);
+  assert.equal(org.resources["agy-current"].maxCalls, 5);
+  for (const binding of Object.values(org.roles)) {
+    assert.equal(Object.hasOwn(binding, "profile"), false);
+    assert.deepEqual(binding.fallbacks, []);
+  }
+});
+
+test("a resource draft refuses an unknown or duplicate resource", () => {
+  assert.throws(
+    () => draftResourceOrganization({ name: "team", resources: ["unknown"] }),
+    /Unsupported provider/,
+  );
+  assert.throws(
+    () =>
+      draftResourceOrganization({
+        name: "team",
+        resources: ["codex", "codex"],
+      }),
+    /Duplicate subscription resource/,
+  );
+});
+
+test("a resource organization rejects an unverified account or pool", () => {
+  const org = draftResourceOrganization({ name: "team", resources: ["codex"] });
+  org.resources["codex-current"].account = "other-account";
+  assert.throws(() => validateOrg(org), /Invalid subscription resource/);
 });
 
 test("the CLI writes a draft init accepts, and never over an existing file", async (t) => {

@@ -119,7 +119,11 @@ import {
   shadowModelCheck,
   shadowStatusFilter,
 } from "./jev.mjs";
-import { draftOrganization, draftThreeTierOrganization } from "./org-draft.mjs";
+import {
+  draftOrganization,
+  draftResourceOrganization,
+  draftThreeTierOrganization,
+} from "./org-draft.mjs";
 import {
   bindKickoffRun,
   classifyKickoffEntry,
@@ -173,8 +177,8 @@ import {
 } from "./resources.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
+  org-draft --name NAME --resources provider,... --output FILE [--concurrency N --max-calls N]
   org-draft --name NAME --models PM,WORKER --output FILE [--tiers 1-4 (legacy)]
-            (four model choices without --tiers retain the previous format)
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
   preset --org FILE --name opus-first|balanced|single-subscription|advisor-codex|advisor-claude --revision N
@@ -417,7 +421,16 @@ No command automatically pushes, merges, deploys, publishes, or deletes.`;
 
 /** Options each subcommand accepts, keyed by command name. */
 export const ALLOWED_OPTIONS = {
-  "org-draft": ["name", "tiers", "models", "output", "codex-home"],
+  "org-draft": [
+    "name",
+    "tiers",
+    "models",
+    "resources",
+    "concurrency",
+    "max-calls",
+    "output",
+    "codex-home",
+  ],
   init: ["org", "from", "codex-home", "host-default"],
   edit: ["org", "from", "revision", "codex-home", "host-default"],
   preset: ["org", "name", "revision", "apply", "codex-home"],
@@ -675,7 +688,7 @@ export const ALLOWED_OPTIONS = {
 
 /** Options each subcommand must receive, keyed by command name. */
 export const REQUIRED_OPTIONS = {
-  "org-draft": ["name", "models", "output"],
+  "org-draft": ["name", "output"],
   init: ["org", "from"],
   edit: ["org", "from", "revision"],
   preset: ["org", "name", "revision"],
@@ -835,6 +848,16 @@ function validateArgs(args) {
   for (const key of REQUIRED_OPTIONS[args.command]) {
     assert(args[key], `--${key} required`);
   }
+  if (args.command === "org-draft") {
+    assert(
+      Boolean(args.models) !== Boolean(args.resources),
+      "org-draft requires exactly one of --resources or --models",
+    );
+    assert(
+      args.resources === undefined || args.tiers === undefined,
+      "--tiers is only available for the legacy --models compatibility input",
+    );
+  }
 }
 
 /** Parses the comma-separated `--host-default` flag into a profile id list. */
@@ -885,6 +908,40 @@ async function revalidateOrgForSave(
   candidate,
   { previousOrg = null, explicitHostDefaultIds = [], codexHome, execute } = {},
 ) {
+  if (candidate.resources !== undefined) {
+    const catalog = await fetchModelCatalog({ codexHome, execute });
+    const selections = Object.entries(candidate.resources).map(
+      ([key, resource]) => {
+        const entry = catalog[resource.provider];
+        const installed =
+          entry?.status === "ok" ||
+          entry?.reasonCode === "no-catalog-interface";
+        return {
+          key,
+          provider: resource.provider,
+          pool: resource.pool,
+          status: installed ? "verified" : "unavailable",
+          savable: installed,
+          reason: installed
+            ? undefined
+            : (entry?.reason ?? "provider catalog is unavailable"),
+          catalogRevision: entry?.catalogRevision ?? null,
+        };
+      },
+    );
+    const rejected = selections.filter((entry) => !entry.savable);
+    assert(
+      rejected.length === 0,
+      "Save refused; the following subscription resources failed catalog verification:\n" +
+        rejected.map((entry) => `${entry.key}: ${entry.reason}`).join("\n"),
+    );
+    return {
+      verifiedAt: catalog.fetchedAt,
+      catalogRevision: catalog.catalogRevision,
+      selections,
+      savable: true,
+    };
+  }
   const unconfirmedHostDefaults = [];
   const selections = Object.entries(candidate.profiles).map(([id, profile]) => {
     const before = previousOrg?.profiles?.[id];
@@ -936,6 +993,10 @@ async function revalidateOrgForSave(
 async function applyPreset(args, execute) {
   const current = validateOrg(readJSON(args.org));
   assert(
+    current.resources === undefined,
+    "Model presets are a legacy profile compatibility path and cannot change a resource organization",
+  );
+  assert(
     Number(args.revision) === current.revision,
     "Organization changed; read it again before applying a preset",
   );
@@ -966,7 +1027,7 @@ function showOrganization(args) {
 
   if (args.json) {
     const orgOutput = structuredClone(org);
-    for (const profile of Object.values(orgOutput.profiles)) {
+    for (const profile of Object.values(orgOutput.profiles ?? {})) {
       profile.displayModel = displayModel(profile.provider, profile.model);
     }
     return { organization: orgOutput, ...status };
@@ -2415,15 +2476,36 @@ async function writeDraft(args, execute) {
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
   assert(!fs.existsSync(output), "Draft output exists; choose a new path");
-  const models = args.models.split(",");
-  const organization =
-    args.tiers === undefined && models.length === 2
-      ? draftThreeTierOrganization({ name: args.name, models })
+  const resourceDraft = args.resources !== undefined;
+  const organization = resourceDraft
+    ? draftResourceOrganization({
+        name: args.name,
+        resources: args.resources.split(","),
+        concurrency:
+          args.concurrency === undefined ? undefined : Number(args.concurrency),
+        maxCalls:
+          args["max-calls"] === undefined
+            ? undefined
+            : Number(args["max-calls"]),
+      })
+    : args.tiers === undefined && args.models.split(",").length === 2
+      ? draftThreeTierOrganization({
+          name: args.name,
+          models: args.models.split(","),
+        })
       : draftOrganization({
           name: args.name,
           tiers: args.tiers === undefined ? undefined : Number(args.tiers),
-          models,
+          models: args.models.split(","),
         });
+  if (resourceDraft) {
+    const catalogReceipt = await revalidateOrgForSave(organization, {
+      codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+      execute,
+    });
+    writeJSON(output, organization);
+    return { output, organization, catalogReceipt };
+  }
   const projectDir = path.dirname(output);
   const defaults = await resolveHostDefaults({ project: projectDir });
   if (defaults.codex?.error) {

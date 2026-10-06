@@ -130,6 +130,44 @@ test("init saves normally when every profile checks out against the catalog", as
   assert.ok(result.catalogReceipt.selections.every((entry) => entry.savable));
 });
 
+test("resource formation saves verified subscriptions without preselecting role models", async (t) => {
+  const dir = tempDir(t);
+  const draft = path.join(dir, "resource-draft.json");
+  const result = await executeCommand(
+    {
+      command: "org-draft",
+      name: "team",
+      resources: "codex,agy",
+      concurrency: "2",
+      "max-calls": "4",
+      output: draft,
+    },
+    fakeExecute(),
+  );
+
+  assert.equal(result.catalogReceipt.savable, true);
+  assert.equal(result.organization.profiles, undefined);
+  assert.equal(result.organization.resources["codex-current"].maxCalls, 4);
+  assert.equal(readJSON(draft).roles.pm.profile, undefined);
+});
+
+test("resource formation rejects a selected provider whose catalog is unavailable", async (t) => {
+  const dir = tempDir(t);
+  await assert.rejects(
+    () =>
+      executeCommand(
+        {
+          command: "org-draft",
+          name: "team",
+          resources: "codex,agy",
+          output: path.join(dir, "resource-draft.json"),
+        },
+        fakeExecute({ "agy models": COMMAND_FAILED }),
+      ),
+    /subscription resources failed catalog verification/,
+  );
+});
+
 test("init refuses a model the catalog no longer lists", async (t) => {
   const dir = tempDir(t);
   const orgFile = path.join(dir, "organization.json");

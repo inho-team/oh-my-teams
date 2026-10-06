@@ -2,14 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "oh my teams organization",
   "type": "object",
-  "required": [
-    "schemaVersion",
-    "revision",
-    "name",
-    "profiles",
-    "roles",
-    "policy"
-  ],
+  "required": ["schemaVersion", "revision", "name", "roles", "policy"],
   "properties": {
     "schemaVersion": { "const": 1 },
     "revision": { "type": "integer", "minimum": 1 },
@@ -44,6 +37,12 @@
       "type": "object",
       "minProperties": 1,
       "additionalProperties": { "$ref": "#/$defs/profile" }
+    },
+    "resources": {
+      "type": "object",
+      "$comment": "New organizations register verified subscription resources and fixed role authority without preselecting a model. Legacy profiles remain a compatibility input.",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/resource" }
     },
     "assistants": {
       "type": "object",
@@ -237,6 +236,26 @@
         }
       }
     },
+    "resource": {
+      "type": "object",
+      "required": [
+        "provider",
+        "account",
+        "subscription",
+        "pool",
+        "concurrency",
+        "maxCalls"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "enum": ["claude", "codex", "agy"] },
+        "account": { "type": "string", "minLength": 1 },
+        "subscription": { "type": "string", "minLength": 1 },
+        "pool": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "maxCalls": { "type": "integer", "minimum": 1, "maximum": 20 }
+      }
+    },
     "assistantProfiles": {
       "type": "array",
       "minItems": 1,
@@ -245,7 +264,7 @@
     },
     "role": {
       "type": "object",
-      "required": ["parent", "profile", "concurrency", "attempts", "fallbacks"],
+      "required": ["parent", "concurrency", "attempts", "fallbacks"],
       "properties": {
         "parent": { "enum": [null, "pm", "pl", "senior", "junior", "worker"] },
         "profile": { "type": "string", "minLength": 1 },

@@ -1,6 +1,6 @@
 ---
 name: form
-description: 최초 oh my teams 상설 조직을 PM과 Worker의 모델로 구성하고, 나머지는 비용이 늘지 않는 기본값으로 저장한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
+description: 최초 oh my teams 상설 조직에 검증된 구독 자원과 고정 역할 권한을 기록한다. 특정 개발 과제의 시작은 kickoff를 사용한다.
 ---
 
 # 팀 결성
@@ -11,11 +11,11 @@ description: 최초 oh my teams 상설 조직을 PM과 Worker의 모델로 구�
 
 ## 묻는 것
 
-조직이 없으면 **PM과 Worker가 각각 어떤 모델을 쓸지만** 묻는다. 이사는 조직 파일의 실행 역할이 아니라 사용자와 대화하는 호스트 세션입니다. 새 조직은 PM과 Worker만 선언하며, PM이 과제에 따라 Worker를 사용하지 않을 수 있습니다. 기존 PL·Senior·Junior 조직의 실행 스냅샷은 완료될 때까지 그대로 유지합니다.
+조직이 없으면 **사용할 구독 자원만** 묻는다. PM과 Worker의 모델, 추론 강도와 역할별 profile은 결성 단계에서 묻거나 기록하지 않는다. 새 조직은 PM과 Worker의 고정 권한·보고 관계와 자원별 account·subscription·pool·동시 실행·호출 한도를 기록하며, 실제 모델 선택은 검증된 자원 범위 안에서 이후의 staffing 결정이 맡는다.
 
-묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 한 번으로 끝납니다. PM과 Worker의 모델을 한꺼번에 묻고, 몇 단계로 운영할지는 묻지 않습니다.
+묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 한 번으로 끝난다. 사용자는 현재 로그인한 Codex·Claude·Agy 가운데 이 조직이 사용할 구독 자원을 선택한다. 사용자가 선택하지 않은 실행기·계정·구독은 조직에 추가하지 않는다.
 
-구독이 부족해 특정 역할을 아예 둘 수 없는 조직은 결성 후 `adjust`에서 그 역할을 뺀다. 뺀 역할이 맡던 일은 서열을 따라 위로 올라가 남은 가장 가까운 역할이 이어받으며, 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 역할 이름은 바꿀 수 없다. 실패 라우팅, 검토 요구사항과 스킬이 이 이름으로 역할을 지목하기 때문이다.
+기존 역할별 profile 조직은 명시적인 호환 입력으로 계속 읽는다. 기존 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서, 축소 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 기존 조직이나 진행 중인 kickoff snapshot의 모델, pool, fallback, 호출 한도와 역할 권한을 새 자원 계약으로 추측하여 바꾸지 않는다.
 
 모델 선택지는 미리 박아 둔 표에서 고르지 않고, 묻기 직전에 실행한 조회 결과에서만 만든다. 다음을 실행한다.
 
@@ -25,41 +25,22 @@ node <runtime> model-catalog --codex-home <codex-home>
 
 세 실행기(`claude`, `codex`, `agy`) 각각의 항목을 이렇게 읽는다.
 
-- `status`가 `"ok"`이면 `models` 배열의 각 항목(`id`, `displayName`, `efforts`)에서 역할의 성격에 맞는 몇 개를 선택지로 제시한다. 표시 이름은 `displayName`을 쓰고, 저장 값은 `provider:id`(예: `codex:gpt-6-astra`)로 적는다. 이번 조회에서 실제로 확인된 값이므로 능력이나 가격의 서열로 늘어놓지 않고 카탈로그가 준 순서를 그대로 따른다.
-- `status`가 `"unavailable"`이고 `reasonCode`가 `"no-catalog-interface"`가 아니면, 설치가 확인되지 않았거나 조회 명령이 실패한 것이다. 그 실행기는 선택지에서 완전히 빼고, 다른 실행기의 모델로 대신 채우지 않으며, 결성 보고에 `reason`을 짧게 적는다.
-- `status`가 `"unavailable"`이고 `reasonCode`가 `"no-catalog-interface"`이면(예: Claude Code처럼 실행기는 있지만 모델을 나열하는 명령이 없는 경우), `models`는 비어 있다. 이때는 그 실행기가 통상적으로 받는 별칭(Claude는 `fable`, `opus`, `sonnet`, `haiku`)을 선택지로 제시하고 `<provider>:<별칭>` 형식으로 받는다. 별칭은 판을 가리키지 않고 그때의 최신 판으로 풀리므로, 새 판이 나오면 조직 파일을 고치지 않아도 역할이 쓰는 모델이 바뀐다. 판을 묶어 두려면 별칭 대신 구체적인 판 이름을 자유 입력으로 받는다.
+- `status`가 `"ok"`이면 그 실행기의 현재 카탈로그를 확인했으므로, 해당 실행기의 현재 account 구독을 자원 선택지로 제시한다. 모델 목록은 역할별 질문이나 우선순위로 바꾸지 않는다.
+- `status`가 `"unavailable"`이고 `reasonCode`가 `"no-catalog-interface"`가 아니면, 설치 또는 카탈로그 조회를 확인하지 못한 것이다. 그 실행기는 자원 선택지에서 제외하고, 다른 실행기의 기본값으로 대체하지 않는다.
+- `status`가 `"unavailable"`이고 `reasonCode`가 `"no-catalog-interface"`이면, 실행기 설치 여부만 확인된 것이다. 이 경우에는 현재 account 구독을 자원으로 선택할 수 있지만, 모델을 선택하거나 모델 접근 권한을 단정하지 않는다.
 
-목록에도 없는 모델은 자유 입력으로 `provider:model` 형식을 받는다. 어떤 선택지도 사용자 답을 대신하지 않는다.
-
-구조화된 선택 도구(예: Claude Code `AskUserQuestion`, 질문당 선택지 최대 4개)를 쓰는 호스트에서, 한 역할에 제시할 선택지가 넷을 넘으면 앞의 네 개만 선택지로 두고 나머지는 질문 본문에 "자유 입력으로 `<provider>:<id>`"처럼 안내한다. 번호를 매긴 선택지로 묻는 호스트에서는 조회된 선택지를 모두 제시한다.
-
-### 호스트 기본값과 자유 입력 안내
-
-자유 입력으로 `provider:default`를 받으면 모델을 `null`로 저장하므로, 실제로 어떤 모델이 실행되는지는 호스트 기본값을 확인해야 알 수 있다. 호스트 설정을 바꾸면 그 역할의 모델도 함께 바뀌며, 모델이 변경되었을 때 경고가 출력된다. 자유 입력에서 `default`를 받았거나 Codex 모델 목록을 질문 본문에 안내할 때는 첫 질문을 만들기 전에 다음을 실행한다. `<runtime>`은 아래 「저장」 절과 같이 해석한다.
-
-```text
-node <runtime> host-defaults --project <project>
-```
-
-- Codex는 `$CODEX_HOME/config.toml`(기본 `~/.codex/config.toml`)의 최상위 `model`을 쓰고, 없으면 `codex debug models`에서 `visibility`가 `list`인 항목 가운데 `priority`가 가장 작은 모델을 쓴다. 출력의 `codex.model`과 `codex.source`가 이 결과이고, `codex.listed`는 지금 선택할 수 있는 Codex 모델 ID 목록이다. Orca처럼 실행기가 자기 `CODEX_HOME`으로 Codex를 띄우는 환경이면 그 경로를 `--codex-home`으로 넘기고, 경로를 확인하지 못했으면 출력의 `codex.configFile`이 실제 실행과 다를 수 있다고 함께 적는다.
-- Claude는 `ANTHROPIC_MODEL`, 프로젝트와 사용자 settings의 `model` 순서로 확인한다. `claude.model`이 `null`이면 Claude Code가 정하는 모델이며, 특정 모델이라고 단정하지 않는다.
-
-자유 입력으로 `codex:default`를 받으면 현재 해석값을 확인해 결과를 알린다. 예를 들어 "지금은 gpt-6-astra가 실행됩니다. 계정 기본값이 바뀌면 함께 바뀝니다."처럼 저장값과 현재 해석값을 구분하고, `codex debug models`가 실패했으면 확인하지 못했다고 적고 모델명을 추측하지 않는다.
-
-`model-catalog`의 Codex 선택지는 그 조회 자체가 `codex debug models`를 실행해 얻은 것이므로 따로 확인할 필요가 없다. 다만 `model-catalog` 조회가 실패했거나 그 결과 밖의 Codex 모델을 쓰려면 질문 본문에 `host-defaults` 출력의 `codex.listed`를 나열하고, 그 가운데 하나를 쓰려면 자유 입력으로 `codex:<id>`를 적으면 된다고 안내한다. 이 안내는 질문 본문에 넣으므로 질문 수와 선택지 수는 늘지 않고, 목록은 카탈로그 순서 그대로 적어 서열을 매기지 않는다.
-
-Gemini는 다른 모델과 달리 강도를 비워 둘 수 없다. Agy에는 강도 없는 Gemini ID가 없고, 강도를 빼고 `--model gemini-3.8-flash`로 부르면 1.2.4가 "requires --effort (available: low, medium, high)"라며 호출 전에 거부한다. `model-catalog`가 돌려주는 `agy.models`의 `id`는 강도가 이미 포함된 값이므로(예: `gemini-3.8-flash-high`) 그 값을 그대로 선택지로 쓰면 항상 강도가 정해진 채로 저장된다. 자유 입력으로 강도가 빠진 Gemini 이름을 받았으면 어떤 강도로 보완했는지 결성 보고에 반드시 적고, 다른 강도로 바꾸려면 `adjust`에서 한다. 자유 입력으로 받은 모델은 `provider:model` 형식으로 옮겨 적고, 초안 명령이 거부하면 그 역할만 다시 묻는다.
+사용자는 catalog가 확인한 실행기만 선택할 수 있다. 목록 밖의 provider나 임의 account·구독 이름을 자유 입력으로 추가하지 않는다.
 
 ## 묻지 않고 정하는 것
 
 아래 값은 사용자가 고른 모델보다 더 많은 호출, 계정이나 권한을 쓰지 않는 쪽으로 고정되어 있으며, `scripts/org-draft.mjs`가 기록한다. 모두 `adjust`에서 바꿀 수 있다.
 
 - 팀 이름은 프로젝트 디렉터리 이름을 쓴다.
-- 각 역할의 상위 역할은 서열상 바로 위 역할이고, 모든 프로필은 각 실행기의 현재 로그인 계정(`account: current`)을 쓴다. 같은 실행기의 프로필은 하나의 `pool`로 묶어, 소진이 확인된 계정을 런타임이 건너뛸 수 있게 한다.
-- 역할별 동시 인원과 시도 횟수는 1이고, 대체 프로필은 두지 않으며, 할당량이 소진되면 중단하고, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번과 workflow attempt 하나가 쓰는 provider 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 대체 프로필을 두면 사용 한도에 걸린 역할의 작업을 다른 실행기가 같은 워크트리에서 이어받을 수 있지만, 사용자가 고르지 않은 구독을 쓰게 되므로 결성 때 정하지 않고 `adjust`에서 사용자가 고르게 한다.
-- 추론 강도(`effort`)는 기록하지 않아 각 CLI의 기본값을 쓴다. 생략했을 때의 실제 강도는 CLI와 계정 설정이 정하므로 특정 값으로 단정해 알리지 않는다.
+- 각 역할의 상위 역할은 서열상 바로 위 역할이다. 선택한 실행기는 현재 로그인 계정(`account: current`)으로 기록하고, 실행기별로 하나의 `pool`을 만들어 같은 구독의 소진을 우회하지 않게 한다.
+- 자원별 동시 실행 한도는 기본 1이고, 자원별 호출 한도와 `policy.maxCalls`는 기본 3이다. 역할의 시도 횟수는 1이며, 대체 profile은 두지 않고, 할당량이 소진되면 중단한다. 추가 자원이나 대체 profile은 `adjust`에서 사용자가 고르게 하며, 이 값도 `adjust`에서 명시적으로 바꿀 수 있다.
+- 모델과 추론 강도는 결성 조직에 기록하지 않는다. 카탈로그가 실패했을 때 host default나 고정 모델을 추측하여 넣지 않는다.
 - 감독 역할은 `worker_done`을 보내지 않은 worker가 15분(`policy.supervision.progressCheckMs: 900000`) 동안 활동이 없으면 진행 상황을 묻고, 답이 없는 요청이 2회(`unansweredLimit: 2`)에 이르면 상위에 보고한다. 이 정책은 메시지 한 통 외에 호출을 쓰지 않으며, 재시도나 종료를 스스로 하지 않는다.
-- GPT-OSS 보조 도구 호출을 허용할지는 묻지 않고 `assistants`를 비워 둔다. 이 상태에서는 모든 역할의 `assist` 호출이 거부되므로, 필요해지면 `adjust`에서 역할별로 허용한다.
+- 보조 도구 호출을 허용할지와 `assistants` 설정은 결성 단계에서 만들지 않는다. advisor profile도 해당 기능이 필요할 때 `adjust`에서 검증된 자원 범위와 별도로 명시한다.
 
 로컬 Ollama 모델은 결성 단계에서 받지 않는다. 컨텍스트 창을 `ollama show`로 확인해 기록해야 하는데, 추측한 값으로 저장하면 잘린 프롬프트에 대한 답이 정상 응답처럼 보이기 때문이다. 결성 후 `adjust`에서 추가한다.
 
@@ -68,13 +49,13 @@ Gemini는 다른 모델과 달리 강도를 비워 둘 수 없다. Agy에는 강
 현재 SKILL.md 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석해 다음을 실행한다. 초안 파일은 새 경로에 쓰며, 이미 있는 파일에는 쓰지 않는다. 예제 조직 자체를 사용자 조직으로 자동 설치하지 않는다.
 
 ```text
-node <runtime> org-draft --name <project-dir-name> --models <pm>,<worker> --output <draft.json>
+node <runtime> org-draft --name <project-dir-name> --resources <codex,claude,agy> --output <draft.json>
 node <runtime> init --org <project>/.omt/organization.json --from <draft.json>
 node <runtime> show --org <project>/.omt/organization.json
 ```
 
 `init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 질문을 처음부터 다시 시작하지 않는다.
 
-결성을 보고할 때에는 PM과 Worker에 배정된 모델을 적는다. `provider:default`를 받아 모델이 `null`인 프로필은 `host-defaults`로 확인한 현재 해석값과 저장값을 구분해 알린다. 이어서 묻지 않고 정한 값을 알리고 `adjust`에서 바꿀 수 있다고 덧붙인다. 새 구조는 [`../../examples/organization.three-tier.json`](../../examples/organization.three-tier.json)에서 확인할 수 있습니다. 기존 네 역할 조직은 새로운 조직으로 자동 변경하지 않는다.
+결성을 보고할 때에는 선택한 자원마다 provider, 현재 account, subscription, pool, 동시 실행 한도와 호출 한도를 적는다. 모델과 추론 강도를 아직 선택하지 않았으며, 조회 실패한 실행기는 저장하지 않았다는 사실도 함께 적는다. 기존 역할별 profile 조직은 호환 입력으로만 유지하며, 새 조직으로 자동 변경하지 않는다.
 
 `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다. 조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 kickoff 등록부가 놓이는 자리가 된다. 한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있으며, form 자체는 kickoff를 등록하지 않는다. 자세한 계약은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)에 있다.
