@@ -7,9 +7,12 @@ import path from "node:path";
 import { run, writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { draftResourceOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import {
+  attachExecution,
   changeTaskStaffing,
   createWorkflow,
+  recordSettlement,
   readWorkflow,
+  retryTask,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 
@@ -74,6 +77,38 @@ async function fixture(t) {
       context: "one task",
       reason: "PM needs the recorded Codex choice",
       pm: { resourceId: "codex-current", model: "gpt-test", effort: "high" },
+      changeApprovals: [
+        {
+          id: "director-approval-1",
+          taskId: "implementation",
+          reason: "higher rework risk",
+          from: {
+            resourceId: "agy-current",
+            model: "gemini-test",
+            effort: "high",
+          },
+          to: {
+            resourceId: "codex-current",
+            model: "gpt-test",
+            effort: "high",
+          },
+        },
+        {
+          id: "director-approval-2",
+          taskId: "implementation",
+          reason: "verified same-pool retry",
+          from: {
+            resourceId: "agy-current",
+            model: "gemini-test",
+            effort: "high",
+          },
+          to: {
+            resourceId: "agy-current",
+            model: "gemini-retry",
+            effort: "high",
+          },
+        },
+      ],
     },
     tasks: {
       implementation: {
@@ -127,11 +162,12 @@ test("resource workflows require and preserve director and task staffing evidenc
     roles: snapshot.state.roles,
     staffing: snapshot.state.staffing,
     workflowTask: "implementation",
+    workflowState: snapshot.state,
   });
   assert.equal(command.modelRequested, "gemini-test");
 });
 
-test("PM cannot alter its own choice and a named upgrade requires director evidence", async (t) => {
+test("PM cannot bypass a frozen director approval with an arbitrary upgrade or lateral label", async (t) => {
   const { dir, organization, request, stateDir } = await fixture(t);
   await createWorkflow(stateDir, request, organization, dir);
   const revision = () => readWorkflow(stateDir, request.id).state.revision;
@@ -160,10 +196,39 @@ test("PM cannot alter its own choice and a named upgrade requires director evide
         taskId: "implementation",
         actor: "pm",
         change: "lateral",
-        reason: "try an unknown resource",
-        choice: { resourceId: "not-a-resource", model: "unknown" },
+        reason: "try a different model without approval",
+        choice: {
+          resourceId: "agy-current",
+          model: "gemini-retry",
+          effort: "high",
+        },
+        directorDecision: {
+          id: "invented-director-decision",
+          reason: "invented approval",
+        },
       }),
-    /Unknown staffing resource/,
+    /not recorded in the frozen workflow/,
+  );
+  assert.throws(
+    () =>
+      changeTaskStaffing(stateDir, request.id, revision(), {
+        schemaVersion: 1,
+        eventId: "mismatched-director-decision",
+        taskId: "implementation",
+        actor: "pm",
+        change: "upgrade",
+        reason: "try an arbitrary director string",
+        choice: {
+          resourceId: "codex-current",
+          model: "gpt-test",
+          effort: "high",
+        },
+        directorDecision: {
+          id: "director-approval-1",
+          reason: "a different arbitrary reason",
+        },
+      }),
+    /does not match the recorded director decision/,
   );
   const result = changeTaskStaffing(stateDir, request.id, revision(), {
     schemaVersion: 1,
@@ -185,5 +250,122 @@ test("PM cannot alter its own choice and a named upgrade requires director evide
   assert.equal(
     result.state.tasks.implementation.staffing.directorDecision.id,
     "director-approval-1",
+  );
+});
+
+test("exhausted and unknown pools reject another model selection and launch", async (t) => {
+  const { dir, organization, request, stateDir } = await fixture(t);
+  await createWorkflow(stateDir, request, organization, dir);
+  const revision = () => readWorkflow(stateDir, request.id).state.revision;
+  const receipt = {
+    executionId: "execution-a",
+    runId: "run-a",
+    taskId: "orca-a",
+    dispatchId: "dispatch-a",
+    worktreeId: `repo::${dir}`,
+  };
+  attachExecution(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "attach-a",
+    attemptId: "attempt-a",
+    taskId: "implementation",
+    callAllowance: 1,
+    receipt,
+  });
+  recordSettlement(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "pool-exhausted-a",
+    attemptId: "attempt-a",
+    taskId: "implementation",
+    executionId: receipt.executionId,
+    outcome: "failed",
+    callsUsed: 1,
+    failure: {
+      message: "subscription pool exhausted",
+      evidence: "worker-limit-check",
+      failureClass: "pool-exhausted",
+    },
+  });
+  let snapshot = readWorkflow(stateDir, request.id);
+  assert.equal(
+    snapshot.state.staffing.poolStates["agy-current"].status,
+    "exhausted",
+  );
+  assert.throws(
+    () =>
+      roleCommand(snapshot.organization, "worker", {
+        roles: snapshot.state.roles,
+        staffing: snapshot.state.staffing,
+        workflowTask: "implementation",
+        workflowState: snapshot.state,
+      }),
+    /Staffing pool agy-current is exhausted/,
+  );
+  retryTask(stateDir, request.id, revision(), {
+    schemaVersion: 1,
+    eventId: "retry-after-pool-failure",
+    taskId: "implementation",
+    resolvedBy: "pm",
+    resolution: "director will choose a verified alternative",
+    evidence: "worker-limit-check",
+  });
+  assert.throws(
+    () =>
+      changeTaskStaffing(stateDir, request.id, revision(), {
+        schemaVersion: 1,
+        eventId: "same-pool-model-change",
+        taskId: "implementation",
+        actor: "pm",
+        change: "lateral",
+        reason: "try another model in the exhausted pool",
+        choice: {
+          resourceId: "agy-current",
+          model: "gemini-retry",
+          effort: "high",
+        },
+        directorDecision: {
+          id: "director-approval-2",
+          reason: "verified same-pool retry",
+        },
+      }),
+    /Staffing pool agy-current is exhausted/,
+  );
+  snapshot = readWorkflow(stateDir, request.id);
+  snapshot.state.staffing.poolStates["agy-current"] = { status: "unknown" };
+  writeJSON(
+    path.join(stateDir, "workflows", request.id, "state.json"),
+    snapshot.state,
+  );
+  snapshot = readWorkflow(stateDir, request.id);
+  assert.throws(
+    () =>
+      roleCommand(snapshot.organization, "worker", {
+        roles: snapshot.state.roles,
+        staffing: snapshot.state.staffing,
+        workflowTask: "implementation",
+        workflowState: snapshot.state,
+      }),
+    /Staffing pool agy-current is unknown/,
+  );
+  assert.throws(
+    () =>
+      changeTaskStaffing(stateDir, request.id, revision(), {
+        schemaVersion: 1,
+        eventId: "unknown-pool-model-change",
+        taskId: "implementation",
+        actor: "pm",
+        change: "lateral",
+        reason: "try another model in an unknown pool",
+        choice: {
+          resourceId: "agy-current",
+          model: "gemini-retry",
+          effort: "high",
+        },
+        directorDecision: {
+          id: "director-approval-2",
+          reason: "verified same-pool retry",
+        },
+      }),
+    /Staffing pool agy-current is unknown/,
   );
 });

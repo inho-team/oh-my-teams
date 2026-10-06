@@ -24,6 +24,7 @@ import {
   ROOT_ROLE,
   validateOrg,
 } from "./core.mjs";
+import { assertStaffingPoolUsable } from "./workflow.mjs";
 
 /**
  * How each provider's role reaches an Orca terminal, and under which agent id.
@@ -262,6 +263,10 @@ function staffedOrganization(requestedOrg, requestedRole, run) {
     decision,
     `No staffing choice recorded for ${run.workflowTask ?? requestedRole}`,
   );
+  assert(
+    run.workflowState,
+    "Resource organization launch requires the frozen workflow state",
+  );
   const resource = requestedOrg.resources[decision.resourceId];
   assert(
     resource,
@@ -280,6 +285,7 @@ function staffedOrganization(requestedOrg, requestedRole, run) {
       PROVIDER_EFFORTS[resource.provider]?.includes(decision.effort),
     `Frozen staffing effort is invalid for ${resource.provider}`,
   );
+  assertStaffingPoolUsable(run.workflowState, requestedOrg, decision);
   const profileId = `staffing-${decision.resourceId}-${decision.model
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -418,12 +424,20 @@ export function resolveRoleLaunch(
   requestedOrg,
   requestedRole,
   explicit = {},
-  { roles, terminal, profile: handoffProfile, staffing, workflowTask } = {},
+  {
+    roles,
+    terminal,
+    profile: handoffProfile,
+    staffing,
+    workflowTask,
+    workflowState,
+  } = {},
 ) {
   const org = validateOrg(
     staffedOrganization(requestedOrg, requestedRole, {
       staffing,
       workflowTask,
+      workflowState,
     }),
   );
   assert(
@@ -629,12 +643,20 @@ function profileArgv(org, label, profileId, profile, firstPrompt) {
 export function roleCommand(
   requestedOrg,
   requestedRole,
-  { roles, profile: handoffProfile, firstPrompt, staffing, workflowTask } = {},
+  {
+    roles,
+    profile: handoffProfile,
+    firstPrompt,
+    staffing,
+    workflowTask,
+    workflowState,
+  } = {},
 ) {
   const org = validateOrg(
     staffedOrganization(requestedOrg, requestedRole, {
       staffing,
       workflowTask,
+      workflowState,
     }),
   );
   assert(
