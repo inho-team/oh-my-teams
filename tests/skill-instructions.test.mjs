@@ -2,16 +2,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  DEPTH_ROLES,
-  readJSON,
-  resolveRole,
-  validateOrg,
-} from "../plugins/oh-my-teams/scripts/core.mjs";
-import { assist } from "../plugins/oh-my-teams/scripts/worker.mjs";
+import { DEPTH_ROLES, readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { draftResourceOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { fetchModelCatalog } from "../plugins/oh-my-teams/scripts/model-catalog.mjs";
@@ -30,67 +23,9 @@ const references = path.join(root, "plugins/oh-my-teams/references");
 const readSkill = (name) =>
   fs.readFileSync(path.join(skills, name, "SKILL.md"), "utf8");
 
-function fixture(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-skill-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  return dir;
-}
-
-test("every example organization can run the assist the skills advertise", async (t) => {
-  const organizations = fs
-    .readdirSync(examples)
-    .filter((name) => name.startsWith("organization"));
-  assert.ok(organizations.length >= 3, "the preset examples must be covered");
-
-  for (const name of organizations) {
-    const org = validateOrg(readJSON(path.join(examples, name)));
-    if (!org.assistants) continue;
-    const dir = fixture(t);
-    fs.writeFileSync(path.join(dir, "value.txt"), "alpha\n");
-    const task = {
-      ...readJSON(path.join(examples, "task.v2.json")),
-      files: ["value.txt"],
-      checks: [[process.execPath, "-e", "process.exit(0)"]],
-    };
-
-    // pm, pl, senior and junior all tell the model it may call assist.
-    // The preset examples carried no `assistants` block, so every one of those
-    // roles failed with "Assistant profile not allowed" on an organization
-    // built from them. A reduced organization need not declare all four, and
-    // there the assist runs as the role that took the absent one's duties over.
-    for (const role of ["pm", "pl", "senior", "junior"]) {
-      const report = await assist(dir, org, task, {
-        role,
-        kind: "research",
-        stateDir: path.join(dir, ".omt", role),
-        call: async () => ({
-          code: 0,
-          stdout: "{}",
-          stderr: "",
-          elapsedMs: 1,
-          text: JSON.stringify({
-            summary: "found it",
-            items: ["alpha is present"],
-            citations: [{ file: "value.txt", line: 1, quote: "alpha" }],
-          }),
-        }),
-      });
-      assert.equal(
-        report.callerRole,
-        resolveRole(org, role),
-        `${name} must allow ${role}`,
-      );
-    }
-  }
-});
-
-test("form says the assistant allowlist starts empty, and what that refuses", () => {
+test("form no longer mentions the removed assist feature or its allowlist", () => {
   const form = readSkill("form");
-  // form no longer asks for `assistants`, and worker.mjs refuses an assist call
-  // for a role that is absent from it, so an unmentioned empty list would read
-  // as a broken assist rather than a default adjust can change.
-  assert.match(form, /assistants/);
-  assert.match(form, /보조 도구 호출을 허용할지/);
+  assert.doesNotMatch(form, /assistants|assist/);
 });
 
 test("a multi-task workflow is told about the integration it cannot add later", () => {
@@ -319,17 +254,19 @@ test("one rule lives in one place", () => {
     path.join(references, "orca-runtime.md"),
     "utf8",
   );
-  const assistRef = fs.readFileSync(path.join(references, "assist.md"), "utf8");
+  const subagents = fs.readFileSync(
+    path.join(references, "subagents.md"),
+    "utf8",
+  );
 
-  // The liveness verdict and the assist contract are fixed facts. Each used to
+  // The liveness verdict and the subagent rule are fixed facts. Each used to
   // be restated in four or five places, so a correction had to be applied in
   // every one of them or the copies disagreed.
   assert.match(runtime, /## worker-list와 liveness/);
-  assert.match(assistRef, /gpt-oss-120b-medium/);
+  assert.match(subagents, /## 서브에이전트와 Worker/);
 
   const restatements = [
     [/`live` worker가 0명이면.*표현하지 않는다/, "the liveness verdict"],
-    [/--role \w+ --kind research/, "the assist invocation"],
     [/"pm": \{/, "the kickoff registry entry"],
   ];
   for (const entry of fs.readdirSync(skills)) {
@@ -345,30 +282,6 @@ test("one rule lives in one place", () => {
   }
 });
 
-test("the assist reference states what the code enforces, not what we wish", () => {
-  const assistRef = fs.readFileSync(
-    path.join(root, "plugins/oh-my-teams/references/assist.md"),
-    "utf8",
-  );
-  const worker = fs.readFileSync(
-    path.join(root, "plugins/oh-my-teams/scripts/worker.mjs"),
-    "utf8",
-  );
-
-  // worker.mjs accepts all three kinds from any role, so the per-role table is
-  // a convention. Presenting it as an enforced rule would be a new mismatch of
-  // exactly the kind this audit kept finding.
-  assert.match(worker, /\["research", "checklist", "edit"\]\.includes\(kind\)/);
-  assert.match(assistRef, /역할에 따라 `kind`를 제한하지 않는다/);
-
-  for (const option of REQUIRED_OPTIONS.assist) {
-    assert.ok(
-      assistRef.includes(`--${option}`),
-      `the reference must show the required --${option}`,
-    );
-  }
-});
-
 test("form points at one structural example, not three overlapping ones", () => {
   const form = readSkill("form");
   // The preset files restate the model assignments the paragraph above already
@@ -380,7 +293,6 @@ test("form points at one structural example, not three overlapping ones", () => 
     ...form.matchAll(/examples\/(organization[.\w-]*\.json)/g),
   ].map((match) => match[1]);
   assert.deepEqual([...new Set(linked)].sort(), [
-    "organization.json",
     "organization.single-subscription.json",
   ]);
 });
@@ -559,10 +471,10 @@ test("the depth is decided by the PM, reported, and changed through the runtime"
     pm,
     /내리기는 빠지는 역할에 예약되었거나 실행 중인 작업이 없을 때만/,
   );
-  for (const skill of ["kickoff", "adjust"]) {
+  for (const skill of ["kickoff", "form", "adjust"]) {
     assert.match(
       readSkill(skill),
-      /「실행 깊이」/,
+      /「실행 깊이」|깊이 1|깊이 2|Worker를 사용하지 않을 수|역할 ID는 `pm`과 `worker`/,
       `${skill} must point at the one place the depth rules live`,
     );
   }
@@ -815,7 +727,10 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
     );
     // An Agy terminal never reports tui-idle, and the inject workaround
     // escapes worker-stop and model checks.
-    assert.match(readSkill(role), /원시 `dispatch --inject`로 우회하지 않/);
+    assert.match(
+      readSkill(role),
+      /원시 `dispatch --inject`로 우회하지 (?:않고|않습니다)/,
+    );
     // #41: a released reservation keeps its attempt spent, so the idle check
     // runs before the attempt is reserved.
     assert.match(readSkill(role), /예약하기 전에 `terminal-idle-check`/);
@@ -828,8 +743,8 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   // orca-runtime.md must link the compatibility matrix.
   assert.match(runtime, /launch-matrix\.mjs/);
 
-  // New runs dispatch Workers directly from PM; legacy PL contracts remain.
-  assert.match(readSkill("pm"), /Worker에게 직접 배정/);
+  // New PMs dispatch workers directly; legacy PL still documents nesting.
+  assert.match(readSkill("pm"), /PM이 직접 작업 그래프와 통합 결과를 책임지고/);
   assert.match(readSkill("pl"), /기본값이 1/);
   assert.match(
     readSkill("senior"),

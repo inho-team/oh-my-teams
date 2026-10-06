@@ -15,7 +15,7 @@ description: 최초 oh my teams 상설 조직에 검증된 구독 자원과 고�
 
 묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 한 번으로 끝난다. 사용자는 현재 로그인한 Codex·Claude·Agy 가운데 이 조직이 사용할 구독 자원을 선택한다. 사용자가 선택하지 않은 실행기·계정·구독은 조직에 추가하지 않는다.
 
-기존 역할별 profile 조직은 명시적인 호환 입력으로 계속 읽는다. 기존 전체 구조는 [`../../examples/organization.json`](../../examples/organization.json)에서, 축소 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 기존 조직이나 진행 중인 kickoff snapshot의 모델, pool, fallback, 호출 한도와 역할 권한을 새 자원 계약으로 추측하여 바꾸지 않는다.
+기존 역할별 profile 조직은 명시적인 호환 입력으로 계속 읽는다. 축소 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 기존 조직이나 진행 중인 kickoff snapshot의 모델, pool, fallback, 호출 한도와 역할 권한을 새 자원 계약으로 추측하여 바꾸지 않는다. 새 조직의 역할 ID는 `pm`과 `worker`이며, 기존 역할이 있는 kickoff에는 저장된 스냅샷을 적용한다.
 
 모델 선택지는 미리 박아 둔 표에서 고르지 않고, 묻기 직전에 실행한 조회 결과에서만 만든다. 다음을 실행한다.
 
@@ -40,7 +40,8 @@ node <runtime> model-catalog --codex-home <codex-home>
 - 자원별 동시 실행 한도는 기본 1이고, 자원별 호출 한도와 `policy.maxCalls`는 기본 3이다. 역할의 시도 횟수는 1이며, 대체 profile은 두지 않고, 할당량이 소진되면 중단한다. 추가 자원이나 대체 profile은 `adjust`에서 사용자가 고르게 하며, 이 값도 `adjust`에서 명시적으로 바꿀 수 있다.
 - 모델과 추론 강도는 결성 조직에 기록하지 않는다. 카탈로그가 실패했을 때 host default나 고정 모델을 추측하여 넣지 않는다.
 - 감독 역할은 `worker_done`을 보내지 않은 worker가 15분(`policy.supervision.progressCheckMs: 900000`) 동안 활동이 없으면 진행 상황을 묻고, 답이 없는 요청이 2회(`unansweredLimit: 2`)에 이르면 상위에 보고한다. 이 정책은 메시지 한 통 외에 호출을 쓰지 않으며, 재시도나 종료를 스스로 하지 않는다.
-- 보조 도구 호출을 허용할지와 `assistants` 설정은 결성 단계에서 만들지 않는다. advisor profile도 해당 기능이 필요할 때 `adjust`에서 검증된 자원 범위와 별도로 명시한다.
+- advisor profile은 해당 기능이 필요할 때 `adjust`에서 검증된 자원 범위와 별도로 명시한다.
+- 감사(`org.auditor`)는 결성 단계에서 만들지 않는다. 이사 또는 독립 정책이 필요할 때 배정하며, PM이 감사 신원과 판정 권한을 선택하지 않는다.
 
 로컬 Ollama 모델은 결성 단계에서 받지 않는다. 컨텍스트 창을 `ollama show`로 확인해 기록해야 하는데, 추측한 값으로 저장하면 잘린 프롬프트에 대한 답이 정상 응답처럼 보이기 때문이다. 결성 후 `adjust`에서 추가한다.
 

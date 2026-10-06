@@ -35,10 +35,15 @@ import {
   releaseKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import {
   acceptOutcome,
   gateCheck,
   recordReview,
 } from "../plugins/oh-my-teams/scripts/gates.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const exampleOrgPath = path.resolve(
@@ -81,11 +86,13 @@ function createProjectStructure(tempDir, worktreeId) {
 // 이 테스트 파일이 만든 문서를 올바르게 찾는다. 생략하면 registerKickoff은 빈 값을 cwd로
 // 되돌리므로, 그 값에 의존하지 않는 테스트에서는 그대로 생략한다.
 function createKickoffRequest(
+  orgFile,
   worktreeId,
   briefFile,
   pmDir,
   revision,
   stateDir,
+  checkoutPath = pmDir,
 ) {
   return {
     goal: "Test kickoff",
@@ -100,7 +107,29 @@ function createKickoffRequest(
       mode: "local-merge",
       branch: "main",
     },
+    requirements: minimalRequirements(orgFile, worktreeId),
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath,
+    },
   };
+}
+
+// assertKickoffCloseReady(releaseKickoff --reason completed)는 legacy/integrity-failure
+// 문서 분류와 무관하게, 이사가 확인한 fidelity 기록이 현재 head/원장에 바인딩돼 있을 것을
+// 항상 요구한다(force도 이 게이트는 우회하지 못한다). minimalRequirements는 statement(s1)
+// 하나와 criterion(c1) 하나뿐이므로, 두 항목을 정확히 한 번씩 덮는 fidelity가 필요하다.
+async function confirmFidelity(orgFile, worktreeId, checkoutPath, repo, head) {
+  await requirementsFidelity(orgFile, worktreeId, {
+    head,
+    repo,
+    recordedBy: "term_director_test",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "test evidence" },
+      { type: "criterion", id: "c1", status: "met", evidence: "test evidence" },
+    ],
+  });
+  await requirementsFidelityConfirm(orgFile, worktreeId, checkoutPath);
 }
 
 function createTestDocument(kickoffId, stageSlug, docType, localId, author) {
@@ -245,6 +274,11 @@ function claimFor(fixture, worktreeId, wt, delivery = { mode: "none" }) {
     organizationRevision: readJSON(fixture.orgFile).revision,
     brief: fixture.brief,
     delivery,
+    requirements: minimalRequirements(fixture.orgFile, worktreeId),
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath: wt.repoDir,
+    },
   };
 }
 
@@ -408,6 +442,7 @@ test("정상_생성_참조_갱신", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-1",
       briefFile,
       pmDir,
@@ -582,6 +617,7 @@ test("권한_없는_수정", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-2",
       briefFile,
       pmDir,
@@ -680,6 +716,7 @@ test("오래된_revision", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-3",
       briefFile,
       pmDir,
@@ -730,6 +767,7 @@ test("깨진_참조", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-4",
       briefFile,
       pmDir,
@@ -779,6 +817,7 @@ test("다른_kickoff_참조", () => {
     const pmDir1 = path.join(tempDir, "pm1");
     fs.mkdirSync(pmDir1, { recursive: true });
     const req1 = createKickoffRequest(
+      orgFile,
       "test-wt-5a",
       briefFile,
       pmDir1,
@@ -790,6 +829,7 @@ test("다른_kickoff_참조", () => {
     const pmDir2 = path.join(tempDir, "pm2");
     fs.mkdirSync(pmDir2, { recursive: true });
     const req2 = createKickoffRequest(
+      orgFile,
       "test-wt-5b",
       briefFile,
       pmDir2,
@@ -840,6 +880,7 @@ test("동시_갱신", async () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-6",
       briefFile,
       pmDir,
@@ -932,7 +973,7 @@ test("동시_갱신", async () => {
 // releaseKickoff와 cleanupKickoffBranches를 실제로 호출해, delivery-ref 문서가 커밋되기
 // 전에는 force 없이 완결이 거부되고, 커밋된 뒤에는 force 없이도 완결되며, 완결 이후에도
 // delivery-ref 문서가 그대로 조회됨을 확인한다.
-test("문서_참조_객체_원자성_인도", (t) => {
+test("문서_참조_객체_원자성_인도", async (t) => {
   const tempDir = makeTempDir();
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
@@ -945,23 +986,29 @@ test("문서_참조_객체_원자성_인도", (t) => {
   const pmDirA = path.join(tempDir, "pm-wt-7a");
   fs.mkdirSync(pmDirA, { recursive: true });
   const requestA = createKickoffRequest(
+    orgFile,
     "test-wt-7a",
     briefFile,
     pmDirA,
     org.revision,
     stateDir,
+    tempDir,
   );
   registerKickoff(orgFile, requestA);
+  const { repoDir: repoDirA, mergeCommit: mergeCommitA } = mergedGitRepo(t);
   const entryFileA = entryFileFor(orgFile, "test-wt-7a");
   writeJSON(entryFileA, {
     ...readJSON(entryFileA),
     delivered: {
-      head: "b".repeat(40),
-      mergeCommit: "a".repeat(40),
+      head: mergeCommitA,
+      mergeCommit: mergeCommitA,
       at: new Date().toISOString(),
     },
   });
-  assert.throws(
+  // 원장을 close-ready로 만들어야 delivery-ref 거부가 실제로 관찰된다; force는
+  // delivery-ref 검사만 우회할 뿐, 이 이사 fidelity 게이트는 우회하지 못한다.
+  await confirmFidelity(orgFile, "test-wt-7a", tempDir, repoDirA, mergeCommitA);
+  await assert.rejects(
     () =>
       releaseKickoff(orgFile, {
         worktreeId: "test-wt-7a",
@@ -970,7 +1017,7 @@ test("문서_참조_객체_원자성_인도", (t) => {
       }),
     /delivery-ref document.*is not committed/,
   );
-  const forced = releaseKickoff(orgFile, {
+  const forced = await releaseKickoff(orgFile, {
     worktreeId: "test-wt-7a",
     reason: "completed",
     force: true,
@@ -982,24 +1029,27 @@ test("문서_참조_객체_원자성_인도", (t) => {
   const pmDirB = path.join(tempDir, "pm-wt-7b");
   fs.mkdirSync(pmDirB, { recursive: true });
   const requestB = createKickoffRequest(
+    orgFile,
     "test-wt-7b",
     briefFile,
     pmDirB,
     org.revision,
     stateDir,
+    tempDir,
   );
   const { entry: entryB } = registerKickoff(orgFile, requestB);
   const kickoffHashB = kickoffHashFor(entryB);
-  const mergeCommitB = "c".repeat(40);
+  const { repoDir: repoDirB, mergeCommit: mergeCommitB } = mergedGitRepo(t);
   const entryFileB = entryFileFor(orgFile, "test-wt-7b");
   writeJSON(entryFileB, {
     ...readJSON(entryFileB),
     delivered: {
-      head: "d".repeat(40),
+      head: mergeCommitB,
       mergeCommit: mergeCommitB,
       at: new Date().toISOString(),
     },
   });
+  await confirmFidelity(orgFile, "test-wt-7b", tempDir, repoDirB, mergeCommitB);
   const deliveryDocIdB = deliveryRefDocId(kickoffHashB, mergeCommitB);
   saveDocument(stateDir, {
     schemaVersion: 1,
@@ -1015,7 +1065,7 @@ test("문서_참조_객체_원자성_인도", (t) => {
     reason: "delivery recorded",
     deliveredCommit: mergeCommitB,
   });
-  const releasedB = releaseKickoff(orgFile, {
+  const releasedB = await releaseKickoff(orgFile, {
     worktreeId: "test-wt-7b",
     reason: "completed",
     callerCwd: tempDir,
@@ -1026,15 +1076,18 @@ test("문서_참조_객체_원자성_인도", (t) => {
   assert.equal(stateB.state, "resolved");
 
   // (3) cleanupKickoffBranches도 같은 delivery-ref 문서 존재 여부로 branch 삭제를 결정한다.
+  //     이 함수는 releaseKickoff과 달리 이사 fidelity 게이트를 거치지 않는다.
   const { repoDir, mergeCommit } = mergedGitRepo(t);
   const pmDirC = path.join(tempDir, "pm-wt-7c");
   fs.mkdirSync(pmDirC, { recursive: true });
   const requestC = createKickoffRequest(
+    orgFile,
     "test-wt-7c",
     briefFile,
     pmDirC,
     org.revision,
     stateDir,
+    tempDir,
   );
   const { entry: entryC } = registerKickoff(orgFile, requestC);
   const kickoffHashC = kickoffHashFor(entryC);
@@ -1048,6 +1101,7 @@ test("문서_참조_객체_원자성_인도", (t) => {
     entry: withDelivery,
     branches: ["feat/kickoff-work"],
     remoteName: "",
+    callerCwd: tempDir,
   });
   assert.deepEqual(beforeDoc, {
     deleted: [],
@@ -1075,6 +1129,7 @@ test("문서_참조_객체_원자성_인도", (t) => {
     entry: withDelivery,
     branches: ["feat/kickoff-work"],
     remoteName: "",
+    callerCwd: tempDir,
   });
   assert.deepEqual(afterDoc, {
     deleted: ["feat/kickoff-work"],
@@ -1086,7 +1141,7 @@ test("문서_참조_객체_원자성_인도", (t) => {
 // Scenario: 기존_kickoff_등록_항목_레거시_판정
 // documentSystemActivatedAt이 없는 조직에서는 registrationSeq 없는 entry가 legacy로 판정되어,
 // releaseKickoff와 cleanupKickoffBranches가 delivery-ref 문서 검사를 건너뛰고 그대로 완결된다.
-test("기존_kickoff_등록_항목_레거시_판정", (t) => {
+test("기존_kickoff_등록_항목_레거시_판정", async (t) => {
   const tempDir = makeTempDir();
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
@@ -1102,22 +1157,41 @@ test("기존_kickoff_등록_항목_레거시_판정", (t) => {
   fs.mkdirSync(pmDir, { recursive: true });
   registerKickoff(
     orgFile,
-    createKickoffRequest("test-wt-8", briefFile, pmDir, org.revision, stateDir),
+    createKickoffRequest(
+      orgFile,
+      "test-wt-8",
+      briefFile,
+      pmDir,
+      org.revision,
+      stateDir,
+      tempDir,
+    ),
   );
   demote(orgFile, "test-wt-8");
   const entryFile = entryFileFor(orgFile, "test-wt-8");
   assert.equal(readJSON(entryFile).registrationSeq, undefined);
 
+  const { repoDir: releaseRepoDir, mergeCommit: releaseMergeCommit } =
+    mergedGitRepo(t);
   writeJSON(entryFile, {
     ...readJSON(entryFile),
     delivered: {
-      head: "b".repeat(40),
-      mergeCommit: "a".repeat(40),
+      head: releaseMergeCommit,
+      mergeCommit: releaseMergeCommit,
       at: new Date().toISOString(),
     },
   });
+  // "legacy"는 delivery-ref 문서 검사만 건너뛰게 하는 documentState 분류이며,
+  // releaseKickoff의 이사 fidelity 게이트는 이 분류와 무관하게 항상 실행된다.
+  await confirmFidelity(
+    orgFile,
+    "test-wt-8",
+    tempDir,
+    releaseRepoDir,
+    releaseMergeCommit,
+  );
 
-  const released = releaseKickoff(orgFile, {
+  const released = await releaseKickoff(orgFile, {
     worktreeId: "test-wt-8",
     reason: "completed",
     callerCwd: tempDir,
@@ -1145,7 +1219,7 @@ test("기존_kickoff_등록_항목_레거시_판정", (t) => {
 // Scenario: registrationSeq_결여_무결성_실패
 // documentSystemActivatedAt 이후 등록되었는데 registrationSeq가 없는 entry는 integrity-failure로
 // 판정되어, releaseKickoff와 cleanupKickoffBranches 모두 force 없이는 거부되고 force로만 우회된다.
-test("registrationSeq_결여_무결성_실패", (t) => {
+test("registrationSeq_결여_무결성_실패", async (t) => {
   const tempDir = makeTempDir();
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
@@ -1159,22 +1233,41 @@ test("registrationSeq_결여_무결성_실패", (t) => {
   fs.mkdirSync(pmDir, { recursive: true });
   const { entry } = registerKickoff(
     orgFile,
-    createKickoffRequest("test-wt-9", briefFile, pmDir, org.revision, stateDir),
+    createKickoffRequest(
+      orgFile,
+      "test-wt-9",
+      briefFile,
+      pmDir,
+      org.revision,
+      stateDir,
+      tempDir,
+    ),
   );
   assert.ok(entry.registrationSeq !== undefined);
 
   demote(orgFile, "test-wt-9");
   const entryFile = entryFileFor(orgFile, "test-wt-9");
+  const { repoDir: releaseRepoDir, mergeCommit: releaseMergeCommit } =
+    mergedGitRepo(t);
   writeJSON(entryFile, {
     ...readJSON(entryFile),
     delivered: {
-      head: "b".repeat(40),
-      mergeCommit: "a".repeat(40),
+      head: releaseMergeCommit,
+      mergeCommit: releaseMergeCommit,
       at: new Date().toISOString(),
     },
   });
+  // force는 registrationSeq 무결성 거부를 우회하지만 이사 fidelity 게이트는 만들어 주지
+  // 않으므로, 원장을 먼저 close-ready로 만들어야 아래 integrity 거부가 실제로 나타난다.
+  await confirmFidelity(
+    orgFile,
+    "test-wt-9",
+    tempDir,
+    releaseRepoDir,
+    releaseMergeCommit,
+  );
 
-  assert.throws(
+  await assert.rejects(
     () =>
       releaseKickoff(orgFile, {
         worktreeId: "test-wt-9",
@@ -1183,7 +1276,7 @@ test("registrationSeq_결여_무결성_실패", (t) => {
       }),
     /no registrationSeq.*completion is refused as a corrupted entry/,
   );
-  const forcedRelease = releaseKickoff(orgFile, {
+  const forcedRelease = await releaseKickoff(orgFile, {
     worktreeId: "test-wt-9",
     reason: "completed",
     force: true,
@@ -1556,7 +1649,7 @@ test("integrity_failure_거부", async (t) => {
 });
 
 // Scenario: kickoffHash_재사용_격리 (row9)
-test("kickoffHash_재사용_격리", () => {
+test("kickoffHash_재사용_격리", async (t) => {
   const tempDir = makeTempDir();
   try {
     const { orgFile, org, briefFile, stateDir } = createProjectStructure(
@@ -1567,27 +1660,45 @@ test("kickoffHash_재사용_격리", () => {
     const pmDir1 = path.join(tempDir, "pm1");
     fs.mkdirSync(pmDir1, { recursive: true });
     const req1 = createKickoffRequest(
+      orgFile,
       "test-wt-15a",
       briefFile,
       pmDir1,
       org.revision,
+      undefined,
+      tempDir,
     );
     const { entry: entry1 } = registerKickoff(orgFile, req1);
     const hash1 = kickoffHashFor(entry1);
 
-    releaseKickoff(orgFile, {
+    // force는 delivered 기록이 없어도 완결시키지만, --head(또는 이전 deliver)와
+    // 이사 fidelity 확인은 여전히 요구한다.
+    const { repoDir, mergeCommit } = mergedGitRepo(t);
+    await confirmFidelity(
+      orgFile,
+      "test-wt-15a",
+      tempDir,
+      repoDir,
+      mergeCommit,
+    );
+    await releaseKickoff(orgFile, {
       worktreeId: entry1.pm.worktreeId,
       reason: "completed",
       force: true,
+      head: mergeCommit,
+      callerCwd: tempDir,
     });
 
     const pmDir2 = path.join(tempDir, "pm2");
     fs.mkdirSync(pmDir2, { recursive: true });
     const req2 = createKickoffRequest(
+      orgFile,
       "test-wt-15a",
       briefFile,
       pmDir2,
       org.revision,
+      undefined,
+      tempDir,
     );
     const { entry: entry2 } = registerKickoff(orgFile, req2);
     const hash2 = kickoffHashFor(entry2);
@@ -1635,6 +1746,7 @@ test("재개", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-16",
       briefFile,
       pmDir,
@@ -1678,6 +1790,7 @@ test("상태_기반_거부_초안_참조", () => {
     );
 
     const request = createKickoffRequest(
+      orgFile,
       "test-wt-17",
       briefFile,
       pmDir,
@@ -1752,6 +1865,7 @@ test("kickoffHash_같은_밀리초_재등록", (t) => {
   t.mock.timers.enable({ apis: ["Date"] });
 
   const req1 = createKickoffRequest(
+    orgFile,
     "test-wt-18a",
     briefFile,
     pmDir1,
@@ -1760,6 +1874,7 @@ test("kickoffHash_같은_밀리초_재등록", (t) => {
   const { entry: entry1 } = registerKickoff(orgFile, req1);
 
   const req2 = createKickoffRequest(
+    orgFile,
     "test-wt-18b",
     briefFile,
     pmDir2,
@@ -1776,7 +1891,7 @@ test("kickoffHash_같은_밀리초_재등록", (t) => {
 });
 
 // Scenario: 재등록_후_이전_kickoff_문서_완결 (row13)
-test("재등록_후_이전_kickoff_문서_완결", (t) => {
+test("재등록_후_이전_kickoff_문서_완결", async (t) => {
   const tempDir = makeTempDir();
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
@@ -1788,11 +1903,13 @@ test("재등록_후_이전_kickoff_문서_완결", (t) => {
   const pmDir1 = path.join(tempDir, "pm1");
   fs.mkdirSync(pmDir1, { recursive: true });
   const req1 = createKickoffRequest(
+    orgFile,
     "test-wt-19",
     briefFile,
     pmDir1,
     org.revision,
     stateDir,
+    tempDir,
   );
   const { entry: entry1 } = registerKickoff(orgFile, req1);
   const hash1 = kickoffHashFor(entry1);
@@ -1811,21 +1928,28 @@ test("재등록_후_이전_kickoff_문서_완결", (t) => {
   doc1.kickoffEntryRef = entry1.kickoffId;
   saveDocument(stateDir, doc1);
 
-  releaseKickoff(orgFile, {
+  // force는 delivered 기록이 없어도 완결시키지만, --head(또는 이전 deliver)와
+  // 이사 fidelity 확인은 여전히 요구한다(15와 같은 이유).
+  const { repoDir, mergeCommit } = mergedGitRepo(t);
+  await confirmFidelity(orgFile, "test-wt-19", tempDir, repoDir, mergeCommit);
+  await releaseKickoff(orgFile, {
     worktreeId: entry1.pm.worktreeId,
     reason: "completed",
     force: true,
+    head: mergeCommit,
     callerCwd: tempDir,
   });
 
   const pmDir2 = path.join(tempDir, "pm2");
   fs.mkdirSync(pmDir2, { recursive: true });
   const req2 = createKickoffRequest(
+    orgFile,
     "test-wt-19",
     briefFile,
     pmDir2,
     org.revision,
     stateDir,
+    tempDir,
   );
   const { entry: entry2 } = registerKickoff(orgFile, req2);
   const hash2 = kickoffHashFor(entry2);
@@ -1835,8 +1959,8 @@ test("재등록_후_이전_kickoff_문서_완결", (t) => {
   assert.ok(state1.exists);
 
   // 이전 kickoff(A)의 완결 시도(delivery-ref 문서 작성)는 재등록 이후에도 실제로 성공한다.
-  const mergeCommit = "e".repeat(40);
-  const deliveryDocId1 = deliveryRefDocId(hash1, mergeCommit);
+  const docMergeCommit = "e".repeat(40);
+  const deliveryDocId1 = deliveryRefDocId(hash1, docMergeCommit);
   const deliveryDoc1 = {
     schemaVersion: 1,
     docId: deliveryDocId1,
@@ -1849,14 +1973,14 @@ test("재등록_후_이전_kickoff_문서_완결", (t) => {
     createdAt: new Date().toISOString(),
     basedOnRevision: null,
     reason: "delivery recorded for the released kickoff",
-    deliveredCommit: mergeCommit,
+    deliveredCommit: docMergeCommit,
   };
   const completionResult = saveDocument(stateDir, deliveryDoc1);
   assert.equal(completionResult.revision, 1);
 
   // 같은 mergeCommit이라도 재등록된 kickoff(B)의 kickoffHash로는 전혀 다른 문서이므로,
   // A의 완결 상태를 이어받았다고 가정한 쓰기는 실패한다.
-  const deliveryDocId2 = deliveryRefDocId(hash2, mergeCommit);
+  const deliveryDocId2 = deliveryRefDocId(hash2, docMergeCommit);
   const stateBeforeB = documentState(stateDir, deliveryDocId2);
   assert.equal(stateBeforeB.exists, false);
   assert.throws(

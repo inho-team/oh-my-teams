@@ -9,7 +9,7 @@ description: 기존 kickoff의 PL 역할 스냅샷을 완료하기 위한 호환
 
 조직 스냅샷과 작업 범위를 읽는다. [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery 절차로 현재 `orca-cli`, `orchestration`을 사용한다. 확장된 실행 인수가 필요하면 현재 가이드가 가리키는 관련 참조만 읽는다.
 
-PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분석하고, 중단기 실행 계획·의존성·작업 파동을 결정한다. 구체적인 구현 방법과 상위 등급 구현은 Senior에게, 닫힌 범위의 구현과 제한된 실무는 Junior에게 배정한다. 등급 기준과 Senior 구현의 검토 규칙은 [pm](../pm/SKILL.md)의 「구현 등급」을 따른다. PL이 만드는 결과물은 계획과 통합·검증 기록이며, 작업의 최종 산출물은 배정받은 역할이 만든다. 보조 도구는 조사와 점검 목록 초안에 쓰되 계획과 통합 결과는 직접 검증한다. 호출 계약은 [`../../references/assist.md`](../../references/assist.md)를 따른다. 조직이 PL에게 자문자를 허용했으면 파동과 의존성을 확정하기 전에만 자문을 구하며, 그 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
+PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분석하고, 중단기 실행 계획·의존성·작업 파동을 결정한다. 구체적인 구현 방법과 상위 등급 구현은 Senior에게, 닫힌 범위의 구현과 제한된 실무는 Junior에게 배정한다. 등급 기준과 Senior 구현의 검토 규칙은 [pm](../pm/SKILL.md)의 「구현 등급」을 따른다. PL이 만드는 결과물은 계획과 통합·검증 기록이며, 작업의 최종 산출물은 배정받은 역할이 만든다. 실행기의 서브에이전트는 조사와 점검 목록 초안에 쓰되 계획과 통합 결과는 직접 검증한다. 규칙은 [`../../references/subagents.md`](../../references/subagents.md)를 따른다. 조직이 PL에게 자문자를 허용했으면 파동과 의존성을 확정하기 전에만 자문을 구하며, 그 계약은 [`../../references/advise.md`](../../references/advise.md)를 따른다.
 
 ## 권한·책임·한계
 
@@ -24,7 +24,7 @@ PL은 PM의 중장기 목표를 저장소와 기술 제약에 대조하여 분�
 - Orca의 `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`와 `supervision-next`로 하위 worker를 감독하고, 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용한다.
 - `prepare`, `prepare-input`, `attach-workspace`, `work`로 제한 편집 하네스를 Junior 역할로 실행하고, `aggregate`, `verify`, `merge-check`로 보고를 취합하고 통합 결과를 검증한다.
 - 통합 전용 Orca worktree에서 하위 결과를 병합하는 커밋을 만든다. kickoff 워크트리 사이의 병합은 게이트를 통과시킨 뒤 별도 허가 없이 진행하고, 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않는다.
-- 보조 도구는 자기 역할로 `assist`를 호출해 조사와 점검 목록 초안에 쓴다.
+- 조사와 점검 목록 초안에는 실행기의 서브에이전트를 쓸 수 있으며, 규칙은 [`../../references/subagents.md`](../../references/subagents.md)를 따른다.
 - 조직이 PL에게 자문자를 허용했으면 분할 계획을 확정하기 전에 자기 역할로 `advise`를 호출할 수 있다.
 
 ### 책임

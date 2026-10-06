@@ -65,7 +65,7 @@ test("terminal closure evidence survives a later role-worktree reuse", () => {
     afterReceipt: { result: { terminals: [] } },
   });
   const [closure] = readTerminalClosures(orgFile);
-  assert.equal(closure.worktreePath, "/repo/child");
+  assert.equal(closure.worktreePath, path.resolve("/repo/child"));
   assert.equal(closure.terminals[0].close.receipt.result.close.ptyKilled, true);
   assert.equal(closure.terminals[0].releases[0].dispatchId, "dispatch_closed");
   fs.rmSync(tmpdir, { recursive: true, force: true });

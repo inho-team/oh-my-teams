@@ -20,6 +20,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 - 무거운 작업 전에 `resource-acquire --org <project>/.omt/organization.json --worktree <pm> --kind test|worker|build --note ...`로 자원 슬롯을 확보하고, 작업이 끝나면 `resource-release --org <project>/.omt/organization.json --slot <slotId>`로 해제한다.
 - `close`로 성공한 kickoff를 전달·병합·정리하고, `disband`로 실패하거나 취소된 kickoff를 해체한다.
 - 주인 브랜치 병합 여부를 결정한다.
+- kickoff에 고정된 `auditPolicy.auditorConfigured`가 참인 kickoff에서 `role-terminal --role auditor`로 감사 터미널을 여는 유일한 역할이다. `requirements-amend`(문구 변경), `requirements-confirm`(claim 이후 재확인), `requirements-present`(제시 증거 기록), `requirements-fidelity-confirm`(원문 대조 확인), `requirements-exception`(항목별 예외), `requirements-retrofit`(원장 없는 기존 kickoff의 사후 구성)도 director만 실행할 수 있다.
 
 ### 책임
 
@@ -54,6 +55,18 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 이사 세션 자체를 새로 열거나 다른 실행기의 세션으로 바꿀 때, 또는 이사 터미널이 Orca 탭에서 사라졌을 때에는 [director-terminal](../director-terminal/SKILL.md)의 절차대로 `director-terminal --replace`로 새 세션을 열고 등록부의 `director.terminalHandle`을 넘긴다. Orca의 터미널 명령을 손으로 조합해 이사를 띄우지 않는다.
 
 로드맵을 작성하거나 갱신할 때는 [`../../references/roadmap.md`](../../references/roadmap.md)가 정한 규칙을 따른다.
+
+## 요구 원장과 감사
+
+요구 원장(requirements ledger)과 감사 체크포인트의 전체 설계는 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)를 따른다. narrower criterion의 사용자 확인은 `requirements-draft`로 draft를 만든 뒤 `requirements-confirm --draft --checkout <이사 체크아웃 경로>`로 기록하고, `kickoff-claim`이 그 확인을 director의 checkoutPath와 대조해 확정 원장으로 승격한다.
+
+원장이 확정된 뒤 기준 문구나 범위를 고쳐야 하면 `requirements-amend`로 바꾸고, narrower criterion은 다시 `requirements-confirm`으로 재확인해야 한다. 구현 결과를 사용자에게 실제로 보여 준 증거는 `requirements-present --org <organization.json> --worktree <id> --from <present.json>`으로 남기고(본문 필드는 `criterionId`·`head`·`repo`·`source`·`channel`·`location`·`userQuote`·`outcome`이다), PM이 작성한 `requirements-fidelity` 원문 대조를 확인했으면 `requirements-fidelity-confirm`으로 승인한다. 원장이 요구하는 항목 중 충족하지 못한 것이 있으면 `--force`로 우회하지 않고 `requirements-exception`으로 항목별 예외를 남긴다. director 없이 등록된 기존 kickoff에는 `requirements-retrofit --checkout`으로 원장을 사후 구성한다.
+
+kickoff에 고정된 `auditPolicy.auditorConfigured`가 참인 kickoff에는 [`auditor/SKILL.md`](../auditor/SKILL.md)가 정한 대로, 구현 착수 전에 브리프 감사 수용이, close-ready 발신 전에 결과 감사 수용이 각각 필요하다. 이사는 `role-terminal --role auditor --state <검토 대상 kickoff의 pm.stateDir> --worktree <감사 전용 워크트리>`로 감사 터미널을 열고, `brief` 체크포인트의 이의에는 이사 자신이 `audit-response`로 응답한다(`outcome` 체크포인트는 PM이 응답한다).
+
+한 kickoff의 accepted workflow들이 서로 다른 결과 저장소를 기록하면 `audit-objection` 외의 결속(감사 수용, close-ready, `deliver`, `kickoff-release`)은 `result-repo-ambiguous`로 거부된다. 이사는 실제 결과가 들어 있는 저장소를 정해 `kickoff-result-repo-decide --org <organization.json> --worktree <id> --repo <저장소 경로> --reason <사유>`를 이사 체크아웃에서 실행한다. 명령은 그 저장소의 HEAD가 모든 수용 head를 포함하고 다른 후보는 포함하지 못함을 Git으로 증명할 때에만 확정 기록을 남기며, 두 후보가 모두 포함하면 거부되므로 먼저 저장소를 정리해야 한다. 이후 workflow가 새로 accepted 되면 지문이 달라지므로 다시 확정해야 한다. 절차의 정본은 [`references/kickoff-registry.md`](../../references/kickoff-registry.md)의 「복수 결과 저장소 확정」이다.
+
+감사 정책이 고정되지 않은 기존 kickoff에는 이사가 `kickoff-audit-policy-retrofit`을 한 번 실행한다. 감사 미설정으로 고정한 kickoff와 kickoff 없는 독립 workflow에는 필요하지 않다.
 
 ## 정형 문서
 
