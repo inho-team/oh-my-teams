@@ -168,6 +168,10 @@ import {
   verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
 import {
+  reclaimKickoffCleanup,
+  scanKickoffCleanup,
+} from "./kickoff-cleanup.mjs";
+import {
   buildDocId,
   buildDocRef,
   documentState,
@@ -237,6 +241,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   kickoff-release --org FILE --worktree ID
                   --reason completed|disbanded|taken-over [--force]
                   (also closes that kickoff's pending director signals)
+  kickoff-cleanup-candidates --org FILE --worktree ID [--history-file FILE]
+  kickoff-cleanup-reclaim --org FILE --worktree ID --history-file FILE
   kickoff-branch-cleanup --org FILE --worktree ID
                          --branches BRANCH[,BRANCH...] [--remote NAME]
                          (verifies delivery then deletes remote, local, and
@@ -488,6 +494,8 @@ export const ALLOWED_OPTIONS = {
     "reason",
   ],
   "kickoff-release": ["org", "worktree", "reason", "force", "repo", "head"],
+  "kickoff-cleanup-candidates": ["org", "worktree", "history-file", "orca"],
+  "kickoff-cleanup-reclaim": ["org", "worktree", "history-file", "orca"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
   "kickoff-check-close-ready": ["org", "worktree", "head", "repo"],
   "kickoff-merge-record": [
@@ -781,6 +789,8 @@ export const REQUIRED_OPTIONS = {
     "reason",
   ],
   "kickoff-release": ["org", "worktree", "reason"],
+  "kickoff-cleanup-candidates": ["org", "worktree"],
+  "kickoff-cleanup-reclaim": ["org", "worktree", "history-file"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
   "kickoff-check-close-ready": ["org", "worktree", "head"],
   "kickoff-merge-record": ["org", "worktree", "head", "merge-commit"],
@@ -3376,14 +3386,37 @@ export async function executeCommand(args, execute) {
         head: args.head,
         gate: ({ source, base }) => mergeCheck({ ...args, repo: source, base }),
       });
-    case "kickoff-release":
+    case "kickoff-cleanup-candidates":
+      return scanKickoffCleanup({
+        orgFile: args.org,
+        worktreeId: args.worktree,
+        archiveFile: args["history-file"],
+        executable: args.orca,
+      });
+    case "kickoff-cleanup-reclaim":
+      return reclaimKickoffCleanup({
+        orgFile: args.org,
+        worktreeId: args.worktree,
+        archiveFile: args["history-file"],
+        executable: args.orca,
+      });
+    case "kickoff-release": {
+      const cleanup =
+        args.reason === "completed"
+          ? await scanKickoffCleanup({
+              orgFile: args.org,
+              worktreeId: args.worktree,
+            })
+          : undefined;
       return releaseKickoff(args.org, {
         worktreeId: args.worktree,
         reason: args.reason,
         force: Boolean(args.force),
+        cleanup,
         repo: args.repo,
         head: args.head,
       });
+    }
     case "kickoff-branch-cleanup": {
       const { kickoffs } = listKickoffs(args.org, args.worktree);
       assert(

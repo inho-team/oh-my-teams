@@ -38,8 +38,8 @@
 ## 검증 범위와 남은 항목
 
 이 문서가 적는 수치는 소스에서 센 정적 계수이며 실행 결과가 아니다. 현재
-계수는 `npm test`의 최상위 테스트 선언 1256개, `npm run quality`의
-149개 활성 모듈·560개 공개 export, `npm run eval:organization`의 11개 결정적 시나리오다. 통과 여부는 각 명령을 실행한 기록의 종료 코드와 pass·fail·skipped
+계수는 `npm test`의 최상위 테스트 선언 1273개, `npm run quality`의
+151개 활성 모듈·563개 공개 export, `npm run eval:organization`의 11개 결정적 시나리오다. 통과 여부는 각 명령을 실행한 기록의 종료 코드와 pass·fail·skipped
 수로 확인한다. 2026-09-28 최종 점검에서는 `npm test`, `npm run quality`,
 `npm run format:check`, `npm run eval:organization`을 실행해 모두 통과했으며, 그
 날의 테스트 수는 위의 현재 계수와 같다고 보장하지 않는다. 테스트는 실제 CLI 프로세스와
