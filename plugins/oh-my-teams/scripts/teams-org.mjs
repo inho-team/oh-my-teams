@@ -66,7 +66,12 @@ import {
   verify,
 } from "./evidence.mjs";
 import { previewPreset } from "./presets.mjs";
-import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
+import {
+  acceptOutcome,
+  gateCheck,
+  recordReview,
+  refreshGateCache,
+} from "./gates.mjs";
 import {
   auditAccept,
   auditChecked,
@@ -370,6 +375,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
              [--org FILE] [--workflow-id ID]
   accept --task FILE --report FILE --decision FILE --repo DIR --state DIR
          [--org FILE --worktree ID] [--workflow-id ID]
+  gate-cache-refresh --task FILE --report FILE --repo DIR --state DIR --org FILE
+         [--workflow-id ID]
          (--org resolves the state's kickoff entry to a current/legacy/
          integrity-failure judgement per structured-omt-documents.md 3.7 item 5;
          current forwards kickoffHash [and --workflow-id, if given] to the
@@ -699,6 +706,14 @@ export const ALLOWED_OPTIONS = {
     "workflow-id",
   ],
   "gate-check": ["task", "report", "repo", "state", "org", "workflow-id"],
+  "gate-cache-refresh": [
+    "task",
+    "report",
+    "repo",
+    "state",
+    "org",
+    "workflow-id",
+  ],
   accept: [
     "task",
     "report",
@@ -882,6 +897,7 @@ export const REQUIRED_OPTIONS = {
   "review-record": ["task", "report", "review", "repo", "state"],
   "gate-check": ["task", "report", "repo", "state"],
   accept: ["task", "report", "decision", "repo", "state"],
+  "gate-cache-refresh": ["task", "report", "repo", "state", "org"],
   "doc-resolve-kickoff": ["org", "worktree"],
   "doc-id": ["kickoff-hash", "stage", "doc-type", "local-id"],
   "doc-show": ["state", "doc-id"],
@@ -4509,6 +4525,16 @@ export async function executeCommand(args, execute) {
         validateTask(readJSON(args.task)),
         readJSON(args.report),
         readJSON(args.review),
+        stateDir,
+        gateHookOptions(args, stateDir),
+      );
+    }
+    case "gate-cache-refresh": {
+      const stateDir = path.resolve(args.state);
+      return refreshGateCache(
+        path.resolve(args.repo),
+        readJSON(args.task),
+        readJSON(args.report),
         stateDir,
         gateHookOptions(args, stateDir),
       );
