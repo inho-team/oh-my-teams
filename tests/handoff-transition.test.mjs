@@ -23,7 +23,6 @@ import {
   retryTask,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 import { recordCheckpoint } from "../plugins/oh-my-teams/scripts/handoff.mjs";
-import { waitHeadless } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import { profilesShareLimit } from "../plugins/oh-my-teams/scripts/handoff-snapshot.mjs";
 import {
   resolveRoleLaunch,
@@ -84,59 +83,10 @@ async function git(dir, ...args) {
   return result.stdout.trim();
 }
 
-/**
- * Waits until every headless runner recorded under stateDir has written its
- * exit.json, mirroring tests/headless.test.mjs's sandbox() cleanup. Most
- * workflow() tests never start a headless worker, so this returns at once
- * when no `headless/` directory exists.
- *
- * @param {string} stateDir - PM state directory (may hold `headless/`).
- * @param {number} [timeoutMs=8000] - Longest time to wait for exit.json.
- * @returns {Promise<void>}
- */
-async function waitAllRunnersExited(stateDir, timeoutMs = 8000) {
-  const headlessRoot = path.join(stateDir, "headless");
-  if (!fs.existsSync(headlessRoot)) return;
-  const deadline = Date.now() + timeoutMs;
-  const workerIds = fs
-    .readdirSync(headlessRoot)
-    .filter((name) => /^[a-z0-9][a-z0-9-]*$/.test(name));
-  for (const workerId of workerIds) {
-    const turnsDir = path.join(headlessRoot, workerId, "turns");
-    if (!fs.existsSync(turnsDir)) continue;
-    const lastTurn = fs
-      .readdirSync(turnsDir)
-      .filter((name) => /^\d+$/.test(name))
-      .map(Number)
-      .sort((a, b) => a - b)
-      .at(-1);
-    if (lastTurn === undefined) continue;
-    const turnDir = path.join(turnsDir, String(lastTurn));
-    const exitFile = path.join(turnDir, "exit.json");
-    const stopFile = path.join(turnDir, "stop.request");
-    if (!fs.existsSync(exitFile) && !fs.existsSync(stopFile)) {
-      try {
-        fs.writeFileSync(stopFile, new Date().toISOString());
-      } catch {
-        // Another caller already requested the stop.
-      }
-    }
-    while (!fs.existsSync(exitFile) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
-}
-
 async function workflow(t, organization = org(), maxAttempts = 1) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "handoff-flow-"));
   const stateDir = path.join(dir, ".omt");
-  t.after(async () => {
-    // A headless test in this file starts a detached runner whose cwd is
-    // `dir` (plugins/oh-my-teams/scripts/headless.mjs launchTurn); on
-    // Windows that process keeps `dir` locked until it exits, so it must be
-    // observed exited before rmSync runs, whichever t.after runs first.
-    // Removal still retries in case another handle lingers.
-    await waitAllRunnersExited(stateDir);
+  t.after(() => {
     fs.rmSync(dir, {
       recursive: true,
       force: true,
@@ -655,67 +605,16 @@ test("workflow-handoff and role-command --profile go through the CLI", async (t)
   assert.match(unrecorded.stderr, /has no handoff to codex-luna/);
 });
 
-test("headless-start --profile runs only the recorded fallback and names the profile it replaced", async (t) => {
-  // Every profile names an executable that does not exist, so the start can
-  // never run a real, billed provider CLI. A workflow launch reads the
-  // organization frozen into the workflow, not --org, so the workflow is
-  // created from this one.
+test("a recorded fallback does not re-enable removed headless start", async (t) => {
   const organization = org();
-  for (const profile of Object.values(organization.profiles))
-    profile.command = ["omt-no-such-cli"];
   const ctx = await workflow(t, organization);
   attach(ctx, 1);
   settle(ctx, 1, limit);
   handoff(ctx, "agy-pro");
-  const orgFile = path.join(ctx.stateDir, "organization.json");
-  writeJSON(orgFile, organization);
-  const start = (extra) =>
-    run([
-      process.execPath,
-      cli,
-      "headless-start",
-      "--org",
-      orgFile,
-      "--role",
-      "pl",
-      "--cwd",
-      ctx.dir,
-      "--spec",
-      "남은 일을 끝낸다",
-      "--state",
-      ctx.stateDir,
-      "--worker",
-      "pl-handoff",
-      ...extra,
-    ]);
-  const bare = await start(["--profile", "agy-pro"]);
-  assert.notEqual(bare.code, 0);
-  assert.match(bare.stderr, /--profile requires --workflow-id/);
-  const workflowArgs = ["--workflow-id", ctx.id, "--workflow-task", "a"];
-  const unrecorded = await start([...workflowArgs, "--profile", "codex-luna"]);
-  assert.notEqual(unrecorded.code, 0);
-  assert.match(unrecorded.stderr, /has no handoff to codex-luna/);
-  const started = await start([...workflowArgs, "--profile", "agy-pro"]);
-  assert.equal(started.code, 0, started.stderr);
-  // The runner fails at once on the missing executable. Waiting for it keeps
-  // the cleanup from removing a directory it still holds on Windows.
-  const ended = await waitHeadless(ctx.stateDir, "pl-handoff", 15000, {
-    pollMs: 100,
-  });
-  assert.equal(ended.liveness, "exited");
-  assert.equal(ended.outcome, "exit-error");
-  const worker = readJSON(
-    path.join(ctx.stateDir, "headless", "pl-handoff", "worker.json"),
-  );
-  assert.deepEqual(worker.binary, ["omt-no-such-cli"]);
-  const { ledger } = JSON.parse(started.stdout);
-  const line = JSON.parse(
-    fs.readFileSync(ledger, "utf8").trim().split("\n").at(-1),
-  );
-  assert.equal(line.via, "headless-start");
-  assert.equal(line.profile, "agy-pro");
-  assert.equal(line.handoffFrom, "codex-current");
-  assert.equal(line.handoffIndex, 1);
+  assert.equal(current(ctx).tasks.a.handoffs[0].to, "agy-pro");
+  const retired = await run([process.execPath, cli, "headless-start"]);
+  assert.notEqual(retired.code, 0);
+  assert.match(retired.stderr, /Unknown command: headless-start/);
 });
 
 test("the skills and runtime reference carry the usage-limit handoff procedure", () => {
@@ -726,10 +625,7 @@ test("the skills and runtime reference carry the usage-limit handoff procedure",
   assert.match(runtime, /node <runtime> worker-limit-check --worktree/);
   assert.match(runtime, /node <runtime> workflow-handoff --id/);
   assert.match(runtime, /--workflow-task <task id> --profile <fallback>/);
-  assert.match(
-    runtime,
-    /node <runtime> headless-start .* --profile <fallback>/,
-  );
+  assert.match(runtime, /node <runtime> role-terminal .* --profile <fallback>/);
   assert.doesNotMatch(runtime, /아직 `--profile`이 없/);
   for (const verdict of ["handoff", "retry", "wait", "none", "unknown"])
     assert.match(runtime, new RegExp(`\\| \`${verdict}\` +\\|`));

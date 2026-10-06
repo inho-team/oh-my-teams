@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import {
+  ACTIVE_FULL_DEPTH,
   FULL_DEPTH,
   ROLES,
   assert,
@@ -21,6 +22,11 @@ import { git } from "./evidence.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { assertFailureSignal } from "./execution.mjs";
 import { gateCheck } from "./gates.mjs";
+import { hasUnresolvedObjections } from "./audit.mjs";
+import {
+  listKickoffs,
+  resolveRegisteredKickoffFromState,
+} from "./kickoff-registry.mjs";
 import {
   profilesShareLimit,
   writeHandoffSnapshot,
@@ -214,7 +220,8 @@ function createInitialState(request, org, tasks) {
   const roleByTask = Object.fromEntries(
     request.tasks.map((item, index) => [tasks[index].id, item.role]),
   );
-  const depth = request.depth ?? FULL_DEPTH;
+  const depth =
+    request.depth ?? (Object.hasOwn(org.roles, "worker") ? 2 : FULL_DEPTH);
   const roles = depthRoles(definedRoles(org), depth);
   return {
     schemaVersion: 1,
@@ -267,6 +274,17 @@ export async function createWorkflow(
 ) {
   validateWorkflowRequest(request);
   validateOrg(org);
+  assert(
+    !Object.hasOwn(org.roles, "worker") ||
+      request.depth === undefined ||
+      request.depth <= ACTIVE_FULL_DEPTH,
+    `Worker organization depth must be 1..${ACTIVE_FULL_DEPTH}`,
+  );
+  assert(
+    !Object.hasOwn(org.roles, "worker") ||
+      request.tasks.every((item) => ["pm", "worker"].includes(item.role)),
+    "Worker organization tasks must use pm or worker roles",
+  );
   const repo = fs.realpathSync(path.resolve(baseDir, request.repo));
   const tasks = await freezeTasks(request, baseDir, repo);
   let integrationTask = null;
@@ -606,10 +624,157 @@ function deriveWorkflowStatus(state) {
   return "ready";
 }
 
+// realpath of a directory, or null when it no longer resolves (a removed
+// worktree cannot be a result repository).
+function realpathOrNull(target) {
+  try {
+    return fs.realpathSync.native(path.resolve(target));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves the repository an audit binds this workflow's result to.
+ *
+ * The caller's `callerRepo` only ever selects among candidates this function
+ * derives from recorded state; it never creates one (B.3). Three cases:
+ * a recorded decision fixes the answer to `decision.checkoutPath`; a workflow
+ * that requires integration has no recorded candidate before acceptance, so
+ * `callerRepo` is returned as an unverified candidate that the caller must
+ * still pass through `gateCheck` before recording it (task receipt paths are
+ * never used there); any other workflow's only candidate is the one worktree
+ * all of its accepted tasks recorded (blocked and failed tasks are excluded).
+ * `callerRepo` is compared with it, never used to choose among several.
+ *
+ * @param {object} state - Workflow state.
+ * @param {string} [callerRepo] - Repository the caller named.
+ * @returns {string} Real path of the result repository.
+ * @throws {Error} When the decision predates result-repository binding, no candidate exists, or `callerRepo` is not one.
+ */
+export function resolveResultRepo(state, callerRepo) {
+  const caller =
+    callerRepo === undefined ? undefined : realpathOrNull(callerRepo);
+  assert(
+    callerRepo === undefined || caller !== null,
+    `Result repository ${callerRepo} does not resolve to a directory`,
+  );
+  const decision = state.integration?.decision;
+  if (decision) {
+    assert(
+      typeof decision.checkoutPath === "string" && decision.checkoutPath,
+      "This workflow was accepted before its result repository was recorded, " +
+        "so the decision cannot name it; the director must decide how to close it",
+    );
+    assert(
+      caller === undefined || caller === decision.checkoutPath,
+      `Result repository ${callerRepo} is not the one this workflow was accepted with (${decision.checkoutPath})`,
+    );
+    return decision.checkoutPath;
+  }
+  if (state.integration?.required) {
+    assert(
+      caller,
+      "This workflow requires integration; pass the integration checkout as the result repository",
+    );
+    return caller;
+  }
+  // Every receipt path of every accepted task counts, and one that no longer
+  // resolves is refused rather than dropped: discarding a vanished worktree
+  // would turn two candidates into one and let the survivor through.
+  const receipts = Object.values(state.tasks)
+    .filter((item) => item.state === "accepted")
+    .flatMap((item) => [item.worktreeId, item.execution?.worktreeId])
+    .filter((id) => String(id ?? "").includes("::"))
+    .map((id) => String(id).slice(String(id).indexOf("::") + 2));
+  assert(
+    receipts.length > 0,
+    "No accepted task recorded a result worktree, so the result repository cannot be determined",
+  );
+  const resolved = receipts.map(realpathOrNull);
+  assert(
+    resolved.every((value) => value !== null),
+    "An accepted task's result worktree no longer resolves, so the result repository cannot be determined",
+  );
+  const candidates = [...new Set(resolved)];
+  assert(
+    candidates.length === 1,
+    `The accepted tasks' result worktrees differ (${candidates.join(", ")}), so the result repository cannot be determined`,
+  );
+  assert(
+    caller === undefined || caller === candidates[0],
+    `Result repository ${callerRepo} is not the worktree of this workflow's accepted tasks (${candidates[0]})`,
+  );
+  return candidates[0];
+}
+
+// The repository an acceptance verifies and records, fixed once so gateCheck
+// and the recorded checkoutPath name the same real path. A decision saved
+// before checkoutPath existed cannot be compared, so it only needs the
+// caller's repository to resolve.
+function acceptanceRepo(state, repo) {
+  const decision = state.integration?.decision;
+  if (decision && !decision.checkoutPath) {
+    const real = realpathOrNull(repo);
+    assert(real, `Result repository ${repo} does not resolve to a directory`);
+    return real;
+  }
+  return resolveResultRepo(state, repo);
+}
+
+// The kickoff this state directory is registered under, resolved from the
+// registry rather than from any caller argument (B.5, no --org bypass), with
+// its pinned audit policy. `null` for a state directory no kickoff owns.
+async function resolveAuditGate(stateDir) {
+  const registered = await resolveRegisteredKickoffFromState(stateDir);
+  if (!registered) return null;
+  const [entry] = listKickoffs(
+    registered.orgFile,
+    registered.worktreeId,
+  ).kickoffs;
+  assert(
+    entry?.auditPolicy !== undefined,
+    `Kickoff ${registered.worktreeId} has no pinned audit policy; the director must run ` +
+      "kickoff-audit-policy-retrofit for this worktree before a workflow can be accepted",
+  );
+  return {
+    orgFile: registered.orgFile,
+    worktreeId: registered.worktreeId,
+    configured: entry.auditPolicy.auditorConfigured === true,
+    source: entry.auditPolicy.source,
+  };
+}
+
+// Only the pinned policy and unresolved outcome objections are checked here
+// (director decision G-1); acceptance existence and the HEAD/ledgerHash
+// binding belong to close-ready and the final delivery gate.
+function assertNoUnresolvedOutcomeObjection(audit) {
+  if (!audit?.configured) return;
+  assert(
+    !hasUnresolvedObjections(audit.orgFile, audit.worktreeId, "outcome"),
+    "The outcome audit checkpoint has an unresolved objection; it must be " +
+      "ruled persuaded (audit-ruling) before this workflow can be accepted",
+  );
+}
+
+// What a decision records about the audit that governed it: nothing for a
+// workflow no kickoff owns, the policy for one it does, and the result
+// repository only when an auditor is configured.
+function auditDecisionFields(audit, checkoutPath) {
+  if (!audit) return {};
+  return {
+    auditGate: {
+      mode: audit.configured ? "configured" : "not-configured",
+      source: audit.source,
+    },
+    ...(audit.configured ? { checkoutPath } : {}),
+  };
+}
+
 // A workflow created without integration (one task and no integrationTask)
 // is closed by its task's own review and PM acceptance. workflow-accept used to
 // demand the integration file regardless, so such a workflow could not close.
-function acceptWithoutIntegration(stateDir, id, expectedRevision) {
+function acceptWithoutIntegration(stateDir, id, expectedRevision, audit, repo) {
   return withWorkflowUpdate(stateDir, id, () => {
     const { state, dir } = readWorkflow(stateDir, id);
     assert(
@@ -625,10 +790,16 @@ function acceptWithoutIntegration(stateDir, id, expectedRevision) {
         "This workflow has no integration task, so each task's review and PM acceptance close it",
     );
     if (state.integration.decision) return state;
+    // Resolved after the pending check and before any write, so a refusal
+    // leaves the stored state untouched.
+    const checkoutPath = audit?.configured
+      ? resolveResultRepo(state, repo)
+      : undefined;
     state.integration.decision = {
       runId: null,
       evidenceKey: null,
       decisionId: null,
+      ...auditDecisionFields(audit, checkoutPath),
       componentResults: Object.fromEntries(
         Object.entries(state.tasks).map(([taskId, item]) => [
           taskId,
@@ -666,6 +837,9 @@ function acceptWithoutIntegration(stateDir, id, expectedRevision) {
  * @param {number} expectedRevision - Revision observed before verification.
  * @param {string} [repo] - Final integration checkout, when integration is required.
  * @param {object} [report] - Report for the frozen integration task, when required.
+ * @param {object} [options] - Document ownership forwarded to `gateCheck`, unchanged otherwise.
+ * @param {string} [options.kickoffHash] - See `gates.mjs`'s `gateCheck` `options.kickoffHash`;
+ *   this workflow's own `id` is always forwarded as `gateCheck`'s `options.workflowId`.
  * @returns {Promise<object>} Accepted workflow bound to integration and task results.
  * @throws {Error} On missing contract, stale evidence, incomplete review or changed state.
  */
@@ -675,14 +849,23 @@ export async function acceptWorkflowIntegration(
   expectedRevision,
   repo,
   report,
+  { kickoffHash } = {},
 ) {
   const snapshot = readWorkflow(stateDir, id);
   assert(
     snapshot.state.revision === expectedRevision,
     "Workflow changed; read state again",
   );
+  const audit = await resolveAuditGate(stateDir);
+  assertNoUnresolvedOutcomeObjection(audit);
   if (!snapshot.state.integration?.required) {
-    return acceptWithoutIntegration(stateDir, id, expectedRevision);
+    return acceptWithoutIntegration(
+      stateDir,
+      id,
+      expectedRevision,
+      audit,
+      repo,
+    );
   }
   assert(
     repo && report,
@@ -704,7 +887,11 @@ export async function acceptWorkflowIntegration(
     ),
     "All component tasks must be accepted first",
   );
-  const gates = await gateCheck(repo, task, report, stateDir);
+  const resultRepo = acceptanceRepo(snapshot.state, repo);
+  const gates = await gateCheck(resultRepo, task, report, stateDir, {
+    kickoffHash,
+    workflowId: id,
+  });
   assert(
     gates.state === "accepted",
     "Integration checks, review and PM acceptance required",
@@ -714,7 +901,7 @@ export async function acceptWorkflowIntegration(
   let testFileWarning;
   if (Array.isArray(snapshot.state.integration.testFilesAtCreation)) {
     const known = new Set(snapshot.state.integration.testFilesAtCreation);
-    const added = (await trackedTestFiles(repo)).filter(
+    const added = (await trackedTestFiles(resultRepo)).filter(
       (file) => !known.has(file),
     );
     if (added.length > 0) {
@@ -734,6 +921,8 @@ export async function acceptWorkflowIntegration(
       runId: report.runId,
       evidenceKey: report.evidence.key,
       decisionId: gates.gates["outcome-accepted"].decisionId,
+      // gateCheck has just passed on this repository, so it is verified now.
+      ...auditDecisionFields(audit, resultRepo),
       ...(testFileWarning ? { warnings: [testFileWarning] } : {}),
       componentResults: Object.fromEntries(
         Object.entries(state.tasks).map(([taskId, item]) => [
@@ -946,6 +1135,10 @@ function validateExecutionInput(input, reserveOnly = false, stateDir = null) {
       input.receipt?.worktreeId,
     "Actual run/task/dispatch/execution/worktree receipt ids required",
   );
+  assert(
+    input.receipt.via !== "headless-start",
+    "Sessionless headless execution was removed; attach an Orca terminal receipt instead",
+  );
   if (input.receipt.via === "headless-start") {
     const expected = `headless:${input.receipt.executionId}`;
     assert(
@@ -1045,7 +1238,12 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
         ),
         "Duplicate execution receipt",
       );
+      assert(
+        !item.worktreeId || item.worktreeId === input.receipt.worktreeId,
+        `Task ${input.taskId} must reuse its role worktree ${item.worktreeId}`,
+      );
       item.execution = input.receipt;
+      item.worktreeId = input.receipt.worktreeId;
       item.state = "running";
       attempt.receipt = input.receipt;
       attempt.status = "running";
@@ -1123,6 +1321,13 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
     item.workerRunId = null;
     item.attemptId = input.attemptId;
     item.execution = reserveOnly ? null : input.receipt;
+    if (!reserveOnly) {
+      assert(
+        !item.worktreeId || item.worktreeId === input.receipt.worktreeId,
+        `Task ${input.taskId} must reuse its role worktree ${item.worktreeId}`,
+      );
+      item.worktreeId = input.receipt.worktreeId;
+    }
     item.attempts.push({
       id: input.attemptId,
       status: item.state,
@@ -1255,6 +1460,96 @@ export function increaseCallAllowance(stateDir, id, expectedRevision, input) {
       reason: input.reason,
     });
     state.revision += 1;
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
+  });
+}
+
+function validateBudgetInput(input) {
+  assert(
+    input?.schemaVersion === 1 && WORKFLOW_ID_PATTERN.test(input.eventId ?? ""),
+    "Budget increase requires schemaVersion=1 and eventId",
+  );
+  assert(
+    Number.isInteger(input.maxAttempts) && input.maxAttempts > 0,
+    "Budget increase requires a positive integer maxAttempts",
+  );
+  assert(
+    typeof input.approvedBy === "string" &&
+      input.approvedBy.trim() &&
+      typeof input.approvalRef === "string" &&
+      input.approvalRef.trim() &&
+      typeof input.reason === "string" &&
+      input.reason.trim(),
+    "Budget increase requires an approver, an approval reference and a reason",
+  );
+}
+
+/**
+ * Raises a workflow's attempt budget (`state.budget.maxAttempts`) with a
+ * recorded approval, so a workflow blocked on an exhausted attempt budget can
+ * resume dispatching through the runtime instead of an operator editing
+ * `state.json` directly.
+ *
+ * Only `maxAttempts` changes. `maxCalls`, `attemptsUsed`, `callsUsed`, every
+ * policy limit and every task's state are left untouched; the new limit must
+ * exceed the current `maxAttempts` (this command only raises the budget) and
+ * must not sit below `attemptsUsed` (it can never invalidate attempts already
+ * spent).
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - Event id, new maxAttempts, approver, approval
+ *   reference and reason.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, `maxAttempts` is not a positive
+ *   integer strictly above the current value, or it sits below `attemptsUsed`.
+ */
+export function increaseWorkflowBudget(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    validateBudgetInput(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+
+    const from = state.budget.maxAttempts;
+    assert(
+      input.maxAttempts > from,
+      `New maxAttempts ${input.maxAttempts} must exceed the current maxAttempts ${from}`,
+    );
+    assert(
+      input.maxAttempts >= state.budget.attemptsUsed,
+      `New maxAttempts ${input.maxAttempts} cannot be below attemptsUsed ${state.budget.attemptsUsed}`,
+    );
+
+    state.budget.maxAttempts = input.maxAttempts;
+    state.budget.history = [
+      ...(state.budget.history ?? []),
+      {
+        from,
+        to: input.maxAttempts,
+        approvedBy: input.approvedBy,
+        approvalRef: input.approvalRef,
+        reason: input.reason,
+        recordedAt: new Date().toISOString(),
+      },
+    ];
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "attempt-budget-increased",
+      from,
+      to: input.maxAttempts,
+      approvedBy: input.approvedBy,
+      approvalRef: input.approvalRef,
+      reason: input.reason,
+    });
+    state.revision += 1;
+    state.status = deriveWorkflowStatus(state);
     saveWorkflowState(stateDir, id, state);
     return { state, duplicate: false };
   });
@@ -1507,6 +1802,89 @@ function validateReworkInput(input, stateDir = null) {
   );
 }
 
+function worktreePathFromReceipt(worktreeId) {
+  const separator = String(worktreeId ?? "").indexOf("::");
+  assert(separator > 0, "Role worktree receipt must include its path");
+  return path.resolve(String(worktreeId).slice(separator + 2));
+}
+
+/**
+ * Records a Junior-to-Senior handoff only after the Senior role worktree proves
+ * it matches the rejected Junior commit.
+ *
+ * @param {string} stateDir - PM workflow store.
+ * @param {string} id - Workflow identifier.
+ * @param {string} taskId - Reworked task identifier.
+ * @param {object} transition - Role worktree and commit proof.
+ * @param {string} transition.fromWorktreeId - Rejected Junior worktree.
+ * @param {string} transition.toWorktreeId - Senior worktree to reuse or create.
+ * @param {string} transition.fromWorktreePath - Rejected Junior path.
+ * @param {string} transition.toWorktreePath - New Senior path.
+ * @param {string} transition.base - Requested child base revision.
+ * @param {object} [ports] - Injectable evidence ports for focused tests.
+ * @param {Function} [ports.gitEvidence=git] - Git evidence reader.
+ * @returns {Promise<object>} Durable transition record for `workflow-rework`.
+ * @throws {Error} When the base, task state, or role transition is not proven.
+ */
+export async function prepareRolePromotion(
+  stateDir,
+  id,
+  taskId,
+  { fromWorktreeId, toWorktreeId, fromWorktreePath, toWorktreePath, base },
+  { gitEvidence = git } = {},
+) {
+  const oldPath = path.resolve(fromWorktreePath);
+  const newPath = path.resolve(toWorktreePath);
+  const previousHead = await gitEvidence(oldPath, ["rev-parse", "HEAD"]);
+  const resolvedBase = await gitEvidence(oldPath, [
+    "rev-parse",
+    `${base}^{commit}`,
+  ]);
+  const newHead = await gitEvidence(newPath, ["rev-parse", "HEAD"]);
+  assert(
+    resolvedBase === previousHead && newHead === previousHead,
+    "Senior role worktree must match the rejected Junior commit",
+  );
+
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    const item = state.tasks[taskId];
+    assert(item, `Unknown promotion task ${taskId}`);
+    assert(
+      item.role === "junior" &&
+        ["submitted", "review-pending", "reviewed"].includes(item.state),
+      "Only a reviewed Junior task may promote to Senior in the same attempt",
+    );
+    assert(
+      item.worktreeId === fromWorktreeId,
+      `Promotion source must be the task's Junior worktree ${item.worktreeId}`,
+    );
+    const transition = {
+      id: `promotion-${crypto.randomUUID()}`,
+      kind: "junior-to-senior",
+      fromRole: "junior",
+      toRole: "senior",
+      fromWorktreeId,
+      toWorktreeId,
+      baseCommit: previousHead,
+      preparedAt: new Date().toISOString(),
+    };
+    item.worktreeTransitions = [
+      ...(item.worktreeTransitions ?? []),
+      transition,
+    ];
+    appendWorkflowEvent(dir, state, {
+      id: transition.id,
+      type: "role-worktree-promotion-prepared",
+      taskId,
+      transition,
+    });
+    state.revision += 1;
+    saveWorkflowState(stateDir, id, state);
+    return { state, transition };
+  });
+}
+
 /**
  * Hands a task back to its implementer after a required review asked for changes.
  *
@@ -1582,6 +1960,21 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       !executions.includes(input.receipt.executionId),
       "Rework needs a new execution, not one already recorded",
     );
+    const transition = (item.worktreeTransitions ?? []).find(
+      (entry) =>
+        entry.id === input.transitionId &&
+        !entry.usedAt &&
+        entry.fromWorktreeId === item.worktreeId &&
+        entry.toWorktreeId === input.receipt.worktreeId &&
+        entry.fromRole === "junior" &&
+        entry.toRole === "senior",
+    );
+    assert(
+      !item.worktreeId ||
+        item.worktreeId === input.receipt.worktreeId ||
+        transition,
+      `Task ${input.taskId} must reuse its role worktree ${item.worktreeId} unless a verified Junior-to-Senior transition exists`,
+    );
     const spent = (attempt.priorCallsUsed ?? 0) + (attempt.callsUsed ?? 0);
     assert(
       spent < attempt.callAllowance &&
@@ -1595,10 +1988,18 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       "Workflow running capacity exhausted",
     );
     assert(
-      roleRunningCount(state, item.role) <
-        organization.roles[canonicalRole(item.role)].concurrency,
-      `No ${item.role} concurrency slot available`,
+      roleRunningCount(state, transition?.toRole ?? item.role) <
+        organization.roles[canonicalRole(transition?.toRole ?? item.role)]
+          .concurrency,
+      `No ${transition?.toRole ?? item.role} concurrency slot available`,
     );
+    const receipt = transition
+      ? {
+          ...input.receipt,
+          executionRole: transition.toRole,
+          transitionId: transition.id,
+        }
+      : input.receipt;
 
     item.rework.push({
       fromAttempt: item.attemptId,
@@ -1607,7 +2008,7 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       conclusion: review.conclusion,
       openFindings,
       fromExecution: executionId,
-      toExecution: input.receipt.executionId,
+      toExecution: receipt.executionId,
       recordedAt: new Date().toISOString(),
     });
     attempt.previousReceipts = [
@@ -1616,9 +2017,15 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
     ];
     attempt.priorCallsUsed = spent;
     attempt.callsUsed = undefined;
-    attempt.receipt = input.receipt;
+    attempt.receipt = receipt;
     attempt.status = "running";
-    item.execution = input.receipt;
+    item.execution = receipt;
+    item.worktreeId = receipt.worktreeId;
+    if (transition) {
+      transition.usedAt = new Date().toISOString();
+      transition.executionId = receipt.executionId;
+      item.executionRole = transition.toRole;
+    }
     item.workerRunId = null;
     item.acceptedResult = null;
     item.state = "running";
@@ -1628,7 +2035,7 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       taskId: input.taskId,
       attemptId: input.attemptId,
       reviewId: input.reviewId,
-      receipt: input.receipt,
+      receipt,
     });
     state.revision += 1;
     state.status = deriveWorkflowStatus(state);

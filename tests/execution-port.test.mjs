@@ -1,7 +1,11 @@
 /** Covers the execution port contract shared by the Orca and local adapters. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import childProcess, { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import os from "node:os";
+import path from "node:path";
 import { run } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   NEUTRAL_FAILURE_KINDS,
@@ -14,6 +18,8 @@ import {
   translateOrcaFailure,
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
 import {
+  resolveTrustedGitExecutable,
+  runTrustedGitSync,
   startWorker as startLocalWorker,
   translateLocalCode,
   translateLocalFailure,
@@ -1029,4 +1035,235 @@ test("STATE-02: run() overflow 후 stdout/stderr 잘라내기 길이가 정확�
     Buffer.byteLength(result.stdout) <= 50,
     `stdout must be <= 50 bytes after slice, got ${Buffer.byteLength(result.stdout)}`,
   );
+});
+
+// runTrustedGitSync: the synchronous Git executor the result repository proof
+// uses. These tests replace the child_process and fs entry points of this test
+// process only while one test runs, so they observe what the function would
+// have spawned without any hook in the module itself.
+
+function gitRepo(t) {
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-trusted-git-")),
+  );
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+  git("init", "-q");
+  git("config", "user.email", "trusted-git@example.com");
+  git("config", "user.name", "Trusted Git");
+  git("commit", "-q", "--allow-empty", "-m", "one");
+  return { dir, head: git("rev-parse", "HEAD") };
+}
+
+// Runs `work` with child_process.spawnSync replaced by `fake`, restoring both
+// the function and the ESM named export afterwards.
+function withSpawnSync(fake, work) {
+  const original = childProcess.spawnSync;
+  childProcess.spawnSync = fake;
+  syncBuiltinESMExports();
+  try {
+    return work();
+  } finally {
+    childProcess.spawnSync = original;
+    syncBuiltinESMExports();
+  }
+}
+
+function withEnv(values, work) {
+  const saved = {};
+  for (const key of Object.keys(values)) saved[key] = process.env[key];
+  Object.assign(process.env, values);
+  try {
+    return work();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test("runTrustedGitSync spawns only the fixed trusted path with a fixed environment that ignores process.env", (t) => {
+  const { dir } = gitRepo(t);
+  const calls = [];
+  const original = childProcess.spawnSync;
+  const result = withEnv(
+    { PATH: "/nonexistent-poisoned-path", GIT_DIR: "/nonexistent-git-dir" },
+    () =>
+      withSpawnSync(
+        (file, args, options) => {
+          calls.push({ file, args, options });
+          return original(file, args, options);
+        },
+        () => runTrustedGitSync(dir, ["rev-parse", "--is-inside-work-tree"]),
+      ),
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, resolveTrustedGitExecutable());
+  assert.equal(path.isAbsolute(calls[0].file), true);
+  assert.deepEqual(calls[0].args, ["rev-parse", "--is-inside-work-tree"]);
+  assert.equal(calls[0].options.cwd, dir);
+  assert.equal(calls[0].options.timeout, 30000);
+  // The child environment holds no key this process (or a caller) could set:
+  // not PATH, not GIT_*, nothing copied from process.env.
+  const keys = Object.keys(calls[0].options.env);
+  assert.deepEqual(
+    keys.filter((key) => key !== "SystemRoot"),
+    [],
+  );
+  assert.deepEqual(result, { status: 0, timedOut: false, stdout: "true\n" });
+});
+
+test("runTrustedGitSync is not steered by GIT_DIR, GIT_WORK_TREE or GIT_COMMON_DIR in this process", (t) => {
+  const real = gitRepo(t);
+  const decoy = gitRepo(t);
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "two"], {
+    cwd: decoy.dir,
+  });
+  const forged = {
+    GIT_DIR: path.join(decoy.dir, ".git"),
+    GIT_WORK_TREE: decoy.dir,
+    GIT_COMMON_DIR: path.join(decoy.dir, ".git"),
+  };
+  const polluted = withEnv(forged, () =>
+    runTrustedGitSync(real.dir, ["rev-parse", "HEAD"]),
+  );
+  assert.equal(polluted.status, 0);
+  assert.equal(polluted.stdout.trim(), real.head);
+  // The same forgery does steer a plain inheriting spawn, so the check above
+  // is not vacuous.
+  const inherited = withEnv(forged, () =>
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: real.dir,
+      encoding: "utf8",
+    }).trim(),
+  );
+  assert.notEqual(inherited, real.head);
+});
+
+test("runTrustedGitSync reports Git's own exit codes as they are, including the clear answer 1", (t) => {
+  const { dir, head } = gitRepo(t);
+  assert.deepEqual(
+    runTrustedGitSync(dir, ["rev-parse", "--verify", "--quiet", "HEAD"]),
+    { status: 0, timedOut: false, stdout: `${head}\n` },
+  );
+  const absent = "1".repeat(40);
+  assert.deepEqual(
+    runTrustedGitSync(dir, [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `${absent}^{commit}`,
+    ]),
+    { status: 1, timedOut: false, stdout: "" },
+  );
+  const failed = runTrustedGitSync(dir, [
+    "merge-base",
+    "--is-ancestor",
+    absent,
+    "HEAD",
+  ]);
+  assert.equal(failed.status, 128);
+  assert.equal(failed.timedOut, false);
+});
+
+test("runTrustedGitSync fails closed without a trusted git executable and never falls back to a PATH git", () => {
+  const original = fs.lstatSync;
+  const spawned = [];
+  fs.lstatSync = (target, ...rest) => {
+    if (/(^|[\\/])git(\.exe)?$/i.test(String(target))) {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    }
+    return original(target, ...rest);
+  };
+  try {
+    withSpawnSync(
+      (...call) => {
+        spawned.push(call);
+        throw new Error("nothing may be spawned without a trusted git");
+      },
+      () =>
+        assert.throws(
+          () => runTrustedGitSync(process.cwd(), ["rev-parse", "HEAD"]),
+          /No trusted git executable found/,
+        ),
+    );
+  } finally {
+    fs.lstatSync = original;
+  }
+  assert.deepEqual(spawned, []);
+});
+
+test("runTrustedGitSync reports a spawn timeout as status null with timedOut true, and a killed process as status null without it", () => {
+  const timedOut = withSpawnSync(
+    () => ({
+      error: Object.assign(new Error("spawnSync git ETIMEDOUT"), {
+        code: "ETIMEDOUT",
+      }),
+      status: null,
+      signal: "SIGTERM",
+      stdout: "partial",
+    }),
+    () => runTrustedGitSync(process.cwd(), ["rev-parse", "HEAD"]),
+  );
+  assert.equal(timedOut.status, null);
+  assert.equal(timedOut.timedOut, true);
+  const killed = withSpawnSync(
+    () => ({ status: null, signal: "SIGKILL", stdout: "" }),
+    () => runTrustedGitSync(process.cwd(), ["rev-parse", "HEAD"]),
+  );
+  assert.deepEqual(killed, { status: null, timedOut: false, stdout: "" });
+  const unlaunched = withSpawnSync(
+    () => ({
+      error: Object.assign(new Error("spawnSync git EACCES"), {
+        code: "EACCES",
+      }),
+      status: null,
+      stdout: null,
+    }),
+    () => runTrustedGitSync(process.cwd(), ["rev-parse", "HEAD"]),
+  );
+  assert.deepEqual(unlaunched, { status: null, timedOut: false, stdout: "" });
+});
+
+test("runTrustedGitSync really times out a Git command that does not finish", (t) => {
+  if (process.platform === "win32") {
+    t.skip(
+      "the hanging command is a Git alias run by sh, which needs sleep(1)",
+    );
+    return;
+  }
+  const { dir } = gitRepo(t);
+  const started = Date.now();
+  const result = runTrustedGitSync(
+    dir,
+    ["-c", "alias.hang=!sleep 30", "hang"],
+    { timeoutMs: 300 },
+  );
+  assert.equal(result.status, null);
+  assert.equal(result.timedOut, true);
+  assert.ok(Date.now() - started < 10000, "the time limit must end the call");
+});
+
+test("runTrustedGitSync refuses a missing directory or non-string arguments before running anything", () => {
+  const spawned = [];
+  withSpawnSync(
+    (...call) => spawned.push(call),
+    () => {
+      assert.throws(
+        () => runTrustedGitSync("", ["rev-parse", "HEAD"]),
+        /A directory is required/,
+      );
+      assert.throws(
+        () => runTrustedGitSync(process.cwd(), "rev-parse HEAD"),
+        /array of strings/,
+      );
+      assert.throws(
+        () => runTrustedGitSync(process.cwd(), ["rev-parse", 1]),
+        /array of strings/,
+      );
+    },
+  );
+  assert.deepEqual(spawned, []);
 });

@@ -202,7 +202,7 @@ function runRoles(org, stateDir, report) {
 // reader cannot assign work to.
 function nextOwner(roles, report, gateStatus, gates) {
   if (gates?.["review-complete"]?.status === "pending") {
-    return foldRole(roles, "senior");
+    return foldRole(roles, roles.includes("worker") ? "worker" : "senior");
   }
   if (gates?.["outcome-accepted"]?.status === "pending") {
     return foldRole(roles, "pm");

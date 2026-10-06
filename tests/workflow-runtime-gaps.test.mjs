@@ -253,7 +253,7 @@ test("workflow-allowance raises a settled attempt's allowance to unblock a rewor
         taskId: "a",
         attemptId: "attempt-a",
         reviewId: "review-a",
-        receipt: receipt("a-fix"),
+        receipt: { ...receipt("a-fix"), worktreeId: "a" },
       }),
     /no call remains for rework/,
   );
@@ -279,7 +279,7 @@ test("workflow-allowance raises a settled attempt's allowance to unblock a rewor
     taskId: "a",
     attemptId: "attempt-a",
     reviewId: "review-a",
-    receipt: receipt("a-fix"),
+    receipt: { ...receipt("a-fix"), worktreeId: "a" },
   });
   assert.equal(reworked.tasks.a.state, "running");
   assert.equal(reworked.tasks.a.execution.executionId, "a-fix");

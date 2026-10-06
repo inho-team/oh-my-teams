@@ -15,7 +15,7 @@
  * `predictLaunchPath`가 반환하는 결과 스키마.
  *
  * @typedef {object} MatrixResult
- * @property {'supervised-terminal'|'headless'|'blocked'} path - 예상 실행 경로.
+ * @property {'supervised-terminal'|'blocked'} path - 예상 실행 경로.
  * @property {string[]} reason - 거부·예외 이유 코드 목록. 성공 경로에서는 빈 배열.
  * @property {string} nextOwner - 거부 시 다음 담당자 (예: 'pm', 'user', '-').
  * @property {string} nextAction - 거부 시 다음 행동 가이드. 성공 경로에서는 빈 문자열.
@@ -83,8 +83,7 @@ export function classifyVersion(version, supported) {
  * 이 조합에서 실제로 의미가 있는 버전만 골라 가장 낮은 신뢰 상태를 돌려줍니다.
  *
  * Orca 버전은 Orca 터미널을 쓰는 경로에만, Antigravity CLI 버전은 Agy 역할에만
- * 적용합니다. headless 경로는 Orca 터미널과 에이전트 인식을 거치지 않으므로 Orca
- * 버전 차이의 영향을 받지 않습니다.
+ * 적용합니다. 모든 지원 경로는 Orca 역할 터미널을 사용하므로 Orca 버전도 확인합니다.
  *
  * @param {MatrixResult} candidate - 표가 고른 결과.
  * @param {object} params - 환경 조합 파라미터.
@@ -92,9 +91,7 @@ export function classifyVersion(version, supported) {
  */
 function relevantVersionStatus(candidate, { runner, orcaVersion, cliVersion }) {
   const statuses = [];
-  if (candidate.path !== "headless") {
-    statuses.push(classifyVersion(orcaVersion, VERIFIED_ORCA_VERSION));
-  }
+  statuses.push(classifyVersion(orcaVersion, VERIFIED_ORCA_VERSION));
   if (runner === "agy") {
     statuses.push(classifyVersion(cliVersion, VERIFIED_CLI_VERSION));
   }
@@ -180,8 +177,8 @@ const SUPERVISED_TRUST_ACTION =
  *
  * 설계 3절의 표 순서를 그대로 따릅니다(Orca 1.4.210 실측으로 7번을 삭제하고 10번을 확장, #104;
  * 신뢰 기록 없는 Agy·Codex는 supervised-terminal로 바뀌어 감독자가 답함, #105;
- * Windows Agy는 신뢰 상태를 확인하기 전에 headless로 먼저 걸러냄, #46/agy-win-untrusted-path):
- * 복합 명령 Windows Agy → Windows Agy(신뢰 상태 무관, headless) →
+ * Windows Agy는 신뢰 상태를 확인하기 전에 blocked로 먼저 걸러냄, #46/agy-win-untrusted-path):
+ * 복합 명령 Windows Agy → Windows Agy(신뢰 상태 무관, blocked) →
  * 신뢰 없음(Agy, 남은 건 POSIX뿐, 감독자가 답함) → 신뢰 없음(Codex, 감독자가 답함) →
  * Claude skipPrompt=false → Claude win32 skipPrompt=true →
  * Agy gemini win32/powershell(신뢰 있음) → Agy win32/powershell(다른 계열, 신뢰 있음) →
@@ -207,11 +204,11 @@ const MATRIX_RULES = [
       reason: ["no_agent_detected"],
       nextOwner: "pm",
       nextAction:
-        "Windows PowerShell에서 Agy는 복합 명령 실행 시 에이전트 식별에 실패합니다. 단일 명령으로 분리하거나 headless를 사용하세요.",
+        "Windows PowerShell에서 Agy는 복합 명령 실행 시 에이전트 식별에 실패합니다. 세션 없는 대체 실행을 시작하지 말고 PM에게 보고하세요.",
       evidence: "source-derived",
     },
   },
-  // 2-1. Agy / win32 / 신뢰 상태가 true로 확인되지 않음(false 또는 unknown) → headless
+  // 2-1. Agy / win32 / 신뢰 상태가 true로 확인되지 않음(false 또는 unknown) → blocked
   //
   // #46이 내린 결론은 "Windows의 Agy는 감독 터미널로 시작되지 않는다"이며 신뢰 상태를
   // 조건으로 달지 않는다. 그런데 옛 순서는 신뢰 기록이 있을 때만 이 결론(규칙 8·9)을
@@ -220,21 +217,10 @@ const MATRIX_RULES = [
   // trustedWorkspaces를 정확 일치로 판정하므로 새로 만든 워크트리는 정의상 항상
   // trustRecordExists가 false이고, 이 조합은 드문 구멍이 아니라 Windows에서 Agy 역할을
   // 처음 여는 기본 경로였다. 이 규칙을 규칙 3보다 앞에 두어 신뢰 상태를 확인하기 전에
-  // win32 + agy를 먼저 headless로 걸러낸다.
+  // win32 + agy를 먼저 blocked로 걸러낸다.
   //
-  // 확인한 것: `docs/plan/agy-terminal-path.md`의 2026-09-18 r3-c1 실측(Windows 11,
-  // Orca 1.4.204, Antigravity CLI 1.2.5)은 신뢰 기록이 없는 새 워크트리에서 gemini Agy가
-  // 터미널을 열기도 전에 agent-trust-workspace로 거부됨을 실측으로 확인했다(옛 규칙 순서의
-  // 증상 재현). `docs/plan/headless-runtime.md`의 2026-09-17 Windows 검증은 신뢰 기록이
-  // 없는 새 임시 Git 저장소에서 headless-start로 같은 Agy(gemini) 역할을 실행해, 신뢰
-  // 질문에 막히지 않고 파일 작성과 커밋까지 `done`으로 끝냄을 실측으로 확인했다.
-  // 또한 확인한 것: `plugins/oh-my-teams/scripts/headless.mjs`의 `PROVIDERS.agy.command`
-  // (163번째 줄)는 headless 경로가 agy CLI를 실행할 때 `--dangerously-skip-permissions`
-  // 플래그를 실제로 넘긴다는 것을 소스로 보여준다.
-  // 확인하지 못한 것: 그 headless 검증 워크트리의 trustRecordExists 값이 정확히 false였는지
-  // unknown이었는지(당시 기록은 "임시 Git 저장소"라고만 적었다), 그리고 위 플래그가 폴더
-  // 신뢰 질문까지 억제하는지의 메커니즘(플래그의 존재 자체는 확인했으나 그 효과 범위는
-  // 확인하지 못했다), Windows에서 Agy 자체가 trustedWorkspaces에 기록하는 경로 표기.
+  // 과거 세션 없는 실험 기록은 사용량·복구를 위한 읽기 전용 근거로만 남긴다.
+  // 이 표는 새 역할 실행 경로를 선택하므로 그 기록을 대체 경로로 사용하지 않는다.
   // 규칙 8·9와 같은 이유로(#104: 근거였던 Orca 1.4.204 판정 규칙이 1.4.210에서 교체되었고
   // 재검증할 Windows 머신이 없음) evidence는 verified로 올리지 않는다.
   //
@@ -246,11 +232,11 @@ const MATRIX_RULES = [
     match: ({ runner, platform, trustRecordExists }) =>
       runner === "agy" && platform === "win32" && trustRecordExists !== true,
     result: {
-      path: "headless",
-      reason: ["agy-headless-no-trust"],
-      nextOwner: "-",
+      path: "blocked",
+      reason: ["agy-interactive-terminal-unavailable"],
+      nextOwner: "pm",
       nextAction:
-        "신뢰 기록이 없거나 확인되지 않아도 Windows의 Agy는 감독 터미널을 열지 않고 headless 경로를 대신 사용합니다.",
+        "Windows의 Agy 역할 터미널 경로는 아직 검증되지 않았습니다. 세션 없는 대체 실행을 시작하지 말고 PM에게 보고하세요.",
       evidence: "unverified",
     },
   },
@@ -310,11 +296,11 @@ const MATRIX_RULES = [
     },
   },
   // 7. (삭제됨) Agy + claude 계열 + 신뢰 있음 → blocked였던 규칙. Orca 1.4.210 실측으로 반증되어 삭제(#104).
-  // 8. Agy / gemini / win32 / 신뢰 있음 → headless
+  // 8. Agy / gemini / win32 / 신뢰 있음 → blocked
   // 실측(Orca 1.4.204): tui-idle이 120초까지 오지 않아 worker-start 불가.
   // 폭 조정(Windows에서는 mode con: cols)은 powershell 전경 문제로 에이전트 식별을 깨뜨려 두 조건을 동시에 만족할 방법이 없음.
   // 근거였던 Orca 1.4.204의 판정 규칙은 1.4.210에서 교체되어 더 이상 존재하지 않고, 재검증할 Windows 머신이
-  // 없으므로 evidence를 verified에서 unverified로 낮춘다. 경로(headless)는 바꾸지 않는다(#104).
+  // 없으므로 evidence를 verified에서 unverified로 낮추고, 새 실행은 blocked로 둔다(#104).
   {
     match: ({ runner, model, platform, trustRecordExists }) =>
       runner === "agy" &&
@@ -322,25 +308,26 @@ const MATRIX_RULES = [
       platform === "win32" &&
       trustRecordExists,
     result: {
-      path: "headless",
-      reason: ["orca-idle-requires-narrow-screen"],
-      nextOwner: "-",
+      path: "blocked",
+      reason: ["agy-interactive-terminal-unavailable"],
+      nextOwner: "pm",
       nextAction:
-        "1.4.204에서는 좁은 화면이 아니면 tui-idle에 도달하지 못한다고 실측됐지만, 그 판정 규칙은 1.4.210에서 교체되어 근거를 잃었고 Windows에서는 아직 재검증되지 않았습니다. 확인될 때까지 headless 경로를 사용합니다.",
+        "Windows의 Agy 역할 터미널 경로는 아직 검증되지 않았습니다. 세션 없는 대체 실행을 시작하지 말고 PM에게 보고하세요.",
       evidence: "unverified",
     },
   },
-  // 9. Agy / - / win32 / 신뢰 있음 (gemini 외 다른 계열 포함) → headless
+  // 9. Agy / - / win32 / 신뢰 있음 (gemini 외 다른 계열 포함) → blocked
   // 근거였던 Orca 1.4.204의 판정 규칙은 1.4.210에서 교체되어 더 이상 존재하지 않고, 재검증할 Windows 머신이
-  // 없으므로 evidence를 verified에서 unverified로 낮춘다. 경로(headless)는 바꾸지 않는다(#104).
+  // 없으므로 evidence를 verified에서 unverified로 낮추고, 새 실행은 blocked로 둔다(#104).
   {
     match: ({ runner, platform, trustRecordExists }) =>
       runner === "agy" && platform === "win32" && trustRecordExists,
     result: {
-      path: "headless",
-      reason: ["agy-headless-fallback"],
-      nextOwner: "-",
-      nextAction: "Agy 역할 대체 경로(headless)를 사용합니다.",
+      path: "blocked",
+      reason: ["agy-interactive-terminal-unavailable"],
+      nextOwner: "pm",
+      nextAction:
+        "Windows의 Agy 역할 터미널 경로는 아직 검증되지 않았습니다. 세션 없는 대체 실행을 시작하지 말고 PM에게 보고하세요.",
       evidence: "unverified",
     },
   },

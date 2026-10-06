@@ -14,6 +14,11 @@
     "schemaVersion": { "const": 1 },
     "revision": { "type": "integer", "minimum": 1 },
     "name": { "type": "string", "minLength": 1 },
+    "documentSystemActivatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "$comment": "docs/plan/structured-omt-documents.md 3.10: ISO time the structured .omt document system was activated for this organization. Deliberately omitted from `required` so organizations saved before wave-2 remain valid; review/decision/evidence files created before this field is set are legacyRef targets, and files created after it is set must have a matching structured document (3.10 판정 근거)."
+    },
     "modelPolicy": {
       "type": "object",
       "required": ["preset", "revision"],
@@ -42,35 +47,45 @@
     },
     "assistants": {
       "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "pm": { "$ref": "#/$defs/assistantProfiles" },
-        "pl": { "$ref": "#/$defs/assistantProfiles" },
-        "senior": { "$ref": "#/$defs/assistantProfiles" },
-        "junior": { "$ref": "#/$defs/assistantProfiles" }
-      }
+      "$comment": "Removed in 2.11.0 with the assist command. An organization file that still contains it stays valid and loadable, the key has no effect, the runtime never rewrites the file on read, and the next saved revision (adjust) drops it. Do not add it to new organizations. See references/subagents.md."
     },
     "advisors": {
       "type": "object",
-      "$comment": "Profiles each role may consult through advise. Unlike assistants, any model is allowed; the advice budget in policy.adviceBudget caps the calls.",
+      "$comment": "Profiles each role may consult through advise. Any model is allowed; the advice budget in policy.adviceBudget caps the calls.",
       "additionalProperties": false,
       "properties": {
         "pm": { "$ref": "#/$defs/assistantProfiles" },
         "pl": { "$ref": "#/$defs/assistantProfiles" },
         "senior": { "$ref": "#/$defs/assistantProfiles" },
-        "junior": { "$ref": "#/$defs/assistantProfiles" }
+        "junior": { "$ref": "#/$defs/assistantProfiles" },
+        "worker": { "$ref": "#/$defs/assistantProfiles" }
       }
     },
     "roles": {
       "type": "object",
       "required": ["pm"],
-      "$comment": "A reduced organization declares only the roles it runs, so only PM is required. Work addressed to an omitted role folds onto the closest declared senior role; core.mjs resolveRole performs that fold and validateOrg rejects a parent the organization does not declare.",
+      "$comment": "New organizations declare PM and Worker; saved legacy organizations can omit subordinate roles. core.mjs foldRole resolves omitted roles and validateOrg rejects undeclared parents.",
       "additionalProperties": false,
       "properties": {
         "pm": { "$ref": "#/$defs/role" },
         "pl": { "$ref": "#/$defs/role" },
         "senior": { "$ref": "#/$defs/role" },
-        "junior": { "$ref": "#/$defs/role" }
+        "junior": { "$ref": "#/$defs/role" },
+        "worker": { "$ref": "#/$defs/role" }
+      }
+    },
+    "auditor": {
+      "type": "object",
+      "$comment": "Optional out-of-ladder role that audits a kickoff's requirements ledger at the brief and outcome checkpoints (docs/plan/requirements-ledger-and-audit.md). Sits alongside roles/advisors, never inside roles.",
+      "additionalProperties": false,
+      "required": ["profile"],
+      "properties": {
+        "profile": { "type": "string", "minLength": 1 },
+        "fallbacks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
       }
     },
     "policy": {
@@ -239,7 +254,7 @@
       "type": "object",
       "required": ["parent", "profile", "concurrency", "attempts", "fallbacks"],
       "properties": {
-        "parent": { "enum": [null, "pm", "pl", "senior", "junior"] },
+        "parent": { "enum": [null, "pm", "pl", "senior", "junior", "worker"] },
         "profile": { "type": "string", "minLength": 1 },
         "concurrency": { "type": "integer", "minimum": 1, "maximum": 32 },
         "attempts": { "type": "integer", "minimum": 1, "maximum": 5 },

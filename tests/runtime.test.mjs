@@ -19,7 +19,6 @@ import {
   run,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
-  assist,
   applyEdits,
   draft,
   makePrompt,
@@ -215,9 +214,6 @@ test("graph validation accepts branches and rejects cycle/missing profile/second
   const root = clone();
   root.roles.senior.parent = null;
   assert.throws(() => validateOrg(root), /root/);
-  const assistant = clone();
-  assistant.assistants.pm = ["missing"];
-  assert.throws(() => validateOrg(assistant), /assistant profiles/);
 });
 test("default organization uses the responsibility hierarchy and routing", () => {
   const org = validateOrg(clone());
@@ -244,101 +240,6 @@ test("default organization uses the responsibility hierarchy and routing", () =>
     Object.values(org.profiles).some(
       (profile) => profile.model === "gpt-oss-120b-medium",
     ),
-  );
-  assert.deepEqual(Object.keys(org.assistants), [
-    "pm",
-    "pl",
-    "senior",
-    "junior",
-  ]);
-  for (const role of ["pm", "pl", "senior", "junior"]) {
-    assert.deepEqual(org.assistants[role], ["agy-oss"]);
-  }
-});
-test("every role can use the configured GPT-OSS research assistant with an audit record", async (t) => {
-  const dir = fixture(t);
-  fs.writeFileSync(path.join(dir, "source.txt"), "alpha\nbeta\n");
-  const assistantTask = {
-    ...task,
-    id: "assistant-research",
-    instruction: "Find the beta line",
-    files: ["source.txt"],
-    checks: [[process.execPath, "--version"]],
-  };
-  for (const role of ["pm", "pl", "senior", "junior"]) {
-    const stateDir = path.join(dir, `.omt-${role}`);
-    const report = await assist(dir, clone(), assistantTask, {
-      role,
-      kind: "research",
-      stateDir,
-      call: async (profile) => {
-        assert.equal(profile.model, "gpt-oss-120b-medium");
-        return response({
-          summary: "Found beta",
-          items: ["beta is present"],
-          citations: [{ file: "source.txt", line: 2, quote: "beta" }],
-        });
-      },
-    });
-    assert.equal(report.callerRole, role);
-    assert.equal(report.profile, "agy-oss");
-    assert.equal(report.citations[0].verified, true);
-    assert.ok(fs.existsSync(report.reportPath));
-    assert.ok(fs.existsSync(report.log));
-    assert.equal(
-      report.logHash,
-      hash(
-        `${JSON.stringify({
-          summary: "Found beta",
-          items: ["beta is present"],
-          citations: [{ file: "source.txt", line: 2, quote: "beta" }],
-        })}\n`,
-      ),
-    );
-  }
-});
-test("assistant edit uses GPT-OSS while retaining caller role checks and scope", async (t) => {
-  const dir = await repo(t);
-  const result = await assist(dir, clone(), task, {
-    role: "junior",
-    kind: "edit",
-    stateDir: path.join(dir, ".omt"),
-    call: async (profile) => {
-      assert.equal(profile.model, "gpt-oss-120b-medium");
-      return response({
-        edits: [
-          {
-            file: "value.txt",
-            beforeHash: hash("wrong\n"),
-            content: "right\n",
-          },
-        ],
-      });
-    },
-  });
-  assert.equal(result.status, "passed");
-  assert.equal(result.role, "junior");
-  assert.equal(result.calls[0].profile, "agy-oss");
-  assert.equal(result.calls[0].selectionReason, "assistant:junior:edit");
-});
-test("assistant rejects profiles not authorized for the caller", async (t) => {
-  const dir = fixture(t);
-  fs.writeFileSync(path.join(dir, "source.txt"), "alpha\n");
-  const assistantTask = {
-    ...task,
-    files: ["source.txt"],
-    checks: [[process.execPath, "--version"]],
-  };
-  await assert.rejects(
-    () =>
-      assist(dir, clone(), assistantTask, {
-        role: "pm",
-        kind: "research",
-        profileId: "agy-sonnet",
-        stateDir: path.join(dir, ".omt"),
-        call: async () => response({}),
-      }),
-    /not allowed/,
   );
 });
 test("account labels alone cannot pretend to switch subscriptions", () => {
@@ -794,8 +695,30 @@ test("concurrent edits cannot both accept the same revision", async (t) => {
     "--revision",
     "1",
   ];
-  const results = await Promise.all([run(argv), run(argv)]);
+  // Only these two children get an environment with no claude, codex or agy
+  // executable, so the save path sees every catalog as not installed (the
+  // same condition as a CI runner) instead of the host's live agy models. The
+  // parent process.env is left alone. Case variants of the keys are removed
+  // first because Windows Node reads the first of several case-only twins.
+  const empty = path.join(dir, "no-executors");
+  fs.mkdirSync(empty);
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !["PATH", "APPDATA"].includes(key.toUpperCase()),
+    ),
+  );
+  env.PATH = empty;
+  env.APPDATA = empty;
+  const results = await Promise.all([run(argv, { env }), run(argv, { env })]);
   assert.equal(results.filter((r) => r.code === 0).length, 1);
+  const rejected = results.filter((r) => r.code !== 0);
+  assert.equal(rejected.length, 1, JSON.stringify(results));
+  assert.equal(rejected[0].code, 1, JSON.stringify(results));
+  // core.mjs: the lock contention message, or the revision check after the lock.
+  assert.match(
+    rejected[0].stderr,
+    /Organization update in progress; read it again before editing|Organization changed; read it again before editing/,
+  );
   assert.equal(readJSON(file).revision, 2);
 });
 test("429 in successful source code is not quota exhaustion", async () => {
@@ -1009,87 +932,46 @@ test("task v2 prompt and report bind goal, acceptance, revision and immutable ha
     taskV2,
   );
 });
-test("model presets preview only changed roles and never mutate an existing organization", () => {
+test("model and tiers presets refuse to reassign, and never mutate an existing organization", () => {
   const org = clone(),
-    before = JSON.stringify(org),
-    balanced = previewPreset(org, "balanced");
+    before = JSON.stringify(org);
+  for (const name of [
+    "opus-first",
+    "balanced",
+    "advisor-codex",
+    "advisor-claude",
+  ]) {
+    assert.throws(
+      () => previewPreset(org, name),
+      /no longer assigns fixed models, fallbacks, or advisors/,
+    );
+    assert.throws(() => previewPreset(org, name), /edit/);
+    assert.throws(() => previewPreset(org, name), /model-catalog/);
+  }
   assert.equal(JSON.stringify(org), before);
-  assert.deepEqual(
-    balanced.changes.map((change) => change.role),
-    ["senior", "junior"],
-  );
-  assert.equal(balanced.organization.roles.pm.profile, org.roles.pm.profile);
-  assert.equal(balanced.organization.roles.pl.profile, org.roles.pl.profile);
-  assert.equal(balanced.organization.roles.senior.profile, "agy-opus");
-  assert.equal(balanced.organization.roles.junior.profile, "agy-sonnet");
 });
-test("presets pin one slot per shared-pool role and keep each fallback chain to what they name", () => {
-  const org = clone();
-  for (const name of ["balanced", "opus-first"]) {
-    const preview = previewPreset(org, name);
-    assert.equal(preview.organization.roles.intern, undefined);
-    for (const role of ["senior", "junior"]) {
+test("the removed presets carry no fixed model, fallback, or advisor table to fall back on", async () => {
+  const { PRESETS } =
+    await import("../plugins/oh-my-teams/scripts/presets.mjs");
+  for (const [name, preset] of Object.entries(PRESETS)) {
+    if (preset.kind === "policy") continue;
+    for (const field of ["models", "fallbacks", "concurrency", "advisor"]) {
       assert.equal(
-        preview.organization.roles[role].concurrency,
-        1,
-        `${name}/${role} must hold a single shared-pool slot`,
+        Object.hasOwn(preset, field),
+        false,
+        `${name} still carries a ${field} table`,
       );
     }
   }
-  // Balanced escalates Sonnet implementation to Opus once and nothing further;
-  // Opus judgment and opus-first have no fallback to spend another quota on.
-  const balanced = previewPreset(org, "balanced").organization.roles;
-  assert.deepEqual(balanced.junior.fallbacks, ["agy-opus"]);
-  assert.deepEqual(balanced.senior.fallbacks, []);
-  const opusFirst = previewPreset(org, "opus-first").organization.roles;
-  assert.deepEqual(opusFirst.senior.fallbacks, []);
-  assert.deepEqual(opusFirst.junior.fallbacks, []);
 });
-test("presets lacking provider metadata throw when generating model or tier changes", async () => {
+test("a policy preset still previews and pins one slot per shared-pool role", () => {
   const org = clone();
-  const { PRESETS } =
-    await import("../plugins/oh-my-teams/scripts/presets.mjs");
-
-  for (const [name, preset] of Object.entries(PRESETS)) {
-    if (preset.kind === "models" || preset.kind === "tiers") {
-      assert.ok(preset.provider, `Preset ${name} missing provider metadata`);
-    }
+  const preview = previewPreset(org, "single-subscription");
+  assert.equal(preview.organization.roles.intern, undefined);
+  for (const role of Object.keys(org.roles)) {
+    assert.equal(preview.organization.roles[role].concurrency, 1);
   }
-
-  const original = PRESETS["opus-first"].provider;
-  PRESETS["opus-first"].provider = undefined;
-  assert.throws(
-    () => previewPreset(org, "opus-first"),
-    /Preset missing provider metadata/,
-  );
-  PRESETS["opus-first"].provider = original;
-});
-test("presets match provider as well as model to prevent Claude Code profiles from masking Agy profiles", () => {
-  const org = clone();
-  org.profiles["claude-opus-spoof"] = {
-    provider: "claude",
-    command: ["claude", "--profile", "test"],
-    model: "claude-opus-4-6-thinking",
-    account: "test",
-    subscription: "test",
-    concurrency: 1,
-  };
-  org.profiles["claude-sonnet-spoof"] = {
-    provider: "claude",
-    command: ["claude", "--profile", "test"],
-    model: "claude-sonnet-4-6",
-    account: "test",
-    subscription: "test",
-    concurrency: 1,
-  };
-
-  const opusFirst = previewPreset(org, "opus-first").organization;
-  assert.equal(opusFirst.roles.senior.profile, "agy-opus");
-  assert.equal(opusFirst.roles.junior.profile, "agy-opus");
-
-  const balanced = previewPreset(org, "balanced").organization;
-  assert.equal(balanced.roles.senior.profile, "agy-opus");
-  assert.equal(balanced.roles.junior.profile, "agy-sonnet");
+  assert.equal(preview.organization.modelPolicy.preset, "single-subscription");
 });
 test("provider print timeout expires before the runtime kills the call", () => {
   for (const timeoutMs of [60000, 300000, 600000]) {
@@ -1970,7 +1852,8 @@ test("workflow retry preserves attempts and cumulative budget", async (t) => {
     runId: "run-r2",
     taskId: "orca-r2",
     dispatchId: "dispatch-r2",
-    worktreeId: "wt-r2",
+    // A retry is a new attempt, but it stays in the proven role worktree.
+    worktreeId: "wt-r1",
   };
   const second = attachExecution(stateDir, request.id, 6, {
     schemaVersion: 1,
@@ -2338,10 +2221,9 @@ test("installer planning verifies versions before reversible legacy migration", 
   assert.equal(plan.clients.codex.newCurrent, true);
   assert.throws(() => parseInstallArgs(["claude", "codex"]), /only one/);
 });
-test("assistant answers that cite another tree are rejected, not stored", async (t) => {
+test("draft answers that cite another tree are rejected, not stored", async (t) => {
   const dir = fixture(t);
   fs.writeFileSync(path.join(dir, "source.txt"), "alpha\nbeta\n");
-  const stateDir = path.join(dir, ".omt");
   const groundedTask = {
     ...task,
     id: "grounding",
@@ -2350,11 +2232,8 @@ test("assistant answers that cite another tree are rejected, not stored", async 
     checks: [[process.execPath, "--version"]],
   };
   const answer = (citations) =>
-    assist(dir, clone(), groundedTask, {
-      role: "pm",
-      kind: "research",
-      stateDir,
-      call: async () => response({ summary: "s", items: ["i"], citations }),
+    draft(dir, clone(), groundedTask, {
+      call: async () => response({ citations }),
     });
 
   await assert.rejects(
@@ -2367,7 +2246,6 @@ test("assistant answers that cite another tree are rejected, not stored", async 
     /do not exist in this workspace/,
   );
   await assert.rejects(() => answer([]), /no source citation/);
-  assert.equal(fs.existsSync(path.join(stateDir, "assists")), false);
 
   const accepted = await answer([
     { file: "source.txt", line: 2, quote: "beta" },
@@ -2441,8 +2319,7 @@ test("ungrounded answers route to workspace rebinding", () => {
     { kind: "workspace-context" },
     { grounded: false },
     {
-      message:
-        "Assistant cited 2 of 3 lines that do not exist in this workspace",
+      message: "Draft cited 2 of 3 lines that do not exist in this workspace",
     },
   ]) {
     assert.deepEqual(classifyFailure(input), {

@@ -1,13 +1,17 @@
 /** Delivering a kickoff into the project that owns it, and nothing else merging there. */
 import { after } from "node:test";
-import { getTemplateProject, cleanupTemplates } from "./template-factory.mjs";
+import { cloneTemplateProject, cleanupTemplates } from "./template-factory.mjs";
 after(() => cleanupTemplates());
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { run, writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
+import {
+  AUDITOR_ROLE,
+  run,
+  writeJSON,
+} from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   listKickoffs,
   registerKickoff,
@@ -17,7 +21,25 @@ import {
   deliverKickoff,
   kickoffOwner,
 } from "../plugins/oh-my-teams/scripts/delivery.mjs";
+import {
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import {
+  auditAccept,
+  auditChecked,
+  auditObjection,
+} from "../plugins/oh-my-teams/scripts/audit.mjs";
+import { recordLaunch } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
+import {
+  deliveryRefDocId,
+  resolveKickoffHash,
+  saveDocument,
+} from "../plugins/oh-my-teams/scripts/documents.mjs";
 import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
+import { acceptTaskThroughRuntime } from "./accepted-workflow-fixture.mjs";
+import { acceptWorkflowIntegration } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 
 const exampleOrg = path.resolve(
   "plugins/oh-my-teams/examples/organization.json",
@@ -29,12 +51,20 @@ async function git(cwd, ...args) {
   return result.stdout.trim();
 }
 
+// These tests are about delivery, not the requirements ledger (which has its
+// own tests), so every claim carries the smallest ledger that passes
+// validateLedgerForClaim: one equal-scope criterion needs no user
+// confirmation and so no director. kickoffProject drives it to close-ready
+// (a director-confirmed fidelity check covering s1/c1 as "met") right after
+// registering, since assertKickoffCloseReady now runs unconditionally inside
+// deliverKickoff/releaseKickoff.
 // A project on main that owns an organization, and one kickoff worktree with
 // a committed result, like literacy-test's report branch.
 
 async function kickoffProject(
   t,
   delivery = { mode: "local-merge", branch: "main" },
+  { auditor } = {},
 ) {
   const root = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "omt-deliver-")),
@@ -48,10 +78,19 @@ async function kickoffProject(
     }),
   );
   const project = path.join(root, "project");
-  fs.cpSync(await getTemplateProject(), project, { recursive: true });
+  await cloneTemplateProject(project);
   const org = path.join(project, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(org), { recursive: true });
   fs.copyFileSync(exampleOrg, org);
+  // D1: registerKickoff pins auditPolicy from organizationAtClaim.auditor at
+  // claim time, with no later live-organization.json fallback, so a caller
+  // wanting an audited kickoff must set org.auditor here, before
+  // registerKickoff runs below, not by mutating the org file afterward.
+  if (auditor !== undefined) {
+    const orgConfig = JSON.parse(fs.readFileSync(org, "utf8"));
+    orgConfig.auditor = auditor;
+    fs.writeFileSync(org, JSON.stringify(orgConfig, null, 2));
+  }
   const brief = path.join(project, ".omt", "brief.md");
   fs.writeFileSync(brief, "전달 범위: main에 커밋한다.\n");
 
@@ -74,7 +113,26 @@ async function kickoffProject(
     organizationRevision: JSON.parse(fs.readFileSync(org, "utf8")).revision,
     brief,
     delivery,
+    requirements: minimalRequirements(org, worktreeId),
+    // validateLedgerForClaim requires a registered director unconditionally,
+    // even for this equal-only ledger. The checkout is the test process's own
+    // cwd so releaseKickoff's director-authority check passes without
+    // --force.
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath: process.cwd(),
+    },
   });
+  await requirementsFidelity(org, worktreeId, {
+    head,
+    repo: worktree,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "report.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(org, worktreeId, process.cwd());
   return { project, org, worktree, worktreeId, head };
 }
 
@@ -92,6 +150,11 @@ test("a claim records how the brief delivers, and a branch where one is merged",
     organizationRevision: entry.organizationRevision,
     brief: entry.brief,
     delivery,
+    requirements: minimalRequirements(fixture.org, "wt-2"),
+    director: {
+      terminalHandle: "term_director_wt-2",
+      checkoutPath: process.cwd(),
+    },
   });
   assert.throws(
     () => registerKickoff(fixture.org, claim(undefined)),
@@ -150,13 +213,328 @@ test("deliver merges the verified head into the owner branch once", async (t) =>
     await git(fixture.project, "rev-parse", "HEAD"),
     delivered.mergeCommit,
   );
+
+  // Save the delivery-ref document before releasing
+  const kickoffHash = resolveKickoffHash(fixture.org, fixture.worktreeId);
+  const docId = deliveryRefDocId(kickoffHash, delivered.mergeCommit);
+  const entry = listKickoffs(fixture.org).kickoffs[0];
+  saveDocument(entry.pm.stateDir, {
+    schemaVersion: 1,
+    docId,
+    stage: "delivery",
+    kickoffId: kickoffHash,
+    workflowId: null,
+    revision: 1,
+    state: "resolved",
+    author: { role: "pm", executionId: "exec-1" },
+    createdAt: new Date().toISOString(),
+    basedOnRevision: null,
+    reason: "delivery recorded",
+    deliveredCommit: delivered.mergeCommit,
+  });
+
   assert.equal(
-    releaseKickoff(fixture.org, {
-      worktreeId: fixture.worktreeId,
-      reason: "completed",
-    }).released,
+    (
+      await releaseKickoff(fixture.org, {
+        worktreeId: fixture.worktreeId,
+        reason: "completed",
+      })
+    ).released,
     true,
   );
+});
+
+test("a later delivery preserves the earlier merge and refuses a stale stage", async (t) => {
+  const fixture = await kickoffProject(t);
+  const options = {
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  };
+  const first = await deliverKickoff(options);
+  const ownerAfterFirst = await git(fixture.project, "rev-parse", "HEAD");
+
+  // A new commit on the old branch cannot replace the first delivered result.
+  fs.writeFileSync(path.join(fixture.worktree, "docs", "later.md"), "stale\n");
+  await git(fixture.worktree, "add", ".");
+  await git(fixture.worktree, "commit", "-qm", "stale continuation");
+  const staleHead = await git(fixture.worktree, "rev-parse", "HEAD");
+  // The lineage check (entry.delivered.mergeCommit must be staleHead's
+  // ancestor) runs only after assertKickoffCloseReady's fidelity gate, so
+  // this counterexample must first clear that gate for staleHead too — the
+  // rejection under test is lineage, not missing evidence.
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: staleHead,
+    repo: fixture.worktree,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "report.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(
+    fixture.org,
+    fixture.worktreeId,
+    process.cwd(),
+  );
+  await assert.rejects(
+    deliverKickoff({ ...options, head: staleHead }),
+    /does not contain previous merge/,
+  );
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    ownerAfterFirst,
+  );
+  assert.equal(
+    listKickoffs(fixture.org).kickoffs[0].deliveryHistory,
+    undefined,
+  );
+
+  await git(
+    fixture.worktree,
+    "merge",
+    "--no-ff",
+    "-qm",
+    "integrate main",
+    "main",
+  );
+  fs.writeFileSync(
+    path.join(fixture.worktree, "docs", "later.md"),
+    "current\n",
+  );
+  await git(fixture.worktree, "commit", "-qam", "finish continuation");
+  const nextHead = await git(fixture.worktree, "rev-parse", "HEAD");
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: nextHead,
+    repo: fixture.worktree,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "report.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "report.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(
+    fixture.org,
+    fixture.worktreeId,
+    process.cwd(),
+  );
+  let gateCalls = 0;
+  const second = await deliverKickoff({
+    ...options,
+    head: nextHead,
+    gate: async () => {
+      gateCalls += 1;
+    },
+  });
+  assert.equal(second.merged, true);
+  assert.equal(gateCalls, 1);
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    second.mergeCommit,
+  );
+  assert.equal(await git(fixture.project, "rev-parse", "HEAD^2"), nextHead);
+  const [entry] = listKickoffs(fixture.org).kickoffs;
+  assert.deepEqual(entry.deliveryHistory, [
+    {
+      head: first.head,
+      mergeCommit: first.mergeCommit,
+      at: entry.deliveryHistory[0].at,
+    },
+  ]);
+  assert.equal(entry.delivered.head, nextHead);
+  assert.equal(entry.delivered.mergeCommit, second.mergeCommit);
+  assert.equal(
+    (await deliverKickoff({ ...options, head: nextHead })).merged,
+    false,
+  );
+  assert.deepEqual(
+    listKickoffs(fixture.org).kickoffs[0].deliveryHistory,
+    entry.deliveryHistory,
+  );
+});
+
+// #139 counterexamples: deliverKickoff's early-return branch
+// (`entry.delivered?.head === head`, line 209 in delivery.mjs) sits AFTER
+// `assertKickoffCloseReady` (line 196), so redelivery — same head or a new
+// one — always re-runs the ledger/audit gate rather than skipping it. These
+// two tests exercise that ordering directly, one gate at a time.
+test("deliver refuses a redelivery whose new head has no confirmed fidelity check (evidence gate is not skipped on redelivery)", async (t) => {
+  const fixture = await kickoffProject(t);
+  const options = {
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  };
+  const first = await deliverKickoff(options);
+  assert.equal(first.merged, true);
+
+  // A new commit lands, but no requirementsFidelity/requirementsFidelityConfirm
+  // is ever recorded for it: the user-evidence checkpoint for this head is missing.
+  await git(
+    fixture.worktree,
+    "merge",
+    "--no-ff",
+    "-qm",
+    "integrate main",
+    "main",
+  );
+  fs.writeFileSync(
+    path.join(fixture.worktree, "docs", "report.md"),
+    "undisclosed change\n",
+  );
+  await git(fixture.worktree, "commit", "-qam", "undisclosed change");
+  const undisclosedHead = await git(fixture.worktree, "rev-parse", "HEAD");
+
+  await assert.rejects(
+    deliverKickoff({ ...options, head: undisclosedHead }),
+    /No director-confirmed fidelity check exists/,
+  );
+  // Nothing merged: the owner branch stays exactly at the first delivery.
+  assert.equal(
+    await git(fixture.project, "rev-parse", "HEAD"),
+    first.mergeCommit,
+  );
+  assert.equal(
+    listKickoffs(fixture.org).kickoffs[0].delivered.head,
+    fixture.head,
+  );
+});
+
+test(
+  "deliver refuses a same-head redelivery of an auditor-pinned kickoff once its earlier valid " +
+    "brief-audit acceptance is invalidated by a new objection (early return does not skip the audit gate)",
+  async (t) => {
+    // D1: the auditor requirement must come from this kickoff's auditPolicy,
+    // pinned at claim time, not a live organization.json read — so org.auditor
+    // is set here, before kickoffProject's registerKickoff call, rather than
+    // mutated onto the org file after the first delivery. Because that policy
+    // can never be relaxed afterward, proving the redelivery gate still runs
+    // now needs a brief-audit acceptance that was valid for the first delivery
+    // and is invalidated afterward, rather than one simply never recorded.
+    const fixture = await kickoffProject(
+      t,
+      { mode: "local-merge", branch: "main" },
+      { auditor: { profile: "claude-current" } },
+    );
+    const [entry] = listKickoffs(fixture.org, fixture.worktreeId).kickoffs;
+    const auditorHandle = `term_auditor_${fixture.worktreeId}`;
+    recordLaunch(fixture.org, {
+      via: "role-terminal",
+      role: AUDITOR_ROLE,
+      terminal: auditorHandle,
+      stateDir: entry.pm.stateDir,
+    });
+
+    const previousHandle = process.env.ORCA_TERMINAL_HANDLE;
+    process.env.ORCA_TERMINAL_HANDLE = auditorHandle;
+    t.after(() => {
+      if (previousHandle === undefined) delete process.env.ORCA_TERMINAL_HANDLE;
+      else process.env.ORCA_TERMINAL_HANDLE = previousHandle;
+    });
+    await auditChecked(fixture.org, fixture.worktreeId, "brief", [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ]);
+    await auditAccept(
+      fixture.org,
+      fixture.worktreeId,
+      "brief",
+      undefined,
+      undefined,
+    );
+    // The result repository is fixed by a workflow accepted through the
+    // runtime path (Appendix G): task acceptance, then workflow-accept.
+    const staged = await acceptTaskThroughRuntime({
+      org: fixture.org,
+      stateDir: entry.pm.stateDir,
+      taskDir: fixture.worktree,
+      workflowId: "wf-redelivery",
+      resultRepo: fixture.worktree,
+    });
+    await acceptWorkflowIntegration(
+      staged.stateDir,
+      staged.workflowId,
+      staged.revision,
+    );
+    await auditChecked(fixture.org, fixture.worktreeId, "outcome", [
+      { type: "statement", id: "s1" },
+      { type: "criterion", id: "c1" },
+    ]);
+    await auditAccept(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      fixture.head,
+      fixture.worktree,
+    );
+
+    const options = {
+      orgFile: fixture.org,
+      worktreeId: fixture.worktreeId,
+      source: fixture.worktree,
+      head: fixture.head,
+    };
+    const first = await deliverKickoff(options);
+    assert.equal(first.merged, true);
+
+    // A new brief-checkpoint objection raised after acceptance makes the
+    // acceptance recorded above no longer valid (tests/auditor.test.mjs's
+    // "hasValidAcceptance refuses once a new unresolved objection is raised
+    // after acceptance" proves the same mechanism for the outcome checkpoint).
+    await auditObjection(fixture.org, fixture.worktreeId, {
+      checkpoint: "brief",
+      target: { type: "criterion", id: "c1" },
+      kind: "gap",
+      description: "criterion c1 needs a second look",
+      rebuttalRequested: "point to where it is met",
+    });
+
+    // Same head as the first, successful delivery: this is exactly the
+    // `entry.delivered?.head === head` branch that returns early. If that
+    // early return ran before the gate, this call would wrongly succeed
+    // despite the now-unresolved objection raised above.
+    await assert.rejects(
+      deliverKickoff(options),
+      /Brief audit acceptance is missing or no longer valid/,
+    );
+    assert.equal(
+      await git(fixture.project, "rev-parse", "HEAD"),
+      first.mergeCommit,
+    );
+    assert.equal(
+      listKickoffs(fixture.org).kickoffs[0].delivered.head,
+      fixture.head,
+    );
+  },
+);
+
+test("deliver ignores an auditor the organization adopts after this kickoff already claimed with none pinned (no live-organization.json fallback, D1)", async (t) => {
+  const fixture = await kickoffProject(t);
+  const options = {
+    orgFile: fixture.org,
+    worktreeId: fixture.worktreeId,
+    source: fixture.worktree,
+    head: fixture.head,
+  };
+  const first = await deliverKickoff(options);
+  assert.equal(first.merged, true);
+
+  // This kickoff's auditPolicy was pinned as auditorConfigured: false at
+  // claim time, before org.auditor below was ever set. Mutating the live
+  // organization.json afterward must not retroactively impose an audit
+  // obligation this kickoff never took on (director decision
+  // msg_0b114271f1f5): there is no live-read fallback, only the pinned
+  // policy, so a same-head redelivery still succeeds instead of being
+  // refused for a missing brief-audit acceptance.
+  const org = JSON.parse(fs.readFileSync(fixture.org, "utf8"));
+  org.auditor = { profile: "claude-current" };
+  fs.writeFileSync(fixture.org, JSON.stringify(org, null, 2));
+
+  const second = await deliverKickoff(options);
+  assert.equal(second.merged, false);
+  assert.equal(second.head, fixture.head);
 });
 
 test("deliver refuses a moved head, an unready owner, and a conflict", async (t) => {
@@ -205,20 +583,23 @@ test("deliver refuses a moved head, an unready owner, and a conflict", async (t)
   assert.equal(listKickoffs(fixture.org).kickoffs[0].delivered, undefined);
 
   // Completing without the merge the brief asked for needs the user's decision.
-  assert.throws(
-    () =>
-      releaseKickoff(fixture.org, {
-        worktreeId: fixture.worktreeId,
-        reason: "completed",
-      }),
-    /which deliver has not recorded/,
-  );
-  assert.equal(
+  await assert.rejects(
     releaseKickoff(fixture.org, {
       worktreeId: fixture.worktreeId,
       reason: "completed",
-      force: true,
-    }).released,
+      head: fixture.head,
+    }),
+    /which deliver has not recorded/,
+  );
+  assert.equal(
+    (
+      await releaseKickoff(fixture.org, {
+        worktreeId: fixture.worktreeId,
+        reason: "completed",
+        head: fixture.head,
+        force: true,
+      })
+    ).released,
     true,
   );
 });
@@ -244,10 +625,14 @@ test("deliver merges only what the brief authorized", async (t) => {
     );
     // A kickoff delivered another way is not held back from completing.
     assert.equal(
-      releaseKickoff(fixture.org, {
-        worktreeId: fixture.worktreeId,
-        reason: "completed",
-      }).released,
+      (
+        await releaseKickoff(fixture.org, {
+          worktreeId: fixture.worktreeId,
+          reason: "completed",
+          head: fixture.head,
+          repo: fixture.worktree,
+        })
+      ).released,
       true,
     );
   }

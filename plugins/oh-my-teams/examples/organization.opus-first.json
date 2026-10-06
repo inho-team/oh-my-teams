@@ -74,11 +74,5 @@
     "maxCalls": 2,
     "timeoutMs": 300000,
     "repeatFailureLimit": 1
-  },
-  "assistants": {
-    "pm": ["agy-oss"],
-    "pl": ["agy-oss"],
-    "senior": ["agy-oss"],
-    "junior": ["agy-oss"]
   }
 }

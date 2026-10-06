@@ -233,7 +233,7 @@ test("a new close-ready supersedes the older pending close-ready of the same wor
   assert.equal(readSignal(orgFile, otherReady.id).status, "pending");
 });
 
-test("kickoff-release closes that kickoff's pending signals and leaves other kickoffs alone", (t) => {
+test("kickoff-release closes that kickoff's pending signals and leaves other kickoffs alone", async (t) => {
   const { orgFile, worktreeId, dir } = makeProject(t);
   const otherId = addKickoff(dir, orgFile, "pm-other");
   const pending = sendSignal(orgFile, {
@@ -254,7 +254,10 @@ test("kickoff-release closes that kickoff's pending signals and leaves other kic
   });
 
   const warn = t.mock.method(console, "warn", () => {});
-  const released = releaseKickoff(orgFile, { worktreeId, reason: "disbanded" });
+  const released = await releaseKickoff(orgFile, {
+    worktreeId,
+    reason: "disbanded",
+  });
   assert.ok(warn.mock.callCount() >= 1);
   assert.deepEqual(released.closedSignals, [pending.id]);
 

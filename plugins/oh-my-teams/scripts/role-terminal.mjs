@@ -33,6 +33,7 @@ import {
   recordRefusal,
 } from "./prompt-supervision.mjs";
 import {
+  assertTrustedOrcaPairing,
   checkTerminalIdle,
   findActiveDispatch,
   runOrcaJson,
@@ -53,11 +54,27 @@ import {
  *
  * @param {object} options - 주입 가능한 의존성.
  * @param {string} [options.worktreePath] - 신뢰 여부를 확인할 워크트리 경로.
- * @param {string} [options.orcaExecutable] - Orca 실행 파일 경로.
+ * @param {string} [options.orcaExecutable] - Orca 실행 파일 경로. `readOrcaVersion`이 있으면 무시됩니다.
  * @param {string} [options.homedir=os.homedir()] - 홈 디렉터리 (테스트용 주입).
  * @param {string} [options.codexHome] - Codex 설정 디렉터리 (테스트용 주입, 미지정 시 CODEX_HOME 환경변수 또는 ~/.codex 사용).
  * @param {Function} [options.execute=run] - 명령 실행기 (테스트용 주입).
+ * @param {() => Promise<string | null>} [options.readOrcaVersion] - Orca 버전을
+ *   전용 신뢰 실행기로 읽는 함수(감사 launch 전용, B.6 decision B). 지정하면
+ *   `orcaExecutable`과 일반 `execute` 대신 이 함수만으로 Orca 버전을 읽습니다.
+ * @param {boolean} [options.skipAgyVersion=false] - true면 agy 버전 조회를
+ *   실행하지 않고 cliVersion을 "unknown"으로 둡니다(감사 launch 전용). agy
+ *   조회는 판독 결과가 판정에 쓰이기 전에 PATH의 agy를 무조건 실행하므로,
+ *   감사 프로필이 agy가 아닌 launch에서는 그 실행 자체가 불필요한 위험입니다.
+ * @param {boolean} [options.throwOnUnverifiedOrca=false] - true면 Orca 버전
+ *   판독이 결국 "unknown"으로 남을 때(감사 launch 전용, msg_f2bc63e31bc2/
+ *   msg_f12840182482 fail-closed) 반환하지 않고 throw합니다. `readOrcaVersion`이
+ *   throw하거나, null·빈 값·semver가 아닌 값을 반환하는 경우 모두 이 자리에서
+ *   같은 "unknown" 상태로 합쳐지므로, 검사 지점은 하나로 충분합니다. 이 옵션은
+ *   호출자의 `--allow-unverified` 같은 완화 플래그와 무관하게 항상 적용되며,
+ *   role-terminal의 감사 분기는 그 플래그를 이 함수에 전달하지 않으므로 우회할
+ *   방법이 없습니다.
  * @returns {Promise<object>} 환경 값 객체.
+ * @throws {Error} `throwOnUnverifiedOrca`가 true이고 Orca 버전이 검증되지 않은 경우.
  */
 export async function readLaunchEnvironment({
   worktreePath,
@@ -65,6 +82,9 @@ export async function readLaunchEnvironment({
   homedir = os.homedir(),
   codexHome,
   execute = run,
+  readOrcaVersion,
+  skipAgyVersion = false,
+  throwOnUnverifiedOrca = false,
 } = {}) {
   const platform = process.platform;
   const shell = platform === "win32" ? "powershell" : "posix";
@@ -73,32 +93,43 @@ export async function readLaunchEnvironment({
   // Orca 버전 읽기
   let orcaVersion = "unknown";
   try {
-    const selected = selectOrcaExecutable(orcaExecutable);
-    const result = await execute([selected, "--version"], { timeoutMs: 10000 });
-    if (result.code === 0) {
-      const ver = String(result.stdout ?? "")
-        .trim()
-        .split(/\s+/)
-        .find((t) => /^\d+\.\d+\.\d+/.test(t));
+    if (readOrcaVersion) {
+      const ver = await readOrcaVersion();
       if (ver) orcaVersion = ver;
+    } else {
+      const selected = selectOrcaExecutable(orcaExecutable);
+      const result = await execute([selected, "--version"], {
+        timeoutMs: 10000,
+      });
+      if (result.code === 0) {
+        const ver = String(result.stdout ?? "")
+          .trim()
+          .split(/\s+/)
+          .find((t) => /^\d+\.\d+\.\d+/.test(t));
+        if (ver) orcaVersion = ver;
+      }
     }
   } catch (error) {
     launchErrors.push(error);
   }
 
-  // Agy CLI 버전 읽기
+  // Agy CLI 버전 읽기 (감사 launch에서는 skipAgyVersion으로 생략)
   let cliVersion = "unknown";
-  try {
-    const result = await execute(["agy", "--version"], { timeoutMs: 10000 });
-    if (result.code === 0) {
-      const ver = String(result.stdout ?? "")
-        .trim()
-        .split(/\s+/)
-        .find((t) => /^\d+\.\d+\.\d+/.test(t));
-      if (ver) cliVersion = ver;
+  if (!skipAgyVersion) {
+    try {
+      const result = await execute(["agy", "--version"], {
+        timeoutMs: 10000,
+      });
+      if (result.code === 0) {
+        const ver = String(result.stdout ?? "")
+          .trim()
+          .split(/\s+/)
+          .find((t) => /^\d+\.\d+\.\d+/.test(t));
+        if (ver) cliVersion = ver;
+      }
+    } catch (error) {
+      launchErrors.push(error);
     }
-  } catch (error) {
-    launchErrors.push(error);
   }
 
   // Agy 신뢰 기록: ~/.gemini/antigravity-cli/settings.json의 trustedWorkspaces
@@ -219,6 +250,14 @@ export async function readLaunchEnvironment({
     }
   }
 
+  if (throwOnUnverifiedOrca && orcaVersion === "unknown") {
+    const cause = launchErrors.at(-1);
+    throw new Error(
+      "role-terminal --role auditor refuses to open: the trusted Orca version probe did not return a verified version, and --allow-unverified cannot lift this refusal" +
+        (cause ? ` (${cause.message})` : ""),
+    );
+  }
+
   return {
     platform,
     shell,
@@ -255,6 +294,8 @@ export const ROLE_TITLE_TAGS = Object.freeze({
   pl: "[PL]",
   senior: "[Senior]",
   junior: "[Junior]",
+  worker: "[Worker]",
+  auditor: "[Auditor]",
 });
 
 /**
@@ -864,6 +905,15 @@ export async function openRoleTerminal({
     Array.isArray(command?.argv) && command.argv.length > 0,
     "role-terminal needs a role command",
   );
+  // The trusted placeholder must travel with the runner trustedOrcaExecute
+  // built. Refusing here, before the first Orca call, proves no terminal
+  // exists, so the caller may reclaim a worktree it just created.
+  try {
+    assertTrustedOrcaPairing(executable, execute);
+  } catch (cause) {
+    cause.preCreateRefusal = { reason: "untrusted-orca-executor" };
+    throw cause;
+  }
   const { typed, columns } = launchLine(command);
   const isCompoundCommand = columns !== null;
   const matrixResult = predictLaunchPath({
@@ -880,7 +930,7 @@ export async function openRoleTerminal({
     allowUnverified,
     allowUnverifiedApproval,
   });
-  if (matrixResult.path === "blocked" || matrixResult.path === "headless") {
+  if (matrixResult.path === "blocked") {
     const err = new Error(
       `Role ${command.role} (profile=${command.profile}, runner=${command.provider}, platform=${platform}, shell=${shell}) ` +
         `launch refused by matrix [${matrixResult.reason.join(", ")}]: ${matrixResult.nextAction}`,

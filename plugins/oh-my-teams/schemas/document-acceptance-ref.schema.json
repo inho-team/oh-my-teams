@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams `05. 수용` acceptance-ref document v1",
+  "$comment": "docs/plan/structured-omt-documents.md 3.2 (05. 수용 row), 3.7 item 7 (localId = decision record's own id), 3.7 contract B (written only after the backing decision already carries its status, so it is recorded resolved from the start).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "docId",
+    "stage",
+    "kickoffId",
+    "workflowId",
+    "revision",
+    "state",
+    "author",
+    "createdAt",
+    "basedOnRevision",
+    "reason",
+    "decisionFileRef",
+    "acceptedBy",
+    "criteriaSatisfied"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "docId": { "type": "string", "minLength": 1 },
+    "stage": { "const": "acceptance" },
+    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflowId": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+      ]
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": {
+      "const": "resolved",
+      "$comment": "3.7 contract B: acceptance-ref is written from the decision record's already-final `status`, never as a draft."
+    },
+    "author": { "$ref": "#/$defs/author" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "basedOnRevision": {
+      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "decisionFileRef": {
+      "$ref": "#/$defs/ref",
+      "$comment": "Points at `<stateDir>/decisions/<id>.json` (gates.mjs), write-once."
+    },
+    "acceptedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": {
+          "enum": ["pm", "user", "director"],
+          "$comment": "PM normally accepts; accepted-risk findings widen this to the ACCEPTED_RISK_AUTHORITIES set (review.schema.json's finding.authority enum)."
+        },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "criteriaSatisfied": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "$comment": "Task acceptance criterion ids (task.schema.json $defs.acceptance) this decision covers."
+    }
+  },
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": {
+          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+        },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

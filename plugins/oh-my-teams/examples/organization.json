@@ -78,12 +78,6 @@
       "pool": "agy-shared"
     }
   },
-  "assistants": {
-    "pm": ["agy-oss"],
-    "pl": ["agy-oss"],
-    "senior": ["agy-oss"],
-    "junior": ["agy-oss"]
-  },
   "roles": {
     "pm": {
       "parent": null,

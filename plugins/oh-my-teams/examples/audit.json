@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "worktreeId": "5a8b2c1d::/Users/me/orca/workspaces/app/task",
+  "checkpoints": {
+    "brief": {
+      "binding": { "ledgerHash": "sha256-of-statements-and-criteria" },
+      "checked": [
+        { "type": "statement", "id": "s1" },
+        { "type": "criterion", "id": "c1" }
+      ],
+      "objections": [
+        {
+          "id": "o1",
+          "target": { "type": "criterion", "id": "c1" },
+          "kind": "mismatch",
+          "description": "narrower 기준이 원문의 다른 카드 요소까지 포함하는지 불분명하다.",
+          "rebuttalRequested": "카드 그림자 외 요소는 범위 밖임을 사용자 확인 문구로 밝혀 달라.",
+          "raisedAt": "2026-09-27T00:20:00Z"
+        }
+      ],
+      "responses": [
+        {
+          "id": "r1",
+          "objectionId": "o1",
+          "argument": "사용자 확인 문구가 '카드 모양만'으로 한정하므로 다른 요소는 범위 밖이다.",
+          "evidenceRefs": [
+            {
+              "path": ".omt/requirements-evidence/confirm-quote.txt",
+              "sha256": "sha256-of-quote-file"
+            }
+          ],
+          "respondedAt": "2026-09-27T00:25:00Z"
+        }
+      ],
+      "rulings": [
+        {
+          "objectionId": "o1",
+          "respondedAgainst": "r1",
+          "verdict": "persuaded",
+          "reason": "확인 문구가 범위를 명확히 한정한다.",
+          "ruledAt": "2026-09-27T00:30:00Z"
+        }
+      ],
+      "acceptance": {
+        "acceptedAt": "2026-09-27T00:31:00Z",
+        "boundHash": "sha256-of-binding-ledgerHash-only"
+      }
+    },
+    "outcome": {
+      "binding": {
+        "ledgerHash": "sha256-of-statements-and-criteria",
+        "resultHead": "abc123",
+        "evidenceFingerprint": "sha256-of-fidelity-items-presentations-and-responses"
+      },
+      "checked": [
+        { "type": "statement", "id": "s1" },
+        { "type": "criterion", "id": "c1" }
+      ],
+      "objections": [],
+      "responses": [],
+      "rulings": [],
+      "acceptance": {
+        "acceptedAt": "2026-09-27T01:15:00Z",
+        "boundHash": "sha256-of-binding-ledgerHash-resultHead-evidenceFingerprint"
+      }
+    }
+  }
+}
