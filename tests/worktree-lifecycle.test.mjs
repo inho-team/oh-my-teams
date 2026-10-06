@@ -536,7 +536,9 @@ test("workflow worktree preflight uses the frozen organization snapshot", async 
       const ports = {
         organization: () => organization,
         callerCwd: "/repo/director",
-        kickoffs: () => ({ kickoffs: [] }),
+        kickoffs: () => ({
+          kickoffs: [{ pm: { worktreeId: "other-kickoff" } }],
+        }),
         catalog: async () => ({ catalogRevision: "catalog-r1" }),
         revalidate: (_catalog, entries) => ({
           savable: entries[0].model === choice.model,
@@ -590,10 +592,38 @@ test("workflow worktree preflight uses the frozen organization snapshot", async 
           () => fs.writeFileSync(orgFile, `${JSON.stringify(organization)}\n`),
           /SHA256 has drifted/,
         ],
+        [
+          "schema required field",
+          () => {
+            const invalid = structuredClone(selection);
+            delete invalid.catalog.verifiedAt;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.catalog: missing verifiedAt/,
+        ],
+        [
+          "schema additional field",
+          () => {
+            const invalid = structuredClone(selection);
+            invalid.catalog.unapproved = true;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.catalog: unexpected unapproved/,
+        ],
+        [
+          "schema type",
+          () => {
+            const invalid = structuredClone(selection);
+            invalid.allowedResources = choice.resourceId;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.allowedResources: expected array/,
+        ],
         ["catalog drift", () => {}, /catalog revision has drifted/],
       ]) {
         await t.test(`${label} refuses before Orca creation`, async () => {
           fs.writeFileSync(orgFile, JSON.stringify(organization));
+          fs.writeFileSync(selectionFile, JSON.stringify(selection));
           let created = false;
           const next = structuredClone(args);
           const replacement = update(next);

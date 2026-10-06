@@ -994,6 +994,85 @@ function sha256(input) {
   return crypto.createHash("sha256").update(input).digest("hex");
 }
 
+const pmBootstrapSelectionSchemaFile = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../schemas/pm-bootstrap-selection.schema.json",
+);
+
+function assertPmBootstrapSchema(value, schema, location = "selection") {
+  const typeMatches = {
+    object:
+      value !== null && typeof value === "object" && !Array.isArray(value),
+    array: Array.isArray(value),
+    string: typeof value === "string",
+    integer: Number.isInteger(value),
+  };
+  if (schema.type)
+    assert(
+      typeMatches[schema.type],
+      `PM bootstrap selection schema rejects ${location}: expected ${schema.type}`,
+    );
+  if (schema.const !== undefined)
+    assert(
+      value === schema.const,
+      `PM bootstrap selection schema rejects ${location}: expected ${JSON.stringify(schema.const)}`,
+    );
+  if (schema.type === "string") {
+    if (schema.minLength !== undefined)
+      assert(
+        value.length >= schema.minLength,
+        `PM bootstrap selection schema rejects ${location}: string is too short`,
+      );
+    if (schema.pattern !== undefined)
+      assert(
+        new RegExp(schema.pattern).test(value),
+        `PM bootstrap selection schema rejects ${location}: pattern mismatch`,
+      );
+    return;
+  }
+  if (schema.type === "integer" && schema.minimum !== undefined) {
+    assert(
+      value >= schema.minimum,
+      `PM bootstrap selection schema rejects ${location}: value is below minimum`,
+    );
+    return;
+  }
+  if (schema.type === "array") {
+    if (schema.minItems !== undefined)
+      assert(
+        value.length >= schema.minItems,
+        `PM bootstrap selection schema rejects ${location}: too few items`,
+      );
+    if (schema.uniqueItems)
+      assert(
+        new Set(value.map((item) => JSON.stringify(item))).size ===
+          value.length,
+        `PM bootstrap selection schema rejects ${location}: duplicate items`,
+      );
+    if (schema.items)
+      value.forEach((item, index) =>
+        assertPmBootstrapSchema(item, schema.items, `${location}[${index}]`),
+      );
+    return;
+  }
+  if (schema.type === "object") {
+    for (const key of schema.required ?? [])
+      assert(
+        Object.hasOwn(value, key),
+        `PM bootstrap selection schema rejects ${location}: missing ${key}`,
+      );
+    if (schema.additionalProperties === false)
+      for (const key of Object.keys(value))
+        assert(
+          Object.hasOwn(schema.properties ?? {}, key),
+          `PM bootstrap selection schema rejects ${location}: unexpected ${key}`,
+        );
+    for (const [key, child] of Object.entries(schema.properties ?? {}))
+      if (Object.hasOwn(value, key))
+        assertPmBootstrapSchema(value[key], child, `${location}.${key}`);
+  }
+}
+
 /**
  * Reads and revalidates the director's one-time resource choice before the
  * first PM worktree exists.  The input remains evidence only: both the live
@@ -1012,7 +1091,6 @@ async function validatePmBootstrapSelection(
     revalidate = revalidateModelChoices,
     callerCwd = process.cwd(),
     readFile = fs.readFileSync,
-    kickoffs = listKickoffs,
   } = {},
 ) {
   assert(args.role === ROOT_ROLE, "--pm-selection is only valid for role pm");
@@ -1031,10 +1109,6 @@ async function validatePmBootstrapSelection(
     path.resolve(args.repo) === path.resolve(callerCwd),
     "The first PM selection must be validated from the director checkout named by --repo",
   );
-  assert(
-    kickoffs(path.resolve(args.org)).kickoffs.length === 0,
-    "--pm-selection is only valid before a kickoff is registered",
-  );
   const bytes = readFile(path.resolve(args["pm-selection"]));
   const text = Buffer.isBuffer(bytes) ? bytes.toString("utf8") : String(bytes);
   let selection;
@@ -1043,17 +1117,7 @@ async function validatePmBootstrapSelection(
   } catch {
     throw new Error("PM bootstrap selection must be valid JSON");
   }
-  assert(
-    selection?.schemaVersion === 1 &&
-      selection.organization &&
-      selection.catalog &&
-      selection.choice &&
-      Array.isArray(selection.allowedResources) &&
-      Array.isArray(selection.allowedPools) &&
-      typeof selection.reason === "string" &&
-      selection.reason.trim(),
-    "PM bootstrap selection has an invalid structure",
-  );
+  assertPmBootstrapSchema(selection, readJSON(pmBootstrapSelectionSchemaFile));
   assert(
     selection.organization.revision === org.revision &&
       selection.organization.sha256 ===
@@ -1800,7 +1864,6 @@ export async function createRoleWorktree(
     catalog = fetchModelCatalog,
     revalidate = revalidateModelChoices,
     callerCwd = process.cwd(),
-    kickoffs = listKickoffs,
   } = {},
 ) {
   // The auditor is out-of-ladder (role-terminal's own comment: it never
@@ -1959,7 +2022,6 @@ export async function createRoleWorktree(
         catalog,
         revalidate,
         callerCwd,
-        kickoffs,
       })
     : null;
   assert(
