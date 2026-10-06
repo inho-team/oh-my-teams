@@ -343,7 +343,9 @@ export async function work(
   org,
   task,
   {
-    role: requestedRole = "junior",
+    role: requestedRole = Object.hasOwn(org.roles, "worker")
+      ? "worker"
+      : "junior",
     stateDir,
     call = invoke,
     workflowId,
@@ -631,123 +633,6 @@ export async function draft(
     usage: response.usage ?? null,
     elapsedMs: response.elapsedMs,
   };
-}
-
-/**
- * Invokes a role-authorized assistant profile for research, checklist, or edits.
- *
- * Read-only modes return verified source citations and persist an audit record.
- * Edit mode reuses the bounded work protocol, including hashes and checks.
- *
- * @param {string} repo - Workspace containing task files.
- * @param {object} org - Organization with per-role assistant allowlists.
- * @param {object} task - Valid task contract and file allowlist.
- * @param {object} options - Caller role, mode, state, profile, and call adapter.
- * @returns {Promise<object>} Read-only assistant report or edit work report.
- * @throws {Error} For unauthorized profiles, invalid modes, or provider failure.
- */
-export async function assist(
-  repo,
-  org,
-  task,
-  { role: callerRole, kind, stateDir, profileId, call = invoke },
-) {
-  validateOrg(org);
-  validateTask(task);
-  const role = resolveRole(org, callerRole);
-  const allowed = org.assistants?.[role] ?? [];
-  const selected = profileId ?? allowed[0];
-  assert(
-    selected && allowed.includes(selected),
-    `Assistant profile not allowed: ${role}`,
-  );
-  const profile = org.profiles[selected];
-  assert(
-    profile.model === "gpt-oss-120b-medium",
-    "Assistant profile must use GPT-OSS-120B",
-  );
-  assert(
-    ["research", "checklist", "edit"].includes(kind),
-    "Assist kind must be research, checklist, or edit",
-  );
-  assert(stateDir, "Shared PM state directory required");
-
-  if (kind === "edit") {
-    return work(repo, org, task, {
-      role,
-      stateDir,
-      call,
-      profileIds: [selected],
-      selectionReason: `assistant:${role}:${kind}`,
-    });
-  }
-
-  const files = readTaskFiles(repo, task);
-  const prompt = [
-    'Return only JSON {"summary":"concise result","items":["action or finding"],',
-    '"citations":[{"file":"relative path","line":1,"quote":"exact full source line","why":"relevance"}]}. ',
-    "Do not edit files or use tools. Do not make approval or completion decisions. ",
-    `Assist kind: ${kind}. Caller role: ${role}. Task: ${task.instruction}. `,
-    `Files: ${JSON.stringify(files)}`,
-  ].join("");
-  assert(
-    Buffer.byteLength(prompt) <= MAX_PROMPT_BYTES,
-    "Task context too large; split it",
-  );
-  const response = await call(profile, repo, prompt, org.policy.timeoutMs);
-  assert(
-    response.code === 0 &&
-      !response.providerError &&
-      !response.timedOut &&
-      !response.overflow,
-    "Assistant provider failed",
-  );
-  const payload = parseModelJSON(response.text);
-  assert(typeof payload.summary === "string", "Assistant summary required");
-  assert(Array.isArray(payload.items), "Assistant items required");
-  const binding = response.modelBinding ?? modelBinding(profile, response);
-  assert(
-    binding.status !== "mismatched",
-    `Assistant answered from ${binding.effective} while ` +
-      `${binding.requested} was requested`,
-  );
-  const citations = checkCitations(repo, payload.citations ?? []);
-  const report = {
-    schemaVersion: 1,
-    id: `${task.id}-${crypto.randomUUID()}`,
-    taskId: task.id,
-    taskHash: taskHash(task),
-    organizationRevision: org.revision,
-    organizationHash: hash(org),
-    callerRole: role,
-    kind,
-    profile: selected,
-    requestedModel: profile.model,
-    requestedEffort: profile.effort ?? null,
-    effectiveModel: response.effectiveModel ?? null,
-    sessionId: response.sessionId ?? null,
-    modelProof: binding.status,
-    workspace: await workspaceBinding(repo),
-    summary: payload.summary,
-    items: payload.items,
-    citations,
-    grounding: assertGroundedCitations(citations, "Assistant"),
-    usage: response.usage ?? null,
-    costUsd: response.costUsd ?? null,
-    elapsedMs: response.elapsedMs,
-    createdAt: new Date().toISOString(),
-    responsibility: `${role} must verify this assistant result`,
-  };
-  const reportPath = path.resolve(stateDir, "assists", `${report.id}.json`);
-  const logPath = path.resolve(stateDir, "assists", `${report.id}.log`);
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  const rawOutput = `${response.stdout ?? ""}\n${response.stderr ?? ""}`;
-  fs.writeFileSync(logPath, rawOutput);
-  report.reportPath = reportPath;
-  report.log = logPath;
-  report.logHash = hash(rawOutput);
-  writeJSON(reportPath, report);
-  return report;
 }
 
 /**

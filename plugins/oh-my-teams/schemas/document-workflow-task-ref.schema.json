@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams `03. 구현` workflow-task-ref document v1",
+  "$comment": "docs/plan/structured-omt-documents.md 3.2 (03. 구현 row), 3.7 item 7 (localId = task's own id).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "docId",
+    "stage",
+    "kickoffId",
+    "workflowId",
+    "revision",
+    "state",
+    "author",
+    "createdAt",
+    "basedOnRevision",
+    "reason",
+    "workflowRef",
+    "taskRef",
+    "attemptRefs",
+    "designRef"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "docId": { "type": "string", "minLength": 1 },
+    "stage": { "const": "implementation" },
+    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "workflowId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "$comment": "Never null: this document type only exists once a workflow request has been created for this kickoff."
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": { "enum": ["open", "in-review", "resolved"] },
+    "author": { "$ref": "#/$defs/author" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "basedOnRevision": {
+      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "workflowRef": {
+      "$ref": "#/$defs/ref",
+      "$comment": "Points at `.omt/workflows/<id>/request.json` (1.2 table #5), written once and immutable."
+    },
+    "taskRef": {
+      "$ref": "#/$defs/ref",
+      "$comment": "Points at the specific `tasks/<taskId>/revisions/<revision>.json` file (1.2 table #7), append-only per revision."
+    },
+    "attemptRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "$comment": "attemptId values issued by workflow-reserve (3.13)."
+    },
+    "designRef": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "pattern": "^omt-doc:[a-f0-9]{64}/(none|[a-z0-9][a-z0-9-]*)/design/design-contract/.+@r[0-9]+$"
+        }
+      ],
+      "$comment": "3.2: required key, but the value is null when this kickoff has no design-contract document. When present it is the only *Ref field that names another structured document, so it alone uses the 3.6 `omt-doc:` reference format."
+    }
+  },
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": {
+          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+        },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

@@ -1577,5 +1577,15 @@ test(
     );
     assert.ok(Date.now() - start < 3000, "Should timeout rather than hang");
     assert.equal(await gone(runtime.read("launcher")), true);
+
+    const unprovable = fakeRuntime(t, "unresponsive");
+    await withBrokenInspection(() =>
+      assert.rejects(
+        () =>
+          startOpenCodexProxy({ ...unprovable.binding, readyTimeoutMs: 200 }),
+        /opencodex-proxy-exit-unverifiable/,
+      ),
+    );
+    assert.equal(fs.existsSync(unprovable.lease), true);
   },
 );

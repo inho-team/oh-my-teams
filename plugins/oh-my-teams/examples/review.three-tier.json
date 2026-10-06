@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "worker-review",
+  "requirementId": "independent-review",
+  "reviewer": {
+    "kind": "agent-review",
+    "role": "worker",
+    "executionId": "separate-review-dispatch-id"
+  },
+  "implementationExecutionId": "implementation-dispatch-id",
+  "conclusion": "approved",
+  "criteria": [
+    {
+      "id": "compatibility",
+      "conclusion": "approved",
+      "evidence": "The reviewed diff preserves existing callers."
+    }
+  ],
+  "findings": []
+}

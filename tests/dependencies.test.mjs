@@ -551,7 +551,7 @@ test(
   async (t) => {
     const box = installableRuntime(t, { startWorks: false });
     await assert.rejects(
-      () => installRuntime(box.root),
+      () => installRuntime(box.root, { _healthTimeoutMs: 1000 }),
       /runtime-health-check-failed/,
     );
     assert.equal(fs.existsSync(box.paths.runtime), false);

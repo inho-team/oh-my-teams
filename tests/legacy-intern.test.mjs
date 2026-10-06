@@ -36,8 +36,7 @@ const example = () =>
     ),
   );
 
-// The shape an organization saved before 2.6.0 had: Intern under Junior, with
-// its own assistant allowlist.
+// The shape an organization saved before 2.6.0 had: Intern under Junior.
 function withIntern(org = example()) {
   org.roles.intern = {
     parent: "junior",
@@ -46,7 +45,6 @@ function withIntern(org = example()) {
     attempts: 1,
     fallbacks: [],
   };
-  if (org.assistants) org.assistants.intern = ["agy-oss"];
   return org;
 }
 
@@ -109,7 +107,7 @@ test("an organization file that declares intern is refused with the way to migra
 });
 
 test("work addressed to intern resolves as Junior's", () => {
-  assert.deepEqual(ROLES, ["pm", "pl", "senior", "junior"]);
+  assert.deepEqual(ROLES, ["pm", "pl", "senior", "junior", "worker"]);
   assert.equal(foldRole(["pm", "junior"], "intern"), "junior");
   // A saved role list that still names intern counts as declaring Junior.
   assert.equal(foldRole(["pm", "intern"], "junior"), "junior");
@@ -159,10 +157,8 @@ test("a snapshot that binds intern beside junior drops the intern binding", () =
     "senior",
     "junior",
   ]);
-  // Junior keeps its own profile and allowlist; Intern's are not merged in.
+  // Junior keeps its own profile; Intern's is not merged in.
   assert.equal(migrated.roles.junior.profile, "agy-opus");
-  assert.deepEqual(migrated.assistants.junior, ["agy-oss"]);
-  assert.equal(migrated.assistants.intern, undefined);
   // An allowlist only Intern had moves to Junior.
   assert.deepEqual(migrated.advisors, { junior: ["agy-opus"] });
   assert.equal(validateOrg(migrated), migrated);
@@ -174,7 +170,6 @@ test("a snapshot that binds intern beside junior drops the intern binding", () =
 test("a snapshot that binds intern without junior renames it to junior", () => {
   const legacy = withIntern();
   delete legacy.roles.junior;
-  delete legacy.assistants.junior;
   legacy.roles.intern.profile = "agy-oss";
   // A parent that named intern follows the rename: PM → Intern → PL here.
   legacy.roles.intern.parent = "pm";
@@ -190,8 +185,6 @@ test("a snapshot that binds intern without junior renames it to junior", () => {
     fallbacks: [],
   });
   assert.equal(migrated.roles.pl.parent, "junior");
-  assert.deepEqual(migrated.assistants.junior, ["agy-oss"]);
-  assert.equal(migrated.assistants.intern, undefined);
   assert.equal(validateOrg(migrated), migrated);
 });
 
