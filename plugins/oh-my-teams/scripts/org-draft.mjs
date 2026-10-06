@@ -31,6 +31,22 @@ export const DRAFT_DEFAULTS = Object.freeze({
 const DRAFT_PROVIDERS = { claude: "Claude", codex: "Codex", agy: "Agy" };
 
 /**
+ * Parses one provider selected as a formation resource.
+ *
+ * @param {string} value - Provider identifier from the resource form.
+ * @returns {string} A supported provider identifier.
+ * @throws {Error} When the provider is not a formation resource.
+ */
+export function parseResourceProvider(value) {
+  const provider = String(value ?? "").trim();
+  assert(
+    Object.hasOwn(DRAFT_PROVIDERS, provider),
+    `Unsupported provider for a resource draft: ${value}`,
+  );
+  return provider;
+}
+
+/**
  * Parses one `provider:model` tier choice, where `default` means host default.
  *
  * Ollama is refused here rather than half-configured: its profile needs an
@@ -126,6 +142,82 @@ export function draftOrganization({ name, tiers = FULL_DEPTH, models }) {
     roles: bindings,
     policy: {
       ...DRAFT_DEFAULTS.policy,
+      supervision: { ...DRAFT_DEFAULTS.policy.supervision },
+    },
+  });
+}
+
+/**
+ * Builds a new organization from verified subscription resources rather than
+ * pre-assigning a model to each role. A later staffing decision chooses a
+ * model from these resources; formation only records the accounts and limits
+ * it may use.
+ *
+ * @param {object} request - Resource formation request.
+ * @param {string} request.name - Organization name.
+ * @param {string[]} request.resources - Provider identifiers to register.
+ * @param {number} [request.concurrency=DRAFT_DEFAULTS.concurrency] - Per-resource slot limit.
+ * @param {number} [request.maxCalls=DRAFT_DEFAULTS.policy.maxCalls] - Per-resource call limit.
+ * @returns {object} Validated resource-based organization ready for `init --from`.
+ * @throws {Error} When resources or limits are invalid.
+ */
+export function draftResourceOrganization({
+  name,
+  resources,
+  concurrency = DRAFT_DEFAULTS.concurrency,
+  maxCalls = DRAFT_DEFAULTS.policy.maxCalls,
+}) {
+  assert(
+    Array.isArray(resources) && resources.length > 0,
+    "Choose at least one subscription resource",
+  );
+  assert(
+    Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 32,
+    "Resource concurrency must be 1..32",
+  );
+  assert(
+    Number.isInteger(maxCalls) && maxCalls >= 1 && maxCalls <= 20,
+    "Resource maxCalls must be 1..20",
+  );
+
+  const pools = {};
+  const registered = {};
+  for (const value of resources) {
+    const provider = parseResourceProvider(value);
+    const id = `${provider}-current`;
+    assert(!registered[id], `Duplicate subscription resource: ${provider}`);
+    pools[id] = { label: `${DRAFT_PROVIDERS[provider]} current account` };
+    registered[id] = {
+      provider,
+      account: "current",
+      subscription: `${DRAFT_PROVIDERS[provider]} (current account)`,
+      pool: id,
+      concurrency,
+      maxCalls,
+    };
+  }
+
+  const roles = {};
+  DEPTH_ROLES[FULL_DEPTH].forEach((role, index, ladder) => {
+    roles[role] = {
+      parent: index === 0 ? null : ladder[index - 1],
+      concurrency,
+      attempts: DRAFT_DEFAULTS.attempts,
+      fallbacks: [],
+    };
+  });
+
+  return validateOrg({
+    schemaVersion: 1,
+    revision: 1,
+    name,
+    modelPolicy: { preset: "custom", revision: 1 },
+    pools,
+    resources: registered,
+    roles,
+    policy: {
+      ...DRAFT_DEFAULTS.policy,
+      maxCalls,
       supervision: { ...DRAFT_DEFAULTS.policy.supervision },
     },
   });

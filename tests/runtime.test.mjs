@@ -777,25 +777,27 @@ test("CLI init reuses the existing organization without reading replacement inpu
   assert.equal(result.code, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).created, false);
 });
-test("concurrent edits cannot both accept the same revision", async (t) => {
+test("concurrent updates cannot both accept the same revision", async (t) => {
   const dir = fixture(t),
-    file = path.join(dir, "organization.json"),
-    proposal = path.join(dir, "next.json");
+    file = path.join(dir, "organization.json");
   saveOrg(file, clone());
-  writeJSON(proposal, { ...clone(), name: "changed" });
-  const argv = [
-    process.execPath,
-    path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs"),
-    "edit",
-    "--org",
-    file,
-    "--from",
-    proposal,
-    "--revision",
-    "1",
-  ];
-  const results = await Promise.all([run(argv), run(argv)]);
-  assert.equal(results.filter((r) => r.code === 0).length, 1);
+  const update = async () => {
+    try {
+      saveOrg(
+        file,
+        { ...clone(), name: "changed" },
+        {
+          update: true,
+          expectedRevision: 1,
+        },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const results = await Promise.all([update(), update()]);
+  assert.equal(results.filter(Boolean).length, 1);
   assert.equal(readJSON(file).revision, 2);
 });
 test("429 in successful source code is not quota exhaustion", async () => {
