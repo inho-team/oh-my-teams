@@ -6,7 +6,7 @@
 
 주도 역할(PM)은 kickoff가 끝날 때까지 이어지는 긴 세션이다. worker를 기다리며 감독할 때마다 누적된 컨텍스트 전체가 다시 입력되므로, 이 세션에 가장 비싼 모델을 두면 판단이 필요 없는 감독 턴까지 그 모델의 요금으로 처리된다. 자문 호출은 이 구조를 뒤집는다. 긴 세션은 주도 모델(예: Sol, Opus)이 맡고, 프론티어 모델(예: Astra, Fable)은 짧은 브리프 하나만 받아 한 번 답하고 끝난다.
 
-`assist`와는 방향이 반대다. `assist`는 역할이 더 싼 GPT-OSS에게 조사와 초안을 맡기는 호출이고, `advise`는 역할이 더 비싼 모델에게 판단을 묻는 호출이다.
+`advise`는 역할이 더 비싼 모델에게 판단을 묻는 호출이다. 조사와 초안을 맡기는 일은 실행기의 서브에이전트가 하며, 그 규칙은 [subagents.md](subagents.md)에 있다.
 
 ## 런타임이 강제하는 것
 
@@ -65,4 +65,4 @@ node <runtime> advise --org <organization.json> --brief <brief.json> --repo <wor
 
 ## 조직에 설정하기
 
-`advisor-codex`와 `advisor-claude` 프리셋이 역할별 모델과 자문 허용 목록을 함께 정한다. 설정 방법은 [adjust](../skills/adjust/SKILL.md)의 「역할과 프리셋」을 따른다. 허용 목록을 직접 고칠 때에는 `advisors`에 역할별 프로필 ID 목록을 적는다. `assistants`와 달리 모델 제한은 없다.
+`advisor-codex`와 `advisor-claude` 프리셋이 역할별 모델과 자문 허용 목록을 함께 정한다. 설정 방법은 [adjust](../skills/adjust/SKILL.md)의 「역할과 프리셋」을 따른다. 허용 목록을 직접 고칠 때에는 `advisors`에 역할별 프로필 ID 목록을 적는다. 모델 제한은 없다.

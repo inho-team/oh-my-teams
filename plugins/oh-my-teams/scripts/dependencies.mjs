@@ -357,6 +357,7 @@ export function isolatedHealthEnvironment(home, codexHome) {
  * @param {string} staging - Staging directory where npm packages are installed.
  * @param {string} healthBase - Base directory for health check temporary homes.
  * @param {Function} [spawnImpl] - Spawn implementation, replaced by tests that must not start a runtime.
+ * @param {number} [timeoutMs=60000] - Maximum time to wait for a cold runtime start.
  * @returns {Promise<void>} Resolves once the runtime answered its health endpoint and was stopped.
  * @throws {Error} `runtime-health-check-failed` when it never answered.
  */
@@ -365,6 +366,7 @@ export async function healthCheck(
   staging,
   healthBase,
   spawnImpl = spawn,
+  timeoutMs = 60000,
 ) {
   const port = await freePort();
   const healthDir = path.join(
@@ -401,7 +403,7 @@ export async function healthCheck(
     exited = true;
   });
   try {
-    const deadline = Date.now() + 15000;
+    const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       try {
         const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
@@ -493,7 +495,13 @@ export async function installRuntime(root, options = {}) {
           timeoutMs: 30000,
         });
         assert(bunVersion.code === 0, "runtime-bun-unavailable");
-        await healthCheck(launch, staging, paths.base, options._spawnImpl);
+        await healthCheck(
+          launch,
+          staging,
+          paths.base,
+          options._spawnImpl,
+          options._healthTimeoutMs,
+        );
         writeJSON(path.join(staging, "manifest.json"), {
           fingerprint: paths.fingerprint,
           version: paths.version,

@@ -10,7 +10,7 @@ Claude Code·Codex용 **에이전트 조직 플러그인**. 이사는 사용자�
 | `form` | PM과 Worker의 모델을 골라 상설 조직을 결성하고, 나머지는 비용이 늘지 않는 기본값으로 저장 |
 | `kickoff` | 하나의 개발 Goal을 시작하거나 재개하고, PM이 Worker를 지휘하여 완료 조건까지 지속 감독 |
 | `status` | 상설 조직과 현재 Goal·실행 팀·워크트리·검증 상태를 구분하여 표시 |
-| `adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존. 추론 강도·대체 순서·인원·보조 도구·별도 계정은 여기서 정함 |
+| `adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존. 추론 강도·대체 순서·인원·별도 계정은 여기서 정함 |
 | `close` | 성공한 Goal의 PR/MR·병합·워크트리 정리와 완료 기록 처리 |
 | `disband` | 실패·취소된 실행 팀을 해체하고 복구 가능한 결과와 기록 보존 |
 | `director-terminal` | 새 이사 세션을 사용자가 보는 Orca 탭에 열고, 기존 이사가 감독하던 kickoff를 그 세션에 넘김 |
@@ -21,7 +21,7 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 
 **2.8.3 변경:** 실험 기능으로 TypeSafe Jev shadow 판단을 추가했다. 조직의 `policy.experimental.jev`를 켜면 `supervision-wait`, `supervision-next`, `role-terminal`, `failure-classify`가 명령 안에서 Jev에게 좁은 판단을 묻고 `<state>/judgments`에 기록한다. 명령의 결과와 게이트는 바뀌지 않으며, 블록이 없으면 꺼져 있다. 규칙은 [Jev 실험 기능](plugins/oh-my-teams/references/jev.md)에 있다.
 
-**2.8.0 변경:** 감독과 검토에 드는 토큰을 줄였다. Claude 역할 터미널은 `--autocompact 250k`로 열리며, 값은 조직의 `policy.claudeAutoCompact`로 바꿀 수 있다. 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 감독 역할은 heartbeat만 온 경우에는 깨어나지 않는 `supervision-wait`로 worker를 기다린다. Junior 구현은 첫 검토에서 반려되면 Senior에게 넘어가고, 검토자는 첫 검토에서 finding을 한 번에 모두 적으며 재검토에서는 수정 diff만 확인한다. 이사의 신호함에서는 `progress` 신호가 미처리 목록에 남지 않고, 새 `close-ready`가 이전 것을 대체하며, `kickoff-release`가 그 kickoff에 남은 신호를 정리한다. OpenCodex runner 프로필은 runner를 거치는 `headless-start`로만 실행하며, `role-command`와 `worker-start`는 runner 없이 실행하지 않도록 거부한다.
+**2.8.0 변경:** 감독과 검토에 드는 토큰을 줄였다. Claude 역할 터미널은 `--autocompact 250k`로 열리며, 값은 조직의 `policy.claudeAutoCompact`로 바꿀 수 있다. 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 감독 역할은 heartbeat만 온 경우에는 깨어나지 않는 `supervision-wait`로 worker를 기다린다. Junior 구현은 첫 검토에서 반려되면 Senior에게 넘어가고, 검토자는 첫 검토에서 finding을 한 번에 모두 적으며 재검토에서는 수정 diff만 확인한다. 이사의 신호함에서는 `progress` 신호가 미처리 목록에 남지 않고, 새 `close-ready`가 이전 것을 대체하며, `kickoff-release`가 그 kickoff에 남은 신호를 정리한다. OpenCodex runner 프로필은 runner를 거치는 `headless-start`로만 실행하며, `role-command`와 `worker-start`는 runner 없이 실행하지 않도록 거부한다. (이후 `headless-start` 실행 경로가 제거되어 현재는 실행 경로가 아니다.)
 
 **2.6.1 변경:** 구현 task의 담당을 추론 강도로 정한다. 설계와 구현이 한 번에 필요한 상위 등급 구현은 Senior가 직접 맡고, 닫힌 범위의 구현은 Junior가 맡는다. Senior가 구현한 task는 다른 Senior 실행이나 PL·PM이 검토한다. 기준은 [pm](plugins/oh-my-teams/skills/pm/SKILL.md)의 「구현 등급」에 있다.
 
@@ -127,7 +127,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 Codex 계정의 모델 카탈로그는 계정과 CLI 버전에 따라 달라진다. codex-cli 0.154.0(2026-09-16)의 `codex debug models`에는 `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`가 선택 가능한 모델로 들어 있었고, `config.toml`에 `model`이 없으면 이 가운데 첫 항목이 실행된다. 설치 때 `agy models`와 Codex 카탈로그로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
 
-새 조직의 구조 예제는 [PM·Worker 조직](plugins/oh-my-teams/examples/organization.three-tier.json)이다. 이전 [네 역할 예제](plugins/oh-my-teams/examples/organization.json)는 진행 중인 kickoff의 역할 스냅샷과 이전 설정을 이해하기 위한 호환 자료이며, 새 결성의 기본값이 아니다. 모든 역할의 동시 실행 슬롯은 기본 1이며, 보조 도구는 `assistants`에 명시적으로 허용한 역할만 사용할 수 있다.
+새 조직의 구조 예제는 [PM·Worker 조직](plugins/oh-my-teams/examples/organization.three-tier.json)이다. 이전 [네 역할 예제](plugins/oh-my-teams/examples/organization.json)는 진행 중인 kickoff의 역할 스냅샷과 이전 설정을 이해하기 위한 호환 자료이며, 새 결성의 기본값이 아니다. 모든 역할의 동시 실행 슬롯은 기본 1이다.
 
 Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
 
@@ -135,7 +135,7 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 
 `form`은 PM과 Worker가 사용할 모델만 한 번에 묻는다. 직급이나 실행 깊이는 묻지 않는다. PM은 목표 달성을 책임지고 구현·설계·독립 검토가 필요할 때 Worker를 배정한다. 선택지는 결성 직전에 실행한 `model-catalog` 조회 결과를 바탕으로 제시하며, 확인된 목록에 없는 모델은 자유 입력 `provider:model`로 받는다. 예전 네 모델을 전달하는 `org-draft` 호출은 기존 설정을 위한 호환 경로로 유지한다.
 
-묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번이 쓰는 provider 호출 수와 workflow attempt 하나에 배정되는 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓴다. 다만 Agy는 Gemini 모델에 기본 강도를 두지 않고 강도 없이 부르면 거부하므로, `model-catalog`가 돌려주는 Gemini id는 강도가 이미 포함되어 있어(예: `gemini-3.8-flash-medium`) 그 값을 그대로 쓰면 따로 정할 필요가 없다. 자유 입력으로 강도 없는 이름을 받았으면 보완한 강도를 결성 보고에 적는다. 보조 도구 호출은 허용하지 않는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
+묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번이 쓰는 provider 호출 수와 workflow attempt 하나에 배정되는 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓴다. 다만 Agy는 Gemini 모델에 기본 강도를 두지 않고 강도 없이 부르면 거부하므로, `model-catalog`가 돌려주는 Gemini id는 강도가 이미 포함되어 있어(예: `gemini-3.8-flash-medium`) 그 값을 그대로 쓰면 따로 정할 필요가 없다. 자유 입력으로 강도 없는 이름을 받았으면 보완한 강도를 결성 보고에 적는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
 
 ### 실행 깊이
 
@@ -201,13 +201,12 @@ Ollama는 저장소 파일을 직접 열지 못한다. 작업 계약의 `context
 
 ## 실행과 검증
 
-역할별 사용량은 `usage-report`가 각 CLI가 이미 남긴 세션 기록에서 읽는다. 역할을 띄우는 `role-terminal`, `worker-start`, `headless-start`가 `<project>/.omt/usage/launches.jsonl`에 어느 역할을 어디서 띄웠는지 적고, 보고서는 그 기록으로 세션을 역할에 연결한다. 메시지 본문은 읽지 않는다. Agy 대화형 세션은 토큰 사용량이 기록되지 않아 `unmeasured`로 표시되므로, 사용량이 중요한 kickoff에서는 Agy 역할을 `headless-start`로 실행한다. 자세한 기준은 [`orca-runtime.md`](plugins/oh-my-teams/references/orca-runtime.md)의 「사용량 측정」 절에 있다.
+역할별 사용량은 `usage-report`가 각 CLI가 이미 남긴 세션 기록에서 읽는다. 역할을 띄우는 `role-terminal`, `worker-start`가 `<project>/.omt/usage/launches.jsonl`에 어느 역할을 어디서 띄웠는지 적고, 보고서는 그 기록으로 세션을 역할에 연결한다. 제거된 `headless-start`가 남긴 과거 기록은 읽기 전용으로 보존되며 보고서가 그대로 읽지만, 새 실행 경로는 아니다. 메시지 본문은 읽지 않는다. Agy 대화형 세션은 토큰 사용량이 기록되지 않아 `unmeasured`로 표시된다. 자세한 기준은 [`orca-runtime.md`](plugins/oh-my-teams/references/orca-runtime.md)의 「사용량 측정」 절에 있다.
 
 ```text
 node plugins/oh-my-teams/scripts/teams-org.mjs --help
 node plugins/oh-my-teams/scripts/teams-org.mjs validate --org plugins/oh-my-teams/examples/organization.json
 node plugins/oh-my-teams/scripts/teams-org.mjs show --org plugins/oh-my-teams/examples/organization.json
-node plugins/oh-my-teams/scripts/teams-org.mjs assist --org .omt/organization.json --task <task.json> --repo <worktree> --state .omt --role junior --kind research
 node plugins/oh-my-teams/scripts/teams-org.mjs advise --org .omt/organization.json --brief <brief.json> --repo <worktree> --state .omt --role pm --kind plan
 node plugins/oh-my-teams/scripts/teams-org.mjs preset --org <project>/.omt/organization.json --name balanced --revision <revision>
 node plugins/oh-my-teams/scripts/teams-org.mjs gate-check --task <task-v2.json> --report <report.json> --repo <worktree> --state <pm-state>
@@ -226,11 +225,13 @@ npm run lint
 
 제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 PM state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.
 
-감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows에서 모델이 `gemini`로 시작하는 Agy 역할은 Orca가 그 터미널의 대기를 보고하지 않으므로 `headless-start`로 실행하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
+감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows의 Agy 역할은 역할 터미널 경로가 검증되지 않아 실행 matrix가 거부하므로 PM에게 보고하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
 
-`assist`는 조직의 `assistants.<role>` 허용 목록에서 GPT-OSS-120B 프로필을 선택한다. `research`와 `checklist`는 파일을 수정하지 않고 검증된 인용과 감사 기록을 남긴다. `edit`는 호출자의 기본 모델을 바꾸지 않은 채 GPT-OSS를 한 번 호출하고, 기존 `work`와 동일한 파일 해시·허용 범위·검사·보고 관문을 적용한다. 비서 결과의 판단과 통합 책임은 호출한 역할에 남는다.
+감사 정책(`org.auditor`의 선언 여부)은 kickoff를 claim할 때 그 kickoff에 고정되며, 이후 조직 파일을 고쳐도 이미 고정된 정책은 바뀌지 않는다. 정책이 고정되지 않은 채 등록된 기존 kickoff는 이사가 `kickoff-audit-policy-retrofit`을 한 번 실행해 정책을 고정해야 `worker-start`, close-ready, `workflow-accept`가 진행된다. 2026-09-29 기준으로 #139 외에 등록된 기존 kickoff 4건이 병합 뒤 이 일회성 절차를 거쳐야 한다. 감사 미설정(`auditorConfigured`가 false)으로 고정한 kickoff와 kickoff 없이 만든 독립 workflow는 기존 동작을 그대로 유지한다. 이 고정은 정책 결속일 뿐이며 감사자의 신원을 증명했다거나 기록을 위조할 수 없다는 뜻이 아니다.
 
-`advise`는 방향이 반대인 호출이다. 조직의 `advisors.<role>` 허용 목록에 있는 비싼 모델에게 결정할 질문 하나와 12000바이트 이하의 요약, 최대 8개의 파일만 보내고 `proceed`·`revise`·`stop`·`escalate` 중 하나의 권고를 받는다. 대화 전문을 보내지 않으므로 프론티어 모델을 긴 감독 세션에 두지 않고 결정 관문에서만 쓸 수 있다. 호출은 kickoff 상태 하나당 `policy.adviceBudget`(기본값 6)회로 제한되고, 실패한 호출도 한 번으로 센다. 권고는 승인이 아니며 결정은 호출한 역할이 내린다. 계약은 [자문 호출 참조](plugins/oh-my-teams/references/advise.md)에 있다.
+역할은 조사, 초안과 순차적인 좁은 편집에 자기 실행기의 서브에이전트를 쓸 수 있고, 병렬 편집과 독립 검토는 별도 Worker와 워크트리로 넘긴다. 서브에이전트는 OMT 역할이 아니며 결과의 검증 책임은 호출한 역할에 있다. 규칙은 [서브에이전트 규칙](plugins/oh-my-teams/references/subagents.md)에 있고, 이전의 보조 도구 명령은 2.11.0에서 삭제되었다.
+
+`advise`는 조사를 맡기는 서브에이전트와 달리 더 비싼 모델에게 판단을 묻는 호출이다. 조직의 `advisors.<role>` 허용 목록에 있는 비싼 모델에게 결정할 질문 하나와 12000바이트 이하의 요약, 최대 8개의 파일만 보내고 `proceed`·`revise`·`stop`·`escalate` 중 하나의 권고를 받는다. 대화 전문을 보내지 않으므로 프론티어 모델을 긴 감독 세션에 두지 않고 결정 관문에서만 쓸 수 있다. 호출은 kickoff 상태 하나당 `policy.adviceBudget`(기본값 6)회로 제한되고, 실패한 호출도 한 번으로 센다. 권고는 승인이 아니며 결정은 호출한 역할이 내린다. 계약은 [자문 호출 참조](plugins/oh-my-teams/references/advise.md)에 있다.
 
 - 파일과 직전 실패만 모델에 전달하고, JSON 편집을 경로·원본 해시 대조 후 하네스가 적용한다.
 - 검사 명령은 argv 배열이다. 호출과 재시도에 한도가 있고 실패를 통과로 바꾸지 않는다. 실패 편집은 보존한다.

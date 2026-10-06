@@ -19,7 +19,6 @@ import {
   run,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
-  assist,
   applyEdits,
   draft,
   makePrompt,
@@ -215,9 +214,6 @@ test("graph validation accepts branches and rejects cycle/missing profile/second
   const root = clone();
   root.roles.senior.parent = null;
   assert.throws(() => validateOrg(root), /root/);
-  const assistant = clone();
-  assistant.assistants.pm = ["missing"];
-  assert.throws(() => validateOrg(assistant), /assistant profiles/);
 });
 test("default organization uses the responsibility hierarchy and routing", () => {
   const org = validateOrg(clone());
@@ -244,101 +240,6 @@ test("default organization uses the responsibility hierarchy and routing", () =>
     Object.values(org.profiles).some(
       (profile) => profile.model === "gpt-oss-120b-medium",
     ),
-  );
-  assert.deepEqual(Object.keys(org.assistants), [
-    "pm",
-    "pl",
-    "senior",
-    "junior",
-  ]);
-  for (const role of ["pm", "pl", "senior", "junior"]) {
-    assert.deepEqual(org.assistants[role], ["agy-oss"]);
-  }
-});
-test("every role can use the configured GPT-OSS research assistant with an audit record", async (t) => {
-  const dir = fixture(t);
-  fs.writeFileSync(path.join(dir, "source.txt"), "alpha\nbeta\n");
-  const assistantTask = {
-    ...task,
-    id: "assistant-research",
-    instruction: "Find the beta line",
-    files: ["source.txt"],
-    checks: [[process.execPath, "--version"]],
-  };
-  for (const role of ["pm", "pl", "senior", "junior"]) {
-    const stateDir = path.join(dir, `.omt-${role}`);
-    const report = await assist(dir, clone(), assistantTask, {
-      role,
-      kind: "research",
-      stateDir,
-      call: async (profile) => {
-        assert.equal(profile.model, "gpt-oss-120b-medium");
-        return response({
-          summary: "Found beta",
-          items: ["beta is present"],
-          citations: [{ file: "source.txt", line: 2, quote: "beta" }],
-        });
-      },
-    });
-    assert.equal(report.callerRole, role);
-    assert.equal(report.profile, "agy-oss");
-    assert.equal(report.citations[0].verified, true);
-    assert.ok(fs.existsSync(report.reportPath));
-    assert.ok(fs.existsSync(report.log));
-    assert.equal(
-      report.logHash,
-      hash(
-        `${JSON.stringify({
-          summary: "Found beta",
-          items: ["beta is present"],
-          citations: [{ file: "source.txt", line: 2, quote: "beta" }],
-        })}\n`,
-      ),
-    );
-  }
-});
-test("assistant edit uses GPT-OSS while retaining caller role checks and scope", async (t) => {
-  const dir = await repo(t);
-  const result = await assist(dir, clone(), task, {
-    role: "junior",
-    kind: "edit",
-    stateDir: path.join(dir, ".omt"),
-    call: async (profile) => {
-      assert.equal(profile.model, "gpt-oss-120b-medium");
-      return response({
-        edits: [
-          {
-            file: "value.txt",
-            beforeHash: hash("wrong\n"),
-            content: "right\n",
-          },
-        ],
-      });
-    },
-  });
-  assert.equal(result.status, "passed");
-  assert.equal(result.role, "junior");
-  assert.equal(result.calls[0].profile, "agy-oss");
-  assert.equal(result.calls[0].selectionReason, "assistant:junior:edit");
-});
-test("assistant rejects profiles not authorized for the caller", async (t) => {
-  const dir = fixture(t);
-  fs.writeFileSync(path.join(dir, "source.txt"), "alpha\n");
-  const assistantTask = {
-    ...task,
-    files: ["source.txt"],
-    checks: [[process.execPath, "--version"]],
-  };
-  await assert.rejects(
-    () =>
-      assist(dir, clone(), assistantTask, {
-        role: "pm",
-        kind: "research",
-        profileId: "agy-sonnet",
-        stateDir: path.join(dir, ".omt"),
-        call: async () => response({}),
-      }),
-    /not allowed/,
   );
 });
 test("account labels alone cannot pretend to switch subscriptions", () => {
@@ -794,8 +695,30 @@ test("concurrent edits cannot both accept the same revision", async (t) => {
     "--revision",
     "1",
   ];
-  const results = await Promise.all([run(argv), run(argv)]);
+  // Only these two children get an environment with no claude, codex or agy
+  // executable, so the save path sees every catalog as not installed (the
+  // same condition as a CI runner) instead of the host's live agy models. The
+  // parent process.env is left alone. Case variants of the keys are removed
+  // first because Windows Node reads the first of several case-only twins.
+  const empty = path.join(dir, "no-executors");
+  fs.mkdirSync(empty);
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !["PATH", "APPDATA"].includes(key.toUpperCase()),
+    ),
+  );
+  env.PATH = empty;
+  env.APPDATA = empty;
+  const results = await Promise.all([run(argv, { env }), run(argv, { env })]);
   assert.equal(results.filter((r) => r.code === 0).length, 1);
+  const rejected = results.filter((r) => r.code !== 0);
+  assert.equal(rejected.length, 1, JSON.stringify(results));
+  assert.equal(rejected[0].code, 1, JSON.stringify(results));
+  // core.mjs: the lock contention message, or the revision check after the lock.
+  assert.match(
+    rejected[0].stderr,
+    /Organization update in progress; read it again before editing|Organization changed; read it again before editing/,
+  );
   assert.equal(readJSON(file).revision, 2);
 });
 test("429 in successful source code is not quota exhaustion", async () => {
@@ -2298,10 +2221,9 @@ test("installer planning verifies versions before reversible legacy migration", 
   assert.equal(plan.clients.codex.newCurrent, true);
   assert.throws(() => parseInstallArgs(["claude", "codex"]), /only one/);
 });
-test("assistant answers that cite another tree are rejected, not stored", async (t) => {
+test("draft answers that cite another tree are rejected, not stored", async (t) => {
   const dir = fixture(t);
   fs.writeFileSync(path.join(dir, "source.txt"), "alpha\nbeta\n");
-  const stateDir = path.join(dir, ".omt");
   const groundedTask = {
     ...task,
     id: "grounding",
@@ -2310,11 +2232,8 @@ test("assistant answers that cite another tree are rejected, not stored", async 
     checks: [[process.execPath, "--version"]],
   };
   const answer = (citations) =>
-    assist(dir, clone(), groundedTask, {
-      role: "pm",
-      kind: "research",
-      stateDir,
-      call: async () => response({ summary: "s", items: ["i"], citations }),
+    draft(dir, clone(), groundedTask, {
+      call: async () => response({ citations }),
     });
 
   await assert.rejects(
@@ -2327,7 +2246,6 @@ test("assistant answers that cite another tree are rejected, not stored", async 
     /do not exist in this workspace/,
   );
   await assert.rejects(() => answer([]), /no source citation/);
-  assert.equal(fs.existsSync(path.join(stateDir, "assists")), false);
 
   const accepted = await answer([
     { file: "source.txt", line: 2, quote: "beta" },
@@ -2401,8 +2319,7 @@ test("ungrounded answers route to workspace rebinding", () => {
     { kind: "workspace-context" },
     { grounded: false },
     {
-      message:
-        "Assistant cited 2 of 3 lines that do not exist in this workspace",
+      message: "Draft cited 2 of 3 lines that do not exist in this workspace",
     },
   ]) {
     assert.deepEqual(classifyFailure(input), {

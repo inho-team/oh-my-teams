@@ -47,18 +47,11 @@
     },
     "assistants": {
       "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "pm": { "$ref": "#/$defs/assistantProfiles" },
-        "pl": { "$ref": "#/$defs/assistantProfiles" },
-        "senior": { "$ref": "#/$defs/assistantProfiles" },
-        "junior": { "$ref": "#/$defs/assistantProfiles" },
-        "worker": { "$ref": "#/$defs/assistantProfiles" }
-      }
+      "$comment": "Removed in 2.11.0 with the assist command. An organization file that still contains it stays valid and loadable, the key has no effect, the runtime never rewrites the file on read, and the next saved revision (adjust) drops it. Do not add it to new organizations. See references/subagents.md."
     },
     "advisors": {
       "type": "object",
-      "$comment": "Profiles each role may consult through advise. Unlike assistants, any model is allowed; the advice budget in policy.adviceBudget caps the calls.",
+      "$comment": "Profiles each role may consult through advise. Any model is allowed; the advice budget in policy.adviceBudget caps the calls.",
       "additionalProperties": false,
       "properties": {
         "pm": { "$ref": "#/$defs/assistantProfiles" },
@@ -79,6 +72,20 @@
         "senior": { "$ref": "#/$defs/role" },
         "junior": { "$ref": "#/$defs/role" },
         "worker": { "$ref": "#/$defs/role" }
+      }
+    },
+    "auditor": {
+      "type": "object",
+      "$comment": "Optional out-of-ladder role that audits a kickoff's requirements ledger at the brief and outcome checkpoints (docs/plan/requirements-ledger-and-audit.md). Sits alongside roles/advisors, never inside roles.",
+      "additionalProperties": false,
+      "required": ["profile"],
+      "properties": {
+        "profile": { "type": "string", "minLength": 1 },
+        "fallbacks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
       }
     },
     "policy": {
