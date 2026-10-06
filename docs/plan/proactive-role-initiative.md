@@ -175,6 +175,8 @@ Orca가 소유한 생명주기는 OMT가 복제하지 않습니다(`P/references
 
 ### 5.1 legacy·현행 역할별 사건 표
 
+이 표는 사건별 전체 표인 §3.3~3.6을 대체하지 않고, 범위 안 주도 행동과 상향 조건을 사건 한 줄로 요약한 보조 표입니다. legacy PL·Senior·Junior의 사건별(시작·배정·반려·정체·오류·사용자 결정 대기·독립 작업·검증·close) 행동은 §3.4(PL 9행), §3.5(Senior 8행), §3.6(Junior 9행)이 정본입니다.
+
 | 역할 | 사건 | 범위 안에서 스스로 하는 일 | 중단·상향 조건 | 금지 | 완료·보고 증거 |
 |---|---|---|---|---|---|
 | worker | 구현 실패 | 원인 분석, 접근 방법 변경, 허용 파일 안의 좁은 수정, 재`verify` | 계약·수용 기준·검사 변경이 필요할 때, 허용 파일 밖을 건드려야 할 때 | 계약 revision 변경, 재위임, 자기 `accept` | 실패·재검사 증거, `worker_done` |
@@ -278,8 +280,8 @@ Orca가 소유한 생명주기는 OMT가 복제하지 않습니다(`P/references
 
 - **문서 revision**: 2. 직전 revision 1은 PL 최종 검토 2가 15개 finding을 `open`으로 남겼습니다(`proactive-pl-final-review2.json`).
 - **작성자**: 회복 workflow `proactive-role-initiative-recovery-r15`의 단일 작성 실행(Senior, 조직 revision 15). 독립 검토자와 검토 revision은 이 커밋 뒤에 기록하며, 작성자는 이 문서를 스스로 승인하지 않습니다.
-- **검사 상태**: PM이 확보한 test 슬롯에서 `npm run format`, `npm run sync`, `npm run lint`, `npm test`를 실행했고 모두 종료 코드 0입니다. `sync`는 변경과 누락이 없었고, `npm test`는 1039개 중 통과 1002, 실패 0, 건너뜀 37이었습니다. 이 문서를 처음 커밋한 HEAD는 2bf62de이며, 최종 커밋 HEAD는 PM 보고와 handoff checkpoint에 적습니다.
-- **선행 조건**: ready-timeout 복구 커밋 `04e423f`는 현재 main(4c43b24)의 조상 병합에 포함되어 있으므로, 남은 조건은 이 설계 HEAD에서의 `npm test` 통과와 독립 검토입니다. 게이트(`gates/proactive-design.json`의 `checks-passed`와 `review-complete`)는 이 문서의 승인으로 바뀌지 않으며 PM이 다시 판정합니다.
+- **검사 상태**: 아래 주장은 `.omt/evidence/7a4bf7d8f717b7372c664a49a733fe7c4f6e378edb578e795c229ca91c7b7c60.json`(생성 2026-09-29T11:09:13Z, 원시 로그 `-0`~`-2.log`)에서 확인됩니다. 이 기록의 fingerprint HEAD는 7cccd600061cde7fea60c5a5e339b793391ac514이고, 명령은 `npm run sync:check`(종료 코드 0, `mismatches: []`), `npm run lint`(종료 코드 0, 이 안에서 `format:check` 통과), `npm test`(종료 코드 0, 1039개 중 통과 1002·실패 0·건너뜀 37)이며 Node는 v26.7.0입니다. 이 문서의 처음 커밋 HEAD는 2bf62de이고, 위 검사는 그 뒤 커밋 7cccd60에서 실행되었습니다. `npm run format`·`npm run sync`(쓰기)와 자원 슬롯 확보는 이 기록으로 확인되지 않으므로 실행했다고 주장하지 않습니다. 이 정정 커밋은 7cccd60 이후의 문서 변경이므로, 위 통과 기록은 정정 커밋에 대한 증거가 아니며 정정 HEAD의 검사는 PM이 다시 실행해 기록합니다.
+- **선행 조건**: ready-timeout 복구 커밋 `04e423f`는 현재 main(4c43b24)의 조상 병합에 포함되어 있으므로, 남은 조건은 정정 HEAD에서의 검사 재실행과 독립 검토입니다. 게이트(`gates/proactive-design.json`의 `checks-passed`와 `review-complete`)는 이 문서의 승인으로 바뀌지 않으며 PM이 다시 판정합니다.
 - **남은 구현 단계**: §8의 표가 정한 검사 추가, 결정 기록 형식, eval 시나리오, 감사 역할 계약 연동입니다. 모두 별도 kickoff이며 이 문서에서 구현하지 않습니다.
 
 ## 11. 열린 finding 15건 대응표
@@ -290,12 +292,12 @@ Orca가 소유한 생명주기는 OMT가 복제하지 않습니다(`P/references
 | persistent-object-ownership-collapsed | `orca orchestration --help`, `kickoff-registry.mjs:170,427,539,707,769`, `workflow.mjs:40,264,608`, `director.mjs:28,584,734`, `resources.mjs:147,229`, `gates.mjs:406,472,549`, `delivery.mjs:165` | resolved: `orca dispatch list` 제거, 객체별 생성·조회·정산·종료·보존 표 | §2 |
 | role-event-matrix-incomplete | 역할 정본과 `workflow.mjs:1558,1740,1888,1992,2095` | resolved: 역할 6개 각각 9개 사건 | §3.1~3.6 |
 | autonomy-boundary-and-rollback-missing | `autonomy.md:7,11-14,18-25,29-33,37` | resolved: `delivery` 포함 네 경계, PM `decision`/`progress` 분기, 재분류, 근거·rollback | §4 |
-| subordinate-proactivity-not-operationalized | 각 역할 스킬의 한계 절 | resolved: 역할·사건별 범위 내 행동·상향·금지·증거, auditor 반증 조건 | §5 |
+| subordinate-proactivity-not-operationalized | 각 역할 스킬의 한계 절 | resolved: 사건별 정본은 legacy PL 9행·Senior 8행·Junior 9행의 §3.4~3.6, §5.1은 이를 역할당 사건 한 줄로 요약한 보조 표임을 명시하고 두 곳을 모두 인용. auditor 반증 조건은 §5.3 | §3.4~3.6, §5.1, §5.3 |
 | cross-kickoff-observations-misstated | §6의 5개 원천 파일(직접 읽음) | resolved, 일부 accepted 아님: 사례 3의 잘못된 추론 철회, 사례 8·9는 원천이 없어 `미확인`으로 표기 | §6 |
 | recovery-protocol-lacks-authoritative-reconciliation | `orca orchestration --help`, `orca-runtime.md:7-15,398-408,455-463`, `workflow.mjs:456-503,896-950` | resolved: 실제 이름공간의 호출, 비교키, 우선순위, reconcile 절차 | §7 |
 | lifecycle-mapping-and-resource-strategy-contradicted | `workflow.mjs:40,442-455,1558,1740,1888`, `resources.mjs:39,147-229` | resolved: 변경 지점·호환·선행 조건·도입 gate 표, 슬롯과 `reserve`의 구분 | §8 |
 | falsification-plan-is-not-executable | §9.1의 테스트 줄, `gates.mjs:107-175`, `workflow.mjs:896-950` | resolved: 현행 검사와 후속 eval을 분리하고 분자·분모·임계값 정의 | §9 |
-| independent-review-evidence-and-pm-boundary-open | `gates/proactive-design.json`, `proactive-runtime-fix-dependency.json`, `proactive-rework4-worktree-boundary.json`, main 4c43b24 | resolved(기록 정정): 이전 HEAD를 최종으로 적던 서술 삭제, 자기 해결 주장 삭제, 검사는 미실행으로 표기 | §6 사례 4·5, §10 |
+| independent-review-evidence-and-pm-boundary-open | `gates/proactive-design.json`, `proactive-runtime-fix-dependency.json`, `proactive-rework4-worktree-boundary.json`, main 4c43b24 | resolved(기록 정정): 이전 HEAD를 최종으로 적던 서술 삭제, 자기 해결 주장 삭제, 검사 수치는 HEAD 7cccd60의 evidence 키와 원시 로그로만 인용하고 확인되지 않는 실행 주장은 제거 | §6 사례 4·5, §10 |
 | p1-02 | `P/skills/junior/SKILL.md:18-36,43-51` | resolved | §3.6 |
 | p3-02 | `P/skills/director/SKILL.md:30,96-110,111-135` | resolved | §3.1 |
 | p3-03 | `workflow.mjs:1558-1626`, `lock-recovery-and-release.test.mjs:253,375` | resolved: `resolution`·`evidence` 필수, `not-started`일 때만 attempt 반환, 반환되지 않는 attempt와 소비된 호출을 명시 | §3.2 예약 해소 행, §9.1 |
