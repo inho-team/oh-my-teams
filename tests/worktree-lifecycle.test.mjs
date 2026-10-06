@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -485,6 +486,173 @@ test("workflow worktree preflight uses the frozen organization snapshot", async 
       assert.deepEqual(effects, []);
     });
   }
+
+  await t.test(
+    "the first PM of a resource organization uses one director-verified bootstrap selection",
+    async (t) => {
+      const directory = fs.mkdtempSync(
+        path.join(os.tmpdir(), "omt-pm-bootstrap-"),
+      );
+      t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+      const organization = draftResourceOrganization({
+        name: "pm-bootstrap",
+        resources: ["codex"],
+      });
+      const orgFile = path.join(directory, "organization.json");
+      fs.writeFileSync(orgFile, JSON.stringify(organization));
+      const sha256 = (text) =>
+        crypto.createHash("sha256").update(text).digest("hex");
+      const choice = {
+        resourceId: "codex-current",
+        model: "gpt-5.6-sol",
+        effort: "high",
+      };
+      const selection = {
+        schemaVersion: 1,
+        organization: {
+          revision: organization.revision,
+          sha256: sha256(fs.readFileSync(orgFile)),
+        },
+        catalog: {
+          verifiedAt: "2026-10-07T00:00:00.000Z",
+          catalogRevision: "catalog-r1",
+          providerRevision: "codex-r1",
+        },
+        allowedResources: [choice.resourceId],
+        allowedPools: [choice.resourceId],
+        choice,
+        reason: "The director selected the PM resource for this kickoff.",
+      };
+      const selectionFile = path.join(directory, "selection.json");
+      fs.writeFileSync(selectionFile, JSON.stringify(selection));
+      const args = {
+        org: orgFile,
+        role: "pm",
+        repo: "/repo/director",
+        name: "pm-bootstrap",
+        base: "p".repeat(40),
+        "pm-selection": selectionFile,
+      };
+      const ports = {
+        organization: () => organization,
+        callerCwd: "/repo/director",
+        kickoffs: () => ({
+          kickoffs: [{ pm: { worktreeId: "other-kickoff" } }],
+        }),
+        catalog: async () => ({ catalogRevision: "catalog-r1" }),
+        revalidate: (_catalog, entries) => ({
+          savable: entries[0].model === choice.model,
+          catalogRevision: "catalog-r1",
+          providerRevisions: { codex: "codex-r1" },
+          selections: [{ savable: entries[0].model === choice.model }],
+        }),
+        environment,
+        matrix: supervised,
+        create: async (_repo, options) => {
+          const workspace = { id: "pm-wt", path: "/repo/pm" };
+          return {
+            workspace,
+            session: await options.openRoleSession(workspace),
+          };
+        },
+        open: async (workspace) => ({
+          ready: true,
+          terminal: "pm-terminal",
+          role: "pm",
+          worktree: `id:${workspace.id}`,
+          modelRequested: choice.model,
+        }),
+      };
+      const result = await createRoleWorktree(args, ports);
+      assert.equal(result.session.modelRequested, choice.model);
+      assert.equal(
+        result.pmBootstrap.selection.choice.resourceId,
+        choice.resourceId,
+      );
+      assert.equal(
+        result.pmBootstrap.inputSha256,
+        sha256(fs.readFileSync(selectionFile)),
+      );
+
+      for (const [label, update, pattern] of [
+        [
+          "missing selection",
+          (next) => {
+            delete next["pm-selection"];
+          },
+          /requires --pm-selection/,
+        ],
+        [
+          "other role",
+          (next) => ({ ...next, role: "worker" }),
+          /only valid for role pm/,
+        ],
+        [
+          "organization drift",
+          () => fs.writeFileSync(orgFile, `${JSON.stringify(organization)}\n`),
+          /SHA256 has drifted/,
+        ],
+        [
+          "schema required field",
+          () => {
+            const invalid = structuredClone(selection);
+            delete invalid.catalog.verifiedAt;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.catalog: missing verifiedAt/,
+        ],
+        [
+          "schema additional field",
+          () => {
+            const invalid = structuredClone(selection);
+            invalid.catalog.unapproved = true;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.catalog: unexpected unapproved/,
+        ],
+        [
+          "schema type",
+          () => {
+            const invalid = structuredClone(selection);
+            invalid.allowedResources = choice.resourceId;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.allowedResources: expected array/,
+        ],
+        ["catalog drift", () => {}, /catalog revision has drifted/],
+      ]) {
+        await t.test(`${label} refuses before Orca creation`, async () => {
+          fs.writeFileSync(orgFile, JSON.stringify(organization));
+          fs.writeFileSync(selectionFile, JSON.stringify(selection));
+          let created = false;
+          const next = structuredClone(args);
+          const replacement = update(next);
+          const rejectedArgs = replacement ?? next;
+          await assert.rejects(
+            () =>
+              createRoleWorktree(rejectedArgs, {
+                ...ports,
+                create: async () => {
+                  created = true;
+                },
+                ...(label === "catalog drift"
+                  ? {
+                      revalidate: () => ({
+                        savable: true,
+                        catalogRevision: "catalog-r2",
+                        providerRevisions: { codex: "codex-r2" },
+                        selections: [{ savable: true }],
+                      }),
+                    }
+                  : {}),
+              }),
+            pattern,
+          );
+          assert.equal(created, false);
+        });
+      }
+    },
+  );
 });
 
 test("the operational role-worktree command opens the session inside creation", async () => {

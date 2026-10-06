@@ -249,12 +249,14 @@ function roleProfileId(org, role, profile) {
 function staffedOrganization(requestedOrg, requestedRole, run) {
   if (requestedOrg.resources === undefined) return requestedOrg;
   const staffing = run.staffing;
+  const bootstrap = run.pmSelection;
   assert(
-    staffing,
+    staffing || (requestedRole === ROOT_ROLE && bootstrap),
     "Resource organization launch requires frozen staffing decisions",
   );
-  const decision =
-    run.workflowTask === undefined
+  const decision = bootstrap
+    ? bootstrap.choice
+    : run.workflowTask === undefined
       ? requestedRole === ROOT_ROLE
         ? staffing.director?.pm
         : undefined
@@ -264,7 +266,7 @@ function staffedOrganization(requestedOrg, requestedRole, run) {
     `No staffing choice recorded for ${run.workflowTask ?? requestedRole}`,
   );
   assert(
-    run.workflowState,
+    bootstrap || run.workflowState,
     "Resource organization launch requires the frozen workflow state",
   );
   const resource = requestedOrg.resources[decision.resourceId];
@@ -273,7 +275,9 @@ function staffedOrganization(requestedOrg, requestedRole, run) {
     `Frozen staffing references unknown resource ${decision.resourceId}`,
   );
   assert(
-    staffing.director?.allowedResources?.includes(decision.resourceId),
+    (
+      bootstrap?.allowedResources ?? staffing.director?.allowedResources
+    )?.includes(decision.resourceId),
     `Frozen staffing resource ${decision.resourceId} lacks director approval`,
   );
   assert(
@@ -285,7 +289,8 @@ function staffedOrganization(requestedOrg, requestedRole, run) {
       PROVIDER_EFFORTS[resource.provider]?.includes(decision.effort),
     `Frozen staffing effort is invalid for ${resource.provider}`,
   );
-  assertStaffingPoolUsable(run.workflowState, requestedOrg, decision);
+  if (!bootstrap)
+    assertStaffingPoolUsable(run.workflowState, requestedOrg, decision);
   const profileId = `staffing-${decision.resourceId}-${decision.model
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -429,6 +434,7 @@ export function resolveRoleLaunch(
     terminal,
     profile: handoffProfile,
     staffing,
+    pmSelection,
     workflowTask,
     workflowState,
   } = {},
@@ -436,6 +442,7 @@ export function resolveRoleLaunch(
   const org = validateOrg(
     staffedOrganization(requestedOrg, requestedRole, {
       staffing,
+      pmSelection,
       workflowTask,
       workflowState,
     }),
@@ -648,6 +655,7 @@ export function roleCommand(
     profile: handoffProfile,
     firstPrompt,
     staffing,
+    pmSelection,
     workflowTask,
     workflowState,
   } = {},
@@ -655,6 +663,7 @@ export function roleCommand(
   const org = validateOrg(
     staffedOrganization(requestedOrg, requestedRole, {
       staffing,
+      pmSelection,
       workflowTask,
       workflowState,
     }),
