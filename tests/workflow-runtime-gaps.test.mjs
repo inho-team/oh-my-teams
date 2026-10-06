@@ -922,3 +922,115 @@ test("review-record accepts failed evidence to record a rejection but never to r
     /Passing implementation evidence required|Evidence did not pass/,
   );
 });
+
+test("refreshGateCache clears a pending gate and allows resumeWorkflow to proceed", async (t) => {
+  const { dir, stateDir, request } = await singleTaskWorkflow(t, {
+    id: "refresh-test",
+  });
+
+  const { writeJSON, readJSON } =
+    await import("../plugins/oh-my-teams/scripts/core.mjs");
+  const { taskHash } =
+    await import("../plugins/oh-my-teams/scripts/contracts.mjs");
+  const { refreshGateCache } =
+    await import("../plugins/oh-my-teams/scripts/gates.mjs");
+  const { saveWorkflowState, readWorkflowSnapshot } =
+    await import("../plugins/oh-my-teams/scripts/workflow-store.mjs");
+  const { verify } =
+    await import("../plugins/oh-my-teams/scripts/evidence.mjs");
+  const { execSync } = await import("node:child_process");
+
+  const snap = readWorkflowSnapshot(stateDir, request.id);
+  snap.state.tasks["a"].state = "submitted";
+  snap.state.tasks["a"].workerRunId = "run-a";
+  saveWorkflowState(stateDir, request.id, snap.state);
+
+  const designTask = readJSON(
+    path.join(
+      stateDir,
+      "workflows",
+      request.id,
+      "tasks",
+      "a",
+      "revisions",
+      "1.json",
+    ),
+  );
+
+  fs.writeFileSync(path.join(dir, "a.txt"), "hello");
+  execSync("git add a.txt", { cwd: dir });
+  execSync("git commit -m 'added a'", { cwd: dir });
+
+  fs.mkdirSync(path.join(stateDir, "evidence"), { recursive: true });
+
+  const actualEvidence = await verify(dir, {
+    baseRef: designTask.baseRef,
+    commands: designTask.checks,
+    environment: designTask.environment,
+    store: path.join(stateDir, "evidence"),
+  });
+
+  const report = {
+    schemaVersion: 1,
+    runId: "run-a",
+    taskId: "a",
+    taskHash: taskHash(designTask),
+    taskRevision: designTask.revision,
+    evidence: actualEvidence,
+  };
+
+  writeJSON(path.join(stateDir, "evidence", actualEvidence.key + ".json"), {
+    schemaVersion: 1,
+    status: "passed",
+    sourceFingerprint: actualEvidence.fingerprint,
+  });
+
+  fs.mkdirSync(path.join(stateDir, "gates"), { recursive: true });
+  writeJSON(path.join(stateDir, "gates", "a.json"), {
+    state: "submitted",
+    taskId: "a",
+    runId: "run-a",
+    gates: { "outcome-accepted": { status: "pending" } },
+  });
+
+  const preRefreshState = resumeWorkflow(
+    stateDir,
+    request.id,
+    snap.state.revision,
+  );
+  assert.equal(
+    preRefreshState.state.tasks["a"].state,
+    "submitted",
+    "Task is submitted and waiting for gate",
+  );
+
+  fs.mkdirSync(path.join(stateDir, "decisions"), { recursive: true });
+  writeJSON(path.join(stateDir, "decisions", "decision-1.json"), {
+    schemaVersion: 1,
+    id: "decision-1",
+    decider: { kind: "pm", executionId: "pm-1" },
+    taskId: "a",
+    taskHash: taskHash(designTask),
+    implementationExecutionId: "run-a",
+    evidenceKey: actualEvidence.key,
+    status: "accepted",
+    reviewIds: [],
+    criteria: ["check"],
+    basis: "Passed",
+  });
+
+  const refreshed = await refreshGateCache(dir, designTask, report, stateDir);
+  assert.equal(refreshed.gates["outcome-accepted"].status, "passed");
+  assert.equal(refreshed.state, "accepted");
+
+  const postRefreshState = resumeWorkflow(
+    stateDir,
+    request.id,
+    preRefreshState.state.revision,
+  );
+  assert.equal(
+    postRefreshState.state.tasks["a"].state,
+    "accepted",
+    "Task transitioned to accepted after gate refresh",
+  );
+});
