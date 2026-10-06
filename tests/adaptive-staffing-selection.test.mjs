@@ -254,6 +254,122 @@ test("PM cannot bypass a frozen director approval with an arbitrary upgrade or l
 });
 
 test("exhausted and unknown pools reject another model selection and launch", async (t) => {
+  await t.test(
+    "a settled call blocks another task's selection and launch in the same Codex pool",
+    async (t) => {
+      const { dir, organization, request, stateDir } = await fixture(t);
+      const verification = structuredClone(
+        JSON.parse(fs.readFileSync(path.join(dir, "task.json"), "utf8")),
+      );
+      verification.id = "verification";
+      writeJSON(path.join(dir, "verification.json"), verification);
+      organization.resources["codex-current"].maxCalls = 1;
+      request.tasks.push({ file: "verification.json", role: "worker" });
+      request.budget = { maxAttempts: 2, maxCalls: 2 };
+      request.staffing.tasks.implementation.choice = {
+        resourceId: "codex-current",
+        model: "gpt-test",
+        effort: "high",
+      };
+      request.staffing.tasks.verification = {
+        ...structuredClone(request.staffing.tasks.implementation),
+        reason: "second task uses the same Codex pool",
+        choice: {
+          resourceId: "codex-current",
+          model: "gpt-test",
+          effort: "high",
+        },
+      };
+      request.staffing.director.changeApprovals = [
+        {
+          id: "director-approval-shared-codex",
+          taskId: "verification",
+          reason: "verified alternate model still uses the shared Codex pool",
+          from: {
+            resourceId: "codex-current",
+            model: "gpt-test",
+            effort: "high",
+          },
+          to: {
+            resourceId: "codex-current",
+            model: "gpt-retry",
+            effort: "high",
+          },
+        },
+      ];
+      await createWorkflow(stateDir, request, organization, dir);
+      const revision = () => readWorkflow(stateDir, request.id).state.revision;
+      const receipt = {
+        executionId: "shared-codex-execution",
+        runId: "shared-codex-run",
+        taskId: "shared-codex-task",
+        dispatchId: "shared-codex-dispatch",
+        worktreeId: `repo::${dir}`,
+      };
+      attachExecution(stateDir, request.id, revision(), {
+        schemaVersion: 1,
+        eventId: "attach-shared-codex-call",
+        attemptId: "shared-codex-attempt",
+        taskId: "implementation",
+        callAllowance: 1,
+        receipt,
+      });
+      recordSettlement(stateDir, request.id, revision(), {
+        schemaVersion: 1,
+        eventId: "settle-shared-codex-call",
+        attemptId: "shared-codex-attempt",
+        taskId: "implementation",
+        executionId: receipt.executionId,
+        outcome: "settled",
+        callsUsed: 1,
+      });
+      const frozen = readWorkflow(stateDir, request.id);
+      const frozenState = structuredClone(frozen.state);
+      const frozenOrganization = structuredClone(frozen.organization);
+      assert.equal(
+        frozen.state.staffing.poolStates["codex-current"].status,
+        "available",
+      );
+
+      assert.throws(
+        () =>
+          changeTaskStaffing(stateDir, request.id, revision(), {
+            schemaVersion: 1,
+            eventId: "select-shared-codex-retry",
+            taskId: "verification",
+            actor: "pm",
+            change: "lateral",
+            reason: "try another model in the same capped Codex pool",
+            choice: {
+              resourceId: "codex-current",
+              model: "gpt-retry",
+              effort: "high",
+            },
+            directorDecision: {
+              id: "director-approval-shared-codex",
+              reason:
+                "verified alternate model still uses the shared Codex pool",
+            },
+          }),
+        /Staffing pool codex-current exhausted its 1 call allowance/,
+      );
+      assert.throws(
+        () =>
+          roleCommand(frozen.organization, "worker", {
+            roles: frozen.state.roles,
+            staffing: frozen.state.staffing,
+            workflowTask: "verification",
+            workflowState: frozen.state,
+          }),
+        /Staffing pool codex-current exhausted its 1 call allowance/,
+      );
+
+      const afterRejections = readWorkflow(stateDir, request.id);
+      assert.deepEqual(afterRejections.organization, frozenOrganization);
+      assert.deepEqual(afterRejections.state, frozenState);
+    },
+  );
+
   const { dir, organization, request, stateDir } = await fixture(t);
   await createWorkflow(stateDir, request, organization, dir);
   const revision = () => readWorkflow(stateDir, request.id).state.revision;
