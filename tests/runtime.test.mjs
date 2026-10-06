@@ -695,22 +695,86 @@ test("concurrent edits cannot both accept the same revision", async (t) => {
     "--revision",
     "1",
   ];
-  // Only these two children get an environment with no claude, codex or agy
-  // executable, so the save path sees every catalog as not installed (the
-  // same condition as a CI runner) instead of the host's live agy models. The
-  // parent process.env is left alone. Case variants of the keys are removed
-  // first because Windows Node reads the first of several case-only twins.
+  // Only these two children get an isolated PATH. Their package-manager
+  // fallback resolves this fixture's executors, so both save paths revalidate
+  // the same catalog instead of observing the host's installed models. Case
+  // variants of the keys are removed first because Windows Node reads the
+  // first of several case-only twins.
   const empty = path.join(dir, "no-executors");
   fs.mkdirSync(empty);
+  const catalog = path.join(dir, "catalog", "npm", "node_modules");
+  const writeCatalogExecutor = (name, source) => {
+    const packageDir = path.join(catalog, name);
+    fs.mkdirSync(packageDir, { recursive: true });
+    writeJSON(path.join(packageDir, "package.json"), { name, bin: "cli.mjs" });
+    fs.writeFileSync(path.join(packageDir, "cli.mjs"), source);
+    fs.writeFileSync(
+      path.join(empty, name),
+      `#!${process.execPath}\n${source}`,
+      {
+        mode: 0o755,
+      },
+    );
+  };
+  writeCatalogExecutor(
+    "claude",
+    'process.stdout.write("fixture-claude 1.0\\n");',
+  );
+  writeCatalogExecutor(
+    "codex",
+    `const models = ${JSON.stringify([
+      {
+        slug: "gpt-5.6-sol",
+        visibility: "list",
+        priority: 1,
+        supported_reasoning_levels: [],
+      },
+      {
+        slug: "gpt-5.6-luna",
+        visibility: "list",
+        priority: 2,
+        supported_reasoning_levels: [],
+      },
+      {
+        slug: "gpt-5.6-terra",
+        visibility: "list",
+        priority: 3,
+        supported_reasoning_levels: [{ effort: "high" }],
+      },
+    ])};
+process.stdout.write(process.argv[2] === "debug" ? JSON.stringify({ models }) : "fixture-codex 1.0\\n");`,
+  );
+  writeCatalogExecutor(
+    "agy",
+    `const models = ${JSON.stringify(
+      [
+        "gpt-oss-120b-medium",
+        "gemini-3.1-pro-high",
+        "gemini-3.8-flash-high",
+        "claude-sonnet-4-6",
+        "claude-opus-4-6-thinking",
+      ]
+        .map((id) => `${id}\t${id}`)
+        .join("\n") + "\n",
+    )};
+process.stdout.write(process.argv[2] === "models" ? models : "fixture-agy 1.0\\n");`,
+  );
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) => !["PATH", "APPDATA"].includes(key.toUpperCase()),
     ),
   );
   env.PATH = empty;
-  env.APPDATA = empty;
+  env.APPDATA = path.dirname(path.dirname(catalog));
   const results = await Promise.all([run(argv, { env }), run(argv, { env })]);
   assert.equal(results.filter((r) => r.code === 0).length, 1);
+  const accepted = results.find((result) => result.code === 0);
+  const receipt = JSON.parse(accepted.stdout).catalogReceipt;
+  assert.ok(
+    receipt.selections.every((selection) =>
+      ["valid", "changed", "delegated"].includes(selection.status),
+    ),
+  );
   const rejected = results.filter((r) => r.code !== 0);
   assert.equal(rejected.length, 1, JSON.stringify(results));
   assert.equal(rejected[0].code, 1, JSON.stringify(results));

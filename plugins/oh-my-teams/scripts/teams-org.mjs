@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Thin CLI adapter for the oh my teams domain modules. */
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,6 +131,7 @@ import {
   increaseWorkflowBudget,
   reopenTask,
   extendIntegrationChecks,
+  changeTaskStaffing,
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
@@ -148,7 +150,11 @@ import {
   shadowModelCheck,
   shadowStatusFilter,
 } from "./jev.mjs";
-import { draftOrganization, draftThreeTierOrganization } from "./org-draft.mjs";
+import {
+  draftOrganization,
+  draftResourceOrganization,
+  draftThreeTierOrganization,
+} from "./org-draft.mjs";
 import {
   bindKickoffRun,
   classifyKickoffEntry,
@@ -211,8 +217,8 @@ import {
 } from "./resources.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
+  org-draft --name NAME --resources provider,... --output FILE [--concurrency N --max-calls N]
   org-draft --name NAME --models PM,WORKER --output FILE [--tiers 1-4 (legacy)]
-            (four model choices without --tiers retain the previous format)
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
   preset --org FILE --name opus-first|balanced|single-subscription|advisor-codex|advisor-claude --revision N
@@ -422,6 +428,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                               (appends checks to an already-frozen, not yet
                               accepted integration task without touching the
                               existing ones)
+  workflow-staffing --id ID --state DIR --revision N --change FILE
+                    (records a PM task staffing change; named upgrades need
+                    an explicit director decision)
   handoff-checkpoint --state DIR --workflow-id ID --workflow-task ID --file FILE
                      [--repo DIR]
                      (validates the checkpoint sections and records HEAD of
@@ -474,7 +483,16 @@ No command automatically pushes, merges, deploys, publishes, or deletes.`;
 
 /** Options each subcommand accepts, keyed by command name. */
 export const ALLOWED_OPTIONS = {
-  "org-draft": ["name", "tiers", "models", "output", "codex-home"],
+  "org-draft": [
+    "name",
+    "tiers",
+    "models",
+    "resources",
+    "concurrency",
+    "max-calls",
+    "output",
+    "codex-home",
+  ],
   init: ["org", "from", "codex-home", "host-default"],
   edit: ["org", "from", "revision", "codex-home", "host-default"],
   preset: ["org", "name", "revision", "apply", "codex-home"],
@@ -543,6 +561,7 @@ export const ALLOWED_OPTIONS = {
     "repo",
     "name",
     "base",
+    "pm-selection",
     "setup",
     "title",
     "brief",
@@ -717,6 +736,8 @@ export const ALLOWED_OPTIONS = {
   "workflow-budget": ["id", "state", "revision", "change"],
   "workflow-reopen": ["id", "state", "revision", "reopen"],
   "workflow-integration-checks": ["id", "state", "revision", "checks"],
+  "workflow-staffing": ["id", "state", "revision", "change"],
+  "workflow-staffing": ["id", "state", "revision", "change"],
   "handoff-checkpoint": [
     "state",
     "workflow-id",
@@ -771,7 +792,7 @@ export const ALLOWED_OPTIONS = {
 
 /** Options each subcommand must receive, keyed by command name. */
 export const REQUIRED_OPTIONS = {
-  "org-draft": ["name", "models", "output"],
+  "org-draft": ["name", "output"],
   init: ["org", "from"],
   edit: ["org", "from", "revision"],
   preset: ["org", "name", "revision"],
@@ -957,6 +978,195 @@ function validateArgs(args) {
   for (const key of REQUIRED_OPTIONS[args.command]) {
     assert(args[key], `--${key} required`);
   }
+  if (args.command === "org-draft") {
+    assert(
+      Boolean(args.models) !== Boolean(args.resources),
+      "org-draft requires exactly one of --resources or --models",
+    );
+    assert(
+      args.resources === undefined || args.tiers === undefined,
+      "--tiers is only available for the legacy --models compatibility input",
+    );
+  }
+}
+
+function sha256(input) {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+const pmBootstrapSelectionSchemaFile = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../schemas/pm-bootstrap-selection.schema.json",
+);
+
+function assertPmBootstrapSchema(value, schema, location = "selection") {
+  const typeMatches = {
+    object:
+      value !== null && typeof value === "object" && !Array.isArray(value),
+    array: Array.isArray(value),
+    string: typeof value === "string",
+    integer: Number.isInteger(value),
+  };
+  if (schema.type)
+    assert(
+      typeMatches[schema.type],
+      `PM bootstrap selection schema rejects ${location}: expected ${schema.type}`,
+    );
+  if (schema.const !== undefined)
+    assert(
+      value === schema.const,
+      `PM bootstrap selection schema rejects ${location}: expected ${JSON.stringify(schema.const)}`,
+    );
+  if (schema.type === "string") {
+    if (schema.minLength !== undefined)
+      assert(
+        value.length >= schema.minLength,
+        `PM bootstrap selection schema rejects ${location}: string is too short`,
+      );
+    if (schema.pattern !== undefined)
+      assert(
+        new RegExp(schema.pattern).test(value),
+        `PM bootstrap selection schema rejects ${location}: pattern mismatch`,
+      );
+    return;
+  }
+  if (schema.type === "integer" && schema.minimum !== undefined) {
+    assert(
+      value >= schema.minimum,
+      `PM bootstrap selection schema rejects ${location}: value is below minimum`,
+    );
+    return;
+  }
+  if (schema.type === "array") {
+    if (schema.minItems !== undefined)
+      assert(
+        value.length >= schema.minItems,
+        `PM bootstrap selection schema rejects ${location}: too few items`,
+      );
+    if (schema.uniqueItems)
+      assert(
+        new Set(value.map((item) => JSON.stringify(item))).size ===
+          value.length,
+        `PM bootstrap selection schema rejects ${location}: duplicate items`,
+      );
+    if (schema.items)
+      value.forEach((item, index) =>
+        assertPmBootstrapSchema(item, schema.items, `${location}[${index}]`),
+      );
+    return;
+  }
+  if (schema.type === "object") {
+    for (const key of schema.required ?? [])
+      assert(
+        Object.hasOwn(value, key),
+        `PM bootstrap selection schema rejects ${location}: missing ${key}`,
+      );
+    if (schema.additionalProperties === false)
+      for (const key of Object.keys(value))
+        assert(
+          Object.hasOwn(schema.properties ?? {}, key),
+          `PM bootstrap selection schema rejects ${location}: unexpected ${key}`,
+        );
+    for (const [key, child] of Object.entries(schema.properties ?? {}))
+      if (Object.hasOwn(value, key))
+        assertPmBootstrapSchema(value[key], child, `${location}.${key}`);
+  }
+}
+
+/**
+ * Reads and revalidates the director's one-time resource choice before the
+ * first PM worktree exists.  The input remains evidence only: both the live
+ * organization bytes and a freshly fetched catalog must still agree with it.
+ *
+ * @param {object} args - Parsed role-worktree-create arguments.
+ * @param {object} org - Current validated organization.
+ * @param {object} ports - Catalog ports used by focused tests.
+ * @returns {Promise<object>} Frozen selection and its input digest.
+ */
+async function validatePmBootstrapSelection(
+  args,
+  org,
+  {
+    catalog = fetchModelCatalog,
+    revalidate = revalidateModelChoices,
+    callerCwd = process.cwd(),
+    readFile = fs.readFileSync,
+  } = {},
+) {
+  assert(args.role === ROOT_ROLE, "--pm-selection is only valid for role pm");
+  assert(
+    org.resources,
+    "--pm-selection is only valid for a resource organization",
+  );
+  assert(
+    !args.state &&
+      !args["workflow-id"] &&
+      !args["workflow-task"] &&
+      !args.worktree,
+    "--pm-selection is only valid while creating the first PM worktree",
+  );
+  assert(
+    path.resolve(args.repo) === path.resolve(callerCwd),
+    "The first PM selection must be validated from the director checkout named by --repo",
+  );
+  const bytes = readFile(path.resolve(args["pm-selection"]));
+  const text = Buffer.isBuffer(bytes) ? bytes.toString("utf8") : String(bytes);
+  let selection;
+  try {
+    selection = JSON.parse(text);
+  } catch {
+    throw new Error("PM bootstrap selection must be valid JSON");
+  }
+  assertPmBootstrapSchema(selection, readJSON(pmBootstrapSelectionSchemaFile));
+  assert(
+    selection.organization.revision === org.revision &&
+      selection.organization.sha256 ===
+        sha256(readFile(path.resolve(args.org))),
+    "PM bootstrap selection organization revision or SHA256 has drifted",
+  );
+  const choice = selection.choice;
+  const resource = org.resources[choice.resourceId];
+  assert(resource, `PM bootstrap resource ${choice.resourceId} is unknown`);
+  assert(
+    selection.allowedResources.includes(choice.resourceId) &&
+      selection.allowedPools.includes(resource.pool),
+    "PM bootstrap selection is outside the director-approved resource or pool",
+  );
+  assert(
+    typeof choice.model === "string" && choice.model.trim(),
+    "PM bootstrap model is required",
+  );
+  const catalogResult = revalidate(await catalog(), [
+    {
+      key: "pm-bootstrap",
+      provider: resource.provider,
+      model: choice.model,
+      ...(choice.effort === undefined ? {} : { effort: choice.effort }),
+      catalogRevision: selection.catalog.providerRevision,
+      touched: true,
+    },
+  ]);
+  assert(
+    catalogResult.savable && catalogResult.selections?.[0]?.savable,
+    "PM bootstrap selection no longer passes catalog verification",
+  );
+  assert(
+    catalogResult.catalogRevision === selection.catalog.catalogRevision &&
+      catalogResult.providerRevisions?.[resource.provider] ===
+        selection.catalog.providerRevision,
+    "PM bootstrap selection catalog revision has drifted",
+  );
+  return {
+    inputSha256: sha256(text),
+    selection: {
+      choice: structuredClone(choice),
+      allowedResources: [...selection.allowedResources],
+      allowedPools: [...selection.allowedPools],
+      reason: selection.reason.trim(),
+      organization: structuredClone(selection.organization),
+      catalog: structuredClone(selection.catalog),
+    },
+  };
 }
 
 /** Parses the comma-separated `--host-default` flag into a profile id list. */
@@ -1007,6 +1217,40 @@ async function revalidateOrgForSave(
   candidate,
   { previousOrg = null, explicitHostDefaultIds = [], codexHome, execute } = {},
 ) {
+  if (candidate.resources !== undefined) {
+    const catalog = await fetchModelCatalog({ codexHome, execute });
+    const selections = Object.entries(candidate.resources).map(
+      ([key, resource]) => {
+        const entry = catalog[resource.provider];
+        const installed =
+          entry?.status === "ok" ||
+          entry?.reasonCode === "no-catalog-interface";
+        return {
+          key,
+          provider: resource.provider,
+          pool: resource.pool,
+          status: installed ? "verified" : "unavailable",
+          savable: installed,
+          reason: installed
+            ? undefined
+            : (entry?.reason ?? "provider catalog is unavailable"),
+          catalogRevision: entry?.catalogRevision ?? null,
+        };
+      },
+    );
+    const rejected = selections.filter((entry) => !entry.savable);
+    assert(
+      rejected.length === 0,
+      "Save refused; the following subscription resources failed catalog verification:\n" +
+        rejected.map((entry) => `${entry.key}: ${entry.reason}`).join("\n"),
+    );
+    return {
+      verifiedAt: catalog.fetchedAt,
+      catalogRevision: catalog.catalogRevision,
+      selections,
+      savable: true,
+    };
+  }
   const unconfirmedHostDefaults = [];
   const selections = Object.entries(candidate.profiles).map(([id, profile]) => {
     const before = previousOrg?.profiles?.[id];
@@ -1058,6 +1302,10 @@ async function revalidateOrgForSave(
 async function applyPreset(args, execute) {
   const current = validateOrg(readJSON(args.org));
   assert(
+    current.resources === undefined,
+    "Model presets are a legacy profile compatibility path and cannot change a resource organization",
+  );
+  assert(
     Number(args.revision) === current.revision,
     "Organization changed; read it again before applying a preset",
   );
@@ -1088,7 +1336,7 @@ function showOrganization(args) {
 
   if (args.json) {
     const orgOutput = structuredClone(org);
-    for (const profile of Object.values(orgOutput.profiles)) {
+    for (const profile of Object.values(orgOutput.profiles ?? {})) {
       profile.displayModel = displayModel(profile.provider, profile.model);
     }
     return { organization: orgOutput, ...status };
@@ -1128,9 +1376,11 @@ async function preflightRoleWorktree(
   environment,
   matrix,
   trustedLaunch = null,
+  workflowRun = {},
 ) {
   const command = roleCommand(organization, args.role, {
     profile: args.profile,
+    ...workflowRun,
   });
   const worktreePath = args.worktree
     ? pathFromWorktreeId(args.worktree)
@@ -1611,6 +1861,9 @@ export async function createRoleWorktree(
     close = runOrcaJson,
     list = runOrcaJson,
     auditorLaunch = resolveAuditorLaunchExecution,
+    catalog = fetchModelCatalog,
+    revalidate = revalidateModelChoices,
+    callerCwd = process.cwd(),
   } = {},
 ) {
   // The auditor is out-of-ladder (role-terminal's own comment: it never
@@ -1650,6 +1903,10 @@ export async function createRoleWorktree(
   assert(
     !hasWorkflow || workflowOptions.every(Boolean),
     "--workflow-id, --workflow-task, and --state must be provided together",
+  );
+  assert(
+    args["pm-selection"] === undefined || args.role === ROOT_ROLE,
+    "--pm-selection is only valid for role pm",
   );
   const sourceWorkflowId = args["prior-workflow-id"];
   const sourceWorkflowTask = args["prior-task-id"];
@@ -1760,6 +2017,18 @@ export async function createRoleWorktree(
     preflightOrganization,
     `Workflow ${args["workflow-id"]} has no frozen organization snapshot`,
   );
+  const pmBootstrap = args["pm-selection"]
+    ? await validatePmBootstrapSelection(args, preflightOrganization, {
+        catalog,
+        revalidate,
+        callerCwd,
+      })
+    : null;
+  assert(
+    !(preflightOrganization.resources && args.role === ROOT_ROLE) ||
+      pmBootstrap,
+    "The first PM launch for a resource organization requires --pm-selection FILE",
+  );
   // D1/checklist 5: the matrix must predict the same pinned-policy launch
   // the nested role-terminal call below will actually open, not a live
   // organization.json read that may since disagree with it.
@@ -1864,6 +2133,16 @@ export async function createRoleWorktree(
     environment,
     matrix,
     auditorTrustedLaunch,
+    hasWorkflow
+      ? {
+          ...(state.roles ? { roles: state.roles } : {}),
+          ...(state.staffing ? { staffing: state.staffing } : {}),
+          workflowTask: args["workflow-task"],
+          workflowState: state,
+        }
+      : pmBootstrap
+        ? { pmSelection: pmBootstrap.selection }
+        : {},
   );
   assert(
     !args.worktree || reusable,
@@ -1889,6 +2168,7 @@ export async function createRoleWorktree(
         ...(auditorTrustedLaunch
           ? { trustedLaunch: auditorTrustedLaunch }
           : {}),
+        ...(pmBootstrap ? { pmSelection: pmBootstrap.selection } : {}),
       }));
   const existingRoleWorktree = Boolean(
     args.worktree && (promotion || reusable),
@@ -2056,6 +2336,14 @@ export async function createRoleWorktree(
         }
       : {}),
     ...(transition ? { transition: transition.transition } : {}),
+    ...(pmBootstrap
+      ? {
+          pmBootstrap: {
+            inputSha256: pmBootstrap.inputSha256,
+            selection: pmBootstrap.selection,
+          },
+        }
+      : {}),
     // D2 rule 6 (director decision, msg_ebb6ab8a8f6b): recordLaunchSafely
     // swallows a launch-ledger write failure so the session itself still
     // opens; without a top-level marker here, `main`'s blockingOutcome never
@@ -2717,6 +3005,7 @@ function launchContext(args) {
       workflowId: args["workflow-id"],
       stateDir,
       workflowState: snapshot.state,
+      ...(snapshot.state.staffing ? { staffing: snapshot.state.staffing } : {}),
       ...(args["workflow-task"] ? { workflowTask: args["workflow-task"] } : {}),
       ...(director ? { director } : {}),
       ...handoffLaunch(args, snapshot.state),
@@ -3086,15 +3375,36 @@ async function writeDraft(args, execute) {
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
   assert(!fs.existsSync(output), "Draft output exists; choose a new path");
-  const models = args.models.split(",");
-  const organization =
-    args.tiers === undefined && models.length === 2
-      ? draftThreeTierOrganization({ name: args.name, models })
+  const resourceDraft = args.resources !== undefined;
+  const organization = resourceDraft
+    ? draftResourceOrganization({
+        name: args.name,
+        resources: args.resources.split(","),
+        concurrency:
+          args.concurrency === undefined ? undefined : Number(args.concurrency),
+        maxCalls:
+          args["max-calls"] === undefined
+            ? undefined
+            : Number(args["max-calls"]),
+      })
+    : args.tiers === undefined && args.models.split(",").length === 2
+      ? draftThreeTierOrganization({
+          name: args.name,
+          models: args.models.split(","),
+        })
       : draftOrganization({
           name: args.name,
           tiers: args.tiers === undefined ? undefined : Number(args.tiers),
-          models,
+          models: args.models.split(","),
         });
+  if (resourceDraft) {
+    const catalogReceipt = await revalidateOrgForSave(organization, {
+      codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
+      execute,
+    });
+    writeJSON(output, organization);
+    return { output, organization, catalogReceipt };
+  }
   const projectDir = path.dirname(output);
   const defaults = await resolveHostDefaults({ project: projectDir });
   if (defaults.codex?.error) {
@@ -3879,7 +4189,11 @@ export async function executeCommand(args, execute) {
         args.brief === undefined
           ? undefined
           : kickoffBriefPrompt(path.resolve(args.brief));
-      const command = roleCommand(org, args.role, { ...runCtx, firstPrompt });
+      const command = roleCommand(org, args.role, {
+        ...runCtx,
+        firstPrompt,
+        ...(args.pmSelection ? { pmSelection: args.pmSelection } : {}),
+      });
       assert(
         !command.runner,
         "An explicit OpenCodex runner has no interactive Orca terminal path; role-terminal cannot run it as native Codex",
@@ -4383,6 +4697,13 @@ export async function executeCommand(args, execute) {
         args.id,
         Number(args.revision),
         readJSON(args.checks),
+      );
+    case "workflow-staffing":
+      return changeTaskStaffing(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.change),
       );
     case "failure-classify": {
       const input = withRuntimeSignal(

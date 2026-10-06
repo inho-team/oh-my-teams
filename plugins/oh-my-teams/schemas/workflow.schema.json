@@ -18,6 +18,10 @@
     "goal": { "type": "string", "minLength": 1 },
     "repo": { "type": "string", "minLength": 1 },
     "integrationTask": { "type": "string", "minLength": 1 },
+    "staffing": {
+      "type": "object",
+      "$comment": "A resource-based workflow freezes the director's catalog evidence, PM choice, and task choices. workflow.mjs validates resource identity and authorization against the frozen organization."
+    },
     "depth": {
       "type": "integer",
       "minimum": 1,

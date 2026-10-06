@@ -6,10 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEPTH_ROLES, readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { REQUIRED_OPTIONS } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import {
-  parseModelChoice,
-  draftOrganization,
-} from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { draftResourceOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { fetchModelCatalog } from "../plugins/oh-my-teams/scripts/model-catalog.mjs";
 import {
   roleCommand,
@@ -297,7 +294,6 @@ test("form points at one structural example, not three overlapping ones", () => 
   ].map((match) => match[1]);
   assert.deepEqual([...new Set(linked)].sort(), [
     "organization.single-subscription.json",
-    "organization.three-tier.json",
   ]);
 });
 
@@ -425,24 +421,17 @@ test("a kickoff is released by its ending, never by a reading", () => {
   assert.match(status, /등록 항목을 지우거나 고쳐 쓰지 않는다/);
 });
 
-test("form asks for PM and Worker models, and not for a ladder size", () => {
+test("form asks for subscription resources, not role models or a ladder size", () => {
   const form = readSkill("form");
-  // Formation used to ask for the name, parents, slots, subscriptions,
-  // fallbacks, exhaustion policy, call limit before a
-  // team existed, and then for a ladder size. Every organization now declares
-  // all four roles; how many a run uses is the PM's depth decision per kickoff.
-  // Four models fit one structured question, so formation asks exactly once.
-  assert.match(form, /질문은 한 번으로 끝납니다/);
-  assert.match(form, /PM과 Worker의 모델을 한꺼번에 묻고/);
-  assert.match(form, /몇 단계로 운영할지는 묻지 않습니다/);
+  assert.match(form, /질문은 한 번으로 끝난다/);
+  assert.match(form, /사용할 구독 자원만/);
+  assert.doesNotMatch(form, /PM·PL·Senior·Junior의 모델을 한꺼번에 묻는다/);
   assert.match(form, /묻지 않고 정하는 것/);
-  // The role-per-model question stays only for existing organizations; its
-  // removal belongs to the adaptive team-staffing kickoff's next wave.
-  assert.match(form, /기존 PL·Senior·Junior 조직의 실행 스냅샷은/);
+  assert.match(form, /명시적인 호환 입력/);
   const draft = /node <runtime> org-draft([^\n`]*)/.exec(form);
   assert.ok(draft, "form must draft the organization");
   assert.doesNotMatch(draft[1], /--tiers/);
-  assert.match(draft[1], /--models <pm>,<worker> /);
+  assert.match(draft[1], /--resources <codex,claude,agy>/);
 });
 
 test("the depth table the PM reads is the depth the runtime applies", () => {
@@ -491,12 +480,7 @@ test("the depth is decided by the PM, reported, and changed through the runtime"
   }
 });
 
-test("every model-catalog choice form documents is one org-draft accepts, Gemini included", async () => {
-  // form no longer offers a fixed table: it builds choices from a live
-  // `model-catalog` query at ask time. This test stubs that query the same
-  // way tests/model-catalog.test.mjs does, then checks that every choice the
-  // documented rules would produce round-trips through parseModelChoice,
-  // draftOrganization and roleCommand exactly the way form/SKILL.md says.
+test("every catalog-verified provider form documents is a resource draft accepts", async () => {
   const fakeExecute = async (argv) => {
     const key = argv.join(" ");
     const table = {
@@ -547,89 +531,22 @@ test("every model-catalog choice form documents is one org-draft accepts, Gemini
 
   const catalog = await fetchModelCatalog({ execute: fakeExecute });
 
-  // Claude has no listing command: form documents this as reading
-  // status "unavailable" with reasonCode "no-catalog-interface" and falling
-  // back to the customary aliases it names explicitly.
   assert.equal(catalog.claude.status, "unavailable");
   assert.equal(catalog.claude.reasonCode, "no-catalog-interface");
-  const CLAUDE_ALIASES = ["fable", "opus", "sonnet", "haiku"];
   const form = readSkill("form");
-  for (const alias of CLAUDE_ALIASES) {
-    assert.match(
-      form,
-      new RegExp(`\`${alias}\``),
-      `form must name the Claude alias ${alias} it falls back to`,
-    );
-  }
-
-  // Codex and Agy both answered "ok": their choices come straight from the
-  // catalog's models array, exactly as form/SKILL.md describes.
   assert.equal(catalog.codex.status, "ok");
   assert.equal(catalog.agy.status, "ok");
-  const codexChoices = catalog.codex.models.map((m) => `codex:${m.id}`);
-  const agyChoices = catalog.agy.models.map((m) => `agy:${m.id}`);
-  assert.deepEqual(codexChoices, ["codex:gpt-6-astra"]);
-  assert.deepEqual(agyChoices, ["agy:gemini-3.1-pro-high"]);
-
-  // Gemini IDs the catalog returns already carry their effort suffix, so a
-  // choice built straight from `id` never needs a separate --effort value.
-  assert.ok(agyChoices[0].endsWith("-high"));
-
-  const allOffered = [
-    ...CLAUDE_ALIASES.map((alias) => `claude:${alias}`),
-    ...codexChoices,
-    ...agyChoices,
-  ];
-  for (const choice of allOffered) {
-    assert.doesNotThrow(() => parseModelChoice(choice), choice);
-  }
-
-  // Verify org-draft accepts each value and role-command builds correct argv:
-  // provider CLI + permission-bypass flag + --model <model>.
-  const BYPASS = {
-    claude: "--dangerously-skip-permissions",
-    codex: "--dangerously-bypass-approvals-and-sandbox",
-    agy: "--dangerously-skip-permissions",
-  };
-  const PLACEHOLDERS = {
-    pm: "claude:fable",
-    pl: "claude:opus",
-    senior: "claude:sonnet",
-    junior: "claude:haiku",
-  };
-  for (const choice of allOffered) {
-    const { provider, model } = parseModelChoice(choice);
-    for (const role of ["pm", "pl", "senior", "junior"]) {
-      const slots = ["pm", "pl", "senior", "junior"].map((r) =>
-        r === role ? choice : PLACEHOLDERS[r],
-      );
-      const org = draftOrganization({ name: "test", models: slots });
-      const cmd = roleCommand(org, role);
-      assert.equal(
-        cmd.argv[0],
-        provider,
-        `${choice}: expected provider ${provider}`,
-      );
-      assert.equal(
-        cmd.argv[1],
-        BYPASS[provider],
-        `${choice}: expected bypass flag`,
-      );
-      if (model !== null) {
-        const modelIdx = cmd.argv.indexOf("--model");
-        assert.ok(modelIdx !== -1, `${choice}: --model flag missing`);
-        assert.equal(
-          cmd.argv[modelIdx + 1],
-          model,
-          `${choice}: expected --model ${model}`,
-        );
-      }
-    }
-  }
-
-  // Gemini effort rules must remain documented.
-  assert.match(form, /requires --effort/);
-  assert.match(form, /결성 보고에 반드시 적고/);
+  const org = draftResourceOrganization({
+    name: "test",
+    resources: ["claude", "codex", "agy"],
+  });
+  assert.deepEqual(Object.keys(org.resources).sort(), [
+    "agy-current",
+    "claude-current",
+    "codex-current",
+  ]);
+  assert.equal(org.profiles, undefined);
+  assert.match(form, /모델을 선택하거나 모델 접근 권한을 단정하지 않는다/);
 });
 
 test("effort is set in adjust, which carries the ranges form no longer does", () => {
@@ -843,47 +760,33 @@ test("roles are launched from their profile, never by hand-typed agent flags", (
   );
 });
 
-test("form says what a default model runs today and reads Codex models at ask time", () => {
+test("form registers catalog-verified subscription resources without choosing models", () => {
   const form = readSkill("form");
-  // "Codex 기본" was chosen as if it named one model, and the only Codex IDs
-  // form knew were a catalog that had already changed.
-  assert.match(form, /node <runtime> host-defaults/);
-  assert.match(form, /codex debug models/);
-  assert.match(form, /`codex:<id>`/);
-  assert.match(form, /지금은 gpt-6-astra가 실행됩니다/);
-  assert.match(form, /현재 해석값/);
-  // The new table (criterion 1) lists gpt-5.6-sol, gpt-5.6-terra and
-  // gpt-5.6-luna as explicit confirmed choices for PL, Senior and Junior.
-  // They are no longer "stale hardcoded IDs" but deliberate selections
-  // verified in the brief (2026-09-17). The provider-confirmation section no
-  // longer enumerates a static Codex list; it refers to codex.listed instead.
-  assert.match(form, /질문 수와 선택지 수는 늘지 않고/);
-  assert.match(form, /서열을 매기지 않는다/);
+  assert.match(form, /node <runtime> model-catalog/);
+  assert.match(form, /사용할 구독 자원만/);
+  assert.match(form, /account·subscription·pool·동시 실행·호출 한도/);
+  assert.match(
+    form,
+    /카탈로그가 실패했을 때 host default나 고정 모델을 추측하여 넣지 않는다/,
+  );
+  assert.doesNotMatch(form, /node <runtime> host-defaults/);
+  assert.doesNotMatch(form, /`codex:<id>`/);
 });
 
-test("form does not hardcode catalog Codex IDs except as marked examples", () => {
+test("form does not hardcode model identifiers or restore role-by-role selection", () => {
   const form = readSkill("form");
-  // The old choice table pinned gpt-5.6-sol/-terra/-luna as confirmed IDs.
-  // Choices now come only from a live model-catalog query, so none of those
-  // stale IDs may appear anywhere in the document.
-  for (const id of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
+  for (const id of [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-6-astra",
+  ]) {
     assert.ok(
       !form.includes(id),
-      `form hardcodes ${id} outside a live model-catalog query`,
+      `form hardcodes ${id} despite resource-only formation`,
     );
   }
-  // gpt-6-astra is the one Codex ID the document keeps, and it must always
-  // sit inside a sentence that marks it explicitly as an example, not as a
-  // confirmed catalog choice.
-  const lines = [...form.matchAll(/^.*gpt-6-astra.*$/gm)];
-  assert.ok(lines.length > 0, "form must still show the gpt-6-astra example");
-  for (const [line] of lines) {
-    assert.match(
-      line,
-      /예를 들어|예:/,
-      `gpt-6-astra must stay inside an example sentence: ${line}`,
-    );
-  }
+  assert.doesNotMatch(form, /PM·PL·Senior·Junior의 모델을 한꺼번에/);
 });
 
 test("planning roles hand the deliverable down instead of writing it", () => {

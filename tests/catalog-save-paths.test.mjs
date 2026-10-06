@@ -11,7 +11,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readJSON, writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
-import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import {
+  draftOrganization,
+  draftResourceOrganization,
+} from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { executeCommand } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const CLAUDE_VERSION_OK = {
@@ -128,6 +131,133 @@ test("init saves normally when every profile checks out against the catalog", as
   assert.equal(result.created, true);
   assert.equal(result.catalogReceipt.savable, true);
   assert.ok(result.catalogReceipt.selections.every((entry) => entry.savable));
+});
+
+test("resource formation saves verified subscriptions without preselecting role models", async (t) => {
+  const dir = tempDir(t);
+  const draft = path.join(dir, "resource-draft.json");
+  const result = await executeCommand(
+    {
+      command: "org-draft",
+      name: "team",
+      resources: "codex,agy",
+      concurrency: "2",
+      "max-calls": "4",
+      output: draft,
+    },
+    fakeExecute(),
+  );
+
+  assert.equal(result.catalogReceipt.savable, true);
+  assert.equal(result.organization.profiles, undefined);
+  assert.equal(result.organization.resources["codex-current"].maxCalls, 4);
+  assert.equal(readJSON(draft).roles.pm.profile, undefined);
+
+  await t.test(
+    "saves a Codex-only organization when the unselected Agy catalog fails",
+    async (t) => {
+      const selectedOnlyDir = tempDir(t);
+      const selectedOnlyDraft = path.join(
+        selectedOnlyDir,
+        "codex-only-draft.json",
+      );
+      const selectedOnly = await executeCommand(
+        {
+          command: "org-draft",
+          name: "codex-only",
+          resources: "codex",
+          output: selectedOnlyDraft,
+        },
+        fakeExecute({ "agy models": COMMAND_FAILED }),
+      );
+
+      assert.equal(selectedOnly.catalogReceipt.savable, true);
+      assert.deepEqual(Object.keys(selectedOnly.organization.resources), [
+        "codex-current",
+      ]);
+      assert.deepEqual(
+        selectedOnly.catalogReceipt.selections.map((entry) => entry.key),
+        ["codex-current"],
+      );
+      assert.equal(
+        readJSON(selectedOnlyDraft).resources["agy-current"],
+        undefined,
+      );
+    },
+  );
+});
+
+test("resource formation rejects a selected provider whose catalog is unavailable", async (t) => {
+  const dir = tempDir(t);
+  await assert.rejects(
+    () =>
+      executeCommand(
+        {
+          command: "org-draft",
+          name: "team",
+          resources: "codex,agy",
+          output: path.join(dir, "resource-draft.json"),
+        },
+        fakeExecute({ "agy models": COMMAND_FAILED }),
+      ),
+    /subscription resources failed catalog verification/,
+  );
+});
+
+test("init and edit reject a resource organization without resources", async (t) => {
+  const dir = tempDir(t);
+  const orgFile = path.join(dir, "organization.json");
+  const valid = draftResourceOrganization({
+    name: "team",
+    resources: ["codex"],
+  });
+  writeJSON(orgFile, valid);
+
+  const emptyResources = structuredClone(valid);
+  emptyResources.resources = {};
+  const fromFile = path.join(dir, "empty-resources.json");
+  writeJSON(fromFile, emptyResources);
+
+  await assert.rejects(
+    () =>
+      executeCommand(
+        { command: "init", org: path.join(dir, "new.json"), from: fromFile },
+        fakeExecute(),
+      ),
+    /at least one subscription resource/i,
+  );
+  await assert.rejects(
+    () =>
+      executeCommand(
+        {
+          command: "edit",
+          org: orgFile,
+          from: fromFile,
+          revision: valid.revision,
+        },
+        fakeExecute(),
+      ),
+    /at least one subscription resource/i,
+  );
+});
+
+test("show --json returns a resource organization without profile decoration", async (t) => {
+  const dir = tempDir(t);
+  const orgFile = path.join(dir, "organization.json");
+  const organization = draftResourceOrganization({
+    name: "team",
+    resources: ["codex"],
+  });
+  writeJSON(orgFile, organization);
+
+  const result = await executeCommand({
+    command: "show",
+    org: orgFile,
+    json: true,
+  });
+
+  assert.equal(result.organization.profiles, undefined);
+  assert.deepEqual(result.organization.resources, organization.resources);
 });
 
 test("init refuses a model the catalog no longer lists", async (t) => {

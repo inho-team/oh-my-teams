@@ -24,6 +24,7 @@ import {
   ROOT_ROLE,
   validateOrg,
 } from "./core.mjs";
+import { assertStaffingPoolUsable } from "./workflow.mjs";
 
 /**
  * How each provider's role reaches an Orca terminal, and under which agent id.
@@ -242,6 +243,82 @@ function roleProfileId(org, role, profile) {
   return profile;
 }
 
+// Resource organizations intentionally do not keep a live profile table. The
+// frozen workflow decision supplies one launch-only profile, so a later
+// organization edit or catalog change cannot silently alter an active run.
+function staffedOrganization(requestedOrg, requestedRole, run) {
+  if (requestedOrg.resources === undefined) return requestedOrg;
+  const staffing = run.staffing;
+  const bootstrap = run.pmSelection;
+  assert(
+    staffing || (requestedRole === ROOT_ROLE && bootstrap),
+    "Resource organization launch requires frozen staffing decisions",
+  );
+  const decision = bootstrap
+    ? bootstrap.choice
+    : run.workflowTask === undefined
+      ? requestedRole === ROOT_ROLE
+        ? staffing.director?.pm
+        : undefined
+      : staffing.tasks?.[run.workflowTask]?.choice;
+  assert(
+    decision,
+    `No staffing choice recorded for ${run.workflowTask ?? requestedRole}`,
+  );
+  assert(
+    bootstrap || run.workflowState,
+    "Resource organization launch requires the frozen workflow state",
+  );
+  const resource = requestedOrg.resources[decision.resourceId];
+  assert(
+    resource,
+    `Frozen staffing references unknown resource ${decision.resourceId}`,
+  );
+  assert(
+    (
+      bootstrap?.allowedResources ?? staffing.director?.allowedResources
+    )?.includes(decision.resourceId),
+    `Frozen staffing resource ${decision.resourceId} lacks director approval`,
+  );
+  assert(
+    typeof decision.model === "string" && decision.model.trim(),
+    "Frozen staffing model required",
+  );
+  assert(
+    decision.effort === undefined ||
+      PROVIDER_EFFORTS[resource.provider]?.includes(decision.effort),
+    `Frozen staffing effort is invalid for ${resource.provider}`,
+  );
+  if (!bootstrap)
+    assertStaffingPoolUsable(run.workflowState, requestedOrg, decision);
+  const profileId = `staffing-${decision.resourceId}-${decision.model
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")}`;
+  const roles = Object.fromEntries(
+    Object.entries(requestedOrg.roles).map(([role, binding]) => [
+      role,
+      { ...binding, profile: profileId, fallbacks: [] },
+    ]),
+  );
+  const { resources: _resources, ...legacyShape } = requestedOrg;
+  return {
+    ...legacyShape,
+    profiles: {
+      [profileId]: {
+        provider: resource.provider,
+        command: [resource.provider],
+        account: resource.account,
+        subscription: resource.subscription,
+        model: decision.model,
+        ...(decision.effort === undefined ? {} : { effort: decision.effort }),
+        pool: resource.pool,
+      },
+    },
+    roles,
+  };
+}
+
 // Whoever works on or reviews a task that changed hands must know which
 // profile did which part; the one taking it over first reads what was left.
 function handoffBrief(workflowState, workflowTask) {
@@ -352,9 +429,24 @@ export function resolveRoleLaunch(
   requestedOrg,
   requestedRole,
   explicit = {},
-  { roles, terminal, profile: handoffProfile } = {},
+  {
+    roles,
+    terminal,
+    profile: handoffProfile,
+    staffing,
+    pmSelection,
+    workflowTask,
+    workflowState,
+  } = {},
 ) {
-  const org = validateOrg(requestedOrg);
+  const org = validateOrg(
+    staffedOrganization(requestedOrg, requestedRole, {
+      staffing,
+      pmSelection,
+      workflowTask,
+      workflowState,
+    }),
+  );
   assert(
     requestedRole !== DIRECTOR_ROLE,
     "이사는 kickoff를 선언한 호스트 세션 자체이며 감독 worker나 역할 터미널로 띄우는 대상이 아니다. " +
@@ -558,9 +650,24 @@ function profileArgv(org, label, profileId, profile, firstPrompt) {
 export function roleCommand(
   requestedOrg,
   requestedRole,
-  { roles, profile: handoffProfile, firstPrompt } = {},
+  {
+    roles,
+    profile: handoffProfile,
+    firstPrompt,
+    staffing,
+    pmSelection,
+    workflowTask,
+    workflowState,
+  } = {},
 ) {
-  const org = validateOrg(requestedOrg);
+  const org = validateOrg(
+    staffedOrganization(requestedOrg, requestedRole, {
+      staffing,
+      pmSelection,
+      workflowTask,
+      workflowState,
+    }),
+  );
   assert(
     requestedRole !== DIRECTOR_ROLE,
     "이사는 kickoff를 선언한 호스트 세션 자체이며 감독 worker나 역할 터미널로 띄우는 대상이 아니다. " +

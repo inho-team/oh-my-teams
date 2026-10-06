@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +26,7 @@ import {
   recordLaunchSafely,
   reclaimIntegratedRoleWorktree,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { draftResourceOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import {
   readTerminalClosures,
   terminalClosureLedgerFile,
@@ -306,67 +308,351 @@ test("role-worktree workflow options reject a state-only context before creation
   assert.deepEqual(effects, []);
 });
 
-test("workflow worktree preflight uses the frozen organization snapshot", async () => {
-  const frozen = roleOrganization();
-  frozen.revision = 15;
-  const live = structuredClone(frozen);
-  live.revision = 16;
-  live.profiles[live.roles.senior.profile] = {
-    ...live.profiles[live.roles.senior.profile],
-    provider: "claude",
-    model: "claude-sonnet-5",
+test("workflow worktree preflight uses the frozen organization snapshot", async (t) => {
+  await t.test("preserves the legacy frozen-profile path", async () => {
+    const frozen = roleOrganization();
+    frozen.revision = 15;
+    const live = structuredClone(frozen);
+    live.revision = 16;
+    live.profiles[live.roles.senior.profile] = {
+      ...live.profiles[live.roles.senior.profile],
+      provider: "claude",
+      model: "claude-sonnet-5",
+    };
+    let liveReads = 0;
+    let created = false;
+    let preflight;
+    await assert.rejects(
+      () =>
+        createRoleWorktree(
+          {
+            org: "/repo/.omt/organization.json",
+            role: "senior",
+            repo: "/repo",
+            name: "frozen-preflight",
+            base: "a".repeat(40),
+            state: "/repo/.omt",
+            "workflow-id": "workflow-r15",
+            "workflow-task": "senior-task",
+          },
+          {
+            organization: () => {
+              liveReads += 1;
+              return live;
+            },
+            read: () =>
+              workflowSnapshot(
+                {
+                  tasks: {
+                    "senior-task": { role: "senior", state: "pending" },
+                  },
+                },
+                frozen,
+              ),
+            environment: async () => ({
+              platform: "win32",
+              shell: "powershell",
+              trustRecordExists: false,
+              codexTrustRecordExists: false,
+              orcaVersion: "1.4.210",
+              cliVersion: "1.2.11",
+            }),
+            matrix: (input) => {
+              preflight = input;
+              return predictLaunchPath(input);
+            },
+            create: async () => {
+              created = true;
+            },
+          },
+        ),
+      /agy-interactive-terminal-unavailable/,
+    );
+    assert.equal(liveReads, 0);
+    assert.equal(created, false);
+    assert.equal(preflight.runner, "agy");
+    assert.equal(preflight.model, "gemini-3.8-flash-high");
+  });
+
+  const organization = draftResourceOrganization({
+    name: "resource-preflight",
+    resources: ["codex"],
+  });
+  const choice = {
+    resourceId: "codex-current",
+    model: "gpt-5.6-sol",
+    effort: "high",
   };
-  let liveReads = 0;
-  let created = false;
-  let preflight;
-  await assert.rejects(
-    () =>
-      createRoleWorktree(
-        {
-          org: "/repo/.omt/organization.json",
-          role: "senior",
-          repo: "/repo",
-          name: "frozen-preflight",
-          base: "a".repeat(40),
-          state: "/repo/.omt",
-          "workflow-id": "workflow-r15",
-          "workflow-task": "senior-task",
+  const staffing = {
+    director: { allowedResources: [choice.resourceId] },
+    tasks: { "resource-task": { choice } },
+    poolStates: {},
+  };
+  const args = {
+    org: "/repo/.omt/organization.json",
+    role: "worker",
+    repo: "/repo",
+    name: "resource-preflight",
+    base: "b".repeat(40),
+    state: "/repo/.omt",
+    "workflow-id": "resource-workflow",
+    "workflow-task": "resource-task",
+  };
+  const resourceState = (nextStaffing) => ({
+    roles: ["pm", "worker"],
+    staffing: nextStaffing,
+    tasks: { "resource-task": { role: "worker", state: "pending" } },
+  });
+
+  await t.test(
+    "uses the frozen resource choice before opening its role session",
+    async () => {
+      let prediction;
+      let created = false;
+      const result = await createRoleWorktree(args, {
+        organization: () => {
+          throw new Error("the live organization must not be read");
         },
-        {
-          organization: () => {
-            liveReads += 1;
-            return live;
-          },
-          read: () =>
-            workflowSnapshot(
-              {
-                tasks: { "senior-task": { role: "senior", state: "pending" } },
-              },
-              frozen,
-            ),
-          environment: async () => ({
-            platform: "win32",
-            shell: "powershell",
-            trustRecordExists: false,
-            codexTrustRecordExists: false,
-            orcaVersion: "1.4.210",
-            cliVersion: "1.2.11",
-          }),
-          matrix: (input) => {
-            preflight = input;
-            return predictLaunchPath(input);
-          },
-          create: async () => {
-            created = true;
-          },
+        read: () => workflowSnapshot(resourceState(staffing), organization),
+        environment,
+        matrix: (input) => {
+          prediction = input;
+          return supervised();
         },
-      ),
-    /agy-interactive-terminal-unavailable/,
+        create: async (_repo, options) => {
+          created = true;
+          const workspace = { id: "wt_resource", path: "/repo/resource" };
+          return {
+            workspace,
+            session: await options.openRoleSession(workspace),
+          };
+        },
+        open: async (workspace) => ({
+          ready: true,
+          terminal: "resource-terminal",
+          role: "worker",
+          worktree: `id:${workspace.id}`,
+          modelRequested: choice.model,
+        }),
+      });
+      assert.equal(created, true);
+      assert.equal(result.session.modelRequested, choice.model);
+      assert.equal(prediction.runner, "codex");
+      assert.equal(prediction.model, choice.model);
+    },
   );
-  assert.equal(liveReads, 0);
-  assert.equal(created, false);
-  assert.equal(preflight.runner, "agy");
-  assert.equal(preflight.model, "gemini-3.8-flash-high");
+
+  for (const [label, nextStaffing, pattern] of [
+    [
+      "missing choice",
+      { ...staffing, tasks: {} },
+      /No staffing choice recorded for resource-task/,
+    ],
+    [
+      "inconsistent choice",
+      {
+        ...staffing,
+        tasks: {
+          "resource-task": {
+            choice: { ...choice, resourceId: "missing-resource" },
+          },
+        },
+      },
+      /Frozen staffing references unknown resource missing-resource/,
+    ],
+    [
+      "exhausted pool",
+      {
+        ...staffing,
+        poolStates: { "codex-current": { status: "exhausted" } },
+      },
+      /Staffing pool codex-current is exhausted/,
+    ],
+  ]) {
+    await t.test(`${label} refuses before create or open`, async () => {
+      const effects = [];
+      await assert.rejects(
+        () =>
+          createRoleWorktree(args, {
+            read: () =>
+              workflowSnapshot(resourceState(nextStaffing), organization),
+            environment,
+            matrix: supervised,
+            create: async () => effects.push("create"),
+            open: async () => effects.push("open"),
+          }),
+        pattern,
+      );
+      assert.deepEqual(effects, []);
+    });
+  }
+
+  await t.test(
+    "the first PM of a resource organization uses one director-verified bootstrap selection",
+    async (t) => {
+      const directory = fs.mkdtempSync(
+        path.join(os.tmpdir(), "omt-pm-bootstrap-"),
+      );
+      t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+      const organization = draftResourceOrganization({
+        name: "pm-bootstrap",
+        resources: ["codex"],
+      });
+      const orgFile = path.join(directory, "organization.json");
+      fs.writeFileSync(orgFile, JSON.stringify(organization));
+      const sha256 = (text) =>
+        crypto.createHash("sha256").update(text).digest("hex");
+      const choice = {
+        resourceId: "codex-current",
+        model: "gpt-5.6-sol",
+        effort: "high",
+      };
+      const selection = {
+        schemaVersion: 1,
+        organization: {
+          revision: organization.revision,
+          sha256: sha256(fs.readFileSync(orgFile)),
+        },
+        catalog: {
+          verifiedAt: "2026-10-07T00:00:00.000Z",
+          catalogRevision: "catalog-r1",
+          providerRevision: "codex-r1",
+        },
+        allowedResources: [choice.resourceId],
+        allowedPools: [choice.resourceId],
+        choice,
+        reason: "The director selected the PM resource for this kickoff.",
+      };
+      const selectionFile = path.join(directory, "selection.json");
+      fs.writeFileSync(selectionFile, JSON.stringify(selection));
+      const args = {
+        org: orgFile,
+        role: "pm",
+        repo: "/repo/director",
+        name: "pm-bootstrap",
+        base: "p".repeat(40),
+        "pm-selection": selectionFile,
+      };
+      const ports = {
+        organization: () => organization,
+        callerCwd: "/repo/director",
+        kickoffs: () => ({
+          kickoffs: [{ pm: { worktreeId: "other-kickoff" } }],
+        }),
+        catalog: async () => ({ catalogRevision: "catalog-r1" }),
+        revalidate: (_catalog, entries) => ({
+          savable: entries[0].model === choice.model,
+          catalogRevision: "catalog-r1",
+          providerRevisions: { codex: "codex-r1" },
+          selections: [{ savable: entries[0].model === choice.model }],
+        }),
+        environment,
+        matrix: supervised,
+        create: async (_repo, options) => {
+          const workspace = { id: "pm-wt", path: "/repo/pm" };
+          return {
+            workspace,
+            session: await options.openRoleSession(workspace),
+          };
+        },
+        open: async (workspace) => ({
+          ready: true,
+          terminal: "pm-terminal",
+          role: "pm",
+          worktree: `id:${workspace.id}`,
+          modelRequested: choice.model,
+        }),
+      };
+      const result = await createRoleWorktree(args, ports);
+      assert.equal(result.session.modelRequested, choice.model);
+      assert.equal(
+        result.pmBootstrap.selection.choice.resourceId,
+        choice.resourceId,
+      );
+      assert.equal(
+        result.pmBootstrap.inputSha256,
+        sha256(fs.readFileSync(selectionFile)),
+      );
+
+      for (const [label, update, pattern] of [
+        [
+          "missing selection",
+          (next) => {
+            delete next["pm-selection"];
+          },
+          /requires --pm-selection/,
+        ],
+        [
+          "other role",
+          (next) => ({ ...next, role: "worker" }),
+          /only valid for role pm/,
+        ],
+        [
+          "organization drift",
+          () => fs.writeFileSync(orgFile, `${JSON.stringify(organization)}\n`),
+          /SHA256 has drifted/,
+        ],
+        [
+          "schema required field",
+          () => {
+            const invalid = structuredClone(selection);
+            delete invalid.catalog.verifiedAt;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.catalog: missing verifiedAt/,
+        ],
+        [
+          "schema additional field",
+          () => {
+            const invalid = structuredClone(selection);
+            invalid.catalog.unapproved = true;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.catalog: unexpected unapproved/,
+        ],
+        [
+          "schema type",
+          () => {
+            const invalid = structuredClone(selection);
+            invalid.allowedResources = choice.resourceId;
+            fs.writeFileSync(selectionFile, JSON.stringify(invalid));
+          },
+          /schema rejects selection.allowedResources: expected array/,
+        ],
+        ["catalog drift", () => {}, /catalog revision has drifted/],
+      ]) {
+        await t.test(`${label} refuses before Orca creation`, async () => {
+          fs.writeFileSync(orgFile, JSON.stringify(organization));
+          fs.writeFileSync(selectionFile, JSON.stringify(selection));
+          let created = false;
+          const next = structuredClone(args);
+          const replacement = update(next);
+          const rejectedArgs = replacement ?? next;
+          await assert.rejects(
+            () =>
+              createRoleWorktree(rejectedArgs, {
+                ...ports,
+                create: async () => {
+                  created = true;
+                },
+                ...(label === "catalog drift"
+                  ? {
+                      revalidate: () => ({
+                        savable: true,
+                        catalogRevision: "catalog-r2",
+                        providerRevisions: { codex: "codex-r2" },
+                        selections: [{ savable: true }],
+                      }),
+                    }
+                  : {}),
+              }),
+            pattern,
+          );
+          assert.equal(created, false);
+        });
+      }
+    },
+  );
 });
 
 test("the operational role-worktree command opens the session inside creation", async () => {

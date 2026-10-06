@@ -762,10 +762,18 @@ function validateProfile(id, profile, pools) {
 }
 
 function validateRole(role, binding, org) {
-  assert(
-    Object.hasOwn(org.profiles, binding.profile),
-    `Unknown profile for ${role}`,
-  );
+  const resourceOrganization = org.resources !== undefined;
+  if (resourceOrganization) {
+    assert(
+      binding.profile === undefined,
+      `Resource organization role ${role} must not preselect a profile`,
+    );
+  } else {
+    assert(
+      Object.hasOwn(org.profiles, binding.profile),
+      `Unknown profile for ${role}`,
+    );
+  }
   assert(
     Number.isInteger(binding.concurrency) &&
       binding.concurrency >= 1 &&
@@ -805,12 +813,51 @@ function validateRole(role, binding, org) {
   assert(
     Array.isArray(binding.fallbacks) &&
       new Set(binding.fallbacks).size === binding.fallbacks.length &&
-      !binding.fallbacks.includes(binding.profile) &&
-      binding.fallbacks.every((profile) =>
-        Object.hasOwn(org.profiles, profile),
-      ),
+      (resourceOrganization
+        ? binding.fallbacks.length === 0
+        : !binding.fallbacks.includes(binding.profile) &&
+          binding.fallbacks.every((profile) =>
+            Object.hasOwn(org.profiles, profile),
+          )),
     `Invalid fallbacks: ${role}`,
   );
+}
+
+function validateResources(resources, pools) {
+  assert(
+    resources &&
+      typeof resources === "object" &&
+      !Array.isArray(resources) &&
+      Object.keys(resources).length > 0,
+    "Resource organization needs at least one subscription resource",
+  );
+  for (const [id, resource] of Object.entries(resources)) {
+    assert(
+      resource &&
+        PROVIDER_IDS.includes(resource.provider) &&
+        resource.provider !== "ollama" &&
+        resource.account === "current" &&
+        typeof resource.subscription === "string" &&
+        resource.subscription.trim() &&
+        typeof resource.pool === "string" &&
+        id === `${resource.provider}-current` &&
+        resource.pool === id &&
+        Object.hasOwn(pools, resource.pool),
+      `Invalid subscription resource: ${id}`,
+    );
+    assert(
+      Number.isInteger(resource.concurrency) &&
+        resource.concurrency >= 1 &&
+        resource.concurrency <= 32,
+      `Invalid resource concurrency: ${id}`,
+    );
+    assert(
+      Number.isInteger(resource.maxCalls) &&
+        resource.maxCalls >= 1 &&
+        resource.maxCalls <= 20,
+      `Invalid resource maxCalls: ${id}`,
+    );
+  }
 }
 
 /**
@@ -829,10 +876,7 @@ export function validateOrg(org) {
     Number.isInteger(org.revision) && org.revision >= 1,
     "Positive revision required",
   );
-  assert(
-    org.profiles && org.roles && org.policy,
-    "profiles, roles and policy required",
-  );
+  assert(org.roles && org.policy, "roles and policy required");
 
   if (org.modelPolicy) {
     assert(
@@ -848,8 +892,21 @@ export function validateOrg(org) {
 
   const pools = org.pools ?? {};
   validatePools(pools);
-  for (const [id, profile] of Object.entries(org.profiles)) {
-    validateProfile(id, profile, pools);
+  if (org.resources !== undefined) {
+    assert(
+      org.profiles === undefined,
+      "Resource organization must not keep legacy profiles",
+    );
+    assert(
+      org.assistants === undefined && org.advisors === undefined,
+      "Resource organization must not preselect assistants or advisors",
+    );
+    validateResources(org.resources, pools);
+  } else {
+    assert(org.profiles, "Legacy organization profiles required");
+    for (const [id, profile] of Object.entries(org.profiles)) {
+      validateProfile(id, profile, pools);
+    }
   }
 
   // An organization may run a reduced ladder, so only PM is mandatory. Role
@@ -1259,9 +1316,20 @@ export function displayModel(provider, model) {
 export function chart(org) {
   validateOrg(org);
   const lines = [`Organization: ${org.name} (revision ${org.revision})`];
+  const resourceOrganization = org.resources !== undefined;
 
   function visit(role, depth) {
     const binding = org.roles[role];
+    if (resourceOrganization) {
+      lines.push(
+        `${"  ".repeat(depth)}${role.toUpperCase()}: resource-selected-at-run` +
+          ` | slots=${binding.concurrency}`,
+      );
+      definedRoles(org)
+        .filter((child) => org.roles[child].parent === role)
+        .forEach((child) => visit(child, depth + 1));
+      return;
+    }
     const profile = org.profiles[binding.profile];
     lines.push(
       `${"  ".repeat(depth)}${role.toUpperCase()}: ${binding.profile}` +
@@ -1282,6 +1350,14 @@ export function chart(org) {
         `${id} (${displayModel(org.profiles[id].provider, org.profiles[id].model)})`,
     );
     lines.push(`ADVISOR for ${role.toUpperCase()}: ${models.join(", ")}`);
+  }
+  if (resourceOrganization) {
+    for (const [id, resource] of Object.entries(org.resources)) {
+      lines.push(
+        `RESOURCE ${id}: ${resource.subscription} | pool=${resource.pool}` +
+          ` | slots=${resource.concurrency} | calls=${resource.maxCalls}`,
+      );
+    }
   }
   return lines.join("\n");
 }
