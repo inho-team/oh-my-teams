@@ -113,7 +113,7 @@ function receiptBody(receipt) {
 function closureProvesLaunch(closure, launch, worktreeId, location) {
   if (
     closure?.worktreeId !== worktreeId ||
-    path.resolve(closure.worktreePath ?? "") !== location ||
+    path.resolve(closure.worktreePath ?? "") !== path.resolve(location) ||
     !closure.at ||
     !launch.at ||
     closure.at < launch.at
