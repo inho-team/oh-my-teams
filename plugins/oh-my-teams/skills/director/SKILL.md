@@ -17,6 +17,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 - 여러 kickoff를 동시에 감독하고, PM의 결정 요청(`director-signal --kind decision`)에 결정을 내린다.
 - `director-inbox --org <project>/.omt/organization.json`으로 미처리 신호를 조회하고, `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`로 결정을 기록하고 PM 터미널에 전달하며, `director-ack --org <project>/.omt/organization.json --signal <id>`으로 수신을 확인한다.
 - `director-watch --org <project>/.omt/organization.json`으로 kickoff별 신호·슬롯 점유·여유 메모리·PM liveness·PM 화면의 provider 과부하 여부를 한 번에 조회한다.
+- 자원 조직의 첫 PM 워크트리를 만들기 전에는 [`pm-bootstrap-selection.schema.json`](../../schemas/pm-bootstrap-selection.schema.json)에 맞춘 이사 선택 파일을 만들고, 이사 checkout에서 `role-worktree-create`의 `--pm-selection`으로 전달한다.
 - 무거운 작업 전에 `resource-acquire --org <project>/.omt/organization.json --worktree <pm> --kind test|worker|build --note ...`로 자원 슬롯을 확보하고, 작업이 끝나면 `resource-release --org <project>/.omt/organization.json --slot <slotId>`로 해제한다.
 - `close`로 성공한 kickoff를 전달·병합·정리하고, `disband`로 실패하거나 취소된 kickoff를 해체한다.
 - 주인 브랜치 병합 여부를 결정한다.
@@ -146,4 +147,3 @@ node <runtime> resource-release --org <project>/.omt/organization.json --slot <s
 ```
 
 `--owner-pid`에는 슬롯을 점유하는 오래 실행되는 프로세스(작업을 실행하는 세션이나 worker)의 PID를 넘긴다. 그 프로세스가 끝나면 다음 획득 때 슬롯이 회수된다. 생략하면 소유자가 알 수 없는 슬롯이 되어 자동으로 회수되지 않고 `resource-release`로만 해제되므로, 결과의 `warning`이 알려 주는 슬롯 ID를 작업이 끝날 때 반드시 해제한다.
-

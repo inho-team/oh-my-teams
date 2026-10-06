@@ -86,7 +86,7 @@ agy --model claude-opus-4-6-thinking ...
 node <runtime> worker-start --org <organization.json> --role <pl|senior|junior> --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <handle> --worktree <selector> --spec <작업> [--run <runId>]
 ```
 
-`<run-bound-worktree>`는 Run에 바인딩된 터미널이 서 있는 워크트리다. PM이 시작하면 PM 워크트리이고, 자기 Run을 바인딩한 PL이 시작하면 PL 워크트리다. `<pm-state>`는 PM 워크트리의 `.omt` 디렉터리로, 등록 항목의 `pm.stateDir`와 같으며 PL과 worker도 이 경로를 함께 쓴다. `--terminal`에는 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 연 터미널을 넘긴다. 래퍼는 새 agent 터미널을 띄우지 않는다.
+`<run-bound-worktree>`는 Run에 바인딩된 터미널이 서 있는 워크트리다. PM이 시작하면 PM 워크트리이고, 자기 Run을 바인딩한 PL이 시작하면 PL 워크트리다. `<pm-state>`는 PM 워크트리의 `.omt` 디렉터리로, 등록 항목의 `pm.stateDir`와 같으며 PL과 worker도 이 경로를 함께 쓴다. 자원 조직의 첫 PM 워크트리는 이사가 `role-worktree-create --pm-selection <선택 파일>`로 열며, 선택 파일 형식은 [`pm-bootstrap-selection.schema.json`](../schemas/pm-bootstrap-selection.schema.json)을 따른다. `--terminal`에는 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 연 터미널을 넘긴다. 래퍼는 새 agent 터미널을 띄우지 않는다.
 
 래퍼는 worker가 시작되면 receipt의 `effects`에 기록된 agent 터미널의 탭 제목을 역할 태그로 시작하게 바꾼다. 제목은 `[PL] <워크트리 이름>` 형식이며, `--title`을 주면 워크트리 이름 대신 그 문구가 태그 뒤에 온다. `--worktree current`처럼 워크트리 이름을 알 수 없고 `--title`도 없으면 제목을 바꾸지 않고 `role-terminal`이 붙인 제목을 유지한다. 같은 워크트리에서 같은 역할을 둘 이상 띄울 때에는 `--title`로 작업을 구분한다. 결과의 `title`과 `titlePinned`가 적용한 제목과 성공 여부를 나타내며, 제목 변경에 실패해도 이미 시작된 worker를 실패로 처리하지 않는다. 탭 제목을 붙이는 이유는 아래 「역할 탭 제목」 절에 있다.
 

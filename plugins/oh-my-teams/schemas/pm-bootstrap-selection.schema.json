@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "oh my teams first PM resource selection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "organization",
+    "catalog",
+    "allowedResources",
+    "allowedPools",
+    "choice",
+    "reason"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "organization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "sha256"],
+      "properties": {
+        "revision": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verifiedAt", "catalogRevision", "providerRevision"],
+      "properties": {
+        "verifiedAt": { "type": "string", "minLength": 1 },
+        "catalogRevision": { "type": "string", "minLength": 1 },
+        "providerRevision": { "type": "string", "minLength": 1 }
+      }
+    },
+    "allowedResources": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "allowedPools": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceId", "model"],
+      "properties": {
+        "resourceId": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reason": { "type": "string", "minLength": 1 }
+  }
+}

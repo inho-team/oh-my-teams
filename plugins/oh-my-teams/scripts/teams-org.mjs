@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Thin CLI adapter for the oh my teams domain modules. */
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -560,6 +561,7 @@ export const ALLOWED_OPTIONS = {
     "repo",
     "name",
     "base",
+    "pm-selection",
     "setup",
     "title",
     "brief",
@@ -986,6 +988,185 @@ function validateArgs(args) {
       "--tiers is only available for the legacy --models compatibility input",
     );
   }
+}
+
+function sha256(input) {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+const pmBootstrapSelectionSchemaFile = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../schemas/pm-bootstrap-selection.schema.json",
+);
+
+function assertPmBootstrapSchema(value, schema, location = "selection") {
+  const typeMatches = {
+    object:
+      value !== null && typeof value === "object" && !Array.isArray(value),
+    array: Array.isArray(value),
+    string: typeof value === "string",
+    integer: Number.isInteger(value),
+  };
+  if (schema.type)
+    assert(
+      typeMatches[schema.type],
+      `PM bootstrap selection schema rejects ${location}: expected ${schema.type}`,
+    );
+  if (schema.const !== undefined)
+    assert(
+      value === schema.const,
+      `PM bootstrap selection schema rejects ${location}: expected ${JSON.stringify(schema.const)}`,
+    );
+  if (schema.type === "string") {
+    if (schema.minLength !== undefined)
+      assert(
+        value.length >= schema.minLength,
+        `PM bootstrap selection schema rejects ${location}: string is too short`,
+      );
+    if (schema.pattern !== undefined)
+      assert(
+        new RegExp(schema.pattern).test(value),
+        `PM bootstrap selection schema rejects ${location}: pattern mismatch`,
+      );
+    return;
+  }
+  if (schema.type === "integer" && schema.minimum !== undefined) {
+    assert(
+      value >= schema.minimum,
+      `PM bootstrap selection schema rejects ${location}: value is below minimum`,
+    );
+    return;
+  }
+  if (schema.type === "array") {
+    if (schema.minItems !== undefined)
+      assert(
+        value.length >= schema.minItems,
+        `PM bootstrap selection schema rejects ${location}: too few items`,
+      );
+    if (schema.uniqueItems)
+      assert(
+        new Set(value.map((item) => JSON.stringify(item))).size ===
+          value.length,
+        `PM bootstrap selection schema rejects ${location}: duplicate items`,
+      );
+    if (schema.items)
+      value.forEach((item, index) =>
+        assertPmBootstrapSchema(item, schema.items, `${location}[${index}]`),
+      );
+    return;
+  }
+  if (schema.type === "object") {
+    for (const key of schema.required ?? [])
+      assert(
+        Object.hasOwn(value, key),
+        `PM bootstrap selection schema rejects ${location}: missing ${key}`,
+      );
+    if (schema.additionalProperties === false)
+      for (const key of Object.keys(value))
+        assert(
+          Object.hasOwn(schema.properties ?? {}, key),
+          `PM bootstrap selection schema rejects ${location}: unexpected ${key}`,
+        );
+    for (const [key, child] of Object.entries(schema.properties ?? {}))
+      if (Object.hasOwn(value, key))
+        assertPmBootstrapSchema(value[key], child, `${location}.${key}`);
+  }
+}
+
+/**
+ * Reads and revalidates the director's one-time resource choice before the
+ * first PM worktree exists.  The input remains evidence only: both the live
+ * organization bytes and a freshly fetched catalog must still agree with it.
+ *
+ * @param {object} args - Parsed role-worktree-create arguments.
+ * @param {object} org - Current validated organization.
+ * @param {object} ports - Catalog ports used by focused tests.
+ * @returns {Promise<object>} Frozen selection and its input digest.
+ */
+async function validatePmBootstrapSelection(
+  args,
+  org,
+  {
+    catalog = fetchModelCatalog,
+    revalidate = revalidateModelChoices,
+    callerCwd = process.cwd(),
+    readFile = fs.readFileSync,
+  } = {},
+) {
+  assert(args.role === ROOT_ROLE, "--pm-selection is only valid for role pm");
+  assert(
+    org.resources,
+    "--pm-selection is only valid for a resource organization",
+  );
+  assert(
+    !args.state &&
+      !args["workflow-id"] &&
+      !args["workflow-task"] &&
+      !args.worktree,
+    "--pm-selection is only valid while creating the first PM worktree",
+  );
+  assert(
+    path.resolve(args.repo) === path.resolve(callerCwd),
+    "The first PM selection must be validated from the director checkout named by --repo",
+  );
+  const bytes = readFile(path.resolve(args["pm-selection"]));
+  const text = Buffer.isBuffer(bytes) ? bytes.toString("utf8") : String(bytes);
+  let selection;
+  try {
+    selection = JSON.parse(text);
+  } catch {
+    throw new Error("PM bootstrap selection must be valid JSON");
+  }
+  assertPmBootstrapSchema(selection, readJSON(pmBootstrapSelectionSchemaFile));
+  assert(
+    selection.organization.revision === org.revision &&
+      selection.organization.sha256 ===
+        sha256(readFile(path.resolve(args.org))),
+    "PM bootstrap selection organization revision or SHA256 has drifted",
+  );
+  const choice = selection.choice;
+  const resource = org.resources[choice.resourceId];
+  assert(resource, `PM bootstrap resource ${choice.resourceId} is unknown`);
+  assert(
+    selection.allowedResources.includes(choice.resourceId) &&
+      selection.allowedPools.includes(resource.pool),
+    "PM bootstrap selection is outside the director-approved resource or pool",
+  );
+  assert(
+    typeof choice.model === "string" && choice.model.trim(),
+    "PM bootstrap model is required",
+  );
+  const catalogResult = revalidate(await catalog(), [
+    {
+      key: "pm-bootstrap",
+      provider: resource.provider,
+      model: choice.model,
+      ...(choice.effort === undefined ? {} : { effort: choice.effort }),
+      catalogRevision: selection.catalog.providerRevision,
+      touched: true,
+    },
+  ]);
+  assert(
+    catalogResult.savable && catalogResult.selections?.[0]?.savable,
+    "PM bootstrap selection no longer passes catalog verification",
+  );
+  assert(
+    catalogResult.catalogRevision === selection.catalog.catalogRevision &&
+      catalogResult.providerRevisions?.[resource.provider] ===
+        selection.catalog.providerRevision,
+    "PM bootstrap selection catalog revision has drifted",
+  );
+  return {
+    inputSha256: sha256(text),
+    selection: {
+      choice: structuredClone(choice),
+      allowedResources: [...selection.allowedResources],
+      allowedPools: [...selection.allowedPools],
+      reason: selection.reason.trim(),
+      organization: structuredClone(selection.organization),
+      catalog: structuredClone(selection.catalog),
+    },
+  };
 }
 
 /** Parses the comma-separated `--host-default` flag into a profile id list. */
@@ -1680,6 +1861,9 @@ export async function createRoleWorktree(
     close = runOrcaJson,
     list = runOrcaJson,
     auditorLaunch = resolveAuditorLaunchExecution,
+    catalog = fetchModelCatalog,
+    revalidate = revalidateModelChoices,
+    callerCwd = process.cwd(),
   } = {},
 ) {
   // The auditor is out-of-ladder (role-terminal's own comment: it never
@@ -1719,6 +1903,10 @@ export async function createRoleWorktree(
   assert(
     !hasWorkflow || workflowOptions.every(Boolean),
     "--workflow-id, --workflow-task, and --state must be provided together",
+  );
+  assert(
+    args["pm-selection"] === undefined || args.role === ROOT_ROLE,
+    "--pm-selection is only valid for role pm",
   );
   const sourceWorkflowId = args["prior-workflow-id"];
   const sourceWorkflowTask = args["prior-task-id"];
@@ -1828,6 +2016,18 @@ export async function createRoleWorktree(
   assert(
     preflightOrganization,
     `Workflow ${args["workflow-id"]} has no frozen organization snapshot`,
+  );
+  const pmBootstrap = args["pm-selection"]
+    ? await validatePmBootstrapSelection(args, preflightOrganization, {
+        catalog,
+        revalidate,
+        callerCwd,
+      })
+    : null;
+  assert(
+    !(preflightOrganization.resources && args.role === ROOT_ROLE) ||
+      pmBootstrap,
+    "The first PM launch for a resource organization requires --pm-selection FILE",
   );
   // D1/checklist 5: the matrix must predict the same pinned-policy launch
   // the nested role-terminal call below will actually open, not a live
@@ -1940,7 +2140,9 @@ export async function createRoleWorktree(
           workflowTask: args["workflow-task"],
           workflowState: state,
         }
-      : {},
+      : pmBootstrap
+        ? { pmSelection: pmBootstrap.selection }
+        : {},
   );
   assert(
     !args.worktree || reusable,
@@ -1966,6 +2168,7 @@ export async function createRoleWorktree(
         ...(auditorTrustedLaunch
           ? { trustedLaunch: auditorTrustedLaunch }
           : {}),
+        ...(pmBootstrap ? { pmSelection: pmBootstrap.selection } : {}),
       }));
   const existingRoleWorktree = Boolean(
     args.worktree && (promotion || reusable),
@@ -2133,6 +2336,14 @@ export async function createRoleWorktree(
         }
       : {}),
     ...(transition ? { transition: transition.transition } : {}),
+    ...(pmBootstrap
+      ? {
+          pmBootstrap: {
+            inputSha256: pmBootstrap.inputSha256,
+            selection: pmBootstrap.selection,
+          },
+        }
+      : {}),
     // D2 rule 6 (director decision, msg_ebb6ab8a8f6b): recordLaunchSafely
     // swallows a launch-ledger write failure so the session itself still
     // opens; without a top-level marker here, `main`'s blockingOutcome never
@@ -3978,7 +4189,11 @@ export async function executeCommand(args, execute) {
         args.brief === undefined
           ? undefined
           : kickoffBriefPrompt(path.resolve(args.brief));
-      const command = roleCommand(org, args.role, { ...runCtx, firstPrompt });
+      const command = roleCommand(org, args.role, {
+        ...runCtx,
+        firstPrompt,
+        ...(args.pmSelection ? { pmSelection: args.pmSelection } : {}),
+      });
       assert(
         !command.runner,
         "An explicit OpenCodex runner has no interactive Orca terminal path; role-terminal cannot run it as native Codex",
