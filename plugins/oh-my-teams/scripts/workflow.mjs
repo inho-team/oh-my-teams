@@ -122,7 +122,97 @@ export function validateWorkflowRequest(request) {
     Number.isInteger(request.budget?.maxCalls) && request.budget.maxCalls >= 1,
     "Workflow maxCalls required",
   );
+  if (request.staffing !== undefined)
+    assert(typeof request.staffing === "object", "Staffing must be an object");
   return request;
+}
+
+function assertText(value, message) {
+  assert(typeof value === "string" && value.trim(), message);
+}
+
+function validateStaffingChoice(choice, organization, allowedResources) {
+  assert(choice && typeof choice === "object", "Staffing choice required");
+  assertText(choice.resourceId, "Staffing resourceId required");
+  assertText(choice.model, "Staffing model required");
+  const resource = organization.resources?.[choice.resourceId];
+  assert(resource, `Unknown staffing resource: ${choice.resourceId}`);
+  assert(
+    allowedResources.includes(choice.resourceId),
+    `Staffing resource ${choice.resourceId} is not director-approved`,
+  );
+  assert(
+    choice.effort === undefined ||
+      (typeof choice.effort === "string" && choice.effort.trim()),
+    "Staffing effort must be a non-empty string when given",
+  );
+  return resource;
+}
+
+// A staffing record is deliberately evidence, not a price or capability table.
+// The caller states the observed risk factors and the director fixes the set of
+// resources PM may consume. This avoids deriving a cost order from model names.
+function validateStaffingRequest(request, organization, tasks) {
+  const staffing = request.staffing;
+  assert(
+    staffing?.schemaVersion === 1 && staffing.catalog && staffing.director,
+    "Staffing needs schemaVersion=1, catalog and director decisions",
+  );
+  assertText(staffing.catalog.revision, "Staffing catalog revision required");
+  assertText(
+    staffing.catalog.verifiedAt,
+    "Staffing catalog verification time required",
+  );
+  assert(
+    Array.isArray(staffing.director.allowedResources) &&
+      staffing.director.allowedResources.length > 0 &&
+      new Set(staffing.director.allowedResources).size ===
+        staffing.director.allowedResources.length,
+    "Director-approved staffing resources required",
+  );
+  assertText(
+    staffing.director.complexity,
+    "Director complexity evidence required",
+  );
+  assertText(staffing.director.risk, "Director risk evidence required");
+  assertText(staffing.director.context, "Director context evidence required");
+  assertText(staffing.director.reason, "Director staffing reason required");
+  validateStaffingChoice(
+    staffing.director.pm,
+    organization,
+    staffing.director.allowedResources,
+  );
+  assert(
+    staffing.tasks && typeof staffing.tasks === "object",
+    "Task staffing required",
+  );
+  assert(
+    Object.keys(staffing.tasks).length === tasks.length,
+    "Every workflow task needs one staffing decision",
+  );
+  for (const [index, task] of tasks.entries()) {
+    const decision = staffing.tasks[task.id];
+    assert(decision, `Missing staffing decision for task ${task.id}`);
+    assert(
+      decision.role === request.tasks[index].role,
+      `Staffing role for ${task.id} must match its workflow role`,
+    );
+    for (const field of [
+      "designComplexity",
+      "changeScope",
+      "reviewIndependence",
+      "reworkCost",
+      "reason",
+    ]) {
+      assertText(decision[field], `Staffing ${field} required for ${task.id}`);
+    }
+    validateStaffingChoice(
+      decision.choice,
+      organization,
+      staffing.director.allowedResources,
+    );
+  }
+  return staffing;
 }
 
 function validateGraph(tasks) {
@@ -215,7 +305,7 @@ function createTaskState(task, requestedRole, roles) {
   return item;
 }
 
-function createInitialState(request, org, tasks) {
+function createInitialState(request, org, tasks, staffing) {
   const createdAt = new Date().toISOString();
   const roleByTask = Object.fromEntries(
     request.tasks.map((item, index) => [tasks[index].id, item.role]),
@@ -244,10 +334,14 @@ function createInitialState(request, org, tasks) {
       callsUsed: 0,
     },
     policy: request.policy,
+    ...(staffing ? { staffing } : {}),
     tasks: Object.fromEntries(
       tasks.map((task) => [
         task.id,
-        createTaskState(task, roleByTask[task.id], roles),
+        {
+          ...createTaskState(task, roleByTask[task.id], roles),
+          ...(staffing ? { staffing: staffing.tasks[task.id] } : {}),
+        },
       ]),
     ),
     eventIds: [],
@@ -287,6 +381,13 @@ export async function createWorkflow(
   );
   const repo = fs.realpathSync(path.resolve(baseDir, request.repo));
   const tasks = await freezeTasks(request, baseDir, repo);
+  const staffing = org.resources
+    ? validateStaffingRequest(request, org, tasks)
+    : undefined;
+  assert(
+    !org.resources || staffing,
+    "Resource organizations require frozen staffing decisions",
+  );
   let integrationTask = null;
   if (request.integrationTask) {
     integrationTask = validateTask(
@@ -331,7 +432,7 @@ export async function createWorkflow(
       );
     }
 
-    const state = createInitialState(request, org, tasks);
+    const state = createInitialState(request, org, tasks, staffing);
     state.integration = {
       required: tasks.length > 1 || Boolean(integrationTask),
       taskHash: integrationTask ? taskHash(integrationTask) : null,
@@ -363,6 +464,106 @@ export function readWorkflow(stateDir, id) {
   // A workflow frozen before 2.6.0 may bind intern; it runs on the migrated
   // ladder, and its stored roles resolve through the legacy aliases.
   return { ...snapshot, organization: migrateLegacyOrg(snapshot.organization) };
+}
+
+function validateStaffingChange(input) {
+  assert(
+    input?.schemaVersion === 1 &&
+      WORKFLOW_ID_PATTERN.test(input.eventId ?? "") &&
+      typeof input.taskId === "string" &&
+      input.taskId.trim() &&
+      input.actor === "pm" &&
+      input.choice &&
+      typeof input.reason === "string" &&
+      input.reason.trim(),
+    "Staffing change requires schemaVersion=1, eventId, taskId, PM actor, choice and reason",
+  );
+  assert(
+    ["lateral", "upgrade", "downgrade"].includes(input.change),
+    "Staffing change must be lateral, upgrade or downgrade",
+  );
+  if (input.change === "upgrade") {
+    assert(
+      input.directorDecision &&
+        typeof input.directorDecision.id === "string" &&
+        input.directorDecision.id.trim() &&
+        typeof input.directorDecision.reason === "string" &&
+        input.directorDecision.reason.trim(),
+      "A staffing upgrade requires an explicit director decision",
+    );
+  }
+}
+
+/**
+ * Changes a pending task's resource/model choice without modifying its frozen
+ * organization. PM may only choose the director-approved resources, may never
+ * change its own PM decision, and must attach a director decision for a named
+ * upgrade because model identifiers do not encode cost or capability.
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - PM change request and, for upgrades, director decision.
+ * @returns {{state: object, duplicate: boolean}} Updated state or replay result.
+ */
+export function changeTaskStaffing(stateDir, id, expectedRevision, input) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, organization, dir } = readWorkflow(stateDir, id);
+    validateStaffingChange(input);
+    if (state.eventIds.includes(input.eventId))
+      return { state, duplicate: true };
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+    assert(
+      organization.resources,
+      "Legacy profile workflows have no adaptive staffing decisions",
+    );
+    assert(state.staffing, "Workflow has no frozen staffing decisions");
+    const item = state.tasks[input.taskId];
+    assert(
+      item?.state === "pending",
+      "Only a pending task's staffing may change",
+    );
+    assert(item.role !== "pm", "PM cannot change its own staffing decision");
+    validateStaffingChoice(
+      input.choice,
+      organization,
+      state.staffing.director.allowedResources,
+    );
+    assert(
+      input.choice.resourceId !== item.staffing.choice.resourceId ||
+        input.choice.model !== item.staffing.choice.model ||
+        input.choice.effort !== item.staffing.choice.effort,
+      "Staffing change must select a different resource, model or effort",
+    );
+    const decision = {
+      ...item.staffing,
+      choice: structuredClone(input.choice),
+      reason: input.reason,
+      ...(input.directorDecision
+        ? { directorDecision: structuredClone(input.directorDecision) }
+        : {}),
+      changedAt: new Date().toISOString(),
+    };
+    item.staffing = decision;
+    state.staffing.tasks[input.taskId] = decision;
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "task-staffing-changed",
+      taskId: input.taskId,
+      change: input.change,
+      choice: decision.choice,
+      reason: input.reason,
+      ...(input.directorDecision
+        ? { directorDecision: input.directorDecision }
+        : {}),
+    });
+    state.revision += 1;
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
+  });
 }
 
 function dependenciesReady(task, state) {
