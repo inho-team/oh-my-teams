@@ -1605,6 +1605,7 @@ export function recordDelivery(
  * @param {string} request.reason - One of `RELEASE_REASONS`.
  * @param {boolean} [request.force=false] - Whether a takeover is authorized.
  * @param {string} [request.callerCwd] - Caller's working directory for director check.
+ * @param {object} [request.cleanup] - Read-only Orca/Git reconciliation to archive.
  * @param {string} [request.head] - Result HEAD to check the ledger against for
  *   `reason: "completed"`; falls back to a prior `deliver`'s recorded head.
  * @param {string} [request.repo] - Workspace `head` is checked against for the
@@ -1616,7 +1617,15 @@ export function recordDelivery(
  */
 export async function releaseKickoff(
   orgFile,
-  { worktreeId, reason, force = false, callerCwd = process.cwd(), head, repo },
+  {
+    worktreeId,
+    reason,
+    force = false,
+    callerCwd = process.cwd(),
+    cleanup,
+    head,
+    repo,
+  },
 ) {
   if (reason === "completed") {
     const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
@@ -1715,6 +1724,36 @@ export async function releaseKickoff(
         );
       }
     }
+    const cleanupRecord = cleanup ?? {
+      schemaVersion: 1,
+      worktreeId,
+      createdAt: entry.createdAt,
+      scannedAt: new Date().toISOString(),
+      inventoryComplete: false,
+      status: "cleanup-pending",
+      candidates: [
+        {
+          worktreeId,
+          path: entry.pm.path,
+          owner: entry.director?.terminalHandle ?? worktreeId,
+          status: "preserve",
+          reasons: ["inventory-not-provided"],
+        },
+      ],
+      errors: ["inventory-not-provided"],
+    };
+    if (cleanupRecord) {
+      assert(
+        cleanupRecord.schemaVersion === 1 &&
+          cleanupRecord.worktreeId === worktreeId &&
+          cleanupRecord.createdAt === entry.createdAt &&
+          Array.isArray(cleanupRecord.candidates) &&
+          cleanupRecord.candidates.some(
+            (item) => item.worktreeId === worktreeId,
+          ),
+        "Cleanup reconciliation must match this kickoff and include its PM worktree",
+      );
+    }
     const archived = path.join(
       path.dirname(registryDirectory(orgFile)),
       "history",
@@ -1724,6 +1763,7 @@ export async function releaseKickoff(
       ...entry,
       releasedAt: new Date().toISOString(),
       releaseReason: reason,
+      ...(cleanupRecord ? { cleanup: cleanupRecord } : {}),
     });
     fs.unlinkSync(file);
     return { released: true, reason, archived, entry };

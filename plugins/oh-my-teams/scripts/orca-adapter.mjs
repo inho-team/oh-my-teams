@@ -651,6 +651,7 @@ export async function createWorktree(
  * @param {string} repo - Parent repository/worktree path.
  * @param {object} options - Worktree identity and selected Orca runtime.
  * @param {string} options.id - Orca worktree ID returned at creation time.
+ * @param {string} [options.identityKey] - Exact server-issued instance identity selector.
  * @param {object} [options.discovery] - Existing matching runtime receipt.
  * @param {string} [options.executable] - Selected Orca executable.
  * @param {Function} [options.execute=run] - Injectable command runner.
@@ -659,9 +660,14 @@ export async function createWorktree(
  */
 export async function reclaimWorktree(
   repo,
-  { id, discovery: suppliedDiscovery, executable, execute = run },
+  { id, identityKey, discovery: suppliedDiscovery, executable, execute = run },
 ) {
   assert(typeof id === "string" && id, "Orca worktree id required for reclaim");
+  assert(
+    identityKey === undefined ||
+      (typeof identityKey === "string" && identityKey),
+    "Orca identity key must be non-empty",
+  );
   const { selected } = await resolvedDiscovery(
     executable,
     suppliedDiscovery,
@@ -669,7 +675,12 @@ export async function reclaimWorktree(
   );
   return runOrcaJson(
     selected,
-    ["worktree", "remove", "--worktree", `id:${id}`],
+    [
+      "worktree",
+      "remove",
+      "--worktree",
+      identityKey ? `identity:${identityKey}` : `id:${id}`,
+    ],
     { cwd: repo, execute },
   );
 }
