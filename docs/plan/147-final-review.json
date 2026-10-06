@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "review-147-final",
+  "requirementId": "issue-147-final-review",
+  "reviewer": {
+    "kind": "agent-review",
+    "role": "pl",
+    "executionId": "ctx_b69b5e311e90"
+  },
+  "implementationExecutionId": "ctx_7c2bc25e7382",
+  "conclusion": "changes-requested",
+  "criteria": [
+    {
+      "id": "deterministic-timeout-refusal",
+      "conclusion": "approved",
+      "evidence": "At HEAD e3ea8e0, tests/terminal-idle-diagnostics.test.mjs contains the POSIX CLI regression for a ready, connected, writable, non-orphaned Agy terminal whose tui-idle check times out. It records the fake Orca argv and asserts that tui-idle was requested while orchestration worker-start was never called. The supplied full-suite receipt includes this test and reports 1,218 pass, 0 fail."
+    },
+    {
+      "id": "runtime-reference-and-exception-scope",
+      "conclusion": "approved",
+      "evidence": "The runtime reference at e3ea8e0 keeps the preflight rule that a timeout creates no Dispatch and requires terminal-idle-check before workflow-reserve. Its approved injection exception remains limited to a user-approved --inject-fallback for an Agy timeout, rejects Claude and Codex before Orca is called, and records unsupervised and model-proof limitations."
+    },
+    {
+      "id": "issue-147-observation-documentation",
+      "conclusion": "approved",
+      "evidence": "Corrective commit e2f636b is an ancestor of e3ea8e0 and records the 2026-09-30 Orca 1.4.217 timeout, receipt df61f4ae-0d24-4378-a330-f29b04f860dc, and no-Dispatch outcome in orca-runtime.md. Merged commit 43a4050 adds docs/plan/147-agy-path.md, preserving that timeout alongside the later official-path result."
+    },
+    {
+      "id": "agy-official-path-settlement",
+      "conclusion": "approved",
+      "evidence": "orca orchestration worker-show for ctx_7117f2ebd635 reports Dispatch completed, worker state succeeded and stage settled for task_28b11709d607 on term_652dcc42-a155-4070-8072-8c782f2c883c. The persisted issue-147-agy-probe state and attach/settle events agree on the same dispatch, run, task, worktree, worker-start path, requested gemini-3.1-pro-high model, and settled outcome."
+    },
+    {
+      "id": "full-suite-evidence-at-reviewed-head",
+      "conclusion": "changes-requested",
+      "evidence": "/tmp/omt-147-test.log is a valid npm test receipt for package 2.11.3: 1,255 tests, 1,218 pass, 0 fail, 37 skipped, duration 69,987.142708 ms, SHA-256 397924b362272411ac5ae3653eba133d47aadc1a50c3528a951cc1c0a6e1565d. Its mtime is 2026-10-06 13:28:28 +0900, before 43a4050 at 13:32:25 and the reviewed merge HEAD e3ea8e0 at 13:33:22, so the receipt does not prove a full suite run at the exact reviewed HEAD."
+    }
+  ],
+  "findings": [
+    {
+      "id": "dispatch-creation-guard",
+      "status": "resolved",
+      "description": "The deterministic timeout guard was previously accepted only through the regression review.",
+      "resolution": "The exact reviewed tree retains the CLI-level ready-terminal timeout test and its command-log assertion that no worker-start Dispatch call occurs."
+    },
+    {
+      "id": "issue-147-observation-not-documented",
+      "status": "resolved",
+      "description": "The prior review found that the issue-147 Agy timeout observation and its no-Dispatch result were not retained in the runtime reference.",
+      "resolution": "Commit e2f636b retains the observation, and merged commit 43a4050 adds the later successful official-path evidence without deleting the prior timeout evidence."
+    },
+    {
+      "id": "full-suite-transcript-missing-at-exact-head",
+      "status": "open",
+      "description": "The supplied successful full-suite receipt predates the 43a4050 evidence commit and merge HEAD e3ea8e0, so it cannot establish the requested full-suite result for the exact PM HEAD.",
+      "resolution": "Run npm test from e3ea8e0 and retain a receipt that identifies that reviewed HEAD."
+    }
+  ]
+}
