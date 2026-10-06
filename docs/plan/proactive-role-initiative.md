@@ -175,7 +175,7 @@ Orca가 소유한 생명주기는 OMT가 복제하지 않습니다(`P/references
 
 ### 5.1 legacy·현행 역할별 사건 표
 
-이 표는 사건별 전체 표인 §3.3~3.6을 대체하지 않고, 범위 안 주도 행동과 상향 조건을 사건 한 줄로 요약한 보조 표입니다. legacy PL·Senior·Junior의 사건별(시작·배정·반려·정체·오류·사용자 결정 대기·독립 작업·검증·close) 행동은 §3.4(PL 9행), §3.5(Senior 8행), §3.6(Junior 9행)이 정본입니다.
+이 표는 사건별 전체 표인 §3.3~3.6을 대체하지 않고, 범위 안 주도 행동과 상향 조건을 사건 한 줄로 요약한 보조 표입니다. legacy PL·Senior·Junior의 사건별(시작·배정·반려·정체·오류·사용자 결정 대기·독립 작업·검증·close) 행동은 §3.4(PL 10행), §3.5(Senior 8행), §3.6(Junior 9행)이 정본입니다.
 
 | 역할 | 사건 | 범위 안에서 스스로 하는 일 | 중단·상향 조건 | 금지 | 완료·보고 증거 |
 |---|---|---|---|---|---|
@@ -292,7 +292,7 @@ Orca가 소유한 생명주기는 OMT가 복제하지 않습니다(`P/references
 | persistent-object-ownership-collapsed | `orca orchestration --help`, `kickoff-registry.mjs:170,427,539,707,769`, `workflow.mjs:40,264,608`, `director.mjs:28,584,734`, `resources.mjs:147,229`, `gates.mjs:406,472,549`, `delivery.mjs:165` | resolved: `orca dispatch list` 제거, 객체별 생성·조회·정산·종료·보존 표 | §2 |
 | role-event-matrix-incomplete | 역할 정본과 `workflow.mjs:1558,1740,1888,1992,2095` | resolved: 역할 6개 각각 9개 사건 | §3.1~3.6 |
 | autonomy-boundary-and-rollback-missing | `autonomy.md:7,11-14,18-25,29-33,37` | resolved: `delivery` 포함 네 경계, PM `decision`/`progress` 분기, 재분류, 근거·rollback | §4 |
-| subordinate-proactivity-not-operationalized | 각 역할 스킬의 한계 절 | resolved: 사건별 정본은 legacy PL 9행·Senior 8행·Junior 9행의 §3.4~3.6, §5.1은 이를 역할당 사건 한 줄로 요약한 보조 표임을 명시하고 두 곳을 모두 인용. auditor 반증 조건은 §5.3 | §3.4~3.6, §5.1, §5.3 |
+| subordinate-proactivity-not-operationalized | 각 역할 스킬의 한계 절 | resolved: 사건별 정본은 legacy PL 10행·Senior 8행·Junior 9행의 §3.4~3.6, §5.1은 이를 역할당 사건 한 줄로 요약한 보조 표임을 명시하고 두 곳을 모두 인용. auditor 반증 조건은 §5.3 | §3.4~3.6, §5.1, §5.3 |
 | cross-kickoff-observations-misstated | §6의 5개 원천 파일(직접 읽음) | resolved, 일부 accepted 아님: 사례 3의 잘못된 추론 철회, 사례 8·9는 원천이 없어 `미확인`으로 표기 | §6 |
 | recovery-protocol-lacks-authoritative-reconciliation | `orca orchestration --help`, `orca-runtime.md:7-15,398-408,455-463`, `workflow.mjs:456-503,896-950` | resolved: 실제 이름공간의 호출, 비교키, 우선순위, reconcile 절차 | §7 |
 | lifecycle-mapping-and-resource-strategy-contradicted | `workflow.mjs:40,442-455,1558,1740,1888`, `resources.mjs:39,147-229` | resolved: 변경 지점·호환·선행 조건·도입 gate 표, 슬롯과 `reserve`의 구분 | §8 |
