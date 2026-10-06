@@ -1,6 +1,6 @@
 /** Covers the director role: ladder placement, launch refusal, header, registry, and close authority. */
 import { after } from "node:test";
-import { getTemplateProject, cleanupTemplates } from "./template-factory.mjs";
+import { cloneTemplateProject, cleanupTemplates } from "./template-factory.mjs";
 after(() => cleanupTemplates());
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -1211,7 +1211,7 @@ async function workerAuditedProject(t, worktreeId) {
     }),
   );
   const project = path.join(root, "project");
-  fs.cpSync(await getTemplateProject(), project, { recursive: true });
+  await cloneTemplateProject(project);
   const org = path.join(project, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(org), { recursive: true });
   const threeTier = readJSON(
