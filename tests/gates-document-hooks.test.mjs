@@ -34,9 +34,7 @@ import {
   registerKickoff,
   registryDirectory,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
-import {
-  minimalRequirements,
-} from "./requirements-draft-fixture.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const organization = readJSON(
   new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url),
@@ -580,7 +578,13 @@ function project(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const orgFile = path.join(dir, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(orgFile), { recursive: true });
-  fs.copyFileSync(new URL("../plugins/oh-my-teams/examples/organization.json", import.meta.url), orgFile);
+  fs.copyFileSync(
+    new URL(
+      "../plugins/oh-my-teams/examples/organization.json",
+      import.meta.url,
+    ),
+    orgFile,
+  );
   const brief = path.join(dir, "brief.md");
   fs.writeFileSync(brief, "goal, acceptance criteria, non-goals\n");
   return { dir, orgFile, brief };
@@ -591,7 +595,9 @@ async function worktree(fixture, worktreeId) {
   fs.mkdirSync(repoDir, { recursive: true });
   await run(["git", "init"], { cwd: repoDir });
   await run(["git", "config", "user.name", "Test"], { cwd: repoDir });
-  await run(["git", "config", "user.email", "test@example.invalid"], { cwd: repoDir });
+  await run(["git", "config", "user.email", "test@example.invalid"], {
+    cwd: repoDir,
+  });
   fs.writeFileSync(path.join(repoDir, ".gitignore"), ".omt/\n*.json\n");
   fs.writeFileSync(path.join(repoDir, "seed.txt"), "seed\n");
   await run(["git", "add", ".gitignore", "seed.txt"], { cwd: repoDir });
@@ -638,7 +644,6 @@ function activateInThePast(orgFile) {
     documentSystemActivatedAt: "2020-01-01T00:00:00.000Z",
   });
 }
-
 
 test("gate-cache-refresh CLI resolves current/legacy/integrity-failure and handles references", async (t) => {
   const fx = project(t);
@@ -699,7 +704,7 @@ test("gate-cache-refresh CLI resolves current/legacy/integrity-failure and handl
     id: "decision-valid",
     decider: { kind: "pm", executionId: "pm-1" },
     criteria: ["check"],
-    basis: "Passed"
+    basis: "Passed",
   };
   await acceptOutcome(wt.repoDir, tsk, report, decision, stateDir);
   saveAcceptanceRef(stateDir, kickoffHash, "wf-gate", "decision-valid");
@@ -745,9 +750,15 @@ test("gate-cache-refresh CLI resolves current/legacy/integrity-failure and handl
     id: "decision-legacy",
     decider: { kind: "pm", executionId: "pm-1" },
     criteria: ["check"],
-    basis: "Passed"
+    basis: "Passed",
   };
-  await acceptOutcome(legacyWt.repoDir, tsk, legacyReport, legacyDecision, legacyStateDir);
+  await acceptOutcome(
+    legacyWt.repoDir,
+    tsk,
+    legacyReport,
+    legacyDecision,
+    legacyStateDir,
+  );
 
   const legacyRef = await cliRun(
     legacyWt.repoDir,
