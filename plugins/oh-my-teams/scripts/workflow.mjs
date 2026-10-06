@@ -1746,6 +1746,187 @@ function validateAllowanceInput(input) {
   );
 }
 
+function validateApprovalCorrectionInput(input) {
+  assert(
+    input?.schemaVersion === 1 &&
+      typeof input.eventId === "string" &&
+      WORKFLOW_ID_PATTERN.test(input.eventId ?? ""),
+    "Approval correction requires schemaVersion=1 and eventId",
+  );
+  assert(
+    typeof input.targetEventId === "string" &&
+      WORKFLOW_ID_PATTERN.test(input.targetEventId),
+    "Approval correction requires a targetEventId",
+  );
+  assert(
+    typeof input.wrongApprovedBy === "string" && input.wrongApprovedBy.trim(),
+    "Approval correction requires wrongApprovedBy",
+  );
+  assert(
+    typeof input.attestation === "string" && input.attestation.trim(),
+    "Approval correction requires an attestation",
+  );
+  assert(
+    typeof input.approvedBy === "string" && input.approvedBy.trim(),
+    "Approval correction requires an approver",
+  );
+  assert(
+    typeof input.approvalTime === "string" &&
+      !isNaN(Date.parse(input.approvalTime)),
+    "Approval correction requires a valid ISO approvalTime",
+  );
+  assert(
+    typeof input.sourceContext === "string" && input.sourceContext.trim(),
+    "Approval correction requires a sourceContext",
+  );
+}
+
+/**
+ * Appends a correction for a historical approval, splitting the new attestation
+ * and the attribution correction into two separate, mutually-referencing events.
+ *
+ * @param {string} stateDir - PM worktree `.omt` state directory.
+ * @param {string} id - Workflow identifier.
+ * @param {number} expectedRevision - Revision the caller last read.
+ * @param {object} input - Event id, target event id, wrong approvedBy, attestation, approver, approvalTime, sourceContext.
+ * @returns {object} Updated workflow state, or the unchanged state on replay.
+ * @throws {Error} When the revision is stale, target event is missing/invalid, or duplicate has different payload.
+ */
+export function correctApprovalProvenance(
+  stateDir,
+  id,
+  expectedRevision,
+  input,
+) {
+  return withWorkflowUpdate(stateDir, id, () => {
+    const { state, dir } = readWorkflow(stateDir, id);
+    validateApprovalCorrectionInput(input);
+
+    if (state.eventIds.includes(input.eventId)) {
+      const corrIdx = state.eventIds.indexOf(input.eventId);
+      const corrSequence = String(corrIdx + 1).padStart(6, "0");
+      const corrEventFile = path.join(
+        dir,
+        "events",
+        `${corrSequence}-${input.eventId}.json`,
+      );
+      assert(
+        fs.existsSync(corrEventFile),
+        "Missing correction event file for duplicate check",
+      );
+
+      const existingCorr = readJSON(corrEventFile);
+      assert(
+        existingCorr.targetEventId === input.targetEventId &&
+          existingCorr.wrongApprovedBy === input.wrongApprovedBy &&
+          existingCorr.attestationEventId === `${input.eventId}-att`,
+        "Duplicate eventId with different correction payload",
+      );
+
+      const attId = `${input.eventId}-att`;
+      const attIdx = state.eventIds.indexOf(attId);
+      assert(
+        attIdx !== -1,
+        "Missing attestation event in state for duplicate check",
+      );
+      const attSequence = String(attIdx + 1).padStart(6, "0");
+      const attEventFile = path.join(
+        dir,
+        "events",
+        `${attSequence}-${attId}.json`,
+      );
+      assert(
+        fs.existsSync(attEventFile),
+        "Missing attestation event file for duplicate check",
+      );
+
+      const existingAtt = readJSON(attEventFile);
+      assert(
+        existingAtt.attestation === input.attestation &&
+          existingAtt.approvedBy === input.approvedBy &&
+          existingAtt.approvalTime === input.approvalTime &&
+          existingAtt.sourceContext === input.sourceContext &&
+          existingAtt.correctionEventId === input.eventId,
+        "Duplicate eventId with different attestation payload",
+      );
+
+      return { state, duplicate: true };
+    }
+
+    assert(
+      state.revision === expectedRevision,
+      "Workflow changed; read state again",
+    );
+
+    const targetIdx = state.eventIds.indexOf(input.targetEventId);
+    assert(
+      targetIdx !== -1,
+      `Target event ${input.targetEventId} not found in workflow history`,
+    );
+
+    const targetSeq = String(targetIdx + 1).padStart(6, "0");
+    const targetEventFile = path.join(
+      dir,
+      "events",
+      `${targetSeq}-${input.targetEventId}.json`,
+    );
+    const targetEvent = fs.existsSync(targetEventFile)
+      ? readJSON(targetEventFile)
+      : null;
+    assert(targetEvent, "Target event file missing");
+
+    assert(
+      [
+        "call-allowance-increased",
+        "execution-reserved",
+        "execution-attached",
+      ].includes(targetEvent.type),
+      "Target event must be an allowance event",
+    );
+    assert(
+      targetEvent.approvedBy === input.wrongApprovedBy,
+      `Target event approvedBy is ${targetEvent.approvedBy}, expected ${input.wrongApprovedBy}`,
+    );
+
+    const attestationEventId = `${input.eventId}-att`;
+
+    state.approvalCorrections = [
+      ...(state.approvalCorrections ?? []),
+      {
+        targetEventId: input.targetEventId,
+        wrongApprovedBy: input.wrongApprovedBy,
+        attestationEventId: attestationEventId,
+        correctionEventId: input.eventId,
+        recordedAt: new Date().toISOString(),
+      },
+    ];
+
+    // Event 1: Attestation
+    appendWorkflowEvent(dir, state, {
+      id: attestationEventId,
+      type: "approval-attestation-recorded",
+      attestation: input.attestation,
+      approvedBy: input.approvedBy,
+      approvalTime: input.approvalTime,
+      sourceContext: input.sourceContext,
+      correctionEventId: input.eventId,
+    });
+
+    // Event 2: Correction
+    appendWorkflowEvent(dir, state, {
+      id: input.eventId,
+      type: "approval-provenance-corrected",
+      targetEventId: input.targetEventId,
+      wrongApprovedBy: input.wrongApprovedBy,
+      attestationEventId: attestationEventId,
+    });
+
+    state.revision += 1;
+    saveWorkflowState(stateDir, id, state);
+    return { state, duplicate: false };
+  });
+}
+
 /**
  * Raises the current attempt's call allowance within budget headroom, whether
  * that attempt is still executing (`reserved`/`running`, the brief's original
