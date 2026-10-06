@@ -152,6 +152,39 @@ test("resource formation saves verified subscriptions without preselecting role 
   assert.equal(result.organization.profiles, undefined);
   assert.equal(result.organization.resources["codex-current"].maxCalls, 4);
   assert.equal(readJSON(draft).roles.pm.profile, undefined);
+
+  await t.test(
+    "saves a Codex-only organization when the unselected Agy catalog fails",
+    async (t) => {
+      const selectedOnlyDir = tempDir(t);
+      const selectedOnlyDraft = path.join(
+        selectedOnlyDir,
+        "codex-only-draft.json",
+      );
+      const selectedOnly = await executeCommand(
+        {
+          command: "org-draft",
+          name: "codex-only",
+          resources: "codex",
+          output: selectedOnlyDraft,
+        },
+        fakeExecute({ "agy models": COMMAND_FAILED }),
+      );
+
+      assert.equal(selectedOnly.catalogReceipt.savable, true);
+      assert.deepEqual(Object.keys(selectedOnly.organization.resources), [
+        "codex-current",
+      ]);
+      assert.deepEqual(
+        selectedOnly.catalogReceipt.selections.map((entry) => entry.key),
+        ["codex-current"],
+      );
+      assert.equal(
+        readJSON(selectedOnlyDraft).resources["agy-current"],
+        undefined,
+      );
+    },
+  );
 });
 
 test("resource formation rejects a selected provider whose catalog is unavailable", async (t) => {
