@@ -137,6 +137,7 @@ import {
   reopenTask,
   extendIntegrationChecks,
   changeTaskStaffing,
+  correctApprovalProvenance,
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
@@ -435,6 +436,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                               (appends checks to an already-frozen, not yet
                               accepted integration task without touching the
                               existing ones)
+  workflow-approval-correction --id ID --state DIR --revision N --correction FILE
+                               (appends a correction for a historical approval,
+                               splitting the new attestation and the attribution
+                               correction into two mutually-referencing events)
   workflow-staffing --id ID --state DIR --revision N --change FILE
                     (records a PM task staffing change; named upgrades need
                     an explicit director decision)
@@ -751,6 +756,7 @@ export const ALLOWED_OPTIONS = {
   "workflow-budget": ["id", "state", "revision", "change"],
   "workflow-reopen": ["id", "state", "revision", "reopen"],
   "workflow-integration-checks": ["id", "state", "revision", "checks"],
+  "workflow-approval-correction": ["id", "state", "revision", "correction"],
   "workflow-staffing": ["id", "state", "revision", "change"],
   "workflow-staffing": ["id", "state", "revision", "change"],
   "handoff-checkpoint": [
@@ -918,6 +924,7 @@ export const REQUIRED_OPTIONS = {
   "workflow-budget": ["id", "state", "revision", "change"],
   "workflow-reopen": ["id", "state", "revision", "reopen"],
   "workflow-integration-checks": ["id", "state", "revision", "checks"],
+  "workflow-approval-correction": ["id", "state", "revision", "correction"],
   "handoff-checkpoint": ["state", "workflow-id", "workflow-task", "file"],
   "failure-classify": ["failure"],
   "lesson-record": ["lesson", "state"],
@@ -4723,6 +4730,13 @@ export async function executeCommand(args, execute) {
         args.id,
         Number(args.revision),
         readJSON(args.checks),
+      );
+    case "workflow-approval-correction":
+      return correctApprovalProvenance(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.correction),
       );
     case "workflow-staffing":
       return changeTaskStaffing(

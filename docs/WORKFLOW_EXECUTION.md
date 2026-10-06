@@ -62,6 +62,30 @@ recordedAt}`으로 덧붙고 `attempt-budget-increased` 이벤트가 함께 기�
 같은 `eventId`를 다시 보내면 상태를 바꾸지 않고 중복으로 반환하며,
 `expectedRevision`이 현재 revision과 다르면 거부한다.
 
+
+## 승인 출처 append-only 보정
+
+`workflow-approval-correction --id ID --state DIR --revision N --correction FILE`은
+과거 승인된 실행에 대해 새로운 승인 출처를 정본 데이터 수정 없이 덧붙이는 append-only 명령이다.
+새로운 승인 사실(attestation)과 잘못된 귀속 정정(correction)을 두 개의 별도 이벤트로 분리하여 기록하고 서로를 참조하게 한다.
+기존 리뷰, 결정, 이벤트, 조직 스냅샷이나 `maxCalls` 등은 변경되지 않으며 변경 내역은
+`state.approvalCorrections` 배열에 요약된다.
+
+입력 파일:
+
+```json
+{
+  "schemaVersion": 1,
+  "eventId": "correction-omt-1",
+  "targetEventId": "allowance-36041363",
+  "wrongApprovedBy": "user",
+  "attestation": "사용자의 2026-09-30 ㄱㄱ 응답은 새로운 승인이다.",
+  "approvedBy": "pm",
+  "approvalTime": "2026-09-30T10:00:00Z",
+  "sourceContext": "Slack DM"
+}
+```
+
 ## 최종 통합 수용
 
 다중 task workflow는 생성 요청에 `integrationTask`로 최종 통합 task v2
