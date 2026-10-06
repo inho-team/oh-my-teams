@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "id": "147-integration-evidence",
+  "workflow": {
+    "id": "issue-147-integration-delivery",
+    "taskId": "record-147-integration-evidence",
+    "revision": 1,
+    "attemptId": "attempt-147-integration-report-20261006",
+    "executionId": "ctx_89275d983c1f",
+    "runId": "run_236793a9ef83",
+    "orcaTaskId": "task_68a3682cce01",
+    "dispatchId": "ctx_89275d983c1f",
+    "worktreeId": "955a83a3-27ee-457a-8ff5-3dff4694e8aa::/Users/jinsungkim/orca/workspaces/oh-my-teams/issue-147-integration-evidence",
+    "via": "worker-start",
+    "model": "gpt-5.6-terra"
+  },
+  "originalBrief": {
+    "path": "/Users/jinsungkim/orca/oh-my-teams/.omt/briefs/147-role-terminal-idle-recovery-2026-09-30.md",
+    "sha256": "c95755925ec6048f6b31f877312c3142da0049dd1c6c613c61cc2666f484ca7a"
+  },
+  "sourceRevision": {
+    "head": "9492d7423b0024958ef4c96624719d030d90a2a4",
+    "mainBase": "b87edf438f27fad2a0d9a536510fd822f121fac2",
+    "staleLedgerHead": "7d5830cbe2240e74fc8734610d7c61eca29c6cf6",
+    "staleness": "The confirmed fidelity ledger was written for 7d5830c. Both 7d5830c and b87edf4 are ancestors of 9492d742, and the frozen task contract hashes match the tracked source files at 9492d742. The ledger's delivery conclusion is therefore retained as evidence, not silently promoted to a delivery-time CI result for 9492d742."
+  },
+  "sourceWorkflows": [
+    {
+      "workflowId": "issue-147-codex-probe",
+      "workflowRevision": 6,
+      "taskId": "probe-codex-idle",
+      "acceptedResult": "accept-147-codex-a",
+      "executionId": "ctx_ac540166b118",
+      "orcaTaskId": "task_1c133dc18fd6",
+      "dispatchId": "ctx_ac540166b118",
+      "terminalId": "term_544c3577-0cfd-469e-893a-dae954db60aa",
+      "worktreeId": "955a83a3-27ee-457a-8ff5-3dff4694e8aa::/Users/jinsungkim/orca/workspaces/oh-my-teams/issue-147-codex-probe"
+    },
+    {
+      "workflowId": "issue-147-ops-docs",
+      "workflowRevision": 6,
+      "taskId": "record-147-recovery",
+      "acceptedResult": "accept-147-ops-a",
+      "executionId": "ctx_7c2bc25e7382",
+      "orcaTaskId": "task_d55d88fc7997",
+      "dispatchId": "ctx_7c2bc25e7382",
+      "worktreeId": "955a83a3-27ee-457a-8ff5-3dff4694e8aa::/Users/jinsungkim/orca/workspaces/oh-my-teams/issue-147-ops-docs"
+    },
+    {
+      "workflowId": "issue-147-regression-review",
+      "workflowRevision": 6,
+      "taskId": "review-147-regression",
+      "acceptedResult": "accept-147-regression-a",
+      "executionId": "ctx_a973aa62db7d",
+      "orcaTaskId": "task_9c23ba5b1c0f",
+      "dispatchId": "ctx_a973aa62db7d",
+      "worktreeId": "955a83a3-27ee-457a-8ff5-3dff4694e8aa::/Users/jinsungkim/orca/workspaces/oh-my-teams/issue-147-regression-review"
+    },
+    {
+      "workflowId": "issue-147-agy-probe",
+      "workflowRevision": 9,
+      "taskId": "probe-agy-idle",
+      "acceptedResult": "accept-147-agy-final",
+      "executionId": "ctx_7117f2ebd635",
+      "orcaTaskId": "task_28b11709d607",
+      "dispatchId": "ctx_7117f2ebd635",
+      "terminalId": "term_652dcc42-a155-4070-8072-8c782f2c883c",
+      "worktreeId": "955a83a3-27ee-457a-8ff5-3dff4694e8aa::/Users/jinsungkim/orca/workspaces/oh-my-teams/issue-147-agy-probe"
+    },
+    {
+      "workflowId": "issue-147-final-review",
+      "workflowRevision": 6,
+      "taskId": "review-147-final",
+      "acceptedResult": "accept-147-final-review-a",
+      "executionId": "ctx_b69b5e311e90",
+      "orcaTaskId": "task_15f737651e87",
+      "dispatchId": "ctx_b69b5e311e90",
+      "worktreeId": "955a83a3-27ee-457a-8ff5-3dff4694e8aa::/Users/jinsungkim/orca/workspaces/oh-my-teams/issue-147-final-review"
+    },
+    {
+      "workflowId": "issue-147-review-closure",
+      "workflowRevision": 6,
+      "taskId": "close-147-test-finding",
+      "acceptedResult": "accept-147-closure-a",
+      "executionId": "ctx_79773ff04929",
+      "orcaTaskId": "task_d37c4a9d7c3d",
+      "dispatchId": "ctx_79773ff04929",
+      "worktreeId": "955a83a3-27ee-457a-8ff5-3dff4694e8aa::/Users/jinsungkim/orca/workspaces/oh-my-teams/issue-147-review-closure"
+    }
+  ],
+  "rows": [
+    {
+      "id": "goal",
+      "text": "이 kickoff는 열린 이슈 #147의 역할 터미널 대기 판정 실패를 해결하여, #145를 비롯한 차단된 작업이 공식 감독 경로로 재개될 수 있게 합니다. 2026년 9월 30일 현재 주인 체크아웃은 `main`의 `4c43b24499e8ba883bffb0a0979245e42ec100be`이고 Orca 런타임은 `1.4.217`입니다. 릴리스 설명은 Codex 준비 판정 수정의 단서일 뿐이므로, 이슈의 Codex와 Agy 수용 조건을 실제 터미널에서 각각 확인하기 전에는 완료로 판정하지 않습니다.",
+      "status": "met",
+      "evidence": [
+        "issue-147-codex-probe acceptedResult accept-147-codex-a records settled official worker-start Dispatch ctx_ac540166b118 for Codex Terra.",
+        "issue-147-agy-probe acceptedResult accept-147-agy-final records settled official worker-start Dispatch ctx_7117f2ebd635 for Gemini 3.1 Pro High on term_652dcc42-a155-4070-8072-8c782f2c883c.",
+        "The fidelity ledger identifies #145's separate implementation report and independent review as out of scope; this report does not claim that #145 itself has been resumed or merged."
+      ]
+    },
+    {
+      "id": "c-1",
+      "text": "`inho-team/oh-my-teams#147`의 본문과 후속 재현, 현재 Orca·Codex·Agy 버전 및 OMT 어댑터를 대조합니다. 화면상 준비, `ready`, 연결·채택·고아 상태, `tui-idle` 판정과 Dispatch 생성의 각 단계를 분리해 원인과 책임 경계를 근거로 제시합니다. Agy의 `orphaned` 상태가 원인인지 동반 증상인지 구별합니다.",
+      "status": "met",
+      "evidence": [
+        "plugins/oh-my-teams/references/orca-runtime.md records the 2026-09-30 Codex settlement ctx_ac540166b118 and the Agy term_92ea125f-d463-4292-a45e-24d6253d685f timeout receipt df61f4ae-0d24-4378-a330-f29b04f860dc before a Dispatch was created.",
+        "docs/plan/147-agy-path.md distinguishes ready=true and the later Dispatch ctx_7117f2ebd635 from the earlier Agy tui-idle timeout with no Dispatch.",
+        "tests/terminal-idle-diagnostics.test.mjs covers a ready, connected, writable, non-orphaned terminal that times out and verifies that worker-start creates no Dispatch; the fidelity ledger therefore does not attribute the failure solely to orphaned state."
+      ]
+    },
+    {
+      "id": "c-2",
+      "text": "저장된 조직 스냅샷의 허용 프로필과 독립된 격리 작업에서 Codex 역할과 Agy 역할을 각각 공식 `role-terminal → terminal-idle-check → worker-start` 경로로 실측합니다. 모델·경로·터미널 인스턴스를 확인하고 실제 Dispatch 생성과 정산까지 확인합니다. `ready: true`나 화면의 입력 프롬프트만으로 성공을 선언하지 않습니다. 실패하면 동일 프로필 반복 시도를 하지 않고 실패 영수증과 자원·터미널 상태를 보존합니다.",
+      "status": "met",
+      "evidence": [
+        "issue-147-codex-probe state.json records model gpt-5.6-terra, worktree issue-147-codex-probe, Dispatch ctx_ac540166b118, and acceptedResult accept-147-codex-a; the archived committed diagnostic at 850bedf:docs/plan/147-codex-path.md identifies terminal term_544c3577-0cfd-469e-893a-dae954db60aa.",
+        "issue-147-agy-probe state.json and docs/plan/147-agy-path.md record model gemini-3.1-pro-high, worktree issue-147-agy-probe, terminal term_652dcc42-a155-4070-8072-8c782f2c883c, Dispatch ctx_7117f2ebd635, and acceptedResult accept-147-agy-final.",
+        "The preserved prior Agy failure names term_92ea125f-d463-4292-a45e-24d6253d685f and receipt df61f4ae-0d24-4378-a330-f29b04f860dc, records no Dispatch, and does not recast ready state alone as success."
+      ]
+    },
+    {
+      "id": "c-3",
+      "text": "OMT가 소유한 결함이면 원인에 맞게 수정하고 성공·실패·불명확 상태의 결정적 회귀 테스트를 추가합니다. Orca 자체의 결함이 남았다면 설치된 앱이나 내부 상태를 임의로 패치하지 않고 공식 이슈에 재현 근거와 필요한 수정 조건을 제출하며, 이 kickoff와 #145가 차단됐다는 사실을 명시합니다. 단순 대기 시간 증가나 원시 주입을 수정으로 간주하지 않습니다.",
+      "status": "met",
+      "evidence": [
+        "tests/terminal-idle-diagnostics.test.mjs provides deterministic timeout diagnostics and the no-Dispatch regression for a ready, non-orphaned terminal; it does not turn a longer wait or raw injection into a resolution.",
+        "plugins/oh-my-teams/references/orca-runtime.md directs the unresolved Agy observation to Orca #15838, preserves the no-Dispatch receipt, and limits the approved injection exception rather than treating it as issue #147 recovery.",
+        "docs/plan/147-final-review-closure.json records the independent closure of the exact-HEAD test receipt finding without asserting that the historical timeout disappeared."
+      ]
+    },
+    {
+      "id": "c-4",
+      "text": "검증된 복구 절차가 있으면 운영 문서와 테스트에 반영하고, 기존 실패 시도와 새 시도의 식별자·자원 정산을 구별합니다. #145의 기존 workflow·PM 브랜치에는 손대지 말고, 이사에게 실제로 재개 가능한지와 구현 보고서·독립 검토 게이트의 남은 조건을 보고합니다.",
+      "status": "met",
+      "evidence": [
+        "The runtime reference and 147-agy-path.md retain both the prior no-Dispatch timeout identifiers and the later settled Agy execution identifiers, while terminal-idle-diagnostics.test.mjs verifies refusal before Dispatch creation.",
+        "The current integration range b87edf4..9492d742 changes only #147 documentation, runtime guidance, and terminal-idle regression coverage; it does not modify #145 workflow state or its PM branch.",
+        "The confirmed fidelity ledger explicitly leaves #145's separate implementation report and independent review outstanding rather than claiming a #145 merge or delivery decision."
+      ]
+    },
+    {
+      "id": "c-5",
+      "text": "코드가 바뀌면 구현과 다른 실행 ID 및 워크트리에서 독립 검토하고, 자원 슬롯을 확보한 상태에서 `npm run format`, `npm run sync`, `npm run lint`, `npm test`를 실행합니다. 병합 시점의 `main` 기준으로 게이트·CI와 필수 검사를 다시 확인합니다. 완료 준비가 입증된 경우에만 이사에게 정확한 HEAD와 증거 경로를 담은 `close-ready` 신호를 보냅니다.",
+      "status": "unmet",
+      "evidence": [
+        "issue-147-final-review execution ctx_b69b5e311e90 and issue-147-review-closure execution ctx_79773ff04929 are separate accepted review workflows; /tmp/omt-147-latest-head.txt identifies 7d5830c and /tmp/omt-147-latest-test.log reports 1,218 pass and 0 fail.",
+        "PR #152 merged main base b87edf438f27fad2a0d9a536510fd822f121fac2 with successful Ubuntu, macOS, and Windows CI checks.",
+        "PR #151 for source head 7d5830c has a failed macOS verify check, and no CI run exists for unpushed integration source head 9492d7423b0024958ef4c96624719d030d90a2a4."
+      ],
+      "unmet": [
+        "Delivery-time gate, CI, and required-check confirmation for exact head 9492d7423b0024958ef4c96624719d030d90a2a4 is not available.",
+        "The confirmed requirements fidelity ledger still requires director-side fidelity confirmation and user presentation before delivery.",
+        "No close-ready signal is claimed by this report."
+      ]
+    }
+  ],
+  "unmetConditions": [
+    {
+      "id": "c-5",
+      "status": "unmet",
+      "reason": "The exact integration source head has no delivery-time CI evidence, and the preceding PR head has a failed macOS CI check. The director-side fidelity and delivery gate remain outside this worker's authority."
+    }
+  ]
+}
