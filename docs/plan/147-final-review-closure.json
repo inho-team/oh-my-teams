@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "id": "review-147-final-closure",
+  "requirementId": "issue-147-final-review",
+  "reviewer": {
+    "kind": "agent-review",
+    "role": "pl",
+    "executionId": "ctx_79773ff04929"
+  },
+  "implementationExecutionId": "ctx_7c2bc25e7382",
+  "conclusion": "approved",
+  "criteria": [
+    {
+      "id": "deterministic-timeout-refusal",
+      "conclusion": "approved",
+      "evidence": "At reviewed HEAD e3ea8e0caa45bf4925e0effd2692c1cb2957753e, the retained CLI regression covers a ready, connected, writable, non-orphaned Agy terminal whose tui-idle check times out and asserts that no orchestration worker-start call occurs. No implementation change follows that reviewed HEAD."
+    },
+    {
+      "id": "runtime-reference-and-exception-scope",
+      "conclusion": "approved",
+      "evidence": "The reviewed runtime reference retains the timeout preflight rule, requires terminal-idle-check before workflow-reserve, and limits the approved injection exception to a user-approved Agy --inject-fallback while rejecting Claude and Codex before Orca is called."
+    },
+    {
+      "id": "issue-147-observation-documentation",
+      "conclusion": "approved",
+      "evidence": "The reviewed history retains the 2026-09-30 timeout and no-Dispatch observation in orca-runtime.md, and merged commit 43a4050 retains the later official-path evidence in docs/plan/147-agy-path.md."
+    },
+    {
+      "id": "agy-official-path-settlement",
+      "conclusion": "approved",
+      "evidence": "The final review records that the persisted probe evidence and Orca worker-show result agree on completed Dispatch ctx_7117f2ebd635, task_28b11709d607, term_652dcc42-a155-4070-8072-8c782f2c883c, the requested gemini-3.1-pro-high model, and a settled successful outcome."
+    },
+    {
+      "id": "full-suite-evidence-at-reviewed-head",
+      "conclusion": "approved",
+      "evidence": "/tmp/omt-147-exact-head.txt identifies reviewed HEAD e3ea8e0caa45bf4925e0effd2692c1cb2957753e. /tmp/omt-147-exact-test.log reports 1,218 pass and 0 fail, and its SHA-256 is 2deee10453dde425ed0ea56bc8851b069b7b8c18fcaa92d2f3598957ec6c35e9."
+    },
+    {
+      "id": "closure-scope",
+      "conclusion": "approved",
+      "evidence": "git diff --name-status e3ea8e0..2a697e701f046ce1684d6fb945e6929608b5d4e5 reports only docs/plan/147-final-review.json, so the post-review range introduces no implementation change or genuine new finding."
+    }
+  ],
+  "findings": [
+    {
+      "id": "dispatch-creation-guard",
+      "status": "resolved",
+      "description": "The deterministic timeout guard was previously accepted only through the regression review.",
+      "resolution": "The reviewed tree retains the CLI-level ready-terminal timeout test and its command-log assertion that no worker-start Dispatch call occurs."
+    },
+    {
+      "id": "issue-147-observation-not-documented",
+      "status": "resolved",
+      "description": "The prior review found that the issue-147 Agy timeout observation and its no-Dispatch result were not retained in the runtime reference.",
+      "resolution": "Commit e2f636b retains the observation, and merged commit 43a4050 adds later successful official-path evidence without deleting the timeout evidence."
+    },
+    {
+      "id": "full-suite-transcript-missing-at-exact-head",
+      "status": "resolved",
+      "description": "The prior final review had no full-suite receipt tied to its exact reviewed HEAD.",
+      "resolution": "/tmp/omt-147-exact-head.txt identifies e3ea8e0caa45bf4925e0effd2692c1cb2957753e, and /tmp/omt-147-exact-test.log records 1,218 pass and 0 fail with SHA-256 2deee10453dde425ed0ea56bc8851b069b7b8c18fcaa92d2f3598957ec6c35e9."
+    }
+  ]
+}
