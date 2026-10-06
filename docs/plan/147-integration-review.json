@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "id": "review-147-integration-evidence",
+  "requirementId": "147-integration-evidence",
+  "reviewer": {
+    "kind": "agent-review",
+    "role": "senior",
+    "executionId": "ctx_f6d62b3d4bde"
+  },
+  "implementationExecutionId": "ctx_89275d983c1f",
+  "conclusion": "changes-requested",
+  "rows": [
+    {
+      "id": "goal",
+      "conclusion": "approved",
+      "evidence": "Verified goal: The issue-147 execution paths are properly isolated. Completion cannot be declared due to unmet c-5 condition."
+    },
+    {
+      "id": "c-1",
+      "conclusion": "approved",
+      "evidence": "Verified c-1: Tests and docs correctly separate the ready/tui-idle timeout from the later worker-start path without attributing failure solely to orphaned state."
+    },
+    {
+      "id": "c-2",
+      "conclusion": "approved",
+      "evidence": "Verified c-2: Both Codex and Agy were tested via official paths, preserving distinct receipts and worktrees without improper repeat attempts."
+    },
+    {
+      "id": "c-3",
+      "conclusion": "approved",
+      "evidence": "Verified c-3: Orca #15838 is properly referenced, no improper patch was applied, and a deterministic timeout test verifies the regression."
+    },
+    {
+      "id": "c-4",
+      "conclusion": "approved",
+      "evidence": "Verified c-4: No #145 PM branch state was modified; identifiers and independent review conditions remain correctly separated."
+    },
+    {
+      "id": "c-5",
+      "conclusion": "changes-requested",
+      "evidence": "Verified c-5 is unmet: Director fidelity confirmation and user presentation remain pending."
+    }
+  ],
+  "findings": [
+    {
+      "id": "missing-fidelity-confirmation",
+      "status": "open",
+      "description": "Director fidelity confirmation and user presentation remain pending. Although PR #151 run 37419294260 now shows all three OS SUCCESS at 9492d74, the fidelity confirmation gate is unmet.",
+      "resolution": "Director must provide fidelity confirmation before final delivery."
+    }
+  ]
+}
