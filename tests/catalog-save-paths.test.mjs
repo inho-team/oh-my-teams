@@ -11,7 +11,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readJSON, writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
-import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import {
+  draftOrganization,
+  draftResourceOrganization,
+} from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { executeCommand } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const CLAUDE_VERSION_OK = {
@@ -166,6 +169,62 @@ test("resource formation rejects a selected provider whose catalog is unavailabl
       ),
     /subscription resources failed catalog verification/,
   );
+});
+
+test("init and edit reject a resource organization without resources", async (t) => {
+  const dir = tempDir(t);
+  const orgFile = path.join(dir, "organization.json");
+  const valid = draftResourceOrganization({
+    name: "team",
+    resources: ["codex"],
+  });
+  writeJSON(orgFile, valid);
+
+  const emptyResources = structuredClone(valid);
+  emptyResources.resources = {};
+  const fromFile = path.join(dir, "empty-resources.json");
+  writeJSON(fromFile, emptyResources);
+
+  await assert.rejects(
+    () =>
+      executeCommand(
+        { command: "init", org: path.join(dir, "new.json"), from: fromFile },
+        fakeExecute(),
+      ),
+    /at least one subscription resource/i,
+  );
+  await assert.rejects(
+    () =>
+      executeCommand(
+        {
+          command: "edit",
+          org: orgFile,
+          from: fromFile,
+          revision: valid.revision,
+        },
+        fakeExecute(),
+      ),
+    /at least one subscription resource/i,
+  );
+});
+
+test("show --json returns a resource organization without profile decoration", async (t) => {
+  const dir = tempDir(t);
+  const orgFile = path.join(dir, "organization.json");
+  const organization = draftResourceOrganization({
+    name: "team",
+    resources: ["codex"],
+  });
+  writeJSON(orgFile, organization);
+
+  const result = await executeCommand({
+    command: "show",
+    org: orgFile,
+    json: true,
+  });
+
+  assert.equal(result.organization.profiles, undefined);
+  assert.deepEqual(result.organization.resources, organization.resources);
 });
 
 test("init refuses a model the catalog no longer lists", async (t) => {
