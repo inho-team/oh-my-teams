@@ -1,6 +1,7 @@
 /** Regression tests for conservative kickoff worktree reconciliation. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +16,11 @@ import {
   releaseKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
+import {
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const pm = "repo::/tmp/pm";
 const child = "repo::/tmp/child";
@@ -54,6 +60,55 @@ const observed = () => ({
   git: { [pm]: clean, [child]: clean },
   inventoryComplete: true,
 });
+
+async function registerCloseReadyFixture({
+  orgFile,
+  project,
+  brief,
+  pmId,
+  pmPath,
+  goal,
+}) {
+  registerKickoff(orgFile, {
+    goal,
+    pm: { worktreeId: pmId, path: pmPath, stateDir: path.join(pmPath, ".omt") },
+    organizationRevision: readJSON(orgFile).revision,
+    brief,
+    delivery: { mode: "none" },
+    requirements: minimalRequirements(orgFile, pmId),
+    director: { terminalHandle: "term-director", checkoutPath: project },
+  });
+  execFileSync("git", ["init", "-q"], { cwd: project });
+  execFileSync("git", ["add", "brief.md"], { cwd: project });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=OMT Test",
+      "-c",
+      "user.email=omt@example.test",
+      "commit",
+      "-qm",
+      "fixture",
+    ],
+    { cwd: project },
+  );
+  const head = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: project,
+    encoding: "utf8",
+  }).trim();
+  await requirementsFidelity(orgFile, pmId, {
+    head,
+    repo: project,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "brief.md" },
+      { type: "criterion", id: "c1", status: "met", evidence: "brief.md" },
+    ],
+  });
+  await requirementsFidelityConfirm(orgFile, pmId, project);
+  return head;
+}
 
 test("completed kickoff classifies delivered, clean, exited worktrees as safe", () => {
   const result = evaluateKickoffCleanup(entry, observed());
@@ -280,12 +335,13 @@ test("a completed archive retains child identity for read-only partial cleanup r
   );
   const pmId = `repo::${pmPath}`;
   const childId = `repo::${childPath}`;
-  registerKickoff(orgFile, {
-    goal: "reconcile worktrees",
-    pm: { worktreeId: pmId, path: pmPath, stateDir: path.join(pmPath, ".omt") },
-    organizationRevision: readJSON(orgFile).revision,
+  const head = await registerCloseReadyFixture({
+    orgFile,
+    project,
     brief,
-    delivery: { mode: "none" },
+    pmId,
+    pmPath,
+    goal: "reconcile worktrees",
   });
   let childPresent = true;
   let foreignWorker = true;
@@ -386,10 +442,13 @@ test("a completed archive retains child identity for read-only partial cleanup r
   assert.equal(contradictory.inventoryComplete, false);
   assert.ok(contradictory.errors.includes("worker-workspace-unattributed"));
   contextLiveness = { verdict: "unverifiable", reason: "unsupervised_settled" };
-  const released = releaseKickoff(orgFile, {
+  const released = await releaseKickoff(orgFile, {
     worktreeId: pmId,
     reason: "completed",
     cleanup,
+    callerCwd: project,
+    head,
+    repo: project,
   });
   assert.equal(readJSON(released.archived).cleanup.candidates.length, 2);
   assert.equal(
@@ -414,7 +473,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
   assert.equal(readJSON(released.archived).cleanup.candidates.length, 2);
 });
 
-function reclaimFixture(t) {
+async function reclaimFixture(t) {
   const project = fs.mkdtempSync(
     path.join(os.tmpdir(), "omt-cleanup-reclaim-"),
   );
@@ -430,33 +489,33 @@ function reclaimFixture(t) {
   const pmId = `repo::${path.join(project, "pm")}`;
   const firstId = `repo::${path.join(project, "first")}`;
   const secondId = `repo::${path.join(project, "second")}`;
-  registerKickoff(orgFile, {
-    goal: "reclaim completed kickoff",
-    pm: {
-      worktreeId: pmId,
-      path: path.join(project, "pm"),
-      stateDir: path.join(project, "pm", ".omt"),
-    },
-    organizationRevision: readJSON(orgFile).revision,
+  const head = await registerCloseReadyFixture({
+    orgFile,
+    project,
     brief,
-    delivery: { mode: "none" },
-    director: { terminalHandle: "term-director", checkoutPath: project },
+    pmId,
+    pmPath: path.join(project, "pm"),
+    goal: "reclaim completed kickoff",
   });
-  const archived = releaseKickoff(orgFile, {
-    worktreeId: pmId,
-    reason: "completed",
-    callerCwd: project,
-    cleanup: {
-      schemaVersion: 1,
+  const archived = (
+    await releaseKickoff(orgFile, {
       worktreeId: pmId,
-      createdAt: listKickoffs(orgFile, pmId).kickoffs[0].createdAt,
-      status: "cleanup-pending",
-      candidates: [pmId, firstId, secondId].map((worktreeId) => ({
-        worktreeId,
-        status: "preserve",
-      })),
-    },
-  }).archived;
+      reason: "completed",
+      callerCwd: project,
+      head,
+      repo: project,
+      cleanup: {
+        schemaVersion: 1,
+        worktreeId: pmId,
+        createdAt: listKickoffs(orgFile, pmId).kickoffs[0].createdAt,
+        status: "cleanup-pending",
+        candidates: [pmId, firstId, secondId].map((worktreeId) => ({
+          worktreeId,
+          status: "preserve",
+        })),
+      },
+    })
+  ).archived;
   const removed = new Set();
   const preserved = new Set();
   const calls = [];
@@ -517,7 +576,7 @@ function reclaimFixture(t) {
 }
 
 test("reclaim removes safe children before their PM and stores receipts", async (t) => {
-  const fixture = reclaimFixture(t);
+  const fixture = await reclaimFixture(t);
   const result = await reclaimKickoffCleanup(fixture.request, fixture);
   assert.deepEqual(fixture.calls, [
     fixture.ids.secondId,
@@ -535,7 +594,7 @@ test("reclaim removes safe children before their PM and stores receipts", async 
 });
 
 test("an Orca removal error stays unverified and is not retried", async (t) => {
-  const fixture = reclaimFixture(t);
+  const fixture = await reclaimFixture(t);
   const result = await reclaimKickoffCleanup(fixture.request, {
     scan: fixture.scan,
     show: fixture.show,
@@ -554,7 +613,7 @@ test("an Orca removal error stays unverified and is not retried", async (t) => {
 });
 
 test("a replacement between scan and show is refused before Orca removal", async (t) => {
-  const fixture = reclaimFixture(t);
+  const fixture = await reclaimFixture(t);
   const result = await reclaimKickoffCleanup(fixture.request, {
     scan: fixture.scan,
     show: async (_executable, args) => {
@@ -581,7 +640,7 @@ test("a replacement between scan and show is refused before Orca removal", async
 });
 
 test("partial cleanup preserves a blocked sibling and reentry removes only remaining candidates", async (t) => {
-  const fixture = reclaimFixture(t);
+  const fixture = await reclaimFixture(t);
   fixture.preserved.add(fixture.ids.firstId);
   const first = await reclaimKickoffCleanup(fixture.request, fixture);
   assert.deepEqual(fixture.calls, [fixture.ids.secondId]);
@@ -598,7 +657,7 @@ test("partial cleanup preserves a blocked sibling and reentry removes only remai
 });
 
 test("an unobserved Orca removal is not repeated on reentry", async (t) => {
-  const fixture = reclaimFixture(t);
+  const fixture = await reclaimFixture(t);
   let scans = 0;
   const scan = async () => {
     scans += 1;

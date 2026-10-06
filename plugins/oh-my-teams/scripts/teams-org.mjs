@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /** Thin CLI adapter for the oh my teams domain modules. */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assert,
+  AUDITOR_ROLE,
   canonicalRole,
   chart,
   displayModel,
@@ -55,7 +57,7 @@ import {
 } from "./role-terminal.mjs";
 import { predictLaunchPath } from "./launch-matrix.mjs";
 import { answerPrompt } from "./prompt-supervision.mjs";
-import { advise, assist, draft, validateTask, work } from "./worker.mjs";
+import { advise, draft, validateTask, work } from "./worker.mjs";
 import {
   aggregate,
   git as gitEvidence,
@@ -65,15 +67,42 @@ import {
 import { previewPreset } from "./presets.mjs";
 import { acceptOutcome, gateCheck, recordReview } from "./gates.mjs";
 import {
+  auditAccept,
+  auditChecked,
+  pickDeclaredIdentity,
+  auditObjection,
+  auditResponse,
+  auditRuling,
+  hasValidAcceptance,
+} from "./audit.mjs";
+import {
+  readDraft,
+  bindKickoffResultRepo,
+  requirementsAmend,
+  requirementsConfirm,
+  requirementsConfirmDraft,
+  requirementsDraft,
+  requirementsException,
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+  requirementsPresent,
+  requirementsRetrofit,
+} from "./requirements.mjs";
+import {
   checkTerminalIdle,
   createWorktreeWithRoleSession,
   discoverOrcaRuntime,
   findActiveDispatch,
   injectTask,
+  isTrustedOrcaExecute,
+  readTrustedOrcaVersion,
   reclaimWorktree,
   releaseWorker,
+  resolveTrustedOrcaScriptPath,
   runOrcaJson,
   selectOrcaExecutable,
+  trustedOrcaExecute,
+  TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
   startWorker,
   waitForSupervisionMessage,
 } from "./orca-adapter.mjs";
@@ -124,13 +153,18 @@ import {
   bindKickoffRun,
   classifyKickoffEntry,
   cleanupKickoffBranches,
+  isSameOrWithinByIdentity,
+  kickoffAuditPolicyRetrofit,
+  kickoffResultRepoDecide,
   kickoffHashFor,
   listKickoffs,
   ownerProject,
   reassignDirector,
+  recordAuditorLaunch,
   recordDelivery,
   registerKickoff,
   releaseKickoff,
+  sharesWorktreeWithAny,
   verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
 import {
@@ -188,6 +222,22 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   kickoff-claim --org FILE --from CLAIM
   kickoff-show --org FILE [--worktree ID]
   kickoff-bind --org FILE --worktree ID --run ID
+  kickoff-result-repo-decide --org FILE --worktree ID --repo PATH --reason TEXT
+                             (director only, run from the kickoff's registered checkout;
+                             when accepted workflows recorded different result repositories,
+                             proves from Git which one contains every accepted head and records
+                             it append-only; the same accepted results cannot be decided twice)
+  kickoff-audit-policy-retrofit --org FILE --worktree ID
+                                --auditor-configured true|false --reason TEXT
+                                [--profile NAME --fallbacks NAME[,NAME...]]
+                                (director only, run from the kickoff's registered checkout;
+                                pins a legacy entry's audit policy once, permanently — refuses
+                                a kickoff already pinned at claim time, an entry with no
+                                registered director, or --auditor-configured false when the
+                                launch ledger already records an auditor session for it;
+                                --profile/--fallbacks are required, and must each name a
+                                profile in organization.json, only when --auditor-configured
+                                is true)
   kickoff-release --org FILE --worktree ID
                   --reason completed|disbanded|taken-over [--force]
                   (also closes that kickoff's pending director signals)
@@ -300,8 +350,6 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role worker]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
-  assist --org FILE --task FILE --repo DIR --state DIR --role ROLE
-         --kind research|checklist|edit [--profile PROFILE]
   advise --org FILE --brief FILE --repo DIR --state DIR --role ROLE
          --kind plan|design|review|unblock [--profile PROFILE]
          (read-only advisor call; spends one slot of policy.adviceBudget)
@@ -315,12 +363,15 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   gate-check --task FILE --report FILE --repo DIR --state DIR
              [--org FILE] [--workflow-id ID]
   accept --task FILE --report FILE --decision FILE --repo DIR --state DIR
-         [--org FILE] [--workflow-id ID]
+         [--org FILE --worktree ID] [--workflow-id ID]
          (--org resolves the state's kickoff entry to a current/legacy/
          integrity-failure judgement per structured-omt-documents.md 3.7 item 5;
          current forwards kickoffHash [and --workflow-id, if given] to the
          document ownership checks in gates.mjs, legacy omits both, and
-         integrity-failure or an unresolvable entry refuses the command)
+         integrity-failure or an unresolvable entry refuses the command;
+         --org/--worktree also name the kickoff under a requirements/audit
+         ledger and refuse while its outcome audit checkpoint has an
+         unresolved objection)
   doc-resolve-kickoff --org FILE --worktree ID
                       (resolveKickoffHash for the worktree's active kickoff)
   doc-id --kickoff-hash HASH --stage STAGE --doc-type TYPE --local-id ID
@@ -433,11 +484,20 @@ export const ALLOWED_OPTIONS = {
   "kickoff-show": ["org", "worktree"],
   "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
-  "kickoff-release": ["org", "worktree", "reason", "force"],
+  "kickoff-result-repo-decide": ["org", "worktree", "repo", "reason"],
+  "kickoff-audit-policy-retrofit": [
+    "org",
+    "worktree",
+    "auditor-configured",
+    "profile",
+    "fallbacks",
+    "reason",
+  ],
+  "kickoff-release": ["org", "worktree", "reason", "force", "repo", "head"],
   "kickoff-cleanup-candidates": ["org", "worktree", "history-file", "orca"],
   "kickoff-cleanup-reclaim": ["org", "worktree", "history-file", "orca"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
-  "kickoff-check-close-ready": ["org", "worktree", "head"],
+  "kickoff-check-close-ready": ["org", "worktree", "head", "repo"],
   "kickoff-merge-record": [
     "org",
     "worktree",
@@ -446,6 +506,26 @@ export const ALLOWED_OPTIONS = {
     "remote",
     "force",
   ],
+  "requirements-draft": ["org", "worktree", "from"],
+  "requirements-confirm": [
+    "org",
+    "worktree",
+    "draft",
+    "checkout",
+    "criterion",
+    "quote",
+  ],
+  "requirements-retrofit": ["org", "worktree", "checkout"],
+  "requirements-exception": ["org", "worktree", "from"],
+  "requirements-amend": ["org", "worktree", "from"],
+  "requirements-present": ["org", "worktree", "from"],
+  "requirements-fidelity": ["org", "worktree", "from"],
+  "requirements-fidelity-confirm": ["org", "worktree"],
+  "audit-objection": ["org", "worktree", "from"],
+  "audit-response": ["org", "worktree", "from"],
+  "audit-ruling": ["org", "worktree", "from"],
+  "audit-checked": ["org", "worktree", "checkpoint", "from"],
+  "audit-accept": ["org", "worktree", "checkpoint", "head", "repo"],
   deliver: [
     "org",
     "worktree",
@@ -577,7 +657,6 @@ export const ALLOWED_OPTIONS = {
   ],
   work: ["org", "task", "repo", "state", "role", "workflow-id", "attempt-id"],
   draft: ["org", "task", "repo", "kind"],
-  assist: ["org", "task", "repo", "state", "role", "kind", "profile"],
   advise: ["org", "brief", "repo", "state", "role", "kind", "profile"],
   verify: ["task", "repo", "state", "timeout-ms"],
   "merge-check": [
@@ -601,7 +680,16 @@ export const ALLOWED_OPTIONS = {
     "workflow-id",
   ],
   "gate-check": ["task", "report", "repo", "state", "org", "workflow-id"],
-  accept: ["task", "report", "decision", "repo", "state", "org", "workflow-id"],
+  accept: [
+    "task",
+    "report",
+    "decision",
+    "repo",
+    "state",
+    "org",
+    "worktree",
+    "workflow-id",
+  ],
   "doc-resolve-kickoff": ["org", "worktree"],
   "doc-id": [
     "kickoff-hash",
@@ -693,12 +781,35 @@ export const REQUIRED_OPTIONS = {
   "kickoff-show": ["org"],
   "kickoff-handoff-verify": ["org", "worktree", "director-terminal", "brief"],
   "kickoff-bind": ["org", "worktree", "run"],
+  "kickoff-result-repo-decide": ["org", "worktree", "repo", "reason"],
+  "kickoff-audit-policy-retrofit": [
+    "org",
+    "worktree",
+    "auditor-configured",
+    "reason",
+  ],
   "kickoff-release": ["org", "worktree", "reason"],
   "kickoff-cleanup-candidates": ["org", "worktree"],
   "kickoff-cleanup-reclaim": ["org", "worktree", "history-file"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],
   "kickoff-check-close-ready": ["org", "worktree", "head"],
   "kickoff-merge-record": ["org", "worktree", "head", "merge-commit"],
+  "requirements-draft": ["org", "worktree", "from"],
+  "requirements-confirm": ["org", "worktree", "criterion", "quote"],
+  "requirements-retrofit": ["org", "worktree"],
+  "requirements-exception": ["org", "worktree", "from"],
+  "requirements-amend": ["org", "worktree", "from"],
+  "requirements-present": ["org", "worktree", "from"],
+  "requirements-fidelity": ["org", "worktree", "from"],
+  "requirements-fidelity-confirm": ["org", "worktree"],
+  "audit-objection": ["org", "worktree", "from"],
+  // --terminal is not required here: it is only relevant for the "outcome"
+  // checkpoint's PM identity (verifiedPm); "brief" uses the caller's own cwd
+  // (verifiedDirector) and never reads it.
+  "audit-response": ["org", "worktree", "from"],
+  "audit-ruling": ["org", "worktree", "from"],
+  "audit-checked": ["org", "worktree", "checkpoint", "from"],
+  "audit-accept": ["org", "worktree", "checkpoint"],
   deliver: ["org", "worktree", "source", "head", "evidence", "task"],
   prepare: ["org", "task", "repo", "name"],
   "role-worktree-create": ["org", "role", "repo", "name", "base"],
@@ -743,7 +854,6 @@ export const REQUIRED_OPTIONS = {
   "supervision-wait": ["run"],
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
-  assist: ["org", "task", "repo", "state", "role", "kind"],
   advise: ["org", "brief", "repo", "state", "role", "kind"],
   verify: ["task", "repo", "state"],
   "merge-check": ["evidence", "task", "repo", "base"],
@@ -807,7 +917,9 @@ export function parseArgs(argv) {
     const option = key.slice(2);
     // `--text` is a flag only for role-spec.
     if (
-      ["json", "apply", "force", "all", "write", "dry-run"].includes(option) ||
+      ["json", "apply", "force", "all", "write", "dry-run", "draft"].includes(
+        option,
+      ) ||
       (option === "text" && command === "role-spec")
     ) {
       args[option] = true;
@@ -1010,17 +1122,30 @@ async function compatibilityPrepare(args) {
   };
 }
 
-async function preflightRoleWorktree(args, organization, environment, matrix) {
+async function preflightRoleWorktree(
+  args,
+  organization,
+  environment,
+  matrix,
+  trustedLaunch = null,
+) {
   const command = roleCommand(organization, args.role, {
     profile: args.profile,
   });
   const worktreePath = args.worktree
     ? pathFromWorktreeId(args.worktree)
     : undefined;
-  const env = await environment({
-    worktreePath,
-    orcaExecutable: args.orca,
-  });
+  // The auditor reads its environment exactly as role-terminal's auditor
+  // branch does, through the launch's own trusted runner and never args.orca.
+  const env = await environment(
+    trustedLaunch
+      ? {
+          worktreePath,
+          orcaExecutable: trustedLaunch.versionExecutable,
+          ...auditorLaunchEnvironmentInputs(trustedLaunch.execute),
+        }
+      : { worktreePath, orcaExecutable: args.orca },
+  );
   const prediction = matrix({
     runner: command.provider,
     model: command.modelRequested,
@@ -1256,6 +1381,202 @@ async function proveAndCloseOwnedTerminals({
 }
 
 /**
+ * Resolves a path's `fs.realpathSync.native` form, or `null` when the path
+ * cannot be resolved (missing, or a broken symlink). A binding check that
+ * cannot verify a path must refuse rather than fall through on a lucky string
+ * match, so callers treat `null` as a mismatch, never a pass-through.
+ *
+ * @param {string} candidate - Path to resolve.
+ * @returns {string | null} Resolved path, or `null` if resolution fails.
+ */
+function realpathOrNull(candidate) {
+  try {
+    return fs.realpathSync.native(candidate);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reports whether `child` is `parent` itself, or sits anywhere inside it, by
+ * filesystem identity. Unlike a plain string comparison, this survives a
+ * symlink or path respelling; unlike {@link isSameOrWithinByIdentity} used
+ * directly, an unresolvable path on either side counts as a mismatch instead
+ * of throwing.
+ *
+ * @param {string} parent - Candidate ancestor directory.
+ * @param {string} child - Candidate descendant (or the same) directory.
+ * @returns {boolean} Whether `child` is `parent` itself or beneath it.
+ */
+function identicalOrWithin(parent, child) {
+  const parentReal = realpathOrNull(parent);
+  const childReal = realpathOrNull(child);
+  if (parentReal === null || childReal === null) return false;
+  return isSameOrWithinByIdentity(parentReal, childReal);
+}
+
+/**
+ * Applies the direct role-terminal binding table (D2/부록 F) to a non-auditor
+ * launch: decides which registered kickoff, if any, owns `target`, and
+ * refuses when the caller's --state or cwd disagrees with that ownership. A
+ * caller-supplied --state is never trusted on its own (D2, msg_c9d1afb03fd4)
+ * -- only the target worktree's own identity or an earlier role-terminal
+ * ledger line recorded there establishes the binding. Skipped entirely when
+ * no kickoff is registered in this organization at all.
+ *
+ * @param {object} params
+ * @param {string} params.org - Organization JSON path (unresolved).
+ * @param {string | null} params.target - Resolved --worktree directory, or
+ *   `null` when the selector names no directory yet.
+ * @param {object} params.args - Parsed `role-terminal` command arguments.
+ * @returns {void}
+ */
+function assertDirectRoleTerminalBinding({ org, target, args }) {
+  const orgPath = path.resolve(org);
+  const { kickoffs } = listKickoffs(orgPath);
+  if (kickoffs.length === 0) return;
+  const stateDir = args.state ? path.resolve(args.state) : null;
+  const statedEntry = stateDir
+    ? kickoffs.find(
+        (candidate) => path.resolve(candidate.pm.stateDir) === stateDir,
+      )
+    : null;
+  assert(
+    stateDir === null || statedEntry,
+    `No kickoff is registered with pm state directory ${stateDir}`,
+  );
+  assert(
+    target,
+    "role-terminal needs a resolvable --worktree while a kickoff is active in this organization",
+  );
+  const pmEntry = kickoffs.find((candidate) =>
+    identicalOrWithin(candidate.pm.path, target),
+  );
+  if (pmEntry) {
+    if (stateDir) {
+      assert(
+        statedEntry === pmEntry,
+        `--state ${args.state} does not name the kickoff (${pmEntry.pm.worktreeId}) this worktree belongs to`,
+      );
+    } else {
+      const callerCwdReal = realpathOrNull(process.cwd());
+      const pmPathReal = realpathOrNull(pmEntry.pm.path);
+      assert(
+        callerCwdReal !== null &&
+          pmPathReal !== null &&
+          callerCwdReal === pmPathReal,
+        `role-terminal without --state may only be opened from kickoff ${pmEntry.pm.worktreeId}'s own PM ` +
+          "worktree; run it from that directory, or pass --state naming the kickoff you intend",
+      );
+    }
+    return;
+  }
+  const activeWorktreeIds = new Set(
+    kickoffs.map((candidate) => candidate.pm.worktreeId),
+  );
+  const bindingLaunch = readLaunches(orgPath).findLast(
+    (line) =>
+      line.via === "role-terminal" &&
+      line.kickoffPmWorktreeId &&
+      activeWorktreeIds.has(line.kickoffPmWorktreeId) &&
+      line.worktreePath &&
+      identicalOrWithin(line.worktreePath, target),
+  );
+  // A brand-new, never-before-seen child has no binding evidence at all; only
+  // role-worktree-create's own internal open (viaRoleWorktreeCreate, never
+  // reachable through the CLI) may open its first session.
+  assert(
+    bindingLaunch || args.viaRoleWorktreeCreate === true,
+    `This launch (worktree ${target}) cannot be tied to any registered kickoff by sitting inside its PM ` +
+      "worktree or by an earlier role-terminal launch recorded there; open it with role-worktree-create first",
+  );
+  if (bindingLaunch) {
+    assert(
+      statedEntry?.pm.worktreeId === bindingLaunch.kickoffPmWorktreeId,
+      `--state must name the kickoff (${bindingLaunch.kickoffPmWorktreeId}) this worktree is already bound to`,
+    );
+  }
+}
+
+/**
+ * Lists the worktree paths recorded by the workflow tasks under a kickoff's PM
+ * state directory: the path half of each task's `<repo-id>::<path>` receipt.
+ * A worker that never wrote a launch-ledger line still shows up here. A
+ * workflow state that exists but cannot be read is a refusal, not a skipped
+ * entry, so a corrupt state cannot silently shrink the independence check.
+ *
+ * @param {string} stateDir - The kickoff's PM `.omt` state directory.
+ * @returns {string[]} Receipt worktree paths of every workflow task.
+ * @throws {Error} With `preCreateRefusal` when a workflow state cannot be read.
+ */
+function workflowReceiptWorktreePaths(stateDir) {
+  const root = path.join(stateDir, "workflows");
+  if (!fs.existsSync(root)) return [];
+  const paths = [];
+  for (const name of fs.readdirSync(root)) {
+    // Only a directory is a workflow; a stray file (e.g. .DS_Store) is not.
+    if (!fs.lstatSync(path.join(root, name)).isDirectory()) continue;
+    const file = path.join(root, name, "state.json");
+    let state;
+    try {
+      state = readJSON(file);
+      assert(
+        state?.tasks !== null &&
+          typeof state?.tasks === "object" &&
+          !Array.isArray(state.tasks),
+        "malformed state",
+      );
+    } catch (error) {
+      const refusal = new Error(
+        `The auditor cannot be placed: workflow ${name} under ${stateDir} cannot be read (${error.message}), ` +
+          "so its workers' worktrees cannot be ruled out",
+      );
+      refusal.preCreateRefusal = { reason: "auditor-independence" };
+      throw refusal;
+    }
+    for (const item of Object.values(state.tasks)) {
+      for (const worktreeId of [
+        item?.worktreeId,
+        item?.execution?.worktreeId,
+      ]) {
+        const separator = String(worktreeId ?? "").indexOf("::");
+        if (separator > 0) paths.push(String(worktreeId).slice(separator + 2));
+      }
+    }
+  }
+  return paths;
+}
+
+/**
+ * Lists the paths a kickoff's auditor worktree must stay independent of: the
+ * kickoff's own PM worktree, every non-auditor worktree this same kickoff has
+ * already launched, and every worktree a workflow task of this kickoff
+ * recorded in its receipt, so a worker absent from the launch ledger is still
+ * covered. Shared by role-terminal's own D4 check and createRoleWorktree's
+ * pre-open D4 check (director msg_e96fa626ec49, msg_8c39242a6c89), so both
+ * compare against the same list.
+ *
+ * @param {string} orgFile - Resolved organization.json path.
+ * @param {object} auditorEntry - The audited kickoff's registry entry.
+ * @returns {string[]} Paths the auditor's own target must not share identity with.
+ * @throws {Error} With `preCreateRefusal` when a workflow state cannot be read.
+ */
+function auditorIndependenceForbiddenPaths(orgFile, auditorEntry) {
+  return [
+    auditorEntry.pm.path,
+    ...readLaunches(orgFile)
+      .filter(
+        (line) =>
+          line.kickoffPmWorktreeId === auditorEntry.pm.worktreeId &&
+          line.role !== AUDITOR_ROLE &&
+          line.worktreePath,
+      )
+      .map((line) => line.worktreePath),
+    ...workflowReceiptWorktreePaths(auditorEntry.pm.stateDir),
+  ];
+}
+
+/**
  * Creates one Orca child worktree only as part of opening its role session.
  * The callback reuses the same `role-terminal` implementation exposed by the
  * CLI, so a new operational path cannot accidentally bypass session proof.
@@ -1268,6 +1589,7 @@ async function proveAndCloseOwnedTerminals({
  * @param {Function} [ports.git=gitEvidence] - Git evidence reader.
  * @param {Function} [ports.closures=readTerminalClosures] - Durable closure-proof reader.
  * @param {Function} [ports.recordClosure=recordTerminalClosure] - Closure-proof writer.
+ * @param {Function} [ports.auditorLaunch=resolveAuditorLaunchExecution] - Builds the auditor's one trusted runner, for tests only.
  * @returns {Promise<object>} Worktree identity and proven role terminal.
  */
 export async function createRoleWorktree(
@@ -1288,14 +1610,43 @@ export async function createRoleWorktree(
     release = releaseWorker,
     close = runOrcaJson,
     list = runOrcaJson,
+    auditorLaunch = resolveAuditorLaunchExecution,
   } = {},
 ) {
+  // The auditor is out-of-ladder (role-terminal's own comment: it never
+  // folds, never runs a workflow), so it takes none of the workflow-task
+  // promotion/reuse machinery below: --state alone names the audited
+  // kickoff, exactly as role-terminal --role auditor itself requires, and
+  // creation always makes a brand-new worktree (never --worktree reuse),
+  // so its session proof is one unit with its creation (audit-worktree-create-path).
+  const isAuditorRole = args.role === AUDITOR_ROLE;
+  if (isAuditorRole) {
+    assert(
+      args.state &&
+        args["workflow-id"] === undefined &&
+        args["workflow-task"] === undefined &&
+        args["prior-workflow-id"] === undefined &&
+        args["prior-task-id"] === undefined &&
+        args.worktree === undefined,
+      "role-worktree-create --role auditor requires --state naming the audited kickoff's PM state directory, " +
+        "and accepts none of --workflow-id/--workflow-task/--prior-workflow-id/--prior-task-id/--worktree " +
+        "(the auditor never runs a workflow and always opens a brand-new worktree)",
+    );
+    // Mirrors role-terminal --role auditor's own --orca refusal (B.6, decision
+    // B): this preflight step reads a launch environment through args.orca
+    // before role-terminal's own trusted-executable check ever runs, so the
+    // same refusal must happen here too, not only downstream.
+    assert(
+      args.orca === undefined,
+      "role-worktree-create --role auditor does not accept --orca; the auditor launch always uses the trusted Orca executable",
+    );
+  }
   const workflowOptions = [
     args["workflow-id"] !== undefined,
     args["workflow-task"] !== undefined,
     args.state !== undefined,
   ];
-  const hasWorkflow = workflowOptions.some(Boolean);
+  const hasWorkflow = !isAuditorRole && workflowOptions.some(Boolean);
   assert(
     !hasWorkflow || workflowOptions.every(Boolean),
     "--workflow-id, --workflow-task, and --state must be provided together",
@@ -1409,7 +1760,111 @@ export async function createRoleWorktree(
     preflightOrganization,
     `Workflow ${args["workflow-id"]} has no frozen organization snapshot`,
   );
-  await preflightRoleWorktree(args, preflightOrganization, environment, matrix);
+  // D1/checklist 5: the matrix must predict the same pinned-policy launch
+  // the nested role-terminal call below will actually open, not a live
+  // organization.json read that may since disagree with it.
+  let organizationForPreflight = preflightOrganization;
+  let auditorEntry = null;
+  let auditorTrustedLaunch = null;
+  if (isAuditorRole) {
+    const stateDir = path.resolve(args.state);
+    auditorEntry = listKickoffs(path.resolve(args.org)).kickoffs.find(
+      (entry) => path.resolve(entry.pm.stateDir) === stateDir,
+    );
+    assert(
+      auditorEntry,
+      `No kickoff is registered with pm state directory ${stateDir}`,
+    );
+    assert(
+      auditorEntry.auditPolicy?.auditorConfigured === true,
+      `Kickoff ${auditorEntry.pm.worktreeId} has no pinned auditor profile; ` +
+        "the director must run kickoff-audit-policy-retrofit with --auditor-configured true " +
+        "before an auditor worktree can be created for it",
+    );
+    assert(
+      Object.hasOwn(
+        preflightOrganization.profiles,
+        auditorEntry.auditPolicy.profile,
+      ),
+      `Kickoff ${auditorEntry.pm.worktreeId}'s pinned auditor profile ` +
+        `"${auditorEntry.auditPolicy.profile}" no longer exists in organization.json; ` +
+        "it is not substituted with another profile, so the auditor worktree cannot be created",
+    );
+    // D2/부록 F: --repo must be this kickoff's own director checkout, and the
+    // caller must actually hold that director's authority. Neither is proven
+    // by --state alone; both are checked before Orca create runs below.
+    const repoReal = realpathOrNull(path.resolve(args.repo));
+    const directorCheckoutReal = realpathOrNull(
+      path.resolve(auditorEntry.director.checkoutPath),
+    );
+    assert(
+      repoReal !== null &&
+        directorCheckoutReal !== null &&
+        repoReal === directorCheckoutReal,
+      `--repo ${args.repo} does not match kickoff ${auditorEntry.pm.worktreeId}'s director checkout ` +
+        `(${auditorEntry.director.checkoutPath}); the auditor worktree must be created from that checkout`,
+    );
+    assertDirectorAuthority(
+      auditorEntry,
+      process.cwd(),
+      "role-worktree-create --role auditor",
+    );
+    // One trusted runner serves the whole launch: the preflight version
+    // read, worktree create and discovery, the internal role-terminal open,
+    // and any automatic reclaim. Selecting it here, before any Orca create
+    // runs, makes an unresolvable or untrusted script refuse with zero
+    // worktrees created.
+    auditorTrustedLaunch = assertTrustedAuditorLaunch(
+      auditorLaunch({ auditorEntry, orcaArg: args.orca }),
+    );
+    organizationForPreflight = {
+      ...preflightOrganization,
+      auditor: {
+        profile: auditorEntry.auditPolicy.profile,
+        fallbacks: auditorEntry.auditPolicy.fallbacks ?? [],
+      },
+    };
+  } else {
+    // D2/부록 F: an active kickoff exists in this organization, so a non-PM
+    // role's worktree must be tied to one by a registered --state, and that
+    // --state's --repo must actually be its PM worktree -- otherwise any
+    // caller could name another kickoff's --workflow-id/--workflow-task/
+    // --state and pair it with an unrelated --repo (counterexamples 4/15).
+    // role: pm's own first worktree is the only role that predates any
+    // registered kickoff to tie itself to.
+    const { kickoffs } = listKickoffs(path.resolve(args.org));
+    if (kickoffs.length > 0) {
+      assert(
+        hasWorkflow || args.role === "pm",
+        `An active kickoff exists in this organization; role-worktree-create for role "${args.role}" ` +
+          "requires --workflow-id, --workflow-task, and --state (role: pm's first worktree is the only exception)",
+      );
+      if (hasWorkflow) {
+        const stateDir = path.resolve(args.state);
+        const statedEntry = kickoffs.find(
+          (candidate) => path.resolve(candidate.pm.stateDir) === stateDir,
+        );
+        assert(
+          statedEntry,
+          `No kickoff is registered with pm state directory ${stateDir}`,
+        );
+        const repoReal = realpathOrNull(path.resolve(args.repo));
+        const pmPathReal = realpathOrNull(path.resolve(statedEntry.pm.path));
+        assert(
+          repoReal !== null && pmPathReal !== null && repoReal === pmPathReal,
+          `--repo ${args.repo} does not match kickoff ${statedEntry.pm.worktreeId}'s PM worktree ` +
+            `(${statedEntry.pm.path})`,
+        );
+      }
+    }
+  }
+  await preflightRoleWorktree(
+    args,
+    organizationForPreflight,
+    environment,
+    matrix,
+    auditorTrustedLaunch,
+  );
   assert(
     !args.worktree || reusable,
     "--worktree requires an accepted prior task of the same role; a promotion also preserves and closes that Senior session first",
@@ -1421,6 +1876,19 @@ export async function createRoleWorktree(
         ...args,
         command: "role-terminal",
         worktree: `id:${workspace.id}`,
+        // Marks this as role-worktree-create's own internal first-session
+        // open, never reachable through the CLI (role-terminal's
+        // ALLOWED_OPTIONS has no such key; validateArgs would reject it).
+        // role-terminal's general-branch binding check trusts this marker,
+        // and only this marker, to open a session in a worktree that has no
+        // earlier via="role-terminal" ledger line yet.
+        viaRoleWorktreeCreate: true,
+        // Hands the internal role-terminal the launch's own trusted runner,
+        // so terminal calls and any reclaim share one instance. Never
+        // reachable through the CLI: ALLOWED_OPTIONS has no such key.
+        ...(auditorTrustedLaunch
+          ? { trustedLaunch: auditorTrustedLaunch }
+          : {}),
       }));
   const existingRoleWorktree = Boolean(
     args.worktree && (promotion || reusable),
@@ -1494,15 +1962,57 @@ export async function createRoleWorktree(
         name: args.name,
         base: args.base,
         setup: args.setup ?? "inherit",
-        executable: args.orca,
+        // The auditor never uses --orca or a PATH runner: create, discovery
+        // and reclaim all run through the launch's trusted runner.
+        executable: auditorTrustedLaunch
+          ? auditorTrustedLaunch.executable
+          : args.orca,
+        ...(auditorTrustedLaunch
+          ? { execute: auditorTrustedLaunch.execute }
+          : {}),
         openRoleSession: async (workspace) => {
+          // D4 pre-check (director msg_e96fa626ec49, msg_8c39242a6c89): the
+          // injected `open` port, when a caller supplies one, replaces this
+          // whole role-terminal call, so role-terminal's own D4 check
+          // (3648-3679) never runs against an injected open. This repeats
+          // that same independence check directly against the fresh
+          // workspace.path first, so a D4 violation is caught -- and the
+          // terminal-open port is never called at all for the rejected
+          // worktree -- whether or not `open` is real or injected.
+          if (isAuditorRole) {
+            let forbidden;
+            try {
+              forbidden = auditorIndependenceForbiddenPaths(
+                path.resolve(args.org),
+                auditorEntry,
+              );
+            } catch (error) {
+              // An unreadable workflow state is refused before any terminal
+              // exists, exactly like a path collision: reclaim the worktree.
+              if (error.preCreateRefusal) {
+                return { ready: false, sessionObserved: false };
+              }
+              throw error;
+            }
+            if (sharesWorktreeWithAny(workspace.path, forbidden)) {
+              return { ready: false, sessionObserved: false };
+            }
+          }
           let opened;
           try {
             opened = await openRoleSession(workspace);
           } catch (error) {
-            // The matrix refuses before creating a terminal. Other throws may
-            // follow a terminal/process creation and must stay for reconciliation.
-            if (error.matrixRefusal) {
+            // The matrix refuses before creating a terminal, and so does the
+            // auditor's agy-provider independence check (role-terminal's
+            // preCreateRefusal, 부록 F): both happen before any terminal
+            // exists, so both are safe to reclaim automatically here. The D4
+            // path check above already covers the auditor-independence
+            // refusal for both real and injected `open`; this catch stays as
+            // the reclaim path for the real role-terminal call's own D4
+            // throw too, in case it is ever reached directly. Other throws
+            // may follow a terminal/process creation and must stay for
+            // reconciliation.
+            if (error.matrixRefusal || error.preCreateRefusal) {
               return { ready: false, sessionObserved: false };
             }
             throw error;
@@ -1546,6 +2056,26 @@ export async function createRoleWorktree(
         }
       : {}),
     ...(transition ? { transition: transition.transition } : {}),
+    // D2 rule 6 (director decision, msg_ebb6ab8a8f6b): recordLaunchSafely
+    // swallows a launch-ledger write failure so the session itself still
+    // opens; without a top-level marker here, `main`'s blockingOutcome never
+    // sees it and process.exitCode stays 0 even though this worktree now has
+    // no launch line for D2's own terminal-binding lookup to find later.
+    // "blocked" is BLOCKING_STATUSES' existing value that fits (the worktree
+    // and session both exist but must not be treated as a usable assignment
+    // until the director looks at them); nothing here reclaims either one
+    // automatically.
+    ...(created.session?.ledgerError
+      ? {
+          status: "blocked",
+          blockedReason:
+            `role-worktree-create opened worktree ${created.workspace.path} and terminal ` +
+            `${created.session.terminal ?? "(none observed)"}, but the launch ledger write failed: ` +
+            `${created.session.ledgerError}. Neither the worktree nor the session is reclaimed ` +
+            "automatically; the director must inspect them and decide whether to retry the launch " +
+            "or discard this worktree.",
+        }
+      : {}),
   };
 }
 
@@ -1783,6 +2313,137 @@ async function startSupervisedWorker(args) {
     args.worktree ?? "current",
     args.repo,
   );
+  // B.5: an audited org must not let implementation start before the brief
+  // audit checkpoint has a valid acceptance. This is the only place that
+  // enforcement is checked (requirements-fidelity does not gate on it), and
+  // it only applies once this launch can be tied to a registered kickoff.
+  //
+  // D2 (director decision, msg_c9d1afb03fd4): a caller-supplied --state alone
+  // never establishes that binding, because nothing before this call proves
+  // --state names the kickoff that actually owns the target worktree -- a
+  // worker could otherwise name any other active kickoff's --state and
+  // inherit its audit policy (or lack of one). Binding instead follows the
+  // target worktree's own identity:
+  //   1. it sits at or inside a registered kickoff's own PM worktree
+  //      (pm.path), or
+  //   2. an earlier ledger line -- written only by role-worktree-create's own
+  //      role-terminal call, which validates --state/--workflow-id/--task
+  //      before recording anything -- named this exact --terminal handle and
+  //      a worktreePath at or inside the target. The caller does supply
+  //      --terminal here, to say which of its own sessions is starting, but
+  //      what this check trusts is not that bare claim: it is the recorded
+  //      line.terminal value in an actual via="role-terminal" ledger line,
+  //      one that was only ever written with the handle Orca itself assigned
+  //      when that session's own role-terminal call opened it (confirmed
+  //      against role-terminal.mjs's openRoleTerminal and orca-adapter.mjs's
+  //      startWorker/assertTerminalIdle). A caller cannot make a stale line
+  //      left by an unrelated kickoff match just by repeating its --terminal
+  //      value, because that value must also equal the one Orca assigned to
+  //      that specific ledger line's own session.
+  // A path-only match from a *different* terminal is never trusted for (2).
+  // If neither resolves this launch to a kickoff while any kickoff is
+  // active, the launch is refused regardless of --state (rule 3). If it does
+  // resolve, a --state that names a different kickoff is refused too (rule
+  // 4). Every identity comparison here treats a realpath failure as a
+  // mismatch, not a pass-through (rule 5) -- unlike sharesWorktreeWithAny
+  // (kickoff-registry.mjs), whose plain-path.resolve fallback is the correct
+  // direction for D4's over-detection goal but the wrong direction here,
+  // where the safe failure is refusing a launch this cannot verify, not
+  // waving it through on a lucky string match.
+  const target =
+    selectedWorktreePath(args.worktree ?? "current", args.repo) ??
+    path.resolve(args.repo);
+  const realpathOrNull = (candidate) => {
+    try {
+      return fs.realpathSync.native(candidate);
+    } catch {
+      return null;
+    }
+  };
+  const identicalOrWithin = (parent, child) => {
+    const parentReal = realpathOrNull(parent);
+    const childReal = realpathOrNull(child);
+    if (parentReal === null || childReal === null) return false;
+    return isSameOrWithinByIdentity(parentReal, childReal);
+  };
+  const kickoffs = listKickoffs(run.orgFile).kickoffs;
+  let entry = kickoffs.find((candidate) =>
+    identicalOrWithin(candidate.pm.path, target),
+  );
+  if (!entry && args.terminal) {
+    const activeWorktreeIds = new Set(
+      kickoffs.map((candidate) => candidate.pm.worktreeId),
+    );
+    const bindingLaunch = readLaunches(run.orgFile).findLast(
+      (line) =>
+        // Only a role-terminal-via line is trusted as binding evidence: that
+        // command validates --state/--workflow-id/--task before recording
+        // anything, while a worker-start-via line's own kickoffPmWorktreeId
+        // was computed by recordLaunch's plain --state/callerCwd lookup
+        // (usage-ledger.mjs's resolveLaunchKickoff), independent of this
+        // gate -- trusting it here would let that weaker, unrelated
+        // computation feed straight back into this one.
+        line.via === "role-terminal" &&
+        line.terminal === args.terminal &&
+        line.kickoffPmWorktreeId &&
+        activeWorktreeIds.has(line.kickoffPmWorktreeId) &&
+        line.worktreePath &&
+        // parent=line.worktreePath, child=target: the CALLER's target must be
+        // the recorded worktree itself or nested inside it, not the other
+        // way around -- else a caller naming some broad ancestor directory as
+        // --worktree could match any old, unrelated launch whose recorded
+        // worktreePath merely happens to sit somewhere underneath it.
+        identicalOrWithin(line.worktreePath, target),
+    );
+    entry = bindingLaunch
+      ? kickoffs.find(
+          (candidate) =>
+            candidate.pm.worktreeId === bindingLaunch.kickoffPmWorktreeId,
+        )
+      : undefined;
+  }
+  assert(
+    entry !== undefined || kickoffs.length === 0,
+    `This launch (worktree ${target}) cannot be tied to any registered kickoff, either by sitting inside ` +
+      "its PM worktree or by an earlier role-worktree-create launch recorded under this same --terminal; " +
+      "a caller-supplied --state does not establish ownership on its own. Open this worktree under the " +
+      "intended kickoff with role-worktree-create, or reuse the --terminal it recorded there.",
+  );
+  if (entry !== undefined && args.state) {
+    const declaredStateDir = realpathOrNull(args.state);
+    const boundStateDir = realpathOrNull(entry.pm.stateDir);
+    assert(
+      declaredStateDir !== null &&
+        boundStateDir !== null &&
+        declaredStateDir === boundStateDir,
+      `--state ${args.state} does not name the kickoff (${entry.pm.worktreeId}) this worktree is actually ` +
+        "bound to; refusing rather than silently preferring either value",
+    );
+  }
+  const worktreeId = entry?.pm.worktreeId ?? null;
+  if (worktreeId) {
+    // D1: this kickoff's pinned auditPolicy decides, not a fresh
+    // organization.json read, so removing org.auditor after claim cannot
+    // skip this precheck for a kickoff that already required an auditor.
+    // There is no live-read fallback (director decision msg_0b114271f1f5): a
+    // legacy entry with no pinned auditPolicy refuses outright, naming the
+    // retrofit command, rather than guessing from organization.json's
+    // current setting.
+    assert(
+      entry.auditPolicy !== undefined,
+      `Kickoff ${worktreeId} has no pinned audit policy; the director must run ` +
+        "kickoff-audit-policy-retrofit for this worktree before a worker can be assigned",
+    );
+    const auditorConfigured = entry.auditPolicy.auditorConfigured;
+    if (auditorConfigured) {
+      assert(
+        await hasValidAcceptance(run.orgFile, worktreeId, "brief"),
+        `Kickoff ${worktreeId} has an auditor configured but no valid brief-audit ` +
+          "acceptance yet; the director must resolve the brief audit " +
+          "(audit-response/audit-ruling/audit-accept) before a worker can be assigned",
+      );
+    }
+  }
   assert(
     args.purpose === undefined || DISPATCH_PURPOSES.includes(args.purpose),
     `--purpose must be one of: ${DISPATCH_PURPOSES.join(", ")}`,
@@ -2466,6 +3127,147 @@ async function writeDraft(args, execute) {
 }
 
 /**
+ * Checks director authority for a director-only `requirements-*` CLI command,
+ * strictly and without the `--force` bypass `assertDirectorAuthority`
+ * (delivery.mjs) offers other commands: a requirements command never accepts
+ * `--force` as a substitute for running from the right checkout (director
+ * decision on requirements-retrofit's authority gap, msg_2f57aa6e083e).
+ *
+ * When the kickoff has a registered director, the caller must be running
+ * from exactly that checkout. When it does not (a kickoff registered before
+ * director support existed), the caller must supply `--checkout`, must be
+ * running from exactly that path, and that path must be the organization's
+ * own owner checkout (`ownerProject(orgFile)`) — there is no warn-and-allow
+ * fallback for a missing director here, unlike `assertDirectorAuthority`.
+ *
+ * @param {object} entry - Kickoff registry entry the command targets.
+ * @param {string} orgFile - Organization JSON path, to resolve the owner checkout.
+ * @param {string|undefined} checkoutArg - The command's `--checkout` value, if given.
+ * @param {string} use - Command name, named in any thrown error.
+ * @returns {{checkoutPath: string}} The verified checkout, to record as the ledger's director.
+ * @throws {Error} When the caller is not running from the required checkout.
+ */
+function assertRequirementsDirectorAuthority(entry, orgFile, checkoutArg, use) {
+  const callerPath = path.resolve(process.cwd());
+  if (entry.director) {
+    const expected = path.resolve(entry.director.checkoutPath);
+    assert(
+      callerPath === expected,
+      `${use} must be run from the director's checkout at ${expected}; ` +
+        `current directory is ${callerPath}. There is no --force override for a requirements command.`,
+    );
+    return { checkoutPath: expected };
+  }
+  assert(
+    typeof checkoutArg === "string" && checkoutArg.trim(),
+    `${use} needs --checkout: this kickoff has no registered director, so the caller ` +
+      "must declare and prove the organization's owner checkout",
+  );
+  const declared = path.resolve(checkoutArg);
+  assert(
+    callerPath === declared,
+    `${use} must be run from the given --checkout path (${declared}); ` +
+      `current directory is ${callerPath}`,
+  );
+  const owner = path.resolve(ownerProject(orgFile));
+  assert(
+    declared === owner,
+    `${use} --checkout must be the organization's owner checkout (${owner}) for a ` +
+      `kickoff with no registered director; got ${declared}`,
+  );
+  return { checkoutPath: declared };
+}
+
+/**
+ * Resolves the executable placeholder and command runner the `role-terminal`
+ * launch uses to open a terminal, in `executeCommand`'s `role-terminal` case.
+ *
+ * When `auditorEntry` is set (the auditor branch; `--orca` has already been
+ * asserted absent there), this always returns the trusted invocation: a
+ * placeholder name that `openRoleTerminal`/`checkTerminalIdle` never actually
+ * read, paired with the runner `trustedExecuteFactory` builds, which
+ * validates and then directly executes the fixed trusted script with a
+ * pinned interpreter and an allowlisted environment (B.6, decision B). It
+ * also returns `versionExecutable`, the same trusted script's resolved real
+ * path (from `resolveScriptPath`, not the placeholder). The auditor launch's
+ * `readLaunchEnvironment` no longer runs that path itself: it reads the Orca
+ * version through `auditorLaunchEnvironmentInputs(execute)`, whose
+ * `readOrcaVersion` is `readTrustedOrcaVersion({ execute })`, so the version
+ * probe uses this same trusted runner and `orcaExecutable` is passed only
+ * for shape. One returned runner serves the whole launch: the preflight
+ * version read, worktree create and discovery, the internal `role-terminal`
+ * open (handed over as `trustedLaunch`), every terminal call, and any
+ * automatic reclaim.
+ *
+ * Outside the auditor branch, the caller's own `--orca` (or its absence)
+ * passes through unchanged for both `executable` and `versionExecutable`, no
+ * trusted runner is built, matching `selectOrcaExecutable`'s existing
+ * behavior.
+ *
+ * @param {object} options - Selection inputs.
+ * @param {object} [options.auditorEntry] - Kickoff entry when launching the auditor role.
+ * @param {string} [options.orcaArg] - The caller's `--orca`, only read outside the auditor branch.
+ * @param {Function} [options.trustedExecuteFactory=trustedOrcaExecute] - Trusted-runner factory, for tests only.
+ * @param {Function} [options.resolveScriptPath=resolveTrustedOrcaScriptPath] - Trusted script path resolver, for tests only.
+ * @returns {{executable: string | undefined, execute: Function | undefined, versionExecutable: string | undefined}}
+ *   `execute` is `undefined` outside the auditor branch, so callers fall back
+ *   to their own default runner.
+ */
+export function resolveAuditorLaunchExecution({
+  auditorEntry,
+  orcaArg,
+  trustedExecuteFactory = trustedOrcaExecute,
+  resolveScriptPath = resolveTrustedOrcaScriptPath,
+} = {}) {
+  if (!auditorEntry)
+    return {
+      executable: orcaArg,
+      execute: undefined,
+      versionExecutable: orcaArg,
+    };
+  return {
+    executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
+    execute: trustedExecuteFactory(),
+    versionExecutable: resolveScriptPath(),
+  };
+}
+
+/**
+ * Inputs the auditor launch passes to `readLaunchEnvironment`, shared by
+ * role-worktree-create's preflight and role-terminal's auditor branch so the
+ * two cannot read the environment differently.
+ *
+ * The Orca version is read through `execute`, the one trusted runner this
+ * launch holds; the agy probe is skipped, the home directory comes from
+ * `os.userInfo()` rather than an inheritable `HOME`, and an unverified Orca
+ * version throws instead of being tolerated.
+ *
+ * @param {Function} execute - Runner `trustedOrcaExecute` built for this launch.
+ * @returns {{readOrcaVersion: Function, skipAgyVersion: true, homedir: string, throwOnUnverifiedOrca: true}}
+ *   Options for `readLaunchEnvironment`.
+ */
+export function auditorLaunchEnvironmentInputs(execute) {
+  return {
+    readOrcaVersion: () => readTrustedOrcaVersion({ execute }),
+    skipAgyVersion: true,
+    homedir: os.userInfo().homedir,
+    throwOnUnverifiedOrca: true,
+  };
+}
+
+// Accepts an auditor launch role-worktree-create built and refuses anything
+// whose runner is not one trustedOrcaExecute made, so no caller can slip a
+// general runner in beside the trusted placeholder.
+function assertTrustedAuditorLaunch(launch) {
+  assert(
+    launch?.executable === TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER &&
+      isTrustedOrcaExecute(launch.execute),
+    "The auditor launch must use the placeholder executable with a runner trustedOrcaExecute built",
+  );
+  return launch;
+}
+
+/**
  * Dispatches a parsed CLI command to its handler.
  *
  * @param {object} args - Parsed CLI arguments.
@@ -2550,6 +3352,32 @@ export async function executeCommand(args, execute) {
         worktreeId: args.worktree,
         runId: args.run,
       });
+    case "kickoff-result-repo-decide":
+      return kickoffResultRepoDecide(args.org, args.worktree, {
+        repo: args.repo,
+        reason: args.reason,
+      });
+    case "kickoff-audit-policy-retrofit": {
+      const auditorConfigured = { true: true, false: false }[
+        args["auditor-configured"]
+      ];
+      assert(
+        auditorConfigured !== undefined,
+        "--auditor-configured must be exactly true or false",
+      );
+      return kickoffAuditPolicyRetrofit(args.org, args.worktree, {
+        auditorConfigured,
+        profile: args.profile,
+        fallbacks:
+          args.fallbacks === undefined
+            ? undefined
+            : args.fallbacks
+                .split(",")
+                .map((id) => id.trim())
+                .filter(Boolean),
+        reason: args.reason,
+      });
+    }
     case "deliver":
       return deliverKickoff({
         orgFile: args.org,
@@ -2585,6 +3413,8 @@ export async function executeCommand(args, execute) {
         reason: args.reason,
         force: Boolean(args.force),
         cleanup,
+        repo: args.repo,
+        head: args.head,
       });
     }
     case "kickoff-branch-cleanup": {
@@ -2612,6 +3442,7 @@ export async function executeCommand(args, execute) {
         orgFile: args.org,
         worktreeId: args.worktree,
         head: args.head,
+        repo: args.repo,
       });
     case "kickoff-merge-record": {
       const [entry] = listKickoffs(args.org, args.worktree).kickoffs;
@@ -2632,6 +3463,203 @@ export async function executeCommand(args, execute) {
         remoteName: args.remote ?? "origin",
       });
     }
+    case "requirements-draft": {
+      // Only statements/criteria come from --from: worktreeId is fixed to
+      // args.worktree last so a forged worktreeId field in the JSON file
+      // cannot redirect the draft write to a different worktree's file.
+      const { statements, criteria } = readJSON(args.from);
+      return requirementsDraft(args.org, {
+        statements,
+        criteria,
+        worktreeId: args.worktree,
+      });
+    }
+    case "requirements-confirm": {
+      if (args.draft) {
+        return requirementsConfirmDraft(args.org, {
+          worktreeId: args.worktree,
+          criterionId: args.criterion,
+          userQuote: args.quote,
+          checkout: args.checkout,
+        });
+      }
+      return requirementsConfirm(args.org, args.worktree, {
+        criterionId: args.criterion,
+        userQuote: args.quote,
+      });
+    }
+    case "requirements-retrofit": {
+      const [entry] = listKickoffs(args.org, args.worktree).kickoffs;
+      assert(
+        entry,
+        `Worktree ${args.worktree} supervises no registered kickoff`,
+      );
+      const director = assertRequirementsDirectorAuthority(
+        entry,
+        args.org,
+        args.checkout,
+        "requirements-retrofit",
+      );
+      const draft = readDraft(args.org, args.worktree);
+      assert(
+        draft,
+        `No draft ledger recorded for worktree ${args.worktree}; run requirements-draft ` +
+          "(and, for a narrower criterion, requirements-confirm --draft) before retrofit",
+      );
+      return requirementsRetrofit(args.org, args.worktree, draft, director);
+    }
+    case "requirements-exception": {
+      // Only these fields are taken from --from: callerCwd is the caller's
+      // actual working directory, proven by the process itself, and must
+      // never be settable by the JSON file the caller supplies (that would
+      // let a forged callerCwd field defeat assertLedgerDirectorAuthority
+      // the same way a --force flag would).
+      const { scope, head, repo, reason, userQuote, unmetFacts } = readJSON(
+        args.from,
+      );
+      return requirementsException(args.org, args.worktree, {
+        scope,
+        head,
+        repo,
+        reason,
+        userQuote,
+        unmetFacts,
+      });
+    }
+    case "requirements-amend": {
+      // callerCwd is never taken from --from, for the same forgery reason
+      // documented on requirements-exception above; it always defaults to
+      // the real process.cwd() inside requirementsAmend itself.
+      const { statements, criteria } = readJSON(args.from);
+      return requirementsAmend(args.org, args.worktree, {
+        statements,
+        criteria,
+      });
+    }
+    case "requirements-present": {
+      const {
+        criterionId,
+        head,
+        repo,
+        source,
+        channel,
+        location,
+        userQuote,
+        outcome,
+      } = readJSON(args.from);
+      return requirementsPresent(args.org, args.worktree, {
+        criterionId,
+        head,
+        repo,
+        source,
+        channel,
+        location,
+        userQuote,
+        outcome,
+      });
+    }
+    case "requirements-fidelity": {
+      const { head, repo, recordedBy, items } = readJSON(args.from);
+      return requirementsFidelity(args.org, args.worktree, {
+        head,
+        repo,
+        recordedBy,
+        items,
+      });
+    }
+    case "requirements-fidelity-confirm":
+      return requirementsFidelityConfirm(args.org, args.worktree);
+    case "audit-objection": {
+      const payload = readJSON(args.from);
+      const {
+        checkpoint,
+        target,
+        kind,
+        description,
+        rebuttalRequested,
+        resultHead,
+        repo,
+      } = payload;
+      return auditObjection(args.org, args.worktree, {
+        checkpoint,
+        target,
+        kind,
+        description,
+        rebuttalRequested,
+        resultHead,
+        repo,
+        declared: pickDeclaredIdentity(payload),
+      });
+    }
+    case "audit-response": {
+      // Neither the caller's terminal handle, its working directory, nor the
+      // Orca executable used to confirm identity is taken from a CLI
+      // argument: verifiedDirector (brief) and verifiedPm (outcome) accept no
+      // callerCwd, environment, executable, execute, or factory override at
+      // all (not even for tests) — they always read process.cwd() and
+      // process.env directly, and verifiedPm's `orchestration run-current`
+      // check always runs through runTrustedOrcaJson, which validates the
+      // fixed trusted script (ignoring --orca, ORCA_CLI_COMMAND, and
+      // ORCA_DEV_REPO_ROOT) and then executes it directly with a pinned
+      // interpreter and an allowlisted child environment, so the script's own
+      // PATH search for `bash` and for the `dirname`/`readlink` it calls
+      // internally, BASH_ENV, and variables such as ORCA_USER_DATA_PATH or
+      // HOME cannot redirect what actually runs (B.6, decision B). A
+      // --terminal, --cwd, or --orca argument here could otherwise forge the
+      // director or PM identity a response is bound to; since auditResponse
+      // takes no such argument, this CLI command never has one to pass
+      // through in the first place, and neither does any other Node code
+      // that imports auditResponse, verifiedDirector, or verifiedPm
+      // directly. What this closes is the caller's ability to redirect,
+      // through an argument, PATH, or an inherited environment variable,
+      // which executable answers this check or what that executable reads
+      // while doing so; it is not identity forgery: a caller sharing this OS
+      // user account can still set ORCA_TERMINAL_HANDLE itself, or run this
+      // process from the director's own checkout, and pass these checks,
+      // until B.6's process-lineage binding lands, and the trusted script's
+      // own integrity (its app bundle, owned by that same OS user) is not
+      // verified either.
+      const payload = readJSON(args.from);
+      const { checkpoint, objectionId, argument, evidenceRefs } = payload;
+      return auditResponse(args.org, args.worktree, {
+        checkpoint,
+        objectionId,
+        argument,
+        evidenceRefs,
+        declared: pickDeclaredIdentity(payload),
+      });
+    }
+    case "audit-ruling": {
+      const payload = readJSON(args.from);
+      const { checkpoint, objectionId, respondedAgainst, verdict, reason } =
+        payload;
+      return auditRuling(args.org, args.worktree, {
+        checkpoint,
+        objectionId,
+        respondedAgainst,
+        verdict,
+        reason,
+        declared: pickDeclaredIdentity(payload),
+      });
+    }
+    case "audit-checked": {
+      const payload = readJSON(args.from);
+      return auditChecked(
+        args.org,
+        args.worktree,
+        args.checkpoint,
+        payload.checked,
+        pickDeclaredIdentity(payload),
+      );
+    }
+    case "audit-accept":
+      return auditAccept(
+        args.org,
+        args.worktree,
+        args.checkpoint,
+        args.head,
+        args.repo,
+      );
     case "prepare":
       return compatibilityPrepare(args);
     case "role-worktree-create":
@@ -2774,7 +3802,79 @@ export async function executeCommand(args, execute) {
         args.profile === undefined || args["workflow-id"],
         "--profile requires --workflow-id, --state and --workflow-task",
       );
-      const { org, run: runCtx } = launchContext(args);
+      // B.2: the auditor is opened here too, but it is out-of-ladder (never
+      // folds, never runs a workflow), so it takes a resolution path of its
+      // own instead of launchContext's workflow-snapshot flow: --state names
+      // the audited kickoff directly, and the caller must be that kickoff's
+      // director.
+      let auditorEntry;
+      let org;
+      let runCtx;
+      if (args.role === AUDITOR_ROLE) {
+        assert(
+          !args["workflow-id"],
+          "role-terminal --role auditor does not run a workflow; omit --workflow-id",
+        );
+        assert(
+          args.state,
+          "role-terminal --role auditor requires --state naming the audited kickoff's PM state directory",
+        );
+        // The auditor launch is the executable a forged handle would need to
+        // impersonate, so it never accepts a caller-supplied binary: --orca
+        // is rejected outright rather than silently ignored, and the launch
+        // below always runs through trustedOrcaExecute, which both validates
+        // and directly executes the fixed trusted script (B.6, decision B).
+        assert(
+          args.orca === undefined,
+          "role-terminal --role auditor does not accept --orca; the auditor launch always uses the trusted Orca executable",
+        );
+        const stateDir = path.resolve(args.state);
+        const { kickoffs } = listKickoffs(path.resolve(args.org));
+        auditorEntry = kickoffs.find(
+          (entry) => path.resolve(entry.pm.stateDir) === stateDir,
+        );
+        assert(
+          auditorEntry,
+          `No kickoff is registered with pm state directory ${stateDir}`,
+        );
+        assertDirectorAuthority(
+          auditorEntry,
+          process.cwd(),
+          "role-terminal --role auditor",
+        );
+        // D1/checklist 5: this kickoff's pinned auditPolicy decides the
+        // profile and fallbacks, not a live organization.json read, so the
+        // launch still opens with the profile this kickoff committed to even
+        // when org.auditor was since changed or cleared entirely, and never
+        // silently substitutes another profile when the pinned one no
+        // longer exists (director decision msg_0b114271f1f5, PM supplement
+        // msg_901f9291b1d3). There is no live fallback: an entry whose
+        // auditPolicy was never pinned, or whose policy says no auditor is
+        // configured, cannot open an auditor terminal at all.
+        assert(
+          auditorEntry.auditPolicy?.auditorConfigured === true,
+          `Kickoff ${auditorEntry.pm.worktreeId} has no pinned auditor profile; ` +
+            "the director must run kickoff-audit-policy-retrofit with --auditor-configured true " +
+            "before an auditor terminal can be opened for it",
+        );
+        const pinnedOrg = readJSON(args.org);
+        assert(
+          Object.hasOwn(pinnedOrg.profiles, auditorEntry.auditPolicy.profile),
+          `Kickoff ${auditorEntry.pm.worktreeId}'s pinned auditor profile ` +
+            `"${auditorEntry.auditPolicy.profile}" no longer exists in organization.json; ` +
+            "it is not substituted with another profile, so the auditor cannot be launched",
+        );
+        org = {
+          ...pinnedOrg,
+          auditor: {
+            profile: auditorEntry.auditPolicy.profile,
+            fallbacks: auditorEntry.auditPolicy.fallbacks ?? [],
+          },
+        };
+        runCtx = { orgFile: path.resolve(args.org) };
+      } else {
+        ({ org, run: runCtx } = launchContext(args));
+      }
       const firstPrompt =
         args.brief === undefined
           ? undefined
@@ -2790,6 +3890,50 @@ export async function executeCommand(args, execute) {
       );
       const target = selectedWorktreePath(args.worktree, process.cwd());
       if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
+      if (auditorEntry) {
+        assert(
+          target,
+          "role-terminal --role auditor needs a resolvable --worktree",
+        );
+        const forbidden = auditorIndependenceForbiddenPaths(
+          path.resolve(args.org),
+          auditorEntry,
+        );
+        // D4: compares by filesystem identity, in both directions, instead
+        // of exact string-set membership, so a symlink, a case variant, or a
+        // nested path cannot pass as independent of the PM's or a worker's
+        // worktree (design B.2's pathWithin). This refusal happens before any
+        // terminal is opened, so it carries preCreateRefusal (부록 F): when
+        // role-worktree-create's own openRoleSession wrapper catches it, it
+        // reclaims the freshly created worktree instead of preserving a
+        // worktree that never got a working session.
+        if (sharesWorktreeWithAny(target, forbidden)) {
+          const refusal = new Error(
+            `The auditor cannot run from ${target}, which this kickoff's PM or a worker already uses; ` +
+              "open it in a separate worktree so the audit stays independent of the work it reviews",
+          );
+          refusal.preCreateRefusal = { reason: "auditor-independence" };
+          throw refusal;
+        }
+        // command.provider is already known here, before
+        // resolveAuditorLaunchExecution/readLaunchEnvironment/openRoleTerminal
+        // run: an agy-configured auditor profile is refused at this point
+        // and no trusted-Orca probe or terminal spawn happens for it.
+        // PROVIDER_IDS does not restrict org.auditor to "claude"
+        // (providers/index.mjs), so this check, not the schema, is what
+        // closes that gap. Also preCreateRefusal, for the same reason above.
+        if (command.provider === "agy") {
+          const refusal = new Error(
+            "role-terminal --role auditor refuses to open: this organization's auditor profile is configured " +
+              "with the agy provider. Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요하다(아직 구현되지 않았습니다); " +
+              "configure org.auditor with a non-agy profile before launching the auditor",
+          );
+          refusal.preCreateRefusal = { reason: "auditor-agy-provider" };
+          throw refusal;
+        }
+      } else {
+        assertDirectRoleTerminalBinding({ org: args.org, target, args });
+      }
       const launchedAt = new Date().toISOString();
       assertWorktreeUnshared(
         runCtx.workflowState,
@@ -2804,17 +3948,78 @@ export async function executeCommand(args, execute) {
             allowUnverifiedApproval.trim().length > 0),
         "--allow-unverified requires a non-empty approval sentence",
       );
+      // The auditor launch resolves its executable and command runner
+      // through resolveAuditorLaunchExecution/trustedOrcaExecute, never from
+      // args.orca (asserted absent above): this is the terminal-opening call
+      // whose handle downstream identity checks (verifiedAuditor) trust, so
+      // neither the executable name nor what running it reads may be
+      // caller-controlled (B.6, decision B). `auditorExecute` is passed only
+      // to openRoleTerminal, which runs nothing but Orca commands.
+      // readLaunchEnvironment's own Orca `--version` probe is a separate
+      // spawn openRoleTerminal never sees, so the auditor branch below passes
+      // it `readOrcaVersion: readTrustedOrcaVersion`, which reruns the same
+      // trusted, allowlisted invocation `runTrustedOrcaJson` uses rather than
+      // running `versionExecutable`'s resolved path through a plain,
+      // uninjected `execute`: only the trusted invocation closes the
+      // script's own shebang PATH search, BASH_ENV, and an inherited HOME.
+      // `skipAgyVersion: true` also drops the auditor branch's `agy
+      // --version` probe entirely, rather than letting it run unconditionally
+      // against PATH before the launch even opens: cliVersion only affects
+      // launch-matrix's judgment when the launched runner is "agy"
+      // (launch-matrix.mjs). The auditor is normally configured on a Claude
+      // profile, but org.auditor's provider is not schema-restricted to
+      // "claude" (providers/index.mjs's PROVIDER_IDS admits agy too); the
+      // agy case never reaches this probe at all, because the
+      // command.provider assertion above refuses it earlier, inside the
+      // auditorEntry block, before resolveAuditorLaunchExecution runs.
+      // `homedir` is likewise read from `os.userInfo()` rather than left at
+      // readLaunchEnvironment's own `os.homedir()` default, so the auditor
+      // branch's trust-record lookups cannot be redirected through an
+      // inherited HOME either. `throwOnUnverifiedOrca: true`
+      // (msg_f2bc63e31bc2/msg_f12840182482) fails the launch closed the
+      // moment the trusted version probe above does not resolve to a
+      // verified semver, whatever the reason (throw, non-zero exit, null,
+      // empty, non-semver): readLaunchEnvironment collapses every one of
+      // those into orcaVersion === "unknown" before this check runs.
+      // allowUnverifiedApproval, read just above, is never passed into
+      // readLaunchEnvironment, so it has no way to relax this refusal. None
+      // of this applies outside the auditor branch: a non-auditor launch
+      // keeps its existing PATH-based Orca/agy version probes, homedir
+      // default, and unverified-version tolerance unchanged.
+      const {
+        executable: auditorExecutable,
+        execute: auditorExecute,
+        versionExecutable,
+      } = auditorEntry && args.trustedLaunch
+        ? assertTrustedAuditorLaunch(args.trustedLaunch)
+        : resolveAuditorLaunchExecution({ auditorEntry, orcaArg: args.orca });
       // 실제 환경에서 매트릭스 입력값을 읽습니다.
       // 알 수 없는 값은 'unknown'으로 전달하여 표가 unverified로 처리합니다.
-      const env = await readLaunchEnvironment({
-        worktreePath: target ?? undefined,
-        orcaExecutable: args.orca,
-      });
+      let env;
+      try {
+        env = await readLaunchEnvironment({
+          worktreePath: target ?? undefined,
+          orcaExecutable: versionExecutable,
+          ...(auditorEntry
+            ? auditorLaunchEnvironmentInputs(auditorExecute)
+            : {}),
+        });
+      } catch (error) {
+        // The auditor's environment read runs only Orca's --version, before
+        // openRoleTerminal creates any terminal, so a refusal here (an
+        // unverified version, an unresolvable trusted script) proves no
+        // session exists and the caller may reclaim a fresh worktree.
+        if (auditorEntry) {
+          error.preCreateRefusal = { reason: "auditor-launch-environment" };
+        }
+        throw error;
+      }
       const opened = await openRoleTerminal({
         worktree: args.worktree,
         command,
         title: args.title,
-        executable: args.orca,
+        executable: auditorExecutable,
+        ...(auditorExecute ? { execute: auditorExecute } : {}),
         platform: env.platform,
         shell: env.shell,
         trustRecordExists: env.trustRecordExists,
@@ -2844,6 +4049,13 @@ export async function executeCommand(args, execute) {
         });
       const drift = await resolveAndCheckDrift(args.org, org, command);
       const warnings = [...(opened.warnings || []), ...drift.warnings];
+      if (auditorEntry) {
+        recordAuditorLaunch(path.resolve(args.org), {
+          worktreeId: auditorEntry.pm.worktreeId,
+          terminalHandle: opened.terminal,
+          path: target,
+        });
+      }
       return {
         ...opened,
         ...(allowUnverifiedApproval ? { allowUnverifiedApproval } : {}),
@@ -2950,18 +4162,6 @@ export async function executeCommand(args, execute) {
         readJSON(args.task),
         { kind: args.kind || "citations" },
       );
-    case "assist":
-      return assist(
-        path.resolve(args.repo),
-        readJSON(args.org),
-        readJSON(args.task),
-        {
-          role: args.role,
-          kind: args.kind,
-          stateDir: path.resolve(args.state),
-          profileId: args.profile,
-        },
-      );
     case "advise":
       return advise(
         path.resolve(args.repo),
@@ -3017,7 +4217,11 @@ export async function executeCommand(args, execute) {
         readJSON(args.report),
         readJSON(args.decision),
         stateDir,
-        gateHookOptions(args, stateDir),
+        {
+          ...gateHookOptions(args, stateDir),
+          orgFile: args.org && path.resolve(args.org),
+          worktreeId: args.worktree,
+        },
       );
     }
     case "doc-resolve-kickoff":
@@ -3231,6 +4435,37 @@ export async function executeCommand(args, execute) {
         args.expected.split(","),
       );
     case "director-signal": {
+      if (args.kind === "close-ready") {
+        // D1: reads this kickoff's pinned auditPolicy, not a fresh
+        // organization.json, so removing org.auditor after claim cannot let
+        // close-ready pass while an outcome objection is still unresolved.
+        // There is no live-read fallback (director decision msg_0b114271f1f5):
+        // a legacy entry with no pinned auditPolicy refuses outright, naming
+        // the retrofit command.
+        const [entry] = listKickoffs(args.org, args.worktree).kickoffs;
+        assert(
+          entry?.auditPolicy !== undefined,
+          `Kickoff ${args.worktree} has no pinned audit policy; the director must run ` +
+            "kickoff-audit-policy-retrofit for this worktree before close-ready can be signaled",
+        );
+        const auditorConfigured = entry.auditPolicy.auditorConfigured;
+        if (auditorConfigured) {
+          assert(
+            await hasValidAcceptance(
+              args.org,
+              args.worktree,
+              "outcome",
+              args.head,
+              // The result repository comes from the recorded workflow
+              // decision; --source is only compared with it (B.3).
+              bindKickoffResultRepo(entry, args.source),
+            ),
+            "close-ready requires a valid outcome-audit acceptance for this kickoff; " +
+              "resolve the outcome audit checkpoint (audit-response/audit-ruling/audit-accept) " +
+              "before sending it",
+          );
+        }
+      }
       const { signaled, id, entry, record } = sendSignal(args.org, {
         worktreeId: args.worktree,
         kind: args.kind,
@@ -3350,7 +4585,14 @@ const PROMPT_ANSWER_BLOCKING = ["refused", "escalate", "unresolved"];
 // acceptance commands report `gateStatus`. Reading only the top-level `status`
 // left a settled failure and a revoked approval exiting 0, so a calling
 // script saw success. Each known shape is checked explicitly.
-function blockingOutcome(output) {
+/**
+ * Tells whether a command's printed output makes the CLI exit non-zero.
+ *
+ * @param {unknown} output - The value a command returned before it is printed.
+ * @returns {boolean} `true` when the output carries a failed or blocked status
+ *   in any of the known envelope shapes.
+ */
+export function blockingOutcome(output) {
   if (!output || typeof output !== "object") return false;
   if (output.event === "prompt-answer")
     return PROMPT_ANSWER_BLOCKING.includes(output.status);

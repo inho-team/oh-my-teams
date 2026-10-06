@@ -14,12 +14,14 @@ import {
 import {
   bindKickoffRun,
   cleanupKickoffBranches,
+  kickoffEntryName,
   listKickoffs,
   registerKickoff,
   registryDirectory,
   releaseKickoff,
   verifyHandoffClaim,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
 const exampleOrg = path.resolve(
@@ -50,11 +52,42 @@ function claimFor(fixture, worktreeId) {
     brief: fixture.brief,
     // These tests are about the registry itself; delivery has its own tests.
     delivery: { mode: "none" },
+    requirements: minimalRequirements(fixture.org, worktreeId),
+    // validateLedgerForClaim requires a registered director unconditionally,
+    // even for this equal-only ledger, so every claim needs one. The checkout
+    // is the test process's own cwd so kickoff-release's director-authority
+    // check (unrelated to what this file tests) passes without --force.
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath: process.cwd(),
+    },
   };
 }
 
 const ids = (fixture) =>
   listKickoffs(fixture.org).kickoffs.map((entry) => entry.pm.worktreeId);
+
+// A registry entry (as opposed to a claim) carries `requirements.ledgerHash`,
+// not the claim's own {statements, criteria, confirmations} shape. Tests that
+// write an entry file directly, to stand in for one a pre-ledger release left
+// behind (A.6's compatibility path), drop the field entirely rather than
+// reshape it, since `requirements` is optional on an entry. `director` is
+// dropped too: a release that predates the ledger predates director support
+// as well, so an entry standing in for one never carries either field.
+function legacyEntryFor(fixture, worktreeId, extra = {}) {
+  const {
+    requirements: _requirements,
+    director: _director,
+    ...claim
+  } = claimFor(fixture, worktreeId);
+  return {
+    schemaVersion: 1,
+    ...claim,
+    runId: null,
+    createdAt: "2026-09-16T00:00:00.000Z",
+    ...extra,
+  };
+}
 
 test("the registry lives with the organization it serves", (t) => {
   const fixture = project(t);
@@ -176,7 +209,17 @@ test("a pasted handoff claim is trusted only when it matches the registered dire
 
   // Registered, but by an entry written before director support existed
   // (or without one recorded): still nothing to compare the claim against.
-  registerKickoff(fixture.org, claimFor(fixture, "wt-a"));
+  // registerKickoff always requires a requirements ledger, and a ledger
+  // always requires a director, so the only way left to produce a
+  // director-less entry is to write one directly, standing in for a release
+  // that predates director support (A.6's compatibility path).
+  writeJSON(
+    path.join(
+      registryDirectory(fixture.org),
+      `${kickoffEntryName("wt-a")}.json`,
+    ),
+    legacyEntryFor(fixture, "wt-a"),
+  );
   assert.equal(
     verifyHandoffClaim(fixture.org, {
       worktreeId: "wt-a",
@@ -222,12 +265,12 @@ test("a pasted handoff claim is trusted only when it matches the registered dire
   assert.equal(matched.reason, "matched");
 });
 
-test("ending one kickoff archives it and leaves the others running", (t) => {
+test("ending one kickoff archives it and leaves the others running", async (t) => {
   const fixture = project(t);
   registerKickoff(fixture.org, claimFor(fixture, "wt-a"));
   registerKickoff(fixture.org, claimFor(fixture, "wt-b"));
 
-  const released = releaseKickoff(fixture.org, {
+  const released = await releaseKickoff(fixture.org, {
     worktreeId: "wt-a",
     reason: "disbanded",
   });
@@ -243,7 +286,7 @@ test("ending one kickoff archives it and leaves the others running", (t) => {
   );
 });
 
-test("the id Orca returns registers, binds and releases as given", (t) => {
+test("the id Orca returns registers, binds and releases as given", async (t) => {
   const fixture = project(t);
   // Orca addresses a worktree as `<repoId>::<worktreePath>`, so the id holds
   // `:` and `/`, and the path may be in any script.
@@ -254,6 +297,7 @@ test("the id Orca returns registers, binds and releases as given", (t) => {
     goal: "deliver the Orca-addressed kickoff",
   };
   claim.pm = { ...claim.pm, worktreeId };
+  claim.requirements = minimalRequirements(fixture.org, worktreeId);
 
   const claimed = registerKickoff(fixture.org, claim);
   assert.equal(path.dirname(claimed.file), registryDirectory(fixture.org));
@@ -267,9 +311,12 @@ test("the id Orca returns registers, binds and releases as given", (t) => {
     bindKickoffRun(fixture.org, { worktreeId, runId: "run-orca" }).entry.runId,
     "run-orca",
   );
-  const released = releaseKickoff(fixture.org, {
+  // This test is about Orca-style worktree id encoding, not ledger
+  // completeness (which has its own tests), so it releases as "disbanded" —
+  // a reason `assertKickoffCloseReady` does not gate.
+  const released = await releaseKickoff(fixture.org, {
     worktreeId,
-    reason: "completed",
+    reason: "disbanded",
   });
   assert.equal(
     path.dirname(released.archived),
@@ -283,16 +330,17 @@ test("the id Orca returns registers, binds and releases as given", (t) => {
   assert.deepEqual(ids(fixture), []);
 });
 
-test("no worktree id writes outside the registry", (t) => {
+test("no worktree id writes outside the registry", async (t) => {
   const fixture = project(t);
   const worktreeId = "../../escaped";
   const claim = claimFor(fixture, "wt-escape");
   claim.pm = { ...claim.pm, worktreeId };
+  claim.requirements = minimalRequirements(fixture.org, worktreeId);
 
   const claimed = registerKickoff(fixture.org, claim);
   assert.equal(path.dirname(claimed.file), registryDirectory(fixture.org));
   assert.equal(fs.existsSync(path.join(fixture.dir, "escaped.json")), false);
-  const released = releaseKickoff(fixture.org, {
+  const released = await releaseKickoff(fixture.org, {
     worktreeId,
     reason: "disbanded",
   });
@@ -312,14 +360,9 @@ test("no worktree id writes outside the registry", (t) => {
   }
 });
 
-test("an entry named after its id by an earlier release stays closable", (t) => {
+test("an entry named after its id by an earlier release stays closable", async (t) => {
   const fixture = project(t);
-  const entry = {
-    schemaVersion: 1,
-    ...claimFor(fixture, "wt-named"),
-    runId: null,
-    createdAt: "2026-09-16T00:00:00.000Z",
-  };
+  const entry = legacyEntryFor(fixture, "wt-named");
   const legacy = path.join(registryDirectory(fixture.org), "wt-named.json");
   writeJSON(legacy, entry);
 
@@ -333,9 +376,76 @@ test("an entry named after its id by an earlier release stays closable", (t) => 
       .entry.runId,
     "run-n",
   );
-  releaseKickoff(fixture.org, { worktreeId: "wt-named", reason: "completed" });
+  // This test is about legacy naming continuity, not ledger compatibility
+  // (compat-not-bypass has its own test below), so it releases as
+  // "disbanded" — a reason `assertKickoffCloseReady` does not gate.
+  await releaseKickoff(fixture.org, {
+    worktreeId: "wt-named",
+    reason: "disbanded",
+  });
   assert.equal(fs.existsSync(legacy), false);
   assert.deepEqual(ids(fixture), []);
+});
+
+test("f7: resultRepoDecisions must be an array of complete records, and the registry refuses a malformed one", (t) => {
+  const fixture = project(t);
+  const file = path.join(registryDirectory(fixture.org), "wt-decisions.json");
+  const record = {
+    id: "decision-1",
+    repo: "/repo",
+    headAtDecision: "a".repeat(40),
+    workflowSet: [{ id: "wf", checkoutPath: "/repo" }],
+    proof: { contained: true },
+    reason: "merged",
+    decidedAt: "2026-10-01T00:00:00.000Z",
+    director: { checkoutPath: "/director" },
+  };
+  const write = (resultRepoDecisions) =>
+    writeJSON(
+      file,
+      legacyEntryFor(fixture, "wt-decisions", { resultRepoDecisions }),
+    );
+  write([record]);
+  assert.deepEqual(ids(fixture), ["wt-decisions"]);
+  const malformed = [
+    "not-an-array",
+    [null],
+    [{ ...record, repo: "" }],
+    [{ ...record, workflowSet: [] }],
+    [{ ...record, workflowSet: [{ id: "wf" }] }],
+    [{ ...record, proof: null }],
+    [{ ...record, reason: " " }],
+    [{ ...record, director: {} }],
+  ];
+  for (const value of malformed) {
+    write(value);
+    assert.throws(
+      () => ids(fixture),
+      /resultRepoDecisions/,
+      JSON.stringify(value),
+    );
+  }
+});
+
+test("compat-not-bypass: a legacy entry with no requirements ledger refuses to complete", async (t) => {
+  const fixture = project(t);
+  const entry = legacyEntryFor(fixture, "wt-legacy-close");
+  const legacy = path.join(
+    registryDirectory(fixture.org),
+    "wt-legacy-close.json",
+  );
+  writeJSON(legacy, entry);
+
+  await assert.rejects(
+    releaseKickoff(fixture.org, {
+      worktreeId: "wt-legacy-close",
+      reason: "completed",
+      head: "0".repeat(40),
+    }),
+    /has no requirements ledger/,
+  );
+  // Still registered: the refused release changed nothing.
+  assert.deepEqual(ids(fixture), ["wt-legacy-close"]);
 });
 
 test("the declaring session is the PM only when it records why", (t) => {
@@ -368,20 +478,19 @@ test("the declaring session is the PM only when it records why", (t) => {
   );
 });
 
-test("ending a kickoff whose PM cannot be reached is a forced decision", (t) => {
+test("ending a kickoff whose PM cannot be reached is a forced decision", async (t) => {
   const fixture = project(t);
   registerKickoff(fixture.org, claimFor(fixture, "wt-a"));
   // An unverifiable PM may still be running, so a takeover is never
   // the automatic consequence of a failed query.
-  assert.throws(
-    () =>
-      releaseKickoff(fixture.org, {
-        worktreeId: "wt-a",
-        reason: "taken-over",
-      }),
+  await assert.rejects(
+    releaseKickoff(fixture.org, {
+      worktreeId: "wt-a",
+      reason: "taken-over",
+    }),
     /explicit authorization/,
   );
-  const taken = releaseKickoff(fixture.org, {
+  const taken = await releaseKickoff(fixture.org, {
     worktreeId: "wt-a",
     reason: "taken-over",
     force: true,
@@ -412,14 +521,9 @@ test("two PMs each create a workflow in their own state", async (t) => {
   }
 });
 
-test("a lease left by the single-kickoff release becomes a registry entry", (t) => {
+test("a lease left by the single-kickoff release becomes a registry entry", async (t) => {
   const fixture = project(t);
-  const legacy = {
-    schemaVersion: 1,
-    ...claimFor(fixture, "wt-old"),
-    runId: "run-old",
-    createdAt: "2026-09-16T00:00:00.000Z",
-  };
+  const legacy = legacyEntryFor(fixture, "wt-old", { runId: "run-old" });
   writeJSON(path.join(fixture.dir, ".omt", "active-kickoff.json"), legacy);
 
   // The kickoff it recorded may still be running, and close needs to find it.
@@ -428,9 +532,16 @@ test("a lease left by the single-kickoff release becomes a registry entry", (t) 
     fs.existsSync(path.join(fixture.dir, ".omt", "active-kickoff.json")),
     false,
   );
+  // This test is about lease migration, not ledger compatibility (which has
+  // its own test above), so it releases as "disbanded" — a reason
+  // `assertKickoffCloseReady` does not gate.
   assert.equal(
-    releaseKickoff(fixture.org, { worktreeId: "wt-old", reason: "completed" })
-      .entry.runId,
+    (
+      await releaseKickoff(fixture.org, {
+        worktreeId: "wt-old",
+        reason: "disbanded",
+      })
+    ).entry.runId,
     "run-old",
   );
 });
@@ -444,14 +555,9 @@ function beforeRename({ pm, selfPm, ...rest }) {
   };
 }
 
-test("an entry stored under the old coordinator key lists, binds and releases as pm", (t) => {
+test("an entry stored under the old coordinator key lists, binds and releases as pm", async (t) => {
   const fixture = project(t);
-  const stored = beforeRename({
-    schemaVersion: 1,
-    ...claimFor(fixture, "wt-renamed"),
-    runId: null,
-    createdAt: "2026-09-16T00:00:00.000Z",
-  });
+  const stored = beforeRename(legacyEntryFor(fixture, "wt-renamed"));
   const legacyLease = path.join(fixture.dir, ".omt", "active-kickoff.json");
   writeJSON(legacyLease, stored);
 
@@ -469,9 +575,12 @@ test("an entry stored under the old coordinator key lists, binds and releases as
   assert.equal(rewritten.pm.worktreeId, "wt-renamed");
   assert.equal(Object.hasOwn(rewritten, "coordinator"), false);
 
-  const released = releaseKickoff(fixture.org, {
+  // This test is about the coordinator/pm key rename, not ledger
+  // compatibility (which has its own test above), so it releases as
+  // "disbanded" — a reason `assertKickoffCloseReady` does not gate.
+  const released = await releaseKickoff(fixture.org, {
     worktreeId: "wt-renamed",
-    reason: "completed",
+    reason: "disbanded",
   });
   assert.equal(readJSON(released.archived).pm.worktreeId, "wt-renamed");
   assert.deepEqual(ids(fixture), []);
@@ -483,13 +592,7 @@ test("registry files stored with the old keys read as pm before any write", (t) 
   fs.mkdirSync(directory, { recursive: true });
   const reason = "orca is not installed; the user approved supervising here";
   const old = (worktreeId, extra = {}) =>
-    beforeRename({
-      schemaVersion: 1,
-      ...claimFor(fixture, worktreeId),
-      runId: null,
-      createdAt: "2026-09-16T00:00:00.000Z",
-      ...extra,
-    });
+    beforeRename(legacyEntryFor(fixture, worktreeId, extra));
   // A hashed entry, and one an earlier release named after the id itself.
   const hashed = path.join(
     directory,
@@ -651,4 +754,15 @@ test("branch cleanup deletes branches whose content has reached the merge commit
       stdio: "pipe",
     }),
   );
+});
+
+test("a claim with no requirements ledger at all is refused before any registry write", (t) => {
+  const fixture = project(t);
+  const claim = claimFor(fixture, "wt-no-requirements");
+  delete claim.requirements;
+  assert.throws(
+    () => registerKickoff(fixture.org, claim),
+    /Claim requirements ledger required/,
+  );
+  assert.deepEqual(ids(fixture), []);
 });

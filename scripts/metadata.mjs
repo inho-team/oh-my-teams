@@ -104,8 +104,9 @@ export function metadataTargets(facts, codexCurrent = "") {
     ),
     {
       file: "docs/PLAN_STATUS.md",
-      pattern: /\| \d+개 테스트가 모두 통과했다\./,
-      text: `| ${tests}개 테스트가 모두 통과했다.`,
+      pattern:
+        /\| 최상위 테스트 선언 \d+개\(통과 여부는 실행 기록의 종료 코드와 pass·fail·skipped 수로 확인한다\)\./,
+      text: `| 최상위 테스트 선언 ${tests}개(통과 여부는 실행 기록의 종료 코드와 pass·fail·skipped 수로 확인한다).`,
     },
     {
       file: "docs/PLAN_STATUS.md",
@@ -119,8 +120,8 @@ export function metadataTargets(facts, codexCurrent = "") {
     },
     {
       file: "docs/SAFETY_AUDIT.md",
-      pattern: /`npm test`의 \d+개 테스트/,
-      text: `\`npm test\`의 ${tests}개 테스트`,
+      pattern: /`npm test`의 최상위 테스트 선언 \d+개/,
+      text: `\`npm test\`의 최상위 테스트 선언 ${tests}개`,
     },
     {
       file: "docs/SAFETY_AUDIT.md",

@@ -14,6 +14,11 @@ import {
   cleanupKickoffBranches,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
+  requirementsFidelity,
+  requirementsFidelityConfirm,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
+import {
   DOCUMENT_STATES,
   STAGE_FOLDER_NAMES,
   STAGE_SLUGS,
@@ -52,6 +57,11 @@ function claimFor(fixture, worktreeId) {
     organizationRevision: readJSON(fixture.org).revision,
     brief: fixture.brief,
     delivery: { mode: "none" },
+    requirements: minimalRequirements(fixture.org, worktreeId),
+    director: {
+      terminalHandle: `term_director_${worktreeId}`,
+      checkoutPath: fixture.dir,
+    },
   };
 }
 
@@ -62,6 +72,24 @@ function kickoff(fixture, worktreeId, delivery) {
   const { entry } = registerKickoff(fixture.org, claim);
   const kickoffHash = resolveKickoffHash(fixture.org, worktreeId);
   return { entry, stateDir: entry.pm.stateDir, kickoffHash, worktreeId };
+}
+
+// assertKickoffCloseReady (releaseKickoff --reason completed) always requires a
+// director-confirmed fidelity check bound to the current head/ledger, regardless
+// of legacy/integrity-failure classification, which only governs the delivery-ref
+// document check. minimalRequirements has one statement (s1) and one criterion
+// (c1), so both items are required to cover the ledger exactly once.
+async function confirmFidelity(fixture, worktreeId, repo, head) {
+  await requirementsFidelity(fixture.org, worktreeId, {
+    head,
+    repo,
+    recordedBy: "term_director_test",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "test evidence" },
+      { type: "criterion", id: "c1", status: "met", evidence: "test evidence" },
+    ],
+  });
+  await requirementsFidelityConfirm(fixture.org, worktreeId, fixture.dir);
 }
 
 function envelope({
@@ -569,13 +597,13 @@ test("validateLegacyRef allows any pre-existing file when documentSystemActivate
   assert.equal(result.record.taskId, "task-3");
 });
 
-test("releaseKickoff refuses to complete a local-merge kickoff until its delivery-ref document is committed", (t) => {
+test("releaseKickoff refuses to complete a local-merge kickoff until its delivery-ref document is committed", async (t) => {
   const fixture = project(t);
   const { worktreeId } = kickoff(fixture, "wt-a", {
     mode: "local-merge",
     branch: "main",
   });
-  const mergeCommit = "a".repeat(40);
+  const { repoDir, mergeCommit } = mergedRepo(t);
   const entryFile = path.join(
     registryDirectory(fixture.org),
     `${kickoffEntryName(worktreeId)}.json`,
@@ -583,13 +611,14 @@ test("releaseKickoff refuses to complete a local-merge kickoff until its deliver
   writeJSON(entryFile, {
     ...readJSON(entryFile),
     delivered: {
-      head: "b".repeat(40),
+      head: mergeCommit,
       mergeCommit,
       at: new Date().toISOString(),
     },
   });
+  await confirmFidelity(fixture, worktreeId, repoDir, mergeCommit);
 
-  assert.throws(
+  await assert.rejects(
     () =>
       releaseKickoff(fixture.org, {
         worktreeId,
@@ -600,7 +629,7 @@ test("releaseKickoff refuses to complete a local-merge kickoff until its deliver
   );
 
   // force still bypasses it, matching the pre-existing pattern for the merge assert.
-  const forced = releaseKickoff(fixture.org, {
+  const forced = await releaseKickoff(fixture.org, {
     worktreeId,
     reason: "completed",
     force: true,
@@ -609,13 +638,13 @@ test("releaseKickoff refuses to complete a local-merge kickoff until its deliver
   assert.equal(forced.released, true);
 });
 
-test("releaseKickoff completes once the delivery-ref document is committed and owned by this kickoff", (t) => {
+test("releaseKickoff completes once the delivery-ref document is committed and owned by this kickoff", async (t) => {
   const fixture = project(t);
   const { stateDir, kickoffHash, worktreeId } = kickoff(fixture, "wt-a", {
     mode: "local-merge",
     branch: "main",
   });
-  const mergeCommit = "c".repeat(40);
+  const { repoDir, mergeCommit } = mergedRepo(t);
   const entryFile = path.join(
     registryDirectory(fixture.org),
     `${kickoffEntryName(worktreeId)}.json`,
@@ -623,11 +652,12 @@ test("releaseKickoff completes once the delivery-ref document is committed and o
   writeJSON(entryFile, {
     ...readJSON(entryFile),
     delivered: {
-      head: "d".repeat(40),
+      head: mergeCommit,
       mergeCommit,
       at: new Date().toISOString(),
     },
   });
+  await confirmFidelity(fixture, worktreeId, repoDir, mergeCommit);
 
   const docId = deliveryRefDocId(kickoffHash, mergeCommit);
   saveDocument(stateDir, {
@@ -645,7 +675,7 @@ test("releaseKickoff completes once the delivery-ref document is committed and o
     deliveredCommit: mergeCommit,
   });
 
-  const result = releaseKickoff(fixture.org, {
+  const result = await releaseKickoff(fixture.org, {
     worktreeId,
     reason: "completed",
     callerCwd: fixture.dir,
@@ -698,6 +728,7 @@ test("cleanupKickoffBranches skips a branch until its kickoff's delivery-ref doc
     entry: withDelivery,
     branches: ["feat/kickoff-work"],
     remoteName: "",
+    callerCwd: fixture.dir,
   });
   assert.deepEqual(beforeDoc, {
     deleted: [],
@@ -725,6 +756,7 @@ test("cleanupKickoffBranches skips a branch until its kickoff's delivery-ref doc
     entry: withDelivery,
     branches: ["feat/kickoff-work"],
     remoteName: "",
+    callerCwd: fixture.dir,
   });
   assert.deepEqual(afterDoc, {
     deleted: ["feat/kickoff-work"],
@@ -778,12 +810,13 @@ test("an entry without registrationSeq (pre-wave-2) keeps the old cleanupKickoff
   });
 });
 
-test("releaseKickoff completes a legacy entry (registered before documentSystemActivatedAt) without a delivery-ref document", (t) => {
+test("releaseKickoff completes a legacy entry (registered before documentSystemActivatedAt) without a delivery-ref document", async (t) => {
   const fixture = project(t);
   const { worktreeId, entry } = kickoff(fixture, "wt-a", {
     mode: "local-merge",
     branch: "main",
   });
+  const { repoDir, mergeCommit } = mergedRepo(t);
   const entryFile = path.join(
     registryDirectory(fixture.org),
     `${kickoffEntryName(worktreeId)}.json`,
@@ -792,17 +825,18 @@ test("releaseKickoff completes a legacy entry (registered before documentSystemA
   writeJSON(entryFile, {
     ...withoutSeq,
     delivered: {
-      head: "b".repeat(40),
-      mergeCommit: "a".repeat(40),
+      head: mergeCommit,
+      mergeCommit,
       at: new Date().toISOString(),
     },
   });
   assert.equal(entry.registrationSeq, registrationSeq);
+  await confirmFidelity(fixture, worktreeId, repoDir, mergeCommit);
 
   // documentSystemActivatedAt is unset on the example organization, so this
   // registrationSeq-less entry is legacy and skips the delivery-ref check
   // entirely, without needing --force.
-  const result = releaseKickoff(fixture.org, {
+  const result = await releaseKickoff(fixture.org, {
     worktreeId,
     reason: "completed",
     callerCwd: fixture.dir,
@@ -810,7 +844,7 @@ test("releaseKickoff completes a legacy entry (registered before documentSystemA
   assert.equal(result.released, true);
 });
 
-test("releaseKickoff refuses a registrationSeq-less entry registered after documentSystemActivatedAt as an integrity failure", (t) => {
+test("releaseKickoff refuses a registrationSeq-less entry registered after documentSystemActivatedAt as an integrity failure", async (t) => {
   const fixture = project(t);
   writeJSON(fixture.org, {
     ...readJSON(fixture.org),
@@ -820,6 +854,7 @@ test("releaseKickoff refuses a registrationSeq-less entry registered after docum
     mode: "local-merge",
     branch: "main",
   });
+  const { repoDir, mergeCommit } = mergedRepo(t);
   const entryFile = path.join(
     registryDirectory(fixture.org),
     `${kickoffEntryName(worktreeId)}.json`,
@@ -828,13 +863,14 @@ test("releaseKickoff refuses a registrationSeq-less entry registered after docum
   writeJSON(entryFile, {
     ...withoutSeq,
     delivered: {
-      head: "b".repeat(40),
-      mergeCommit: "a".repeat(40),
+      head: mergeCommit,
+      mergeCommit,
       at: new Date().toISOString(),
     },
   });
+  await confirmFidelity(fixture, worktreeId, repoDir, mergeCommit);
 
-  assert.throws(
+  await assert.rejects(
     () =>
       releaseKickoff(fixture.org, {
         worktreeId,
@@ -844,7 +880,7 @@ test("releaseKickoff refuses a registrationSeq-less entry registered after docum
     /no registrationSeq.*completion is refused as a corrupted entry/,
   );
 
-  const forced = releaseKickoff(fixture.org, {
+  const forced = await releaseKickoff(fixture.org, {
     worktreeId,
     reason: "completed",
     force: true,

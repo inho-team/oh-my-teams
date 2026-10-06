@@ -46,7 +46,6 @@ test("an organization may omit every role except PM", () => {
 
   const solo = structuredClone(org);
   delete solo.roles.junior;
-  delete solo.assistants.junior;
   assert.equal(definedRoles(validateOrg(solo)).length, 1);
 
   const headless = structuredClone(org);

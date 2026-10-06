@@ -14,6 +14,7 @@ import { HANDOFF_SECTIONS } from "./handoff.mjs";
 import {
   canonicalRole,
   assert,
+  AUDITOR_ROLE,
   claudeAutoCompact,
   definedRoles,
   DIRECTOR_ROLE,
@@ -227,11 +228,15 @@ function checkpointRule(workflowId, stateDir, workflowTask) {
 const BARE_COMMAND = /^[A-Za-z0-9._-]+$/;
 
 // A launch runs the role's own profile unless a workflow handoff named one of
-// its declared fallbacks; teams-org checks the handoff record itself.
+// its declared fallbacks; teams-org checks the handoff record itself. The
+// auditor declares its profile in org.auditor rather than org.roles, since it
+// is out-of-ladder like the director, but the {profile, fallbacks} shape is
+// the same.
 function roleProfileId(org, role, profile) {
-  if (profile === undefined) return org.roles[role].profile;
+  const declared = role === AUDITOR_ROLE ? org.auditor : org.roles[role];
+  if (profile === undefined) return declared.profile;
   assert(
-    org.roles[role].fallbacks.includes(profile),
+    (declared.fallbacks ?? []).includes(profile),
     `Profile ${profile} is not a fallback of ${role}`,
   );
   return profile;
@@ -561,8 +566,20 @@ export function roleCommand(
     "이사는 kickoff를 선언한 호스트 세션 자체이며 감독 worker나 역할 터미널로 띄우는 대상이 아니다. " +
       "이사 세션을 열려면 director-command·director-terminal을, PM 터미널을 열려면 role-command를 사용하되 role에 pm을 지정하라.",
   );
-  const role = foldRole(activeRoles(org, roles), requestedRole);
-  assertHeldRole(org, roles, requestedRole, role);
+  let role;
+  if (requestedRole === AUDITOR_ROLE) {
+    // The auditor is out-of-ladder (core.mjs's AUDITOR_ROLE doc): it never
+    // folds, holds no run depth, and is not among activeRoles, so it skips
+    // both checks a declared role in ROLES goes through above.
+    assert(
+      org.auditor,
+      "This organization has no auditor configured (org.auditor)",
+    );
+    role = AUDITOR_ROLE;
+  } else {
+    role = foldRole(activeRoles(org, roles), requestedRole);
+    assertHeldRole(org, roles, requestedRole, role);
+  }
   const profileId = roleProfileId(org, role, handoffProfile);
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);

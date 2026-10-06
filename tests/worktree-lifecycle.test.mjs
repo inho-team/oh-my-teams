@@ -442,7 +442,7 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
       git: async (repo, argv) => {
         if (argv[0] === "status") return "";
         if (argv[0] === "rev-parse" && argv[1] === "HEAD")
-          return repo === "/repo" ? "integration-a" : "senior-a";
+          return repo === path.resolve("/repo") ? "integration-a" : "senior-a";
         if (argv[0] === "rev-parse") return "integration-a";
         if (argv[0] === "merge-base") return "";
         throw new Error(`unexpected git: ${argv.join(" ")}`);
@@ -529,7 +529,7 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
       git: async (repo, argv) => {
         if (argv[0] === "status") return "";
         if (argv[0] === "rev-parse" && argv[1] === "HEAD")
-          return repo === "/repo" ? "integration-a" : "senior-a";
+          return repo === path.resolve("/repo") ? "integration-a" : "senior-a";
         if (argv[0] === "rev-parse") return "integration-a";
         if (argv[0] === "merge-base") return "";
         throw new Error(`unexpected git: ${argv.join(" ")}`);
@@ -611,7 +611,7 @@ test("two consecutive role-worktree reuses retain and verify prior closure proof
     git: async (repo, argv) => {
       if (argv[0] === "status") return "";
       if (argv[0] === "rev-parse" && argv[1] === "HEAD")
-        return repo === "/repo" ? "integration-a" : "senior-a";
+        return repo === path.resolve("/repo") ? "integration-a" : "senior-a";
       if (argv[0] === "rev-parse") return "integration-a";
       if (argv[0] === "merge-base") return "";
       throw new Error(`unexpected git: ${argv.join(" ")}`);
@@ -762,7 +762,7 @@ test("a named accepted task in another workflow can safely reuse its same-role w
       git: async (repo, argv) => {
         if (argv[0] === "status") return "";
         if (argv[0] === "rev-parse" && argv[1] === "HEAD")
-          return repo === "/repo" ? "integration-a" : "senior-a";
+          return repo === path.resolve("/repo") ? "integration-a" : "senior-a";
         if (argv[0] === "rev-parse") return "integration-a";
         if (argv[0] === "merge-base") return "";
         throw new Error(`unexpected git: ${argv.join(" ")}`);

@@ -24,6 +24,7 @@ import {
   REQUIRED_OPTIONS,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 
 const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
@@ -152,8 +153,6 @@ test("a director command refuses what it cannot open", () => {
 test("a director opens as a visible split of the calling terminal and the tab is titled", async () => {
   const command = directorCommand(example(), { profile: "claude-current" });
   const orca = fakeOrca([
-    [PROMPT],
-    [PROMPT, `${PROMPT} ${command.command}`],
     [`${PROMPT} ${command.command}`, "╭ Claude Code ╮", "│ opus │", "> "],
   ]);
   const opened = await openDirectorTerminal({
@@ -310,6 +309,7 @@ function claim(fixture, worktreeId, terminalHandle) {
     organizationRevision: readJSON(fixture.org).revision,
     brief: fixture.brief,
     delivery: { mode: "none" },
+    requirements: minimalRequirements(fixture.org, worktreeId),
     director: { terminalHandle, checkoutPath: fixture.dir },
   };
 }

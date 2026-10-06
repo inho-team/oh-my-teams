@@ -769,7 +769,7 @@ function reportsIn(directory, pick) {
  * are read; a report's summaries and findings are not.
  *
  * @param {string} stateDir - PM worktree state directory.
- * @param {object} [options] - `window`, and `org` to name an assist's or advice's provider.
+ * @param {object} [options] - `window`, and `org` to name an advice's provider.
  * @returns {{source: string, records: object[], unavailable: string | null}}
  *   One record per provider call whose report was written inside the window.
  */
@@ -806,9 +806,11 @@ export function collectHarnessReports(stateDir, { window, org } = {}) {
       );
     });
   }
-  // Assist, advice and judgment reports share one shape for usage: the calling
-  // role, the profile it spent (or the provider a judgment names), and the
-  // provider's usage block.
+  // Advice and judgment reports share one shape for usage: the calling role,
+  // the profile it spent (or the provider a judgment names), and the provider's
+  // usage block. The `assists` directory is read-only history: the assist
+  // command is removed, but reports it wrote earlier still count toward usage.
+  // Nothing writes there any more.
   for (const [directory, prefix] of [
     ["assists", "assist"],
     ["advice", "advice"],

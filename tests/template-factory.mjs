@@ -57,6 +57,28 @@ export async function getTemplateProject() {
 }
 
 /**
+ * Clones the committed template into an independent Git fixture. Git creates
+ * its own object directory instead of copying a live .git tree with fs.cpSync.
+ * @param {string} destination The new fixture repository path.
+ * @returns {Promise<string>} The cloned repository path.
+ */
+export async function cloneTemplateProject(destination) {
+  const source = await getTemplateProject();
+  const commands = [
+    ["clone", "--no-local", "-q", source, destination],
+    ["-C", destination, "config", "user.email", "t@example.invalid"],
+    ["-C", destination, "config", "user.name", "t"],
+  ];
+  for (const args of commands) {
+    const result = await run(["git", ...args], {
+      cwd: path.dirname(destination),
+    });
+    if (result.code !== 0) throw new Error("Git failed: " + result.stderr);
+  }
+  return destination;
+}
+
+/**
  * Cleans up all template directories that were created during the test run.
  * @returns {void}
  */
