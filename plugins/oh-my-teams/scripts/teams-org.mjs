@@ -1195,9 +1195,11 @@ async function preflightRoleWorktree(
   environment,
   matrix,
   trustedLaunch = null,
+  workflowRun = {},
 ) {
   const command = roleCommand(organization, args.role, {
     profile: args.profile,
+    ...workflowRun,
   });
   const worktreePath = args.worktree
     ? pathFromWorktreeId(args.worktree)
@@ -1931,6 +1933,14 @@ export async function createRoleWorktree(
     environment,
     matrix,
     auditorTrustedLaunch,
+    hasWorkflow
+      ? {
+          ...(state.roles ? { roles: state.roles } : {}),
+          ...(state.staffing ? { staffing: state.staffing } : {}),
+          workflowTask: args["workflow-task"],
+          workflowState: state,
+        }
+      : {},
   );
   assert(
     !args.worktree || reusable,
