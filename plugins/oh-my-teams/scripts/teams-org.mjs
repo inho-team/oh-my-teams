@@ -130,6 +130,7 @@ import {
   increaseWorkflowBudget,
   reopenTask,
   extendIntegrationChecks,
+  changeTaskStaffing,
 } from "./workflow.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { recordLessonCandidate } from "./lessons.mjs";
@@ -420,6 +421,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                               (appends checks to an already-frozen, not yet
                               accepted integration task without touching the
                               existing ones)
+  workflow-staffing --id ID --state DIR --revision N --change FILE
+                    (records a PM task staffing change; named upgrades need
+                    an explicit director decision)
   handoff-checkpoint --state DIR --workflow-id ID --workflow-task ID --file FILE
                      [--repo DIR]
                      (validates the checkpoint sections and records HEAD of
@@ -722,6 +726,8 @@ export const ALLOWED_OPTIONS = {
   "workflow-budget": ["id", "state", "revision", "change"],
   "workflow-reopen": ["id", "state", "revision", "reopen"],
   "workflow-integration-checks": ["id", "state", "revision", "checks"],
+  "workflow-staffing": ["id", "state", "revision", "change"],
+  "workflow-staffing": ["id", "state", "revision", "change"],
   "handoff-checkpoint": [
     "state",
     "workflow-id",
@@ -2768,6 +2774,7 @@ function launchContext(args) {
       workflowId: args["workflow-id"],
       stateDir,
       workflowState: snapshot.state,
+      ...(snapshot.state.staffing ? { staffing: snapshot.state.staffing } : {}),
       ...(args["workflow-task"] ? { workflowTask: args["workflow-task"] } : {}),
       ...(director ? { director } : {}),
       ...handoffLaunch(args, snapshot.state),
@@ -4432,6 +4439,13 @@ export async function executeCommand(args, execute) {
         args.id,
         Number(args.revision),
         readJSON(args.checks),
+      );
+    case "workflow-staffing":
+      return changeTaskStaffing(
+        path.resolve(args.state),
+        args.id,
+        Number(args.revision),
+        readJSON(args.change),
       );
     case "failure-classify": {
       const input = withRuntimeSignal(
