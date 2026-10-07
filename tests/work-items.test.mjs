@@ -291,41 +291,70 @@ test("work-items CLI interface", async (t) => {
   const emptyResult = JSON.parse(emptyResultStr);
   assert.strictEqual(emptyResult.length, 0);
 
-  await t.test("listWorkItems and CLI reject path traversal and scope mismatches", () => {
-    assert.throws(
-      () => listWorkItems(stateDir, "../invalid", workflowId),
-      /kickoffHash must be a 64-character hex string/
-    );
-    assert.throws(
-      () => listWorkItems(stateDir, kickoffId, "../invalid"),
-      /workflowId must be null or a valid id/
-    );
+  await t.test(
+    "listWorkItems and CLI reject path traversal and scope mismatches",
+    () => {
+      assert.throws(
+        () => listWorkItems(stateDir, "../invalid", workflowId),
+        /kickoffHash must be a 64-character hex string/,
+      );
+      assert.throws(
+        () => listWorkItems(stateDir, kickoffId, "../invalid"),
+        /workflowId must be null or a valid id/,
+      );
 
-    assert.throws(
-      () => execSync(`node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "../invalid" --workflow-id "${workflowId}"`, { stdio: "pipe" }),
-      /kickoffHash must be a 64-character hex string/
-    );
-    assert.throws(
-      () => execSync(`node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "../invalid"`, { stdio: "pipe" }),
-      /workflowId must be null or a valid id/
-    );
+      assert.throws(
+        () =>
+          execSync(
+            `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "../invalid" --workflow-id "${workflowId}"`,
+            { stdio: "pipe" },
+          ),
+        /kickoffHash must be a 64-character hex string/,
+      );
+      assert.throws(
+        () =>
+          execSync(
+            `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "../invalid"`,
+            { stdio: "pipe" },
+          ),
+        /workflowId must be null or a valid id/,
+      );
 
-    const otherKickoff = crypto.randomBytes(32).toString("hex");
-    const otherDocId = `${otherKickoff}/${workflowId}/implementation/work-item/task-other`;
-    const docOther = {
-      ...doc,
-      docId: otherDocId,
-      kickoffId: otherKickoff,
-      title: "Malicious Task"
-    };
-    
-    const typeDir = path.join(stateDir, "documents", kickoffId, workflowId, "implementation", "work-item");
-    const localId = "task-malicious";
-    fs.mkdirSync(path.join(typeDir, localId, "revisions"), { recursive: true });
-    fs.writeFileSync(path.join(typeDir, localId, "current.json"), JSON.stringify({ revision: 1 }));
-    fs.writeFileSync(path.join(typeDir, localId, "revisions/1.json"), JSON.stringify(docOther));
+      const otherKickoff = crypto.randomBytes(32).toString("hex");
+      const otherDocId = `${otherKickoff}/${workflowId}/implementation/work-item/task-other`;
+      const docOther = {
+        ...doc,
+        docId: otherDocId,
+        kickoffId: otherKickoff,
+        title: "Malicious Task",
+      };
 
-    const docs = listWorkItems(stateDir, kickoffId, workflowId);
-    assert.ok(!docs.some(d => d.title === "Malicious Task"), "Should reject envelope scope mismatch");
-  });
+      const typeDir = path.join(
+        stateDir,
+        "documents",
+        kickoffId,
+        workflowId,
+        "implementation",
+        "work-item",
+      );
+      const localId = "task-malicious";
+      fs.mkdirSync(path.join(typeDir, localId, "revisions"), {
+        recursive: true,
+      });
+      fs.writeFileSync(
+        path.join(typeDir, localId, "current.json"),
+        JSON.stringify({ revision: 1 }),
+      );
+      fs.writeFileSync(
+        path.join(typeDir, localId, "revisions/1.json"),
+        JSON.stringify(docOther),
+      );
+
+      const docs = listWorkItems(stateDir, kickoffId, workflowId);
+      assert.ok(
+        !docs.some((d) => d.title === "Malicious Task"),
+        "Should reject envelope scope mismatch",
+      );
+    },
+  );
 });
