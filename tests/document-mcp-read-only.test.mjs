@@ -10,6 +10,11 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import { handleCallToolRequest } from "../plugins/oh-my-teams/scripts/document-mcp.mjs";
 import { writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
+import { execSync } from "node:child_process";
+import {
+  registerKickoff,
+  kickoffHashFor,
+} from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 
 test("document-mcp-read-only: direct API tests", async (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-mcp-test-"));
@@ -91,18 +96,18 @@ test("document-mcp-read-only: direct API tests", async (t) => {
     }); // mismatch
 
     // 2. Reject write tools & unknown tools
-    assert.throws(
+    await assert.rejects(
       () => handleCallToolRequest(tmpDir, "write_document", {}),
       /forbidden or unknown/,
     );
-    assert.throws(
+    await assert.rejects(
       () => handleCallToolRequest(tmpDir, "unknown_tool", {}),
       /forbidden or unknown/,
     );
 
     // 3. get_document tests
     // valid
-    const res1 = handleCallToolRequest(tmpDir, "get_document", {
+    const res1 = await handleCallToolRequest(tmpDir, "get_document", {
       kickoffHash,
       workflowId: "wf-123",
       docId: `${kickoffHash}/wf-123/planning/work-item/doc1`,
@@ -110,7 +115,7 @@ test("document-mcp-read-only: direct API tests", async (t) => {
     assert.match(res1.content[0].text, /Valid document/);
 
     // invalid docId scope
-    assert.throws(
+    await assert.rejects(
       () =>
         handleCallToolRequest(tmpDir, "get_document", {
           kickoffHash: otherKickoff,
@@ -121,7 +126,7 @@ test("document-mcp-read-only: direct API tests", async (t) => {
     );
 
     // mismatch envelope
-    assert.throws(
+    await assert.rejects(
       () =>
         handleCallToolRequest(tmpDir, "get_document", {
           kickoffHash,
@@ -132,7 +137,7 @@ test("document-mcp-read-only: direct API tests", async (t) => {
     );
 
     // 4. list_documents tests
-    assert.throws(
+    await assert.rejects(
       () =>
         handleCallToolRequest(tmpDir, "list_documents", {
           kickoffHash,
@@ -144,7 +149,7 @@ test("document-mcp-read-only: direct API tests", async (t) => {
 
     fs.rmSync(mismatchDocDir, { recursive: true, force: true });
 
-    const listRes = handleCallToolRequest(tmpDir, "list_documents", {
+    const listRes = await handleCallToolRequest(tmpDir, "list_documents", {
       kickoffHash,
       workflowId: "wf-123",
       docType: "work-item",
@@ -154,7 +159,7 @@ test("document-mcp-read-only: direct API tests", async (t) => {
     assert.equal(listedDocs[0].content, "Valid document");
 
     // 5. list_events tests
-    assert.throws(
+    await assert.rejects(
       () =>
         handleCallToolRequest(tmpDir, "list_events", {
           kickoffHash: otherKickoff,
@@ -163,7 +168,7 @@ test("document-mcp-read-only: direct API tests", async (t) => {
       /Workflow kickoffId mismatch/,
     ); // because wf-123 state.json says kickoffHash
 
-    assert.throws(
+    await assert.rejects(
       () =>
         handleCallToolRequest(tmpDir, "list_events", {
           kickoffHash,
@@ -174,7 +179,7 @@ test("document-mcp-read-only: direct API tests", async (t) => {
 
     fs.unlinkSync(path.join(eventsDir, "evt2.json"));
 
-    const evRes = handleCallToolRequest(tmpDir, "list_events", {
+    const evRes = await handleCallToolRequest(tmpDir, "list_events", {
       kickoffHash,
       workflowId: "wf-123",
     });
@@ -206,8 +211,8 @@ test("document-mcp-read-only: direct API tests", async (t) => {
       fs.symlinkSync(extDir, docsSymlink, "dir");
 
       // list_documents will throw if it tries to traverse a symlink that resolves outside stateDir
-      assert.throws(() => {
-        handleCallToolRequest(tmpDir, "list_documents", {
+      await assert.rejects(async () => {
+        await handleCallToolRequest(tmpDir, "list_documents", {
           kickoffHash,
           workflowId: "wf-123",
           docType: "work-item",
@@ -233,12 +238,33 @@ test("document-mcp-read-only: direct API tests", async (t) => {
         workflowId: "foreign-workflow",
         content: "Leak content",
       });
-      assert.throws(() => {
-        handleCallToolRequest(tmpDir, "list_documents", {
+      await assert.rejects(async () => {
+        await handleCallToolRequest(tmpDir, "list_documents", {
           kickoffHash,
           docType: "work-item",
         });
       }, /Envelope mismatch: workflowId/);
+
+      // Test leaf symlink escape in get_document
+      const leafDocDir = path.join(
+        tmpDir,
+        "documents",
+        kickoffHash,
+        "none",
+        "01. 기획",
+        "work-item",
+        "doc-leaf-symlink",
+      );
+      fs.mkdirSync(leafDocDir, { recursive: true });
+      const extCurrent = path.join(extDir, "ext-current.json");
+      writeJSON(extCurrent, { revision: 1 });
+      fs.symlinkSync(extCurrent, path.join(leafDocDir, "current.json"));
+      await assert.rejects(async () => {
+        await handleCallToolRequest(tmpDir, "get_document", {
+          kickoffHash,
+          docId: `${kickoffHash}/none/planning/work-item/doc-leaf-symlink`,
+        });
+      }, /Path traversal detected/);
 
       // Test get_document symlink traversal
       const extDocDir = path.join(extDir, "doc-ext");
@@ -261,8 +287,8 @@ test("document-mcp-read-only: direct API tests", async (t) => {
       );
       fs.mkdirSync(path.dirname(symDocDir), { recursive: true });
       fs.symlinkSync(extDocDir, symDocDir, "dir");
-      assert.throws(() => {
-        handleCallToolRequest(tmpDir, "get_document", {
+      await assert.rejects(async () => {
+        await handleCallToolRequest(tmpDir, "get_document", {
           kickoffHash,
           docId: `${kickoffHash}/none/planning/work-item/doc-symlink`,
         });
@@ -387,6 +413,106 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
         child.on("exit", resolve);
       });
     }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+test("document-mcp-read-only: registered kickoff scope integration", async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-mcp-scope-test-"));
+  try {
+    execSync("git init", { cwd: tmpDir });
+    const omt = path.join(tmpDir, ".omt");
+    fs.mkdirSync(path.join(omt, "kickoffs"), { recursive: true });
+
+    // Setup organization
+    const orgFile = path.join(omt, "organization.json");
+    fs.copyFileSync(
+      path.resolve("plugins/oh-my-teams/examples/organization.json"),
+      orgFile,
+    );
+
+    // Create requirements draft using requirements.mjs
+    const { requirementsDraft, readDraft } =
+      await import("../plugins/oh-my-teams/scripts/requirements.mjs");
+    const worktreeId = "wt-scope";
+    const statements = [
+      { id: "s1", text: `deliver ${worktreeId}`, source: "brief" },
+    ];
+    const criteria = [
+      {
+        id: "c1",
+        text: `deliver ${worktreeId}`,
+        scope: "equal",
+        userVisible: false,
+        derivedFrom: ["s1"],
+      },
+    ];
+    requirementsDraft(orgFile, { worktreeId, statements, criteria });
+    const draft = readDraft(orgFile, worktreeId);
+
+    // Register kickoff
+    const claim = {
+      schemaVersion: 1,
+      goal: "Test goal",
+      brief: path.join(tmpDir, "brief.md"),
+      createdAt: new Date().toISOString(),
+      organizationRevision: 1,
+      runId: null,
+      selfPm: "test reason",
+      pm: {
+        worktreeId,
+        path: tmpDir,
+        stateDir: omt,
+      },
+      delivery: { mode: "none" },
+      requirements: {
+        statements: draft.statements,
+        criteria: draft.criteria,
+        confirmations: draft.confirmations,
+      },
+      director: {
+        terminalHandle: "term_dir",
+        checkoutPath: process.cwd(),
+      },
+    };
+    fs.writeFileSync(path.join(tmpDir, "brief.md"), "content");
+    const { entry } = registerKickoff(orgFile, claim);
+    const validHash = kickoffHashFor(entry);
+    const otherHash = "b".repeat(64);
+
+    // Setup documents for validHash
+    const docDir = path.join(
+      omt,
+      "documents",
+      validHash,
+      "none",
+      "01. 기획",
+      "work-item",
+      "doc1",
+    );
+    fs.mkdirSync(path.join(docDir, "revisions"), { recursive: true });
+    writeJSON(path.join(docDir, "current.json"), { revision: 1 });
+    writeJSON(path.join(docDir, "revisions", "1.json"), {
+      docId: `${validHash}/none/planning/work-item/doc1`,
+      kickoffId: validHash,
+      workflowId: null,
+      content: "Valid document",
+    });
+
+    // Test with correct hash (Should succeed)
+    const res = await handleCallToolRequest(omt, "get_document", {
+      kickoffHash: validHash,
+      docId: `${validHash}/none/planning/work-item/doc1`,
+    });
+    assert.equal(typeof res.content[0].text, "string");
+
+    // Test with incorrect hash (Should fail with registered kickoff mismatch)
+    await assert.rejects(async () => {
+      await handleCallToolRequest(omt, "get_document", {
+        kickoffHash: otherHash,
+        docId: `${otherHash}/none/planning/work-item/doc1`,
+      });
+    }, /kickoffHash mismatch with registered kickoff/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

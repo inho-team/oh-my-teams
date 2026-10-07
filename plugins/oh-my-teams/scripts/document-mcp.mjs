@@ -16,6 +16,7 @@ import { getDocumentContent } from "./work-items.mjs";
 import { workflowDirectory } from "./workflow-store.mjs";
 import { parseDocId, stageFolderName } from "./documents.mjs";
 import { readJSON } from "./core.mjs";
+import { resolveRegisteredKickoffFromState } from "./kickoff-registry.mjs";
 
 function ensureSafePath(targetPath, stateDir) {
   if (!fs.existsSync(targetPath)) return;
@@ -36,7 +37,7 @@ function ensureSafePath(targetPath, stateDir) {
  * @param {object} args - Tool arguments.
  * @returns {object} - Tool result.
  */
-export function handleCallToolRequest(stateDir, name, args) {
+export async function handleCallToolRequest(stateDir, name, args) {
   if (
     !name ||
     [
@@ -49,6 +50,15 @@ export function handleCallToolRequest(stateDir, name, args) {
     throw new Error(
       `Tool ${name} is forbidden or unknown. This is a read-only MCP server.`,
     );
+  }
+
+  const resolved = await resolveRegisteredKickoffFromState(stateDir);
+  if (
+    resolved &&
+    args.kickoffHash &&
+    args.kickoffHash !== resolved.kickoffHash
+  ) {
+    throw new Error("kickoffHash mismatch with registered kickoff");
   }
 
   if (name === "get_document") {
@@ -78,8 +88,16 @@ export function handleCallToolRequest(stateDir, name, args) {
     );
     ensureSafePath(targetDir, stateDir);
 
-    const doc = getDocumentContent(stateDir, docId);
-    if (!doc) throw new Error("Document not found");
+    const currentFile = path.join(targetDir, "current.json");
+    if (!fs.existsSync(currentFile)) throw new Error("Document not found");
+    ensureSafePath(currentFile, stateDir);
+    const current = readJSON(currentFile);
+    if (current.revision <= 0) throw new Error("Document not found");
+
+    const revFile = path.join(targetDir, `revisions/${current.revision}.json`);
+    if (!fs.existsSync(revFile)) throw new Error("Document not found");
+    ensureSafePath(revFile, stateDir);
+    const doc = readJSON(revFile);
 
     if (doc.kickoffId !== kickoffHash)
       throw new Error("Envelope mismatch: kickoffId");
