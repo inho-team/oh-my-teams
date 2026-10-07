@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 import { readJSON, writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
@@ -45,19 +45,15 @@ function createProjectStructure(tempDir, worktreeId) {
   org.documentSystemActivatedAt = new Date().toISOString();
   fs.writeFileSync(orgFile, JSON.stringify(org, null, 2));
 
-  execSync("git init", { cwd: projectDir, stdio: "ignore" });
-  execSync("git config user.name 'Test User'", {
-    cwd: projectDir,
-    stdio: "ignore",
-  });
-  execSync("git config user.email 'test@example.com'", {
-    cwd: projectDir,
-    stdio: "ignore",
-  });
-  execSync("git commit --allow-empty -m 'Initial commit'", {
-    cwd: projectDir,
-    stdio: "ignore",
-  });
+  const gitOptions = { cwd: projectDir, stdio: "ignore" };
+  execFileSync("git", ["init"], gitOptions);
+  execFileSync("git", ["config", "user.name", "Test User"], gitOptions);
+  execFileSync("git", ["config", "user.email", "test@example.com"], gitOptions);
+  execFileSync(
+    "git",
+    ["commit", "--allow-empty", "-m", "Initial commit"],
+    gitOptions,
+  );
 
   const briefFile = path.join(projectDir, "brief.md");
   fs.writeFileSync(briefFile, "# Test Brief\n");
