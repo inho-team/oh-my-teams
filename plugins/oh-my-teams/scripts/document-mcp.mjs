@@ -12,6 +12,7 @@ import {
 import path from "node:path";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
 import { getDocumentContent } from "./work-items.mjs";
 import { workflowDirectory } from "./workflow-store.mjs";
 import { parseDocId, stageFolderName } from "./documents.mjs";
@@ -367,7 +368,10 @@ export function createMcpServer(stateDir) {
   return server;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const { values: options } = parseArgs({
     options: { state: { type: "string" } },
     strict: false,

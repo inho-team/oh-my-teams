@@ -393,7 +393,7 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
       process.cwd(),
       "plugins/oh-my-teams/scripts/document-mcp.mjs",
     );
-    const child = spawn("node", [mcpPath, "--state", tmpDir], {
+    const child = spawn(process.execPath, [mcpPath, "--state", tmpDir], {
       stdio: ["pipe", "pipe", "inherit"],
     });
 
@@ -405,10 +405,26 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
         const id = Math.random().toString();
 
         const timeout = setTimeout(() => {
-          child.stdout.removeListener("data", onData);
-          child.on("exit", () => {});
+          cleanup();
           reject(new Error("Timeout waiting for response"));
         }, 3000);
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+          child.stdout.removeListener("data", onData);
+          child.removeListener("exit", onExit);
+          child.removeListener("error", onError);
+        };
+        const onExit = (code, signal) => {
+          cleanup();
+          reject(
+            new Error(`MCP server exited before responding: ${code ?? signal}`),
+          );
+        };
+        const onError = (error) => {
+          cleanup();
+          reject(error);
+        };
 
         const onData = (data) => {
           stdoutBuffer += data.toString();
@@ -420,8 +436,7 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
             try {
               const msg = JSON.parse(line);
               if (msg.id === id) {
-                clearTimeout(timeout);
-                child.stdout.removeListener("data", onData);
+                cleanup();
                 if (msg.error) reject(new Error(msg.error.message));
                 else resolve(msg.result);
               }
@@ -431,6 +446,8 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
           }
         };
         child.stdout.on("data", onData);
+        child.once("exit", onExit);
+        child.once("error", onError);
 
         const req = {
           jsonrpc: "2.0",
@@ -617,7 +634,7 @@ test("document-mcp-read-only: unregistered state rejection (stdio)", async (t) =
       process.cwd(),
       "plugins/oh-my-teams/scripts/document-mcp.mjs",
     );
-    const child = spawn("node", [mcpPath, "--state", tmpDir], {
+    const child = spawn(process.execPath, [mcpPath, "--state", tmpDir], {
       stdio: ["pipe", "pipe", "inherit"],
     });
 
@@ -626,9 +643,26 @@ test("document-mcp-read-only: unregistered state rejection (stdio)", async (t) =
       new Promise((resolve, reject) => {
         const id = Math.random().toString();
         const timeout = setTimeout(() => {
-          child.stdout.removeListener("data", onData);
+          cleanup();
           reject(new Error("Timeout waiting for response"));
         }, 3000);
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+          child.stdout.removeListener("data", onData);
+          child.removeListener("exit", onExit);
+          child.removeListener("error", onError);
+        };
+        const onExit = (code, signal) => {
+          cleanup();
+          reject(
+            new Error(`MCP server exited before responding: ${code ?? signal}`),
+          );
+        };
+        const onError = (error) => {
+          cleanup();
+          reject(error);
+        };
 
         const onData = (data) => {
           stdoutBuffer += data.toString();
@@ -640,8 +674,7 @@ test("document-mcp-read-only: unregistered state rejection (stdio)", async (t) =
             try {
               const msg = JSON.parse(line);
               if (msg.id === id) {
-                clearTimeout(timeout);
-                child.stdout.removeListener("data", onData);
+                cleanup();
                 if (msg.error) reject(new Error(msg.error.message));
                 else resolve(msg.result);
               }
@@ -649,6 +682,8 @@ test("document-mcp-read-only: unregistered state rejection (stdio)", async (t) =
           }
         };
         child.stdout.on("data", onData);
+        child.once("exit", onExit);
+        child.once("error", onError);
 
         const req = { jsonrpc: "2.0", id, method, params };
         child.stdin.write(JSON.stringify(req) + "\n");
