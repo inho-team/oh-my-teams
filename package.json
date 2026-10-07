@@ -1,6 +1,6 @@
 {
   "name": "oh-my-teams",
-  "version": "2.14.0",
+  "version": "2.15.0",
   "description": "A Director/PM/Worker agent organization plugin for Claude Code and Codex, running on Orca.",
   "private": true,
   "license": "MIT",
@@ -29,5 +29,8 @@
   },
   "devDependencies": {
     "prettier": "3.9.6"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1"
   }
 }
