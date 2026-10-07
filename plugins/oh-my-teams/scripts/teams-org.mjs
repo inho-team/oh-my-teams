@@ -21,6 +21,7 @@ import {
   validateOrg,
   writeJSON,
 } from "./core.mjs";
+import { saveWorkItem, listWorkItems } from "./work-items.mjs";
 import {
   assertWorktreeUnshared,
   directorBriefPrompt,
@@ -500,6 +501,15 @@ No command automatically pushes, merges, deploys, publishes, or deletes.`;
 
 /** Options each subcommand accepts, keyed by command name. */
 export const ALLOWED_OPTIONS = {
+  "work-item-save": ["state", "file", "expected-revision"],
+  "work-item-list": [
+    "state",
+    "kickoff-id",
+    "workflow-id",
+    "title",
+    "doc-state",
+    "assignee",
+  ],
   "org-draft": [
     "name",
     "tiers",
@@ -827,6 +837,8 @@ export const ALLOWED_OPTIONS = {
 
 /** Options each subcommand must receive, keyed by command name. */
 export const REQUIRED_OPTIONS = {
+  "work-item-save": ["state", "file"],
+  "work-item-list": ["state", "kickoff-id"],
   "org-draft": ["name", "output"],
   init: ["org", "from"],
   edit: ["org", "from", "revision"],
@@ -3629,6 +3641,43 @@ function assertTrustedAuditorLaunch(launch) {
  */
 export async function executeCommand(args, execute) {
   switch (args.command) {
+    case "work-item-save": {
+      const doc = readJSON(args.file);
+      const options =
+        args["expected-revision"] !== undefined
+          ? { expectedRevision: Number(args["expected-revision"]) }
+          : {};
+      return saveWorkItem(args.state, doc, options);
+    }
+    case "work-item-list": {
+      assert(
+        args.state && typeof args.state === "string",
+        "state must be a non-empty string",
+      );
+      assert(
+        args["kickoff-id"] && typeof args["kickoff-id"] === "string",
+        "kickoff-id must be a non-empty string",
+      );
+      let docs = listWorkItems(
+        args.state,
+        args["kickoff-id"],
+        args["workflow-id"] || null,
+      );
+      if (args.title) {
+        const titleRegex = new RegExp(args.title, "i");
+        docs = docs.filter((d) => titleRegex.test(d.title));
+      }
+      if (args["doc-state"]) {
+        docs = docs.filter((d) => d.state === args["doc-state"]);
+      }
+      if (args.assignee) {
+        docs = docs.filter(
+          (d) =>
+            Array.isArray(d.assignees) && d.assignees.includes(args.assignee),
+        );
+      }
+      return docs;
+    }
     case "org-draft":
       return await writeDraft(args, execute);
     case "init": {

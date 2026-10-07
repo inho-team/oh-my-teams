@@ -1515,4 +1515,40 @@ test("kickoff-branch-cleanup forwards --org as cleanupKickoffBranches' orgFile, 
   const body = JSON.parse(result.stdout);
   assert.deepEqual(body.skipped, ["feat/kickoff-work"]);
   assert.deepEqual(body.deleted, []);
+
+  await t.test("doc-save explicitly rejects task-comment", async () => {
+    const kId =
+      "0000000000000000000000000000000000000000000000000000000000000000";
+    const commentDoc = {
+      schemaVersion: 1,
+      docId: `${kId}/wf-1/implementation/task-comment/c1`,
+      kickoffId: kId,
+      workflowId: "wf-1",
+      stage: "implementation",
+      revision: 1,
+      state: "open",
+      basedOnRevision: null,
+      reason: "test reason",
+      createdAt: new Date().toISOString(),
+      author: { role: "pm", executionId: "exec-1" },
+      content: "This is a comment",
+    };
+    const tDir = fs.mkdtempSync(path.join(os.tmpdir(), "doc-cli-test-"));
+    const docFile = path.join(tDir, "comment.json");
+    fs.writeFileSync(docFile, JSON.stringify(commentDoc));
+    await assert.rejects(async () => {
+      const result = await cliRun(
+        dir,
+        "doc-save",
+        "--state",
+        path.join(dir, "test-wt-integrity-failure", ".omt"),
+        "--org",
+        orgFile,
+        "--doc",
+        docFile,
+      );
+      if (result.code !== 0) throw new Error(result.stderr);
+    }, /task-comment documents are explicitly rejected/);
+    fs.rmSync(tDir, { recursive: true, force: true });
+  });
 });
