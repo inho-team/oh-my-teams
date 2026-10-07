@@ -53,11 +53,10 @@ export async function handleCallToolRequest(stateDir, name, args) {
   }
 
   const resolved = await resolveRegisteredKickoffFromState(stateDir);
-  if (
-    resolved &&
-    args.kickoffHash &&
-    args.kickoffHash !== resolved.kickoffHash
-  ) {
+  if (!resolved) {
+    throw new Error("Unregistered state: cannot read documents");
+  }
+  if (args.kickoffHash && args.kickoffHash !== resolved.kickoffHash) {
     throw new Error("kickoffHash mismatch with registered kickoff");
   }
 

@@ -15,10 +15,70 @@ import {
   registerKickoff,
   kickoffHashFor,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import {
+  requirementsDraft,
+  readDraft,
+} from "../plugins/oh-my-teams/scripts/requirements.mjs";
+
+function setupRegisteredState(tmpDir) {
+  execSync("git init", { cwd: tmpDir });
+  const omt = path.join(tmpDir, ".omt");
+  fs.mkdirSync(path.join(omt, "kickoffs"), { recursive: true });
+
+  const orgFile = path.join(omt, "organization.json");
+  fs.copyFileSync(
+    path.resolve("plugins/oh-my-teams/examples/organization.json"),
+    orgFile,
+  );
+
+  const worktreeId = "wt-scope";
+  const statements = [
+    { id: "s1", text: `deliver ${worktreeId}`, source: "brief" },
+  ];
+  const criteria = [
+    {
+      id: "c1",
+      text: `deliver ${worktreeId}`,
+      scope: "equal",
+      userVisible: false,
+      derivedFrom: ["s1"],
+    },
+  ];
+  requirementsDraft(orgFile, { worktreeId, statements, criteria });
+  const draft = readDraft(orgFile, worktreeId);
+
+  const claim = {
+    schemaVersion: 1,
+    goal: "Test goal",
+    brief: path.join(tmpDir, "brief.md"),
+    createdAt: new Date().toISOString(),
+    organizationRevision: 1,
+    runId: null,
+    selfPm: "test reason",
+    pm: {
+      worktreeId,
+      path: tmpDir,
+      stateDir: omt,
+    },
+    delivery: { mode: "none" },
+    requirements: {
+      statements: draft.statements,
+      criteria: draft.criteria,
+      confirmations: draft.confirmations,
+    },
+    director: {
+      terminalHandle: "term_dir",
+      checkoutPath: process.cwd(),
+    },
+  };
+  fs.writeFileSync(path.join(tmpDir, "brief.md"), "content");
+  const { entry } = registerKickoff(orgFile, claim);
+  return { omt, kickoffHash: kickoffHashFor(entry) };
+}
 
 test("document-mcp-read-only: direct API tests", async (t) => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-mcp-test-"));
-  const kickoffHash = "a".repeat(64);
+  const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omt-mcp-test-"));
+  const { omt: tmpDir, kickoffHash } = setupRegisteredState(testRoot);
   const otherKickoff = "b".repeat(64);
 
   try {
@@ -26,6 +86,12 @@ test("document-mcp-read-only: direct API tests", async (t) => {
     const wfDir = path.join(tmpDir, "workflows", "wf-123");
     fs.mkdirSync(wfDir, { recursive: true });
     writeJSON(path.join(wfDir, "state.json"), { kickoffId: kickoffHash });
+
+    const mismatchWfDir = path.join(tmpDir, "workflows", "wf-mismatch");
+    fs.mkdirSync(mismatchWfDir, { recursive: true });
+    writeJSON(path.join(mismatchWfDir, "state.json"), {
+      kickoffId: otherKickoff,
+    });
 
     const docDir = path.join(
       tmpDir,
@@ -118,9 +184,9 @@ test("document-mcp-read-only: direct API tests", async (t) => {
     await assert.rejects(
       () =>
         handleCallToolRequest(tmpDir, "get_document", {
-          kickoffHash: otherKickoff,
+          kickoffHash,
           workflowId: "wf-123",
-          docId: `${kickoffHash}/wf-123/planning/work-item/doc1`,
+          docId: `${otherKickoff}/wf-123/planning/work-item/doc1`,
         }),
       /Scope mismatch/,
     );
@@ -162,8 +228,8 @@ test("document-mcp-read-only: direct API tests", async (t) => {
     await assert.rejects(
       () =>
         handleCallToolRequest(tmpDir, "list_events", {
-          kickoffHash: otherKickoff,
-          workflowId: "wf-123",
+          kickoffHash,
+          workflowId: "wf-mismatch",
         }),
       /Workflow kickoffId mismatch/,
     ); // because wf-123 state.json says kickoffHash
@@ -297,14 +363,14 @@ test("document-mcp-read-only: direct API tests", async (t) => {
       fs.rmSync(extDir, { recursive: true, force: true });
     }
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(testRoot, { recursive: true, force: true });
   }
 });
 
 test("document-mcp-read-only: stdio actual MCP check", async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-mcp-stdio-"));
+  const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omt-mcp-stdio-"));
   try {
-    const kickoffHash = "a".repeat(64);
+    const { omt: tmpDir, kickoffHash } = setupRegisteredState(testRoot);
 
     const docDir = path.join(
       tmpDir,
@@ -414,7 +480,7 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
       });
     }
   } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(testRoot, { recursive: true, force: true });
   }
 });
 test("document-mcp-read-only: registered kickoff scope integration", async (t) => {
@@ -513,6 +579,109 @@ test("document-mcp-read-only: registered kickoff scope integration", async (t) =
         docId: `${otherHash}/none/planning/work-item/doc1`,
       });
     }, /kickoffHash mismatch with registered kickoff/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("document-mcp-read-only: unregistered state rejection (handleCallToolRequest)", async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-mcp-unreg-"));
+  try {
+    const kickoffHash = "a".repeat(64);
+    for (const tool of [
+      "get_document",
+      "list_documents",
+      "list_events",
+      "search_documents",
+    ]) {
+      await assert.rejects(
+        () =>
+          handleCallToolRequest(tmpDir, tool, {
+            kickoffHash,
+            query: "a",
+            docId: "a",
+            docType: "a",
+          }),
+        /Unregistered state: cannot read documents/,
+      );
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("document-mcp-read-only: unregistered state rejection (stdio)", async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-mcp-unreg-stdio-"));
+  try {
+    const mcpPath = path.resolve(
+      process.cwd(),
+      "plugins/oh-my-teams/scripts/document-mcp.mjs",
+    );
+    const child = spawn("node", [mcpPath, "--state", tmpDir], {
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+
+    let stdoutBuffer = "";
+    const request = (method, params) =>
+      new Promise((resolve, reject) => {
+        const id = Math.random().toString();
+        const timeout = setTimeout(() => {
+          child.stdout.removeListener("data", onData);
+          reject(new Error("Timeout waiting for response"));
+        }, 3000);
+
+        const onData = (data) => {
+          stdoutBuffer += data.toString();
+          const lines = stdoutBuffer.split("\n");
+          stdoutBuffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.id === id) {
+                clearTimeout(timeout);
+                child.stdout.removeListener("data", onData);
+                if (msg.error) reject(new Error(msg.error.message));
+                else resolve(msg.result);
+              }
+            } catch (e) {}
+          }
+        };
+        child.stdout.on("data", onData);
+
+        const req = { jsonrpc: "2.0", id, method, params };
+        child.stdin.write(JSON.stringify(req) + "\n");
+      });
+
+    try {
+      await request("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0.0" },
+      });
+      child.stdin.write(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+        }) + "\n",
+      );
+
+      await assert.rejects(
+        request("tools/call", {
+          name: "get_document",
+          arguments: { kickoffHash: "a".repeat(64), docId: "a" },
+        }),
+        /Unregistered state: cannot read documents/,
+      );
+    } finally {
+      child.kill();
+      await new Promise((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null)
+          return resolve();
+        child.on("exit", resolve);
+      });
+    }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
