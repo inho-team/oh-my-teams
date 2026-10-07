@@ -1268,6 +1268,7 @@ export async function findActiveDispatch(
           status: "active",
           dispatchId: active.dispatchId,
           taskId: active.taskId ?? null,
+          runId,
         };
       }
       if (
@@ -1757,4 +1758,36 @@ export async function waitForSupervisionMessage({
       lastHeartbeats,
     };
   }
+}
+
+/**
+ * Resolves the active Run bound to a coordinator terminal.
+ * @param {string} terminal - Terminal handle
+ * @param {object} options - Options
+ * @returns {Promise<{ status: string, runId?: string }>}
+ */
+export async function findCoordinatorRun(
+  terminal,
+  { executable, cwd, execute = run } = {},
+) {
+  assert(terminal, "A terminal handle is required");
+  const selected = selectOrcaExecutable(executable);
+  let envelope;
+  try {
+    envelope = await runOrcaJson(
+      selected,
+      ["orchestration", "run-current", "--from", terminal],
+      { cwd, execute },
+    );
+  } catch {
+    return { status: "unknown" };
+  }
+  const currentRun = envelope.result?.run;
+  if (!currentRun) {
+    return { status: "clear" };
+  }
+  if (currentRun.coordinator_handle !== terminal) {
+    return { status: "mismatched" };
+  }
+  return { status: "active", runId: currentRun.id };
 }

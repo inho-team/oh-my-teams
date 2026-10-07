@@ -288,6 +288,23 @@ function recoverDocumentTransaction(journalFile) {
   if (!fs.existsSync(transaction.revisionFile)) {
     writeJSON(transaction.revisionFile, transaction.doc);
   }
+  if (transaction.events) {
+    const baseDir = path.dirname(path.dirname(journalFile));
+    const eventsDir = path.join(baseDir, "events");
+    const undeliveredDir = path.join(eventsDir, "undelivered");
+    fs.mkdirSync(eventsDir, { recursive: true });
+    fs.mkdirSync(undeliveredDir, { recursive: true });
+    for (const event of transaction.events) {
+      const eventFile = path.join(eventsDir, `${event.id}.json`);
+      const undeliveredFile = path.join(undeliveredDir, `${event.id}.json`);
+      if (!fs.existsSync(eventFile)) {
+        writeJSON(eventFile, event);
+      }
+      if (!fs.existsSync(undeliveredFile)) {
+        writeJSON(undeliveredFile, event);
+      }
+    }
+  }
   writeJSON(transaction.currentFile, transaction.current);
   fs.unlinkSync(journalFile);
 }
@@ -464,10 +481,14 @@ function validateReference(stateDir, doc, ref, ownLock) {
 export function saveDocument(
   stateDir,
   doc,
-  { expectedRevision = null, refs = [] } = {},
+  { expectedRevision = null, refs = [], requestId = null } = {},
 ) {
   validateEnvelope(doc);
   const parsed = parseDocId(doc.docId);
+  assert(
+    parsed.docType !== "task-comment",
+    "task-comment documents are explicitly rejected",
+  );
   const ownLock = documentLockPath(stateDir, parsed);
   return withFileLock(
     ownLock,
@@ -477,9 +498,32 @@ export function saveDocument(
       recoverDocumentTransaction(journalFile);
 
       const currentFile = path.join(directory, "current.json");
-      const priorRevision = fs.existsSync(currentFile)
-        ? readJSON(currentFile).revision
-        : 0;
+      const current = fs.existsSync(currentFile)
+        ? readJSON(currentFile)
+        : { revision: 0, requestId: null, requestIds: {} };
+
+      const allRequestIds = Object.assign({}, current.requestIds || {});
+      if (current.requestId) {
+        allRequestIds[current.requestId] = {
+          revision: current.revision,
+          hash: current.hash,
+        };
+      }
+
+      if (requestId && allRequestIds[requestId]) {
+        return {
+          docId: doc.docId,
+          revision: allRequestIds[requestId].revision,
+          hash: allRequestIds[requestId].hash,
+        };
+      }
+      const priorRevision = current.revision;
+      let priorState = null;
+      if (priorRevision > 0) {
+        priorState = readJSON(
+          path.join(directory, "revisions", `${priorRevision}.json`),
+        ).state;
+      }
       const normalizedExpected = expectedRevision ?? 0;
       assert(
         normalizedExpected === priorRevision,
@@ -502,11 +546,78 @@ export function saveDocument(
         `${doc.revision}.json`,
       );
       const docHash = hash(doc);
+      const events = [];
+      const createEvent = (type, payload) => {
+        const hex = hash(doc.docId + doc.revision + type);
+        const id = [
+          hex.substring(0, 8),
+          hex.substring(8, 12),
+          hex.substring(12, 16),
+          hex.substring(16, 20),
+          hex.substring(20, 32),
+        ].join("-");
+
+        let causality = null;
+        if (doc.revision > 1) {
+          causality = { basedOnRevision: priorRevision };
+        }
+
+        return {
+          id,
+          schemaVersion: 1,
+          type,
+          kickoffId: doc.kickoffId,
+          workflowId: doc.workflowId,
+          recordedAt: new Date().toISOString(),
+          author: doc.author,
+          causality,
+          revisionRef: buildDocRef(doc.docId, doc.revision),
+          ...payload,
+        };
+      };
+
+      if (priorRevision === 0) {
+        events.push(
+          createEvent("document.created", {
+            docId: doc.docId,
+            state: doc.state,
+          }),
+        );
+      } else {
+        events.push(
+          createEvent("document.revised", {
+            docId: doc.docId,
+            revisionRef: buildDocRef(doc.docId, doc.revision),
+            priorRevision,
+          }),
+        );
+      }
+
+      if (priorRevision > 0 && priorState !== doc.state) {
+        events.push(
+          createEvent("document.state-changed", {
+            docId: doc.docId,
+            priorState,
+            newState: doc.state,
+          }),
+        );
+      }
+
+      if (requestId) {
+        allRequestIds[requestId] = { revision: doc.revision, hash: docHash };
+      }
+
       commitDocumentTransaction(journalFile, {
         revisionFile,
         doc,
         currentFile,
-        current: { revision: doc.revision, hash: docHash },
+        current: {
+          revision: doc.revision,
+          hash: docHash,
+          requestId: requestId || null,
+          requestIds: allRequestIds,
+        },
+        events,
       });
       return { docId: doc.docId, revision: doc.revision, hash: docHash };
     },

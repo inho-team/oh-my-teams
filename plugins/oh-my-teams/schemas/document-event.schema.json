@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://oh-my-teams.local/schemas/document-event.schema.json",
+  "title": "Document Event",
+  "description": "An event emitted when a document is created, revised, or its state changes.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["document.created", "document.revised", "document.state-changed"]
+    },
+    "kickoffId": { "type": "string" },
+    "workflowId": { "type": ["string", "null"] },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "author": { "$ref": "#/$defs/author" },
+    "docId": { "type": "string" },
+    "causality": {
+      "type": ["string", "object", "null"],
+      "properties": {
+        "basedOnRevision": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "revisionRef": { "type": "string" },
+    "state": { "type": "string" },
+    "priorRevision": { "type": ["integer", "null"] },
+    "priorState": { "type": ["string", "null"] },
+    "newState": { "type": ["string", "null"] }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "type",
+    "kickoffId",
+    "recordedAt",
+    "author",
+    "docId"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "executionId"],
+      "properties": {
+        "role": {
+          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+        },
+        "executionId": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -99,6 +99,7 @@ import {
   createWorktreeWithRoleSession,
   discoverOrcaRuntime,
   findActiveDispatch,
+  findCoordinatorRun,
   injectTask,
   isTrustedOrcaExecute,
   readTrustedOrcaVersion,
@@ -183,6 +184,8 @@ import {
   reclaimKickoffCleanup,
   scanKickoffCleanup,
 } from "./kickoff-cleanup.mjs";
+import { consumeDocumentEvent } from "./document-events.mjs";
+import { deliverUndeliveredEvents } from "./document-event-delivery.mjs";
 import {
   buildDocId,
   buildDocRef,
@@ -400,6 +403,8 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
            condition in structured-omt-documents.md 3.4.2; when workflowId is
            set the workflow snapshot's state.roles, or its organization when
            state.roles is absent, is used instead and --org is ignored)
+  doc-event-consume --state DIR --event FILE
+  doc-event-deliver --state DIR --kickoff-hash HASH [--workflow-id ID] [--orca EXECUTABLE]
   workflow-create --workflow FILE --org FILE --state DIR
   workflow-status --id ID --state DIR
   workflow-resume --id ID --state DIR --revision N [--observations FILE]
@@ -739,7 +744,16 @@ export const ALLOWED_OPTIONS = {
     "revision",
   ],
   "doc-show": ["state", "doc-id"],
-  "doc-save": ["state", "doc", "expected-revision", "refs", "org"],
+  "doc-save": [
+    "state",
+    "doc",
+    "expected-revision",
+    "refs",
+    "org",
+    "request-id",
+  ],
+  "doc-event-consume": ["state", "event"],
+  "doc-event-deliver": ["state", "kickoff-hash", "workflow-id", "orca"],
   "workflow-create": ["workflow", "org", "state"],
   "workflow-status": ["id", "state"],
   "workflow-resume": ["id", "state", "revision", "observations"],
@@ -908,6 +922,8 @@ export const REQUIRED_OPTIONS = {
   "doc-id": ["kickoff-hash", "stage", "doc-type", "local-id"],
   "doc-show": ["state", "doc-id"],
   "doc-save": ["state", "doc"],
+  "doc-event-consume": ["state", "event"],
+  "doc-event-deliver": ["state", "kickoff-hash"],
   "workflow-create": ["workflow", "org", "state"],
   "workflow-status": ["id", "state"],
   "workflow-resume": ["id", "state", "revision"],
@@ -4601,6 +4617,9 @@ export async function executeCommand(args, execute) {
       if (args["expected-revision"] !== undefined) {
         options.expectedRevision = Number(args["expected-revision"]);
       }
+      if (args["request-id"] !== undefined) {
+        options.requestId = args["request-id"];
+      }
       if (args.refs !== undefined) {
         options.refs = args.refs
           .split(",")
@@ -4608,6 +4627,39 @@ export async function executeCommand(args, execute) {
           .filter(Boolean);
       }
       return saveDocument(stateDir, doc, options);
+    }
+    case "doc-event-consume":
+      return consumeDocumentEvent(
+        path.resolve(args.state),
+        readJSON(args.event),
+      );
+    case "doc-event-deliver": {
+      const terminalId = process.env.ORCA_TERMINAL_HANDLE;
+      if (!terminalId) {
+        throw new Error("Missing ORCA_TERMINAL_HANDLE for delivery addresses");
+      }
+      let active = await findActiveDispatch(terminalId, {
+        cwd: process.cwd(),
+        executable: args.orca,
+      });
+      if (active.status !== "active") {
+        active = await findCoordinatorRun(terminalId, {
+          cwd: process.cwd(),
+          executable: args.orca,
+        });
+      }
+      if (active.status !== "active") {
+        throw new Error(
+          `Unavailable delivery address: terminal ${terminalId} has no active dispatch or run`,
+        );
+      }
+      return deliverUndeliveredEvents(
+        path.resolve(args.state),
+        args["kickoff-hash"],
+        args["workflow-id"],
+        undefined,
+        { executable: args.orca, runId: active.runId, terminalId },
+      );
     }
     case "workflow-create":
       return createWorkflow(

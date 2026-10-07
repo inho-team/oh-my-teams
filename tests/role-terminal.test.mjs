@@ -1969,6 +1969,7 @@ test("findActiveDispatch finds a target terminal's active Dispatch on a later pa
     status: "active",
     dispatchId: "ctx_late",
     taskId: "task_late",
+    runId: "run_global",
   });
 });
 
@@ -2084,6 +2085,7 @@ test("findActiveDispatch follows every global run page before checking each expl
     status: "active",
     dispatchId: "ctx_target",
     taskId: null,
+    runId: "run_target",
   });
   assert.deepEqual(calls[1], [
     "orca",

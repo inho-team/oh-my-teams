@@ -1,6 +1,6 @@
 {
   "name": "oh-my-teams",
-  "version": "2.12.0",
+  "version": "2.13.0",
   "description": "oh my teams: a Director/PM/Worker agent organization running on Orca.",
   "author": { "name": "inho-team" }
 }
