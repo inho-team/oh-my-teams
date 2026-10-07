@@ -8,6 +8,10 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
+import { resolveKickoffHash } from "../plugins/oh-my-teams/scripts/documents.mjs";
+import { registerKickoff } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 import {
   saveWorkItem,
   getDocumentContent,
@@ -185,16 +189,59 @@ test("work-items module", async (t) => {
 });
 
 test("work-items CLI interface", async (t) => {
-  const { execSync } = await import("node:child_process");
+  const { execFileSync, execSync } = await import("node:child_process");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "work-items-cli-test-"));
-  const stateDir = path.join(tmpDir, ".omt");
-  fs.mkdirSync(stateDir);
+  const projectDir = path.join(tmpDir, "project");
+  const pmDir = path.join(tmpDir, "pm");
+  const stateDir = path.join(pmDir, ".omt");
+  const orgFile = path.join(projectDir, ".omt", "organization.json");
+  const brief = path.join(tmpDir, "brief.md");
+  fs.mkdirSync(projectDir);
+  execFileSync("git", ["init", projectDir]);
+  execFileSync("git", [
+    "-C",
+    projectDir,
+    "config",
+    "user.name",
+    "Work Item Test",
+  ]);
+  execFileSync("git", [
+    "-C",
+    projectDir,
+    "config",
+    "user.email",
+    "work-item@example.invalid",
+  ]);
+  fs.writeFileSync(path.join(projectDir, "seed.txt"), "seed\n");
+  execFileSync("git", ["-C", projectDir, "add", "seed.txt"]);
+  execFileSync("git", ["-C", projectDir, "commit", "-m", "seed"]);
+  execFileSync("git", ["-C", projectDir, "worktree", "add", "--detach", pmDir]);
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(path.dirname(orgFile), { recursive: true });
+  fs.copyFileSync(
+    path.resolve("plugins/oh-my-teams/examples/organization.json"),
+    orgFile,
+  );
+  fs.writeFileSync(brief, "Work-item CLI test brief\n");
 
   t.after(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  const kickoffId = crypto.randomBytes(32).toString("hex");
+  const worktreeId = "work-item-cli-pm";
+  registerKickoff(orgFile, {
+    goal: "Test work-item CLI scope",
+    pm: { worktreeId, path: pmDir, stateDir },
+    organizationRevision: readJSON(orgFile).revision,
+    brief,
+    delivery: { mode: "none" },
+    requirements: minimalRequirements(orgFile, worktreeId),
+    director: {
+      terminalHandle: "term_director_work_item_cli",
+      checkoutPath: pmDir,
+    },
+  });
+  const kickoffId = resolveKickoffHash(orgFile, worktreeId);
   const workflowId = "cli-workflow";
   const docId = `${kickoffId}/${workflowId}/implementation/work-item/task-cli`;
 
@@ -240,8 +287,9 @@ test("work-items CLI interface", async (t) => {
     "scripts",
     "teams-org.mjs",
   );
+  const listCommand = `node "${scriptPath}" work-item-list`;
   const resultStr = execSync(
-    `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}"`,
+    `${listCommand} --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}"`,
     { encoding: "utf8" },
   );
   const result = JSON.parse(resultStr);
@@ -261,7 +309,7 @@ test("work-items CLI interface", async (t) => {
   saveWorkItem(stateDir, doc2);
 
   const titleResultStr = execSync(
-    `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}" --title "Another"`,
+    `${listCommand} --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}" --title "Another"`,
     { encoding: "utf8" },
   );
   const titleResult = JSON.parse(titleResultStr);
@@ -269,7 +317,7 @@ test("work-items CLI interface", async (t) => {
   assert.strictEqual(titleResult[0].title, "Another Task");
 
   const stateResultStr = execSync(
-    `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}" --doc-state "resolved"`,
+    `${listCommand} --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}" --doc-state "resolved"`,
     { encoding: "utf8" },
   );
   const stateResult = JSON.parse(stateResultStr);
@@ -277,7 +325,7 @@ test("work-items CLI interface", async (t) => {
   assert.strictEqual(stateResult[0].title, "Another Task");
 
   const assigneeResultStr = execSync(
-    `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}" --assignee "worker-1"`,
+    `${listCommand} --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}" --assignee "worker-1"`,
     { encoding: "utf8" },
   );
   const assigneeResult = JSON.parse(assigneeResultStr);
@@ -285,7 +333,7 @@ test("work-items CLI interface", async (t) => {
   assert.strictEqual(assigneeResult[0].title, "Another Task");
 
   const emptyResultStr = execSync(
-    `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}" --title "Not Found"`,
+    `${listCommand} --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "${workflowId}" --title "Not Found"`,
     { encoding: "utf8" },
   );
   const emptyResult = JSON.parse(emptyResultStr);
@@ -306,7 +354,7 @@ test("work-items CLI interface", async (t) => {
       assert.throws(
         () =>
           execSync(
-            `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "../invalid" --workflow-id "${workflowId}"`,
+            `${listCommand} --state "${stateDir}" --kickoff-id "../invalid" --workflow-id "${workflowId}"`,
             { stdio: "pipe" },
           ),
         /kickoffHash must be a 64-character hex string/,
@@ -314,7 +362,7 @@ test("work-items CLI interface", async (t) => {
       assert.throws(
         () =>
           execSync(
-            `node "${scriptPath}" work-item-list --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "../invalid"`,
+            `${listCommand} --state "${stateDir}" --kickoff-id "${kickoffId}" --workflow-id "../invalid"`,
             { stdio: "pipe" },
           ),
         /workflowId must be null or a valid id/,
@@ -328,6 +376,38 @@ test("work-items CLI interface", async (t) => {
         kickoffId: otherKickoff,
         title: "Malicious Task",
       };
+
+      saveWorkItem(stateDir, docOther);
+      const snapshot = () =>
+        fs
+          .readdirSync(stateDir, { recursive: true })
+          .sort()
+          .filter((entry) => fs.statSync(path.join(stateDir, entry)).isFile())
+          .map((entry) => [
+            entry,
+            fs.readFileSync(path.join(stateDir, entry), "utf8"),
+          ]);
+      const beforeRejectedList = snapshot();
+      assert.throws(
+        () =>
+          execSync(
+            `${listCommand} --state "${stateDir}" --kickoff-id "${otherKickoff}" --workflow-id "${workflowId}"`,
+            { stdio: "pipe" },
+          ),
+        /kickoff-id does not match the kickoff registered for state/,
+      );
+      const alternateOrg = path.join(tmpDir, "alternate", "organization.json");
+      fs.mkdirSync(path.dirname(alternateOrg), { recursive: true });
+      fs.copyFileSync(orgFile, alternateOrg);
+      assert.throws(
+        () =>
+          execSync(
+            `${listCommand} --state "${stateDir}" --kickoff-id "${otherKickoff}" --workflow-id "${workflowId}" --org "${alternateOrg}"`,
+            { stdio: "pipe" },
+          ),
+        /Unknown option: --org/,
+      );
+      assert.deepStrictEqual(snapshot(), beforeRejectedList);
 
       const typeDir = path.join(
         stateDir,

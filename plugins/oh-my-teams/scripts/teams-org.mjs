@@ -178,6 +178,7 @@ import {
   recordDelivery,
   registerKickoff,
   releaseKickoff,
+  resolveRegisteredKickoffFromState,
   sharesWorktreeWithAny,
   verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
@@ -3657,6 +3658,15 @@ export async function executeCommand(args, execute) {
       assert(
         args["kickoff-id"] && typeof args["kickoff-id"] === "string",
         "kickoff-id must be a non-empty string",
+      );
+      assert(
+        /^[a-f0-9]{64}$/.test(args["kickoff-id"]),
+        "kickoffHash must be a 64-character hex string",
+      );
+      const registration = await resolveRegisteredKickoffFromState(args.state);
+      assert(
+        registration?.kickoffHash === args["kickoff-id"],
+        "kickoff-id does not match the kickoff registered for state",
       );
       let docs = listWorkItems(
         args.state,
