@@ -396,6 +396,17 @@ test("work-items CLI interface", async (t) => {
           ),
         /kickoff-id does not match the kickoff registered for state/,
       );
+      const alternateOrg = path.join(tmpDir, "alternate", "organization.json");
+      fs.mkdirSync(path.dirname(alternateOrg), { recursive: true });
+      fs.copyFileSync(orgFile, alternateOrg);
+      assert.throws(
+        () =>
+          execSync(
+            `${listCommand} --state "${stateDir}" --kickoff-id "${otherKickoff}" --workflow-id "${workflowId}" --org "${alternateOrg}"`,
+            { stdio: "pipe" },
+          ),
+        /Unknown option: --org/,
+      );
       assert.deepStrictEqual(snapshot(), beforeRejectedList);
 
       const typeDir = path.join(
