@@ -50,17 +50,11 @@ async function repo(t) {
   );
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   execFileSync("git", ["init"], { cwd: dir });
-  execFileSync(
-    "git",
-    [
-      "commit",
-      "--allow-empty",
-      "-m",
-      "root",
-      "--author=Test <test@example.com>",
-    ],
-    { cwd: dir },
-  );
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "test@example.com"], {
+    cwd: dir,
+  });
+  execFileSync("git", ["commit", "--allow-empty", "-m", "root"], { cwd: dir });
   return dir;
 }
 

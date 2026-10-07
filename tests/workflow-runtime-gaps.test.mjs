@@ -938,8 +938,6 @@ test("refreshGateCache clears a pending gate and allows resumeWorkflow to procee
     await import("../plugins/oh-my-teams/scripts/workflow-store.mjs");
   const { verify } =
     await import("../plugins/oh-my-teams/scripts/evidence.mjs");
-  const { execSync } = await import("node:child_process");
-
   const snap = readWorkflowSnapshot(stateDir, request.id);
   snap.state.tasks["a"].state = "submitted";
   snap.state.tasks["a"].workerRunId = "run-a";
@@ -958,8 +956,11 @@ test("refreshGateCache clears a pending gate and allows resumeWorkflow to procee
   );
 
   fs.writeFileSync(path.join(dir, "a.txt"), "hello");
-  execSync("git add a.txt", { cwd: dir });
-  execSync("git commit -m 'added a'", { cwd: dir });
+  assert.equal((await run(["git", "add", "a.txt"], { cwd: dir })).code, 0);
+  assert.equal(
+    (await run(["git", "commit", "-m", "added a"], { cwd: dir })).code,
+    0,
+  );
 
   fs.mkdirSync(path.join(stateDir, "evidence"), { recursive: true });
 
