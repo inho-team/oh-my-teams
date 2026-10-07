@@ -147,6 +147,7 @@ function createTestDocument(kickoffId, stageSlug, docType, localId, author) {
     workflowId: null,
     revision: 1,
     state: "open",
+      basedOnRevision: null,
     author,
     createdAt: new Date().toISOString(),
     basedOnRevision: null,
@@ -2001,4 +2002,26 @@ test("재등록_후_이전_kickoff_문서_완결", async (t) => {
 
   const resolved = resolveKickoffHash(orgFile, "test-wt-19");
   assert.equal(resolved, hash2);
+
+  await t.test("saveDocument rejects task-comment", () => {
+    const kId = "0000000000000000000000000000000000000000000000000000000000000000";
+    const commentDoc = {
+      schemaVersion: 1,
+      docId: `${hash2}/wf-1/implementation/task-comment/c1`,
+      kickoffId: hash2,
+      workflowId: "wf-1",
+      stage: "implementation",
+      revision: 1,
+      state: "open",
+      basedOnRevision: null,
+      reason: "test reason",
+      createdAt: new Date().toISOString(),
+      author: { role: "pm", executionId: "exec-1" },
+      content: "This is a comment"
+    };
+    assert.throws(
+      () => saveDocument(stateDir, commentDoc),
+      /task-comment documents are explicitly rejected/
+    );
+  });
 });

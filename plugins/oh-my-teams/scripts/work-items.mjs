@@ -226,6 +226,17 @@ export function getDocumentContent(stateDir, docId) {
  * @returns {Array<object>}
  */
 export function listWorkItems(stateDir, kickoffHash, workflowId) {
+  assert(
+    typeof kickoffHash === "string" && /^[a-f0-9]{64}$/.test(kickoffHash),
+    "kickoffHash must be a 64-character hex string",
+  );
+  if (workflowId !== null) {
+    assert(
+      typeof workflowId === "string" && /^[a-z0-9][a-z0-9-]*$/.test(workflowId),
+      "workflowId must be null or a valid id",
+    );
+  }
+
   const docs = [];
   const baseDir = path.join(
     stateDir,
@@ -251,7 +262,15 @@ export function listWorkItems(stateDir, kickoffHash, workflowId) {
             `revisions/${current.revision}.json`,
           );
           if (fs.existsSync(revFile)) {
-            docs.push(readJSON(revFile));
+            const doc = readJSON(revFile);
+            const parsed = parseDocId(doc.docId);
+            if (
+              parsed.kickoffHash === kickoffHash &&
+              parsed.workflowId === workflowId &&
+              parsed.docType === docType
+            ) {
+              docs.push(doc);
+            }
           }
         }
       }
