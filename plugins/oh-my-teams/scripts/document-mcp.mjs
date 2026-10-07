@@ -14,7 +14,7 @@ import fs from "node:fs";
 import { parseArgs } from "node:util";
 import { getDocumentContent } from "./work-items.mjs";
 import { workflowDirectory } from "./workflow-store.mjs";
-import { parseDocId } from "./documents.mjs";
+import { parseDocId, stageFolderName } from "./documents.mjs";
 import { readJSON } from "./core.mjs";
 
 function ensureSafePath(targetPath, stateDir) {
@@ -66,12 +66,26 @@ export function handleCallToolRequest(stateDir, name, args) {
     if (!workflowId && parsed.workflowId !== null)
       throw new Error("Scope mismatch: workflowId");
 
+    const folder = stageFolderName(parsed.stageSlug);
+    const targetDir = path.join(
+      stateDir,
+      "documents",
+      kickoffHash,
+      parsed.workflowId ?? "none",
+      folder,
+      parsed.docType,
+      parsed.localId,
+    );
+    ensureSafePath(targetDir, stateDir);
+
     const doc = getDocumentContent(stateDir, docId);
     if (!doc) throw new Error("Document not found");
 
     if (doc.kickoffId !== kickoffHash)
       throw new Error("Envelope mismatch: kickoffId");
     if (workflowId && doc.workflowId !== workflowId)
+      throw new Error("Envelope mismatch: workflowId");
+    if (!workflowId && doc.workflowId)
       throw new Error("Envelope mismatch: workflowId");
 
     return { content: [{ type: "text", text: JSON.stringify(doc, null, 2) }] };
@@ -118,6 +132,8 @@ export function handleCallToolRequest(stateDir, name, args) {
                   throw new Error("Envelope mismatch: kickoffId");
                 if (workflowId && doc.workflowId !== workflowId)
                   throw new Error("Envelope mismatch: workflowId");
+                if (!workflowId && doc.workflowId)
+                  throw new Error("Envelope mismatch: workflowId");
                 docs.push(doc);
               }
             }
@@ -162,6 +178,9 @@ export function handleCallToolRequest(stateDir, name, args) {
             throw new Error("Event does not belong to the specified kickoff");
           }
           if (workflowId && event.workflowId !== workflowId) {
+            throw new Error("Event does not belong to the specified workflow");
+          }
+          if (!workflowId && event.workflowId) {
             throw new Error("Event does not belong to the specified workflow");
           }
           events.push(event);
@@ -225,6 +244,8 @@ export function handleCallToolRequest(stateDir, name, args) {
                   if (doc.kickoffId !== kickoffHash)
                     throw new Error("Envelope mismatch: kickoffId");
                   if (workflowId && doc.workflowId !== workflowId)
+                    throw new Error("Envelope mismatch: workflowId");
+                  if (!workflowId && doc.workflowId)
                     throw new Error("Envelope mismatch: workflowId");
 
                   const docText = JSON.stringify(doc).toLowerCase();

@@ -213,6 +213,60 @@ test("document-mcp-read-only: direct API tests", async (t) => {
           docType: "work-item",
         });
       }, /Path traversal detected/);
+
+      // 7. Regression Tests for Scope and Symlinks
+      // Test missing workflowId leak in list_documents
+      const noneDir = path.join(
+        tmpDir,
+        "documents",
+        kickoffHash,
+        "none",
+        "01. 기획",
+        "work-item",
+        "doc-leak",
+      );
+      fs.mkdirSync(path.join(noneDir, "revisions"), { recursive: true });
+      writeJSON(path.join(noneDir, "current.json"), { revision: 1 });
+      writeJSON(path.join(noneDir, "revisions", "1.json"), {
+        docId: `${kickoffHash}/none/planning/work-item/doc-leak`,
+        kickoffId: kickoffHash,
+        workflowId: "foreign-workflow",
+        content: "Leak content",
+      });
+      assert.throws(() => {
+        handleCallToolRequest(tmpDir, "list_documents", {
+          kickoffHash,
+          docType: "work-item",
+        });
+      }, /Envelope mismatch: workflowId/);
+
+      // Test get_document symlink traversal
+      const extDocDir = path.join(extDir, "doc-ext");
+      fs.mkdirSync(path.join(extDocDir, "revisions"), { recursive: true });
+      writeJSON(path.join(extDocDir, "current.json"), { revision: 1 });
+      writeJSON(path.join(extDocDir, "revisions", "1.json"), {
+        docId: `${kickoffHash}/none/planning/work-item/doc-symlink`,
+        kickoffId: kickoffHash,
+        workflowId: null,
+        content: "Ext content",
+      });
+      const symDocDir = path.join(
+        tmpDir,
+        "documents",
+        kickoffHash,
+        "none",
+        "01. 기획",
+        "work-item",
+        "doc-symlink",
+      );
+      fs.mkdirSync(path.dirname(symDocDir), { recursive: true });
+      fs.symlinkSync(extDocDir, symDocDir, "dir");
+      assert.throws(() => {
+        handleCallToolRequest(tmpDir, "get_document", {
+          kickoffHash,
+          docId: `${kickoffHash}/none/planning/work-item/doc-symlink`,
+        });
+      }, /Path traversal detected/);
     } finally {
       fs.rmSync(extDir, { recursive: true, force: true });
     }
@@ -257,7 +311,7 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
     const request = (method, params) =>
       new Promise((resolve, reject) => {
         const id = Math.random().toString();
-        
+
         const timeout = setTimeout(() => {
           child.stdout.removeListener("data", onData);
           child.on("exit", () => {});
@@ -300,9 +354,14 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
       await request("initialize", {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: { name: "test", version: "1.0.0" }
+        clientInfo: { name: "test", version: "1.0.0" },
       });
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
+      child.stdin.write(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+        }) + "\n",
+      );
 
       // 1. Valid tool call
       const res = await request("tools/call", {
@@ -323,7 +382,8 @@ test("document-mcp-read-only: stdio actual MCP check", async () => {
       child.kill();
       // Wait for child to exit
       await new Promise((resolve) => {
-        if (child.exitCode !== null || child.signalCode !== null) return resolve();
+        if (child.exitCode !== null || child.signalCode !== null)
+          return resolve();
         child.on("exit", resolve);
       });
     }
