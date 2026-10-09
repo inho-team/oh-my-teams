@@ -55,7 +55,9 @@ test("advise and draft still exist", () => {
 });
 
 test("no active file advertises assist or the assistants setting", () => {
-  const skills = fs.readdirSync(path.join(plugin, "skills"));
+  const skills = fs
+    .readdirSync(path.join(plugin, "skills"))
+    .filter((name) => !name.startsWith("."));
   const files = [
     path.join(root, "README.md"),
     ...skills.map((name) => path.join(plugin, "skills", name, "SKILL.md")),
