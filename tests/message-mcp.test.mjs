@@ -153,7 +153,7 @@ test("Role launch attaches Message MCP through session arguments", () => {
   });
   assert.deepEqual(
     JSON.parse(director.argv[1]).mcpServers.omt_message.args.slice(-4),
-    ["--org", "/tmp/organization.json", "--actor", "director"],
+    ["--org", path.resolve("/tmp/organization.json"), "--actor", "director"],
   );
 });
 
