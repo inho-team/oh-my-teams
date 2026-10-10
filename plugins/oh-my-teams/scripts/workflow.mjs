@@ -2366,9 +2366,9 @@ function worktreePathFromReceipt(worktreeId) {
  * @param {string} taskId - Reworked task identifier.
  * @param {object} transition - Role worktree and commit proof.
  * @param {string} transition.fromWorktreeId - Rejected Junior worktree.
- * @param {string} transition.toWorktreeId - Senior worktree to reuse or create.
+ * @param {string} transition.toWorktreeId - Senior worktree, possibly the closed Junior worktree.
  * @param {string} transition.fromWorktreePath - Rejected Junior path.
- * @param {string} transition.toWorktreePath - New Senior path.
+ * @param {string} transition.toWorktreePath - Senior path, possibly the source path.
  * @param {string} transition.base - Requested child base revision.
  * @param {object} [ports] - Injectable evidence ports for focused tests.
  * @param {Function} [ports.gitEvidence=git] - Git evidence reader.

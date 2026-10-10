@@ -163,6 +163,8 @@ function worktreePath(worktreeId) {
  * @param {string} role - Role about to start, after folding.
  * @param {string} [selector] - Orca worktree selector the role is given.
  * @param {string} callerDir - Directory `current` and `active` resolve to.
+ * @param {object} [options] - Internal, validated role transition context.
+ * @param {string} [options.promotionTaskId] - Reviewed Junior task being promoted in place.
  * @returns {void}
  * @throws {Error} When the worktree belongs to a role that does not supervise `role`.
  */
@@ -171,9 +173,29 @@ export function assertWorktreeUnshared(
   role,
   selector,
   callerDir,
+  { promotionTaskId } = {},
 ) {
   const target = selectedWorktreePath(selector, callerDir);
   if (!workflowState?.tasks || !target) return;
+  const promotion =
+    role === "senior"
+      ? Object.entries(workflowState.tasks).find(
+          ([taskId, item]) =>
+            item.role === "junior" &&
+            item.state === "reviewed" &&
+            worktreePath(item.worktreeId) === target &&
+            (promotionTaskId === taskId ||
+              (item.worktreeTransitions ?? []).some(
+                (transition) =>
+                  transition.kind === "junior-to-senior" &&
+                  transition.fromRole === "junior" &&
+                  transition.toRole === "senior" &&
+                  transition.fromWorktreeId === item.worktreeId &&
+                  transition.toWorktreeId === item.worktreeId &&
+                  !transition.usedAt,
+              )),
+        )
+      : null;
   for (const [taskId, item] of Object.entries(workflowState.tasks)) {
     const receipts = [
       item.execution,
@@ -183,6 +205,13 @@ export function assertWorktreeUnshared(
       if (worktreePath(receipt?.worktreeId) !== target) continue;
       const owner = receipt.role ?? item.role;
       if (owner === role || DISPATCH_AUTHORITY[owner]?.includes(role)) continue;
+      if (
+        promotion &&
+        owner === "junior" &&
+        receipt.worktreeId === promotion[1].worktreeId &&
+        (taskId === promotion[0] || item.state === "accepted")
+      )
+        continue;
       throw new Error(
         `Worktree ${target} is where ${owner} works on task ${taskId}; ` +
           `${role} does not start there. Read that work by path and commit from ` +

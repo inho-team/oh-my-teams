@@ -280,10 +280,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                         [--setup inherit|run|skip] [--title TEXT] [--brief FILE]
                         [--workflow-id ID --state DIR --workflow-task ID]
                         [--prior-workflow-id ID --prior-task-id ID]
-                        [--worktree WORKTREE_ID] [--profile FALLBACK] [--orca EXECUTABLE]
+                        [--worktree WORKTREE_ID] [--fresh-reason TEXT]
+                        [--profile FALLBACK] [--orca EXECUTABLE]
                         (creates a child only while opening and proving its Orca role session;
                         reuses a proven idle same-role worktree only after prior acceptance,
                         integration, Dispatch release, terminal closure, and Git-clean proof;
+                        a reviewed Junior task can promote in its own clean worktree after closure;
+                        fresh creation with an accepted same-role source needs --fresh-reason;
                         cross-workflow reuse requires the explicit accepted prior pair;
                         a proven no-session launch is reclaimed, an ambiguous launch is preserved)
   role-worktree-reclaim --org FILE --state DIR --workflow-id ID --workflow-task ID
@@ -598,6 +601,7 @@ export const ALLOWED_OPTIONS = {
     "prior-task-id",
     "profile",
     "worktree",
+    "fresh-reason",
     "orca",
   ],
   "role-worktree-reclaim": [
@@ -1973,8 +1977,17 @@ export async function createRoleWorktree(
       (args["workflow-id"] && args["workflow-task"] && args.state),
     "Cross-workflow reuse requires the current --workflow-id, --workflow-task, and --state",
   );
+  assert(
+    args["fresh-reason"] === undefined ||
+      (hasWorkflow &&
+        !args.worktree &&
+        typeof args["fresh-reason"] === "string" &&
+        args["fresh-reason"].trim()),
+    "--fresh-reason is only valid for a new workflow child and must explain why reuse is unavailable",
+  );
   let promotion = null;
   let reusable = null;
+  let promotesInPlace = false;
   let snapshot = null;
   let state = null;
   let task = null;
@@ -1995,6 +2008,23 @@ export async function createRoleWorktree(
       ["submitted", "review-pending", "reviewed"].includes(task.state)
         ? { fromWorktreeId: existing }
         : null;
+    promotesInPlace = Boolean(
+      promotion &&
+      task.state === "reviewed" &&
+      args.worktree === promotion.fromWorktreeId,
+    );
+    if (promotesInPlace) {
+      const conflictingTask = Object.entries(state.tasks).find(
+        ([taskId, item]) =>
+          taskId !== args["workflow-task"] &&
+          item.state !== "accepted" &&
+          (item.worktreeId ?? item.execution?.worktreeId) === args.worktree,
+      );
+      assert(
+        !conflictingTask,
+        `Worktree ${args.worktree} is also owned by current workflow task ${conflictingTask?.[0]}`,
+      );
+    }
     const assignedRole = trustedTaskExecutionRole(task) ?? task.role;
     assert(
       promotion || assignedRole === args.role,
@@ -2004,7 +2034,7 @@ export async function createRoleWorktree(
       !existing || promotion,
       `Task ${args["workflow-task"]} already has worktree ${existing}; reuse it with role-terminal instead of creating another`,
     );
-    if (args.worktree) {
+    if (args.worktree && !promotesInPlace) {
       let source = null;
       if (sourceWorkflowId) {
         const sourceState =
@@ -2054,6 +2084,22 @@ export async function createRoleWorktree(
       assert(
         !conflictingTask,
         `Worktree ${args.worktree} is also owned by current workflow task ${conflictingTask?.[0]}; preserve it instead of opening another role session`,
+      );
+    }
+    if (!args.worktree) {
+      const acceptedSameRole = Object.entries(state.tasks)
+        .filter(
+          ([taskId, item]) =>
+            taskId !== args["workflow-task"] &&
+            item.state === "accepted" &&
+            (item.executionRole ?? item.role) === args.role &&
+            (item.worktreeId ?? item.execution?.worktreeId),
+        )
+        .map(([taskId]) => taskId);
+      assert(
+        (!promotion && acceptedSameRole.length === 0) || args["fresh-reason"],
+        `Reuse an existing role worktree before creating another, or give --fresh-reason explaining why it is unavailable ` +
+          `(promotion: ${Boolean(promotion)}; accepted same-role tasks: ${acceptedSameRole.join(", ") || "none"})`,
       );
     }
   }
@@ -2195,8 +2241,8 @@ export async function createRoleWorktree(
         : {},
   );
   assert(
-    !args.worktree || reusable,
-    "--worktree requires an accepted prior task of the same role; a promotion also preserves and closes that Senior session first",
+    !args.worktree || reusable || promotesInPlace,
+    "--worktree requires an accepted prior task of the same role or the reviewed Junior task's own worktree",
   );
   const openRoleSession =
     open ??
@@ -2219,17 +2265,13 @@ export async function createRoleWorktree(
           ? { trustedLaunch: auditorTrustedLaunch }
           : {}),
         ...(pmBootstrap ? { pmSelection: pmBootstrap.selection } : {}),
+        ...(promotesInPlace ? { promotionTaskId: args["workflow-task"] } : {}),
       }));
   const existingRoleWorktree = Boolean(
     args.worktree && (promotion || reusable),
   );
   const created = existingRoleWorktree
     ? await (async () => {
-        if (promotion)
-          assert(
-            args.worktree !== promotion.fromWorktreeId,
-            "Senior promotion needs a separate Senior role worktree",
-          );
         const workspace = {
           id: args.worktree,
           path: pathFromWorktreeId(args.worktree),
@@ -2243,26 +2285,33 @@ export async function createRoleWorktree(
           !clean,
           "A reused role worktree must be clean before opening a new role session",
         );
-        if (reusable) {
+        if (reusable || promotesInPlace) {
           const previousHead = await git(workspace.path, ["rev-parse", "HEAD"]);
           const integrationCommit = await git(workspace.path, [
             "rev-parse",
             `${args.base}^{commit}`,
           ]);
-          const integrationHead = await git(path.resolve(args.repo), [
-            "rev-parse",
-            "HEAD",
-          ]);
-          assert(
-            integrationCommit === integrationHead,
-            "A reused role worktree must be based on the current PM integration HEAD",
-          );
-          await git(workspace.path, [
-            "merge-base",
-            "--is-ancestor",
-            previousHead,
-            integrationCommit,
-          ]);
+          if (promotesInPlace) {
+            assert(
+              previousHead === integrationCommit,
+              "In-place Senior promotion must start from the reviewed Junior commit",
+            );
+          } else {
+            const integrationHead = await git(path.resolve(args.repo), [
+              "rev-parse",
+              "HEAD",
+            ]);
+            assert(
+              integrationCommit === integrationHead,
+              "A reused role worktree must be based on the current PM integration HEAD",
+            );
+            await git(workspace.path, [
+              "merge-base",
+              "--is-ancestor",
+              previousHead,
+              integrationCommit,
+            ]);
+          }
           const terminalEvidence = await proveAndCloseOwnedTerminals({
             repo: path.resolve(args.repo),
             worktreeId: workspace.id,
@@ -2377,6 +2426,9 @@ export async function createRoleWorktree(
   return {
     ...created.workspace,
     session: created.session,
+    ...(args["fresh-reason"]
+      ? { freshReason: args["fresh-reason"].trim() }
+      : {}),
     ...(reusable
       ? {
           reusedFrom: {
@@ -4152,6 +4204,9 @@ export async function executeCommand(args, execute) {
         command.role,
         args.worktree,
         process.cwd(),
+        args.promotionTaskId
+          ? { promotionTaskId: args.promotionTaskId }
+          : undefined,
       );
       const allowUnverifiedApproval = args["allow-unverified"];
       assert(
