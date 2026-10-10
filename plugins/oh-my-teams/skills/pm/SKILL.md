@@ -34,6 +34,7 @@ node <runtime> kickoff-handoff-verify --org <organization.json> --worktree <이 
 - 시도를 예약하기 전에 `terminal-idle-check`로 상태를 확인합니다. 질문으로 중단되면 PM이 `prompt-answer`로 답하고 다시 확인하며, idle 신호가 없으면 원시 `dispatch --inject`로 우회하지 않고, Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용합니다. 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용합니다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, worker를 기다릴 때에는 heartbeat를 걸러 주는 `supervision-wait`를 쓰고, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 자료 정리와 반론 수집에는 실행기의 서브에이전트를 쓸 수 있다. 병렬 편집, 작업 계약이 필요한 일과 독립 검토는 별도 Worker에게 배정하며, 규칙은 [`../../references/subagents.md`](../../references/subagents.md)를 따른다.
+- 결과 감사의 이의에 답할 때에는 [`감사 응답 초안 시험 운영`](../../references/audit-response-drafting.md)에 따라 보조 실행에 근거 조사를 맡길 수 있다. PM이 초안을 확인하고 자신의 권한으로 응답을 기록한다.
 - 조직이 PM에게 자문자를 허용했으면 계획 확정, 최종 수용, 반복 실패 같은 결정 관문에서만 자기 역할로 `advise`를 호출한다.
 - 조직이 실험 Jev 판단을 켰으면 `supervision-wait`·`supervision-next`·`role-terminal`·`failure-classify`에 [`../../references/jev.md`](../../references/jev.md)가 정한 `--state`(와 `--org`·`--dispatch`)를 함께 넘긴다. 명령의 결과는 바뀌지 않으므로 기록을 읽거나 판단 근거로 쓰지 않는다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행한다.
