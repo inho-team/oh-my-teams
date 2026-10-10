@@ -693,7 +693,7 @@ test("doc-event-consume CLI 명령어 호출 (긍정 및 거부)", async () => {
             stdio: ["ignore", "pipe", "pipe"],
           },
         ),
-      /Missing ORCA_TERMINAL_HANDLE/,
+      /--actor required/,
     );
 
     // Cross-scope rejection

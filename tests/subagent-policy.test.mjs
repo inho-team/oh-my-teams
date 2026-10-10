@@ -66,7 +66,7 @@ test("no active file advertises assist or the assistants setting", () => {
     ...fs
       .readdirSync(path.join(plugin, "examples"))
       .map((name) => path.join(plugin, "examples", name)),
-  ].filter((file) => fs.statSync(file).isFile());
+  ].filter((file) => fs.existsSync(file) && fs.statSync(file).isFile());
   for (const file of files) {
     const text = fs.readFileSync(file, "utf8");
     assert.doesNotMatch(

@@ -5,14 +5,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readJSON, writeJSON } from "./core.mjs";
-import { runOrcaJson } from "./orca-adapter.mjs";
+import { sendMessage } from "./message-store.mjs";
 import { workflowDirectory } from "./workflow-store.mjs";
 
 const kickoffDocumentsRoot = (stateDir, kickoffHash) =>
   path.join(stateDir, "documents", kickoffHash);
 
 /**
- * Delivers undelivered events via the Orca adapter.
+ * Delivers undelivered events through the kickoff message store.
  * @param {string} stateDir - State directory.
  * @param {string} kickoffHash - Kickoff hash.
  * @param {string} workflowId - Workflow ID.
@@ -24,12 +24,11 @@ export async function deliverUndeliveredEvents(
   stateDir,
   kickoffHash,
   workflowId,
-  deliverFn = deliverEventToOrca,
-  { executable = "orca", runId, terminalId } = {},
+  deliverFn = deliverEventToMessage,
+  { actor, to } = {},
 ) {
-  if (!runId || !terminalId) {
-    throw new Error("Missing runId or terminalId for event delivery");
-  }
+  if (deliverFn === deliverEventToMessage && (!actor || !to))
+    throw new Error("Missing actor or recipient for event delivery");
 
   const eventsDir = workflowId
     ? path.join(workflowDirectory(stateDir, workflowId), "events")
@@ -55,13 +54,12 @@ export async function deliverUndeliveredEvents(
       continue;
     }
 
-    // Deliver using the adapter.
+    // Deliver through the idempotent message store.
     // If it throws, the loop will terminate and the file is left for retry.
-    await deliverFn(event, { executable, runId, terminalId });
+    await deliverFn(event, { stateDir, kickoffHash, actor, to });
 
     // 이벤트 ID별 delivered receipt를 영속화
-    // 송신 성공 후 receipt 영속화 전 중단 시 재전송 가능성이 있음.
-    // (소비 측의 consumeDocumentEvent에서 이벤트 ID별 중복 처리로 멱등성을 보장함)
+    // 송신 후 receipt 기록 전에 중단되어도 이벤트 ID의 메시지 키로 재시도를 합친다.
     writeJSON(receiptPath, { deliveredAt: new Date().toISOString() });
 
     // Delete from queue only on successful delivery and receipt persistence.
@@ -70,32 +68,23 @@ export async function deliverUndeliveredEvents(
 }
 
 /**
- * Delivers a single event via Orca JSON.
+ * Delivers a single document event through Message MCP storage.
  * @param {object} event - Event object.
  * @param {object} options - Options.
  * @returns {Promise<void>}
  */
-export async function deliverEventToOrca(
+export async function deliverEventToMessage(
   event,
-  { executable = "orca", execute, runId, terminalId } = {},
+  { stateDir, kickoffHash, actor, to } = {},
 ) {
-  if (!runId || !terminalId) {
-    throw new Error("Missing runId or terminalId for event delivery");
-  }
-
-  const args = [
-    "orchestration",
-    "send",
-    "--to",
-    `run:${runId}`,
-    "--from",
-    terminalId,
-    "--type",
-    "status",
-    "--subject",
-    `document-event: ${event.type}`,
-    "--payload",
-    JSON.stringify(event),
-  ];
-  await runOrcaJson(executable, args, { execute });
+  if (!actor || !to)
+    throw new Error("Missing actor or recipient for event delivery");
+  sendMessage(stateDir, kickoffHash, {
+    from: actor,
+    to,
+    key: `doc-event:${event.id}`,
+    type: "status",
+    subject: `document-event: ${event.type}`,
+    body: JSON.stringify(event),
+  });
 }

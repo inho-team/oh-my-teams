@@ -43,11 +43,11 @@ oh my teams의 모든 역할이 보고하거나 지시할 때 따르는 공통 �
 
 사용자에게 전달하는 최종 결과를 한국어로 쓰는 자세한 기준은 [`korean-result-reporting.md`](korean-result-reporting.md)가 이 순서를 사용자 보고에 맞게 풀어 쓴다.
 
-## Run 생성 후 orchestration 메시지의 정형 문서 계약
+## Run 생성 후 Message MCP 정형 문서 계약
 
-Run이 생성된 뒤 배정자와 역할이 `orchestration send`/`reply`로 정형 문서를 다룰 때는 다음 계약을 따른다.
+Run이 생성된 뒤 배정자와 역할이 Message MCP로 정형 문서를 다룰 때는 다음 계약을 따른다.
 
-**`send`의 본문 필드:**
+**`send_message`의 본문 필드:**
 
 ```json
 {
@@ -67,7 +67,7 @@ Run이 생성된 뒤 배정자와 역할이 `orchestration send`/`reply`로 정�
 
 메시지는 **절대로 문서의 전문을 담지 않는다.** 정형 문서의 참조는 `docRef`로 충분하며, 원본이 필요한 쪽은 이 식별자로 `docId`를 조립해 저장소에서 직접 조회한다. 메시지의 사본은 어떤 경우에도 정형 문서의 정본을 대체하지 않는다.
 
-**`reply`의 본문 순서와 내용:**
+**답변의 본문 순서와 내용:**
 
 답변도 두괄식을 그대로 따르되, 상세 부분에는 `docRef`가 가리키는 문서의 새 revision 번호와 변경 요약만 포함한다. 갱신된 문서의 전문이나 상세한 변경 내역은 붙이지 않는다.
 

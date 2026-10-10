@@ -30,7 +30,7 @@
 }
 ```
 
-`director`는 이사가 자기 식별자를 기록하는 항목이다. `terminalHandle`은 PM이 `director-signal`을 보낼 터미널이고, `checkoutPath`는 `deliver`, `kickoff-release`, `kickoff-branch-cleanup`, `kickoff-merge-record`를 실행해도 되는 유일한 작업 디렉터리다. 필드 이름은 정확히 이 둘이어야 한다. `director`를 아예 적지 않은 요청은 이전 등록과 같은 호환 경로로 받아들이지만, 그 항목에서는 위 명령의 권한 검사가 경고만 남기고 진행한다.
+`director`는 이사가 자기 식별자를 기록하는 항목이다. `terminalHandle`은 이사 세션의 소유권을 식별하고, `checkoutPath`는 `deliver`, `kickoff-release`, `kickoff-branch-cleanup`, `kickoff-merge-record`를 실행해도 되는 유일한 작업 디렉터리다. 필드 이름은 정확히 이 둘이어야 한다. `director`를 아예 적지 않은 요청은 이전 등록과 같은 호환 경로로 받아들이지만, 그 항목에서는 위 명령의 권한 검사가 경고만 남기고 진행한다.
 
 런타임은 요청 파일의 키를 다음과 같이 다룬다. 위 형식에 없는 키는 항목에 저장되지 않으므로 등록은 성공하되 무시한 키를 `warnings`와 표준 오류의 `[omt] Warning:` 줄로 알린다. `director.terminalHandle`을 `terminal`이나 `handle`로 적는 식의 오타가 조용히 이사 기록 없는 등록이 되는 것을 막기 위해서다. `director`가 있는데 `checkoutPath`가 없으면 작업 디렉터리로 대신 채우지 않고 등록을 거부한다.
 

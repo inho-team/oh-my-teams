@@ -17,8 +17,11 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   kickoffEntryName,
+  kickoffHashFor,
+  listKickoffs,
   registryDirectory,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { receiveMessages } from "../plugins/oh-my-teams/scripts/message-store.mjs";
 import {
   PROMPT_ANSWER_REFUSALS,
   answerPrompt,
@@ -129,6 +132,7 @@ async function kickoff(
     ),
     {
       schemaVersion: 1,
+      registrationSeq: 1,
       goal: "answer prompts",
       pm: { worktreeId, path: pmPath, stateDir },
       runId: RUN,
@@ -181,6 +185,7 @@ async function kickoff(
     });
   launch({
     role: "pl",
+    workflowTaskId: "pl-task",
     provider: "claude",
     terminal: PL,
     worktreePath: plPath,
@@ -188,6 +193,7 @@ async function kickoff(
   });
   launch({
     role: "senior",
+    workflowTaskId: "junior",
     provider: seniorProvider,
     terminal: SENIOR,
     worktreePath: ROLE_WORKTREE,
@@ -195,6 +201,15 @@ async function kickoff(
     callerCwd: seniorFrom === "pm" ? pmPath : plPath,
   });
   return { dir, orgFile, org, pmPath, plPath, stateDir, worktreeId, request };
+}
+
+function redirectedMessages(fixture) {
+  const entry = listKickoffs(fixture.orgFile).kickoffs[0];
+  return receiveMessages(
+    fixture.stateDir,
+    kickoffHashFor(entry),
+    "task:junior",
+  );
 }
 
 // Orca as the supervisor path meets it. `terminals[handle]` holds the
@@ -597,16 +612,14 @@ test("a question the CLI asks its user is redirected without a key", async (t) =
     terminals: { [SENIOR]: at(ROLE_WORKTREE, CLAUDE_ASKUSER) },
   });
   const record = await answer(fixture, orca);
-  assert.equal(record.status, "redirected");
+  assert.equal(record.status, "redirected", JSON.stringify(record.redirect));
   assert.equal(record.sent, false);
   assert.equal(record.key, null);
   assert.equal(orca.keys().length, 0);
-  const [message] = orca.messages();
-  assert.equal(message[message.indexOf("--to") + 1], SENIOR);
-  assert.match(
-    message[message.indexOf("--body") + 1],
-    /orca orchestration ask/,
-  );
+  const [message] = redirectedMessages(fixture);
+  assert.equal(message.to, "task:junior");
+  assert.match(message.body, /Message MCP/);
+  assert.equal(orca.messages().length, 0);
 });
 
 test("a screen that is not a captured question goes upward, and a clear screen sends nothing", async (t) => {
@@ -1008,7 +1021,7 @@ test("the same user question screen is redirected once, however often it is read
     assert.equal(repeat.refusal, "already-answered");
     assert.equal(repeat.next, "await-worker");
   }
-  assert.equal(orca.messages().length, 1);
+  assert.equal(redirectedMessages(fixture).length, 1);
   assert.equal(orca.keys().length, 0);
   // Two callers at once tell the worker once.
   const race = await kickoff(t, { seniorProvider: "claude" });
@@ -1016,34 +1029,11 @@ test("the same user question screen is redirected once, however often it is read
     terminals: { [SENIOR]: at(ROLE_WORKTREE, CLAUDE_ASKUSER) },
   });
   const results = await Promise.all([answer(race, both), answer(race, both)]);
-  assert.equal(both.messages().length, 1);
+  assert.equal(redirectedMessages(race).length, 1);
   assert.deepEqual(results.map((record) => record.status).sort(), [
     "redirected",
     "refused",
   ]);
-  // A message that did not go out is not counted as told.
-  const failing = await kickoff(t, { seniorProvider: "claude" });
-  const flaky = fakeOrca({
-    terminals: { [SENIOR]: at(ROLE_WORKTREE, CLAUDE_ASKUSER) },
-  });
-  let failNext = true;
-  const execute = async (argv) => {
-    if (argv.includes("orchestration") && argv.includes("send") && failNext) {
-      failNext = false;
-      return {
-        code: 1,
-        stdout: JSON.stringify({
-          ok: false,
-          error: { code: "x", message: "down" },
-        }),
-      };
-    }
-    return flaky.execute(argv);
-  };
-  const lost = await answer(failing, flaky, { execute });
-  assert.equal(lost.status, "unresolved");
-  const retried = await answer(failing, flaky, { execute });
-  assert.equal(retried.status, "redirected");
 });
 
 test("two user questions that differ only in their text are each redirected once", async (t) => {
@@ -1066,7 +1056,7 @@ test("two user questions that differ only in their text are each redirected once
   });
   const moved = await answer(fixture, second);
   assert.equal(moved.status, "redirected");
-  assert.equal(second.messages().length, 1);
+  assert.equal(redirectedMessages(fixture).length, 2);
   assert.notEqual(moved.questionDigest, first.questionDigest);
   assert.equal(moved.fingerprint, first.fingerprint);
   // Each of the two screens is told once, however often it is read again.
@@ -1076,8 +1066,9 @@ test("two user questions that differ only in their text are each redirected once
     assert.equal(repeat.status, "refused");
     assert.equal(repeat.refusal, "already-answered");
   }
-  assert.equal(second.messages().length, 1);
-  assert.equal(orca.messages().length, 1);
+  assert.equal(second.messages().length, 0);
+  assert.equal(orca.messages().length, 0);
+  assert.equal(redirectedMessages(fixture).length, 2);
   assert.equal(orca.keys().length + second.keys().length, 0);
 });
 

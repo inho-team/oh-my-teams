@@ -356,7 +356,7 @@ test("a user question screen is told apart from unknown and is sent back to the 
     assert.equal(result.kind, "user-question", name);
     assert.equal(result.action, "redirect", name);
     assert.equal(result.key, null, name);
-    assert.match(result.instruction, /orca orchestration ask/);
+    assert.match(result.instruction, /Message MCP/);
     assert.match(result.instruction, /사용자에게 직접 묻지 않/);
     for (const line of [
       "A와 B 중 하나를 선택해주세요.",
