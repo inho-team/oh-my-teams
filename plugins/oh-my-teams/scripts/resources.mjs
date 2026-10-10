@@ -361,7 +361,7 @@ async function pmProviderOverload(orgFile, entry, options) {
 export async function directorWatch(orgFile, options = {}) {
   const checkFreeMemory = options.freeMemory ?? availableMemory;
   const freeBytes = checkFreeMemory();
-  const { signals } = listInbox(orgFile);
+  const { signals, deliveries = [] } = listInbox(orgFile);
   const slots = readSlots(orgFile);
   const { kickoffs } = listKickoffs(path.resolve(orgFile));
 
@@ -392,7 +392,9 @@ export async function directorWatch(orgFile, options = {}) {
   return {
     freeMemoryBytes: freeBytes,
     pendingSignals: signals.length,
+    pendingDeliveries: deliveries.length,
     activeSlots: slots.length,
+    deliveries,
     kickoffs: kickoffSummaries,
   };
 }
