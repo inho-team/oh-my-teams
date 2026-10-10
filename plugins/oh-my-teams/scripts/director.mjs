@@ -42,6 +42,26 @@ function inboxLock(orgFile) {
   return path.join(ownerProject(orgFile), ".omt", "director", ".inbox.lock");
 }
 
+// Directory that holds one JSON file per independent delivery receipt.
+function deliveriesDir(orgFile) {
+  return path.join(ownerProject(orgFile), ".omt", "director", "deliveries");
+}
+
+// Lock file for the deliveries directory.
+function deliveriesLock(orgFile) {
+  return path.join(
+    ownerProject(orgFile),
+    ".omt",
+    "director",
+    ".deliveries.lock",
+  );
+}
+
+// Reads all JSON files from the deliveries directory in deterministic name order.
+function readDeliveries(orgFile) {
+  return readJsonDirectory(deliveriesDir(orgFile));
+}
+
 // Looks up the registry entry for a PM worktree, throwing if absent.
 function requireEntry(orgFile, worktreeId) {
   const { kickoffs } = listKickoffs(path.resolve(orgFile));
@@ -543,17 +563,22 @@ export async function notifyDirectorSignal(
 }
 
 /**
- * Lists pending (unprocessed) signals in the Director's inbox.
+ * Lists pending (unprocessed) signals in the Director's inbox and unacknowledged
+ * independent worktree delivery receipts.
  *
  * `progress` signals are stored acknowledged and superseded or closed signals
  * are settled, so none of them appear here.
  *
  * @param {string} orgFile - Organization JSON path.
- * @returns {{signals: object[]}} Pending signal records in filename order.
+ * @returns {{signals: object[], deliveries: object[]}} Pending signal records and unacknowledged deliveries.
  */
 export function listInbox(orgFile) {
   const all = readInbox(orgFile);
-  return { signals: all.filter((r) => r.status === "pending") };
+  const { deliveries } = listDeliveries(orgFile, { unacknowledgedOnly: true });
+  return {
+    signals: all.filter((r) => r.status === "pending"),
+    deliveries,
+  };
 }
 
 /**
@@ -735,18 +760,40 @@ export function acknowledgeSignal(orgFile, signalId) {
   let updated;
   withFileLock(inboxLock(orgFile), () => {
     const file = path.join(inboxDir(orgFile), `${signalId}.json`);
-    assert(fs.existsSync(file), `Signal ${signalId} not found`);
-    const record = readJSON(file);
-    assert(
-      record.status !== "acknowledged",
-      `Signal ${signalId} is already acknowledged`,
-    );
-    updated = {
-      ...record,
-      status: "acknowledged",
-      acknowledgedAt: new Date().toISOString(),
-    };
-    writeJSON(file, updated);
+    if (fs.existsSync(file)) {
+      const record = readJSON(file);
+      assert(
+        record.status !== "acknowledged",
+        `Signal ${signalId} is already acknowledged`,
+      );
+      updated = {
+        ...record,
+        status: "acknowledged",
+        acknowledgedAt: new Date().toISOString(),
+      };
+      writeJSON(file, updated);
+      return;
+    }
+    const deliveryFile = path.join(deliveriesDir(orgFile), `${signalId}.json`);
+    if (fs.existsSync(deliveryFile)) {
+      const record = readJSON(deliveryFile);
+      assert(
+        !record.acknowledged,
+        `Delivery ${signalId} is already acknowledged`,
+      );
+      const now = new Date().toISOString();
+      updated = {
+        ...record,
+        status: "acknowledged",
+        acknowledged: true,
+        acknowledgedAt: now,
+        acknowledgedBy: "director",
+        updatedAt: now,
+      };
+      writeJSON(deliveryFile, updated);
+      return;
+    }
+    assert(false, `Signal ${signalId} not found`);
   });
   return { acknowledged: true, record: updated };
 }
@@ -812,4 +859,257 @@ export function processLiveness(owner) {
   } catch (error) {
     return error.code === "ESRCH" ? "dead" : "unverifiable";
   }
+}
+
+/**
+ * Records an independent Orca worktree completion delivery receipt and attempts
+ * Director terminal notification.
+ *
+ * Persists the source worktree, 40-character commit HEAD, PR URL or delivery target,
+ * Director terminal handle, send outcome, and unacknowledged status. Reuses existing
+ * Orca adapters and terminal safeguards. Repeated requests for the same source and HEAD
+ * are idempotent: if already acknowledged or successfully notified, prompts are not
+ * resent and records are not duplicated; stale or failed deliveries are safely updated
+ * in place.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} request - Delivery receipt request.
+ * @param {string} request.source - Source worktree directory or identifier.
+ * @param {string} request.head - Full 40-character commit SHA.
+ * @param {string} [request.pr] - Pull request URL.
+ * @param {string} [request.target] - Delivery target (defaults to pr if omitted).
+ * @param {string} [request.directorTerminal] - Director terminal handle.
+ * @param {string} [request.text] - Optional summary or note.
+ * @param {string} [request.orcaExecutable] - Optional Orca executable path.
+ * @param {Function} [request.execute] - Optional command runner.
+ * @param {object} [options] - Injectable options for testing.
+ * @param {string} [options.orcaExecutable] - Orca binary path.
+ * @param {Function} [options.execute] - Injectable command runner.
+ * @returns {Promise<{delivered: boolean, replayed?: boolean, retried?: boolean, duplicate?: boolean, record: object}>}
+ *   Delivery result and persisted record.
+ * @throws {Error} When source or head is missing or head is not a valid 40-character SHA.
+ */
+export async function recordDeliveryReceipt(orgFile, request, options = {}) {
+  const source = String(request?.source ?? "").trim();
+  assert(source.length > 0, "Delivery source worktree is required");
+
+  const head = String(request?.head ?? "").trim();
+  assert(
+    /^[0-9a-f]{40}$/i.test(head),
+    `Full commit HEAD (40-character hex SHA) is required: got ${request?.head}`,
+  );
+
+  const target = String(request?.pr ?? request?.target ?? "").trim();
+  assert(target.length > 0, "Delivery PR URL or target is required");
+
+  const text =
+    request?.text !== undefined ? String(request.text).trim() : undefined;
+  const pr = request?.pr !== undefined ? String(request.pr).trim() : undefined;
+
+  const orcaExecutable =
+    options.orcaExecutable ?? request?.orcaExecutable ?? "orca";
+  const execute = options.execute ?? request?.execute ?? run;
+
+  let directorTerminal = request?.directorTerminal
+    ? String(request.directorTerminal).trim()
+    : undefined;
+  if (!directorTerminal) {
+    try {
+      const { kickoffs } = listKickoffs(orgFile);
+      const active = kickoffs.find((k) => k.director?.terminalHandle);
+      if (active) {
+        directorTerminal = active.director.terminalHandle;
+      }
+    } catch {
+      // Kickoffs unavailable, proceed without fallback
+    }
+  }
+
+  let existing;
+  withFileLock(deliveriesLock(orgFile), () => {
+    const all = readDeliveries(orgFile);
+    existing = all.find((d) => d.source === source && d.head === head);
+  });
+
+  if (existing) {
+    if (existing.acknowledged === true) {
+      return {
+        delivered: false,
+        duplicate: true,
+        replayed: true,
+        record: existing,
+      };
+    }
+    if (existing.delivery?.notified === true) {
+      return {
+        delivered: true,
+        duplicate: true,
+        replayed: true,
+        record: existing,
+      };
+    }
+    if (
+      existing.delivery?.sent === true &&
+      existing.delivery?.outcome === "unclear"
+    ) {
+      return {
+        delivered: false,
+        duplicate: true,
+        replayed: true,
+        record: existing,
+      };
+    }
+  }
+
+  const id = existing?.id ?? crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  let sent;
+  if (!directorTerminal) {
+    sent = {
+      notified: false,
+      deferred: false,
+      sent: false,
+      notifyError: "no-director-terminal-specified",
+      delivery: { outcome: "failed" },
+    };
+  } else {
+    const promptText = `[omt delivery] from ${source}: HEAD ${head} delivered to ${target}${text ? ` (${text})` : ""}`;
+    sent = await notifyTerminal(
+      orcaExecutable,
+      directorTerminal,
+      promptText,
+      execute,
+    );
+  }
+
+  let outcome = "failed";
+  let status = "failed";
+
+  if (sent.notified) {
+    outcome = "submitted";
+    status = "pending-acknowledgement";
+  } else if (
+    sent.notifyError === "terminal-identity-unknown" ||
+    sent.notifyError?.includes("stale") ||
+    sent.delivery?.outcome === "stale"
+  ) {
+    outcome = "stale";
+    status = "stale-terminal";
+  } else if (sent.notifyError === "shell-terminal") {
+    outcome = "failed";
+    status = "shell-terminal";
+  } else if (
+    sent.deferred ||
+    sent.notifyError?.startsWith("blocked-by-") ||
+    sent.notifyError === "screen-unavailable"
+  ) {
+    outcome = "deferred";
+    status = "deferred";
+  } else if (sent.delivery?.outcome === "unclear") {
+    outcome = "unclear";
+    status = "unclear-submission";
+  } else {
+    outcome = "failed";
+    status = "failed";
+  }
+
+  const record = {
+    schemaVersion: 1,
+    id,
+    source,
+    head,
+    target,
+    ...(pr ? { pr } : {}),
+    directorTerminal: directorTerminal ?? null,
+    ...(text ? { text } : {}),
+    status,
+    acknowledged: false,
+    acknowledgedAt: null,
+    delivery: {
+      notified: Boolean(sent.notified),
+      sent: sent.sent === true,
+      outcome,
+      ...(sent.notifyError ? { notifyError: sent.notifyError } : {}),
+      ...(sent.delivery?.requestId
+        ? { requestId: sent.delivery.requestId }
+        : {}),
+      ...(sent.delivery?.stages ? { stages: sent.delivery.stages } : {}),
+      attemptedAt: now,
+    },
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  withFileLock(deliveriesLock(orgFile), () => {
+    writeJSON(path.join(deliveriesDir(orgFile), `${id}.json`), record);
+  });
+
+  return {
+    delivered: Boolean(sent.notified),
+    retried: Boolean(existing),
+    record,
+  };
+}
+
+/**
+ * Acknowledges an independent worktree delivery receipt by ID.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} deliveryId - Delivery receipt ID to acknowledge.
+ * @returns {{acknowledged: boolean, record: object}} Updated delivery record.
+ * @throws {Error} When the delivery receipt is not found or already acknowledged.
+ */
+export function acknowledgeDelivery(orgFile, deliveryId) {
+  let updated;
+  withFileLock(deliveriesLock(orgFile), () => {
+    const file = path.join(deliveriesDir(orgFile), `${deliveryId}.json`);
+    assert(fs.existsSync(file), `Delivery ${deliveryId} not found`);
+    const record = readJSON(file);
+    assert(
+      !record.acknowledged,
+      `Delivery ${deliveryId} is already acknowledged`,
+    );
+    const now = new Date().toISOString();
+    updated = {
+      ...record,
+      status: "acknowledged",
+      acknowledged: true,
+      acknowledgedAt: now,
+      acknowledgedBy: "director",
+      updatedAt: now,
+    };
+    writeJSON(file, updated);
+  });
+  return { acknowledged: true, record: updated };
+}
+
+/**
+ * Reads a specific delivery receipt by ID.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} deliveryId - Delivery receipt ID.
+ * @returns {object} The delivery receipt record.
+ * @throws {Error} When the delivery receipt is not found.
+ */
+export function readDeliveryReceipt(orgFile, deliveryId) {
+  const file = path.join(deliveriesDir(orgFile), `${deliveryId}.json`);
+  assert(fs.existsSync(file), `Delivery ${deliveryId} not found`);
+  return readJSON(file);
+}
+
+/**
+ * Lists independent worktree delivery receipts.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {object} [options] - Options.
+ * @param {boolean} [options.unacknowledgedOnly=false] - Only unacknowledged receipts.
+ * @returns {{deliveries: object[]}} Delivery records in filename order.
+ */
+export function listDeliveries(orgFile, options = {}) {
+  const all = readDeliveries(orgFile);
+  const unacknowledgedOnly = Boolean(options.unacknowledgedOnly);
+  return {
+    deliveries: unacknowledgedOnly ? all.filter((d) => !d.acknowledged) : all,
+  };
 }

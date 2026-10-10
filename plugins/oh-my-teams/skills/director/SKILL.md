@@ -15,7 +15,7 @@ description: 사용자와 대화하는 유일한 창구로서 목표를 확정�
 
 - 사용자와 목표·수용 기준·전달 방식을 확정하고, 확정한 내용을 브리프로 써서 PM에게 인계한다.
 - 여러 kickoff를 동시에 감독하고, PM의 결정 요청(`director-signal --kind decision`)에 결정을 내린다.
-- `director-inbox --org <project>/.omt/organization.json`으로 미처리 신호를 조회하고, `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`로 결정을 기록하고 PM 터미널에 전달하며, `director-ack --org <project>/.omt/organization.json --signal <id>`으로 수신을 확인한다.
+- `director-inbox --org <project>/.omt/organization.json`으로 미처리 신호와 독립 워크트리 전달 영수증을 조회하고, `director-reply --org <project>/.omt/organization.json --signal <id> --text ...`로 결정을 기록하고 PM 터미널에 전달하며, `director-ack --org <project>/.omt/organization.json (--signal <id> | --delivery <id>)`으로 수신을 확인한다. `director-deliveries --org <project>/.omt/organization.json [--unacknowledged]`로 독립 워크트리 전달 영수증만 따로 조회할 수도 있다.
 - `director-watch --org <project>/.omt/organization.json`으로 kickoff별 신호·슬롯 점유·여유 메모리·PM liveness·PM 화면의 provider 과부하 여부를 한 번에 조회한다.
 - 자원 조직의 첫 PM 워크트리를 만들기 전에는 [`pm-bootstrap-selection.schema.json`](../../schemas/pm-bootstrap-selection.schema.json)에 맞춘 이사 선택 파일을 만들고, 이사 checkout에서 `role-worktree-create`의 `--pm-selection`으로 전달한다.
 - 무거운 작업 전에 `resource-acquire --org <project>/.omt/organization.json --worktree <pm> --kind test|worker|build --note ...`로 자원 슬롯을 확보하고, 작업이 끝나면 `resource-release --org <project>/.omt/organization.json --slot <slotId>`로 해제한다.
@@ -125,6 +125,16 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 `director-signal`은 신호를 기록한 뒤 이사 터미널에 알리는 것도 함께 시도한다. 이때 이사의 화면을 먼저 읽어서, 화면이 폴더 신뢰 질문이나 Claude Code의 AskUserQuestion 선택 창을 보여주고 있거나 화면 자체를 읽을 수 없으면 Enter와 텍스트를 전혀 보내지 않고 그 신호를 미배달 상태로 남긴다. 화면이 그런 질문 화면이 아니면(작업 중이든 입력을 기다리는 중이든 구분하지 않는다) 알림을 전달한다. 같은 PM 워크트리에 이사 터미널로 아직 닿지 않은 신호가 있으면(대기 중인 `decision`·`blocked`·`close-ready`, 또는 배달이 아직 확인되지 않은 `progress`) 그중 키를 한 번도 보내지 않은 채 미룬 신호만, 다음번 `director-signal` 호출이 그 신호들을 이번 신호와 함께 한 메시지로 묶어서 다시 보낸다. 화면이 막혀 있지 않아서 실제로 전송을 시도했지만 제출까지는 끝내 확인하지 못한 신호는 텍스트가 이미 이사에게 도달했을 수 있으므로 다시 묶지 않으며, `director-inbox`에 그대로 남아 있으니 이사가 직접 확인하거나 PM이 손으로 다시 알려야 한다. 이미 배달이 확인된 신호(`notify.notified: true`)도 이 묶음에 다시 포함되지 않으므로, 어느 경우든 같은 신호가 두 번 전달되지 않는다. 재발송은 이사의 화면 상태를 따로 감시해서 이루어지는 것이 아니라, PM이 다음 신호를 보내는 시점에 맞물려 시도된다는 점에 유의한다. 같은 PM 워크트리에 대해 `director-signal`이 겹쳐 실행되면, 나중에 시작한 호출은 앞선 호출이 이미 선점한 신호(`notify.inFlight: true`, `notify.claimedAt`, `notify.owner`가 `{pid, hostname}`으로 남는다)를 보고 그 신호만 이번 묶음에서 빼며, 소유자가 살아 있거나 생사를 판정할 수 없으면(다른 hostname이면 항상 이렇게 판정된다) 선점 표시를 그대로 두고 건드리지 않는다. 방금 기록한 새 신호와 선점되지 않은 나머지 백로그는 평소대로 전송되므로, 판정할 수 없는 소유자 하나가 그 워크트리의 다른 알림 전체를 막지는 않는다. 이번에 보낼 것이 하나도 남지 않으면(예: 새 신호 자신이 이미 다른 살아 있는 호출에 선점된 경우) 터미널을 건드리지 않은 채 물러난다(`notifyError: "backlog-claimed"`). 선점한 소유자가 죽었다고 증명되면 그 신호는 다시 선점해 보내지 않고, 제출을 끝내 확인하지 못한 시도와 같은 값(`notified: false, sent: true`)으로 확정하며 `notifyError: "owner-exited-before-confirming"`을 남긴다. 배달 여부는 각 신호 레코드의 `notify` 필드(`{notified: true, notifiedAt}` 또는 `{notified: false, sent, deferredAt, notifyError}`, 선점 중이면 `{inFlight, claimedAt, owner}`)에 남으며, `director-inbox`로 언제든 확인할 수 있다. 이사나 PM은 `notify.inFlight`가 남아 있는 신호를 멈춘 선점으로, `notifyError: "owner-exited-before-confirming"`인 신호를 다시 보내지 않기로 확정된 신호로 구분해 알아볼 수 있다.
 
 `close-ready` 신호는 `close`의 입력(통합 워크트리·HEAD)과 연결된다. 신호가 있는데 HEAD가 다르면 거부하고, 신호가 없으면 경고한 뒤 진행한다. 신호가 없는 경우는 신호 통로가 생기기 전에 등록된 kickoff를 종료할 수 있도록 남겨 둔 호환 경로다.
+
+### 독립 워크트리 완료 전달과 수신 확인
+
+등록 kickoff 밖에서 독립 완료된 Orca 워크트리 작업(예: `lawyer` 파일럿 PR #161 사례)은 kickoff 등록이 없으므로 `requireEntry`를 요구하는 `director-signal` 대신 `director-delivery`로 전달 영수증을 남긴다. 이사는 다음 절차로 전달을 확인한다.
+
+- `director-inbox --org <project>/.omt/organization.json`: 미처리 신호와 함께 미확인 독립 워크트리 전달 영수증(`deliveries`)을 함께 조회한다.
+- `director-deliveries --org <project>/.omt/organization.json [--unacknowledged]`: 독립 워크트리 완료 영수증 목록을 조회한다. 각 영수증에는 출처(`source`), 40자 전체 커밋 HEAD(`head`), PR 주소(`pr`/`target`), 지정된 이사 터미널 핸들, 알림 전송 결과(`delivery.outcome`), 그리고 수신 확인 여부(`acknowledged`)가 보존된다.
+- 이사 터미널 핸들이 유효하지 않거나 닫혀 있어 전송되지 않은 경우 `status: "stale-terminal"`(전송 실패 시 `"failed"`, 프롬프트 미확정 시 `"unclear-submission"`)과 `acknowledged: false`로 남아 불완전 상태가 명확히 드러난다. 이사는 터미널이 stale했던 기간의 작업도 inbox에서 누락 없이 파악할 수 있으며, 송신자는 유효한 새 이사 터미널로 중복 레코드 생성 없이 안전하게 재시도할 수 있다.
+- 이사가 PR 또는 커밋 산출물을 검토한 뒤 `director-ack --org <project>/.omt/organization.json --delivery <id>`를 실행하여 수신을 확인한다. 확인된 영수증은 `status: "acknowledged"`, `acknowledged: true`, `acknowledgedAt` 타임스탬프가 기록되고 inbox 미처리 목록에서 제외된다.
+- 이미 검토 후 병합된 PR #161(`6c8bdca`)과 같은 완료 작업은 재전송하거나 중복 병합하지 않는다.
 
 ## 종료
 
