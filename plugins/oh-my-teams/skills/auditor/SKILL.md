@@ -15,12 +15,12 @@ description: 서열 밖에서 이사가 여는 선택적 검토자로서 브리�
 
 - `audit-objection --org <org> --worktree <감사 대상 kickoff의 worktreeId> --from <objection.json>`으로 statement·criterion이나 결과에 이의를 제기한다. `checkpoint`(`brief` 또는 `outcome`)는 `--from` JSON 본문에 적는다.
 - `audit-ruling --org <org> --worktree <worktreeId> --from <ruling.json>`으로 상대의 응답이 이의를 해소했는지 판정한다. `checkpoint`와 `verdict`(`persuaded` 또는 `not-persuaded`)는 `--from` JSON 본문에 적는다.
-- `audit-checked --org <org> --worktree <worktreeId> --checkpoint brief|outcome --from <checked.json>`으로 실제로 검토한 statement·criterion 목록을 기록한다.
+- `audit-checked --org <org> --worktree <worktreeId> --checkpoint brief|outcome --from <checked.json>`으로 실제로 검토한 statement·criterion 목록을 기록한다. `outcome`에는 `--head <검토한 HEAD> --repo <검토한 저장소 경로>`를 추가한다.
 - `audit-accept --org <org> --worktree <worktreeId> --checkpoint brief`로 [B.4의 여섯 조건](../../../../docs/plan/requirements-ledger-and-audit.md)을 전부 만족하는 브리프 체크포인트를 수용한다. 결과 체크포인트는 `audit-accept --org <org> --worktree <worktreeId> --checkpoint outcome --head <검증할 HEAD> --repo <대조할 저장소 경로>`로 수용하며, `--head`와 `--repo`는 `outcome`에서만 필요하다.
 
 ### 책임
 
-`brief` 체크포인트는 `{ledgerHash}`에만 묶여 기준 확정 직후부터 유효하고, `outcome` 체크포인트는 `{ledgerHash, resultHead, evidenceFingerprint}`에 묶여 구현 결과와 제시 증거가 나온 뒤에 검토한다. `audit-checked`로 기록하는 목록은 그 시점의 원장이 담은 모든 statement·criterion의 id를 scope와 무관하게 정확히 한 번씩 포함해야 하며, 하나라도 빠지면 `audit-accept`가 거부된다. 수용 전에는 미해결 이의(판정이 없거나 최신 판정이 `not-persuaded`)가 하나도 남지 않아야 한다.
+`brief` 체크포인트는 `{ledgerHash}`에만 묶여 기준 확정 직후부터 유효하고, `outcome` 체크포인트는 `{ledgerHash, resultHead, evidenceFingerprint}`에 묶여 구현 결과와 제시 증거가 나온 뒤에 검토한다. `audit-checked`로 기록한 검토도 이 binding에 묶인다. 원장이 바뀌면 두 체크포인트를 다시 검토하고, 결과 HEAD나 증거 지문이 바뀌면 결과 체크포인트를 다시 검토한다. `audit-checked` 목록은 그 시점의 원장이 담은 모든 statement·criterion의 id를 scope와 무관하게 정확히 한 번씩 포함해야 하며, 하나라도 빠지면 `audit-accept`가 거부된다. 수용 전에는 미해결 이의(판정이 없거나 최신 판정이 `not-persuaded`)가 하나도 남지 않아야 한다.
 
 ### 한계
 
@@ -56,7 +56,7 @@ node <runtime> role-terminal --org <project>/.omt/organization.json --role audit
 
 결과 저장소가 모호하면(accepted workflow들이 서로 다른 저장소를 기록했는데 이사의 확정 기록이 없을 때) `audit-objection`은 오류로 끝나지 않고 `bindingDefect`를 단 outcome 이의로 기록된다. 이 이의는 결과 저장소를 지정하지 않고 checkpoint 결속도 바꾸지 않으므로 수용을 막기만 한다. `audit-accept`는 이사가 `kickoff-result-repo-decide`로 저장소를 확정하기 전까지 거부된다. 정본은 `plugins/oh-my-teams/scripts/audit.mjs`의 `auditObjection`(395행)이다.
 
-1. `audit-checked --checkpoint outcome`으로 결과를 검토했음을 기록한다.
+1. `audit-checked --checkpoint outcome --head <검토한 HEAD> --repo <검토한 저장소 경로>`로 결과를 검토했음을 기록한다.
 2. 제시된 증거가 statement·criterion과 어긋나면 `audit-objection`을 실행하고 `--from` JSON 본문의 `checkpoint`를 `outcome`으로 적어 이의를 남긴다.
 3. PM이 `--from` JSON 본문의 `checkpoint`를 `outcome`으로 적어 실행하는 `audit-response`를 기다린다. PM이 새 증거나 논거 없이 완료만 재선언하면 `not-persuaded`로 판정해도 된다.
 4. 이의가 모두 해소되면 `audit-accept --checkpoint outcome --head <검증할 HEAD> --repo <대조할 저장소 경로>`로 수용한다.

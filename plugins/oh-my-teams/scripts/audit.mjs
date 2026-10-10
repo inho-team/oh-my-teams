@@ -66,6 +66,8 @@ function emptyCheckpoint() {
   return {
     binding: null,
     checked: [],
+    checkedBoundHash: null,
+    checkedHistory: [],
     objections: [],
     responses: [],
     rulings: [],
@@ -225,11 +227,17 @@ export async function computeBinding(
  * @returns {string} The confirmed auditor terminal handle.
  * @throws {Error} When the handle is unset or was not launched as this kickoff's auditor.
  */
-export function verifiedAuditor(orgFile, worktreeId) {
+function verifiedAuditorContext(orgFile, worktreeId) {
   const callerHandle = process.env.ORCA_TERMINAL_HANDLE;
   assert(
     callerHandle,
     "ORCA_TERMINAL_HANDLE is not set, so the caller cannot be identified as the auditor",
+  );
+  const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
+  assert(entry, `Worktree ${worktreeId} supervises no registered kickoff`);
+  assert(
+    entry.auditor?.terminalHandle === callerHandle,
+    `Caller ${callerHandle} is not the current auditor terminal for kickoff ${worktreeId}`,
   );
   const launch = readLaunches(orgFile).findLast(
     (line) =>
@@ -242,7 +250,18 @@ export function verifiedAuditor(orgFile, worktreeId) {
     launch,
     `Caller ${callerHandle} is not the auditor terminal launched for kickoff ${worktreeId}`,
   );
-  return callerHandle;
+  return { callerHandle, entry };
+}
+
+/**
+ * Confirms the caller has the kickoff's current, launched auditor handle.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} worktreeId - PM worktree of the kickoff under audit.
+ * @returns {string} The confirmed current auditor terminal handle.
+ */
+export function verifiedAuditor(orgFile, worktreeId) {
+  return verifiedAuditorContext(orgFile, worktreeId).callerHandle;
 }
 
 /**
@@ -421,10 +440,8 @@ export async function auditObjection(
       `Objection ${name} required`,
     );
   }
-  const verifiedCaller = {
-    role: AUDITOR_ROLE,
-    handle: verifiedAuditor(orgFile, worktreeId),
-  };
+  const { callerHandle, entry } = verifiedAuditorContext(orgFile, worktreeId);
+  const verifiedCaller = { role: AUDITOR_ROLE, handle: callerHandle };
   assertDeclaredIdentity(declared, verifiedCaller);
   const ledger = requireLedger(orgFile, worktreeId);
   // An outcome objection may be raised before workflow-accept (allowPending):
@@ -440,11 +457,7 @@ export async function auditObjection(
   let bindingDefect;
   if (checkpoint === "outcome") {
     try {
-      boundRepo = bindKickoffResultRepo(
-        listKickoffs(orgFile, worktreeId).kickoffs[0],
-        repo,
-        { allowPending: true },
-      );
+      boundRepo = bindKickoffResultRepo(entry, repo, { allowPending: true });
     } catch (error) {
       if (error?.code !== "result-repo-ambiguous") throw error;
       bindingDefect = {
@@ -621,6 +634,8 @@ export async function auditRuling(
  * @param {string} checkpoint - "brief" or "outcome".
  * @param {{type: string, id: string}[]} checked - Items checked.
  * @param {object} [declared] - Identity fields the caller's payload declared; see `assertDeclaredIdentity`.
+ * @param {string} [resultHead] - Current result HEAD, required for outcome.
+ * @param {string} [repo] - Result repository, required for outcome.
  * @returns {Promise<{recorded: boolean, audit: object}>} Updated audit record.
  * @throws {Error} When identity fails or a declared identity differs from the verified one.
  */
@@ -630,6 +645,8 @@ export async function auditChecked(
   checkpoint,
   checked,
   declared,
+  resultHead,
+  repo,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
   assert(
@@ -640,19 +657,46 @@ export async function auditChecked(
       ),
     "checked must be a {type, id} array",
   );
-  const verifiedCaller = {
-    role: AUDITOR_ROLE,
-    handle: verifiedAuditor(orgFile, worktreeId),
-  };
+  const { callerHandle, entry } = verifiedAuditorContext(orgFile, worktreeId);
+  const verifiedCaller = { role: AUDITOR_ROLE, handle: callerHandle };
   assertDeclaredIdentity(declared, verifiedCaller);
-  return withAudit(orgFile, worktreeId, (audit) => {
+  const ledger = requireLedger(orgFile, worktreeId);
+  const boundRepo =
+    checkpoint === "outcome"
+      ? bindKickoffResultRepo(entry, repo, { allowPending: true })
+      : repo;
+  return withAudit(orgFile, worktreeId, async (audit) => {
     const record = audit.checkpoints[checkpoint];
-    // Merged, not overwritten (D3): a later call naming a narrower set of
-    // items must not silently erase coverage an earlier call already
-    // recorded, which would let the auditor's own checked history be shrunk
-    // after the fact instead of only ever growing.
+    const currentBinding = await computeBinding(
+      checkpoint,
+      ledger,
+      audit,
+      resultHead,
+      boundRepo,
+    );
+    const currentBoundHash = canonicalHash(currentBinding);
+    const previousCoverageCurrent =
+      record.checkedBoundHash === currentBoundHash ||
+      (record.checkedBoundHash == null &&
+        record.acceptance?.boundHash === currentBoundHash);
+    if (!previousCoverageCurrent && record.checked.length > 0) {
+      record.checkedHistory = [
+        ...(record.checkedHistory ?? []),
+        {
+          boundHash:
+            record.checkedBoundHash ?? record.acceptance?.boundHash ?? null,
+          checked: record.checked,
+        },
+      ];
+    }
+    // Merge within one binding (D3). When the binding changes, preserve the
+    // old coverage in history and start fresh so item IDs cannot substitute
+    // for a review of changed text, HEAD, or evidence.
     const merged = new Map(
-      record.checked.map((item) => [`${item.type}:${item.id}`, item]),
+      (previousCoverageCurrent ? record.checked : []).map((item) => [
+        `${item.type}:${item.id}`,
+        item,
+      ]),
     );
     // An item already on record keeps its first verifiedCaller; only a new
     // item is stamped, so a later call can neither shrink coverage nor
@@ -665,6 +709,7 @@ export async function auditChecked(
       }
     }
     record.checked = [...merged.values()];
+    record.checkedBoundHash = currentBoundHash;
     const file = auditFile(orgFile, worktreeId);
     writeJSON(file, audit);
     return { recorded: true, audit };
@@ -753,11 +798,21 @@ function checkedCovers(checked, ledger) {
 // `hasValidAcceptance` (deciding whether an EXISTING one is still
 // trustworthy) — both need the same substantive re-check; only the latter
 // also compares against a stored acceptance.
-function checkpointSubstantiveReasons(record, ledger, ownerRoot, checkpoint) {
+function checkpointSubstantiveReasons(
+  record,
+  ledger,
+  ownerRoot,
+  checkpoint,
+  currentBoundHash,
+) {
   const reasons = [];
-  if (!checkedCovers(record.checked, ledger)) {
+  const checkedCurrent =
+    record.checkedBoundHash === currentBoundHash ||
+    (record.checkedBoundHash == null &&
+      record.acceptance?.boundHash === currentBoundHash);
+  if (!checkedCurrent || !checkedCovers(record.checked, ledger)) {
     reasons.push(
-      "checked does not cover every current statement and criterion exactly once",
+      "checked does not cover every current statement and criterion exactly once for the current binding",
     );
   }
   for (const objection of record.objections) {
@@ -829,18 +884,19 @@ export async function auditAccepted({
   repo,
 }) {
   const record = audit.checkpoints[checkpoint];
-  const reasons = checkpointSubstantiveReasons(
-    record,
-    ledger,
-    ownerRoot,
-    checkpoint,
-  );
   const currentBinding = await computeBinding(
     checkpoint,
     ledger,
     audit,
     resultHead,
     repo,
+  );
+  const reasons = checkpointSubstantiveReasons(
+    record,
+    ledger,
+    ownerRoot,
+    checkpoint,
+    canonicalHash(currentBinding),
   );
   return { accepted: reasons.length === 0, currentBinding, reasons };
 }
@@ -865,18 +921,13 @@ export async function auditAccept(
   repo,
 ) {
   assert(CHECKPOINTS.includes(checkpoint), `Unknown checkpoint: ${checkpoint}`);
-  verifiedAuditor(orgFile, worktreeId);
+  const { entry } = verifiedAuditorContext(orgFile, worktreeId);
   const ledger = requireLedger(orgFile, worktreeId);
   const ownerRoot = ownerProject(orgFile);
   // An outcome acceptance pins the result HEAD, so it is only recorded once
   // workflow-accept has fixed the result repository (no allowPending).
   const boundRepo =
-    checkpoint === "outcome"
-      ? bindKickoffResultRepo(
-          listKickoffs(orgFile, worktreeId).kickoffs[0],
-          repo,
-        )
-      : repo;
+    checkpoint === "outcome" ? bindKickoffResultRepo(entry, repo) : repo;
   return withAudit(orgFile, worktreeId, async (audit) => {
     const check = await auditAccepted({
       audit,
@@ -948,14 +999,6 @@ export async function hasValidAcceptance(
   const audit = readAudit(orgFile, worktreeId);
   const record = audit.checkpoints[checkpoint];
   if (!record.acceptance) return false;
-  const ownerRoot = ownerProject(orgFile);
-  const reasons = checkpointSubstantiveReasons(
-    record,
-    ledger,
-    ownerRoot,
-    checkpoint,
-  );
-  if (reasons.length > 0) return false;
   let currentBinding;
   try {
     currentBinding = await computeBinding(
@@ -970,7 +1013,16 @@ export async function hasValidAcceptance(
     // not throw — this is the plain-boolean gate contract callers rely on.
     return false;
   }
-  return record.acceptance.boundHash === canonicalHash(currentBinding);
+  const currentBoundHash = canonicalHash(currentBinding);
+  if (record.acceptance.boundHash !== currentBoundHash) return false;
+  const reasons = checkpointSubstantiveReasons(
+    record,
+    ledger,
+    ownerProject(orgFile),
+    checkpoint,
+    currentBoundHash,
+  );
+  return reasons.length === 0;
 }
 
 /**
