@@ -128,13 +128,13 @@ PM은 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|c
 
 ### 독립 워크트리 완료 전달과 수신 확인
 
-등록 kickoff 밖에서 독립 완료된 Orca 워크트리 작업(예: `lawyer` 파일럿 PR #161 사례)은 kickoff 등록이 없으므로 `requireEntry`를 요구하는 `director-signal` 대신 `director-delivery`로 전달 영수증을 남긴다. 이사는 다음 절차로 전달을 확인한다.
+등록 kickoff 밖에서 독립 완료된 Orca 워크트리 작업(예: `lawyer` 파일럿 PR #161 사례)은 kickoff 등록이 없으므로 `requireEntry`를 요구하는 `director-signal` 대신 `director-delivery`로 전달 영수증을 남깁니다. 전달 시에는 무관한 kickoff를 임의 선택하지 않고 명시적인 이사 터미널 대상(`--director-terminal`)을 지정해야 합니다. 런타임은 터미널 전송 전에 의도(intent)를 디스크에 먼저 기록하여 프로세스가 비정상 종료되더라도 검사 가능한 기록을 남기며, 동일한 출처와 커밋 HEAD에 대한 동시 요청이나 이미 전송된 요청(`sent: true`)에 대한 중복 전송을 차단합니다. 이사는 다음 절차로 전달을 확인합니다.
 
-- `director-inbox --org <project>/.omt/organization.json`: 미처리 신호와 함께 미확인 독립 워크트리 전달 영수증(`deliveries`)을 함께 조회한다.
-- `director-deliveries --org <project>/.omt/organization.json [--unacknowledged]`: 독립 워크트리 완료 영수증 목록을 조회한다. 각 영수증에는 출처(`source`), 40자 전체 커밋 HEAD(`head`), PR 주소(`pr`/`target`), 지정된 이사 터미널 핸들, 알림 전송 결과(`delivery.outcome`), 그리고 수신 확인 여부(`acknowledged`)가 보존된다.
-- 이사 터미널 핸들이 유효하지 않거나 닫혀 있어 전송되지 않은 경우 `status: "stale-terminal"`(전송 실패 시 `"failed"`, 프롬프트 미확정 시 `"unclear-submission"`)과 `acknowledged: false`로 남아 불완전 상태가 명확히 드러난다. 이사는 터미널이 stale했던 기간의 작업도 inbox에서 누락 없이 파악할 수 있으며, 송신자는 유효한 새 이사 터미널로 중복 레코드 생성 없이 안전하게 재시도할 수 있다.
-- 이사가 PR 또는 커밋 산출물을 검토한 뒤 `director-ack --org <project>/.omt/organization.json --delivery <id>`를 실행하여 수신을 확인한다. 확인된 영수증은 `status: "acknowledged"`, `acknowledged: true`, `acknowledgedAt` 타임스탬프가 기록되고 inbox 미처리 목록에서 제외된다.
-- 이미 검토 후 병합된 PR #161(`6c8bdca`)과 같은 완료 작업은 재전송하거나 중복 병합하지 않는다.
+- `director-inbox --org <project>/.omt/organization.json`: 미처리 신호와 함께 미확인 독립 워크트리 전달 영수증(`deliveries`)을 함께 조회합니다. `director-watch` 결과에도 미확인 독립 전달 건수(`pendingDeliveries`)와 목록(`deliveries`)이 명시되어 라우팅 상태를 실시간으로 점검할 수 있습니다.
+- `director-deliveries --org <project>/.omt/organization.json [--unacknowledged]`: 독립 워크트리 완료 영수증 목록을 조회합니다. 각 영수증에는 출처(`source`), 40자 전체 커밋 HEAD(`head`), PR 주소(`pr`/`target`), 지정된 이사 터미널 핸들, 알림 전송 결과(`delivery.outcome`), 그리고 수신 확인 여부(`acknowledged`)가 보존됩니다.
+- 이사 터미널 핸들이 유효하지 않거나 닫혀 있어 전송되지 않은 경우 status는 stale-terminal(전송 실패 시 failed, 프롬프트 미확정 시 unclear-submission)과 unacknowledged 상태로 남아 불완전 상태가 명확히 드러납니다. 이사는 터미널이 stale했던 기간의 작업도 inbox에서 누락 없이 파악할 수 있으며, 송신자는 유효한 새 이사 터미널로 중복 레코드 생성 없이 안전하게 재시도할 수 있습니다.
+- 이사가 PR 또는 커밋 산출물을 검토한 뒤 `director-ack --org <project>/.omt/organization.json --delivery <id>`를 실행하여 수신을 확인합니다. 이때 이사의 신원 증명(`ORCA_TERMINAL_HANDLE` 또는 `--director-terminal`)이 전달 레코드의 대상 터미널과 일치하는지 검증합니다. 확인된 영수증은 status가 acknowledged로 바뀌고 inbox 미처리 목록에서 제외됩니다.
+- 이미 검토 후 병합된 PR #161(`6c8bdca`)과 같은 완료 작업은 재전송하거나 중복 병합하지 않습니다.
 
 ## 종료
 

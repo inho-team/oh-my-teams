@@ -753,10 +753,11 @@ export async function findPmTerminal(orgFile, pmPath, options = {}) {
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} signalId - Signal ID to acknowledge.
+ * @param {object} [options] - Optional caller options for delivery acknowledgement.
  * @returns {{acknowledged: boolean, record: object}} Updated record.
  * @throws {Error} When the signal is not found or is already acknowledged.
  */
-export function acknowledgeSignal(orgFile, signalId) {
+export function acknowledgeSignal(orgFile, signalId, options = {}) {
   let updated;
   withFileLock(inboxLock(orgFile), () => {
     const file = path.join(inboxDir(orgFile), `${signalId}.json`);
@@ -776,25 +777,14 @@ export function acknowledgeSignal(orgFile, signalId) {
     }
     const deliveryFile = path.join(deliveriesDir(orgFile), `${signalId}.json`);
     if (fs.existsSync(deliveryFile)) {
-      const record = readJSON(deliveryFile);
-      assert(
-        !record.acknowledged,
-        `Delivery ${signalId} is already acknowledged`,
-      );
-      const now = new Date().toISOString();
-      updated = {
-        ...record,
-        status: "acknowledged",
-        acknowledged: true,
-        acknowledgedAt: now,
-        acknowledgedBy: "director",
-        updatedAt: now,
-      };
-      writeJSON(deliveryFile, updated);
       return;
     }
     assert(false, `Signal ${signalId} not found`);
   });
+  const deliveryFile = path.join(deliveriesDir(orgFile), `${signalId}.json`);
+  if (fs.existsSync(deliveryFile)) {
+    return acknowledgeDelivery(orgFile, signalId, options);
+  }
   return { acknowledged: true, record: updated };
 }
 
@@ -878,16 +868,16 @@ export function processLiveness(owner) {
  * @param {string} request.head - Full 40-character commit SHA.
  * @param {string} [request.pr] - Pull request URL.
  * @param {string} [request.target] - Delivery target (defaults to pr if omitted).
- * @param {string} [request.directorTerminal] - Director terminal handle.
+ * @param {string} request.directorTerminal - Explicit Director terminal handle.
  * @param {string} [request.text] - Optional summary or note.
  * @param {string} [request.orcaExecutable] - Optional Orca executable path.
  * @param {Function} [request.execute] - Optional command runner.
  * @param {object} [options] - Injectable options for testing.
  * @param {string} [options.orcaExecutable] - Orca binary path.
  * @param {Function} [options.execute] - Injectable command runner.
- * @returns {Promise<{delivered: boolean, replayed?: boolean, retried?: boolean, duplicate?: boolean, record: object}>}
+ * @returns {Promise<{delivered: boolean, replayed?: boolean, retried?: boolean, duplicate?: boolean, inFlight?: boolean, record: object}>}
  *   Delivery result and persisted record.
- * @throws {Error} When source or head is missing or head is not a valid 40-character SHA.
+ * @throws {Error} When source, head, target, or directorTerminal is missing or invalid.
  */
 export async function recordDeliveryReceipt(orgFile, request, options = {}) {
   const source = String(request?.source ?? "").trim();
@@ -902,6 +892,12 @@ export async function recordDeliveryReceipt(orgFile, request, options = {}) {
   const target = String(request?.pr ?? request?.target ?? "").trim();
   assert(target.length > 0, "Delivery PR URL or target is required");
 
+  const directorTerminal = String(request?.directorTerminal ?? "").trim();
+  assert(
+    directorTerminal.length > 0,
+    "Explicit director terminal target is required for independent delivery receipt",
+  );
+
   const text =
     request?.text !== undefined ? String(request.text).trim() : undefined;
   const pr = request?.pr !== undefined ? String(request.pr).trim() : undefined;
@@ -910,77 +906,155 @@ export async function recordDeliveryReceipt(orgFile, request, options = {}) {
     options.orcaExecutable ?? request?.orcaExecutable ?? "orca";
   const execute = options.execute ?? request?.execute ?? run;
 
-  let directorTerminal = request?.directorTerminal
-    ? String(request.directorTerminal).trim()
-    : undefined;
-  if (!directorTerminal) {
-    try {
-      const { kickoffs } = listKickoffs(orgFile);
-      const active = kickoffs.find((k) => k.director?.terminalHandle);
-      if (active) {
-        directorTerminal = active.director.terminalHandle;
-      }
-    } catch {
-      // Kickoffs unavailable, proceed without fallback
-    }
-  }
+  let intent;
+  let earlyReturn;
 
-  let existing;
   withFileLock(deliveriesLock(orgFile), () => {
     const all = readDeliveries(orgFile);
-    existing = all.find((d) => d.source === source && d.head === head);
+    const existing = all.find((d) => d.source === source && d.head === head);
+
+    if (existing) {
+      if (existing.acknowledged === true) {
+        earlyReturn = {
+          delivered: false,
+          duplicate: true,
+          replayed: true,
+          record: existing,
+        };
+        return;
+      }
+      if (existing.delivery?.notified === true) {
+        earlyReturn = {
+          delivered: true,
+          duplicate: true,
+          replayed: true,
+          record: existing,
+        };
+        return;
+      }
+      // Once input may have been sent, retry must not send again without proof.
+      if (existing.delivery?.sent === true) {
+        earlyReturn = {
+          delivered: false,
+          duplicate: true,
+          replayed: true,
+          record: existing,
+        };
+        return;
+      }
+      if (existing.delivery?.inFlight === true) {
+        const liveness = processLiveness(existing.delivery.owner);
+        if (liveness !== "dead") {
+          earlyReturn = {
+            delivered: false,
+            duplicate: true,
+            inFlight: true,
+            record: existing,
+          };
+          return;
+        }
+        // Settle dead owner in place rather than resending to avoid duplicate sends.
+        const now = new Date().toISOString();
+        const settled = {
+          ...existing,
+          status: "failed",
+          delivery: {
+            ...existing.delivery,
+            inFlight: false,
+            sent: true,
+            outcome: "failed",
+            notifyError: "owner-exited-before-confirming",
+          },
+          updatedAt: now,
+        };
+        writeJSON(
+          path.join(deliveriesDir(orgFile), `${existing.id}.json`),
+          settled,
+        );
+        earlyReturn = {
+          delivered: false,
+          duplicate: true,
+          replayed: true,
+          record: settled,
+        };
+        return;
+      }
+
+      // Safe in-place retry when sent !== true: persist updated intent before submitting.
+      const now = new Date().toISOString();
+      intent = {
+        ...existing,
+        target,
+        ...(pr ? { pr } : {}),
+        directorTerminal,
+        ...(text ? { text } : {}),
+        status: "pending-submission",
+        delivery: {
+          notified: false,
+          sent: false,
+          inFlight: true,
+          owner: { pid: process.pid, hostname: THIS_HOST },
+          attemptedAt: now,
+          outcome: "pending",
+        },
+        updatedAt: now,
+      };
+      writeJSON(
+        path.join(deliveriesDir(orgFile), `${existing.id}.json`),
+        intent,
+      );
+      return;
+    }
+
+    // Persist intent before terminal submission so process exit leaves an inspectable record.
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    intent = {
+      schemaVersion: 1,
+      id,
+      source,
+      head,
+      target,
+      ...(pr ? { pr } : {}),
+      directorTerminal,
+      ...(text ? { text } : {}),
+      status: "pending-submission",
+      acknowledged: false,
+      acknowledgedAt: null,
+      delivery: {
+        notified: false,
+        sent: false,
+        inFlight: true,
+        owner: { pid: process.pid, hostname: THIS_HOST },
+        attemptedAt: now,
+        outcome: "pending",
+      },
+      createdAt: now,
+      updatedAt: now,
+    };
+    writeJSON(path.join(deliveriesDir(orgFile), `${id}.json`), intent);
   });
 
-  if (existing) {
-    if (existing.acknowledged === true) {
-      return {
-        delivered: false,
-        duplicate: true,
-        replayed: true,
-        record: existing,
-      };
-    }
-    if (existing.delivery?.notified === true) {
-      return {
-        delivered: true,
-        duplicate: true,
-        replayed: true,
-        record: existing,
-      };
-    }
-    if (
-      existing.delivery?.sent === true &&
-      existing.delivery?.outcome === "unclear"
-    ) {
-      return {
-        delivered: false,
-        duplicate: true,
-        replayed: true,
-        record: existing,
-      };
-    }
+  if (earlyReturn) {
+    return earlyReturn;
   }
 
-  const id = existing?.id ?? crypto.randomUUID();
-  const now = new Date().toISOString();
-
+  const promptText = `[omt delivery] from ${source}: HEAD ${head} delivered to ${target}${text ? ` (${text})` : ""}`;
   let sent;
-  if (!directorTerminal) {
-    sent = {
-      notified: false,
-      deferred: false,
-      sent: false,
-      notifyError: "no-director-terminal-specified",
-      delivery: { outcome: "failed" },
-    };
-  } else {
-    const promptText = `[omt delivery] from ${source}: HEAD ${head} delivered to ${target}${text ? ` (${text})` : ""}`;
+  try {
     sent = await notifyTerminal(
       orcaExecutable,
       directorTerminal,
       promptText,
       execute,
     );
+  } catch (error) {
+    sent = {
+      notified: false,
+      sent: false,
+      notifyError: error.message,
+      delivery: { outcome: "failed" },
+    };
   }
 
   let outcome = "failed";
@@ -1014,53 +1088,54 @@ export async function recordDeliveryReceipt(orgFile, request, options = {}) {
     status = "failed";
   }
 
-  const record = {
-    schemaVersion: 1,
-    id,
-    source,
-    head,
-    target,
-    ...(pr ? { pr } : {}),
-    directorTerminal: directorTerminal ?? null,
-    ...(text ? { text } : {}),
-    status,
-    acknowledged: false,
-    acknowledgedAt: null,
-    delivery: {
-      notified: Boolean(sent.notified),
-      sent: sent.sent === true,
-      outcome,
-      ...(sent.notifyError ? { notifyError: sent.notifyError } : {}),
-      ...(sent.delivery?.requestId
-        ? { requestId: sent.delivery.requestId }
-        : {}),
-      ...(sent.delivery?.stages ? { stages: sent.delivery.stages } : {}),
-      attemptedAt: now,
-    },
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-  };
+  const now = new Date().toISOString();
+  let finalRecord;
 
   withFileLock(deliveriesLock(orgFile), () => {
-    writeJSON(path.join(deliveriesDir(orgFile), `${id}.json`), record);
+    const file = path.join(deliveriesDir(orgFile), `${intent.id}.json`);
+    const current = fs.existsSync(file) ? readJSON(file) : intent;
+    finalRecord = {
+      ...current,
+      status,
+      delivery: {
+        notified: Boolean(sent.notified),
+        sent: sent.sent === true,
+        inFlight: false,
+        outcome,
+        ...(sent.notifyError ? { notifyError: sent.notifyError } : {}),
+        ...(sent.delivery?.requestId
+          ? { requestId: sent.delivery.requestId }
+          : {}),
+        ...(sent.delivery?.stages ? { stages: sent.delivery.stages } : {}),
+        attemptedAt: intent.delivery.attemptedAt,
+        settledAt: now,
+      },
+      updatedAt: now,
+    };
+    writeJSON(file, finalRecord);
   });
 
   return {
     delivered: Boolean(sent.notified),
-    retried: Boolean(existing),
-    record,
+    retried: intent.updatedAt !== intent.createdAt,
+    record: finalRecord,
   };
 }
 
 /**
- * Acknowledges an independent worktree delivery receipt by ID.
+ * Acknowledges an independent worktree delivery receipt by ID with proven Director identity.
  *
  * @param {string} orgFile - Organization JSON path.
  * @param {string} deliveryId - Delivery receipt ID to acknowledge.
+ * @param {object} [options] - Caller options.
+ * @param {string} [options.callerTerminal] - Caller terminal handle.
+ * @param {string} [options.terminal] - Alternative caller terminal handle.
+ * @param {object} [options.env] - Environment containing ORCA_TERMINAL_HANDLE.
  * @returns {{acknowledged: boolean, record: object}} Updated delivery record.
- * @throws {Error} When the delivery receipt is not found or already acknowledged.
+ * @throws {Error} When the delivery receipt is not found, already acknowledged,
+ *   or caller cannot prove Director identity.
  */
-export function acknowledgeDelivery(orgFile, deliveryId) {
+export function acknowledgeDelivery(orgFile, deliveryId, options = {}) {
   let updated;
   withFileLock(deliveriesLock(orgFile), () => {
     const file = path.join(deliveriesDir(orgFile), `${deliveryId}.json`);
@@ -1070,13 +1145,33 @@ export function acknowledgeDelivery(orgFile, deliveryId) {
       !record.acknowledged,
       `Delivery ${deliveryId} is already acknowledged`,
     );
+
+    const env = options.env ?? process.env;
+    const callerHandle =
+      options.callerTerminal ?? options.terminal ?? env.ORCA_TERMINAL_HANDLE;
+    assert(
+      callerHandle && String(callerHandle).trim().length > 0,
+      "ORCA_TERMINAL_HANDLE or caller terminal is required to prove Director identity for acknowledgement",
+    );
+    const normalizedCaller = String(callerHandle).trim();
+
+    if (record.directorTerminal) {
+      assert(
+        normalizedCaller === record.directorTerminal,
+        `Caller terminal ${normalizedCaller} does not match delivery director terminal ${record.directorTerminal}`,
+      );
+    }
+
     const now = new Date().toISOString();
     updated = {
       ...record,
       status: "acknowledged",
       acknowledged: true,
       acknowledgedAt: now,
-      acknowledgedBy: "director",
+      acknowledgedBy: {
+        role: "director",
+        terminal: normalizedCaller,
+      },
       updatedAt: now,
     };
     writeJSON(file, updated);

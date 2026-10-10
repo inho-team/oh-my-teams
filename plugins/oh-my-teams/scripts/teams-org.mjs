@@ -478,9 +478,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   director-reply --org FILE --signal ID --text TEXT [--orca EXECUTABLE]
                  (records the director's decision and attempts PM notification)
   director-ack --org FILE (--signal ID | --delivery ID)
+               [--director-terminal HANDLE]
                (marks a signal or delivery receipt as acknowledged without a text reply)
-  director-delivery --org FILE --source DIR --head SHA (--pr URL | --target TEXT)
-                    [--director-terminal HANDLE] [--text TEXT] [--orca EXECUTABLE]
+  director-delivery --org FILE --source DIR --head SHA --director-terminal HANDLE
+                    (--pr URL | --target TEXT) [--text TEXT] [--orca EXECUTABLE]
                     (records an independent worktree delivery receipt and notifies director terminal)
   director-deliveries --org FILE [--unacknowledged]
                       (lists independent worktree delivery receipts)
@@ -815,7 +816,13 @@ export const ALLOWED_OPTIONS = {
   ],
   "director-inbox": ["org"],
   "director-reply": ["org", "signal", "text", "orca"],
-  "director-ack": ["org", "signal", "delivery"],
+  "director-ack": [
+    "org",
+    "signal",
+    "delivery",
+    "director-terminal",
+    "terminal",
+  ],
   "director-delivery": [
     "org",
     "source",
@@ -983,7 +990,7 @@ export const REQUIRED_OPTIONS = {
   "director-inbox": ["org"],
   "director-reply": ["org", "signal", "text"],
   "director-ack": ["org"],
-  "director-delivery": ["org", "source", "head"],
+  "director-delivery": ["org", "source", "head", "director-terminal"],
   "director-deliveries": ["org"],
   "resource-acquire": ["org", "worktree", "kind"],
   "resource-release": ["org", "slot"],
@@ -4784,7 +4791,11 @@ export async function executeCommand(args, execute) {
       });
     case "director-ack":
       if (args.delivery) {
-        return acknowledgeDelivery(args.org, args.delivery);
+        const callerTerminal =
+          args["director-terminal"] ??
+          args.terminal ??
+          process.env.ORCA_TERMINAL_HANDLE;
+        return acknowledgeDelivery(args.org, args.delivery, { callerTerminal });
       }
       assert(args.signal, "director-ack needs --signal ID or --delivery ID");
       return acknowledgeSignal(args.org, args.signal);

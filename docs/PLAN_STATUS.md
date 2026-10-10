@@ -18,7 +18,7 @@
 
 | 명령 | 결과 |
 |---|---|
-| `npm test` | 최상위 테스트 선언 1320개(통과 여부는 실행 기록의 종료 코드와 pass·fail·skipped 수로 확인한다). |
+| `npm test` | 최상위 테스트 선언 1325개(통과 여부는 실행 기록의 종료 코드와 pass·fail·skipped 수로 확인한다). |
 | `npm run quality` | 활성 `.mjs` 161개와 공개 export 586개를 검사했으며 지적 사항이 없었다. |
 | `npm run eval:organization` | 결정적 로컬 시나리오 11개가 모두 통과했다. |
 | `npm run format:check` | Prettier 기준으로 모든 대상 파일이 통과했다. |

@@ -2095,7 +2095,7 @@ test("safe retry updates existing delivery record in place without duplicating r
   assert.equal(deliveries[0].status, "pending-acknowledgement");
 });
 
-test("acknowledgeDelivery marks receipt acknowledged and updates inbox", async (t) => {
+test("acknowledgeDelivery marks receipt acknowledged with verified Director identity and updates inbox", async (t) => {
   const { orgFile } = makeProject(t);
   const source = "/Users/jinsungkim/orca/workspaces/oh-my-teams/lawyer";
   const head = "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad";
@@ -2115,10 +2115,30 @@ test("acknowledgeDelivery marks receipt acknowledged and updates inbox", async (
 
   assert.equal(listInbox(orgFile).deliveries.length, 1);
 
-  const ack = acknowledgeDelivery(orgFile, delivery.record.id);
+  // Missing caller identity throws
+  assert.throws(
+    () => acknowledgeDelivery(orgFile, delivery.record.id, { env: {} }),
+    /ORCA_TERMINAL_HANDLE or caller terminal is required/,
+  );
+
+  // Mismatched caller identity throws
+  assert.throws(
+    () =>
+      acknowledgeDelivery(orgFile, delivery.record.id, {
+        callerTerminal: "term_imposter",
+      }),
+    /does not match delivery director terminal/,
+  );
+
+  // Valid Director terminal succeeds
+  const ack = acknowledgeDelivery(orgFile, delivery.record.id, {
+    callerTerminal: "term_director",
+  });
   assert.equal(ack.acknowledged, true);
   assert.equal(ack.record.status, "acknowledged");
   assert.equal(ack.record.acknowledged, true);
+  assert.equal(ack.record.acknowledgedBy.role, "director");
+  assert.equal(ack.record.acknowledgedBy.terminal, "term_director");
   assert.ok(ack.record.acknowledgedAt);
 
   // Unacknowledged list in inbox drops it
@@ -2140,18 +2160,24 @@ test("acknowledgeDelivery marks receipt acknowledged and updates inbox", async (
 
   // Double acknowledgement throws
   assert.throws(
-    () => acknowledgeDelivery(orgFile, delivery.record.id),
+    () =>
+      acknowledgeDelivery(orgFile, delivery.record.id, {
+        callerTerminal: "term_director",
+      }),
     /already acknowledged/,
   );
 
   // Unknown delivery ID throws
   assert.throws(
-    () => acknowledgeDelivery(orgFile, "ghost-delivery-id"),
+    () =>
+      acknowledgeDelivery(orgFile, "ghost-delivery-id", {
+        callerTerminal: "term_director",
+      }),
     /not found/,
   );
 });
 
-test("recordDeliveryReceipt validates full 40-char commit HEAD and required inputs", async (t) => {
+test("recordDeliveryReceipt validates full 40-char commit HEAD, target, and explicit directorTerminal", async (t) => {
   const { orgFile } = makeProject(t);
 
   await assert.rejects(
@@ -2159,6 +2185,7 @@ test("recordDeliveryReceipt validates full 40-char commit HEAD and required inpu
       recordDeliveryReceipt(orgFile, {
         head: "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad",
         pr: "https://example.com/pr",
+        directorTerminal: "term_director",
       }),
     /Delivery source worktree is required/,
   );
@@ -2169,6 +2196,7 @@ test("recordDeliveryReceipt validates full 40-char commit HEAD and required inpu
         source: "src",
         head: "6c8bdca", // short SHA
         pr: "https://example.com/pr",
+        directorTerminal: "term_director",
       }),
     /Full commit HEAD.*required/,
   );
@@ -2179,6 +2207,7 @@ test("recordDeliveryReceipt validates full 40-char commit HEAD and required inpu
         source: "src",
         head: "z".repeat(40), // invalid hex
         pr: "https://example.com/pr",
+        directorTerminal: "term_director",
       }),
     /Full commit HEAD.*required/,
   );
@@ -2188,9 +2217,213 @@ test("recordDeliveryReceipt validates full 40-char commit HEAD and required inpu
       recordDeliveryReceipt(orgFile, {
         source: "src",
         head: "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad",
+        directorTerminal: "term_director",
       }),
     /Delivery PR URL or target is required/,
   );
+
+  await assert.rejects(
+    () =>
+      recordDeliveryReceipt(orgFile, {
+        source: "src",
+        head: "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad",
+        pr: "https://example.com/pr",
+      }),
+    /Explicit director terminal target is required/,
+  );
+});
+
+test("recordDeliveryReceipt requires explicit Director target rather than selecting an unrelated kickoff", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+
+  // Even though makeProject registers a kickoff with director.terminalHandle,
+  // recordDeliveryReceipt must reject calls without explicit directorTerminal.
+  await assert.rejects(
+    () =>
+      recordDeliveryReceipt(orgFile, {
+        source: "/Users/jinsungkim/orca/workspaces/oh-my-teams/lawyer",
+        head: "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad",
+        pr: "https://github.com/inho-team/oh-my-teams/pull/161",
+      }),
+    /Explicit director terminal target is required/,
+  );
+});
+
+test("concurrent same-source/head requests must not double send", async (t) => {
+  const { orgFile } = makeProject(t);
+  const source = "/Users/jinsungkim/orca/workspaces/oh-my-teams/lawyer";
+  const head = "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad";
+  const pr = "https://github.com/inho-team/oh-my-teams/pull/161";
+
+  let terminalSends = 0;
+  const base = orcaNotify(
+    [["input_accepted", "turn_started"]],
+    [],
+    [{ handle: "term_director", agentIdentity: "claude" }],
+  );
+  const slowExecute = async (argv, options) => {
+    if (argv.includes("send")) {
+      terminalSends++;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return base.execute(argv, options);
+  };
+
+  const [res1, res2] = await Promise.all([
+    recordDeliveryReceipt(
+      orgFile,
+      { source, head, pr, directorTerminal: "term_director" },
+      { execute: slowExecute },
+    ),
+    recordDeliveryReceipt(
+      orgFile,
+      { source, head, pr, directorTerminal: "term_director" },
+      { execute: slowExecute },
+    ),
+  ]);
+
+  // Exactly one call delivered to terminal, the other was deduplicated
+  assert.equal(terminalSends, 1);
+  const deliveredCount = [res1, res2].filter((r) => r.delivered).length;
+  const duplicateCount = [res1, res2].filter((r) => r.duplicate).length;
+  assert.equal(deliveredCount, 1);
+  assert.equal(duplicateCount, 1);
+  assert.equal(listDeliveries(orgFile).deliveries.length, 1);
+});
+
+test("persist intent before any terminal submission so process exit leaves an inspectable record", async (t) => {
+  const { orgFile } = makeProject(t);
+  const source = "/Users/jinsungkim/orca/workspaces/oh-my-teams/lawyer";
+  const head = "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad";
+  const pr = "https://github.com/inho-team/oh-my-teams/pull/161";
+
+  let inspectRecordDuringSend = null;
+  const base = orcaNotify(
+    [["input_accepted", "turn_started"]],
+    [],
+    [{ handle: "term_director", agentIdentity: "claude" }],
+  );
+  const inspectingExecute = async (argv, options) => {
+    if (argv.includes("send")) {
+      const deliveries = listDeliveries(orgFile).deliveries;
+      if (deliveries.length > 0) {
+        inspectRecordDuringSend = deliveries[0];
+      }
+    }
+    return base.execute(argv, options);
+  };
+
+  const res = await recordDeliveryReceipt(
+    orgFile,
+    { source, head, pr, directorTerminal: "term_director" },
+    { execute: inspectingExecute },
+  );
+
+  assert.ok(inspectRecordDuringSend);
+  assert.equal(inspectRecordDuringSend.status, "pending-submission");
+  assert.equal(inspectRecordDuringSend.delivery.inFlight, true);
+  assert.equal(inspectRecordDuringSend.delivery.outcome, "pending");
+  assert.equal(inspectRecordDuringSend.delivery.owner.pid, process.pid);
+
+  // After completion, settled record is recorded
+  assert.equal(res.delivered, true);
+  assert.equal(res.record.status, "pending-acknowledgement");
+  assert.equal(res.record.delivery.inFlight, false);
+});
+
+test("once input may have been sent, retry must not send again without proof", async (t) => {
+  const { orgFile } = makeProject(t);
+  const source = "/Users/jinsungkim/orca/workspaces/oh-my-teams/lawyer";
+  const head = "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad";
+  const pr = "https://github.com/inho-team/oh-my-teams/pull/161";
+
+  let sendCalls = 0;
+  // Orca answers input_accepted (without turn_started and empty screen), so outcome becomes unclear and sent is true
+  const base = orcaNotify(
+    [["input_accepted"]],
+    [],
+    [{ handle: "term_director", agentIdentity: "claude" }],
+  );
+  const sendingExecute = async (argv, options) => {
+    if (argv.includes("send")) {
+      sendCalls++;
+    }
+    return base.execute(argv, options);
+  };
+
+  const first = await recordDeliveryReceipt(
+    orgFile,
+    { source, head, pr, directorTerminal: "term_director" },
+    { execute: sendingExecute },
+  );
+
+  assert.equal(first.delivered, false);
+  assert.equal(first.record.delivery.sent, true);
+  assert.equal(first.record.status, "unclear-submission");
+  const callsBeforeRetry = sendCalls;
+  assert.ok(callsBeforeRetry >= 1);
+
+  // Second attempt: because sent was true, retry must NOT send again to avoid duplicate keys!
+  const retry = await recordDeliveryReceipt(
+    orgFile,
+    { source, head, pr, directorTerminal: "term_director" },
+    { execute: sendingExecute },
+  );
+
+  assert.equal(retry.duplicate, true);
+  assert.equal(retry.replayed, true);
+  assert.equal(sendCalls, callsBeforeRetry); // Not invoked again!
+});
+
+test("directorWatch includes unacknowledged independent deliveries in watch report", async (t) => {
+  const { orgFile } = makeProject(t);
+  const source = "/Users/jinsungkim/orca/workspaces/oh-my-teams/lawyer";
+  const head = "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad";
+  const pr = "https://github.com/inho-team/oh-my-teams/pull/161";
+
+  const orca = orcaNotify(
+    [["input_accepted", "turn_started"]],
+    [],
+    [{ handle: "term_director", agentIdentity: "claude" }],
+  );
+
+  // Before delivery: 0 pending deliveries
+  const watchBefore = await directorWatch(orgFile, {
+    orcaExecutable: "orca",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [],
+  });
+  assert.equal(watchBefore.pendingDeliveries, 0);
+  assert.deepEqual(watchBefore.deliveries, []);
+
+  // Record delivery
+  const delivery = await recordDeliveryReceipt(
+    orgFile,
+    { source, head, pr, directorTerminal: "term_director" },
+    { execute: orca.execute },
+  );
+
+  // After delivery: 1 pending delivery clearly routed in watch report
+  const watchAfter = await directorWatch(orgFile, {
+    orcaExecutable: "orca",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [],
+  });
+  assert.equal(watchAfter.pendingDeliveries, 1);
+  assert.equal(watchAfter.deliveries.length, 1);
+  assert.equal(watchAfter.deliveries[0].id, delivery.record.id);
+
+  // After acknowledgement: drops to 0
+  acknowledgeDelivery(orgFile, delivery.record.id, {
+    callerTerminal: "term_director",
+  });
+  const watchAfterAck = await directorWatch(orgFile, {
+    orcaExecutable: "orca",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [],
+  });
+  assert.equal(watchAfterAck.pendingDeliveries, 0);
+  assert.deepEqual(watchAfterAck.deliveries, []);
 });
 
 test("kickoff compatibility: independent delivery receipts do not interfere with registered kickoffs", async (t) => {
@@ -2204,11 +2437,24 @@ test("kickoff compatibility: independent delivery receipts do not interfere with
     source: "/path/to/kickoff",
   });
 
-  const delivery = await recordDeliveryReceipt(orgFile, {
-    source: "/independent/worktree",
-    head: "2222222222222222222222222222222222222222",
-    pr: "https://example.com/pr/1",
-  });
+  const delivery = await recordDeliveryReceipt(
+    orgFile,
+    {
+      source: "/independent/worktree",
+      head: "2222222222222222222222222222222222222222",
+      pr: "https://example.com/pr/1",
+      directorTerminal: "term_director",
+    },
+    {
+      execute: async () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { handle: "term_director", agentIdentity: "claude" },
+        ]),
+        stderr: "",
+      }),
+    },
+  );
 
   const inbox = listInbox(orgFile);
   assert.equal(inbox.signals.length, 1);
