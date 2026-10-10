@@ -234,7 +234,13 @@ export function resolveKickoffHash(orgFile, worktreeId) {
   return kickoffHashFor(entry);
 }
 
-function documentDirectory(stateDir, docId) {
+/**
+ * Resolves the canonical storage directory of a structured document.
+ * @param {string} stateDir - PM state directory.
+ * @param {string} docId - Structured document identifier.
+ * @returns {string} Document directory.
+ */
+export function documentDirectory(stateDir, docId) {
   const { kickoffHash, workflowId, stageSlug, docType, localId } =
     parseDocId(docId);
   const folder = stageFolderName(stageSlug);

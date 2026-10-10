@@ -8,10 +8,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assert, readJSON } from "./core.mjs";
 import {
+  documentDirectory,
   saveDocument,
   documentState,
   parseDocId,
-  stageFolderName,
 } from "./documents.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -167,27 +167,6 @@ function validateDocument(doc, schemaName) {
       }
     }
   }
-}
-
-/**
- * Gets the actual folder path for a document.
- * @param {string} stateDir
- * @param {string} docId
- * @returns {string}
- */
-function documentDirectory(stateDir, docId) {
-  const { kickoffHash, workflowId, stageSlug, docType, localId } =
-    parseDocId(docId);
-  const folder = stageFolderName(stageSlug);
-  return path.join(
-    stateDir,
-    "documents",
-    kickoffHash,
-    workflowId ?? "none",
-    folder,
-    docType,
-    localId,
-  );
 }
 
 /**
