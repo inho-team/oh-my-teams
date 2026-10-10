@@ -98,7 +98,6 @@ import {
   createWorktreeWithRoleSession,
   discoverOrcaRuntime,
   findActiveDispatch,
-  findCoordinatorRun,
   injectTask,
   isTrustedOrcaExecute,
   readTrustedOrcaVersion,
@@ -228,6 +227,14 @@ import {
   releaseResource,
   RESOURCE_KINDS,
 } from "./resources.mjs";
+import {
+  acknowledgeMessage,
+  getMessage,
+  messageIdFor,
+  receiveMessages,
+  sendMessage,
+  waitMessages,
+} from "./message-store.mjs";
 
 const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --resources provider,... --output FILE [--concurrency N --max-calls N]
@@ -369,6 +376,13 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                    acknowledged here; the timeout defaults to the organization's
                    policy.supervision.progressCheckMs; pass the returned
                    deliveryId as --ack on the next wait)
+  message-send --state DIR --actor ACTOR --to ACTOR --key KEY
+               --type TYPE --subject TEXT --body TEXT
+  message-inbox --state DIR --actor ACTOR [--limit N --wait-ms N]
+  message-watch --org FILE [--wait-ms N]
+  message-show --state DIR --actor ACTOR --id MESSAGE_ID
+  message-ack --state DIR --actor ACTOR --id MESSAGE_ID
+               (durable OMT Message MCP mailbox; a read does not acknowledge)
   work --org SNAPSHOT --task FILE --repo WORKTREE --state SHARED_DIR [--role worker]
        [--workflow-id ID --attempt-id ID]
   draft --org FILE --task FILE --repo DIR [--kind citations|checklist]
@@ -411,7 +425,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
            set the workflow snapshot's state.roles, or its organization when
            state.roles is absent, is used instead and --org is ignored)
   doc-event-consume --state DIR --event FILE
-  doc-event-deliver --state DIR --kickoff-hash HASH [--workflow-id ID] [--orca EXECUTABLE]
+  doc-event-deliver --state DIR --kickoff-hash HASH --actor ACTOR --to ACTOR [--workflow-id ID]
   workflow-create --workflow FILE --org FILE --state DIR
   workflow-status --id ID --state DIR
   workflow-resume --id ID --state DIR --revision N [--observations FILE]
@@ -468,21 +482,15 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   quota-compare --before FILE --after FILE
   aggregate --expected id,id --report FILE [--report FILE ...]
   director-signal --org FILE --worktree ID --kind decision|close-ready|blocked|progress
-                  --text TEXT [--head SHA --source DIR] [--orca EXECUTABLE]
-                  (writes a structured record to .omt/director/inbox/; notifies
-                  the director terminal when the registry entry names one. The
-                  notification is skipped without sending a key when the
-                  director's screen shows a selection window or a trust
-                  question, or cannot be read at all; any earlier signal still
-                  undelivered for the same worktree is bundled into the same
-                  message, and a signal marked delivered is never sent again)
+                  --text TEXT [--head SHA --source DIR]
+                  (writes the signal record and queues a Message MCP message)
   director-inbox --org FILE
                  (lists pending signals and unacknowledged deliveries)
-  director-reply --org FILE --signal ID --text TEXT [--orca EXECUTABLE]
-                 (records the director's decision and attempts PM notification)
+  director-reply --org FILE --signal ID --text TEXT
+                 (records the director's decision and queues a PM message)
   director-ack --org FILE (--signal ID | --delivery ID)
                [--director-terminal HANDLE]
-               (marks a signal or delivery receipt as acknowledged without a text reply)
+               (marks a signal and its message, or a delivery receipt, as handled)
   director-delivery --org FILE --source DIR --head SHA --director-terminal HANDLE
                     (--pr URL | --target TEXT) [--text TEXT] [--orca EXECUTABLE]
                     (records an independent worktree delivery receipt and notifies director terminal)
@@ -690,7 +698,20 @@ export const ALLOWED_OPTIONS = {
     "json",
   ],
   "supervision-next": ["org", "observation", "dispatch", "state", "orca"],
-  "supervision-wait": ["run", "org", "timeout-ms", "ack", "orca", "state"],
+  "supervision-wait": [
+    "run",
+    "org",
+    "timeout-ms",
+    "ack",
+    "orca",
+    "state",
+    "mailbox",
+  ],
+  "message-send": ["state", "actor", "to", "key", "type", "subject", "body"],
+  "message-inbox": ["state", "actor", "limit", "wait-ms"],
+  "message-watch": ["org", "wait-ms"],
+  "message-show": ["state", "actor", "id"],
+  "message-ack": ["state", "actor", "id"],
   "worker-start": [
     "org",
     "role",
@@ -775,7 +796,7 @@ export const ALLOWED_OPTIONS = {
     "request-id",
   ],
   "doc-event-consume": ["state", "event"],
-  "doc-event-deliver": ["state", "kickoff-hash", "workflow-id", "orca"],
+  "doc-event-deliver": ["state", "kickoff-hash", "workflow-id", "actor", "to"],
   "workflow-create": ["workflow", "org", "state"],
   "workflow-status": ["id", "state"],
   "workflow-resume": ["id", "state", "revision", "observations"],
@@ -949,6 +970,11 @@ export const REQUIRED_OPTIONS = {
   "usage-report": ["org"],
   "supervision-next": ["org", "observation"],
   "supervision-wait": ["run"],
+  "message-send": ["state", "actor", "to", "key", "type", "subject", "body"],
+  "message-inbox": ["state", "actor"],
+  "message-watch": ["org"],
+  "message-show": ["state", "actor", "id"],
+  "message-ack": ["state", "actor", "id"],
   work: ["org", "task", "repo", "state"],
   draft: ["org", "task", "repo"],
   advise: ["org", "brief", "repo", "state", "role", "kind"],
@@ -964,7 +990,7 @@ export const REQUIRED_OPTIONS = {
   "doc-show": ["state", "doc-id"],
   "doc-save": ["state", "doc"],
   "doc-event-consume": ["state", "event"],
-  "doc-event-deliver": ["state", "kickoff-hash"],
+  "doc-event-deliver": ["state", "kickoff-hash", "actor", "to"],
   "workflow-create": ["workflow", "org", "state"],
   "workflow-status": ["id", "state"],
   "workflow-resume": ["id", "state", "revision"],
@@ -3300,6 +3326,98 @@ function supervisionWaitTimeout(args) {
   return supervisionPolicy(validateOrg(readJSON(args.org))).progressCheckMs;
 }
 
+async function messageScope(state) {
+  const stateDir = path.resolve(state);
+  const registration = await resolveRegisteredKickoffFromState(stateDir);
+  assert(
+    registration?.kickoffHash,
+    "Message commands require a registered kickoff state",
+  );
+  return { stateDir, kickoffHash: registration.kickoffHash };
+}
+
+async function watchDirectorMessages(orgFile, timeoutMs = 0) {
+  assert(
+    Number.isInteger(timeoutMs) && timeoutMs >= 0 && timeoutMs <= 60000,
+    "Message timeout must be 0-60000 milliseconds",
+  );
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const messages = listKickoffs(orgFile)
+      .kickoffs.filter((entry) => entry.registrationSeq !== undefined)
+      .flatMap((entry) => {
+        const kickoffHash = kickoffHashFor(entry);
+        return receiveMessages(entry.pm.stateDir, kickoffHash, "director").map(
+          (message) => ({
+            worktreeId: entry.pm.worktreeId,
+            stateDir: entry.pm.stateDir,
+            message,
+          }),
+        );
+      });
+    if (messages.length) return { messages, timedOut: false };
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { messages: [], timedOut: true };
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(250, remaining)),
+    );
+  }
+}
+
+async function waitForSupervisionOrMessage(args) {
+  const timeoutMs = supervisionWaitTimeout(args);
+  if (!args.mailbox) {
+    return waitForSupervisionMessage({
+      runId: args.run,
+      timeoutMs,
+      ack: args.ack,
+      executable: args.orca,
+      cwd: process.cwd(),
+    });
+  }
+  assert(args.state, "supervision-wait --mailbox requires --state");
+  const { stateDir, kickoffHash } = await messageScope(args.state);
+  const deadline = Date.now() + timeoutMs;
+  let pendingAck = args.ack;
+  let heartbeats = 0;
+  const lastHeartbeats = {};
+  for (;;) {
+    const messages = receiveMessages(stateDir, kickoffHash, args.mailbox);
+    if (messages.length) {
+      return {
+        timedOut: false,
+        source: "message-mcp",
+        messages,
+        runId: args.run,
+        deliveryId: pendingAck ?? null,
+        heartbeats,
+        lastHeartbeats,
+      };
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      return {
+        timedOut: true,
+        runId: args.run,
+        deliveryId: pendingAck ?? null,
+        heartbeats,
+        lastHeartbeats,
+      };
+    }
+    const delivery = await waitForSupervisionMessage({
+      runId: args.run,
+      timeoutMs: Math.min(10000, remaining),
+      ack: pendingAck,
+      executable: args.orca,
+      cwd: process.cwd(),
+    });
+    pendingAck = delivery.deliveryId;
+    heartbeats += delivery.heartbeats ?? 0;
+    Object.assign(lastHeartbeats, delivery.lastHeartbeats ?? {});
+    if (!delivery.timedOut) return { ...delivery, heartbeats, lastHeartbeats };
+  }
+}
+
 async function writeDraft(args, execute) {
   const output = path.resolve(args.output);
   // A draft path that already holds a file may be the live organization, and
@@ -4167,9 +4285,15 @@ export async function executeCommand(args, execute) {
         args.brief === undefined
           ? undefined
           : kickoffBriefPrompt(path.resolve(args.brief));
+      const target = selectedWorktreePath(args.worktree, process.cwd());
       const command = roleCommand(org, args.role, {
         ...runCtx,
         firstPrompt,
+        messageState:
+          args.state ??
+          (args.role === "pm" && target
+            ? path.join(target, ".omt")
+            : undefined),
         ...(args.pmSelection ? { pmSelection: args.pmSelection } : {}),
       });
       assert(
@@ -4180,7 +4304,6 @@ export async function executeCommand(args, execute) {
         firstPrompt === undefined || command.role === "pm",
         "--brief hands over an incoming-brief prompt, which only makes sense for the pm role this terminal launches",
       );
-      const target = selectedWorktreePath(args.worktree, process.cwd());
       if (target) assertNotKickoffOwner(target, `starting ${command.role}`);
       if (auditorEntry) {
         assert(
@@ -4423,20 +4546,53 @@ export async function executeCommand(args, execute) {
       return decision;
     }
     case "supervision-wait": {
-      const delivery = await waitForSupervisionMessage({
-        runId: args.run,
-        timeoutMs: supervisionWaitTimeout(args),
-        ack: args.ack,
-        executable: args.orca,
-        cwd: process.cwd(),
-      });
-      if (args.state && args.org)
+      const delivery = await waitForSupervisionOrMessage(args);
+      if (args.state && args.org && delivery.source !== "message-mcp")
         await shadowStatusFilter({
           org: validateOrg(readJSON(args.org)),
           stateDir: path.resolve(args.state),
           delivery,
         });
       return delivery;
+    }
+    case "message-send": {
+      const { stateDir, kickoffHash } = await messageScope(args.state);
+      return sendMessage(stateDir, kickoffHash, {
+        from: args.actor,
+        to: args.to,
+        key: args.key,
+        type: args.type,
+        subject: args.subject,
+        body: args.body,
+      });
+    }
+    case "message-inbox": {
+      const { stateDir, kickoffHash } = await messageScope(args.state);
+      const limit = args.limit === undefined ? 50 : Number(args.limit);
+      return args["wait-ms"] === undefined
+        ? {
+            messages: receiveMessages(stateDir, kickoffHash, args.actor, {
+              limit,
+            }),
+            timedOut: false,
+          }
+        : waitMessages(stateDir, kickoffHash, args.actor, {
+            limit,
+            timeoutMs: Number(args["wait-ms"]),
+          });
+    }
+    case "message-watch":
+      return watchDirectorMessages(
+        args.org,
+        args["wait-ms"] === undefined ? 0 : Number(args["wait-ms"]),
+      );
+    case "message-show": {
+      const { stateDir, kickoffHash } = await messageScope(args.state);
+      return getMessage(stateDir, kickoffHash, args.actor, args.id);
+    }
+    case "message-ack": {
+      const { stateDir, kickoffHash } = await messageScope(args.state);
+      return acknowledgeMessage(stateDir, kickoffHash, args.actor, args.id);
     }
     case "work":
       return work(
@@ -4576,31 +4732,17 @@ export async function executeCommand(args, execute) {
         readJSON(args.event),
       );
     case "doc-event-deliver": {
-      const terminalId = process.env.ORCA_TERMINAL_HANDLE;
-      if (!terminalId) {
-        throw new Error("Missing ORCA_TERMINAL_HANDLE for delivery addresses");
-      }
-      let active = await findActiveDispatch(terminalId, {
-        cwd: process.cwd(),
-        executable: args.orca,
-      });
-      if (active.status !== "active") {
-        active = await findCoordinatorRun(terminalId, {
-          cwd: process.cwd(),
-          executable: args.orca,
-        });
-      }
-      if (active.status !== "active") {
-        throw new Error(
-          `Unavailable delivery address: terminal ${terminalId} has no active dispatch or run`,
-        );
-      }
+      const scope = await messageScope(args.state);
+      assert(
+        scope.kickoffHash === args["kickoff-hash"],
+        "Document event kickoff does not match registered state",
+      );
       return deliverUndeliveredEvents(
-        path.resolve(args.state),
+        scope.stateDir,
         args["kickoff-hash"],
         args["workflow-id"],
         undefined,
-        { executable: args.orca, runId: active.runId, terminalId },
+        { actor: args.actor, to: args.to },
       );
     }
     case "workflow-create":
@@ -4821,20 +4963,45 @@ export async function executeCommand(args, execute) {
           );
         }
       }
-      const { signaled, id, entry, record } = sendSignal(args.org, {
-        worktreeId: args.worktree,
-        kind: args.kind,
-        text: args.text,
-        head: args.head,
-        source: args.source,
+      let signal;
+      try {
+        signal = sendSignal(args.org, {
+          worktreeId: args.worktree,
+          kind: args.kind,
+          text: args.text,
+          head: args.head,
+          source: args.source,
+        });
+      } catch (error) {
+        if (!/^Duplicate pending /.test(error.message)) throw error;
+        const record = listInbox(args.org).signals.find(
+          (item) =>
+            item.worktreeId === args.worktree &&
+            item.kind === args.kind &&
+            item.text === args.text.trim() &&
+            (args.kind !== "close-ready" ||
+              (item.head === args.head && item.source === args.source)),
+        );
+        if (!record) throw error;
+        const [entry] = listKickoffs(args.org, args.worktree).kickoffs;
+        signal = { signaled: false, id: record.id, entry, record };
+      }
+      const { signaled, id, entry } = signal;
+      const queued = sendMessage(entry.pm.stateDir, kickoffHashFor(entry), {
+        from: "pm",
+        to: "director",
+        key: `signal:${id}`,
+        type: args.kind,
+        subject: `${args.kind} from ${args.worktree}`,
+        body: args.text,
       });
-      const notification = await notifyDirectorSignal(
-        args.org,
-        entry,
-        record,
-        args.orca,
-      );
-      return { signaled, id, ...notification };
+      return {
+        signaled,
+        id,
+        queued: true,
+        messageId: queued.message.id,
+        replayed: queued.replayed,
+      };
     }
     case "director-inbox":
       return listInbox(args.org);
@@ -4842,9 +5009,9 @@ export async function executeCommand(args, execute) {
       return replySignal(args.org, {
         signalId: args.signal,
         text: args.text,
-        orcaExecutable: args.orca,
+        channel: "message-mcp",
       });
-    case "director-ack":
+    case "director-ack": {
       if (args.delivery) {
         const callerTerminal =
           args["director-terminal"] ??
@@ -4853,7 +5020,24 @@ export async function executeCommand(args, execute) {
         return acknowledgeDelivery(args.org, args.delivery, { callerTerminal });
       }
       assert(args.signal, "director-ack needs --signal ID or --delivery ID");
-      return acknowledgeSignal(args.org, args.signal);
+      const record = readSignal(args.org, args.signal);
+      const result = acknowledgeSignal(args.org, args.signal);
+      const [entry] = listKickoffs(args.org, record.worktreeId).kickoffs;
+      if (entry) {
+        const kickoffHash = kickoffHashFor(entry);
+        const id = messageIdFor(kickoffHash, "pm", `signal:${record.id}`);
+        try {
+          acknowledgeMessage(entry.pm.stateDir, kickoffHash, "director", id);
+        } catch (error) {
+          return {
+            ...result,
+            messageAcknowledged: false,
+            messageError: error.message,
+          };
+        }
+      }
+      return { ...result, messageAcknowledged: Boolean(entry) };
+    }
     case "director-delivery":
       return recordDeliveryReceipt(args.org, {
         source: args.source,
@@ -4948,6 +5132,7 @@ function directorRequest(args) {
     provider: args.provider,
     model: args.model,
     effort: args.effort,
+    messageOrg: path.resolve(args.org),
     ...(brief ? { brief, firstPrompt: directorBriefPrompt(brief) } : {}),
   };
 }

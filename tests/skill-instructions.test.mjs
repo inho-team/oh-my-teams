@@ -854,7 +854,7 @@ test("a silent worker is asked, then escalated, and never shown as progressing",
   assert.match(runtime, /node <runtime> supervision-next --org/);
   assert.match(
     runtime,
-    /orchestration send --to dispatch:<id> --type question/,
+    /message-send --state <pm-state> --actor <내 주소> --to task:<workflow task ID>/,
   );
   assert.match(runtime, /worker-read --dispatch <id> --source auto/);
   assert.match(runtime, /`무응답 N분`/);

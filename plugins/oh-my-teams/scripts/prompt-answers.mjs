@@ -357,7 +357,7 @@ export function agyTrustQuestionVisible(lines) {
  * screen is read again; Esc is never returned because it quits Claude. A
  * Claude `AskUserQuestion` screen is a `user-question`: it is not answered, and
  * `extra.instruction` tells the worker to ask the supervisor through
- * `orca orchestration ask`.
+ * a Message MCP question to the supervisor.
  *
  * @param {string[]} lines - Screen lines, oldest first.
  * @param {object} [context] - What the caller knows about the terminal.
@@ -378,7 +378,7 @@ export function classifyPromptScreen(lines, context = {}) {
   if (ask) {
     const instruction = [
       "이 화면은 사용자에게 직접 묻는 선택 화면입니다. 이 실행에서는 사용자에게 직접 묻지 않으므로 이 화면에 답하지 않습니다.",
-      "아래 질문을 `orca orchestration ask`로 감독자에게 다시 물어 주세요.",
+      "아래 질문을 Message MCP의 `send_message`로 감독자에게 다시 물어 주세요.",
       "질문:",
       ...ask.excerpt,
     ].join("\n");

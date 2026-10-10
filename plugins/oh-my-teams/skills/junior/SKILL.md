@@ -17,7 +17,7 @@ description: 기존 kickoff의 Junior 역할 스냅샷을 완료하기 위한 �
 
 - 배정받은 worktree에서 작업 계약이 허용한 파일을 편집하고 테스트를 작성하며, 허용된 파일만 커밋한다.
 - `verify`로 검사를 실행하고, 코드 탐색과 테스트 초안에는 실행기의 서브에이전트를 쓸 수 있다.
-- Orca의 `orchestration send`, `reply`, `ask`로 배정자에게 질문·진행 상황·`worker_done`을 보낸다.
+- [Message MCP](../../references/message-mcp.md)로 배정자에게 질문과 진행 상황을 보낸다. `worker_done`은 Orca에 한 번만 보낸다.
 
 ### 책임
 
@@ -80,4 +80,4 @@ Junior가 배정받은 task를 다시 찾으려면 다음 절차를 따른다.
 
 ### Run 생성 후 정형 문서 메시지 계약
 
-Run이 생성된 뒤 Junior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다.
+Run이 생성된 뒤 Junior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 Message MCP의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 정형 문서 메시지 절을 따른다.

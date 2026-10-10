@@ -25,6 +25,7 @@ import {
   validateOrg,
 } from "./core.mjs";
 import { assertStaffingPoolUsable } from "./workflow.mjs";
+import { messageMcpLaunch } from "./message-mcp-config.mjs";
 
 /**
  * How each provider's role reaches an Orca terminal, and under which agent id.
@@ -575,7 +576,7 @@ const PROVIDER_EXECUTABLES = Object.freeze({
 // bypass flag, model, effort, Codex's update-check override, Claude's
 // autocompact window and the first prompt. Shared by the role and director
 // commands so both type the same line into a terminal.
-function profileArgv(org, label, profileId, profile, firstPrompt) {
+function profileArgv(org, label, profileId, profile, firstPrompt, messageMcp) {
   assert(
     BARE_COMMAND.test(profile.command[0]),
     `${label} profile ${profileId} must name a bare executable name on PATH, not ${profile.command[0]}`,
@@ -624,6 +625,15 @@ function profileArgv(org, label, profileId, profile, firstPrompt) {
   const autoCompact =
     profile.provider === "claude" ? claudeAutoCompact(org) : null;
   if (autoCompact) argv.push("--autocompact", autoCompact);
+  const message = messageMcp
+    ? messageMcpLaunch(
+        profile.provider,
+        messageMcp.stateDir,
+        messageMcp.actor,
+        { orgFile: messageMcp.orgFile },
+      )
+    : null;
+  if (message) argv.push(...message.argv);
   if (firstPrompt !== undefined) {
     assert(
       typeof firstPrompt === "string" && firstPrompt.trim(),
@@ -646,6 +656,11 @@ function profileArgv(org, label, profileId, profile, firstPrompt) {
     effortRequested: profile.effort ?? null,
     ...(runner ? { runner } : {}),
     autoCompact,
+    ...(message
+      ? {
+          messageMcp: { actor: messageMcp.actor, available: message.available },
+        }
+      : {}),
   };
 }
 
@@ -671,6 +686,7 @@ function profileArgv(org, label, profileId, profile, firstPrompt) {
  *   command's own argument, built with {@link kickoffBriefPrompt} rather than
  *   free text. Only added when the profile's provider has a confirmed entry
  *   in {@link FIRST_PROMPT_ARG}.
+ * @param {string} [run.messageState] - Registered or soon-to-be registered PM state.
  * @returns {object} Role, profile, argv, shell command, requested model and
  *   the Claude `--autocompact` value (null for other providers).
  * @throws {Error} When the role is not held, the profile cannot be launched,
@@ -687,6 +703,7 @@ export function roleCommand(
     pmSelection,
     workflowTask,
     workflowState,
+    messageState,
   } = {},
 ) {
   const org = validateOrg(
@@ -719,11 +736,22 @@ export function roleCommand(
   const profileId = roleProfileId(org, role, handoffProfile);
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
+  const messageActor =
+    role === ROOT_ROLE ? "pm" : workflowTask ? `task:${workflowTask}` : null;
   return {
     role,
     profile: profileId,
     provider: profile.provider,
-    ...profileArgv(org, `Role ${role}`, profileId, profile, firstPrompt),
+    ...profileArgv(
+      org,
+      `Role ${role}`,
+      profileId,
+      profile,
+      firstPrompt,
+      messageState && messageActor
+        ? { stateDir: messageState, actor: messageActor }
+        : null,
+    ),
   };
 }
 
@@ -768,6 +796,7 @@ export function directorBriefPrompt(briefPath) {
  * @param {string} [request.model] - Model for an explicit provider.
  * @param {string} [request.effort] - Effort for an explicit provider.
  * @param {string} [request.firstPrompt] - Prompt from {@link directorBriefPrompt}.
+ * @param {string} [request.messageOrg] - Organization registry for the director mailbox.
  * @returns {object} Role `director`, profile, argv, shell command, requested
  *   model and effort.
  * @throws {Error} When both or neither of profile and provider are given, the
@@ -776,7 +805,7 @@ export function directorBriefPrompt(briefPath) {
  */
 export function directorCommand(
   requestedOrg,
-  { profile: profileId, provider, model, effort, firstPrompt } = {},
+  { profile: profileId, provider, model, effort, firstPrompt, messageOrg } = {},
 ) {
   const org = validateOrg(requestedOrg);
   let id;
@@ -822,7 +851,14 @@ export function directorCommand(
     role: DIRECTOR_ROLE,
     profile: id,
     provider: profile.provider,
-    ...profileArgv(org, "Director", id, profile, firstPrompt),
+    ...profileArgv(
+      org,
+      "Director",
+      id,
+      profile,
+      firstPrompt,
+      messageOrg ? { orgFile: messageOrg, actor: "director" } : null,
+    ),
   };
 }
 

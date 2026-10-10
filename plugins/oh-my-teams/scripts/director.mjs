@@ -19,10 +19,15 @@ import {
   withFileLock,
   writeJSON,
 } from "./core.mjs";
-import { listKickoffs, ownerProject } from "./kickoff-registry.mjs";
+import {
+  kickoffHashFor,
+  listKickoffs,
+  ownerProject,
+} from "./kickoff-registry.mjs";
 import { classifyPromptScreen } from "./prompt-answers.mjs";
 import { deliverPrompt, readTerminalScreen } from "./prompt-submission.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
+import { sendMessage } from "./message-store.mjs";
 
 /** Signal kinds PM may send to the Director. */
 export const SIGNAL_KINDS = Object.freeze([
@@ -599,6 +604,7 @@ export function listInbox(orgFile) {
  * @param {object} request - Reply request.
  * @param {string} request.signalId - Signal ID to reply to.
  * @param {string} request.text - Director's decision text.
+ * @param {string} [request.channel] - `message-mcp` stores the reply in the OMT mailbox.
  * @param {string} [request.orcaExecutable] - Orca binary for PM notification.
  * @param {Function} [request.listTerminals] - Injectable async lister returning
  *   Orca terminal records (`handle`, `title`, `worktreePath`), for tests.
@@ -616,7 +622,10 @@ export async function replySignal(orgFile, request) {
     assert(fs.existsSync(file), `Signal ${request.signalId} not found`);
     const record = readJSON(file);
     assert(
-      record.status === "pending",
+      record.status === "pending" ||
+        (request.channel === "message-mcp" &&
+          record.status === "replied" &&
+          record.reply === text),
       `Signal ${request.signalId} is already ${record.status}`,
     );
     updated = {
@@ -627,6 +636,26 @@ export async function replySignal(orgFile, request) {
     };
     writeJSON(file, updated);
   });
+
+  if (request.channel === "message-mcp") {
+    const [entry] = listKickoffs(orgFile, updated.worktreeId).kickoffs;
+    assert(entry, `Kickoff ${updated.worktreeId} is no longer registered`);
+    const queued = sendMessage(entry.pm.stateDir, kickoffHashFor(entry), {
+      from: "director",
+      to: "pm",
+      key: `reply:${updated.id}`,
+      type: "decision",
+      subject: `Reply to ${updated.kind} signal ${updated.id}`,
+      body: text,
+    });
+    return {
+      replied: true,
+      record: updated,
+      queued: true,
+      messageId: queued.message.id,
+      replayed: queued.replayed,
+    };
+  }
 
   // PM terminal notification. The kickoff registry does not store the PM's
   // terminal handle, because a PM can be relaunched in a new terminal. The

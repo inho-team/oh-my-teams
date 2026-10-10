@@ -37,7 +37,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { assert, run, withAsyncFileLock } from "./core.mjs";
 import { kickoffOwner } from "./delivery.mjs";
-import { listKickoffs } from "./kickoff-registry.mjs";
+import { kickoffHashFor, listKickoffs } from "./kickoff-registry.mjs";
+import { sendMessage } from "./message-store.mjs";
 import {
   probeTerminalBlock,
   runOrcaJson,
@@ -385,7 +386,13 @@ export async function verifySupervisor({
       "not-supervisor",
       `Caller ${callerHandle} is neither the PM bound to this kickoff's Run nor a PL that started ${role} from its own worktree`,
     );
-  return { handle: callerHandle, role: parent.role, runId: bound.id, kickoff };
+  return {
+    handle: callerHandle,
+    role: parent.role,
+    runId: bound.id,
+    kickoff,
+    workflowTaskId: parent.workflowTaskId,
+  };
 }
 
 function keyOf(classification) {
@@ -566,6 +573,8 @@ export async function answerTerminalPrompt({
   stateDir,
   supervisor,
   workflowId = null,
+  messageTarget = null,
+  kickoffHash = null,
   settleMs = DEFAULT_SETTLE_MS,
   rechecks = DEFAULT_RECHECKS,
   sleep = sleepFor,
@@ -666,11 +675,12 @@ export async function answerTerminalPrompt({
           };
           appendRecord(stateDir, reservation);
           const sent = await redirectWorker({
-            orca,
-            terminal,
             found,
             supervisor,
-            execute,
+            stateDir,
+            messageTarget,
+            kickoffHash,
+            key: `prompt:${fingerprint}:${digest}`,
           });
           const record = {
             ...reservation,
@@ -791,28 +801,31 @@ export async function answerTerminalPrompt({
 
 // A question the CLI asks its user is not answered with a key. The worker is
 // told through a message to ask the supervisor instead.
-async function redirectWorker({ orca, terminal, found, supervisor, execute }) {
-  const subject = "질문 화면: orchestration ask로 다시 물어 주세요";
+async function redirectWorker({
+  found,
+  supervisor,
+  stateDir,
+  messageTarget,
+  kickoffHash,
+  key,
+}) {
+  const subject = "질문 화면: 감독자에게 다시 물어 주세요";
   try {
-    await runOrcaJson(
-      orca,
-      [
-        "orchestration",
-        "send",
-        "--to",
-        terminal,
-        "--from",
-        supervisor.handle,
-        "--type",
-        "status",
-        "--subject",
-        subject,
-        "--body",
-        found.instruction ?? found.reason ?? subject,
-      ],
-      { execute },
+    assert(
+      messageTarget && kickoffHash,
+      "Prompt redirect requires a kickoff task address",
     );
-    return { sent: true, subject };
+    const from =
+      supervisor.role === "pm" ? "pm" : `task:${supervisor.workflowTaskId}`;
+    const result = sendMessage(stateDir, kickoffHash, {
+      from,
+      to: `task:${messageTarget}`,
+      key,
+      type: "instruction",
+      subject,
+      body: found.instruction ?? found.reason ?? subject,
+    });
+    return { sent: true, subject, messageId: result.message.id };
   } catch (error) {
     return { sent: false, subject, error: error.message };
   }
@@ -1186,6 +1199,8 @@ export async function answerPrompt({
       stateDir,
       supervisor,
       workflowId,
+      messageTarget: launch.workflowTaskId,
+      kickoffHash: kickoffHashFor(kickoff),
       settleMs,
       rechecks,
       sleep,

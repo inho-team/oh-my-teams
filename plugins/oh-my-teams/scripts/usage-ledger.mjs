@@ -295,6 +295,9 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
       workerId: launch.workerId ?? null,
       callerCwd,
       workflowId: launch.workflowId ?? null,
+      ...(launch.via === "worker-start" || launch.workflowTaskId
+        ? { workflowTaskId: launch.workflowTaskId ?? null }
+        : {}),
       // A fallback profile that took a task over names the profile it
       // replaced, so a report does not count its work as the role's own.
       ...(launch.handoffFrom
@@ -307,7 +310,6 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
       // the same terminal can tell a rework from a different task.
       ...(launch.via === "worker-start"
         ? {
-            workflowTaskId: launch.workflowTaskId ?? null,
             orcaTaskId: launch.orcaTaskId ?? null,
             purpose: launch.purpose ?? null,
           }

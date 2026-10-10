@@ -20,7 +20,7 @@ description: 기존 kickoff의 Senior 역할 스냅샷을 완료하기 위한 �
 - 조직이 Senior에게 자문자를 허용했으면 설계 대안이 둘 이상 남았거나 위험이 큰 검토에서 자기 역할로 `advise`를 호출할 수 있다.
 - 구현 task의 담당 역할로 직접 배정받았으면(workflow task의 `role`이 `senior`) 작업 계약이 허용한 파일을 편집하고 테스트를 작성하며, 허용된 파일만 커밋한다.
 - `verify`로 검사를 다시 실행하고, `review-record`와 `gate-check`로 검토 판정을 source fingerprint에 고정한다.
-- Orca의 `orchestration send`, `reply`, `ask`로 배정자에게 질문·진행 상황·`worker_done`을 보낸다.
+- [Message MCP](../../references/message-mcp.md)로 배정자에게 질문과 진행 상황을 보낸다. `worker_done`은 Orca에 한 번만 보낸다.
 
 ### 책임
 
@@ -96,4 +96,4 @@ Senior가 진행 중인 설계 또는 구현 작업을 다시 찾으려면 다�
 
 ### Run 생성 후 정형 문서 메시지 계약
 
-Run이 생성된 뒤 Senior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다.
+Run이 생성된 뒤 Senior가 배정자(PL 또는 PM)와 정형 문서를 다룰 때 Message MCP의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 정형 문서 메시지 절을 따른다.

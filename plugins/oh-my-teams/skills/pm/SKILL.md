@@ -31,14 +31,14 @@ node <runtime> kickoff-handoff-verify --org <organization.json> --worktree <이 
 - 조직과 kickoff 상태를 `show`, `validate`, `kickoff-show`, `kickoff-bind`로 조회하고 기록한다.
 - `workflow-create`, `workflow-resume`, `workflow-reserve`, `workflow-attach`, `workflow-retry`, `workflow-rework`, `workflow-handoff`, `workflow-settle`, `workflow-release`, `workflow-accept`로 작업 DAG와 예산을 관리한다. attempt의 호출 한도를 늘려야 하면 `workflow-allowance`를, 검토 없이 정산된 task를 수동으로 되돌려야 하면 `workflow-reopen`을, 이미 굳힌 통합 task에 검사를 더해야 하면 `workflow-integration-checks`를 쓴다. 세 명령 모두 승인자(`approvedBy`)와 사유(`reason`)를 요구하며 근거를 이사에게 보고한다.
 - 신규 조직의 Worker는 `worker-start --org <project>/.omt/organization.json --role worker --workflow-id <workflowId> --state <pm-state>` 래퍼로만 시작하고 `role-spec`으로 지시문 머리글을 만듭니다. 기존 조직의 PL·Senior·Junior는 저장된 역할과 실행 깊이에 따라서만 시작합니다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 모델·강도·권한 우회 플래그를 담아 연 터미널에서 모델을 확인하고, 두 명령에 같은 workflow와 state를 넘깁니다. Ollama 역할과 현재 계정이 아닌 프로필은 `work` 하네스를 사용하며, 실행기별 절차는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-start 래퍼` 절을 따릅니다.
-- 시도를 예약하기 전에 `terminal-idle-check`로 상태를 확인합니다. 질문으로 중단되면 PM이 `prompt-answer`로 답하고 다시 확인하며, idle 신호가 없으면 원시 `dispatch --inject`로 우회하지 않고, Orca의 `orchestration run-create`, `check`, `send`, `reply`, `worker-list`, `worker-show`, `worker-read`를 사용합니다. 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용합니다.
+- 시도를 예약하기 전에 `terminal-idle-check`로 상태를 확인합니다. 질문으로 중단되면 PM이 `prompt-answer`로 답하고 다시 확인하며, idle 신호가 없으면 원시 `dispatch --inject`로 우회하지 않고, Orca의 `orchestration run-create`, `check`, `worker-list`, `worker-show`, `worker-read`를 사용합니다. 역할 간 대화에는 Message MCP를 사용합니다. 실패 복구 절차가 허락할 때에만 `worker-stop`, `worker-abandon`, `worker-release`를 사용합니다.
 - `aggregate`, `failure-classify`, `lesson-record`, `supervision-next`로 보고를 취합하고 실패와 무응답을 판정하며, worker를 기다릴 때에는 heartbeat를 걸러 주는 `supervision-wait`를 쓰고, 필수 검토가 끝난 뒤 `accept`로 최종 수용을 기록한다.
 - 자료 정리와 반론 수집에는 실행기의 서브에이전트를 쓸 수 있다. 병렬 편집, 작업 계약이 필요한 일과 독립 검토는 별도 Worker에게 배정하며, 규칙은 [`../../references/subagents.md`](../../references/subagents.md)를 따른다.
 - 결과 감사의 이의에 답할 때에는 [`감사 응답 초안 시험 운영`](../../references/audit-response-drafting.md)에 따라 보조 실행에 근거 조사를 맡길 수 있다. PM이 초안을 확인하고 자신의 권한으로 응답을 기록한다.
 - 조직이 PM에게 자문자를 허용했으면 계획 확정, 최종 수용, 반복 실패 같은 결정 관문에서만 자기 역할로 `advise`를 호출한다.
 - 조직이 실험 Jev 판단을 켰으면 `supervision-wait`·`supervision-next`·`role-terminal`·`failure-classify`에 [`../../references/jev.md`](../../references/jev.md)가 정한 `--state`(와 `--org`·`--dispatch`)를 함께 넘긴다. 명령의 결과는 바뀌지 않으므로 기록을 읽거나 판단 근거로 쓰지 않는다.
 - kickoff의 워크트리끼리 합치는 병합은 게이트를 통과시킨 뒤 직접 진행한다. 원본 프로젝트(주인 체크아웃)에는 커밋하거나 병합하지 않으며, 그 전달은 이사가 `close`에서 브리프의 전달 방식으로 수행한다.
-- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다. `--text`의 본문은 두괄식 첫 줄(판정 또는 결정 요청)로 시작한다. progress 신호는 이사의 미처리 목록에 남지 않는 알림이므로 답을 기다리지 않는다. HEAD가 바뀌어 완료 준비 신호를 다시 보내면 이전 신호는 자동으로 대체된다. 이사 터미널이 선택 창이나 질문 화면을 띄우고 있어서 이번 신호가 곧바로 전달되지 않을 수 있는데, 이는 정상 동작이므로 PM이 따로 재전송할 필요가 없다. 다음번 `director-signal` 호출이 미배달 신호를 자동으로 묶어서 다시 전달하며, 자세한 내용은 [director 스킬](../director/SKILL.md)의 「신호 수신과 결정」 절을 따른다. 등록 kickoff 밖에서 독립 완료된 별도 Orca 워크트리 작업(예: 파일럿 작업)은 kickoff 등록이 없으므로 `director-signal`을 보낼 수 없으며, 사용자에게만 보고하고 끝내지 않고 `director-delivery --org <project>/.omt/organization.json --source <워크트리> --head <40자 commit HEAD> --director-terminal <이사 터미널> --pr <PR 주소>`로 완료 영수증을 남기고 이사 터미널에 전달한다. 이사 터미널이 stale하거나 전송이 실패한 경우 영수증은 불완전 상태(stale-terminal 또는 failed)로 남아 안전한 재시도가 가능하며, 이사의 `director-ack` 확인을 거쳐 인계가 확정된다.
+- 이사에게 진행·결정 요청·완료 준비 신호를 보낼 때에는 `director-signal --org <org> --worktree <pm-worktree-id> --kind decision|close-ready|blocked|progress --text ... [--head <sha> --source <통합 워크트리>]` 명령을 사용한다. `--text`의 본문은 두괄식 첫 줄(판정 또는 결정 요청)로 시작한다. progress 신호는 이사의 미처리 목록에 남지 않는 알림이므로 답을 기다리지 않는다. HEAD가 바뀌어 완료 준비 신호를 다시 보내면 이전 신호는 자동으로 대체된다. 신호는 Message MCP에 보관되며, `queued: true`는 이사가 처리했다는 뜻이 아니다. 결정을 기다릴 때에는 `supervision-wait --state <pm-state> --mailbox pm` 또는 `message-inbox --state <pm-state> --actor pm`으로 답장을 받고, 처리한 메시지를 `message-ack`으로 확인한다. 자세한 절차는 [Message MCP](../../references/message-mcp.md)를 따른다. 등록 kickoff 밖에서 독립 완료된 별도 Orca 워크트리 작업(예: 파일럿 작업)은 kickoff 등록이 없으므로 `director-signal`을 보낼 수 없다. 이 경우에는 `director-delivery --org <project>/.omt/organization.json --source <워크트리> --head <40자 commit HEAD> --director-terminal <이사 터미널> --pr <PR 주소>`로 완료 영수증을 남긴다. 영수증은 이사의 `director-ack` 확인을 거쳐 인계가 확정된다.
 - 무거운 작업(테스트·빌드·무거운 worker) 전에 자원 슬롯을 확보하고 작업이 끝나면 해제한다. 슬롯을 얻는 명령은 이사 스킬의 권한 절을 참조한다.
 
 ### 책임
@@ -171,7 +171,7 @@ kickoff 안의 커밋과 워크트리 사이 병합은 PM이 처리하되 단순
 
 감독 작업은 task가 수용되고 workflow 통합이 끝난 뒤에만 reuse/retain/release 중 하나를 정한다. 중간 회수는 `role-worktree-reclaim --org <organization.json> --state <pm-state> --workflow-id <workflowId> --workflow-task <task id> --repo <integration-worktree> --worktree <receipt-worktreeId> --merge-commit <integration-commit>`으로 수행한다. 이 명령은 Dispatch가 clear인지, worker-release와 역할 터미널 close가 성공했는지, 자식 HEAD가 통합 커밋의 조상인지, 자식 Git 상태가 깨끗한지를 확인한 뒤에만 Orca 회수를 호출한다. 하나라도 증명하지 못하면 워크트리를 보존하고 PM이 재사용하거나 조정한다. 실행 중·상태 불명 워커를 완료로 간주하지 않는다. 결과는 변경 내용, 검사 근거, 남은 사항, 확인 가능한 모델 사용량으로 보고한다.
 
-worker를 기다리는 동안에는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 따른다. 원시 `check --wait` 대신 `node <runtime> supervision-wait --run <runId> --org <organization.json> [--ack <deliveryId>]`로 기다리면 heartbeat만 온 경우에는 깨어나지 않는다. 대기 시간은 완료나 실패의 근거가 아니지만, 그 시점마다 활동을 다시 조회해 진행 요청과 보고를 결정한다. 무응답 worker를 사용자에게 `진행 중`으로 보고하지 않는다.
+worker를 기다리는 동안에는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 따른다. 원시 `check --wait` 대신 `node <runtime> supervision-wait --run <runId> --org <organization.json> --state <pm-state> --mailbox pm [--ack <deliveryId>]`로 기다리면 heartbeat만 온 경우에는 깨어나지 않는다. 대기 시간은 완료나 실패의 근거가 아니지만, 그 시점마다 활동을 다시 조회해 진행 요청과 보고를 결정한다. 무응답 worker를 사용자에게 `진행 중`으로 보고하지 않는다.
 
 ## 정형 문서
 
@@ -210,7 +210,7 @@ PM이 진행 중인 kickoff과 workflow를 다시 찾으려면 다음 절차를 
 
 ### Run 생성 후 정형 문서 메시지 계약
 
-Run이 생성된 뒤 PM이 이사와 정형 문서를 다룰 때 `orchestration send`/`reply`의 메시지 계약은 [`../../references/bluf.md`](../../references/bluf.md)의 "Run 생성 후 orchestration 메시지의 정형 문서 계약" 절을 따른다. `review-record`, `gate-check`, `accept` 명령을 부를 때는 `--org` 옵션을 항상 넘긴다.
+Run이 생성된 뒤 PM이 이사와 정형 문서를 다룰 때 [Message MCP](../../references/message-mcp.md)의 전달·확인 절차와 [`../../references/bluf.md`](../../references/bluf.md)의 정형 문서 메시지 계약을 따른다. `review-record`, `gate-check`, `accept` 명령을 부를 때는 `--org` 옵션을 항상 넘긴다.
 
 진행 상황이나 최종 결과를 보고하기 직전에 authoritative Goal 상태와 해당 Run의 `worker-list`를 다시 조회한다. 진행 상태 판정은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `worker-list와 liveness` 절을 따른다.
 

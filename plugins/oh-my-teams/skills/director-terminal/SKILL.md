@@ -26,7 +26,7 @@ description: 새 이사 세션을 사용자가 보는 Orca 탭에 열고, 기존
    조직에 원하는 실행기의 프로필이 있으면 `--profile`로, 없으면 `--provider`·`--model`·`--effort`로 지정한다. 두 방식을 함께 쓰면 거부된다. 명령만 미리 보려면 같은 인자로 `director-command`를 실행한다.
 
 3. **결과를 확인한다.** `ready: true`이고 `visible: true`이며 `screen`에 표시된 모델이 `modelRequested`와 같을 때에만 이사가 열린 것이다. `ready: false`(`status: "blocked"`)이면 화면을 증거로 붙여 사용자에게 보고하고, 다른 실행기나 모델로 대신 열지 않는다. 런타임은 Orca 화면에 붙지 않은 터미널을 닫고 거부하므로, 그 오류가 나오면 오류 문구가 안내하는 대로 보이는 터미널에서 다시 실행한다.
-4. **kickoff를 넘긴다.** 옛 이사가 감독하던 kickoff가 있으면 `--replace <옛 이사 터미널 핸들>`을 함께 주어, 등록부에서 그 핸들을 적은 모든 kickoff의 `director.terminalHandle`을 새 터미널로 바꾼다. PM의 `director-signal`은 등록부의 이 값으로 알림 대상을 찾으므로, 이 단계를 빠뜨리면 PM의 신호가 닫힌 터미널로 간다. 결과의 `reassigned.reassigned`에 넘긴 PM 워크트리 ID가, `unchanged`에 다른 이사의 kickoff가 적힌다. 등록부는 이사가 `ready`일 때에만 바뀐다.
+4. **kickoff를 넘긴다.** 옛 이사가 감독하던 kickoff가 있으면 `--replace <옛 이사 터미널 핸들>`을 함께 주어, 등록부에서 그 핸들을 적은 모든 kickoff의 `director.terminalHandle`을 새 터미널로 바꾼다. 이 값은 이사 세션의 소유권을 식별하며, PM의 신호 본문은 Message MCP 메시지함에 보관된다. 결과의 `reassigned.reassigned`에 넘긴 PM 워크트리 ID가, `unchanged`에 다른 이사의 kickoff가 적힌다. 등록부는 이사가 `ready`일 때에만 바뀐다.
 
    ```text
    node <runtime> director-terminal --org <project>/.omt/organization.json --provider codex --model <모델> --effort high --brief <브리프 경로> --replace <옛 이사 터미널 핸들>

@@ -15,7 +15,7 @@ Worker는 서열이 아니라 실행 역할입니다. PM은 작업 계약에 구
 - 독립 검토를 맡았을 때에는 구현 실행과 다른 실행 ID 및 별도 워크트리에서 소스와 검사 증거를 확인하고 `review-record`로 결과를 기록합니다.
 - 조사, 초안과 순차적인 좁은 편집에는 자기 실행기의 서브에이전트를 쓸 수 있습니다. 범위와 결과는 Worker가 소유하며 규칙은 [`../../references/subagents.md`](../../references/subagents.md)를 따릅니다.
 - 배정받은 범위의 검사를 `verify`로 실행하고, 필요한 자원 슬롯을 확보했다가 해제합니다.
-- Orca의 `orchestration send`, `reply`, `ask`로 PM에게 진행 상황과 결과를 전달합니다.
+- [Message MCP](../../references/message-mcp.md)로 PM에게 질문과 진행 상황을 전달합니다. 완료 결과인 `worker_done`은 Orca에 한 번만 보냅니다.
 
 ### 책임
 
