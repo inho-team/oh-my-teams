@@ -908,6 +908,7 @@ export async function recordDeliveryReceipt(orgFile, request, options = {}) {
 
   let intent;
   let earlyReturn;
+  let isRetry = false;
 
   withFileLock(deliveriesLock(orgFile), () => {
     const all = readDeliveries(orgFile);
@@ -981,6 +982,7 @@ export async function recordDeliveryReceipt(orgFile, request, options = {}) {
       }
 
       // Safe in-place retry when sent !== true: persist updated intent before submitting.
+      isRetry = true;
       const now = new Date().toISOString();
       intent = {
         ...existing,
@@ -1117,7 +1119,7 @@ export async function recordDeliveryReceipt(orgFile, request, options = {}) {
 
   return {
     delivered: Boolean(sent.notified),
-    retried: intent.updatedAt !== intent.createdAt,
+    retried: isRetry,
     record: finalRecord,
   };
 }

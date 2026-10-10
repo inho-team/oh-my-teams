@@ -2095,6 +2095,43 @@ test("safe retry updates existing delivery record in place without duplicating r
   assert.equal(deliveries[0].status, "pending-acknowledgement");
 });
 
+test("safe retry sets retried: true even when createdAt and updatedAt share the exact same timestamp", async (t) => {
+  const { orgFile } = makeProject(t);
+  const source = "/Users/jinsungkim/orca/workspaces/oh-my-teams/lawyer";
+  const head = "6c8bdca24b2c5b8d0f7d3aadc2ddaad51f219dad";
+  const pr = "https://github.com/inho-team/oh-my-teams/pull/161";
+
+  const staleOrca = orcaNotify(
+    [],
+    [],
+    [{ handle: "term_live", agentIdentity: "claude" }],
+  );
+
+  const first = await recordDeliveryReceipt(
+    orgFile,
+    { source, head, pr, directorTerminal: "term_stale" },
+    { execute: staleOrca.execute },
+  );
+
+  assert.equal(first.retried, false);
+
+  const liveOrca = orcaNotify(
+    [["input_accepted", "turn_started"]],
+    [],
+    [{ handle: "term_live", agentIdentity: "claude" }],
+  );
+
+  const retry = await recordDeliveryReceipt(
+    orgFile,
+    { source, head, pr, directorTerminal: "term_live" },
+    { execute: liveOrca.execute },
+  );
+
+  assert.equal(retry.delivered, true);
+  assert.equal(retry.retried, true);
+  assert.equal(retry.record.id, first.record.id);
+});
+
 test("acknowledgeDelivery marks receipt acknowledged with verified Director identity and updates inbox", async (t) => {
   const { orgFile } = makeProject(t);
   const source = "/Users/jinsungkim/orca/workspaces/oh-my-teams/lawyer";
