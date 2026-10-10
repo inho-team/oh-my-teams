@@ -87,7 +87,7 @@ node <runtime> worker-start --org <project>/.omt/organization.json --role worker
 node <runtime> role-spec --org <project>/.omt/organization.json --role worker --workflow-id <workflowId> --state <pm-state> --spec "<구체적인 작업>"
 ```
 
-`workflow-attach`가 receipt를 받으면 같은 역할의 수정·재시도·재검토는 그 `worktreeId`를 재사용한다. 새 task도 위의 수용·통합·Dispatch clear/release·소유 터미널 종료·Git clean 증거를 모두 갖춘 같은 역할 worktree를 우선 재사용한다. `role-worktree-create --worktree <worktreeId>`는 이 검증과 새 역할 세션 증명을 한 호출로 수행한다. 단, Junior 반려를 Senior가 같은 attempt에서 고칠 때에는 기존의 깨끗한 Senior 역할 워크트리를 `role-worktree-create ... --role senior --worktree <senior-worktreeId>`로 다시 열어 이전 Senior task의 보존·종료 증거와 동시 프로세스 부재를 확인하고, Junior HEAD와 Senior HEAD가 `--base`에 일치하는지 검증해 전환 기록을 만든다. 그 기록과 Senior receipt를 같은 task의 `workflow-rework`에 연결한다. 원래 task의 `role: junior`는 바꾸지 않으며 Senior 실행 역할은 전환 기록과 receipt에 따로 남긴다. workflow를 고정한 뒤 후속 task를 만들라는 우회는 하지 않는다.
+`workflow-attach`가 receipt를 받으면 같은 역할의 수정·재시도·재검토는 그 `worktreeId`를 재사용한다. 새 task도 위의 수용·통합·Dispatch clear/release·소유 터미널 종료·Git clean 증거를 모두 갖춘 같은 역할 worktree를 우선 재사용한다. `role-worktree-create --worktree <worktreeId>`는 이 검증과 새 역할 세션 증명을 한 호출로 수행한다. Junior 반려를 Senior가 같은 attempt에서 고칠 때에는 검토가 끝난 Junior 워크트리의 세션 종료와 Git 상태를 증명하고 그 워크트리를 재사용할 수 있다. 다른 Senior 워크트리를 선택할 수도 있으며, 두 경로의 판정과 전환 기록은 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「역할과 워크트리」 절을 따른다. 그 기록과 Senior receipt를 같은 task의 `workflow-rework`에 연결한다. 원래 task의 `role: junior`는 바꾸지 않으며 Senior 실행 역할은 전환 기록과 receipt에 따로 남긴다. workflow를 고정한 뒤 후속 task를 만들라는 우회는 하지 않는다.
 
 질문 때문에 점검이 거부되면 `node <runtime> prompt-answer --org <project>/.omt/organization.json --terminal <handle> --workflow-id <workflowId> --state <pm-state>`로 답한 뒤 위 `terminal-idle-check`부터 다시 실행한다. 분류기가 알아보지 못한 화면(캡처되지 않은 명령 승인·업데이트 안내)에는 키를 보내지 않으며, Orca가 그 터미널을 `blockedReason`으로 멈춘 상태라고 보고하면 `escalate`(`next`: `report-upstream`)로 끝나므로 점검으로 되돌아가지 않고 보고한다. `prompt-answer`는 호출한 터미널이 그 역할의 감독자이고 대상 터미널의 워크트리를 Orca가 이 kickoff의 PM 워크트리 아래에 만들어진 것으로 기록하고 있을 때에만 화면을 읽고 키를 한 번 보낸 뒤 다시 읽어 확인하며, 모든 시도를 PM state의 `prompt-answers.jsonl`에 기록한다. 호출자는 환경 변수로만 식별되므로 이 확인은 감독 관계가 없는 터미널의 실수 호출을 막을 뿐 악의적인 프로세스를 막지는 못한다. 결과가 `escalate`나 `unresolved`이거나 거부되었을 때, 또는 사람이 정해야 하는 질문일 때에만 PM이 `director-signal`로 이사에게 알린다. 절차와 거부 코드는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 「프롬프트 질문 답하기」 절을 따른다.
 
@@ -104,7 +104,7 @@ Claude 역할 터미널은 `--autocompact 250k`(조직의 `policy.claudeAutoComp
 | 상위 | Senior | 설계와 구현이 한 번에 필요한 일, 여러 모듈에 걸치는 변경, 공개 인터페이스·보안·데이터 형식 변경, Junior 구현이 검토에서 한 번 반려된 일 |
 | 하위 | Junior | 파일과 완료 조건이 닫힌 수정, 정해진 반복 편집, 인용 수집처럼 결정적으로 검증할 수 있는 일 |
 
-Senior에게 구현을 맡길 때에는 workflow task의 `role`을 `senior`로 적는다. 그 task의 필수 검토는 구현한 실행과 다른 Senior 실행이나 PL·PM이 맡으며, 같은 실행이 검토하면 런타임이 거부한다. 판단이 애매하면 하위 등급으로 시작한다. Junior 구현이 첫 검토에서 반려되어 Senior의 별도 소유권이 필요하면, Junior HEAD를 기준으로 만든 Senior 역할 세션 worktree를 전환 기록으로 증명해 같은 task의 `workflow-rework`로 연결한다. Junior가 두 번째 반려를 받을 때까지 기다리면 검토와 수정이 한 번씩 더 들고, finding도 여러 차례에 나뉘어 나오기 쉽다.
+Senior에게 구현을 맡길 때에는 workflow task의 `role`을 `senior`로 적는다. 그 task의 필수 검토는 구현한 실행과 다른 Senior 실행이나 PL·PM이 맡으며, 같은 실행이 검토하면 런타임이 거부한다. 판단이 애매하면 하위 등급으로 시작한다. Junior 구현이 첫 검토에서 반려되어 Senior의 별도 소유권이 필요하면, 검증된 Senior 역할 세션과 전환 기록을 같은 task의 `workflow-rework`로 연결한다. Junior가 두 번째 반려를 받을 때까지 기다리면 검토와 수정이 한 번씩 더 들고, finding도 여러 차례에 나뉘어 나오기 쉽다.
 
 ## 실행 깊이
 

@@ -779,6 +779,88 @@ test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", 
   assert.equal(result.transition.id, "promotion-w2-00");
 });
 
+test("a reviewed Junior task promotes in its own worktree after its terminal closes", async () => {
+  const worktreeId = "repo::/repo/junior-reviewed";
+  let created = false;
+  let closureRecorded = false;
+  let promoted;
+  const result = await createRoleWorktree(
+    {
+      org: "/repo/.omt/organization.json",
+      role: "senior",
+      repo: "/repo",
+      name: "same-task-senior",
+      base: "d".repeat(40),
+      state: "/repo/.omt",
+      "workflow-id": "workflow-promotion",
+      "workflow-task": "reviewed",
+      worktree: worktreeId,
+    },
+    {
+      organization: roleOrganization,
+      environment,
+      matrix: supervised,
+      create: async () => {
+        created = true;
+      },
+      read: () =>
+        workflowSnapshot({
+          tasks: {
+            reviewed: { role: "junior", state: "reviewed", worktreeId },
+          },
+        }),
+      git: async (_repo, argv) => {
+        if (argv[0] === "status") return "";
+        if (argv[0] === "rev-parse") return "reviewed-commit";
+        throw new Error(`unexpected git: ${argv.join(" ")}`);
+      },
+      launches: () => [
+        {
+          via: "worker-start",
+          workflowId: "workflow-promotion",
+          workflowTaskId: "reviewed",
+          worktreePath: "/repo/junior-reviewed",
+          terminal: "junior-terminal",
+          workerId: "junior-dispatch",
+        },
+      ],
+      closures: () => [],
+      recordClosure: () => {
+        closureRecorded = true;
+      },
+      active: async () => ({ status: "clear" }),
+      release: async (dispatchId) => releasedExternalTerminal(dispatchId),
+      close: async (_orca, argv) => closedTerminal(argv.at(-1)),
+      list: (() => {
+        let calls = 0;
+        return async () => ({
+          result: {
+            terminals: calls++ === 0 ? [{ handle: "junior-terminal" }] : [],
+          },
+        });
+      })(),
+      open: async (workspace) => {
+        assert.equal(closureRecorded, true);
+        return {
+          ready: true,
+          terminal: "senior-terminal",
+          role: "senior",
+          worktree: `id:${workspace.id}`,
+          modelRequested: "gpt-5.6-sol",
+        };
+      },
+      promote: async (...args) => {
+        promoted = args[3];
+        return { transition: { id: "promotion-same-worktree" } };
+      },
+    },
+  );
+  assert.equal(created, false);
+  assert.equal(result.id, worktreeId);
+  assert.equal(promoted.fromWorktreeId, worktreeId);
+  assert.equal(promoted.toWorktreeId, worktreeId);
+});
+
 test("a new same-role task reuses only an accepted, integrated, idle worktree", async () => {
   let created = false;
   let listed = 0;
@@ -852,6 +934,61 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
   );
   assert.equal(created, false);
   assert.equal(result.session.terminal, "new-senior-terminal");
+});
+
+test("an accepted same-role worktree prevents silent creation of another child", async () => {
+  let created = false;
+  const args = {
+    org: "/repo/.omt/organization.json",
+    role: "senior",
+    repo: "/repo",
+    name: "next-senior-task",
+    base: "e".repeat(40),
+    state: "/repo/.omt",
+    "workflow-id": "workflow-reuse",
+    "workflow-task": "next",
+  };
+  const ports = {
+    organization: roleOrganization,
+    environment,
+    matrix: supervised,
+    read: () =>
+      workflowSnapshot({
+        tasks: {
+          next: { role: "senior", state: "pending" },
+          prior: {
+            role: "senior",
+            state: "accepted",
+            worktreeId: "repo::/repo/senior-existing",
+          },
+        },
+      }),
+    create: async () => {
+      created = true;
+      return {
+        workspace: { id: "repo::/repo/new-senior", path: "/repo/new-senior" },
+        session: { ready: true, terminal: "senior-terminal" },
+      };
+    },
+  };
+  await assert.rejects(
+    () => createRoleWorktree(args, ports),
+    /Reuse an existing role worktree.*--fresh-reason/,
+  );
+  assert.equal(created, false);
+  const result = await createRoleWorktree(
+    {
+      ...args,
+      "fresh-reason": "The prior role worktree still has a live session",
+    },
+    ports,
+  );
+  assert.equal(created, true);
+  assert.equal(result.id, "repo::/repo/new-senior");
+  assert.equal(
+    result.freshReason,
+    "The prior role worktree still has a live session",
+  );
 });
 
 test("two consecutive role-worktree reuses retain and verify prior closure proofs", async (t) => {

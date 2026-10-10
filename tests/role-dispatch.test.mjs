@@ -801,6 +801,68 @@ test("a role does not start in the worktree another role's task works in", async
   }
 });
 
+test("a reviewed Junior task can open its own worktree for a validated Senior promotion", () => {
+  const worktreeId = "repo-1::/w/reviewed-junior";
+  const state = {
+    tasks: {
+      reviewed: {
+        role: "junior",
+        state: "reviewed",
+        worktreeId,
+        attempts: [{ receipt: { worktreeId, role: "junior" } }],
+      },
+    },
+  };
+  const check = (options) =>
+    assertWorktreeUnshared(
+      state,
+      "senior",
+      `id:${worktreeId}`,
+      "/w/pm",
+      options,
+    );
+  assert.throws(() => check(), /where junior works/);
+  assert.throws(
+    () => check({ promotionTaskId: "other" }),
+    /where junior works/,
+  );
+  check({ promotionTaskId: "reviewed" });
+  state.tasks.reviewed.state = "running";
+  assert.throws(
+    () => check({ promotionTaskId: "reviewed" }),
+    /where junior works/,
+  );
+  state.tasks.reviewed.state = "reviewed";
+  state.tasks.reviewed.worktreeTransitions = [
+    {
+      kind: "junior-to-senior",
+      fromRole: "junior",
+      toRole: "senior",
+      fromWorktreeId: worktreeId,
+      toWorktreeId: worktreeId,
+    },
+  ];
+  check();
+  state.tasks.reviewed.worktreeTransitions[0].usedAt = new Date().toISOString();
+  assert.throws(() => check(), /where junior works/);
+  delete state.tasks.reviewed.worktreeTransitions[0].usedAt;
+  state.tasks.prior = {
+    role: "junior",
+    state: "accepted",
+    attempts: [{ receipt: { worktreeId, role: "junior" } }],
+  };
+  check();
+  state.tasks.other = {
+    role: "junior",
+    state: "running",
+    attempts: [{ receipt: { worktreeId, role: "junior" } }],
+  };
+  assert.throws(
+    () => check({ promotionTaskId: "reviewed" }),
+    /where junior works on task other/,
+  );
+});
+
 test("the launch documents keep each role out of another role's worktree", () => {
   const read = (file) =>
     fs.readFileSync(
