@@ -12,6 +12,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
+  fileSha256,
   readJSON,
   run,
   writeJSON,
@@ -371,6 +372,7 @@ function gateEnvelope({
   docType,
   localId,
   author = { role: "senior", executionId: "doc-writer" },
+  ...extra
 }) {
   return {
     schemaVersion: 1,
@@ -384,6 +386,7 @@ function gateEnvelope({
     createdAt: new Date().toISOString(),
     basedOnRevision: null,
     reason: "test fixture",
+    ...extra,
   };
 }
 
@@ -680,8 +683,16 @@ test("권한_없는_수정", () => {
     const reviewsDir = path.join(stateDir, "reviews");
     fs.mkdirSync(reviewsDir, { recursive: true });
     fs.writeFileSync(
-      path.join(reviewsDir, "self-review.json"),
-      JSON.stringify({ implementationExecutionId: "charlie-exec-1" }, null, 2),
+      path.join(reviewsDir, "review-2.json"),
+      JSON.stringify(
+        {
+          id: "review-2",
+          reviewer: { executionId: "charlie-exec-1" },
+          implementationExecutionId: "charlie-exec-1",
+        },
+        null,
+        2,
+      ),
     );
 
     const selfReviewDoc = createTestDocument(
@@ -691,7 +702,10 @@ test("권한_없는_수정", () => {
       "review-2",
       { role: "senior", executionId: "charlie-exec-1" },
     );
-    selfReviewDoc.reviewFileRef = "reviews/self-review.json";
+    selfReviewDoc.reviewFileRef = {
+      path: "reviews/review-2.json",
+      sha256: fileSha256(path.join(reviewsDir, "review-2.json")),
+    };
     selfReviewDoc.implementationRef = null;
     const selfReviewFile = path.join(tempDir, "self-review-doc.json");
     fs.writeFileSync(selfReviewFile, JSON.stringify(selfReviewDoc, null, 2));
@@ -1477,6 +1491,11 @@ test("current_kickoff의_kickoffHash_전달_미커밋_문서", async (t) => {
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      author: { role: "senior", executionId: "senior-1" },
+      reviewFileRef: {
+        path: "reviews/review-1.json",
+        sha256: fileSha256(path.join(stateDir, "reviews", "review-1.json")),
+      },
     }),
   );
   const savedReview = await cliRun(

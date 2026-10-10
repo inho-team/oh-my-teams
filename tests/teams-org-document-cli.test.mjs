@@ -14,6 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  fileSha256,
   readJSON,
   run,
   writeJSON,
@@ -255,6 +256,32 @@ const reviewInput = (overrides = {}) => ({
   ...overrides,
 });
 
+function backingReviewRef(
+  stateDir,
+  localId,
+  reviewerExecutionId = "doc-writer",
+  implementationExecutionId = "impl-run",
+) {
+  const relativePath = `reviews/${localId}.json`;
+  const file = path.join(stateDir, relativePath);
+  if (!fs.existsSync(file)) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    writeJSON(
+      file,
+      reviewInput({
+        id: localId,
+        reviewer: {
+          kind: "agent-review",
+          role: "senior",
+          executionId: reviewerExecutionId,
+        },
+        implementationExecutionId,
+      }),
+    );
+  }
+  return { path: relativePath, sha256: fileSha256(file) };
+}
+
 test("doc-id builds a docId, and with --revision a matching docRef", async (t) => {
   const dir = tempDir(t);
   const kickoffHash = "a".repeat(64);
@@ -323,6 +350,10 @@ test("doc-save commits a new document and doc-show reports its revision and real
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      reviewFileRef: {
+        ...backingReviewRef(wt.stateDir, "review-1", "doc-writer"),
+        path: ".omt/reviews/review-1.json",
+      },
     }),
   );
   assert.equal(readJSON(docFile).docId, docId);
@@ -403,6 +434,7 @@ test("doc-save refuses a different execution writing the next revision of a docu
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "senior-1"),
       author: { role: "senior", executionId: "senior-1" },
     }),
   );
@@ -424,6 +456,7 @@ test("doc-save refuses a different execution writing the next revision of a docu
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "senior-1"),
       author: { role: "senior", executionId: "senior-2" },
     }),
   );
@@ -463,7 +496,10 @@ test("doc-save refuses a review-ref whose reviewFileRef names an implementation 
       docType: "review-ref",
       localId: "review-1",
       author: { role: "senior", executionId: "senior-1" },
-      reviewFileRef,
+      reviewFileRef: {
+        path: reviewFileRef,
+        sha256: fileSha256(path.join(wt.stateDir, reviewFileRef)),
+      },
     }),
   );
 
@@ -482,6 +518,93 @@ test("doc-save refuses a review-ref whose reviewFileRef names an implementation 
   );
 });
 
+test("doc-save rejects review references that do not identify the backing record", async (t) => {
+  const fx = project(t);
+  const wt = await worktree(fx, "wt-review-reference");
+  const { kickoffHash } = registerCurrent(fx, "wt-review-reference", wt);
+  const validRef = backingReviewRef(wt.stateDir, "review-1", "senior-1");
+  const cases = [
+    { ref: undefined, error: /reviewFileRef must name the backing review/ },
+    {
+      ref: { ...validRef, sha256: "0".repeat(64) },
+      error: /reviewFileRef SHA-256 does not match/,
+    },
+    {
+      ref: { ...validRef, path: "reviews/other.json" },
+      error: /reviewFileRef must name the backing review/,
+    },
+  ];
+
+  for (const [index, invalid] of cases.entries()) {
+    const docFile = path.join(wt.repoDir, `invalid-review-${index}.json`);
+    writeJSON(
+      docFile,
+      envelope({
+        kickoffHash,
+        stageSlug: "review",
+        docType: "review-ref",
+        localId: "review-1",
+        author: { role: "senior", executionId: "senior-1" },
+        reviewFileRef: invalid.ref,
+      }),
+    );
+    const saved = await cliRun(
+      wt.repoDir,
+      "doc-save",
+      "--state",
+      wt.stateDir,
+      "--doc",
+      docFile,
+    );
+    assert.notEqual(saved.code, 0);
+    assert.match(saved.stderr, invalid.error);
+  }
+
+  const backingFile = path.join(wt.stateDir, validRef.path);
+  const backing = readJSON(backingFile);
+  delete backing.implementationExecutionId;
+  writeJSON(backingFile, backing);
+  const missingImplementation = path.join(
+    wt.repoDir,
+    "missing-implementation.json",
+  );
+  writeJSON(
+    missingImplementation,
+    envelope({
+      kickoffHash,
+      stageSlug: "review",
+      docType: "review-ref",
+      localId: "review-1",
+      author: { role: "senior", executionId: "senior-1" },
+      reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "senior-1"),
+    }),
+  );
+  const missing = await cliRun(
+    wt.repoDir,
+    "doc-save",
+    "--state",
+    wt.stateDir,
+    "--doc",
+    missingImplementation,
+  );
+  assert.notEqual(missing.code, 0);
+  assert.match(
+    missing.stderr,
+    /Backing review must name an implementation execution/,
+  );
+
+  const shown = await cliRun(
+    wt.repoDir,
+    "doc-show",
+    "--state",
+    wt.stateDir,
+    "--doc-id",
+    `${kickoffHash}/none/review/review-ref/review-1`,
+  );
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.equal(JSON.parse(shown.stdout).exists, false);
+});
+
 test("doc-save's --refs rejects a reference to a document that does not exist or names a stale revision", async (t) => {
   const fx = project(t);
   const wt = await worktree(fx, "wt-refs");
@@ -495,6 +618,7 @@ test("doc-save's --refs rejects a reference to a document that does not exist or
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "doc-writer"),
     }),
   );
   const missingRefDocId = readJSON(missingRefDocFile).docId;
@@ -568,6 +692,7 @@ test("doc-save's --expected-revision rejects a stale optimistic-concurrency read
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "doc-writer"),
     }),
   );
   const firstSave = await cliRun(
@@ -588,6 +713,7 @@ test("doc-save's --expected-revision rejects a stale optimistic-concurrency read
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "doc-writer"),
       revision: 2,
       basedOnRevision: 1,
     }),
@@ -735,6 +861,8 @@ test("review-record, gate-check, accept and merge-check forward kickoffHash for 
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      reviewFileRef: backingReviewRef(stateDir, "review-1", "senior-1"),
+      author: { role: "senior", executionId: "senior-1" },
     }),
   );
   assert.equal(readJSON(reviewDocFile).docId, reviewDocId);
@@ -951,6 +1079,8 @@ test("gate-check only finds a workflow-scoped review-ref document when --workflo
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
+      reviewFileRef: backingReviewRef(stateDir, "review-1", "senior-1"),
+      author: { role: "senior", executionId: "senior-1" },
     }),
   );
   assert.equal(readJSON(reviewDocFile).docId, reviewDocId);

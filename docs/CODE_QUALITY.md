@@ -50,11 +50,11 @@ arrow 함수, template이 섞인 긴 실행문에 대한 회귀 테스트가 포
 
 | 항목 | 결과 |
 |---|---:|
-| 활성 `.mjs` 파일 | 160/160 모듈 문서화 |
-| 공개 export | 580/580 JSDoc |
-| 인식한 매개변수 태그 | 490개 (의미적 정확성은 별도 검토 대상) |
-| 공개 함수 | 499/499 `@returns` |
-| 오류 계약을 가진 공개 API | 235개 `@throws` 명시 |
+| 활성 `.mjs` 파일 | 161/161 모듈 문서화 |
+| 공개 export | 582/582 JSDoc |
+| 인식한 매개변수 태그 | 492개 (의미적 정확성은 별도 검토 대상) |
+| 공개 함수 | 501/501 `@returns` |
+| 오류 계약을 가진 공개 API | 236개 `@throws` 명시 |
 | 장문 실행문·문서 누락 | 0건 |
 
 `@throws`는 실제 오류 계약이 있는 API에만 쓴다. 순수 집계 함수처럼 예외를 의도적으로 만들지 않는 함수에 허위 `@throws`를 추가하지 않는다.
@@ -66,5 +66,6 @@ arrow 함수, template이 섞인 긴 실행문에 대한 회귀 테스트가 포
 - `workflow-store.mjs`: workflow 경로, 잠금, event append, snapshot 읽기
 - `status.mjs`: 실행·gate·quota 상태의 읽기 전용 projection
 - `orca-adapter.mjs`: 실행 파일 선택, runtime discovery, JSON 호출, worktree 생성
+- `document-authority.mjs`: 정형 문서 CLI의 작성 권한과 검토 참조 검증
 
 주석은 코드 동작을 그대로 번역하지 않는다. 권한 경계, 캐시 무효화, 프로세스 생존 불명, append-only 기록처럼 잘못 단순화하기 쉬운 이유를 설명한다.
