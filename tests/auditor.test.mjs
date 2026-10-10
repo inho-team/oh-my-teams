@@ -22,6 +22,7 @@ import {
   kickoffEntryName,
   kickoffResultRepoDecide,
   listKickoffs,
+  recordAuditorLaunch,
   registerKickoff,
   registryDirectory,
   releaseKickoff,
@@ -34,6 +35,7 @@ import {
   assertKickoffCloseReady,
   requirementsFidelity,
   requirementsFidelityConfirm,
+  requirementsAmend,
   requirementsPresent,
 } from "../plugins/oh-my-teams/scripts/requirements.mjs";
 import { minimalRequirements } from "./requirements-draft-fixture.mjs";
@@ -302,6 +304,11 @@ function kickoff(
     terminal: auditorHandle,
     stateDir: entry.pm.stateDir,
   });
+  recordAuditorLaunch(org, {
+    worktreeId,
+    terminalHandle: auditorHandle,
+    path: dir,
+  });
   return {
     dir,
     repo,
@@ -493,10 +500,18 @@ test("outcome objection -> PM response -> persuaded ruling -> checked -> accept"
 
   await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.repo,
+    ),
   );
   const { accepted } = await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(
@@ -520,6 +535,73 @@ test("outcome objection -> PM response -> persuaded ruling -> checked -> accept"
   );
 });
 
+test("new fidelity items and response evidence each require another outcome check", async (t) => {
+  const fixture = kickoff(t);
+  fs.writeFileSync(path.join(fixture.dir, "evidence.txt"), "first proof\n");
+  const objectionId = await objectAndResolve(fixture, {
+    resultHead: fixture.head,
+    evidencePath: "evidence.txt",
+  });
+  const check = () =>
+    withOrcaHandle(fixture.auditorHandle, () =>
+      auditChecked(
+        fixture.org,
+        fixture.worktreeId,
+        "outcome",
+        BRIEF_ITEMS,
+        undefined,
+        fixture.head,
+        fixture.repo,
+      ),
+    );
+  const accept = () =>
+    withOrcaHandle(fixture.auditorHandle, () =>
+      auditAccept(
+        fixture.org,
+        fixture.worktreeId,
+        "outcome",
+        fixture.head,
+        fixture.repo,
+      ),
+    );
+  await check();
+  await accept();
+  await requirementsFidelity(fixture.org, fixture.worktreeId, {
+    head: fixture.head,
+    repo: fixture.repo,
+    recordedBy: "pm",
+    items: [
+      { type: "statement", id: "s1", status: "met", evidence: "first proof" },
+      { type: "criterion", id: "c1", status: "met", evidence: "first proof" },
+    ],
+  });
+  await assert.rejects(accept(), /checked does not cover.*current binding/);
+  await check();
+  await accept();
+
+  const evidencePath = path.join(fixture.dir, "second-evidence.txt");
+  fs.writeFileSync(evidencePath, "second proof\n");
+  const { response } = recordOutcomeResponseDirectly(fixture, {
+    objectionId,
+    argument: "new evidence resolves the objection",
+    evidenceRefs: [
+      { path: "second-evidence.txt", sha256: fileSha256(evidencePath) },
+    ],
+  });
+  await withOrcaHandle(fixture.auditorHandle, () =>
+    auditRuling(fixture.org, fixture.worktreeId, {
+      checkpoint: "outcome",
+      objectionId,
+      respondedAgainst: response.id,
+      verdict: "persuaded",
+      reason: "second proof supports the result",
+    }),
+  );
+  await assert.rejects(accept(), /checked does not cover.*current binding/);
+  await check();
+  await accept();
+});
+
 test("hasValidAcceptance refuses once a cited response evidence file changes, same HEAD and fingerprint", async (t) => {
   const fixture = kickoff(t);
   const evidencePath = "evidence.txt";
@@ -527,10 +609,18 @@ test("hasValidAcceptance refuses once a cited response evidence file changes, sa
 
   await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.repo,
+    ),
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(
@@ -574,10 +664,18 @@ test("hasValidAcceptance refuses once a new unresolved objection is raised after
 
   await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.repo,
+    ),
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(
@@ -633,10 +731,18 @@ test("path B: a presentation after acceptance invalidates it, and re-audit + re-
 
   await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.repo,
+    ),
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(
@@ -685,14 +791,34 @@ test("path B: a presentation after acceptance invalidates it, and re-audit + re-
     false,
   );
 
-  // Re-auditing (checked coverage still holds, the objection is still
-  // persuaded on its latest response) and re-accepting must succeed — the
-  // stale old acceptance must not itself block recording the new one.
+  await assert.rejects(
+    withOrcaHandle(fixture.auditorHandle, () =>
+      auditAccept(
+        fixture.org,
+        fixture.worktreeId,
+        "outcome",
+        fixture.head,
+        fixture.repo,
+      ),
+    ),
+    /checked does not cover.*current binding/,
+  );
+
+  // Re-checking every item under the new evidence binding permits a new
+  // acceptance; the stale old acceptance does not block it.
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.repo,
+    ),
   );
   const { accepted } = await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(
@@ -718,6 +844,7 @@ test("path B: a presentation after acceptance invalidates it, and re-audit + re-
   // The superseded acceptance is kept as history, not erased.
   const record = readAudit(fixture.org, fixture.worktreeId).checkpoints.outcome;
   assert.equal(record.acceptanceHistory.length, 1);
+  assert.equal(record.checkedHistory.length, 1);
 });
 
 test("ruling history is preserved across a not-persuaded then a persuaded verdict on a stronger response", async (t) => {
@@ -789,10 +916,18 @@ test("auditAccept refuses a resultHead that does not match the workspace's actua
 
   await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.repo,
+    ),
   );
 
   await assert.rejects(
@@ -816,10 +951,18 @@ test("hasValidAcceptance returns false, without throwing, once the declared resu
 
   await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.repo,
+    ),
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(
@@ -866,10 +1009,18 @@ test(
 
     await objectAndResolve(fixture, { resultHead: fixture.head, evidencePath });
     await withOrcaHandle(fixture.auditorHandle, () =>
-      auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-        { type: "statement", id: "s1" },
-        { type: "criterion", id: "c1" },
-      ]),
+      auditChecked(
+        fixture.org,
+        fixture.worktreeId,
+        "outcome",
+        [
+          { type: "statement", id: "s1" },
+          { type: "criterion", id: "c1" },
+        ],
+        undefined,
+        fixture.head,
+        fixture.repo,
+      ),
     );
     await withOrcaHandle(fixture.auditorHandle, () =>
       auditAccept(
@@ -1123,10 +1274,18 @@ test("director-signal refuses a close-ready under an audited kickoff before the 
   await assert.rejects(signalClose, /valid outcome-audit acceptance/);
 
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.repo,
+    ),
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(
@@ -1903,6 +2062,8 @@ test(
     // on this machine, which is exactly what the rejection below proves did
     // not happen.
     const launchesBefore = readLaunches(fixture.org).length;
+    const auditorBefore = listKickoffs(fixture.org, fixture.worktreeId)
+      .kickoffs[0].auditor;
     await assert.rejects(
       roleTerminalAuditor(),
       /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
@@ -1912,10 +2073,10 @@ test(
       /Agy 감사 지원은 별도의 신뢰 실행 경로 설계가 필요/,
     );
 
-    // recordAuditorLaunch (kickoff-registry) never ran: the kickoff entry
-    // still carries no `auditor` field.
+    // recordAuditorLaunch (kickoff-registry) never ran: the pre-existing
+    // auditor handle is unchanged.
     const [afterEntry] = listKickoffs(fixture.org, fixture.worktreeId).kickoffs;
-    assert.equal(afterEntry.auditor, undefined);
+    assert.deepEqual(afterEntry.auditor, auditorBefore);
     // recordLaunchSafely (usage-ledger), which only runs once openRoleTerminal
     // has already returned, never ran either.
     assert.equal(readLaunches(fixture.org).length, launchesBefore);
@@ -3577,6 +3738,42 @@ test("cli audit-checked: succeeds with the auditor's handle, and refuses without
   );
   assert.equal(succeeded.code, 0, succeeded.stderr);
   assert.equal(JSON.parse(succeeded.stdout).recorded, true);
+
+  const missingBinding = runCli(
+    [
+      "audit-checked",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--checkpoint",
+      "outcome",
+      "--from",
+      requestFile,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: fixture.auditorHandle } },
+  );
+  assert.notEqual(missingBinding.code, 0);
+  assert.match(missingBinding.stderr, /resultHead is required/);
+  const outcome = runCli(
+    [
+      "audit-checked",
+      "--org",
+      fixture.org,
+      "--worktree",
+      fixture.worktreeId,
+      "--checkpoint",
+      "outcome",
+      "--from",
+      requestFile,
+      "--head",
+      fixture.head,
+      "--repo",
+      fixture.repo,
+    ],
+    { cwd: fixture.dir, env: { ORCA_TERMINAL_HANDLE: fixture.auditorHandle } },
+  );
+  assert.equal(outcome.code, 0, outcome.stderr);
 });
 
 test("cli audit-accept: succeeds with the auditor's handle once checked coverage holds, and refuses without one", async (t) => {
@@ -3747,6 +3944,11 @@ function registeredKickoffProject(t, worktreeId) {
     role: AUDITOR_ROLE,
     terminal: auditorHandle,
     stateDir: entry.pm.stateDir,
+  });
+  recordAuditorLaunch(org, {
+    worktreeId,
+    terminalHandle: auditorHandle,
+    path: owner,
   });
 
   return {
@@ -5450,6 +5652,11 @@ test("D3 (c): a narrower or different-auditor re-send keeps each existing checke
     terminal: second,
     stateDir: fixture.entry.pm.stateDir,
   });
+  recordAuditorLaunch(fixture.org, {
+    worktreeId: fixture.worktreeId,
+    terminalHandle: second,
+    path: fixture.dir,
+  });
   await withOrcaHandle(second, () =>
     auditChecked(fixture.org, fixture.worktreeId, "brief", [BRIEF_ITEMS[0]]),
   );
@@ -5470,6 +5677,213 @@ test("D3 (c): a narrower or different-auditor re-send keeps each existing checke
     type: "criterion",
     id: "c2",
     verifiedCaller: { role: AUDITOR_ROLE, handle: second },
+  });
+});
+
+test("reopening an auditor terminal revokes the old handle for every auditor write", async (t) => {
+  const fixture = kickoff(t);
+  const replacement = "term_auditor_reopened";
+  recordLaunch(fixture.org, {
+    via: "role-terminal",
+    role: AUDITOR_ROLE,
+    terminal: replacement,
+    stateDir: fixture.entry.pm.stateDir,
+  });
+  recordAuditorLaunch(fixture.org, {
+    worktreeId: fixture.worktreeId,
+    terminalHandle: replacement,
+    path: fixture.dir,
+  });
+  const before = readAudit(fixture.org, fixture.worktreeId);
+  const attempts = [
+    () =>
+      auditObjection(fixture.org, fixture.worktreeId, {
+        checkpoint: "brief",
+        target: BRIEF_ITEMS[0],
+        kind: "gap",
+        description: "stale terminal objection",
+        rebuttalRequested: "review this again",
+      }),
+    () =>
+      auditRuling(fixture.org, fixture.worktreeId, {
+        checkpoint: "brief",
+        objectionId: "missing",
+        respondedAgainst: "missing",
+        verdict: "persuaded",
+        reason: "stale terminal ruling",
+      }),
+    () => auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS),
+    () => auditAccept(fixture.org, fixture.worktreeId, "brief"),
+  ];
+  for (const attempt of attempts) {
+    await assert.rejects(
+      withOrcaHandle(fixture.auditorHandle, attempt),
+      /not the current auditor terminal/,
+    );
+  }
+  assert.deepEqual(readAudit(fixture.org, fixture.worktreeId), before);
+  await withOrcaHandle(replacement, async () => {
+    await auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS);
+    await auditAccept(fixture.org, fixture.worktreeId, "brief");
+  });
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "brief"),
+    true,
+  );
+});
+
+test("amending text under the same item IDs requires a fresh brief and outcome check", async (t) => {
+  const fixture = kickoff(t);
+  await withOrcaHandle(fixture.auditorHandle, async () => {
+    await auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS);
+    await auditAccept(fixture.org, fixture.worktreeId, "brief");
+    await auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      BRIEF_ITEMS,
+      undefined,
+      fixture.head,
+      fixture.repo,
+    );
+    await auditAccept(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      fixture.head,
+      fixture.repo,
+    );
+  });
+  const ledger = readLedger(fixture.org, fixture.worktreeId);
+  const statements = ledger.statements.map((item) => ({
+    ...item,
+    text: `${item.text} with amended scope`,
+  }));
+  const criteria = ledger.criteria.map((item) => ({
+    ...item,
+    text: `${item.text} with amended criterion`,
+  }));
+  await requirementsAmend(fixture.org, fixture.worktreeId, {
+    statements,
+    criteria,
+    callerCwd: fixture.dir,
+  });
+  for (const checkpoint of ["brief", "outcome"]) {
+    const args = checkpoint === "outcome" ? [fixture.head, fixture.repo] : [];
+    assert.equal(
+      await hasValidAcceptance(
+        fixture.org,
+        fixture.worktreeId,
+        checkpoint,
+        ...args,
+      ),
+      false,
+    );
+    await assert.rejects(
+      withOrcaHandle(fixture.auditorHandle, () =>
+        auditAccept(fixture.org, fixture.worktreeId, checkpoint, ...args),
+      ),
+      /checked does not cover.*current binding/,
+    );
+    await withOrcaHandle(fixture.auditorHandle, async () => {
+      await auditChecked(
+        fixture.org,
+        fixture.worktreeId,
+        checkpoint,
+        [BRIEF_ITEMS[0]],
+        undefined,
+        ...args,
+      );
+      await assert.rejects(
+        auditAccept(fixture.org, fixture.worktreeId, checkpoint, ...args),
+        /checked does not cover/,
+      );
+      await auditChecked(
+        fixture.org,
+        fixture.worktreeId,
+        checkpoint,
+        [BRIEF_ITEMS[1]],
+        undefined,
+        ...args,
+      );
+      await auditAccept(fixture.org, fixture.worktreeId, checkpoint, ...args);
+    });
+    assert.equal(
+      await hasValidAcceptance(
+        fixture.org,
+        fixture.worktreeId,
+        checkpoint,
+        ...args,
+      ),
+      true,
+    );
+    assert.equal(
+      readAudit(fixture.org, fixture.worktreeId).checkpoints[checkpoint]
+        .checkedHistory.length,
+      1,
+    );
+  }
+});
+
+test("a new result HEAD requires a new outcome check while brief coverage stays valid", async (t) => {
+  const fixture = kickoff(t);
+  await withOrcaHandle(fixture.auditorHandle, async () => {
+    await auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS);
+    await auditAccept(fixture.org, fixture.worktreeId, "brief");
+    await auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      BRIEF_ITEMS,
+      undefined,
+      fixture.head,
+      fixture.repo,
+    );
+    await auditAccept(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      fixture.head,
+      fixture.repo,
+    );
+  });
+  fs.writeFileSync(path.join(fixture.repo, "new-result.txt"), "new result\n");
+  git(fixture.repo, ["add", "new-result.txt"]);
+  git(fixture.repo, ["commit", "-q", "-m", "new result"]);
+  const newHead = git(fixture.repo, ["rev-parse", "HEAD"]);
+  assert.equal(
+    await hasValidAcceptance(fixture.org, fixture.worktreeId, "brief"),
+    true,
+  );
+  await assert.rejects(
+    withOrcaHandle(fixture.auditorHandle, () =>
+      auditAccept(
+        fixture.org,
+        fixture.worktreeId,
+        "outcome",
+        newHead,
+        fixture.repo,
+      ),
+    ),
+    /checked does not cover.*current binding/,
+  );
+  await withOrcaHandle(fixture.auditorHandle, async () => {
+    await auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      BRIEF_ITEMS,
+      undefined,
+      newHead,
+      fixture.repo,
+    );
+    await auditAccept(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      newHead,
+      fixture.repo,
+    );
   });
 });
 
@@ -5621,6 +6035,7 @@ test("D3 (f): audit records written before verifiedCaller existed stay valid per
   });
   const legacy = readAudit(fixture.org, fixture.worktreeId);
   const brief = legacy.checkpoints.brief;
+  delete brief.checkedBoundHash;
   for (const list of [
     brief.objections,
     brief.responses,
@@ -5660,7 +6075,7 @@ test("D3 (g): a PM-shaped or unlaunched handle still cannot record an auditor-on
     withOrcaHandle(fixture.pmHandle, () =>
       auditChecked(fixture.org, fixture.worktreeId, "brief", BRIEF_ITEMS),
     ),
-    /is not the auditor terminal launched/,
+    /is not the current auditor terminal/,
   );
   assert.equal(d3Counts(fixture).checked, 0);
 });
@@ -5856,6 +6271,9 @@ const auditorAcceptsOutcome = (
       fixture.worktreeId,
       "outcome",
       OUTCOME_CHECKED,
+      undefined,
+      head,
+      repo,
     );
     return auditAccept(fixture.org, fixture.worktreeId, "outcome", head, repo);
   });
@@ -6741,9 +7159,9 @@ test("f7-1: with no decision record, audit-accept, close-ready, deliver and comp
 
 test("f7-2: an outcome objection records the ambiguity as a bindingDefect without touching binding or checked; any other binding error still refuses", async (t) => {
   const fixture = await f7Kickoff(t);
-  await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", OUTCOME_CHECKED),
-  );
+  const seeded = readAudit(fixture.org, fixture.worktreeId);
+  seeded.checkpoints.outcome.checked = OUTCOME_CHECKED;
+  writeJSON(auditFilePath(fixture.org, fixture.worktreeId), seeded);
   const before = readAudit(fixture.org, fixture.worktreeId).checkpoints.outcome;
   const { recorded } = await f7Objection(fixture);
   assert.equal(recorded, true);

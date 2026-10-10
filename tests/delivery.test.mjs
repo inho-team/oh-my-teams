@@ -14,6 +14,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   listKickoffs,
+  recordAuditorLaunch,
   registerKickoff,
   releaseKickoff,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
@@ -426,6 +427,11 @@ test(
       terminal: auditorHandle,
       stateDir: entry.pm.stateDir,
     });
+    recordAuditorLaunch(fixture.org, {
+      worktreeId: fixture.worktreeId,
+      terminalHandle: auditorHandle,
+      path: fixture.project,
+    });
 
     const previousHandle = process.env.ORCA_TERMINAL_HANDLE;
     process.env.ORCA_TERMINAL_HANDLE = auditorHandle;
@@ -458,10 +464,18 @@ test(
       staged.workflowId,
       staged.revision,
     );
-    await auditChecked(fixture.org, fixture.worktreeId, "outcome", [
-      { type: "statement", id: "s1" },
-      { type: "criterion", id: "c1" },
-    ]);
+    await auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      [
+        { type: "statement", id: "s1" },
+        { type: "criterion", id: "c1" },
+      ],
+      undefined,
+      fixture.head,
+      fixture.worktree,
+    );
     await auditAccept(
       fixture.org,
       fixture.worktreeId,

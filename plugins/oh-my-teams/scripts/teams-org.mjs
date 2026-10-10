@@ -568,7 +568,7 @@ export const ALLOWED_OPTIONS = {
   "audit-objection": ["org", "worktree", "from"],
   "audit-response": ["org", "worktree", "from"],
   "audit-ruling": ["org", "worktree", "from"],
-  "audit-checked": ["org", "worktree", "checkpoint", "from"],
+  "audit-checked": ["org", "worktree", "checkpoint", "from", "head", "repo"],
   "audit-accept": ["org", "worktree", "checkpoint", "head", "repo"],
   deliver: [
     "org",
@@ -3856,6 +3856,8 @@ export async function executeCommand(args, execute) {
         args.checkpoint,
         payload.checked,
         pickDeclaredIdentity(payload),
+        args.head,
+        args.repo,
       );
     }
     case "audit-accept":

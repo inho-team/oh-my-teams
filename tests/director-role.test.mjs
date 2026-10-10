@@ -37,6 +37,7 @@ import {
   cleanupKickoffBranches,
   kickoffEntryName,
   recordDelivery,
+  recordAuditorLaunch,
   registerKickoff,
   registryDirectory,
   releaseKickoff,
@@ -1258,6 +1259,11 @@ async function workerAuditedProject(t, worktreeId) {
     terminal: auditorHandle,
     stateDir: entry.pm.stateDir,
   });
+  recordAuditorLaunch(org, {
+    worktreeId,
+    terminalHandle: auditorHandle,
+    path: project,
+  });
 
   return { project, org, worktree, worktreeId, head, entry, auditorHandle };
 }
@@ -1467,7 +1473,15 @@ test("Worker 경로: 원장 close-ready와 감사 brief·outcome 수용을 모�
     staged.revision,
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
-    auditChecked(fixture.org, fixture.worktreeId, "outcome", checked),
+    auditChecked(
+      fixture.org,
+      fixture.worktreeId,
+      "outcome",
+      checked,
+      undefined,
+      fixture.head,
+      fixture.worktree,
+    ),
   );
   await withOrcaHandle(fixture.auditorHandle, () =>
     auditAccept(

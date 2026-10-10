@@ -345,6 +345,7 @@ if (command.role === AUDITOR_ROLE) {
     "brief": {
       "binding": { "ledgerHash": "..." },
       "checked": [{ "type": "statement", "id": "s1" }, { "type": "criterion", "id": "c1" }],
+      "checkedBoundHash": "hash({ledgerHash})", "checkedHistory": [],
       "objections": [
         {
           "id": "o1", "target": { "type": "criterion", "id": "c1" },
@@ -363,7 +364,7 @@ if (command.role === AUDITOR_ROLE) {
     },
     "outcome": {
       "binding": { "ledgerHash": "...", "resultHead": "...", "evidenceFingerprint": "..." },
-      "checked": [], "objections": [], "responses": [], "rulings": [], "acceptance": null
+      "checked": [], "checkedBoundHash": null, "checkedHistory": [], "objections": [], "responses": [], "rulings": [], "acceptance": null
     }
   }
 }
@@ -371,17 +372,19 @@ if (command.role === AUDITOR_ROLE) {
 
 `checkpoints.brief.binding`은 원장 hash만 담는다(보충 계약 1: "브리프 감사는 계약(원장 hash)에만"). `checkpoints.outcome.binding`은 원장 hash·결과 HEAD·**항상 계산되는** `evidenceFingerprint`를 담는다 — 보충 계약 3 4항이 지적한 "`evidenceKey`를 null로 생략"하는 문제를 없애기 위해, `evidenceFingerprint`는 그 시점에 실제로 감사 대상인 증거 전체를 `hash()`(core.mjs, taskHash와 같은 함수)로 묶은 값이며 항상 계산된다. 묶는 대상은 세 가지다: fidelity 초안의 `items`, 그때까지의 `presentations`의 `evidence.sha256` 목록, 그리고 **`checkpoints.outcome`의 각 objection에 대한 가장 최근 response의 `evidenceRefs.sha256` 목록**(objectionId로 정렬) — 이 세 번째 항목이 보충 계약 4 2항이 지적한 결함(fingerprint가 응답 증거를 포함하지 않으면 `response.evidenceRefs`가 가리키는 실제 파일이 나중에 바뀌어도 감지되지 않는다)을 없앤다. 증거가 하나도 없는 상태에서는 빈 배열의 hash가 되므로, 이후 증거가 추가되거나 바뀌면 이 값이 반드시 바뀌어 재감사를 강제한다. `auditAccepted`(B.4)는 이 fingerprint를 **저장된 값과의 단순 비교로 신뢰하지 않고**, 저장된 각 `evidenceRefs.{path, sha256}`을 `inside()`로 다시 열어 파일의 현재 sha256을 재계산해 대조한 뒤에만 `evidenceFingerprint`를 유효한 것으로 취급한다(B.4 조건 6).
 
+`checkedBoundHash`는 `audit-checked`가 실제로 검토한 현재 binding의 hash다. 같은 binding에서 항목을 다시 보내면 기존 `checked`와 최초 확인자를 보존하며 병합한다. binding이 달라지면 이전 항목을 `checkedHistory`에 보존하고, 현재 검토 기록은 새 목록으로 시작한다. 따라서 원장의 statement·criterion 내용을 같은 ID로 고치면 brief와 outcome 모두 재검토해야 한다. 결과 HEAD, fidelity 항목, 제시 증거 또는 최신 응답의 증거 지문이 바뀌면 outcome만 재검토해야 한다. 인용 파일 내용만 저장된 sha256과 달라진 경우에는 B.4 조건 6이 수용을 거부한다. 새로운 증거를 인용한 응답과 판정이 기록되고 다시 검토되기 전에는 수용할 수 없다. 기존 기록에 `checkedBoundHash`가 없으면 현재 binding과 일치하는 기존 acceptance가 있을 때에만 그 기록을 현재 검토로 인정한다. binding이 바뀌었다면 `audit-checked`를 다시 실행해야 한다. 결과 검토는 실제 HEAD를 확인할 수 있도록 `--head`와 `--repo`를 함께 받는다.
+
 **resultHead의 그라운딩**(이전 조사가 "checkpoint·workflow·gates·evidence에 git HEAD 개념이 없다"고 잘못 결론지었던 부분의 정정): `evidence.mjs`는 이미 실제 저장소 HEAD를 확인하는 어댑터를 갖고 있다 — `fingerprint()`(142행)가 증거 검증에 쓰는 `git(repo, ["rev-parse", "HEAD"])`(23·156행)와, 이를 감싼 공개 함수 `workspaceBinding(repo)`(608행, `{repo, head}`를 반환하고 Git 워크스페이스가 아니면 `head: null`)다. `computeBinding(checkpoint, ledger, audit, resultHead, repo)`는 `checkpoint`가 `outcome`이면 이 `workspaceBinding(repo)`를 호출해 얻은 실제 HEAD와 호출자가 선언한 `resultHead`를 대조하고, 다르면(위조되었거나 오래된 값이면) binding 계산 자체를 거부한다 — 임의의 `resultHead` 문자열만으로 검증 대상 HEAD를 맞추는 경로는 없다. `auditObjection`·`auditAccepted`·`auditAccept`가 이 검증을 거치는 `computeBinding`을 그대로 쓰고, `hasValidAcceptance`는 같은 검증이 실패하면(선언된 HEAD가 실제 HEAD와 다르면) 예외를 던지지 않고 조용히 `false`를 반환한다(A.5 게이트가 요구하는 plain boolean 계약). `requirements.mjs`의 `requirementsPresent`·`requirementsFidelity`도 각각 선언된 `head`를 같은 방식으로 검증한다.
 
 이 검증에는 **어느 저장소의 HEAD와 대조할지**가 필요하므로, 위 함수들은 모두 호출자가 명시하는 `repo` 인자(또는 request 필드)를 받는다 — `kickoff-registry.mjs`의 `entry.pm.path`(PM 워크트리)에서 자동으로 유도하지 않는다. PM이 브리프를 작성·조율하는 워크트리와 실제 구현이 이루어지는 워크트리(예: 이 문서를 담고 있는 `139-auditor-impl` 같은 작업 워크트리)가 서로 다를 수 있기 때문에, 자동 유도는 엉뚱한 저장소의 HEAD와 대조하는 결함으로 이어진다. `repo`를 채우는 방식(CLI의 `process.cwd()` 기본값 vs `--repo` 신규 인자)은 아직 CLI 배선 시점의 결정 사항으로 남아 있다.
 
-`objections`·`responses`·`rulings`는 각각 `id`/`objectionId`/`respondedAgainst`로 연결된다. `raisedBy`/`respondedBy` 같은 자기선언 필드는 두지 않는다 — 신원은 **호출자의 `process.env.ORCA_TERMINAL_HANDLE`을 런타임이 매 호출마다 확인해서** 별도로 부여한다(B.6). 기록에는 신원 확인 결과만 `verifiedCaller` 객체로 남긴다. 감사관(objection·ruling·checked 항목)과 PM(outcome response)은 `{role, handle}`, 이사(brief response)는 `{role: "director", checkoutPath}`이며, 값은 항상 런타임이 확인한 것이다. `--from` JSON 본문이 `actor`·`raisedBy`·`respondedBy`·`ruledBy`·`verifiedCaller`·`terminal` 중 하나로 신원을 선언하면, 검증값(handle 또는 checkoutPath, 또는 role·handle·checkoutPath가 모두 같은 객체)과 다를 때 기록 전에 거부한다. 같아도 선언값은 저장하지 않는다. `checked` 항목은 새 항목에만 `verifiedCaller`를 붙이고, 이미 기록된 항목의 `type:id`와 최초 `verifiedCaller`는 이후 호출이 바꾸거나 줄이지 못한다. 이 필드가 생기기 전에 쓴 기록에는 `verifiedCaller`가 없으며, 그대로 유효하게 읽고 다시 쓸 때에도 지어 넣지 않는다.
+`objections`·`responses`·`rulings`는 각각 `id`/`objectionId`/`respondedAgainst`로 연결된다. `raisedBy`/`respondedBy` 같은 자기선언 필드는 두지 않는다 — 신원은 **호출자의 `process.env.ORCA_TERMINAL_HANDLE`을 런타임이 매 호출마다 확인해서** 별도로 부여한다(B.6). 기록에는 신원 확인 결과만 `verifiedCaller` 객체로 남긴다. 감사관(objection·ruling·checked 항목)과 PM(outcome response)은 `{role, handle}`, 이사(brief response)는 `{role: "director", checkoutPath}`이며, 값은 항상 런타임이 확인한 것이다. `--from` JSON 본문이 `actor`·`raisedBy`·`respondedBy`·`ruledBy`·`verifiedCaller`·`terminal` 중 하나로 신원을 선언하면, 검증값(handle 또는 checkoutPath, 또는 role·handle·checkoutPath가 모두 같은 객체)과 다를 때 기록 전에 거부한다. 같아도 선언값은 저장하지 않는다. 같은 binding의 `checked` 항목에는 새 항목에만 `verifiedCaller`를 붙이고, 이미 기록된 항목의 `type:id`와 최초 `verifiedCaller`는 이후 호출이 바꾸거나 줄이지 못한다. binding이 달라지면 기존 항목을 현재 검토로 병합하지 않는다. 이 필드가 생기기 전에 쓴 기록에는 `verifiedCaller`가 없으며, 그대로 유효하게 읽고 다시 쓸 때에도 지어 넣지 않는다.
 
 ### B.4 이의·응답·판정 수용 규칙(수용 기준 `audit-persuasion`; 보충 계약 3 4항)
 
 `auditAccepted(checkpoint, currentBinding, workflowContext)`가 아래를 전부 만족해야 `true`를 반환한다.
 
-1. **checked 완전성**: `checkpoint.checked`가 **현재 `ledger.statements`의 모든 id와 `ledger.criteria`의 모든 id를 scope 무관하게 정확히 한 번씩** 포함해야 한다(임의 항목 1개만 있어도 통과하던 22:31판의 결함을 없앤다). 하나라도 빠지면 거부.
+1. **checked 완전성**: `checkpoint.checkedBoundHash`가 현재 binding의 hash와 같고, `checkpoint.checked`가 **현재 `ledger.statements`의 모든 id와 `ledger.criteria`의 모든 id를 scope 무관하게 정확히 한 번씩** 포함해야 한다. 하나라도 빠지거나 binding이 다르면 거부한다. 기존 기록에 `checkedBoundHash`가 없으면 현재 binding과 일치하는 기존 acceptance가 있을 때에만 검토 기록을 인정한다.
 2. **미해결 이의 없음**: 모든 `objections`에 대해, `rulings`에서 그 `objectionId`를 가진 **가장 최근** ruling이 존재하고 `verdict !== "not-persuaded"`. 없거나 `not-persuaded`가 최신이면 거부.
 3. **ruling이 최신 응답에 연결**: 각 ruling의 `respondedAgainst`가 그 `objectionId`에 대한 **가장 최근** response의 `id`와 같아야 한다(오래된 response를 근거로 한 판정을 새 response 이후에도 유효한 것으로 재사용하지 못하게 한다).
 4. **역할 독립성, 두 가지 서로 다른 사실로 증명**(보충 계약 3 1항 — 22:31판은 response와 implementation만 비교하는 오류가 있었다):
@@ -415,6 +418,8 @@ if (command.role === AUDITOR_ROLE) {
 function verifiedAuditor(orgFile, targetKickoffWorktreeId, env = process.env) {
   const callerHandle = env.ORCA_TERMINAL_HANDLE;
   assert(callerHandle, "ORCA_TERMINAL_HANDLE is not set, so the caller cannot be identified");
+  const [entry] = listKickoffs(orgFile, targetKickoffWorktreeId).kickoffs;
+  assert(entry?.auditor?.terminalHandle === callerHandle, "Caller is not the current auditor terminal");
   const launch = readLaunches(orgFile).findLast(
     (l) => l.via === "role-terminal" && l.role === "auditor" &&
       l.terminal === callerHandle && l.kickoffPmWorktreeId === targetKickoffWorktreeId,
@@ -425,6 +430,8 @@ function verifiedAuditor(orgFile, targetKickoffWorktreeId, env = process.env) {
 ```
 
 `readLaunches`/`findLast`는 `usage-ledger.mjs`에 이미 있는 함수를 그대로 쓴다(새 함수를 만들지 않는다). `launch.terminal`은 `openRoleTerminal`이 auditor 역할로 새로 연 터미널에 Orca가 직접 부여한 handle이므로(B.2), PM이나 이사가 자신의 `ORCA_TERMINAL_HANDLE`을 그대로 두고 호출하면 `l.terminal === callerHandle`이 성립하지 않아 거부된다.
+
+재개설할 때 `recordAuditorLaunch`가 kickoff 항목의 현재 `auditor.terminalHandle`을 바꾸므로, 감사 전용 명령은 현재 항목의 handle과 실행 기록을 함께 확인한다. 실행 기록에 남은 이전 handle은 재개설 직후부터 권한을 잃는다. 이 검사는 같은 OS 사용자의 환경 변수·기록 파일 위조 한계를 해결하지 않는다.
 
 `audit-response`는 checkpoint가 `outcome`이면 PM 신원을, `brief`면 director 신원을 같은 원칙으로 확인한다.
 
@@ -536,7 +543,7 @@ files 목록 밖에서 실제로 필요한 수정은 다음과 같다 — 전부
 
 위 본문은 구현 전에 작성한 설계이므로 원문을 그대로 두었다. 다음 네 가지는 구현 결과가 달라졌으며, 본문과 충돌하면 이 절과 정본 파일을 따른다.
 
-- **(a) audit CLI 옵션**: 본문 460~462행의 `--checkpoint`·`--target`·`--argument` 같은 개별 옵션 표기는 현재 CLI와 다르다. `audit-objection`·`audit-response`·`audit-ruling`은 `--org`, `--worktree`, `--from`만 받고, checkpoint·verdict 등은 `--from`이 가리키는 JSON 본문에 적는다. `audit-checked`는 `--checkpoint`와 `--from`을 받는다. `audit-accept`는 `--checkpoint`를 받고, `outcome` 체크포인트일 때만 `--head`와 `--repo`를 함께 받는다. 정본은 `plugins/oh-my-teams/scripts/teams-org.mjs`의 511-515행(허용 옵션), 790-797행(필수 옵션)과 `audit-*` case(3530-3620행)이다.
+- **(a) audit CLI 옵션**: 본문 460~462행의 `--checkpoint`·`--target`·`--argument` 같은 개별 옵션 표기는 현재 CLI와 다르다. `audit-objection`·`audit-response`·`audit-ruling`은 `--org`, `--worktree`, `--from`만 받고, checkpoint·verdict 등은 `--from`이 가리키는 JSON 본문에 적는다. `audit-checked`는 `--checkpoint`와 `--from`을 받고, `outcome` 체크포인트일 때 `--head`와 `--repo`도 받는다. `audit-accept`는 `--checkpoint`를 받고, `outcome` 체크포인트일 때만 `--head`와 `--repo`를 함께 받는다. 정본은 `plugins/oh-my-teams/scripts/teams-org.mjs`의 511-515행(허용 옵션), 790-797행(필수 옵션)과 `audit-*` case(3530-3620행)이다.
 - **(b) 자동 progress 신호 없음**: 본문 451행과 519행은 `audit-accept`가 이사 받은함에 progress 신호를 남긴다고 적지만, 구현된 `auditAccept`는 `sendSignal`을 호출하지 않는다. 수용 결과는 감사 기록에만 남으므로 이사가 필요하면 감사 상태를 직접 조회한다. 정본은 `plugins/oh-my-teams/scripts/audit.mjs`의 839-890행이다.
 - **(c) 고정된 `auditPolicy` 기준**: 감사 적용 여부는 `org.auditor`의 현재 값이 아니라 kickoff에 고정된 `auditPolicy`가 정하고, 감사 프로필도 그때 고정된 profile·fallbacks를 쓴다. 본문의 193·215·233·243·261·281·306·397·406·518행이 `org.auditor` 존재를 기준으로 적은 부분이 여기에 해당한다. `kickoff-claim`이 claim 시점의 값으로 정책을 고정하고, 정책이 없는 기존 kickoff는 조직 파일을 다시 읽지 않고 거부되며 이사가 `kickoff-audit-policy-retrofit`으로 고정해야 한다. 정본은 `plugins/oh-my-teams/scripts/kickoff-registry.mjs`의 1025-1040행(고정)과 1143-1269행(retrofit), `teams-org.mjs`의 2411-2430행(`worker-start`)·4407-4436행(close-ready)과 `requirements.mjs`의 1323-1355행(`assertKickoffCloseReady`)이다. `workflow.mjs`의 `resolveAuditGate`(725-745행)도 같은 기준을 따르며, 결과 감사의 미해결 이의는 정책 값과 관계없이 kickoff 문맥에서 `gates.mjs`의 663-671행이 task accept 전에 확인한다.
 - **(d) 복수 결과 저장소의 확정**: 한 kickoff의 accepted workflow들이 서로 다른 `checkoutPath`를 기록했을 때, 본문은 이를 모호성으로 거부하기만 한다. 구현은 이사가 `kickoff-result-repo-decide`로 Git 포함 관계를 증명해 단일 저장소를 `entry.resultRepoDecisions`에 append-only로 확정할 수 있게 한다. 정본은 `plugins/oh-my-teams/scripts/kickoff-registry.mjs`의 `kickoffResultRepoDecide`(1328행), `requirements.mjs`의 `collectAcceptedResults`(1334행)·`proveResultRepoContainment`(1500행)·`resolveKickoffResultRepo`(1611행)와 `teams-org.mjs`의 `kickoff-result-repo-decide` case(3345행)이다. 수용 head는 workflow state·`decisions/<id>.json`·`gates/<taskId>.json`과 `<state>/reports/*.json`에 보관된 유일한 보고서를 대조해 얻으며, 보고서의 fingerprint가 자체 key로 해시되는지만 확인한다. 현재 workspace에서 fingerprint를 다시 계산하지 않고 `evidence/<key>.json` 캐시에도 의존하지 않는다. 다섯 소비자(`audit-objection`, `audit-accept`, close-ready, `deliver`, `kickoff-release`)는 모두 `resolveKickoffResultRepo`를 거치며, 결정 기록이 없거나 workflow 집합 지문이 달라지면 code `result-repo-ambiguous`로 거부한다. outcome 감사 이의만은 이 모호성을 `bindingDefect`로 기록할 수 있고(`audit.mjs`의 `auditObjection`, 395행), 이때 checkpoint binding은 바뀌지 않는다. 위조 한계는 B.6 수준이다. PM state는 같은 OS 사용자가 쓸 수 있으므로 이 검사는 우발적 손상을 막을 뿐 일관되게 조작한 위조를 막지 못한다. Git 호출은 `requirements.mjs`의 `runGit` 한 함수에 모여 있으며, 이 함수는 `local-adapter.mjs`의 `runTrustedGitSync`만 거친다. 이 실행기는 고정 경로의 신뢰 `git`, 고정 자식 환경, 30초 시간 제한을 쓰므로 호출자의 `PATH`와 `GIT_*` 환경이 증명 결과를 바꾸지 못하며, 신뢰 `git`이 없는 환경(예: Homebrew의 `git`만 있는 환경)에서는 확정이 거부된다. 부재 커밋과 비조상은 Git이 종료 코드 1로 명확히 보고한 경우로만 인정하고, 그 밖의 종료 코드·실행 실패·시간 초과는 증명 실패로 거부한다. 이 실행기를 쓰지 않는 `evidence.mjs`의 `git()`과 `kickoff-registry.mjs`의 `tryGit`이 `PATH`·`GIT_*`를 상속하는 한계는 `docs/SAFETY_AUDIT.md`의 「Git 실행 파일과 환경 변수의 신뢰 한계」에 적혀 있다.
