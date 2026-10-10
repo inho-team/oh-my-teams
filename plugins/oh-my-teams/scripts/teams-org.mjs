@@ -209,10 +209,14 @@ import {
   pruneRuntimes,
 } from "./dependencies.mjs";
 import {
+  acknowledgeDelivery,
   acknowledgeSignal,
+  listDeliveries,
   listInbox,
   notifyDirectorSignal,
+  readDeliveryReceipt,
   readSignal,
+  recordDeliveryReceipt,
   replySignal,
   sendSignal,
   SIGNAL_KINDS,
@@ -478,21 +482,20 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   quota-compare --before FILE --after FILE
   aggregate --expected id,id --report FILE [--report FILE ...]
   director-signal --org FILE --worktree ID --kind decision|close-ready|blocked|progress
-                  --text TEXT [--head SHA --source DIR] [--orca EXECUTABLE]
-                  (writes a structured record to .omt/director/inbox/; notifies
-                  the director terminal when the registry entry names one. The
-                  notification is skipped without sending a key when the
-                  director's screen shows a selection window or a trust
-                  question, or cannot be read at all; any earlier signal still
-                  undelivered for the same worktree is bundled into the same
-                  message, and a signal marked delivered is never sent again)
+                  --text TEXT [--head SHA --source DIR]
+                  (writes the signal record and queues a Message MCP message)
   director-inbox --org FILE
-                 (lists pending signals; progress signals are stored
-                 acknowledged, and a newer close-ready supersedes an older one)
-  director-reply --org FILE --signal ID --text TEXT [--orca EXECUTABLE]
-                 (records the director's decision and attempts PM notification)
-  director-ack --org FILE --signal ID
-               (marks a signal as acknowledged without a text reply)
+                 (lists pending signals and unacknowledged deliveries)
+  director-reply --org FILE --signal ID --text TEXT
+                 (records the director's decision and queues a PM message)
+  director-ack --org FILE (--signal ID | --delivery ID)
+               [--director-terminal HANDLE]
+               (marks a signal and its message, or a delivery receipt, as handled)
+  director-delivery --org FILE --source DIR --head SHA --director-terminal HANDLE
+                    (--pr URL | --target TEXT) [--text TEXT] [--orca EXECUTABLE]
+                    (records an independent worktree delivery receipt and notifies director terminal)
+  director-deliveries --org FILE [--unacknowledged]
+                      (lists independent worktree delivery receipts)
   resource-acquire --org FILE --worktree ID --kind test|worker|build [--note TEXT] [--owner-pid PID]
                    (acquires a resource slot; --owner-pid names the long-lived owner process, omitted the owner is unknown and the slot is only freed by resource-release)
   resource-release --org FILE --slot ID
@@ -838,7 +841,24 @@ export const ALLOWED_OPTIONS = {
   ],
   "director-inbox": ["org"],
   "director-reply": ["org", "signal", "text", "orca"],
-  "director-ack": ["org", "signal"],
+  "director-ack": [
+    "org",
+    "signal",
+    "delivery",
+    "director-terminal",
+    "terminal",
+  ],
+  "director-delivery": [
+    "org",
+    "source",
+    "head",
+    "pr",
+    "target",
+    "director-terminal",
+    "text",
+    "orca",
+  ],
+  "director-deliveries": ["org", "unacknowledged"],
   "resource-acquire": ["org", "worktree", "kind", "note", "owner-pid"],
   "resource-release": ["org", "slot"],
   "director-watch": ["org", "orca"],
@@ -999,7 +1019,9 @@ export const REQUIRED_OPTIONS = {
   "director-signal": ["org", "worktree", "kind", "text"],
   "director-inbox": ["org"],
   "director-reply": ["org", "signal", "text"],
-  "director-ack": ["org", "signal"],
+  "director-ack": ["org"],
+  "director-delivery": ["org", "source", "head", "director-terminal"],
+  "director-deliveries": ["org"],
   "resource-acquire": ["org", "worktree", "kind"],
   "resource-release": ["org", "slot"],
   "director-watch": ["org"],
@@ -4990,6 +5012,14 @@ export async function executeCommand(args, execute) {
         channel: "message-mcp",
       });
     case "director-ack": {
+      if (args.delivery) {
+        const callerTerminal =
+          args["director-terminal"] ??
+          args.terminal ??
+          process.env.ORCA_TERMINAL_HANDLE;
+        return acknowledgeDelivery(args.org, args.delivery, { callerTerminal });
+      }
+      assert(args.signal, "director-ack needs --signal ID or --delivery ID");
       const record = readSignal(args.org, args.signal);
       const result = acknowledgeSignal(args.org, args.signal);
       const [entry] = listKickoffs(args.org, record.worktreeId).kickoffs;
@@ -5008,6 +5038,20 @@ export async function executeCommand(args, execute) {
       }
       return { ...result, messageAcknowledged: Boolean(entry) };
     }
+    case "director-delivery":
+      return recordDeliveryReceipt(args.org, {
+        source: args.source,
+        head: args.head,
+        pr: args.pr,
+        target: args.target,
+        directorTerminal: args["director-terminal"],
+        text: args.text,
+        orcaExecutable: args.orca,
+      });
+    case "director-deliveries":
+      return listDeliveries(args.org, {
+        unacknowledgedOnly: Boolean(args.unacknowledged),
+      });
     case "resource-acquire":
       return acquireResource(args.org, {
         worktreeId: args.worktree,
