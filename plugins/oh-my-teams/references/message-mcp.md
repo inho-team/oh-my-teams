@@ -4,9 +4,9 @@ OMT의 역할 간 질문, 진행 보고, 지시와 결정을 PM 워크트리의 
 
 ## 주소와 범위
 
-각 kickoff는 등록부의 `kickoffHash`로 분리됩니다. 발신자와 수신자는 `director`, `pm`, `task:<workflow task ID>` 가운데 하나입니다. PM이 배정한 Worker와 PL이 배정한 하위 역할은 자신에게 배정된 workflow task ID를 주소에 사용합니다. 하위 역할이 PL에게 보고할 때에는 PL의 workflow task ID를 수신 주소에 사용합니다. 다른 kickoff에 보내려면 해당 kickoff의 PM 상태 디렉터리를 명시해야 합니다.
+각 kickoff는 등록부의 `kickoffHash`로 분리됩니다. 발신자와 수신자는 `director`, `pm`, `task:<workflow task ID>` 가운데 하나입니다. PM이 배정한 Worker와 PL이 배정한 하위 역할은 자신에게 배정된 workflow task ID를 주소에 사용합니다. 하위 역할이 PL에게 보고할 때에는 PL의 workflow task ID를 수신 주소에 사용합니다. 다른 kickoff에 보내려면 해당 kickoff의 PM 상태 디렉터리를 명시해야 하지만, MCP 도구 요청의 임의 worktree·terminal 값은 그 범위를 바꾸지 못한다.
 
-Claude와 Codex 역할 터미널과 새 이사 터미널에는 시작 명령의 세션 인자로 Message MCP가 연결됩니다. 사용자 설정 파일은 수정하지 않습니다. Agy는 현재 세션별 MCP 구성 인자를 제공하지 않으므로 같은 저장소에 접근하는 아래 CLI 명령을 사용합니다. 이사의 MCP는 조직에 등록된 모든 kickoff를 함께 조회합니다. `message-watch` CLI도 같은 메시지를 보여 줍니다.
+Claude와 Codex 역할 터미널과 새 이사 터미널에는 시작 명령의 세션 인자로 Message MCP가 연결됩니다. 사용자 설정 파일은 수정하지 않습니다. Agy는 현재 세션별 MCP 구성 인자를 제공하지 않으므로 같은 저장소에 접근하는 아래 CLI 명령을 사용합니다. 이사의 MCP가 여러 kickoff를 조회할 수 있는 경우에도 고정 launch receipt와 pane/terminal 또는 server-start worktree binding이 소유한 kickoff만 읽기·쓰기·ack할 수 있다. binding이 없거나 모호하면 `ownership-unverifiable`로 거부하며, 등록된 이사·역할 terminal에서 다시 시작하거나 해당 PM에게 bound server 재실행을 요청한다. `message-watch` CLI도 같은 소유권 경계를 따른다.
 
 ## 보내기와 받기
 

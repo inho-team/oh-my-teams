@@ -99,13 +99,28 @@ function confirmedActionReceipt(observation, previous, nowMs) {
   return receipt;
 }
 
-function handledDecision(observation) {
+function pendingDecisionCycle(reason, escalatedAt) {
+  return `${reason}:${escalatedAt}`;
+}
+
+function handledDecision(observation, pending, nowMs) {
   const resolution = observation.pendingDecisionResolution;
-  return (
+  if (
     resolution?.status === "handled" &&
     validDate(resolution.at) &&
-    evidenceObject(resolution.evidence)
-  );
+    Date.parse(resolution.at) <= nowMs &&
+    evidenceObject(resolution.evidence) &&
+    pending?.reason &&
+    validDate(pending.escalatedAt) &&
+    Date.parse(resolution.at) >= Date.parse(pending.escalatedAt)
+  ) {
+    return (
+      resolution.decisionCycle === pending.cycle ||
+      (resolution.reason === pending.reason &&
+        resolution.escalatedAt === pending.escalatedAt)
+    );
+  }
+  return false;
 }
 
 function reportDelay(observation, nowMs, policy) {
@@ -257,7 +272,26 @@ export function recordSupervisionObservation({
     const now = observation.now ?? new Date().toISOString();
     const progressAdvanced = decision.progressAdvanced === true;
     const receipt = decision.confirmedActionReceipt;
-    const resolved = handledDecision(observation);
+    const escalation =
+      decision.action === "escalate"
+        ? { at: now, reason: decision.reason }
+        : progressAdvanced
+          ? null
+          : (previous?.escalation ?? null);
+    const pending =
+      decision.action === "escalate"
+        ? {
+            reason: decision.reason,
+            escalatedAt: now,
+            cycle: pendingDecisionCycle(decision.reason, now),
+            ...decisionOwner(decision.reason),
+          }
+        : (previous?.pendingDecision ?? null);
+    const resolved = handledDecision(
+      observation,
+      pending,
+      new Date(now).getTime(),
+    );
     const unansweredRequests = progressAdvanced
       ? 0
       : (decision.effectiveUnansweredRequests ??
@@ -274,7 +308,10 @@ export function recordSupervisionObservation({
       schemaVersion: 1,
       dispatchId,
       observedAt: now,
-      source: observation.source ?? "official-orca-supervision-call",
+      // An observation JSON is submitted by a supervisor unless an adapter
+      // explicitly labels an Orca observation. Do not confer official Orca
+      // provenance merely because it is stored in this local report file.
+      source: observation.source ?? "supervisor-submitted",
       liveness: observation.liveness,
       lastProvenProgress: progressAdvanced
         ? {
@@ -286,20 +323,10 @@ export function recordSupervisionObservation({
       unansweredRequests,
       inspections,
       actionReceiptIds: receipt
-        ? [...(previous?.actionReceiptIds ?? []), receipt.id].slice(-20)
+        ? [...new Set([...(previous?.actionReceiptIds ?? []), receipt.id])]
         : (previous?.actionReceiptIds ?? []),
-      escalation:
-        decision.action === "escalate"
-          ? { at: now, reason: decision.reason }
-          : progressAdvanced
-            ? null
-            : (previous?.escalation ?? null),
-      pendingDecision:
-        decision.action === "escalate"
-          ? { reason: decision.reason, ...decisionOwner(decision.reason) }
-          : progressAdvanced || resolved
-            ? null
-            : (previous?.pendingDecision ?? null),
+      escalation,
+      pendingDecision: progressAdvanced || resolved ? null : pending,
       report: {
         state: "stored",
         proof: "local-durable",

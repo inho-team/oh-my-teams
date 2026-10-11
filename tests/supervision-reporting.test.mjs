@@ -196,8 +196,108 @@ test("unknown or invalid progress preserves a pending decision until handled evi
         status: "handled",
         at: "2026-10-11T06:02:00.000Z",
         evidence: { kind: "message-ack", key: "msg_123" },
+        decisionCycle: escalated.supervision.pendingDecision.cycle,
       },
     },
   });
   assert.equal(handled.supervision.pendingDecision, null);
+});
+
+test("old action receipts remain deduplicated after more than twenty later receipts", (t) => {
+  const stateDir = state(t);
+  const dispatchId = "ctx_all_receipts";
+  for (let index = 0; index < 21; index += 1) {
+    recordSupervisionObservation({
+      stateDir,
+      dispatchId,
+      policy,
+      observation: {
+        liveness: "unverifiable",
+        now: `2026-10-11T06:${String(index).padStart(2, "0")}:00.000Z`,
+        actionReceipt: {
+          id: `inspect-${index}`,
+          action: "inspect",
+          status: "performed",
+          at: `2026-10-11T06:${String(index).padStart(2, "0")}:00.000Z`,
+          evidence: { kind: "orca-observation", key: `worker-${index}` },
+        },
+      },
+    });
+  }
+  const replay = recordSupervisionObservation({
+    stateDir,
+    dispatchId,
+    policy,
+    observation: {
+      liveness: "unverifiable",
+      now: "2026-10-11T06:30:00.000Z",
+      actionReceipt: {
+        id: "inspect-0",
+        action: "inspect",
+        status: "performed",
+        at: "2026-10-11T06:30:00.000Z",
+        evidence: { kind: "orca-observation", key: "replayed" },
+      },
+    },
+  });
+  assert.equal(replay.confirmedActionReceipt, null);
+  assert.equal(replay.supervision.inspections, 21);
+});
+
+test("only a current decision cycle can clear a pending decision", (t) => {
+  const stateDir = state(t);
+  const first = recordSupervisionObservation({
+    stateDir,
+    dispatchId: "ctx_current_cycle",
+    policy,
+    observation: {
+      liveness: "unverifiable",
+      supervisor: { status: "absent" },
+      now,
+    },
+  });
+  const pending = first.supervision.pendingDecision;
+  const stale = recordSupervisionObservation({
+    stateDir,
+    dispatchId: "ctx_current_cycle",
+    policy,
+    observation: {
+      liveness: "live",
+      now: "2026-10-11T06:01:00.000Z",
+      pendingDecisionResolution: {
+        status: "handled",
+        at: "2026-10-11T05:59:00.000Z",
+        decisionCycle: pending.cycle,
+        evidence: { kind: "message-ack", key: "old" },
+      },
+    },
+  });
+  assert.equal(stale.supervision.pendingDecision.cycle, pending.cycle);
+  const wrongCycle = recordSupervisionObservation({
+    stateDir,
+    dispatchId: "ctx_current_cycle",
+    policy,
+    observation: {
+      liveness: "live",
+      now: "2026-10-11T06:02:00.000Z",
+      pendingDecisionResolution: {
+        status: "handled",
+        at: "2026-10-11T06:02:00.000Z",
+        decisionCycle: "other-cycle",
+        evidence: { kind: "message-ack", key: "other" },
+      },
+    },
+  });
+  assert.equal(wrongCycle.supervision.pendingDecision.cycle, pending.cycle);
+});
+
+test("locally submitted observations do not default to official Orca provenance", (t) => {
+  const stateDir = state(t);
+  const result = recordSupervisionObservation({
+    stateDir,
+    dispatchId: "ctx_source",
+    policy,
+    observation: { liveness: "live", now },
+  });
+  assert.equal(result.supervision.source, "supervisor-submitted");
 });
