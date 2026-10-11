@@ -25,6 +25,10 @@ import {
   validateOrg,
 } from "./core.mjs";
 import { assertStaffingPoolUsable } from "./workflow.mjs";
+import {
+  assertModelAssignmentChoice,
+  directorModelAssignment,
+} from "./model-assignment.mjs";
 import { messageMcpLaunch } from "./message-mcp-config.mjs";
 
 /**
@@ -295,6 +299,11 @@ function staffedOrganization(requestedOrg, requestedRole, run) {
     decision,
     `No staffing choice recorded for ${run.workflowTask ?? requestedRole}`,
   );
+  assertModelAssignmentChoice(
+    requestedOrg,
+    requestedRole === ROOT_ROLE ? ROOT_ROLE : "worker",
+    decision,
+  );
   assert(
     bootstrap || run.workflowState,
     "Resource organization launch requires the frozen workflow state",
@@ -331,7 +340,11 @@ function staffedOrganization(requestedOrg, requestedRole, run) {
       { ...binding, profile: profileId, fallbacks: [] },
     ]),
   );
-  const { resources: _resources, ...legacyShape } = requestedOrg;
+  const {
+    resources: _resources,
+    modelAssignment: _modelAssignment,
+    ...legacyShape
+  } = requestedOrg;
   return {
     ...legacyShape,
     profiles: {
@@ -818,7 +831,7 @@ export function directorCommand(
     profile = org.profiles[profileId];
     assert(profile, `Organization has no profile ${profileId}`);
     id = profileId;
-  } else {
+  } else if (provider !== undefined) {
     assert(
       Object.hasOwn(PROVIDER_EXECUTABLES, provider),
       `Director provider must be one of ${Object.keys(PROVIDER_EXECUTABLES).join(", ")}, not ${provider}`,
@@ -838,6 +851,26 @@ export function directorCommand(
       ...(effort !== undefined ? { effort } : {}),
       command: [PROVIDER_EXECUTABLES[provider]],
       account: "current",
+    };
+  } else {
+    assert(
+      model === undefined && effort === undefined,
+      "Director default selection cannot combine with --model or --effort; name --provider for an explicit selection",
+    );
+    const assignment = directorModelAssignment(org);
+    assert(
+      assignment,
+      "directorCommand needs a profile or provider unless the organization has a director model assignment",
+    );
+    const resource = org.resources[assignment.resourceId];
+    id = "assignment:director";
+    profile = {
+      provider: "codex",
+      model: assignment.model,
+      command: [PROVIDER_EXECUTABLES.codex],
+      account: resource.account,
+      subscription: resource.subscription,
+      pool: resource.pool,
     };
   }
   launchableProfile(DIRECTOR_ROLE, id, profile);

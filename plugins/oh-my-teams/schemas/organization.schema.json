@@ -44,6 +44,10 @@
       "minProperties": 1,
       "additionalProperties": { "$ref": "#/$defs/resource" }
     },
+    "modelAssignment": {
+      "$ref": "#/$defs/modelAssignment",
+      "$comment": "A durable resource-organization policy for the director, PM, and worker models. It is outside roles because the director is a host session, and each worker task selects one permitted model."
+    },
     "assistants": {
       "type": "object",
       "$comment": "Removed in 2.11.0 with the assist command. An organization file that still contains it stays valid and loadable, the key has no effect, the runtime never rewrites the file on read, and the next saved revision (adjust) drops it. Do not add it to new organizations. See references/subagents.md."
@@ -261,6 +265,39 @@
         "pool": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
         "concurrency": { "type": "integer", "minimum": 1, "maximum": 32 },
         "maxCalls": { "type": "integer", "minimum": 1, "maximum": 20 }
+      }
+    },
+    "modelAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "director", "pm", "worker"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "director": { "$ref": "#/$defs/modelAssignmentChoice" },
+        "pm": { "$ref": "#/$defs/modelAssignmentChoice" },
+        "worker": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resourceId", "models"],
+          "properties": {
+            "resourceId": { "type": "string", "minLength": 1 },
+            "models": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "modelAssignmentChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceId", "model"],
+      "properties": {
+        "resourceId": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 }
       }
     },
     "assistantProfiles": {
