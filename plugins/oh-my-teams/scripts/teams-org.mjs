@@ -39,6 +39,10 @@ import {
 } from "./host-defaults.mjs";
 import { fetchModelCatalog, revalidateModelChoices } from "./model-catalog.mjs";
 import {
+  assertModelAssignmentChoice,
+  modelAssignmentCatalogSelections,
+} from "./model-assignment.mjs";
+import {
   assertNotKickoffOwner,
   deliverKickoff,
   assertDirectorAuthority,
@@ -509,11 +513,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                    (releases an acquired resource slot)
   director-watch --org FILE [--orca EXECUTABLE]
                  (shows pending signals, slot usage, free memory, and PM liveness per kickoff)
-  director-command --org FILE (--profile ID | --provider claude|codex|agy [--model NAME] [--effort LEVEL])
+  director-command --org FILE [--profile ID | --provider claude|codex|agy [--model NAME] [--effort LEVEL]]
                    [--brief FILE]
                    (prints the command a director session opens with; the director is
                    the host session, not a role, so it takes a profile or an explicit provider)
-  director-terminal --org FILE (--profile ID | --provider claude|codex|agy [--model NAME] [--effort LEVEL])
+  director-terminal --org FILE [--profile ID | --provider claude|codex|agy [--model NAME] [--effort LEVEL]]
                     [--brief FILE] [--checkout DIR] [--from-terminal HANDLE] [--title TEXT]
                     [--replace HANDLE] [--orca EXECUTABLE]
                     (opens that command in a terminal the user can see: a vertical split of
@@ -1251,6 +1255,7 @@ async function validatePmBootstrapSelection(
     typeof choice.model === "string" && choice.model.trim(),
     "PM bootstrap model is required",
   );
+  assertModelAssignmentChoice(org, "pm", choice);
   const catalogResult = revalidate(await catalog(), [
     {
       key: "pm-bootstrap",
@@ -1353,7 +1358,12 @@ async function revalidateOrgForSave(
         };
       },
     );
-    const rejected = selections.filter((entry) => !entry.savable);
+    const modelReceipt = revalidateModelChoices(
+      catalog,
+      modelAssignmentCatalogSelections(candidate),
+    );
+    const allSelections = [...selections, ...modelReceipt.selections];
+    const rejected = allSelections.filter((entry) => !entry.savable);
     assert(
       rejected.length === 0,
       "Save refused; the following subscription resources failed catalog verification:\n" +
@@ -1362,8 +1372,8 @@ async function revalidateOrgForSave(
     return {
       verifiedAt: catalog.fetchedAt,
       catalogRevision: catalog.catalogRevision,
-      selections,
-      savable: true,
+      selections: allSelections,
+      savable: modelReceipt.savable,
     };
   }
   const unconfirmedHostDefaults = [];
@@ -5538,10 +5548,6 @@ export async function executeCommand(args, execute) {
 // What a director launch asks for: an organization profile or an explicit
 // provider, and the brief whose fixed-wording prompt becomes the first prompt.
 function directorRequest(args) {
-  assert(
-    args.profile !== undefined || args.provider !== undefined,
-    "director-command needs --profile ID or --provider claude|codex|agy [--model NAME] [--effort LEVEL]",
-  );
   const brief = args.brief === undefined ? undefined : path.resolve(args.brief);
   assert(
     brief === undefined || fs.existsSync(brief),

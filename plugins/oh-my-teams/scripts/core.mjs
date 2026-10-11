@@ -16,6 +16,7 @@ import {
   transportFor,
 } from "./providers/index.mjs";
 import { OPENCODEX_RUNNER_PROVIDERS } from "./opencodex.mjs";
+import { validateModelAssignment } from "./model-assignment.mjs";
 
 /**
  * Stable role identifiers used by schemas, organization graphs, and reports.
@@ -951,6 +952,8 @@ export function validateOrg(org) {
       "Resource organization must not preselect assistants or advisors",
     );
     validateResources(org.resources, pools);
+    if (org.modelAssignment !== undefined)
+      validateModelAssignment(org.modelAssignment, org.resources);
   } else {
     assert(org.profiles, "Legacy organization profiles required");
     for (const [id, profile] of Object.entries(org.profiles)) {
