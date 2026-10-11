@@ -19,7 +19,7 @@ pipeline {
                 checkout scm
                 sh 'colima start --profile ci --activate=false'
                 sh 'docker build -t inho-team-oh-my-teams-ci:node22 -f .ci/Dockerfile.linux .'
-                sh '''docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE:/workspace" -w /workspace inho-team-oh-my-teams-ci:node22 sh .ci/run-linux.sh'''
+                sh '''docker run --rm -e HOME=/tmp -v "$WORKSPACE:/workspace" -w /workspace inho-team-oh-my-teams-ci:node22 sh .ci/run-linux.sh'''
             }
             post {
                 always {
