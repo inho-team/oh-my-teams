@@ -853,6 +853,10 @@ export function directorCommand(
       account: "current",
     };
   } else {
+    assert(
+      model === undefined && effort === undefined,
+      "Director default selection cannot combine with --model or --effort; name --provider for an explicit selection",
+    );
     const assignment = directorModelAssignment(org);
     assert(
       assignment,

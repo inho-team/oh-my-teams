@@ -109,6 +109,19 @@ test("the director default and worker launch use the policy outside roles", () =
   assert.equal(director.role, "director");
   assert.equal(director.profile, "assignment:director");
   assert.equal(director.modelRequested, "gpt-6-astra");
+  assert.throws(
+    () => directorCommand(org, { model: "gpt-6.1-sol" }),
+    /cannot combine with --model/,
+  );
+  assert.throws(
+    () => directorCommand(org, { effort: "high" }),
+    /cannot combine with --model or --effort/,
+  );
+  assert.equal(
+    directorCommand(org, { provider: "codex", model: "gpt-6.1-sol" })
+      .modelRequested,
+    "gpt-6.1-sol",
+  );
   const pm = roleCommand(org, "pm", {
     pmSelection: {
       choice: { resourceId: "codex-current", model: "gpt-6.1-sol" },
