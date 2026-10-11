@@ -16,11 +16,15 @@
 
 ## 재개 검토 기준과 증거 경계
 
-이 문서는 최초 실패 재현의 기준 HEAD `e8f9df0640472ce884c9a7b7fb62e0232b5a04ba`를 유지한다. 2026-10-11 재개에서는 정식 검토 기록 `/Users/jinsungkim/orca/workspaces/oh-my-teams/feat-supervision-reporting/.omt/reviews/supervision-investigation-review-a2.json`의 다섯 finding을 반영하고, PM 워크트리의 post-merge HEAD `c2e50e9302edb954378581c453839e6884cf400c`는 읽기 전용으로 대조했다. 따라서 이 절의 post-merge 인용은 병합 뒤에도 남은 결함의 소스 증거이고, 최초 A2 fixture·현재 워크트리 검사는 과거 `3699fcde6ef31d43fbd693684a07ab2afab55264`의 환경·시각 증거이며, 새 구현 Worker의 결과나 독립 재검토 결과는 아니다.
+이 문서는 최초 실패 재현의 기준 HEAD `e8f9df0640472ce884c9a7b7fb62e0232b5a04ba`를 유지한다. 2026-10-11 재개에서는 정식 검토 기록 `/Users/jinsungkim/orca/workspaces/oh-my-teams/feat-supervision-reporting/.omt/reviews/supervision-investigation-review-a2.json`의 다섯 finding을 반영하고, PM 워크트리의 post-merge HEAD `c2e50e9302edb954378581c453839e6884cf400c`는 읽기 전용으로 대조했다. 이번 수정 execution은 Dispatch `ctx_8dc61e8d1300`, Orca task `task_20858749da3d`, 전체 Run `run_d4227d769b5f`이며, frozen 조사 계약은 task ID `supervision-investigation`, revision 1, hash `aac104f2b02c359a87fda24c531c481d9c420fb0268d5d15fca8319e41a5a0a6`이다. 따라서 이 절의 post-merge 인용은 병합 뒤에도 남은 결함의 소스 증거이고, 최초 A2 fixture·현재 워크트리 검사는 과거 `3699fcde6ef31d43fbd693684a07ab2afab55264`의 환경·시각 증거이며, 새 구현 Worker의 결과나 독립 재검토 결과는 아니다.
 
 `node /tmp/omt-supervision-handle-message-tool-repro.mjs`의 원시 결과 `/tmp/omt-supervision-handle-message-tool-repro-20261011.json`은 실제 `handleMessageTool` 함수를 두 이사 등록 fixture에 직접 호출했다. `contextKeys`는 `orgFile`, `actor`뿐이고, director A를 뜻하는 terminal·Orca Run·session provenance가 없어서 `receive_messages`가 기대 한 건 대신 두 director inbox를 반환했다. 이는 handler가 현재 호출자 소유권을 판정할 입력을 받지 않는다는 단위 재현이며, 실제 Orca가 다른 이사의 terminal에 메시지를 전송했다는 transport 증명은 아니다. 실제 transport의 수신·제출·화면 확인은 별도 Orca receipt 없이는 `unverifiable`로 남긴다.
 
 같은 fixture에서 director actor가 `ack_message`를 호출하면 결과는 해당 message ID, `actor: "director"`, `status: "acknowledged"`이고, 뒤의 `receive_messages`에는 그 worktree가 사라지고 다른 worktree의 pending 메시지만 남았다. 이는 고정 actor·kickoff hash를 쓰는 Message MCP 저장소가 그 수신자의 acknowledgement와 `acknowledgedAt`을 기록했다는 긍정 근거이다. 다만 ack는 수신자가 처리 뒤에 보내는 자기 보고이므로 사람의 읽음, 내용의 의미 판단, 외부 행동 또는 `handled`를 증명하지 않으며, `progress`의 `autoAcknowledged`와도 분리한다.
+
+실제 실행 관측도 같은 경계를 뒷받침한다. PM이 04:51경 자신의 구현 Worker로 보낸 `msg_76d6717320e1d76005c3857a08a435969778dda7b84e7ebd76a3b54482620b86`은 04:44:22 저장 뒤 pending이었고, `msg_9a48776484b8559bd2c8bb19a79ed40bd50b62d3195f2a40c052e915f2a84992`도 04:48:51 저장 뒤 pending이었다. 같은 Dispatch `ctx_e3a7289dfe38`은 live/working이고 화면은 검사 단계를 보였다. 이 source receipt와 관측 시각은 저장 및 처리 ack 부재를 증명하지만, Worker가 읽지 않았거나 의미 처리하지 않았다는 결론은 증명하지 않는다. PM의 다음 행동은 완료 전 동일 task의 pending을 다시 확인하고 필요한 후속 지시를 그 task에 보낼 일이다.
+
+별도 설치 경로 실패도 receipt 단계와 구분한다. PM이 설치된 2.17.0 cache의 `message-mcp.mjs --help`를 실행했을 때 `@modelcontextprotocol/sdk`의 `ERR_MODULE_NOT_FOUND`와 exit 1을 재현했고, 실제 `role-terminal` receipt는 그 cache 경로를 MCP server로 가리킨다. 이 사실은 해당 MCP server가 초기화되지 않아 실제 Message MCP tool 호출을 받을 수 없다는 별도 원인이지, pending 메시지가 수신자에게 전달되었거나 수신자가 읽고 처리하지 않았다는 증거가 아니다. 설치 cache는 이 조사에서 수정하지 않으며, 복구와 최종 2.18 설치 검증은 이사 소유이고, MCP가 없는 동안에는 자신의 actor에 한정한 `message-inbox --state`와 처리 뒤 `message-ack`만 사용한다.
 
 ## 관측 결과 요약
 
