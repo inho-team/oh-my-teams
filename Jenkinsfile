@@ -25,7 +25,7 @@ pipeline {
         stage('macOS Node 22') {
             agent { label 'macmini' }
             environment {
-                PATH = "/opt/homebrew/bin:${env.PATH}"
+                PATH = "/Users/kimjinseong/.nvm/versions/node/v22.23.2/bin:${env.PATH}"
             }
             steps {
                 sh 'git config --global core.autocrlf false'
