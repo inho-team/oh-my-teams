@@ -262,7 +262,11 @@ test("document-mcp-read-only: direct API tests", async (t) => {
         type: "leak",
       });
       const symlinkPath = path.join(eventsDir, "symlink");
-      fs.symlinkSync(extDir, symlinkPath, "dir");
+      fs.symlinkSync(
+        extDir,
+        symlinkPath,
+        process.platform === "win32" ? "junction" : "dir",
+      );
 
       // We don't read nested dirs in list_events, but if we did, we'd want to block it.
       // But we can test list_documents traversal.
@@ -274,7 +278,11 @@ test("document-mcp-read-only: direct API tests", async (t) => {
         "wf-123",
         "02. design",
       );
-      fs.symlinkSync(extDir, docsSymlink, "dir");
+      fs.symlinkSync(
+        extDir,
+        docsSymlink,
+        process.platform === "win32" ? "junction" : "dir",
+      );
 
       // list_documents will throw if it tries to traverse a symlink that resolves outside stateDir
       await assert.rejects(async () => {
@@ -324,13 +332,24 @@ test("document-mcp-read-only: direct API tests", async (t) => {
       fs.mkdirSync(leafDocDir, { recursive: true });
       const extCurrent = path.join(extDir, "ext-current.json");
       writeJSON(extCurrent, { revision: 1 });
-      fs.symlinkSync(extCurrent, path.join(leafDocDir, "current.json"));
-      await assert.rejects(async () => {
-        await handleCallToolRequest(tmpDir, "get_document", {
-          kickoffHash,
-          docId: `${kickoffHash}/none/planning/work-item/doc-leaf-symlink`,
-        });
-      }, /Path traversal detected/);
+      let fileSymlinkCreated = false;
+      try {
+        fs.symlinkSync(extCurrent, path.join(leafDocDir, "current.json"));
+        fileSymlinkCreated = true;
+      } catch (error) {
+        if (process.platform !== "win32" || error.code !== "EPERM") throw error;
+        t.diagnostic(
+          "File symlinks require Windows Developer Mode or a privileged agent.",
+        );
+      }
+      if (fileSymlinkCreated) {
+        await assert.rejects(async () => {
+          await handleCallToolRequest(tmpDir, "get_document", {
+            kickoffHash,
+            docId: `${kickoffHash}/none/planning/work-item/doc-leaf-symlink`,
+          });
+        }, /Path traversal detected/);
+      }
 
       // Test get_document symlink traversal
       const extDocDir = path.join(extDir, "doc-ext");
@@ -352,7 +371,11 @@ test("document-mcp-read-only: direct API tests", async (t) => {
         "doc-symlink",
       );
       fs.mkdirSync(path.dirname(symDocDir), { recursive: true });
-      fs.symlinkSync(extDocDir, symDocDir, "dir");
+      fs.symlinkSync(
+        extDocDir,
+        symDocDir,
+        process.platform === "win32" ? "junction" : "dir",
+      );
       await assert.rejects(async () => {
         await handleCallToolRequest(tmpDir, "get_document", {
           kickoffHash,

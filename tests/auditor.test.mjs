@@ -1826,7 +1826,11 @@ test(
       fs.mkdtempSync(path.join(os.tmpdir(), "omt-audit-symlink-")),
       "alias",
     );
-    fs.symlinkSync(workerDir, symlinkToWorker, "dir");
+    fs.symlinkSync(
+      workerDir,
+      symlinkToWorker,
+      process.platform === "win32" ? "junction" : "dir",
+    );
     t.after(() => fs.rmSync(symlinkToWorker, { force: true }));
     await assert.rejects(
       () =>
@@ -6195,7 +6199,11 @@ test("D4: role-terminal --role auditor refuses a worktree only a workflow task r
     /PM or a worker already uses/,
   );
   const alias = path.join(realTempDir(t, "omt-d4-alias-"), "alias");
-  fs.symlinkSync(workerDir, alias, "dir");
+  fs.symlinkSync(
+    workerDir,
+    alias,
+    process.platform === "win32" ? "junction" : "dir",
+  );
   await assert.rejects(
     () => roleTerminal(alias),
     /PM or a worker already uses/,
@@ -6700,7 +6708,11 @@ test("resolveResultRepo: one recorded worktree is the only candidate, and the ca
   assert.throws(() => resolveResultRepo(one, repoB), /not the worktree/);
   // A symlink spelling of the same repository is the same repository.
   const alias = path.join(realTempDir(t, "omt-g-alias-"), "alias");
-  fs.symlinkSync(repoA, alias, "dir");
+  fs.symlinkSync(
+    repoA,
+    alias,
+    process.platform === "win32" ? "junction" : "dir",
+  );
   assert.equal(resolveResultRepo(one, alias), repoA);
   // Condition 5: different receipt repositories cannot be decided, with or
   // without a caller value, including a task whose two receipts disagree.
@@ -6854,7 +6866,11 @@ test("workflow-accept with integration required: the checkout is resolved once, 
     assert.deepEqual(fs.readFileSync(wf.file), before);
     // (a) A symlink spelling is accepted and recorded as the real path.
     const alias = path.join(realTempDir(t, "omt-g-int-alias-"), "alias");
-    fs.symlinkSync(fixture.dir, alias, "dir");
+    fs.symlinkSync(
+      fixture.dir,
+      alias,
+      process.platform === "win32" ? "junction" : "dir",
+    );
     const accepted = await accept(alias);
     assert.equal(
       accepted.integration.decision.checkoutPath,
