@@ -171,6 +171,85 @@ function closureProvesLaunch(
   );
 }
 
+// An external terminal's worker row can retain missing_status after its PTY
+// has been positively killed. Only a settled row with the exact incarnation
+// and closure may override that stale projection; absence alone never does.
+function closedExternalWorker(row, observed, item, id, location) {
+  if (
+    !item ||
+    !["completed", "failed"].includes(row.dispatchStatus) ||
+    !["succeeded", "failed"].includes(row.workerState) ||
+    row.terminalState !== "retained" ||
+    row.resource?.ownershipState !== "external" ||
+    row.resource.retainedReason !== "external_terminal" ||
+    row.resource.worktreeId !== id ||
+    row.resource.ownerDispatchId !== row.dispatchId ||
+    row.resource.originDispatchId !== row.dispatchId ||
+    row.projection?.host?.id !== item.hostId ||
+    row.projection?.liveness?.verdict !== "unverifiable" ||
+    row.projection.liveness.reason !== "missing_status"
+  )
+    return false;
+  const launch = (observed.launches ?? []).find(
+    (entry) =>
+      entry.workerId === row.dispatchId &&
+      entry.via === "worker-start" &&
+      entry.terminal === row.agentTerminalHandle &&
+      entry.worktreePath === location,
+  );
+  if (!launch || row.resource.terminalHandle !== launch.terminal) return false;
+  return (observed.closures ?? []).some((closure) => {
+    if (
+      !closureProvesLaunch(
+        closure,
+        launch,
+        id,
+        location,
+        item.worktreeInstanceId,
+        item.hostId,
+      )
+    )
+      return false;
+    const before = receiptBody(closure.beforeReceipt);
+    const after = receiptBody(closure.afterReceipt);
+    const terminal = before.terminals.find(
+      (entry) => entry.handle === launch.terminal,
+    );
+    const proof = closure.terminals.find(
+      (entry) => entry.terminal === launch.terminal,
+    );
+    const close = receiptBody(proof.close.receipt).close;
+    const runtime = closure.beforeReceipt?._meta?.runtimeId;
+    return (
+      typeof terminal?.ptyId === "string" &&
+      typeof terminal.incarnationId === "string" &&
+      row.resource.endpointIncarnation ===
+        `${terminal.ptyId}:${terminal.incarnationId}` &&
+      terminal.worktreeId === id &&
+      terminal.executionHostId === item.hostId &&
+      terminal.tabId === close.tabId &&
+      typeof runtime === "string" &&
+      runtime === row.resource.endpointId &&
+      closure.afterReceipt?._meta?.runtimeId === runtime &&
+      proof.close.receipt?._meta?.runtimeId === runtime &&
+      !before.truncated &&
+      !after.truncated &&
+      before.hostScope?.hostIds?.includes(item.hostId) &&
+      after.hostScope?.hostIds?.includes(item.hostId) &&
+      !before.hostScope?.omittedHostIds?.includes(item.hostId) &&
+      !after.hostScope?.omittedHostIds?.includes(item.hostId) &&
+      closedLaunchesProven(
+        observed.launches ?? [],
+        observed.closures ?? [],
+        id,
+        location,
+        item.worktreeInstanceId,
+        item.hostId,
+      )
+    );
+  });
+}
+
 function closedLaunchesProven(
   launches,
   closures,
@@ -265,7 +344,13 @@ export function evaluateKickoffCleanup(entry, observed) {
       item?.hasAttachedPty
     )
       reasons.push("terminal-or-process-live");
-    if (assigned.some((worker) => !cleanWorker(worker)))
+    if (
+      assigned.some(
+        (worker) =>
+          !cleanWorker(worker) &&
+          !closedExternalWorker(worker, observed, item, id, location),
+      )
+    )
       reasons.push("worker-unsettled-or-unverifiable");
     if (
       assigned.length === 0 &&

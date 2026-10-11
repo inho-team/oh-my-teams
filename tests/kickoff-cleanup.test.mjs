@@ -689,3 +689,162 @@ test("an unobserved Orca removal is not repeated on reentry", async (t) => {
     1,
   );
 });
+
+function closedExternalObservation() {
+  const input = observed();
+  const runtime = { runtimeId: "runtime-exact" };
+  const dispatchId = "external-dispatch";
+  const terminal = {
+    handle: "external-terminal",
+    ptyId: `${child}@@pty`,
+    incarnationId: "incarnation",
+    worktreeId: child,
+    executionHostId: "local",
+    tabId: "tab-exact",
+  };
+  const scope = { hostIds: ["local"], omittedHostIds: ["unrelated-remote"] };
+  input.workers[1] = {
+    dispatchId,
+    workerState: "succeeded",
+    dispatchStatus: "completed",
+    agentTerminalHandle: terminal.handle,
+    terminalState: "retained",
+    resource: {
+      ownershipState: "external",
+      releaseState: "not_requested",
+      retainedReason: "external_terminal",
+      terminalHandle: terminal.handle,
+      worktreeId: child,
+      endpointId: runtime.runtimeId,
+      endpointIncarnation: `${terminal.ptyId}:${terminal.incarnationId}`,
+      originDispatchId: dispatchId,
+      ownerDispatchId: dispatchId,
+    },
+    projection: {
+      host: { id: "local" },
+      workspace: { id: child },
+      liveness: { verdict: "unverifiable", reason: "missing_status" },
+    },
+  };
+  input.launches = [
+    {
+      via: "worker-start",
+      workerId: dispatchId,
+      terminal: terminal.handle,
+      worktreePath: "/tmp/child",
+      at: "2026-09-29T00:10:00Z",
+    },
+  ];
+  input.closures = [
+    {
+      worktreeId: child,
+      worktreePath: "/tmp/child",
+      at: "2026-09-29T00:11:00Z",
+      identity: { instanceId: "child-instance", executionHostId: "local" },
+      beforeReceipt: {
+        result: { terminals: [terminal], hostScope: scope, truncated: false },
+        _meta: runtime,
+      },
+      afterReceipt: {
+        result: { terminals: [], hostScope: scope, truncated: false },
+        _meta: runtime,
+      },
+      terminals: [
+        {
+          terminal: terminal.handle,
+          dispatch: { result: { status: "clear" } },
+          releases: [
+            {
+              dispatchId,
+              receipt: {
+                result: {
+                  dispatchId,
+                  state: "retained",
+                  reason: "external_terminal",
+                  processAction: "none",
+                },
+              },
+            },
+          ],
+          close: {
+            receipt: {
+              result: {
+                close: {
+                  handle: terminal.handle,
+                  tabId: terminal.tabId,
+                  ptyKilled: true,
+                },
+              },
+              _meta: runtime,
+            },
+          },
+        },
+      ],
+    },
+  ];
+  return structuredClone(input);
+}
+
+test("a settled external Dispatch needs exact PTY incarnation and closure to overcome stale missing_status", () => {
+  const input = closedExternalObservation();
+  assert.equal(
+    evaluateKickoffCleanup(entry, input).candidates[1].status,
+    "safe-to-remove",
+  );
+  const cases = {
+    active: (v) => {
+      v.workers[1].dispatchStatus = "running";
+    },
+    live: (v) => {
+      v.workers[1].projection.liveness.verdict = "live";
+    },
+    incarnation: (v) => {
+      v.workers[1].resource.endpointIncarnation = "replacement";
+    },
+    endpoint: (v) => {
+      v.workers[1].resource.endpointId = "another-runtime";
+    },
+    owner: (v) => {
+      v.workers[1].resource.ownerDispatchId = "another-dispatch";
+    },
+    identity: (v) => {
+      v.closures[0].identity.instanceId = "new-instance";
+    },
+    tab: (v) => {
+      v.closures[0].terminals[0].close.receipt.result.close.tabId = "new-tab";
+    },
+    kill: (v) => {
+      v.closures[0].terminals[0].close.receipt.result.close.ptyKilled = false;
+    },
+    release: (v) => {
+      v.closures[0].terminals[0].releases = [];
+    },
+    host: (v) => {
+      v.closures[0].afterReceipt.result.hostScope.omittedHostIds.push("local");
+    },
+    truncated: (v) => {
+      v.closures[0].afterReceipt.result.truncated = true;
+    },
+    closure: (v) => {
+      v.closures = [];
+    },
+    liveTerminal: (v) => {
+      v.terminals = [{ handle: "live", worktreeId: child }];
+    },
+    unknownDispatch: (v) => {
+      v.workers.push({ ...v.workers[1], dispatchId: "unknown" });
+    },
+    incomplete: (v) => {
+      v.inventoryComplete = false;
+    },
+  };
+  for (const [name, change] of Object.entries(cases)) {
+    const candidate = closedExternalObservation();
+    change(candidate);
+    assert.equal(
+      evaluateKickoffCleanup(entry, candidate).candidates[1].status,
+      "preserve",
+      name,
+    );
+  }
+});

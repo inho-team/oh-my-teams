@@ -112,6 +112,7 @@ import {
   waitForSupervisionMessage,
 } from "./orca-adapter.mjs";
 import { withRuntimeSignal } from "./adapters.mjs";
+import { prepareRoleLifecycle } from "./worktree-legacy.mjs";
 import { withAutomaticWorktreeReuse } from "./worktree-reuse.mjs";
 import {
   withWorktreeLock,
@@ -2556,13 +2557,32 @@ async function createRoleWorktreeUnderLock(
               "Promotion worktree belongs to another assignment",
             );
             promotionIdentity = shown.identity;
-            promotionTransaction = lifecycle.prepare({
-              type: "role-promotion",
-              worktreeId: workspace.id,
-              identityKey: shown.identity.key,
-              workflowId: args["workflow-id"],
-              taskId: args["workflow-task"],
-            });
+            promotionTransaction = await prepareRoleLifecycle(
+              {
+                orgFile: args.org,
+                owner: lifecycle.current,
+                workflowState: state,
+                task: state.tasks[args["workflow-task"]],
+                workflowId: args["workflow-id"],
+                taskId: args["workflow-task"],
+                child: shown,
+                expectedHead: previousHead,
+                executable: args.orca,
+                repo: args.repo,
+                operation: {
+                  type: "role-promotion",
+                  worktreeId: workspace.id,
+                  identityKey: shown.identity.key,
+                  workflowId: args["workflow-id"],
+                  taskId: args["workflow-task"],
+                },
+              },
+              {
+                prepare: lifecycle.prepare,
+                show,
+                launches: launches(args.org, { strict: true }),
+              },
+            );
           }
           const terminalEvidence = automaticSource
             ? null
@@ -2598,6 +2618,8 @@ async function createRoleWorktreeUnderLock(
               "Promotion source has unproven sessions, Dispatches or Git state",
             );
           }
+          if (promotionTransaction?.revalidate)
+            await promotionTransaction.revalidate();
           if (automaticSource)
             await git(workspace.path, [
               "merge",
@@ -2751,6 +2773,7 @@ async function createRoleWorktreeUnderLock(
       },
     );
   }
+  if (promotionTransaction?.revalidate) await promotionTransaction.revalidate();
   if (promotionTransaction)
     promotionTransaction.complete({
       workspace: created.workspace,
@@ -2759,6 +2782,9 @@ async function createRoleWorktreeUnderLock(
   return {
     ...created.workspace,
     session: created.session,
+    ...(promotionTransaction?.legacyLifecycle
+      ? { legacyLifecycle: promotionTransaction.legacyLifecycle }
+      : {}),
     ...(args["fresh-reason"]
       ? { freshReason: args["fresh-reason"].trim() }
       : {}),
@@ -2930,12 +2956,27 @@ async function reclaimIntegratedRoleWorktreeUnderLock(
   ]);
   await git(repo, ["merge-base", "--is-ancestor", head, mergeCommit]);
 
-  const transaction = prepare({
-    type: "role-reclaim",
-    worktreeId,
-    identityKey: identity.identity.key,
-    sourceWorktreeId: owner.pm.worktreeId,
-  });
+  const transaction = await prepareRoleLifecycle(
+    {
+      orgFile: args.org,
+      owner,
+      task,
+      workflowState: state,
+      workflowId: args["workflow-id"],
+      taskId: args["workflow-task"],
+      child: identity,
+      expectedHead: head,
+      executable: args.orca,
+      repo,
+      operation: {
+        type: "role-reclaim",
+        worktreeId,
+        identityKey: identity.identity.key,
+        sourceWorktreeId: owner.pm.worktreeId,
+      },
+    },
+    { prepare, show, launches: launches(args.org, { strict: true }) },
+  );
   const terminalEvidence = await proveAndCloseOwnedTerminals({
     repo,
     worktreeId,
@@ -2985,6 +3026,7 @@ async function reclaimIntegratedRoleWorktreeUnderLock(
       latestIdentity.parentWorktreeId === identity.parentWorktreeId,
     "Role reclaim identity or parent changed; preserve it",
   );
+  if (transaction.revalidate) await transaction.revalidate();
   const reclaimed = await reclaim(repo, {
     id: worktreeId,
     identityKey: identity.identity.key,
