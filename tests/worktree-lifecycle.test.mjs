@@ -1,4 +1,5 @@
 /** Regressions for session-bound OMT worktree creation and headless rejection. */
+import { durableSuccessSupported } from "./directory-durability-fixture.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -10,7 +11,10 @@ import {
   createWorktreeWithRoleSession,
   reclaimWorktree,
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
-import { readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
+import {
+  readJSON,
+  assertDirectorySync,
+} from "../plugins/oh-my-teams/scripts/core.mjs";
 import { predictLaunchPath } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
 import { runTurn } from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
 import * as headlessRuntime from "../plugins/oh-my-teams/scripts/headless.mjs";
@@ -31,6 +35,64 @@ import {
   readTerminalClosures,
   terminalClosureLedgerFile,
 } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
+
+import {
+  registerKickoff,
+  registryDirectory,
+} from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { minimalRequirements } from "./requirements-draft-fixture.mjs";
+
+function reclaimSandbox(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-role-reclaim-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const org = path.join(root, ".omt", "organization.json");
+  fs.mkdirSync(path.dirname(org), { recursive: true });
+  const organization = roleOrganization();
+  fs.writeFileSync(org, JSON.stringify(organization));
+  const brief = path.join(root, "brief.md");
+  fs.writeFileSync(brief, "reclaim fixture");
+  fs.mkdirSync(path.join(root, "integration"));
+  const pmId = `repo::${root}/integration`;
+  registerKickoff(org, {
+    goal: "reclaim fixture",
+    pm: {
+      worktreeId: pmId,
+      path: `${root}/integration`,
+      stateDir: `${root}/.omt`,
+    },
+    brief,
+    delivery: { mode: "none" },
+    organizationRevision: organization.revision,
+    requirements: minimalRequirements(org, pmId),
+    director: { terminalHandle: "director", checkoutPath: root },
+  });
+  return {
+    root,
+    scan: async () => ({
+      inventoryComplete: true,
+      candidates: ["child", "junior-rejected"].map((name) => ({
+        worktreeId: `repo::${root}/${name}`,
+        status: "safe-to-remove",
+      })),
+    }),
+    show: async (_executable, args) =>
+      args[1] === "ps"
+        ? { result: { worktrees: [] } }
+        : {
+            result: {
+              worktree: {
+                id: args.at(-1).slice(3),
+                parentWorktreeId: pmId,
+                identity: {
+                  key: "exact-child",
+                  instanceId: "child-instance",
+                  executionHostId: "local",
+                },
+              },
+            },
+          },
+  };
+}
 
 const discovery = { executable: "orca", versionsMatch: true };
 const roleOrganization = () =>
@@ -1372,19 +1434,23 @@ test("CLI usage admits only an explicit paired cross-workflow reuse source", () 
   );
 });
 
-test("an integrated child is reclaimed only after every lifecycle proof", async () => {
+test("an integrated child is reclaimed only after every lifecycle proof", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  const f = reclaimSandbox(t);
   const calls = [];
   const result = await reclaimIntegratedRoleWorktree(
     {
-      org: "/repo/.omt/organization.json",
-      state: "/repo/.omt",
+      org: `${f.root}/.omt/organization.json`,
+      state: `${f.root}/.omt`,
       "workflow-id": "workflow-a",
       "workflow-task": "task-a",
-      repo: "/repo/integration",
-      worktree: "repo::/repo/child",
+      repo: `${f.root}/integration`,
+      worktree: `repo::${f.root}/child`,
       "merge-commit": "merge-a",
     },
     {
+      show: f.show,
+      scan: f.scan,
       read: () => ({
         state: {
           status: "accepted",
@@ -1392,7 +1458,7 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
           tasks: {
             "task-a": {
               state: "accepted",
-              worktreeId: "repo::/repo/child",
+              worktreeId: `repo::${f.root}/child`,
             },
           },
         },
@@ -1402,7 +1468,7 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
           via: "worker-start",
           workflowId: "workflow-a",
           workflowTaskId: "task-a",
-          worktreePath: "/repo/child",
+          worktreePath: `${f.root}/child`,
           terminal: "term-a",
           workerId: "dispatch-earlier",
         },
@@ -1410,7 +1476,7 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
           via: "worker-start",
           workflowId: "workflow-a",
           workflowTaskId: "task-a",
-          worktreePath: "/repo/child",
+          worktreePath: `${f.root}/child`,
           terminal: "term-a",
           workerId: "dispatch-a",
         },
@@ -1450,25 +1516,29 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
     "release:dispatch-a",
     "close:term-a",
     "git:status --porcelain=v1 -uall",
-    "reclaim:repo::/repo/child",
+    `reclaim:repo::${f.root}/child`,
   ]);
 });
 
-test("an active or unproven child is preserved instead of reclaimed", async () => {
+test("an active or unproven child is preserved instead of reclaimed", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  const f = reclaimSandbox(t);
   let reclaimed = false;
   await assert.rejects(
     () =>
       reclaimIntegratedRoleWorktree(
         {
-          org: "/repo/.omt/organization.json",
-          state: "/repo/.omt",
+          org: `${f.root}/.omt/organization.json`,
+          state: `${f.root}/.omt`,
           "workflow-id": "workflow-a",
           "workflow-task": "task-a",
-          repo: "/repo/integration",
-          worktree: "repo::/repo/child",
+          repo: `${f.root}/integration`,
+          worktree: `repo::${f.root}/child`,
           "merge-commit": "merge-a",
         },
         {
+          show: f.show,
+          scan: f.scan,
           read: () => ({
             state: {
               status: "accepted",
@@ -1476,7 +1546,7 @@ test("an active or unproven child is preserved instead of reclaimed", async () =
               tasks: {
                 "task-a": {
                   state: "accepted",
-                  worktreeId: "repo::/repo/child",
+                  worktreeId: `repo::${f.root}/child`,
                 },
               },
             },
@@ -1486,7 +1556,7 @@ test("an active or unproven child is preserved instead of reclaimed", async () =
               via: "worker-start",
               workflowId: "workflow-a",
               workflowTaskId: "task-a",
-              worktreePath: "/repo/child",
+              worktreePath: `${f.root}/child`,
               terminal: "term-a",
               workerId: "dispatch-a",
             },
@@ -1507,7 +1577,7 @@ test("an active or unproven child is preserved instead of reclaimed", async () =
   assert.equal(reclaimed, false);
 });
 
-test("ambiguous Orca release, close, or terminal-list receipts preserve the child", async () => {
+test("ambiguous Orca release, close, or terminal-list receipts preserve the child", async (t) => {
   for (const [label, ports] of [
     [
       "release",
@@ -1571,27 +1641,30 @@ test("ambiguous Orca release, close, or terminal-list receipts preserve the chil
     ["extra-terminal", { extraTerminal: true }],
     ["remaining-terminal", { remainingTerminal: true }],
   ]) {
+    const f = reclaimSandbox(t);
     let reclaimed = false;
     let listed = 0;
     await assert.rejects(
       () =>
         reclaimIntegratedRoleWorktree(
           {
-            org: "/repo/.omt/organization.json",
-            state: "/repo/.omt",
+            org: `${f.root}/.omt/organization.json`,
+            state: `${f.root}/.omt`,
             "workflow-id": "workflow-a",
             "workflow-task": "task-a",
-            repo: "/repo/integration",
-            worktree: "repo::/repo/child",
+            repo: `${f.root}/integration`,
+            worktree: `repo::${f.root}/child`,
             "merge-commit": "merge-a",
           },
           {
+            show: f.show,
+            scan: f.scan,
             read: () => ({
               state: {
                 tasks: {
                   "task-a": {
                     state: "accepted",
-                    worktreeId: "repo::/repo/child",
+                    worktreeId: `repo::${f.root}/child`,
                   },
                 },
               },
@@ -1601,7 +1674,7 @@ test("ambiguous Orca release, close, or terminal-list receipts preserve the chil
                 via: "worker-start",
                 workflowId: "workflow-a",
                 workflowTaskId: "task-a",
-                worktreePath: "/repo/child",
+                worktreePath: `${f.root}/child`,
                 terminal: "owned-terminal",
                 workerId: "owned-dispatch",
               },
@@ -1646,30 +1719,34 @@ test("ambiguous Orca release, close, or terminal-list receipts preserve the chil
   }
 });
 
-test("an accepted promotion can reclaim its retired Junior worktree", async () => {
+test("an accepted promotion can reclaim its retired Junior worktree", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  const f = reclaimSandbox(t);
   let listed = 0;
   const result = await reclaimIntegratedRoleWorktree(
     {
-      org: "/repo/.omt/organization.json",
-      state: "/repo/.omt",
+      org: `${f.root}/.omt/organization.json`,
+      state: `${f.root}/.omt`,
       "workflow-id": "workflow-promotion",
       "workflow-task": "w2-00",
-      repo: "/repo/integration",
-      worktree: "repo::/repo/junior-rejected",
+      repo: `${f.root}/integration`,
+      worktree: `repo::${f.root}/junior-rejected`,
       "merge-commit": "merge-a",
     },
     {
+      show: f.show,
+      scan: f.scan,
       read: () => ({
         state: {
           tasks: {
             "w2-00": {
               state: "accepted",
               role: "junior",
-              worktreeId: "repo::/repo/senior-fixed",
+              worktreeId: `repo::${f.root}/senior-fixed`,
               worktreeTransitions: [
                 {
                   usedAt: "2026-09-29T00:00:00.000Z",
-                  fromWorktreeId: "repo::/repo/junior-rejected",
+                  fromWorktreeId: `repo::${f.root}/junior-rejected`,
                 },
               ],
             },
@@ -1681,7 +1758,7 @@ test("an accepted promotion can reclaim its retired Junior worktree", async () =
           via: "worker-start",
           workflowId: "workflow-promotion",
           workflowTaskId: "w2-00",
-          worktreePath: "/repo/junior-rejected",
+          worktreePath: `${f.root}/junior-rejected`,
           terminal: "junior-terminal",
           workerId: "junior-dispatch",
         },
@@ -1704,8 +1781,8 @@ test("an accepted promotion can reclaim its retired Junior worktree", async () =
       reclaim: async (_repo, options) => ({ removed: options.id }),
     },
   );
-  assert.equal(result.worktreeId, "repo::/repo/junior-rejected");
-  assert.equal(result.reclaimed.removed, "repo::/repo/junior-rejected");
+  assert.equal(result.worktreeId, `repo::${f.root}/junior-rejected`);
+  assert.equal(result.reclaimed.removed, `repo::${f.root}/junior-rejected`);
 });
 
 test("an interactive terminal launch keeps its session when its ledger write fails", (t) => {
@@ -1778,4 +1855,563 @@ test("headless runner rejects public and node entry execution before any provide
   assert.equal(direct.status, 1);
   assert.match(direct.stderr, /New headless runner execution was removed/);
   assert.equal(fs.existsSync(path.join(turnDir, "pids.json")), false);
+});
+
+function previouslyClosedRole(f) {
+  const worktreeId = `repo::${f.root}/child`;
+  const worktreePath = `${f.root}/child`;
+  const launch = {
+    via: "worker-start",
+    at: "2026-01-01T00:00:00.000Z",
+    terminal: "old-terminal",
+    workerId: "old-dispatch",
+    worktreePath,
+  };
+  const closure = {
+    worktreeId,
+    worktreePath,
+    at: "2026-01-01T00:01:00.000Z",
+    identity: { key: "exact-child" },
+    terminals: [
+      {
+        terminal: "old-terminal",
+        dispatch: { result: { status: "clear" } },
+        releases: [
+          {
+            dispatchId: "old-dispatch",
+            receipt: releasedExternalTerminal("old-dispatch"),
+          },
+        ],
+        close: { receipt: closedTerminal("old-terminal") },
+      },
+    ],
+    afterReceipt: { result: { terminals: [] } },
+  };
+  return { worktreeId, worktreePath, launch, closure };
+}
+
+test("an exact past closure and current empty inventory allow safe role reclaim", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  const f = reclaimSandbox(t);
+  const old = previouslyClosedRole(f);
+  const result = await reclaimIntegratedRoleWorktree(
+    {
+      org: `${f.root}/.omt/organization.json`,
+      state: `${f.root}/.omt`,
+      "workflow-id": "closed-flow",
+      "workflow-task": "closed-task",
+      repo: `${f.root}/integration`,
+      worktree: old.worktreeId,
+      "merge-commit": "head",
+    },
+    {
+      read: () => ({
+        state: {
+          tasks: {
+            "closed-task": { state: "accepted", worktreeId: old.worktreeId },
+          },
+        },
+      }),
+      show: f.show,
+      scan: f.scan,
+      launches: () => [old.launch],
+      closures: () => [old.closure],
+      recordClosure: () =>
+        assert.fail("past closure must not be rewritten as an empty proof"),
+      active: async () => assert.fail("historically closed terminal"),
+      release: async () => assert.fail("already released"),
+      close: async () => assert.fail("already closed"),
+      list: async () => ({ result: { terminals: [] } }),
+      git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
+      reclaim: async (_repo, options) => ({ removed: options.id }),
+    },
+  );
+  assert.equal(result.reclaimed.removed, old.worktreeId);
+  assert.deepEqual(result.terminals, []);
+});
+
+test("a reviewed promotion reuses its proven closed worktree without creating another", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  const f = reclaimSandbox(t);
+  const old = previouslyClosedRole(f);
+  const state = {
+    tasks: {
+      "closed-task": {
+        role: "junior",
+        state: "reviewed",
+        worktreeId: old.worktreeId,
+      },
+    },
+  };
+  const result = await createRoleWorktree(
+    {
+      org: `${f.root}/.omt/organization.json`,
+      state: `${f.root}/.omt`,
+      "workflow-id": "closed-flow",
+      "workflow-task": "closed-task",
+      repo: `${f.root}/integration`,
+      role: "senior",
+      name: "unused",
+      base: "head",
+    },
+    {
+      callerCwd: `${f.root}/integration`,
+      read: () => workflowSnapshot(state),
+      environment,
+      matrix: supervised,
+      show: f.show,
+      scan: f.scan,
+      launches: () => [old.launch],
+      closures: () => [old.closure],
+      recordClosure: () => assert.fail("do not replace the prior closure"),
+      active: async () => assert.fail("already closed"),
+      release: async () => assert.fail("already released"),
+      close: async () => assert.fail("already closed"),
+      list: async () => ({ result: { terminals: [] } }),
+      git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
+      create: async () => assert.fail("must reuse"),
+      promote: async () => ({ transition: { toWorktreeId: old.worktreeId } }),
+      open: async () => ({
+        ready: true,
+        terminal: "new-terminal",
+        role: "senior",
+        worktree: `id:${old.worktreeId}`,
+        modelRequested: "model",
+      }),
+    },
+  );
+  assert.equal(result.id, old.worktreeId);
+});
+
+test("an empty inventory with no ownership history cannot authorize reclaim", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  const f = reclaimSandbox(t);
+  const old = previouslyClosedRole(f);
+  await assert.rejects(
+    () =>
+      reclaimIntegratedRoleWorktree(
+        {
+          org: `${f.root}/.omt/organization.json`,
+          state: `${f.root}/.omt`,
+          "workflow-id": "closed-flow",
+          "workflow-task": "closed-task",
+          repo: `${f.root}/integration`,
+          worktree: old.worktreeId,
+          "merge-commit": "head",
+        },
+        {
+          read: () => ({
+            state: {
+              tasks: {
+                "closed-task": {
+                  state: "accepted",
+                  worktreeId: old.worktreeId,
+                },
+              },
+            },
+          }),
+          show: f.show,
+          scan: f.scan,
+          launches: () => [],
+          closures: () => [old.closure],
+          list: async () => ({ result: { terminals: [] } }),
+          git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
+          reclaim: async () => assert.fail("unknown ownership"),
+        },
+      ),
+    /No owned Dispatch/,
+  );
+});
+
+test("a reviewed promotion with no ownership history preserves the worktree", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  const f = reclaimSandbox(t);
+  const old = previouslyClosedRole(f);
+  await assert.rejects(
+    () =>
+      createRoleWorktree(
+        {
+          org: `${f.root}/.omt/organization.json`,
+          state: `${f.root}/.omt`,
+          "workflow-id": "closed-flow",
+          "workflow-task": "closed-task",
+          repo: `${f.root}/integration`,
+          role: "senior",
+          name: "unused",
+          base: "head",
+        },
+        {
+          callerCwd: `${f.root}/integration`,
+          read: () =>
+            workflowSnapshot({
+              tasks: {
+                "closed-task": {
+                  role: "junior",
+                  state: "reviewed",
+                  worktreeId: old.worktreeId,
+                },
+              },
+            }),
+          environment,
+          matrix: supervised,
+          show: f.show,
+          scan: f.scan,
+          launches: () => [],
+          closures: () => [old.closure],
+          list: async () => ({ result: { terminals: [] } }),
+          git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
+          create: async () => assert.fail("must preserve"),
+          open: async () => assert.fail("must not launch"),
+        },
+      ),
+    /ownership|owned|launch/i,
+  );
+});
+
+function unavailableDirectorySync(t) {
+  const sync = fs.fsyncSync;
+  t.mock.method(fs, "fsyncSync", (fd) => {
+    if (fs.fstatSync(fd).isDirectory())
+      throw Object.assign(new Error("directory flush unsupported"), {
+        code: "EINVAL",
+      });
+    return sync(fd);
+  });
+}
+
+function legacyLifecycleFixture(
+  t,
+  { protocol = false, connected = false } = {},
+) {
+  const f = reclaimSandbox(t);
+  const org = `${f.root}/.omt/organization.json`;
+  const registry = registryDirectory(org);
+  const file = fs
+    .readdirSync(registry)
+    .find(
+      (name) =>
+        name.endsWith(".json") &&
+        readJSON(path.join(registry, name)).pm?.worktreeId,
+    );
+  const ownerFile = path.join(registry, file);
+  const owner = readJSON(ownerFile);
+  // Models a persisted pre-upgrade registration, never a production enrollment.
+  if (!protocol) delete owner.reuseProtocol;
+  fs.writeFileSync(ownerFile, JSON.stringify(owner));
+  const createdAt = Date.parse(owner.createdAt) + 100;
+  const old = previouslyClosedRole(f);
+  const parent = {
+    id: owner.pm.worktreeId,
+    path: owner.pm.path,
+    repoId: "repo",
+    identity: {
+      key: "parent-key",
+      instanceId: "parent-instance",
+      executionHostId: "local",
+    },
+  };
+  const child = {
+    id: old.worktreeId,
+    path: old.worktreePath,
+    repoId: "repo",
+    parentWorktreeId: parent.id,
+    head: "head",
+    createdAt,
+    identity: {
+      key: "exact-child",
+      instanceId: "child-instance",
+      executionHostId: "local",
+    },
+    lineage: {
+      worktreeId: old.worktreeId,
+      worktreeInstanceId: "child-instance",
+      parentWorktreeId: parent.id,
+      parentWorktreeInstanceId: "parent-instance",
+      origin: "cli",
+      capture: { confidence: "explicit" },
+      createdAt,
+    },
+  };
+  Object.assign(old.launch, {
+    at: new Date(createdAt + 100).toISOString(),
+    kickoffPmWorktreeId: parent.id,
+    workflowId: "closed-flow",
+    workflowTaskId: "closed-task",
+  });
+  Object.assign(old.closure, {
+    at: new Date(createdAt + 200).toISOString(),
+    identity: child.identity,
+  });
+  const roleLaunch = {
+    via: "role-terminal",
+    at: new Date(createdAt + 10).toISOString(),
+    terminal: old.launch.terminal,
+    worktreePath: child.path,
+    kickoffPmWorktreeId: parent.id,
+    workflowId: "closed-flow",
+  };
+  const history = [roleLaunch, old.launch];
+  const task = { role: "junior", state: "reviewed", worktreeId: child.id };
+  const mutations = [];
+  let attached = connected;
+  const ports = {
+    callerCwd: owner.pm.path,
+    read: () => workflowSnapshot({ tasks: { "closed-task": task } }),
+    environment,
+    matrix: supervised,
+    scan: f.scan,
+    show: async (_exe, args) => ({
+      result:
+        args[1] === "ps"
+          ? { worktrees: [] }
+          : {
+              worktree: structuredClone(
+                args.at(-1).slice(3) === parent.id ? parent : child,
+              ),
+            },
+    }),
+    launches: () => history,
+    closures: () => (connected ? [] : [old.closure]),
+    recordClosure: (receipt) => {
+      assert.equal(receipt.identity.key, child.identity.key);
+    },
+    active: async () => ({ status: "clear" }),
+    release: async (id) => {
+      mutations.push("release");
+      return releasedExternalTerminal(id);
+    },
+    close: async () => {
+      mutations.push("close");
+      attached = false;
+      return closedTerminal("old-terminal");
+    },
+    list: async () => ({
+      result: { terminals: attached ? [{ handle: "old-terminal" }] : [] },
+    }),
+    git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
+    create: async () => assert.fail("must not create"),
+    promote: async () => {
+      mutations.push("promote");
+      return { transition: { toWorktreeId: child.id } };
+    },
+    open: async () => {
+      mutations.push("open");
+      return {
+        ready: true,
+        terminal: "new-terminal",
+        role: "senior",
+        worktree: `id:${child.id}`,
+        modelRequested: "model",
+      };
+    },
+    reclaim: async (_repo, options) => {
+      mutations.push("remove");
+      return { removed: options.id };
+    },
+  };
+  const args = {
+    org,
+    state: `${f.root}/.omt`,
+    "workflow-id": "closed-flow",
+    "workflow-task": "closed-task",
+    repo: owner.pm.path,
+    role: "senior",
+    name: "unused",
+    base: "head",
+    worktree: child.id,
+    "merge-commit": "head",
+  };
+  const run = (kind) => {
+    task.state = kind === "promotion" ? "reviewed" : "accepted";
+    return kind === "promotion"
+      ? createRoleWorktree(args, ports)
+      : reclaimIntegratedRoleWorktree(args, ports);
+  };
+  return {
+    ...f,
+    org,
+    old,
+    owner,
+    parent,
+    child,
+    history,
+    task,
+    ports,
+    args,
+    mutations,
+    run,
+  };
+}
+
+test("unsupported directory durability preserves proven legacy promotion and reclaim without claiming protocol support", async (t) => {
+  for (const kind of ["promotion", "reclaim"]) {
+    for (const connected of [false, true]) {
+      await t.test(
+        `${kind}: ${connected ? "connected owned terminal" : "exact historical closure"}`,
+        async (t) => {
+          const f = legacyLifecycleFixture(t, { connected });
+          unavailableDirectorySync(t);
+          const result = await f.run(kind);
+          assert.equal(result.legacyLifecycle.mode, "legacy-same-task");
+          assert.equal(result.legacyLifecycle.durable, false);
+          assert.deepEqual(f.mutations, [
+            ...(connected ? ["release", "close"] : []),
+            ...(kind === "promotion" ? ["open", "promote"] : ["remove"]),
+          ]);
+          assert.equal(
+            fs.existsSync(
+              path.join(path.dirname(f.org), "worktree-transitions.json"),
+            ),
+            false,
+          );
+        },
+      );
+    }
+  }
+});
+
+test("unsupported new-protocol promotion and reclaim make zero external mutations", async (t) => {
+  for (const kind of ["promotion", "reclaim"])
+    await t.test(kind, async (t) => {
+      const f = legacyLifecycleFixture(t, { protocol: true, connected: true });
+      unavailableDirectorySync(t);
+      await assert.rejects(() => f.run(kind), {
+        code: "worktree-durability-unavailable",
+      });
+      assert.deepEqual(f.mutations, []);
+    });
+});
+
+test("legacy compatibility rejects new owners, journal resources and ambiguous historic instance proofs", async (t) => {
+  const changes = {
+    "journal-owned": (f) =>
+      fs.writeFileSync(
+        path.join(path.dirname(f.org), "worktree-transitions.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          entries: [
+            {
+              type: "reuse",
+              status: "completed",
+              worktreeId: f.child.id,
+              targetWorktreeId: f.parent.id,
+              workflowId: "closed-flow",
+              taskId: "closed-task",
+            },
+          ],
+        }),
+      ),
+    "unpaired-role-terminal": (f) => {
+      f.history[0].terminal = "unowned-terminal";
+    },
+    "foreign-role-owner": (f) => {
+      f.history[0].kickoffPmWorktreeId = "other-owner";
+    },
+    "foreign-role-workflow": (f) => {
+      f.history[0].workflowId = "other-workflow";
+    },
+    "explicit-foreign-role-task": (f) => {
+      f.history[0].workflowTaskId = "other-task";
+    },
+    "role-terminal-after-dispatch": (f) => {
+      f.history[0].at = new Date(Date.parse(f.old.launch.at) + 1).toISOString();
+    },
+    "missing-worker-task": (f) => {
+      delete f.old.launch.workflowTaskId;
+    },
+    "new-protocol-only": (f) => {
+      f.old.launch.worktreeProtocolVersion = 1;
+    },
+    "foreign-owner": (f) => {
+      f.old.launch.kickoffPmWorktreeId = "new-protocol-pm";
+    },
+    "foreign-task": (f) => {
+      f.old.launch.workflowTaskId = "another-task";
+    },
+    "recreated-instance": (f) => {
+      f.child.createdAt = Date.parse(f.old.launch.at) + 1;
+      f.child.lineage.createdAt = f.child.createdAt;
+    },
+    "missing-instance-age": (f) => {
+      delete f.child.createdAt;
+    },
+    "manual-lineage": (f) => {
+      f.child.lineage.origin = "manual";
+    },
+    "parent-instance": (f) => {
+      f.child.lineage.parentWorktreeInstanceId = "replacement";
+    },
+    "wrong-closure": (f) => {
+      f.old.closure.identity = { key: "another-instance" };
+    },
+    "unknown-dispatch": (f) => {
+      f.ports.active = async () => ({ status: "unknown" });
+      f.ports.closures = () => [];
+    },
+    "another-task-claim": (f) => {
+      f.ports.read = () =>
+        workflowSnapshot({
+          tasks: {
+            "closed-task": f.task,
+            "other-task": { state: "accepted", worktreeId: f.child.id },
+          },
+        });
+    },
+    "identity-changed-after-scan": (f) => {
+      const scan = f.ports.scan;
+      f.ports.scan = async (...args) => {
+        const result = await scan(...args);
+        f.child.identity.key = "replacement-after-scan";
+        return result;
+      };
+    },
+    "dirty-git": (f) => {
+      f.ports.git = async (_repo, args) =>
+        args[0] === "status" ? " M dirty" : "head";
+    },
+    "incomplete-global-inventory": (f) => {
+      f.ports.scan = async () => ({ inventoryComplete: false, candidates: [] });
+    },
+  };
+  for (const [label, change] of Object.entries(changes))
+    for (const kind of ["promotion", "reclaim"]) {
+      await t.test(`${kind}: ${label}`, async (t) => {
+        const f = legacyLifecycleFixture(t);
+        change(f);
+        unavailableDirectorySync(t);
+        await assert.rejects(() => f.run(kind));
+        assert.deepEqual(f.mutations, []);
+      });
+    }
+});
+
+test("a durable prepare failure never falls back to legacy compatibility after a successful capability probe", async (t) => {
+  for (const kind of ["promotion", "reclaim"])
+    await t.test(kind, async (t) => {
+      const f = legacyLifecycleFixture(t);
+      try {
+        assertDirectorySync(path.dirname(f.org));
+      } catch (error) {
+        assert.equal(error.code, "worktree-durability-unavailable");
+        return t.skip(
+          "Initial capability is unavailable; subsequent-write failure requires supported directory sync",
+        );
+      }
+      const sync = fs.fsyncSync;
+      let directoryCalls = 0;
+      t.mock.method(fs, "fsyncSync", (fd) => {
+        if (fs.fstatSync(fd).isDirectory() && ++directoryCalls === 2)
+          throw Object.assign(new Error("later directory failure"), {
+            code: "EINVAL",
+          });
+        return sync(fd);
+      });
+      try {
+        await f.run(kind);
+        assert.fail("must refuse interrupted preparation");
+      } catch (error) {
+        assert.equal(error.code, "worktree-durability-unavailable");
+      }
+      assert.deepEqual(f.mutations, []);
+    });
 });

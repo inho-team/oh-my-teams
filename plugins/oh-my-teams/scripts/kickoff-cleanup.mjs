@@ -1,4 +1,5 @@
 /** Read-only reconciliation of a completed kickoff's Orca worktrees and Git evidence. */
+import { proveKickoffWorktreeOwnership } from "./worktree-ownership.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { assert, readJSON, withAsyncFileLock, writeJSON } from "./core.mjs";
@@ -10,14 +11,22 @@ import {
 } from "./kickoff-registry.mjs";
 import {
   reclaimWorktree,
+  listWorktreeTerminals,
   runOrcaJson,
   selectOrcaExecutable,
 } from "./orca-adapter.mjs";
 import { readLaunches, readTerminalClosures } from "./usage-ledger.mjs";
+import {
+  retiredWorktrees,
+  withWorktreeLock,
+} from "./worktree-transactions.mjs";
 
 function archivedEntry(orgFile, archiveFile, worktreeId) {
-  const directory = path.join(path.dirname(path.resolve(orgFile)), "history");
-  const file = path.resolve(archiveFile);
+  const directory = path.join(
+    path.dirname(fs.realpathSync(orgFile)),
+    "history",
+  );
+  const file = fs.realpathSync(archiveFile);
   assert(
     path.dirname(file) === directory,
     "Archive must be in the organization's history directory",
@@ -110,7 +119,21 @@ function receiptBody(receipt) {
   return receipt?.result ?? receipt ?? {};
 }
 
-function closureProvesLaunch(closure, launch, worktreeId, location) {
+function closureProvesLaunch(
+  closure,
+  launch,
+  worktreeId,
+  location,
+  instanceId,
+  hostId,
+) {
+  if (
+    !instanceId ||
+    !hostId ||
+    closure.identity?.instanceId !== instanceId ||
+    closure.identity?.executionHostId !== hostId
+  )
+    return false;
   if (
     closure?.worktreeId !== worktreeId ||
     path.resolve(closure.worktreePath ?? "") !== path.resolve(location) ||
@@ -150,7 +173,126 @@ function closureProvesLaunch(closure, launch, worktreeId, location) {
   );
 }
 
-function closedLaunchesProven(launches, closures, id, location) {
+// Keep the two current inventories separate: worktree visibility does not prove
+// that the terminal query covered the same host or came from the same runtime.
+function currentTerminalInventory(observed, id) {
+  const inventory = observed.currentInventory;
+  return inventory?.scopedTerminals
+    ? inventory.scopedTerminals[id]
+    : inventory?.terminal;
+}
+
+function currentInventoryProven(observed, hostId, id) {
+  const worktree = observed.currentInventory?.worktree;
+  const terminal = currentTerminalInventory(observed, id);
+  return (
+    typeof hostId === "string" &&
+    hostId.length > 0 &&
+    typeof worktree?.runtimeId === "string" &&
+    worktree.runtimeId.length > 0 &&
+    terminal?.runtimeId === worktree.runtimeId &&
+    (!observed.currentInventory.scopedTerminals ||
+      (terminal.worktreeId === id && terminal.rowsVerified === true)) &&
+    [worktree, terminal].every(
+      (inventory) =>
+        inventory.truncated === false &&
+        Array.isArray(inventory.hostScope?.hostIds) &&
+        Array.isArray(inventory.hostScope?.omittedHostIds) &&
+        inventory.hostScope.hostIds.includes(hostId) &&
+        !inventory.hostScope.omittedHostIds.includes(hostId),
+    )
+  );
+}
+
+// An external terminal's worker row can retain missing_status after its PTY
+// has been positively killed. Only a settled row with the exact incarnation
+// and closure may override that stale projection; absence alone never does.
+function closedExternalWorker(row, observed, item, id, location) {
+  if (
+    !item ||
+    !currentInventoryProven(observed, item.hostId, id) ||
+    !["completed", "failed"].includes(row.dispatchStatus) ||
+    !["succeeded", "failed"].includes(row.workerState) ||
+    row.terminalState !== "retained" ||
+    row.resource?.ownershipState !== "external" ||
+    row.resource.retainedReason !== "external_terminal" ||
+    row.resource.worktreeId !== id ||
+    row.resource.ownerDispatchId !== row.dispatchId ||
+    row.resource.originDispatchId !== row.dispatchId ||
+    row.projection?.host?.id !== item.hostId ||
+    row.projection?.liveness?.verdict !== "unverifiable" ||
+    row.projection.liveness.reason !== "missing_status"
+  )
+    return false;
+  const launch = (observed.launches ?? []).find(
+    (entry) =>
+      entry.workerId === row.dispatchId &&
+      entry.via === "worker-start" &&
+      entry.terminal === row.agentTerminalHandle &&
+      entry.worktreePath === location,
+  );
+  if (!launch || row.resource.terminalHandle !== launch.terminal) return false;
+  return (observed.closures ?? []).some((closure) => {
+    if (
+      !closureProvesLaunch(
+        closure,
+        launch,
+        id,
+        location,
+        item.worktreeInstanceId,
+        item.hostId,
+      )
+    )
+      return false;
+    const before = receiptBody(closure.beforeReceipt);
+    const after = receiptBody(closure.afterReceipt);
+    const terminal = before.terminals.find(
+      (entry) => entry.handle === launch.terminal,
+    );
+    const proof = closure.terminals.find(
+      (entry) => entry.terminal === launch.terminal,
+    );
+    const close = receiptBody(proof.close.receipt).close;
+    const runtime = closure.beforeReceipt?._meta?.runtimeId;
+    return (
+      typeof terminal?.ptyId === "string" &&
+      typeof terminal.incarnationId === "string" &&
+      row.resource.endpointIncarnation ===
+        `${terminal.ptyId}:${terminal.incarnationId}` &&
+      terminal.worktreeId === id &&
+      terminal.executionHostId === item.hostId &&
+      terminal.tabId === close.tabId &&
+      typeof runtime === "string" &&
+      runtime === row.resource.endpointId &&
+      currentTerminalInventory(observed, id).runtimeId === runtime &&
+      closure.afterReceipt?._meta?.runtimeId === runtime &&
+      proof.close.receipt?._meta?.runtimeId === runtime &&
+      !before.truncated &&
+      !after.truncated &&
+      before.hostScope?.hostIds?.includes(item.hostId) &&
+      after.hostScope?.hostIds?.includes(item.hostId) &&
+      !before.hostScope?.omittedHostIds?.includes(item.hostId) &&
+      !after.hostScope?.omittedHostIds?.includes(item.hostId) &&
+      closedLaunchesProven(
+        observed.launches ?? [],
+        observed.closures ?? [],
+        id,
+        location,
+        item.worktreeInstanceId,
+        item.hostId,
+      )
+    );
+  });
+}
+
+function closedLaunchesProven(
+  launches,
+  closures,
+  id,
+  location,
+  instanceId,
+  hostId,
+) {
   if (typeof location !== "string") return false;
   const owned = launches.filter((launch) => launch.worktreePath === location);
   return (
@@ -159,7 +301,14 @@ function closedLaunchesProven(launches, closures, id, location) {
       (launch) =>
         typeof launch.terminal === "string" &&
         closures.some((closure) =>
-          closureProvesLaunch(closure, launch, id, location),
+          closureProvesLaunch(
+            closure,
+            launch,
+            id,
+            location,
+            instanceId,
+            hostId,
+          ),
         ),
     )
   );
@@ -180,6 +329,12 @@ export function evaluateKickoffCleanup(entry, observed) {
   const byId = new Map(worktrees.map((item) => [item.worktreeId, item]));
   const candidates = candidateIds(entry, worktrees).map((id) => {
     const item = byId.get(id);
+    if (observed.retired?.includes(id))
+      return {
+        worktreeId: id,
+        status: "transferred",
+        reasons: ["ownership-transferred"],
+      };
     const location = worktreePath(id, item, entry);
     const previous = entry.cleanup?.candidates?.find(
       (candidate) => candidate.worktreeId === id,
@@ -195,8 +350,32 @@ export function evaluateKickoffCleanup(entry, observed) {
     const assigned = workers.filter((worker) =>
       workerInCandidate(worker, id, location),
     );
+    const ownership = observed.ownership?.[id];
     const reasons = [];
+    if (observed.ownership && ownership?.status !== "proven")
+      reasons.push(ownership?.reason ?? "candidate-ownership-unproven");
+    if (
+      observed.ownership &&
+      ownership?.status === "proven" &&
+      item &&
+      id !== entry.pm.worktreeId &&
+      item.parentWorktreeId !==
+        (previous?.parentWorktreeId ?? entry.pm.worktreeId)
+    )
+      reasons.push("candidate-parent-ownership-changed");
+    if (
+      observed.ownership &&
+      entry.releasedAt &&
+      id !== entry.pm.worktreeId &&
+      !previous?.instanceId
+    )
+      reasons.push("candidate-registration-instance-unproven");
     if (!inventoryComplete) reasons.push("inventory-incomplete");
+    if (
+      observed.currentInventory &&
+      !currentInventoryProven(observed, item?.hostId ?? previous?.hostId, id)
+    )
+      reasons.push("current-inventory-provenance-unverified");
     if (!item) reasons.push("orca-worktree-unlisted");
     if (
       item?.path &&
@@ -224,7 +403,13 @@ export function evaluateKickoffCleanup(entry, observed) {
       item?.hasAttachedPty
     )
       reasons.push("terminal-or-process-live");
-    if (assigned.some((worker) => !cleanWorker(worker)))
+    if (
+      assigned.some(
+        (worker) =>
+          !cleanWorker(worker) &&
+          !closedExternalWorker(worker, observed, item, id, location),
+      )
+    )
       reasons.push("worker-unsettled-or-unverifiable");
     if (
       assigned.length === 0 &&
@@ -233,6 +418,8 @@ export function evaluateKickoffCleanup(entry, observed) {
         observed.closures ?? [],
         id,
         location,
+        item?.worktreeInstanceId,
+        item?.hostId,
       )
     )
       reasons.push("process-exit-unproven");
@@ -242,7 +429,11 @@ export function evaluateKickoffCleanup(entry, observed) {
     const hostVerified =
       previous?.hostId && observed.hostIds?.includes(previous.hostId);
     const absenceVerified =
-      inventoryComplete && (!observed.remoteHostsOmitted || hostVerified);
+      (!observed.ownership || ownership?.status === "proven") &&
+      inventoryComplete &&
+      (!observed.remoteHostsOmitted || hostVerified) &&
+      (!observed.currentInventory ||
+        currentInventoryProven(observed, previous?.hostId, id));
     return {
       worktreeId: id,
       path: location,
@@ -250,6 +441,7 @@ export function evaluateKickoffCleanup(entry, observed) {
       instanceId: item?.worktreeInstanceId ?? previous?.instanceId ?? null,
       hostId: item?.hostId ?? previous?.hostId ?? null,
       owner: entry.director?.terminalHandle ?? entry.pm.worktreeId,
+      ownership,
       status:
         removed && absenceVerified
           ? "already-removed"
@@ -269,7 +461,10 @@ export function evaluateKickoffCleanup(entry, observed) {
     runId: entry.runId,
     scannedAt: observed.scannedAt ?? new Date().toISOString(),
     inventoryComplete,
-    status: candidates.every((item) => item.status === "already-removed")
+    currentInventory: observed.currentInventory ?? null,
+    status: candidates.every((item) =>
+      ["already-removed", "transferred"].includes(item.status),
+    )
       ? "clean"
       : "cleanup-pending",
     candidates,
@@ -281,7 +476,7 @@ export function evaluateKickoffCleanup(entry, observed) {
 async function gitObservation(location, delivered, projectDir, gitCommand) {
   if (!location || !fs.existsSync(location)) return null;
   try {
-    const [status, ignored, head] = await Promise.all([
+    const [status, ignored, head, branch] = await Promise.all([
       gitCommand(location, ["status", "--porcelain=v1", "-uall"]),
       gitCommand(location, [
         "ls-files",
@@ -291,6 +486,9 @@ async function gitObservation(location, delivered, projectDir, gitCommand) {
         "-z",
       ]),
       gitCommand(location, ["rev-parse", "HEAD"]),
+      gitCommand(location, ["symbolic-ref", "--quiet", "HEAD"]).catch(
+        () => null,
+      ),
     ]);
     let included = false;
     if (delivered?.mergeCommit) {
@@ -309,6 +507,7 @@ async function gitObservation(location, delivered, projectDir, gitCommand) {
     const ignoredPaths = ignored.split("\0").filter(Boolean);
     return {
       head,
+      branch,
       dirty: Boolean(status),
       ignored: ignoredPaths.length > 0,
       ignoredCount: ignoredPaths.length,
@@ -395,7 +594,7 @@ async function allWorkerObservations(executable, orca, requiredRunId) {
  * @returns {Promise<object>} Conservative cleanup inventory.
  */
 export async function scanKickoffCleanup(
-  { orgFile, worktreeId, archiveFile, executable },
+  { orgFile, worktreeId, archiveFile, executable, integrationCommit },
   {
     orca = runOrcaJson,
     gitCommand = git,
@@ -449,6 +648,30 @@ export async function scanKickoffCleanup(
   );
   const ids = candidateIds(entry, worktrees);
   const byId = new Map(worktrees.map((item) => [item.worktreeId, item]));
+  const scopedTerminals = {};
+  for (const id of ids) {
+    const hostId =
+      byId.get(id)?.hostId ??
+      entry.cleanup?.candidates?.find((item) => item.worktreeId === id)?.hostId;
+    try {
+      const receipt = await listWorktreeTerminals(selected, id, orca);
+      const body = receipt?.result;
+      scopedTerminals[id] = {
+        worktreeId: id,
+        hostScope: body?.hostScope ?? null,
+        truncated: body?.truncated ?? null,
+        runtimeId: receipt?._meta?.runtimeId ?? null,
+        rowsVerified:
+          Array.isArray(body?.terminals) &&
+          body.terminals.every(
+            (row) => row.worktreeId === id && row.executionHostId === hostId,
+          ),
+      };
+      if (Array.isArray(body?.terminals)) terminals.push(...body.terminals);
+    } catch (error) {
+      scopedTerminals[id] = { worktreeId: id, error: error.message };
+    }
+  }
   const gitStates = {};
   const absentPaths = [];
   for (const id of ids) {
@@ -456,7 +679,7 @@ export async function scanKickoffCleanup(
     if (location && !fs.existsSync(location)) absentPaths.push(location);
     gitStates[id] = await gitObservation(
       location,
-      entry.delivered,
+      integrationCommit ? { mergeCommit: integrationCommit } : entry.delivered,
       ownerProject(orgFile),
       gitCommand,
     );
@@ -465,9 +688,18 @@ export async function scanKickoffCleanup(
     worktrees,
     terminals,
     workers,
+    retired: retiredWorktrees(orgFile, worktreeId).map(
+      (entry) => entry.worktreeId,
+    ),
     launches: readLaunches(orgFile),
     closures: readTerminalClosures(orgFile),
     git: gitStates,
+    ownership: Object.fromEntries(
+      ids.map((id) => [
+        id,
+        proveKickoffWorktreeOwnership(orgFile, entry, id, byId.get(id)),
+      ]),
+    ),
     absentPaths,
     errors,
     unattributedWorkers: unattributedWorkers.map((worker) => ({
@@ -481,6 +713,22 @@ export async function scanKickoffCleanup(
     })),
     remoteHostsOmitted,
     hostIds: treeResult?.hostScope?.hostIds ?? [],
+    currentInventory: {
+      scopedTerminals,
+      ...Object.fromEntries(
+        ["worktree", "terminal"].map((kind, index) => [
+          kind,
+          {
+            hostScope: values[index]?.hostScope ?? null,
+            truncated: values[index]?.truncated ?? null,
+            runtimeId:
+              results[index].status === "fulfilled"
+                ? (results[index].value?._meta?.runtimeId ?? null)
+                : null,
+          },
+        ]),
+      ),
+    },
     inventoryComplete: errors.length === 0,
   });
 }
@@ -505,10 +753,17 @@ function isDescendant(candidate, ancestorId, candidates) {
  * @param {object} [ports] - Injectable read-only scanner and Orca reclaimer.
  * @returns {Promise<object>} Durable per-candidate cleanup result.
  */
-export async function reclaimKickoffCleanup(
+export async function reclaimKickoffCleanup(request, ports = {}) {
+  return withWorktreeLock(request.orgFile, (prepare) =>
+    reclaimKickoffCleanupUnderLock(request, { ...ports, prepare }),
+  );
+}
+
+async function reclaimKickoffCleanupUnderLock(
   { orgFile, worktreeId, archiveFile, executable, callerCwd = process.cwd() },
   {
     scan = scanKickoffCleanup,
+    prepare,
     show = runOrcaJson,
     reclaim = reclaimWorktree,
   } = {},
@@ -567,7 +822,7 @@ export async function reclaimKickoffCleanup(
         const pendingChild = latest.candidates.some(
           (item) =>
             item.worktreeId !== id &&
-            item.status !== "already-removed" &&
+            !["already-removed", "transferred"].includes(item.status) &&
             (id === worktreeId || isDescendant(item, id, latest.candidates)),
         );
         if (
@@ -605,16 +860,39 @@ export async function reclaimKickoffCleanup(
               shown.path === candidate.path &&
               shown.identity?.instanceId === candidate.instanceId &&
               shown.identity?.executionHostId === candidate.hostId &&
+              shown.parentWorktreeId === candidate.parentWorktreeId &&
               typeof shown.identity?.key === "string" &&
               shown.identity.key,
             `Worktree ${id} identity changed or could not be verified; preserve it`,
           );
+          if (candidate.git?.head)
+            assert(
+              shown.head === candidate.git.head &&
+                shown.branch === candidate.git.branch,
+              "Worktree Git identity changed before reclaim; preserve it",
+            );
           identityKey = shown.identity.key;
         } catch (error) {
           attempt.outcome = "refused";
           attempt.error = error.message;
         }
+        let transaction;
         if (identityKey) {
+          const ownership = proveKickoffWorktreeOwnership(orgFile, entry, id);
+          if (ownership.status !== "proven") {
+            attempt.outcome = "refused";
+            attempt.error = ownership.reason;
+            writeJSON(recordFile, record);
+            continue;
+          }
+          transaction = prepare({
+            type: "kickoff-reclaim",
+            ownership,
+            before: receiptBody(attempt.showReceipt).worktree,
+            worktreeId: id,
+            identityKey,
+            sourceWorktreeId: worktreeId,
+          });
           try {
             attempt.receipt = await reclaim(ownerProject(orgFile), {
               id,
@@ -642,6 +920,9 @@ export async function reclaimKickoffCleanup(
           }
         }
         writeJSON(recordFile, record);
+        if (transaction && attempt.outcome === "removed")
+          transaction.complete(attempt);
+        if (transaction && attempt.outcome !== "removed") break;
       }
       try {
         record.latest = await scan(request);

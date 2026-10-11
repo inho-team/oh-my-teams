@@ -1,4 +1,9 @@
 /** Regression tests for conservative kickoff worktree reconciliation. */
+import {
+  denyDirectorySync,
+  durableSuccessSupported,
+} from "./directory-durability-fixture.mjs";
+import { recordLaunch } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -36,6 +41,7 @@ const worktrees = [
     worktreeId: pm,
     path: "/tmp/pm",
     worktreeInstanceId: "pm-instance",
+    hostId: "local",
     childWorktreeIds: [child],
     liveTerminalCount: 0,
   },
@@ -43,6 +49,7 @@ const worktrees = [
     worktreeId: child,
     path: "/tmp/child",
     worktreeInstanceId: "child-instance",
+    hostId: "local",
     parentWorktreeId: pm,
     liveTerminalCount: 0,
   },
@@ -197,6 +204,7 @@ test("a matching Orca PTY kill receipt proves a role launch ended", () => {
   ];
   input.closures = [
     {
+      identity: { instanceId: "child-instance", executionHostId: "local" },
       at: "2026-09-29T00:20:00.000Z",
       worktreeId: child,
       worktreePath: "/tmp/child",
@@ -343,6 +351,14 @@ test("a completed archive retains child identity for read-only partial cleanup r
     pmPath,
     goal: "reconcile worktrees",
   });
+  recordLaunch(orgFile, {
+    via: "role-terminal",
+    role: "worker",
+    stateDir: path.join(pmPath, ".omt"),
+    callerCwd: pmPath,
+    worktreePath: childPath,
+    terminal: "child-fixture-terminal",
+  });
   let childPresent = true;
   let foreignWorker = true;
   let contextLiveness = {
@@ -350,14 +366,18 @@ test("a completed archive retains child identity for read-only partial cleanup r
     reason: "unsupervised_settled",
   };
   const orca = async (_executable, args) => ({
+    _meta: { runtimeId: "fixture-runtime" },
     result:
       args[0] === "worktree"
         ? {
+            hostScope: { hostIds: ["local"], omittedHostIds: [] },
+            truncated: false,
             worktrees: [
               {
                 worktreeId: pmId,
                 path: pmPath,
                 worktreeInstanceId: "pm-fixture-instance",
+                hostId: "local",
                 childWorktreeIds: childPresent ? [childId] : [],
               },
               ...(childPresent
@@ -366,6 +386,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
                       worktreeId: childId,
                       path: childPath,
                       worktreeInstanceId: "child-fixture-instance",
+                      hostId: "local",
                       parentWorktreeId: pmId,
                     },
                   ]
@@ -373,7 +394,11 @@ test("a completed archive retains child identity for read-only partial cleanup r
             ],
           }
         : args[0] === "terminal"
-          ? { terminals: [] }
+          ? {
+              terminals: [],
+              hostScope: { hostIds: ["local"], omittedHostIds: [] },
+              truncated: false,
+            }
           : args[1] === "run-list"
             ? args.includes("--cursor")
               ? { runs: [{ id: "run-another-kickoff" }], nextCursor: null }
@@ -497,6 +522,15 @@ async function reclaimFixture(t) {
     pmPath: path.join(project, "pm"),
     goal: "reclaim completed kickoff",
   });
+  for (const id of [firstId, secondId])
+    recordLaunch(orgFile, {
+      via: "role-terminal",
+      role: "worker",
+      stateDir: path.join(project, "pm", ".omt"),
+      callerCwd: path.join(project, "pm"),
+      worktreePath: id.split("::")[1],
+      terminal: `terminal-${id}`,
+    });
   const archived = (
     await releaseKickoff(orgFile, {
       worktreeId: pmId,
@@ -542,6 +576,7 @@ async function reclaimFixture(t) {
       result: {
         worktree: {
           id,
+          parentWorktreeId: id === pmId ? null : pmId,
           path: id.split("::")[1],
           identity: {
             key: `wt2:local:${id}-instance`,
@@ -576,6 +611,7 @@ async function reclaimFixture(t) {
 }
 
 test("reclaim removes safe children before their PM and stores receipts", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = await reclaimFixture(t);
   const result = await reclaimKickoffCleanup(fixture.request, fixture);
   assert.deepEqual(fixture.calls, [
@@ -594,6 +630,7 @@ test("reclaim removes safe children before their PM and stores receipts", async 
 });
 
 test("an Orca removal error stays unverified and is not retried", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = await reclaimFixture(t);
   const result = await reclaimKickoffCleanup(fixture.request, {
     scan: fixture.scan,
@@ -607,8 +644,10 @@ test("an Orca removal error stays unverified and is not retried", async (t) => {
     result.attempts.every((attempt) => attempt.outcome === "unverified"),
   );
   assert.match(result.attempts[0].error, /Orca refused removal/);
-  const retried = await reclaimKickoffCleanup(fixture.request, fixture);
-  assert.equal(retried.attempts.length, result.attempts.length);
+  await assert.rejects(
+    () => reclaimKickoffCleanup(fixture.request, fixture),
+    /Unresolved/,
+  );
   assert.deepEqual(fixture.calls, []);
 });
 
@@ -640,6 +679,7 @@ test("a replacement between scan and show is refused before Orca removal", async
 });
 
 test("partial cleanup preserves a blocked sibling and reentry removes only remaining candidates", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = await reclaimFixture(t);
   fixture.preserved.add(fixture.ids.firstId);
   const first = await reclaimKickoffCleanup(fixture.request, fixture);
@@ -657,6 +697,7 @@ test("partial cleanup preserves a blocked sibling and reentry removes only remai
 });
 
 test("an unobserved Orca removal is not repeated on reentry", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = await reclaimFixture(t);
   let scans = 0;
   const scan = async () => {
@@ -674,9 +715,207 @@ test("an unobserved Orca removal is not repeated on reentry", async (t) => {
   });
   assert.equal(uncertain.attempts[0].outcome, "unverified");
   assert.match(uncertain.attempts[0].error, /inventory unavailable/);
-  await reclaimKickoffCleanup(fixture.request, fixture);
+  await assert.rejects(
+    () => reclaimKickoffCleanup(fixture.request, fixture),
+    /Unresolved/,
+  );
   assert.equal(
     fixture.calls.filter((id) => id === fixture.ids.secondId).length,
     1,
   );
+});
+
+function closedExternalObservation() {
+  const input = observed();
+  const runtime = { runtimeId: "runtime-exact" };
+  const dispatchId = "external-dispatch";
+  const terminal = {
+    handle: "external-terminal",
+    ptyId: `${child}@@pty`,
+    incarnationId: "incarnation",
+    worktreeId: child,
+    executionHostId: "local",
+    tabId: "tab-exact",
+  };
+  const scope = { hostIds: ["local"], omittedHostIds: ["unrelated-remote"] };
+  input.currentInventory = Object.fromEntries(
+    ["worktree", "terminal"].map((kind) => [
+      kind,
+      {
+        hostScope: structuredClone(scope),
+        runtimeId: runtime.runtimeId,
+        truncated: false,
+      },
+    ]),
+  );
+  input.workers[1] = {
+    dispatchId,
+    workerState: "succeeded",
+    dispatchStatus: "completed",
+    agentTerminalHandle: terminal.handle,
+    terminalState: "retained",
+    resource: {
+      ownershipState: "external",
+      releaseState: "not_requested",
+      retainedReason: "external_terminal",
+      terminalHandle: terminal.handle,
+      worktreeId: child,
+      endpointId: runtime.runtimeId,
+      endpointIncarnation: `${terminal.ptyId}:${terminal.incarnationId}`,
+      originDispatchId: dispatchId,
+      ownerDispatchId: dispatchId,
+    },
+    projection: {
+      host: { id: "local" },
+      workspace: { id: child },
+      liveness: { verdict: "unverifiable", reason: "missing_status" },
+    },
+  };
+  input.launches = [
+    {
+      via: "worker-start",
+      workerId: dispatchId,
+      terminal: terminal.handle,
+      worktreePath: "/tmp/child",
+      at: "2026-09-29T00:10:00Z",
+    },
+  ];
+  input.closures = [
+    {
+      worktreeId: child,
+      worktreePath: "/tmp/child",
+      at: "2026-09-29T00:11:00Z",
+      identity: { instanceId: "child-instance", executionHostId: "local" },
+      beforeReceipt: {
+        result: { terminals: [terminal], hostScope: scope, truncated: false },
+        _meta: runtime,
+      },
+      afterReceipt: {
+        result: { terminals: [], hostScope: scope, truncated: false },
+        _meta: runtime,
+      },
+      terminals: [
+        {
+          terminal: terminal.handle,
+          dispatch: { result: { status: "clear" } },
+          releases: [
+            {
+              dispatchId,
+              receipt: {
+                result: {
+                  dispatchId,
+                  state: "retained",
+                  reason: "external_terminal",
+                  processAction: "none",
+                },
+              },
+            },
+          ],
+          close: {
+            receipt: {
+              result: {
+                close: {
+                  handle: terminal.handle,
+                  tabId: terminal.tabId,
+                  ptyKilled: true,
+                },
+              },
+              _meta: runtime,
+            },
+          },
+        },
+      ],
+    },
+  ];
+  return structuredClone(input);
+}
+
+test("a settled external Dispatch needs exact PTY incarnation and closure to overcome stale missing_status", () => {
+  const input = closedExternalObservation();
+  assert.equal(
+    evaluateKickoffCleanup(entry, input).candidates[1].status,
+    "safe-to-remove",
+  );
+  const cases = {
+    currentProvenanceMissing: (v) => {
+      delete v.currentInventory;
+    },
+    currentTargetAbsent: (v) => {
+      v.currentInventory.terminal.hostScope.hostIds = ["other-host"];
+    },
+    currentTargetOmitted: (v) => {
+      v.currentInventory.terminal.hostScope.omittedHostIds.push("local");
+    },
+    currentRuntimeMismatch: (v) => {
+      v.currentInventory.terminal.runtimeId = "new-runtime";
+    },
+    currentBothRuntimeChanged: (v) => {
+      v.currentInventory.terminal.runtimeId = "new-runtime";
+      v.currentInventory.worktree.runtimeId = "new-runtime";
+    },
+    active: (v) => {
+      v.workers[1].dispatchStatus = "running";
+    },
+    live: (v) => {
+      v.workers[1].projection.liveness.verdict = "live";
+    },
+    incarnation: (v) => {
+      v.workers[1].resource.endpointIncarnation = "replacement";
+    },
+    endpoint: (v) => {
+      v.workers[1].resource.endpointId = "another-runtime";
+    },
+    owner: (v) => {
+      v.workers[1].resource.ownerDispatchId = "another-dispatch";
+    },
+    identity: (v) => {
+      v.closures[0].identity.instanceId = "new-instance";
+    },
+    tab: (v) => {
+      v.closures[0].terminals[0].close.receipt.result.close.tabId = "new-tab";
+    },
+    kill: (v) => {
+      v.closures[0].terminals[0].close.receipt.result.close.ptyKilled = false;
+    },
+    release: (v) => {
+      v.closures[0].terminals[0].releases = [];
+    },
+    host: (v) => {
+      v.closures[0].afterReceipt.result.hostScope.omittedHostIds.push("local");
+    },
+    truncated: (v) => {
+      v.closures[0].afterReceipt.result.truncated = true;
+    },
+    closure: (v) => {
+      v.closures = [];
+    },
+    liveTerminal: (v) => {
+      v.terminals = [{ handle: "live", worktreeId: child }];
+    },
+    unknownDispatch: (v) => {
+      v.workers.push({ ...v.workers[1], dispatchId: "unknown" });
+    },
+    incomplete: (v) => {
+      v.inventoryComplete = false;
+    },
+  };
+  for (const [name, change] of Object.entries(cases)) {
+    const candidate = closedExternalObservation();
+    change(candidate);
+    assert.equal(
+      evaluateKickoffCleanup(entry, candidate).candidates[1].status,
+      "preserve",
+      name,
+    );
+  }
+});
+
+test("unsupported directory durability never removes a protocol archived child", async (t) => {
+  const fixture = await reclaimFixture(t);
+  denyDirectorySync(t);
+  await assert.rejects(() => reclaimKickoffCleanup(fixture.request, fixture), {
+    code: "worktree-durability-unavailable",
+  });
+  assert.deepEqual(fixture.calls, []);
+  assert.equal(fixture.removed.size, 0);
 });
