@@ -21,6 +21,7 @@ import { taskHash, validateTask } from "./contracts.mjs";
 import { git } from "./evidence.mjs";
 import { classifyFailure, validateFailureEvidence } from "./failures.mjs";
 import { assertFailureSignal } from "./execution.mjs";
+import { assertModelAssignmentChoice } from "./model-assignment.mjs";
 import { gateCheck } from "./gates.mjs";
 import { hasUnresolvedObjections } from "./audit.mjs";
 import {
@@ -131,7 +132,7 @@ function assertText(value, message) {
   assert(typeof value === "string" && value.trim(), message);
 }
 
-function validateStaffingChoice(choice, organization, allowedResources) {
+function validateStaffingChoice(choice, organization, allowedResources, role) {
   assert(choice && typeof choice === "object", "Staffing choice required");
   assertText(choice.resourceId, "Staffing resourceId required");
   assertText(choice.model, "Staffing model required");
@@ -146,6 +147,7 @@ function validateStaffingChoice(choice, organization, allowedResources) {
       (typeof choice.effort === "string" && choice.effort.trim()),
     "Staffing effort must be a non-empty string when given",
   );
+  assertModelAssignmentChoice(organization, role, choice);
   return resource;
 }
 
@@ -236,11 +238,13 @@ function validateDirectorChangeApprovals(staffing, organization, tasks) {
       approval.from,
       organization,
       staffing.director.allowedResources,
+      staffing.tasks[task.id]?.role,
     );
     validateStaffingChoice(
       approval.to,
       organization,
       staffing.director.allowedResources,
+      staffing.tasks[task.id]?.role,
     );
     assert(
       sameStaffingChoice(approval.from, staffing.tasks[task.id]?.choice),
@@ -286,6 +290,7 @@ function validateStaffingRequest(request, organization, tasks) {
     staffing.director.pm,
     organization,
     staffing.director.allowedResources,
+    "pm",
   );
   assert(
     staffing.tasks && typeof staffing.tasks === "object",
@@ -315,6 +320,7 @@ function validateStaffingRequest(request, organization, tasks) {
       decision.choice,
       organization,
       staffing.director.allowedResources,
+      decision.role,
     );
   }
   validateDirectorChangeApprovals(staffing, organization, tasks);
@@ -673,6 +679,7 @@ export function changeTaskStaffing(stateDir, id, expectedRevision, input) {
       input.choice,
       organization,
       state.staffing.director.allowedResources,
+      item.role,
     );
     assertStaffingPoolUsable(state, organization, input.choice);
     assert(
