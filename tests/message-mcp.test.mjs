@@ -224,7 +224,7 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
   assert.equal(directorMessages.length, 1);
   assert.equal(directorMessages[0].id, signal.messageId);
   const directorTool = await handleMessageTool(
-    { orgFile, actor: "director" },
+    { orgFile, actor: "director", directorTerminal: "term_director" },
     "receive_messages",
   );
   assert.equal(
@@ -265,6 +265,7 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
     org: orgFile,
     signal: signal.id,
     text: "Use staging.",
+    "director-terminal": "term_director",
   });
   assert.equal(reply.queued, true);
   assert.equal(
@@ -276,17 +277,20 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
     org: orgFile,
     signal: signal.id,
     text: "Use staging.",
+    "director-terminal": "term_director",
   });
   assert.equal(replay.replayed, true);
   const watched = await executeCommand({
     command: "message-watch",
     org: orgFile,
+    "director-terminal": "term_director",
   });
   assert.equal(watched.messages[0].message.id, signal.messageId);
   const acknowledged = await executeCommand({
     command: "director-ack",
     org: orgFile,
     signal: signal.id,
+    "director-terminal": "term_director",
   });
   assert.equal(acknowledged.messageAcknowledged, true);
   assert.deepEqual(receiveMessages(state, kickoffHash, "director"), []);
@@ -294,6 +298,31 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
     parseArgs(["message-inbox", "--state", state, "--actor", "pm"]),
   );
   assert.equal(inbox.messages.length, 1);
+});
+
+test("Director Message MCP confines reads and writes to terminal-owned kickoffs", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-owner-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { state, orgFile, worktreeId, kickoffHash } = registeredState(root);
+  sendMessage(state, kickoffHash, { ...message, key: "owner-check" });
+
+  const foreign = await handleMessageTool(
+    { orgFile, actor: "director", directorTerminal: "term_other" },
+    "receive_messages",
+  );
+  assert.deepEqual(foreign.structuredContent.messages, []);
+  await assert.rejects(
+    () =>
+      handleMessageTool(
+        { orgFile, actor: "director", directorTerminal: "term_other" },
+        "ack_message",
+        {
+          worktreeId,
+          id: receiveMessages(state, kickoffHash, "director")[0].id,
+        },
+      ),
+    /does not own/,
+  );
 });
 
 test("Message MCP stdio exposes a registered kickoff mailbox", async (t) => {

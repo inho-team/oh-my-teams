@@ -1033,6 +1033,27 @@ test("directorWatch keeps every kickoff's own report when one PM terminal lookup
   assert.equal(kickoff.pmLiveness, "unverifiable");
 });
 
+test("directorWatch separates launch request, liveness observation, and stored progress", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", "codex");
+  sendSignal(orgFile, { worktreeId, kind: "progress", text: "check passed" });
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.equal(kickoff.observation.liveness.verdict, "unverifiable");
+  assert.equal(kickoff.observation.liveness.source, "orca-worker-list");
+  assert.equal(kickoff.observation.launch.requestedModel, null);
+  assert.equal(kickoff.observation.launch.observedModel, null);
+  assert.equal(kickoff.observation.lastStoredProgress.proof, "stored-only");
+  assert.equal(kickoff.observation.lastStoredProgress.autoAcknowledged, true);
+});
+
 test("replySignal reports that no PM terminal was found instead of claiming delivery", async (t) => {
   const { orgFile, worktreeId } = makeProject(t);
   const { id } = sendSignal(orgFile, {

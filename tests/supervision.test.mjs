@@ -142,6 +142,34 @@ test("a stall already escalated is not escalated again every period", () => {
   assert.equal(resumed.reason, "recent-activity");
 });
 
+test("output-only activity cannot reset a semantic-progress escalation", () => {
+  const escalatedAt = minutesAgo(10);
+  const result = next({
+    liveness: "live",
+    lastActivityAt: minutesAgo(1),
+    semanticProgressAt: minutesAgo(60),
+    unansweredRequests: 2,
+    escalatedAt,
+    escalatedReason: "silent-after-progress-requests",
+  });
+  assert.equal(result.action, "wait");
+  assert.equal(result.reason, "already-escalated");
+  assert.equal(result.activityAt, minutesAgo(1));
+  assert.equal(result.semanticProgressAt, minutesAgo(60));
+});
+
+test("verified semantic progress starts a new supervision assessment", () => {
+  const escalatedAt = minutesAgo(10);
+  const result = next({
+    liveness: "live",
+    lastActivityAt: minutesAgo(1),
+    semanticProgressAt: minutesAgo(1),
+    escalatedAt,
+  });
+  assert.equal(result.action, "wait");
+  assert.equal(result.reason, "recent-activity");
+});
+
 test("an exit or a human prompt after an escalation is still reported", () => {
   // The already-escalated rule ran first, so a worker that exited without
   // worker_done, or stopped on a prompt only a human can answer, after its

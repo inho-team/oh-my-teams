@@ -77,6 +77,9 @@ const LIVENESS = new Set(["live", "unverifiable", "exited"]);
  * @param {object} observation - Current facts about the worker.
  * @param {string} observation.liveness - `live`, `unverifiable` or `exited`.
  * @param {string} [observation.lastActivityAt] - Last heartbeat, message or output change.
+ * @param {string} [observation.semanticProgressAt] - Last verified artifact,
+ * check, acceptance event, or evidence-backed stage report. When present this,
+ * rather than activity, is the only timestamp that can end an escalation cycle.
  * @param {string|number} [observation.now=Date.now()] - Time of this check.
  * @param {number} [observation.unansweredRequests=0] - Progress requests still unanswered.
  * @param {number} [observation.inspections=0] - Inspections since the last activity.
@@ -92,6 +95,7 @@ const LIVENESS = new Set(["live", "unverifiable", "exited"]);
 export function nextSupervisionAction({
   liveness,
   lastActivityAt,
+  semanticProgressAt,
   now = Date.now(),
   unansweredRequests = 0,
   inspections = 0,
@@ -109,7 +113,11 @@ export function nextSupervisionAction({
   }
   const nowMs = new Date(now).getTime();
   if (Number.isNaN(nowMs)) throw new Error(`Invalid now: ${now}`);
-  const last = Date.parse(lastActivityAt ?? "");
+  // `lastActivityAt` remains a useful diagnostic, but terminal redraws and
+  // heartbeats do not prove work advanced. Keep the legacy fallback for older
+  // callers that did not yet record semantic progress.
+  const progressAt = semanticProgressAt ?? lastActivityAt;
+  const last = Date.parse(progressAt ?? "");
   const silentMs = Number.isNaN(last) ? null : Math.max(0, nowMs - last);
   const silentMinutes = silentMs === null ? null : Math.floor(silentMs / 60000);
   const exhausted = unansweredRequests + inspections >= policy.unansweredLimit;
@@ -117,6 +125,8 @@ export function nextSupervisionAction({
     action,
     reason,
     silentMinutes,
+    activityAt: lastActivityAt ?? null,
+    semanticProgressAt: semanticProgressAt ?? null,
     display:
       reason === "recent-activity"
         ? "진행 중"

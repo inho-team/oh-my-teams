@@ -577,13 +577,74 @@ export async function notifyDirectorSignal(
  * @param {string} orgFile - Organization JSON path.
  * @returns {{signals: object[], deliveries: object[]}} Pending signal records and unacknowledged deliveries.
  */
-export function listInbox(orgFile) {
+export function listInbox(
+  orgFile,
+  { directorTerminal, includeStored = false } = {},
+) {
   const all = readInbox(orgFile);
   const { deliveries } = listDeliveries(orgFile, { unacknowledgedOnly: true });
+  if (directorTerminal !== undefined) {
+    const entries = listKickoffs(orgFile).kickoffs;
+    const owned = new Set(
+      entries
+        .filter((entry) => entry.director?.terminalHandle === directorTerminal)
+        .map((entry) => entry.pm.worktreeId),
+    );
+    const unowned = new Set(
+      entries
+        .filter((entry) => !entry.director?.terminalHandle)
+        .map((entry) => entry.pm.worktreeId),
+    );
+    return {
+      signals: all.filter(
+        (record) => record.status === "pending" && owned.has(record.worktreeId),
+      ),
+      deliveries: deliveries.filter(
+        (record) => record.directorTerminal === directorTerminal,
+      ),
+      unownedSignals: all.filter(
+        (record) =>
+          record.status === "pending" && unowned.has(record.worktreeId),
+      ),
+    };
+  }
   return {
     signals: all.filter((r) => r.status === "pending"),
     deliveries,
+    ...(includeStored ? { storedSignals: all } : {}),
   };
+}
+
+/**
+ * Verifies that a caller terminal owns one current kickoff before it can
+ * mutate that kickoff's Director-facing records. Legacy entries deliberately
+ * have no mutable Director mailbox because their ownership is unknown.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} worktreeId - Target PM worktree id.
+ * @param {string|undefined} directorTerminal - Proven caller terminal.
+ * @returns {object} Registered, owned kickoff entry.
+ */
+export function requireDirectorMailboxOwner(
+  orgFile,
+  worktreeId,
+  directorTerminal,
+) {
+  const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
+  assert(entry, `Kickoff ${worktreeId} is no longer registered`);
+  assert(
+    entry.registrationSeq !== undefined && entry.director?.terminalHandle,
+    "Legacy or unowned kickoff cannot receive Director mailbox writes",
+  );
+  assert(
+    typeof directorTerminal === "string" && directorTerminal.trim(),
+    "Director terminal provenance is required for mailbox writes",
+  );
+  assert(
+    entry.director.terminalHandle === directorTerminal.trim(),
+    "Director terminal does not own this kickoff mailbox",
+  );
+  return entry;
 }
 
 /**
@@ -621,6 +682,13 @@ export async function replySignal(orgFile, request) {
     const file = path.join(inboxDir(orgFile), `${request.signalId}.json`);
     assert(fs.existsSync(file), `Signal ${request.signalId} not found`);
     const record = readJSON(file);
+    if (request.directorTerminal !== undefined) {
+      requireDirectorMailboxOwner(
+        orgFile,
+        record.worktreeId,
+        request.directorTerminal,
+      );
+    }
     assert(
       record.status === "pending" ||
         (request.channel === "message-mcp" &&
@@ -792,6 +860,13 @@ export function acknowledgeSignal(orgFile, signalId, options = {}) {
     const file = path.join(inboxDir(orgFile), `${signalId}.json`);
     if (fs.existsSync(file)) {
       const record = readJSON(file);
+      if (options.directorTerminal !== undefined) {
+        requireDirectorMailboxOwner(
+          orgFile,
+          record.worktreeId,
+          options.directorTerminal,
+        );
+      }
       assert(
         record.status !== "acknowledged",
         `Signal ${signalId} is already acknowledged`,

@@ -98,16 +98,34 @@ export async function handleMessageTool(context, name, args = {}) {
   if (context.orgFile) {
     if (actor !== "director")
       throw new Error("Organization mailbox is director-only");
-    const kickoffs = () =>
+    const allKickoffs = () =>
       listKickoffs(context.orgFile).kickoffs.filter(
         (entry) => entry.registrationSeq !== undefined,
       );
+    const directorTerminal = String(context.directorTerminal ?? "").trim();
+    if (!directorTerminal) {
+      throw new Error(
+        "Director Message MCP requires ORCA_TERMINAL_HANDLE provenance",
+      );
+    }
+    const kickoffs = () =>
+      allKickoffs().filter(
+        (entry) => entry.director?.terminalHandle === directorTerminal,
+      );
     const scope = () => {
-      const entry = kickoffs().find(
+      const entry = allKickoffs().find(
         (item) => item.pm.worktreeId === args.worktreeId,
       );
       if (!entry)
         throw new Error("Director message requires a registered worktreeId");
+      if (!entry.director?.terminalHandle) {
+        throw new Error(
+          "Legacy or unowned kickoff is read-only and cannot use the director mailbox",
+        );
+      }
+      if (entry.director.terminalHandle !== directorTerminal) {
+        throw new Error("Director terminal does not own this kickoff mailbox");
+      }
       return {
         stateDir: entry.pm.stateDir,
         kickoffHash: kickoffHashFor(entry),
@@ -140,7 +158,19 @@ export async function handleMessageTool(context, name, args = {}) {
           setTimeout(resolve, Math.min(250, deadline - Date.now())),
         );
       }
-      result = { messages, timedOut: messages.length === 0 };
+      const unowned = allKickoffs()
+        .filter((entry) => !entry.director?.terminalHandle)
+        .flatMap((entry) =>
+          receiveMessages(entry.pm.stateDir, kickoffHashFor(entry), actor).map(
+            (message) => ({ worktreeId: entry.pm.worktreeId, message }),
+          ),
+        );
+      result = {
+        messages,
+        unowned,
+        timedOut: messages.length === 0,
+        directorTerminal,
+      };
     } else {
       const target = scope();
       switch (name) {
@@ -269,6 +299,9 @@ if (
         ? { orgFile: path.resolve(values.org) }
         : { stateDir: path.resolve(values.state) }),
       actor: validateMessageActor(values.actor),
+      ...(values.org
+        ? { directorTerminal: process.env.ORCA_TERMINAL_HANDLE }
+        : {}),
     };
     await createMessageMcpServer(context).connect(new StdioServerTransport());
   } catch (error) {

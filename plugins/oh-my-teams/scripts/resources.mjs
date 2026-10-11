@@ -361,15 +361,31 @@ async function pmProviderOverload(orgFile, entry, options) {
 export async function directorWatch(orgFile, options = {}) {
   const checkFreeMemory = options.freeMemory ?? availableMemory;
   const freeBytes = checkFreeMemory();
-  const { signals, deliveries = [] } = listInbox(orgFile);
+  const {
+    signals,
+    deliveries = [],
+    storedSignals: allSignals = [],
+  } = listInbox(orgFile, { includeStored: true });
   const slots = readSlots(orgFile);
   const { kickoffs } = listKickoffs(path.resolve(orgFile));
+  const observedAt = new Date().toISOString();
 
   const kickoffSummaries = await Promise.all(
     kickoffs.map(async (entry) => {
       const pmSignals = signals.filter(
         (s) => s.worktreeId === entry.pm.worktreeId,
       );
+      const progressSignals = allSignals
+        .filter(
+          (signal) =>
+            signal.worktreeId === entry.pm.worktreeId &&
+            signal.kind === "progress",
+        )
+        .sort(
+          (a, b) =>
+            (b.seq ?? 0) - (a.seq ?? 0) ||
+            String(b.sentAt).localeCompare(String(a.sentAt)),
+        );
       const pmSlots = slots.filter((s) => s.worktreeId === entry.pm.worktreeId);
       const liveness = await queryPmLiveness(entry, options.orcaExecutable);
       const providerOverload = await pmProviderOverload(
@@ -385,6 +401,41 @@ export async function directorWatch(orgFile, options = {}) {
         slots: pmSlots,
         pmLiveness: liveness,
         providerOverload,
+        observation: {
+          liveness: {
+            verdict: liveness,
+            source: "orca-worker-list",
+            observedAt,
+          },
+          launch: {
+            requestedModel:
+              findPmLaunch(orgFile, entry.pm.path)?.modelRequested ?? null,
+            configuredModel: entry.pm?.model ?? null,
+            observedModel: null,
+            source: "launch-ledger-and-kickoff-registry",
+            observedAt,
+          },
+          ...(progressSignals[0]
+            ? {
+                lastStoredProgress: {
+                  id: progressSignals[0].id,
+                  at: progressSignals[0].sentAt,
+                  source: "director-signal-store",
+                  proof: "stored-only",
+                  autoAcknowledged:
+                    progressSignals[0].autoAcknowledged === true,
+                },
+              }
+            : {}),
+        },
+        attention: pmSignals.map((signal) => ({
+          kind: signal.kind,
+          id: signal.id,
+          observedAt: signal.sentAt,
+          source: "director-signal-store",
+          nextOwner: "director",
+          nextAction: "read-and-handle",
+        })),
       };
     }),
   );

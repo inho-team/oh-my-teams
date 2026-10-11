@@ -383,7 +383,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   message-send --state DIR --actor ACTOR --to ACTOR --key KEY
                --type TYPE --subject TEXT --body TEXT
   message-inbox --state DIR --actor ACTOR [--limit N --wait-ms N]
-  message-watch --org FILE [--wait-ms N]
+  message-watch --org FILE [--wait-ms N] [--director-terminal HANDLE]
   message-show --state DIR --actor ACTOR --id MESSAGE_ID
   message-ack --state DIR --actor ACTOR --id MESSAGE_ID
                (durable OMT Message MCP mailbox; a read does not acknowledge)
@@ -488,11 +488,11 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
   director-signal --org FILE --worktree ID --kind decision|close-ready|blocked|progress
                   --text TEXT [--head SHA --source DIR]
                   (writes the signal record and queues a Message MCP message)
-  director-inbox --org FILE
+  director-inbox --org FILE [--director-terminal HANDLE]
                  (lists pending signals and unacknowledged deliveries)
-  director-reply --org FILE --signal ID --text TEXT
+  director-reply --org FILE --signal ID --text TEXT [--director-terminal HANDLE]
                  (records the director's decision and queues a PM message)
-  director-ack --org FILE (--signal ID | --delivery ID)
+  director-ack --org FILE (--signal ID | --delivery ID) [--director-terminal HANDLE]
                [--director-terminal HANDLE]
                (marks a signal and its message, or a delivery receipt, as handled)
   director-delivery --org FILE --source DIR --head SHA --director-terminal HANDLE
@@ -713,7 +713,7 @@ export const ALLOWED_OPTIONS = {
   ],
   "message-send": ["state", "actor", "to", "key", "type", "subject", "body"],
   "message-inbox": ["state", "actor", "limit", "wait-ms"],
-  "message-watch": ["org", "wait-ms"],
+  "message-watch": ["org", "wait-ms", "director-terminal"],
   "message-show": ["state", "actor", "id"],
   "message-ack": ["state", "actor", "id"],
   "worker-start": [
@@ -843,8 +843,8 @@ export const ALLOWED_OPTIONS = {
     "source",
     "orca",
   ],
-  "director-inbox": ["org"],
-  "director-reply": ["org", "signal", "text", "orca"],
+  "director-inbox": ["org", "director-terminal"],
+  "director-reply": ["org", "signal", "text", "orca", "director-terminal"],
   "director-ack": [
     "org",
     "signal",
@@ -3346,7 +3346,17 @@ async function messageScope(state) {
   return { stateDir, kickoffHash: registration.kickoffHash };
 }
 
-async function watchDirectorMessages(orgFile, timeoutMs = 0) {
+function directorCallerTerminal(args) {
+  const terminal =
+    args["director-terminal"] ?? process.env.ORCA_TERMINAL_HANDLE;
+  assert(
+    typeof terminal === "string" && terminal.trim(),
+    "Director commands require --director-terminal or ORCA_TERMINAL_HANDLE provenance",
+  );
+  return terminal.trim();
+}
+
+async function watchDirectorMessages(orgFile, directorTerminal, timeoutMs = 0) {
   assert(
     Number.isInteger(timeoutMs) && timeoutMs >= 0 && timeoutMs <= 60000,
     "Message timeout must be 0-60000 milliseconds",
@@ -3354,7 +3364,11 @@ async function watchDirectorMessages(orgFile, timeoutMs = 0) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const messages = listKickoffs(orgFile)
-      .kickoffs.filter((entry) => entry.registrationSeq !== undefined)
+      .kickoffs.filter(
+        (entry) =>
+          entry.registrationSeq !== undefined &&
+          entry.director?.terminalHandle === directorTerminal,
+      )
       .flatMap((entry) => {
         const kickoffHash = kickoffHashFor(entry);
         return receiveMessages(entry.pm.stateDir, kickoffHash, "director").map(
@@ -3365,9 +3379,10 @@ async function watchDirectorMessages(orgFile, timeoutMs = 0) {
           }),
         );
       });
-    if (messages.length) return { messages, timedOut: false };
+    if (messages.length) return { messages, timedOut: false, directorTerminal };
     const remaining = deadline - Date.now();
-    if (remaining <= 0) return { messages: [], timedOut: true };
+    if (remaining <= 0)
+      return { messages: [], timedOut: true, directorTerminal };
     await new Promise((resolve) =>
       setTimeout(resolve, Math.min(250, remaining)),
     );
@@ -4594,6 +4609,7 @@ export async function executeCommand(args, execute) {
     case "message-watch":
       return watchDirectorMessages(
         args.org,
+        directorCallerTerminal(args),
         args["wait-ms"] === undefined ? 0 : Number(args["wait-ms"]),
       );
     case "message-show": {
@@ -5014,12 +5030,15 @@ export async function executeCommand(args, execute) {
       };
     }
     case "director-inbox":
-      return listInbox(args.org);
+      return listInbox(args.org, {
+        directorTerminal: directorCallerTerminal(args),
+      });
     case "director-reply":
       return replySignal(args.org, {
         signalId: args.signal,
         text: args.text,
         channel: "message-mcp",
+        directorTerminal: directorCallerTerminal(args),
       });
     case "director-ack": {
       if (args.delivery) {
@@ -5031,7 +5050,9 @@ export async function executeCommand(args, execute) {
       }
       assert(args.signal, "director-ack needs --signal ID or --delivery ID");
       const record = readSignal(args.org, args.signal);
-      const result = acknowledgeSignal(args.org, args.signal);
+      const result = acknowledgeSignal(args.org, args.signal, {
+        directorTerminal: directorCallerTerminal(args),
+      });
       const [entry] = listKickoffs(args.org, record.worktreeId).kickoffs;
       if (entry) {
         const kickoffHash = kickoffHashFor(entry);
