@@ -1151,6 +1151,13 @@ test("directorWatch keeps invalid terminal adapter JSON and envelopes unverifiab
       }),
     },
     orcaEnvelope({ terminals: [], truncated: true }),
+    orcaEnvelope({
+      terminals: [],
+      hostScope: {
+        hostIds: ["local"],
+        omittedHostIds: ["mac-mini", "dbserver"],
+      },
+    }),
   ]) {
     const runtime = await observePmTerminalAdapter(t, terminalListResult);
     assert.equal(runtime.terminalStatus, "unverifiable");
@@ -1179,6 +1186,10 @@ test("directorWatch preserves an exact PM terminal from an incomplete adapter li
         ? orcaEnvelope({
             terminals: [{ handle: "term_pm", worktreePath: pmPath }],
             truncated: true,
+            hostScope: {
+              hostIds: ["local"],
+              omittedHostIds: ["mac-mini", "dbserver"],
+            },
           })
         : { code: 1, stdout: "", stderr: "not used by terminal observation" },
   });

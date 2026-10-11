@@ -832,9 +832,13 @@ async function orcaTerminals(
   if (!Array.isArray(listed)) {
     return fallback("Orca terminal list returned an invalid terminal envelope");
   }
+  const hostScope = payload?.result?.hostScope ?? payload?.hostScope;
+  const omittedHosts = hostScope?.omittedHostIds;
   if (
     strict &&
-    (payload?.result?.truncated === true || payload?.truncated === true)
+    (payload?.result?.truncated === true ||
+      payload?.truncated === true ||
+      (Array.isArray(omittedHosts) && omittedHosts.length > 0))
   ) {
     Object.defineProperty(listed, "incomplete", { value: true });
   }
