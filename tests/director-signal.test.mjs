@@ -831,6 +831,30 @@ test("queryPmLiveness asks Orca for worker-list with the given executable", asyn
   assert.ok(calls[0].options.timeoutMs > 0);
 });
 
+test("queryPmLiveness does not promote a same-worktree Worker to a role-terminal PM", async () => {
+  const verdict = await queryPmLiveness(
+    PM_ENTRY,
+    "orca",
+    async () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        result: {
+          workers: [
+            {
+              projection: {
+                workspace: { id: PM_ENTRY.pm.worktreeId },
+                liveness: { verdict: "live" },
+              },
+            },
+          ],
+        },
+      }),
+    }),
+    { terminal: "term_pm" },
+  );
+  assert.equal(verdict, "unverifiable");
+});
+
 // ─── PM terminal discovery and available memory ─────────────────────────────
 
 function recordPmLaunch(orgFile, worktreePath, terminal, provider = "claude") {
@@ -1031,6 +1055,248 @@ test("directorWatch keeps every kickoff's own report when one PM terminal lookup
   // The rest of directorWatch's report is unaffected by the one kickoff's failure.
   assert.equal(typeof report.freeMemoryBytes, "number");
   assert.equal(kickoff.pmLiveness, "unverifiable");
+  assert.equal(kickoff.observation.runtime.terminalStatus, "unverifiable");
+  assert.equal(kickoff.observation.runtime.terminalProof, "query-failed");
+  assert.equal(
+    kickoff.observation.runtime.source,
+    "orca-terminal-list-query-failed-and-launch-ledger",
+  );
+  assert.equal(kickoff.observation.runtime.nextOwner, "director");
+  assert.match(kickoff.observation.runtime.terminalError, /Unexpected end/);
+});
+
+test("directorWatch distinguishes confirmed PM terminal absence from query failure", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [],
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.equal(kickoff.observation.runtime.terminalStatus, "absent");
+  assert.equal(
+    kickoff.observation.runtime.terminalProof,
+    "terminal-list-confirmed-absent",
+  );
+  assert.equal(
+    kickoff.observation.runtime.source,
+    "orca-terminal-list-and-launch-ledger",
+  );
+  assert.equal(kickoff.observation.runtime.nextOwner, "director");
+  assert.equal(kickoff.observation.runtime.terminalError, null);
+});
+
+async function observePmTerminalAdapter(t, terminalListResult) {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", "codex");
+  const calls = [];
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "orca-test",
+    freeMemory: () => 1024 * 1024 * 1024,
+    execute: async (argv) => {
+      calls.push(argv);
+      if (argv[1] === "terminal" && argv[2] === "list") {
+        return terminalListResult;
+      }
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "not used by terminal observation",
+      };
+    },
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.deepEqual(calls.at(-1), ["orca-test", "terminal", "list", "--json"]);
+  return kickoff.observation.runtime;
+}
+
+test("directorWatch keeps actual nonzero terminal adapter responses unverifiable", async (t) => {
+  const runtime = await observePmTerminalAdapter(t, {
+    code: 42,
+    stdout: "",
+    stderr: "orca terminal list unavailable",
+  });
+  assert.equal(runtime.terminalStatus, "unverifiable");
+  assert.equal(runtime.terminalProof, "query-failed");
+  assert.equal(
+    runtime.source,
+    "orca-terminal-list-query-failed-and-launch-ledger",
+  );
+  assert.equal(runtime.nextOwner, "director");
+  assert.match(runtime.terminalError, /exited with code 42/);
+  assert.match(runtime.terminalError, /orca terminal list unavailable/);
+});
+
+test("directorWatch keeps invalid terminal adapter JSON and envelopes unverifiable", async (t) => {
+  for (const terminalListResult of [
+    { code: 0, stdout: "{" },
+    {
+      code: 0,
+      stdout: JSON.stringify({ ok: true, result: { terminals: {} } }),
+    },
+    { code: 0, stdout: JSON.stringify({ ok: true, result: {} }) },
+    {
+      code: 0,
+      stdout: JSON.stringify({
+        ok: false,
+        result: { terminals: [] },
+        error: { message: "terminal list denied" },
+      }),
+    },
+    orcaEnvelope({ terminals: [], truncated: true }),
+    orcaEnvelope({
+      terminals: [],
+      hostScope: {
+        hostIds: ["local"],
+        omittedHostIds: ["mac-mini", "dbserver"],
+      },
+    }),
+  ]) {
+    const runtime = await observePmTerminalAdapter(t, terminalListResult);
+    assert.equal(runtime.terminalStatus, "unverifiable");
+    assert.equal(runtime.terminalProof, "query-failed");
+    assert.equal(
+      runtime.source,
+      "orca-terminal-list-query-failed-and-launch-ledger",
+    );
+    assert.equal(runtime.nextOwner, "director");
+    assert.match(
+      runtime.terminalError,
+      /invalid JSON|invalid terminal envelope|failed response envelope|incomplete/,
+    );
+  }
+});
+
+test("directorWatch preserves an exact PM terminal from an incomplete adapter list", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", "codex");
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "orca-test",
+    freeMemory: () => 1024 * 1024 * 1024,
+    execute: async (argv) =>
+      argv[1] === "terminal" && argv[2] === "list"
+        ? orcaEnvelope({
+            terminals: [{ handle: "term_pm", worktreePath: pmPath }],
+            truncated: true,
+            hostScope: {
+              hostIds: ["local"],
+              omittedHostIds: ["mac-mini", "dbserver"],
+            },
+          })
+        : { code: 1, stdout: "", stderr: "not used by terminal observation" },
+  });
+  const runtime = report.kickoffs.find((item) => item.worktreeId === worktreeId)
+    .observation.runtime;
+  assert.equal(runtime.terminal, "term_pm");
+  assert.equal(runtime.terminalStatus, "present-unverified");
+  assert.equal(runtime.terminalProof, "terminal-list-observed");
+  assert.equal(runtime.terminalError, null);
+});
+
+test("directorWatch recognizes actual successful empty terminal adapter output as absent", async (t) => {
+  for (const terminalListResult of [
+    orcaEnvelope({ terminals: [] }),
+    { code: 0, stdout: "[]" },
+  ]) {
+    const runtime = await observePmTerminalAdapter(t, terminalListResult);
+    assert.equal(runtime.terminalStatus, "absent");
+    assert.equal(runtime.terminalProof, "terminal-list-confirmed-absent");
+    assert.equal(runtime.source, "orca-terminal-list-and-launch-ledger");
+    assert.equal(runtime.terminalError, null);
+  }
+});
+
+test("directorWatch does not claim terminal absence without a PM launch binding", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  let listed = false;
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => {
+      listed = true;
+      return [];
+    },
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.equal(listed, false);
+  assert.equal(kickoff.observation.runtime.terminalStatus, "unverifiable");
+  assert.equal(
+    kickoff.observation.runtime.terminalProof,
+    "launch-binding-missing",
+  );
+  assert.equal(
+    kickoff.observation.runtime.source,
+    "launch-ledger-and-kickoff-registry",
+  );
+  assert.equal(kickoff.observation.runtime.nextOwner, "director");
+  assert.equal(kickoff.observation.runtime.terminalError, null);
+});
+
+test("directorWatch separates launch request, liveness observation, and stored progress", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", "codex");
+  sendSignal(orgFile, { worktreeId, kind: "progress", text: "check passed" });
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.equal(kickoff.observation.liveness.verdict, "unverifiable");
+  assert.equal(kickoff.observation.liveness.source, "orca-worker-list");
+  assert.equal(kickoff.observation.launch.requestedModel, null);
+  assert.equal(kickoff.observation.launch.observedModel, null);
+  assert.equal(kickoff.observation.lastStoredProgress.proof, "stored-only");
+  assert.equal(kickoff.observation.lastStoredProgress.autoAcknowledged, true);
+});
+
+test("directorWatch records a role-terminal PM without promoting terminal presence to live", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", "codex");
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [
+      { handle: "term_pm", worktreePath: pmPath, agentIdentity: "codex" },
+    ],
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.equal(kickoff.pmLiveness, "unverifiable");
+  assert.equal(kickoff.observation.launch.requestedProvider, "codex");
+  assert.equal(kickoff.observation.launch.requestedModelProof, "unknown");
+  assert.equal(kickoff.observation.launch.observedModelProof, "not-observed");
+  assert.equal(kickoff.observation.runtime.terminal, "term_pm");
+  assert.equal(
+    kickoff.observation.runtime.terminalStatus,
+    "present-unverified",
+  );
+  assert.equal(
+    kickoff.observation.runtime.nextAction,
+    "inspect-agent-session-or-Run-before-claiming-liveness",
+  );
+  assert.equal(kickoff.observation.runtime.dispatch.status, "none-recorded");
+  assert.equal(kickoff.observation.runtime.run.status, "unknown");
+  assert.equal(
+    kickoff.observation.runtime.source,
+    "orca-terminal-list-and-launch-ledger",
+  );
 });
 
 test("replySignal reports that no PM terminal was found instead of claiming delivery", async (t) => {

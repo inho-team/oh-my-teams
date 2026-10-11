@@ -26,8 +26,10 @@ import {
   listInbox,
   processLiveness,
 } from "./director.mjs";
+import { findCoordinatorRun } from "./orca-adapter.mjs";
 import { readTerminalScreen } from "./prompt-submission.mjs";
 import { readScreenOverload } from "./limit-check.mjs";
+import { listSupervisionReports } from "./supervision-reporting.mjs";
 
 /** Resource kinds that may be acquired. */
 export const RESOURCE_KINDS = Object.freeze(["test", "worker", "build"]);
@@ -268,9 +270,15 @@ function inPmWorktree(worker, entry) {
  * @param {object} entry - Kickoff registry entry.
  * @param {string} [orcaExecutable] - Orca binary path.
  * @param {Function} [execute=run] - Injectable command runner.
+ * @param {{workerId?: string}|null} [pmLaunch] - Exact PM Dispatch binding.
  * @returns {Promise<"live"|"exited"|"unverifiable">} PM liveness verdict.
  */
-export async function queryPmLiveness(entry, orcaExecutable, execute = run) {
+export async function queryPmLiveness(
+  entry,
+  orcaExecutable,
+  execute = run,
+  pmLaunch = null,
+) {
   const argv = [
     orcaExecutable ?? "orca",
     "orchestration",
@@ -285,13 +293,27 @@ export async function queryPmLiveness(entry, orcaExecutable, execute = run) {
     // older Orca versions.
     const workers = Array.isArray(parsed) ? parsed : parsed?.result?.workers;
     if (!Array.isArray(workers)) return "unverifiable";
-    const verdicts = workers
-      .filter((worker) => inPmWorktree(worker, entry))
-      .map((worker) => {
-        const liveness = worker.projection?.liveness;
-        const verdict = liveness?.verdict ?? liveness;
-        return ORCA_LIVENESS.has(verdict) ? verdict : "unverifiable";
-      });
+    const candidates = workers.filter((worker) => inPmWorktree(worker, entry));
+    // A role-terminal PM has no supervised Dispatch. Other workers in the
+    // same worktree are not evidence that this PM is alive. When a launch
+    // receipt names a Dispatch, require that exact identity instead.
+    const bound = pmLaunch
+      ? pmLaunch.workerId
+        ? candidates.filter((worker) =>
+            [
+              worker.workerId,
+              worker.dispatchId,
+              worker.projection?.id,
+            ].includes(pmLaunch.workerId),
+          )
+        : []
+      : candidates;
+    const verdicts = bound.map((worker) => {
+      const liveness = worker.projection?.liveness;
+      const verdict = liveness?.verdict ?? liveness;
+      return ORCA_LIVENESS.has(verdict) ? verdict : "unverifiable";
+    });
+    if (pmLaunch && !pmLaunch.workerId) return "unverifiable";
     if (verdicts.includes("live")) return "live";
     if (verdicts.length > 0 && verdicts.every((v) => v === "exited")) {
       return "exited";
@@ -355,23 +377,114 @@ async function pmProviderOverload(orgFile, entry, options) {
  * @param {string} [options.orcaExecutable] - Orca binary path.
  * @param {Function} [options.freeMemory] - Injectable free-memory reporter.
  * @param {Function} [options.listTerminals] - Injectable async Orca terminal lister, for tests.
- * @param {Function} [options.execute] - Injectable command runner for the PM screen read.
+ * @param {Function} [options.execute] - Injectable command runner for PM observation adapters.
  * @returns {Promise<object>} Watch report with signals, slots, memory, and kickoffs.
  */
 export async function directorWatch(orgFile, options = {}) {
   const checkFreeMemory = options.freeMemory ?? availableMemory;
   const freeBytes = checkFreeMemory();
-  const { signals, deliveries = [] } = listInbox(orgFile);
+  const {
+    signals,
+    deliveries = [],
+    storedSignals: allSignals = [],
+  } = listInbox(orgFile, { includeStored: true });
   const slots = readSlots(orgFile);
   const { kickoffs } = listKickoffs(path.resolve(orgFile));
+  const observedAt = new Date().toISOString();
 
   const kickoffSummaries = await Promise.all(
     kickoffs.map(async (entry) => {
       const pmSignals = signals.filter(
         (s) => s.worktreeId === entry.pm.worktreeId,
       );
+      const progressSignals = allSignals
+        .filter(
+          (signal) =>
+            signal.worktreeId === entry.pm.worktreeId &&
+            signal.kind === "progress",
+        )
+        .sort(
+          (a, b) =>
+            (b.seq ?? 0) - (a.seq ?? 0) ||
+            String(b.sentAt).localeCompare(String(a.sentAt)),
+        );
       const pmSlots = slots.filter((s) => s.worktreeId === entry.pm.worktreeId);
-      const liveness = await queryPmLiveness(entry, options.orcaExecutable);
+      const supervision = listSupervisionReports(entry.pm.stateDir);
+      const pmLaunch = findPmLaunch(orgFile, entry.pm.path);
+      const workerLiveness = await queryPmLiveness(
+        entry,
+        options.orcaExecutable,
+        options.execute,
+        pmLaunch,
+      );
+      // PMs opened through role-terminal are not supervised workers, so a
+      // worker-list miss cannot mean the PM is absent. The launch ledger binds
+      // the PM role to one terminal; findPmTerminal then independently checks
+      // that Orca still lists that exact terminal in the registered worktree.
+      let pmTerminal;
+      let terminalObservation;
+      if (!pmLaunch?.terminal) {
+        pmTerminal = undefined;
+        terminalObservation = {
+          status: "unverifiable",
+          source: "launch-ledger-and-kickoff-registry",
+          proof: "launch-binding-missing",
+          error: null,
+          nextOwner: "director",
+          nextAction: "recover-the-PM-launch-binding-before-observation",
+        };
+      } else {
+        try {
+          pmTerminal = await findPmTerminal(orgFile, entry.pm.path, {
+            orcaExecutable: options.orcaExecutable,
+            listTerminals: options.listTerminals,
+            execute: options.execute,
+            strict: true,
+          });
+          terminalObservation = pmTerminal
+            ? {
+                status: "present-unverified",
+                source: "orca-terminal-list-and-launch-ledger",
+                proof: "terminal-list-observed",
+                nextOwner: "director",
+                nextAction:
+                  "inspect-agent-session-or-Run-before-claiming-liveness",
+              }
+            : {
+                status: "absent",
+                source: "orca-terminal-list-and-launch-ledger",
+                proof: "terminal-list-confirmed-absent",
+                nextOwner: "director",
+                nextAction: "reconcile-launch-record-and-Orca-observation",
+              };
+        } catch (error) {
+          pmTerminal = undefined;
+          terminalObservation = {
+            status: "unverifiable",
+            source: "orca-terminal-list-query-failed-and-launch-ledger",
+            proof: "query-failed",
+            error: error instanceof Error ? error.message : String(error),
+            nextOwner: "director",
+            nextAction:
+              "re-run-terminal-observation-or-recover-the-observation-path",
+          };
+        }
+      }
+      // A connected terminal may be an empty shell, an idle agent, or a stale
+      // launch record. It is a useful identity observation but never positive
+      // agent liveness; only Orca's worker/session liveness may say "live".
+      const liveness = workerLiveness;
+      let run = { status: "not-observed" };
+      if (pmTerminal) {
+        try {
+          run = await findCoordinatorRun(pmTerminal, {
+            executable: options.orcaExecutable,
+            execute: options.execute,
+          });
+        } catch {
+          run = { status: "unknown" };
+        }
+      }
       const providerOverload = await pmProviderOverload(
         orgFile,
         entry,
@@ -385,6 +498,71 @@ export async function directorWatch(orgFile, options = {}) {
         slots: pmSlots,
         pmLiveness: liveness,
         providerOverload,
+        supervision: supervision.map((record) => ({
+          dispatchId: record.dispatchId,
+          observedAt: record.observedAt,
+          source: record.source,
+          lastProvenProgress: record.lastProvenProgress,
+          pendingDecision: record.pendingDecision,
+          report: record.report,
+        })),
+        observation: {
+          liveness: {
+            verdict: liveness,
+            source: "orca-worker-list",
+            observedAt,
+          },
+          launch: {
+            requestedProvider: pmLaunch?.provider ?? null,
+            requestedModel: pmLaunch?.modelRequested ?? null,
+            requestedModelProof: pmLaunch?.modelRequested
+              ? "launch-ledger-requested"
+              : "unknown",
+            configuredProvider: entry.pm?.provider ?? null,
+            configuredModel: entry.pm?.model ?? null,
+            configuredModelProof: entry.pm?.modelProof ?? "unknown",
+            observedModel: null,
+            observedModelProof: "not-observed",
+            source: "launch-ledger-and-kickoff-registry",
+            observedAt,
+          },
+          runtime: {
+            terminal: pmTerminal ?? null,
+            launchTerminal: pmLaunch?.terminal ?? entry.pm?.terminal ?? null,
+            workerLiveness,
+            terminalStatus: terminalObservation.status,
+            terminalProof: terminalObservation.proof,
+            terminalError: terminalObservation.error ?? null,
+            run,
+            dispatch: pmLaunch?.workerId
+              ? { status: "recorded", id: pmLaunch.workerId }
+              : { status: "none-recorded" },
+            nextOwner: terminalObservation.nextOwner,
+            nextAction: terminalObservation.nextAction,
+            source: terminalObservation.source,
+            observedAt,
+          },
+          ...(progressSignals[0]
+            ? {
+                lastStoredProgress: {
+                  id: progressSignals[0].id,
+                  at: progressSignals[0].sentAt,
+                  source: "director-signal-store",
+                  proof: "stored-only",
+                  autoAcknowledged:
+                    progressSignals[0].autoAcknowledged === true,
+                },
+              }
+            : {}),
+        },
+        attention: pmSignals.map((signal) => ({
+          kind: signal.kind,
+          id: signal.id,
+          observedAt: signal.sentAt,
+          source: "director-signal-store",
+          nextOwner: "director",
+          nextAction: "read-and-handle",
+        })),
       };
     }),
   );

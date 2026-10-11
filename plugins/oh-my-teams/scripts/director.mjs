@@ -577,13 +577,74 @@ export async function notifyDirectorSignal(
  * @param {string} orgFile - Organization JSON path.
  * @returns {{signals: object[], deliveries: object[]}} Pending signal records and unacknowledged deliveries.
  */
-export function listInbox(orgFile) {
+export function listInbox(
+  orgFile,
+  { directorTerminal, includeStored = false } = {},
+) {
   const all = readInbox(orgFile);
   const { deliveries } = listDeliveries(orgFile, { unacknowledgedOnly: true });
+  if (directorTerminal !== undefined) {
+    const entries = listKickoffs(orgFile).kickoffs;
+    const owned = new Set(
+      entries
+        .filter((entry) => entry.director?.terminalHandle === directorTerminal)
+        .map((entry) => entry.pm.worktreeId),
+    );
+    const unowned = new Set(
+      entries
+        .filter((entry) => !entry.director?.terminalHandle)
+        .map((entry) => entry.pm.worktreeId),
+    );
+    return {
+      signals: all.filter(
+        (record) => record.status === "pending" && owned.has(record.worktreeId),
+      ),
+      deliveries: deliveries.filter(
+        (record) => record.directorTerminal === directorTerminal,
+      ),
+      unownedSignals: all.filter(
+        (record) =>
+          record.status === "pending" && unowned.has(record.worktreeId),
+      ),
+    };
+  }
   return {
     signals: all.filter((r) => r.status === "pending"),
     deliveries,
+    ...(includeStored ? { storedSignals: all } : {}),
   };
+}
+
+/**
+ * Verifies that a caller terminal owns one current kickoff before it can
+ * mutate that kickoff's Director-facing records. Legacy entries deliberately
+ * have no mutable Director mailbox because their ownership is unknown.
+ *
+ * @param {string} orgFile - Organization JSON path.
+ * @param {string} worktreeId - Target PM worktree id.
+ * @param {string|undefined} directorTerminal - Proven caller terminal.
+ * @returns {object} Registered, owned kickoff entry.
+ */
+export function requireDirectorMailboxOwner(
+  orgFile,
+  worktreeId,
+  directorTerminal,
+) {
+  const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
+  assert(entry, `Kickoff ${worktreeId} is no longer registered`);
+  assert(
+    entry.registrationSeq !== undefined && entry.director?.terminalHandle,
+    "Legacy or unowned kickoff cannot receive Director mailbox writes",
+  );
+  assert(
+    typeof directorTerminal === "string" && directorTerminal.trim(),
+    "Director terminal provenance is required for mailbox writes",
+  );
+  assert(
+    entry.director.terminalHandle === directorTerminal.trim(),
+    "Director terminal does not own this kickoff mailbox",
+  );
+  return entry;
 }
 
 /**
@@ -621,6 +682,13 @@ export async function replySignal(orgFile, request) {
     const file = path.join(inboxDir(orgFile), `${request.signalId}.json`);
     assert(fs.existsSync(file), `Signal ${request.signalId} not found`);
     const record = readJSON(file);
+    if (request.directorTerminal !== undefined) {
+      requireDirectorMailboxOwner(
+        orgFile,
+        record.worktreeId,
+        request.directorTerminal,
+      );
+    }
     assert(
       record.status === "pending" ||
         (request.channel === "message-mcp" &&
@@ -706,19 +774,75 @@ export async function replySignal(orgFile, request) {
   };
 }
 
-// Lists Orca terminals as plain records; any failure yields an empty list so
-// that a missing Orca only skips notification. `execute` is the same
-// injectable command runner every other Orca call in this module takes, so
-// `notifyTerminal` and `findPmTerminal` parse one terminal-list response the
-// same way instead of each keeping its own copy.
-async function orcaTerminals(orcaExecutable, execute = run) {
-  const result = await execute([orcaExecutable, "terminal", "list", "--json"], {
-    timeoutMs: 10000,
-  });
-  if (result.code !== 0) return [];
-  const payload = JSON.parse(result.stdout);
+// Lists Orca terminals as plain records. Notification uses its default
+// best-effort mode: a missing or malformed response merely skips terminal
+// input. Supervision passes `strict` so an adapter failure cannot be confused
+// with a successful empty list observation.
+async function orcaTerminals(
+  orcaExecutable,
+  execute = run,
+  { strict = false } = {},
+) {
+  const fallback = (message, cause) => {
+    if (strict) {
+      const detail = cause instanceof Error ? cause.message : cause;
+      throw new Error(detail ? `${message}: ${detail}` : message);
+    }
+    return [];
+  };
+  let result;
+  try {
+    result = await execute([orcaExecutable, "terminal", "list", "--json"], {
+      timeoutMs: 10000,
+    });
+  } catch (error) {
+    return fallback("Orca terminal list command failed", error);
+  }
+  if (!result || typeof result !== "object") {
+    return fallback("Orca terminal list returned an invalid command result");
+  }
+  if (result.code !== 0) {
+    return fallback(
+      `Orca terminal list exited with code ${result.code}`,
+      typeof result.stderr === "string" && result.stderr.trim()
+        ? result.stderr.trim()
+        : undefined,
+    );
+  }
+  if (typeof result.stdout !== "string") {
+    return fallback("Orca terminal list returned a non-string JSON payload");
+  }
+  let payload;
+  try {
+    payload = JSON.parse(result.stdout);
+  } catch (error) {
+    return fallback("Orca terminal list returned invalid JSON", error);
+  }
+  if (payload && typeof payload === "object" && payload.ok === false) {
+    const error =
+      typeof payload.error === "string"
+        ? payload.error
+        : payload.error?.message;
+    return fallback(
+      "Orca terminal list returned a failed response envelope",
+      error,
+    );
+  }
   const listed = payload?.result?.terminals ?? payload?.terminals ?? payload;
-  return Array.isArray(listed) ? listed : [];
+  if (!Array.isArray(listed)) {
+    return fallback("Orca terminal list returned an invalid terminal envelope");
+  }
+  const hostScope = payload?.result?.hostScope ?? payload?.hostScope;
+  const omittedHosts = hostScope?.omittedHostIds;
+  if (
+    strict &&
+    (payload?.result?.truncated === true ||
+      payload?.truncated === true ||
+      (Array.isArray(omittedHosts) && omittedHosts.length > 0))
+  ) {
+    Object.defineProperty(listed, "incomplete", { value: true });
+  }
+  return listed;
 }
 
 /**
@@ -758,7 +882,11 @@ export function findPmLaunch(orgFile, pmPath) {
  *
  * @param {string} orgFile - Organization JSON path whose ledger is read.
  * @param {string} pmPath - PM worktree path recorded in the kickoff registry.
- * @param {object} [options] - `orcaExecutable`, or an injectable `listTerminals`.
+ * @param {object} [options] - Terminal-list options.
+ * @param {string} [options.orcaExecutable] - Orca executable name or path.
+ * @param {Function} [options.listTerminals] - Injectable terminal lister.
+ * @param {Function} [options.execute] - Injectable command runner for the adapter path.
+ * @param {boolean} [options.strict] - Throw for command or response failures.
  * @returns {Promise<string | undefined>} The terminal handle, or undefined.
  */
 export async function findPmTerminal(orgFile, pmPath, options = {}) {
@@ -767,13 +895,22 @@ export async function findPmTerminal(orgFile, pmPath, options = {}) {
   if (!launch) return undefined;
   const list =
     options.listTerminals ??
-    (() => orcaTerminals(options.orcaExecutable ?? "orca"));
-  const live = (await list()).some(
+    (() =>
+      orcaTerminals(options.orcaExecutable ?? "orca", options.execute, {
+        strict: options.strict === true,
+      }));
+  const terminals = await list();
+  const live = terminals.some(
     (terminal) =>
       terminal?.handle === launch.terminal &&
       typeof terminal.worktreePath === "string" &&
       path.resolve(terminal.worktreePath) === target,
   );
+  if (!live && options.strict === true && terminals.incomplete === true) {
+    throw new Error(
+      "Orca terminal list is incomplete; PM absence is unverified",
+    );
+  }
   return live ? launch.terminal : undefined;
 }
 
@@ -792,6 +929,13 @@ export function acknowledgeSignal(orgFile, signalId, options = {}) {
     const file = path.join(inboxDir(orgFile), `${signalId}.json`);
     if (fs.existsSync(file)) {
       const record = readJSON(file);
+      if (options.directorTerminal !== undefined) {
+        requireDirectorMailboxOwner(
+          orgFile,
+          record.worktreeId,
+          options.directorTerminal,
+        );
+      }
       assert(
         record.status !== "acknowledged",
         `Signal ${signalId} is already acknowledged`,

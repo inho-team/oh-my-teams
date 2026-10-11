@@ -19,6 +19,7 @@ import {
   registerKickoff,
   kickoffHashFor,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
+import { recordLaunch } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import {
   requirementsDraft,
   readDraft,
@@ -27,7 +28,11 @@ import {
   executeCommand,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { messageMcpLaunch } from "../plugins/oh-my-teams/scripts/message-mcp-config.mjs";
+import {
+  assertMessageMcpStartup,
+  messageMcpDependencyStatus,
+  messageMcpLaunch,
+} from "../plugins/oh-my-teams/scripts/message-mcp-config.mjs";
 import { deliverEventToMessage } from "../plugins/oh-my-teams/scripts/document-event-delivery.mjs";
 import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 
@@ -157,6 +162,23 @@ test("Role launch attaches Message MCP through session arguments", () => {
   );
 });
 
+test("Message MCP launch reports an installation dependency failure before role startup", () => {
+  const dependencyStatus = messageMcpDependencyStatus({
+    resolve: () => {
+      const error = new Error("missing");
+      error.code = "MODULE_NOT_FOUND";
+      throw error;
+    },
+  });
+  const launch = messageMcpLaunch("codex", "/tmp/omt-state", "pm", {
+    dependencyStatus,
+  });
+  assert.equal(launch.available, false);
+  assert.equal(launch.startup, "dependency-unavailable");
+  assert.match(launch.reason, /prepare that installation/);
+  assert.throws(() => assertMessageMcpStartup(launch), /startup blocked/);
+});
+
 function registeredState(root) {
   execFileSync("git", ["init", root], { stdio: "ignore" });
   const state = path.join(root, ".omt");
@@ -199,6 +221,15 @@ function registeredState(root) {
     director: { terminalHandle: "term_director", checkoutPath: process.cwd() },
   };
   const { entry } = registerKickoff(orgFile, claim);
+  recordLaunch(orgFile, {
+    via: "role-terminal",
+    role: "pm",
+    provider: "codex",
+    worktreePath: root,
+    terminal: "term_pm",
+    stateDir: state,
+    callerCwd: root,
+  });
   return { state, orgFile, worktreeId, kickoffHash: kickoffHashFor(entry) };
 }
 
@@ -224,7 +255,11 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
   assert.equal(directorMessages.length, 1);
   assert.equal(directorMessages[0].id, signal.messageId);
   const directorTool = await handleMessageTool(
-    { orgFile, actor: "director" },
+    {
+      orgFile,
+      actor: "director",
+      callerSession: { terminal: "term_director", source: "test" },
+    },
     "receive_messages",
   );
   assert.equal(
@@ -265,6 +300,7 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
     org: orgFile,
     signal: signal.id,
     text: "Use staging.",
+    "director-terminal": "term_director",
   });
   assert.equal(reply.queued, true);
   assert.equal(
@@ -276,17 +312,20 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
     org: orgFile,
     signal: signal.id,
     text: "Use staging.",
+    "director-terminal": "term_director",
   });
   assert.equal(replay.replayed, true);
   const watched = await executeCommand({
     command: "message-watch",
     org: orgFile,
+    "director-terminal": "term_director",
   });
   assert.equal(watched.messages[0].message.id, signal.messageId);
   const acknowledged = await executeCommand({
     command: "director-ack",
     org: orgFile,
     signal: signal.id,
+    "director-terminal": "term_director",
   });
   assert.equal(acknowledged.messageAcknowledged, true);
   assert.deepEqual(receiveMessages(state, kickoffHash, "director"), []);
@@ -296,20 +335,170 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
   assert.equal(inbox.messages.length, 1);
 });
 
-test("Message MCP stdio exposes a registered kickoff mailbox", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-stdio-"));
+test("State Message MCP refuses a caller session bound to another kickoff", async (t) => {
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-message-state-owner-"),
+  );
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { state } = registeredState(root);
+  await assert.rejects(
+    () =>
+      handleMessageTool(
+        {
+          stateDir: state,
+          actor: "pm",
+          callerSession: { terminal: "term_other", source: "test" },
+        },
+        "receive_messages",
+      ),
+    /not bound to this kickoff/,
+  );
+});
+
+test("State Message MCP accepts only the launch-bound caller session", async (t) => {
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), "omt-message-state-live-"),
+  );
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const { state, kickoffHash } = registeredState(root);
+  const result = await handleMessageTool(
+    {
+      stateDir: state,
+      actor: "pm",
+      callerSession: { terminal: "term_pm", source: "test" },
+    },
+    "send_message",
+    {
+      to: "director",
+      key: "bound-session",
+      type: "status",
+      subject: "Bound",
+      body: "The caller is fixed at startup.",
+    },
+  );
+  assert.equal(result.structuredContent.message.from, "pm");
+  assert.equal(receiveMessages(state, kickoffHash, "director").length, 1);
+});
+
+test("State Message MCP accepts one fixed server-start worktree binding without env", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-start-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { state } = registeredState(root);
+  await assert.doesNotReject(() =>
+    handleMessageTool(
+      {
+        stateDir: state,
+        actor: "pm",
+        callerSession: {
+          worktreePath: root,
+          source: "server-start-worktree-binding",
+        },
+      },
+      "receive_messages",
+    ),
+  );
+});
+
+test("State Message MCP binds a task actor to its recorded workflow task", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-task-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { state, orgFile } = registeredState(root);
+  recordLaunch(orgFile, {
+    via: "worker-start",
+    role: "worker",
+    workflowTaskId: "runtime-task",
+    provider: "codex",
+    worktreePath: root,
+    terminal: "term_task",
+    stateDir: state,
+    callerCwd: root,
+  });
+  await assert.doesNotReject(() =>
+    handleMessageTool(
+      {
+        stateDir: state,
+        actor: "task:runtime-task",
+        callerSession: {
+          terminal: "term_task",
+          worktreePath: root,
+          source: "test",
+        },
+      },
+      "receive_messages",
+    ),
+  );
+  await assert.rejects(
+    () =>
+      handleMessageTool(
+        {
+          stateDir: state,
+          actor: "task:other-task",
+          callerSession: {
+            terminal: "term_task",
+            worktreePath: root,
+            source: "test",
+          },
+        },
+        "receive_messages",
+      ),
+    /does not match the bound task launch/,
+  );
+});
+
+test("Director Message MCP confines reads and writes to terminal-owned kickoffs", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-owner-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { state, orgFile, worktreeId, kickoffHash } = registeredState(root);
+  sendMessage(state, kickoffHash, { ...message, key: "owner-check" });
+
+  const foreign = await handleMessageTool(
+    {
+      orgFile,
+      actor: "director",
+      callerSession: { terminal: "term_other", source: "test" },
+    },
+    "receive_messages",
+  );
+  assert.deepEqual(foreign.structuredContent.messages, []);
+  await assert.rejects(
+    () =>
+      handleMessageTool(
+        {
+          orgFile,
+          actor: "director",
+          callerSession: { terminal: "term_other", source: "test" },
+        },
+        "ack_message",
+        {
+          worktreeId,
+          id: receiveMessages(state, kickoffHash, "director")[0].id,
+        },
+      ),
+    /does not own/,
+  );
+});
+
+test("Message MCP stdio refuses a registered mailbox without caller provenance", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-stdio-"));
+  const { state } = registeredState(root);
   const script = path.resolve("plugins/oh-my-teams/scripts/message-mcp.mjs");
   const client = new Client({ name: "omt-message-test", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [script, "--state", state, "--actor", "pm"],
   });
-  await client.connect(transport);
   t.after(async () => {
-    await client.close();
+    try {
+      await client.close();
+    } finally {
+      try {
+        await transport.close();
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
   });
+  await client.connect(transport);
   const listed = await client.listTools();
   assert.deepEqual(
     listed.tools.map((tool) => tool.name),
@@ -325,18 +514,45 @@ test("Message MCP stdio exposes a registered kickoff mailbox", async (t) => {
       body: "Please decide.",
     },
   });
-  assert.equal(sent.isError, undefined);
-  assert.equal(receiveMessages(state, kickoffHash, "director").length, 1);
-  const ownInbox = await client.callTool({
+  assert.equal(sent.isError, true);
+  assert.match(
+    sent.content[0].text,
+    /ownership-unverifiable: recover from the registered role terminal/,
+  );
+});
+
+test("Message MCP stdio uses a fixed launch worktree when pane env is absent", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-stdio-ok-"));
+  const { state } = registeredState(root);
+  const script = path.resolve("plugins/oh-my-teams/scripts/message-mcp.mjs");
+  const client = new Client({
+    name: "omt-message-start-test",
+    version: "1.0.0",
+  });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [script, "--state", state, "--actor", "pm"],
+    cwd: root,
+    env: { ORCA_AGENT_PANE: "", ORCA_TERMINAL_HANDLE: "" },
+  });
+  t.after(async () => {
+    try {
+      await client.close();
+    } finally {
+      try {
+        await transport.close();
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+  await client.connect(transport);
+  const received = await client.callTool({
     name: "receive_messages",
     arguments: {},
   });
-  assert.deepEqual(ownInbox.structuredContent.messages, []);
-  const forbiddenAck = await client.callTool({
-    name: "ack_message",
-    arguments: { id: sent.structuredContent.message.id },
-  });
-  assert.equal(forbiddenAck.isError, true);
+  assert.notEqual(received.isError, true, JSON.stringify(received));
+  assert.equal(received.structuredContent.messages.length, 0);
 });
 
 test("Supervisor wait receives a stored role message before checking Orca", async (t) => {
