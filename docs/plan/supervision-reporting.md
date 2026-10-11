@@ -12,7 +12,7 @@
 - `/tmp/omt-supervision-worker-list-20261011.json`: Orca 전역 워커 목록 관측이다.
 - `/Users/jinsungkim/orca/oh-my-teams/.omt/usage/launches.jsonl:1024-1027`: PM과 이 Worker의 역할 실행 원장이다.
 
-다른 kickoff의 Message MCP 메시지는 수신·확인 처리하지 않았다. 이 문서의 메시지 격리 평가는 코드와 테스트, 그리고 등록부의 읽기 전용 집계만으로 수행했다.
+다른 kickoff의 실제 Message MCP 메시지는 수신·확인 처리하지 않았다. 이 문서의 메시지 격리 평가는 코드·테스트·등록부의 읽기 전용 집계와 OS 임시 fixture에서 실제 `handleMessageTool`을 직접 호출한 단위 재현으로 수행했다. fixture는 synthetic context만 사용하므로 실제 Orca transport나 업무 메시지 소비의 증명에는 사용하지 않는다.
 
 ## 재개 검토 기준과 증거 경계
 
@@ -24,7 +24,9 @@
 
 실제 실행 관측도 같은 경계를 뒷받침한다. PM이 04:51경 자신의 구현 Worker로 보낸 `msg_76d6717320e1d76005c3857a08a435969778dda7b84e7ebd76a3b54482620b86`은 04:44:22 저장 뒤 pending이었고, `msg_9a48776484b8559bd2c8bb19a79ed40bd50b62d3195f2a40c052e915f2a84992`도 04:48:51 저장 뒤 pending이었다. 같은 Dispatch `ctx_e3a7289dfe38`은 live/working이고 화면은 검사 단계를 보였다. 이 source receipt와 관측 시각은 저장 및 처리 ack 부재를 증명하지만, Worker가 읽지 않았거나 의미 처리하지 않았다는 결론은 증명하지 않는다. PM의 다음 행동은 완료 전 동일 task의 pending을 다시 확인하고 필요한 후속 지시를 그 task에 보낼 일이다.
 
-별도 설치 경로 실패도 receipt 단계와 구분한다. PM이 설치된 2.17.0 cache의 `message-mcp.mjs --help`를 실행했을 때 `@modelcontextprotocol/sdk`의 `ERR_MODULE_NOT_FOUND`와 exit 1을 재현했고, 실제 `role-terminal` receipt는 그 cache 경로를 MCP server로 가리킨다. 이 사실은 해당 MCP server가 초기화되지 않아 실제 Message MCP tool 호출을 받을 수 없다는 별도 원인이지, pending 메시지가 수신자에게 전달되었거나 수신자가 읽고 처리하지 않았다는 증거가 아니다. 설치 cache는 이 조사에서 수정하지 않으며, 복구와 최종 2.18 설치 검증은 이사 소유이고, MCP가 없는 동안에는 자신의 actor에 한정한 `message-inbox --state`와 처리 뒤 `message-ack`만 사용한다.
+SDK 설치 실패와 복구도 시각별 receipt 단계로 구분한다. 과거 실패에서는 PM이 설치된 2.17.0 cache의 `message-mcp.mjs --help`를 실행해 `@modelcontextprotocol/sdk`의 `ERR_MODULE_NOT_FOUND`와 exit 1을 재현했고, 실제 `role-terminal` receipt는 그 cache 경로를 MCP server로 가리켰다. 이는 당시 MCP server가 초기화되지 않아 tool 호출을 받을 수 없던 원인이지, pending 메시지가 수신자에게 전달되었거나 수신자가 읽고 처리하지 않았다는 증거는 아니다.
+
+그 뒤 Director는 2026-10-11 04:59:44 UTC에 실제 Codex 2.17.0+codex.20261011040835와 Claude 2.17.0 cache의 bundled lockfile 기준으로 `npm ci --omit=dev --ignore-scripts --no-audit --no-fund`를 실행해 누락 dependency를 복구했다. 복구 증거 `/Users/jinsungkim/orca/oh-my-teams/.omt/history/plugin-updates/20261011-mcp-dependency-repair.json`은 두 cache와 임시 MCP Client의 initialize·tools/list roundtrip, `send_message`·`receive_messages`·`ack_message`·`get_message` 네 tool 확인, 업무 메시지를 보내지 않은 사실을 기록한다. 이 복구는 과거 실패를 없애거나 그 실패 session의 자동 재연결을 증명하지 않는다. 실패한 session은 자신의 actor에 한정한 CLI `message-inbox --state`와 처리 뒤 `message-ack` fallback을 유지하고, 새 working session에서 같은 roundtrip을 검증한 뒤에만 MCP 복구를 주장할 수 있다. 최종 2.18 actual install은 Director 소유이며, PRODUCT role launch 전 SDK startup preflight는 구현 Worker의 미래 범위일 뿐 이 조사에서 구현됐다고 주장하지 않는다.
 
 ## 관측 결과 요약
 
@@ -93,13 +95,13 @@ post-merge `message-mcp.mjs:96`부터 `176`의 organization-scoped handler도 `c
 
 ### 보완 설계와 회귀 검증
 
-이사 inbox 조회는 임의 terminal 문자열이나 `--actor director`가 아니라 공식 `orca-adapter.mjs`가 Orca MCP transport/session에서 얻은 검증 가능한 caller provenance를 필수로 해야 한다. provenance는 최소한 실제 terminal handle, Run, Dispatch 또는 session identity, worktree, 관측 시각, 발급 source를 함께 묶고 adapter가 직접 만든 불변 receipt여야 하며, CLI 인자·환경 변수·MCP tool args로 주입한 값은 authority로 승격하지 않는다. post-merge adapter도 trusted executable을 고정하지만(`orca-adapter.mjs:219`부터 `322`), session handle을 실제 process lineage에 bind하는 일은 여전히 열린 설계라고 명시한다. 따라서 환경에 `ORCA_*` 값이 없을 때에도 organization MCP는 adapter-provenance의 terminal·Run을 등록부 `director.terminalHandle`·kickoff Run과 대조하고, state MCP는 같은 provenance의 worktree·Run·Dispatch·role을 resolved kickoff hash와 PM state에 대조해야 한다. 어느 한 증거가 없거나 불일치하면 receive·send·ack·get의 소유권을 `unverifiable`로 두고 권한 동작을 거부하며, legacy/unowned는 별도 읽기 전용 진단 목록만 제공한다.
+공식 process-lineage authentication API는 확인되지 않았으므로, 이 설계는 같은 OS 사용자 또는 환경 변수 위조에 대한 인증 시스템이라고 주장하지 않는다. 범위는 여러 정상 이사의 우발적 inbox 혼입 방지이며, fixed launch receipt와 server-start binding, Orca pane·terminal 관측을 함께 보관해 scope를 `launch-bound`, `observed`, `ownership-unverifiable` proof 수준으로 표시한다. no-override `run-current`가 PM coordinator를 찾았다는 관측도 scope authentication으로 승격하지 않는다.
 
-이사 inbox 조회는 위 provenance가 일치한 kickoff만 반환해야 한다. 익명·legacy 등록은 호환을 위해 읽기 전용의 별도 `unowned` 목록에 보존하되, 자동 ack·reply·notification의 대상이 되어서는 안 된다. PM inbox도 actor 문자열만으로는 충분하지 않으며, 동일한 state-bound provenance를 확인한 뒤 자기 kickoff hash만 읽어야 한다.
+organization MCP는 server 시작 때 고정된 launch receipt의 director terminal·worktree·Run과 등록부 `director.terminalHandle`·kickoff Run을 대조해 그 결과로 scope를 고정한다. state MCP도 시작 binding의 role·worktree·Run/Dispatch와 resolved kickoff hash·PM state를 대조해 scope를 고정한다. 이후 tool request의 임의 worktreeId·terminal·actor 문자열은 scope를 넓히거나 바꾸지 못하게 거부하고, 해석 시각·source·proof 수준을 response에 남긴다. 환경 변수와 launch binding이 모두 없거나 관측이 불일치·모호하면 양쪽 MCP의 ownership은 `ownership-unverifiable`이며, 정상 준비 상태로 표시하지 않고 recovery와 next owner를 반환한다. 익명·legacy 등록은 별도 읽기 전용 `unowned` 진단 목록에만 보존하며 자동 ack·reply·notification 대상이 될 수 없다.
 
 신호와 메시지는 `stored`, `notification-attempted`, `terminal-submitted`, `received`, `acknowledged`, `replied`, `handled`를 별도 이벤트로 기록한다. `acknowledged`는 fixed receiver가 작성한 `acknowledgedAt` 자기 보고 receipt로 표시하고, `handled`는 그와 다른 근거 있는 작업 결과 또는 명시적 처리 attestation이 있을 때만 기록한다. `autoAcknowledged`는 정보성 signal의 목록 상태일 뿐 수신자 ack 또는 handled receipt가 아니다. 중복은 stable key와 동일 payload의 replay로만 인정하고, 동일 key·다른 payload는 거부한다. 재시작 뒤에는 저장된 pending 이벤트를 다시 조회하되, 입력 제출이 불명확한 경우에는 재전송하지 않고 사람의 확인 대상으로 올린다.
 
-회귀 검증은 두 이사의 두 kickoff, 하나의 legacy/anonymous entry, 메시지 재시작 전후, 중복 key, 잘못된 수신자의 ack, 화면 제출 실패를 포함해야 한다. 추가로 org/state MCP 각각에서 provenance가 없는 경우와 임의 terminal·Run·Dispatch 문자열을 거부하고, adapter-issued provenance가 등록부와 일치할 때만 해당 inbox를 반환하는 시험이 필요하다. `message-watch`가 다른 이사의 메시지를 반환하지 않고, `queued`가 읽음·처리됨으로 표현되지 않으며, 수신자만 ack할 수 있어야 한다. 기존 actor 격리 시험은 [`tests/message-mcp.test.mjs:299`](../../tests/message-mcp.test.mjs#L299)~[`340`](../../tests/message-mcp.test.mjs#L340)에 있으나, 이사 소유권 필터 시험은 추가가 필요하다.
+회귀 검증은 두 이사의 두 kickoff, 하나의 legacy/anonymous entry, 메시지 재시작 전후, 중복 key, 잘못된 수신자의 ack, 화면 제출 실패를 포함해야 한다. 추가로 org/state MCP 각각에서 정상 launch binding, 잘못된 binding, 모호한 pane·terminal 관측, launch/environment 모두 없는 경우를 분리해 검사하고, 요청의 임의 worktree·terminal·Run·Dispatch 문자열이 고정 scope를 바꾸지 못하게 거부해야 한다. `message-watch`가 다른 이사의 메시지를 반환하지 않고, `queued`가 읽음·처리됨으로 표현되지 않으며, 수신자만 ack할 수 있어야 한다. 기존 actor 격리 시험은 [`tests/message-mcp.test.mjs:299`](../../tests/message-mcp.test.mjs#L299)~[`340`](../../tests/message-mcp.test.mjs#L340)에 있으나, 이사 소유권 필터 시험은 추가가 필요하다.
 
 ## 수용 기준 4: 장시간 무진전, provider 장애와 감독자 부재
 
@@ -139,7 +141,7 @@ post-merge `message-mcp.mjs:96`부터 `176`의 organization-scoped handler도 `c
 
 구현 task는 기존 감시 어댑터와 projection 경계 안에서 다음을 수행한다.
 
-1. 먼저 `orca-adapter.mjs`에 org/state MCP 모두가 쓸 caller-provenance port를 만들고, `message-mcp.mjs`, `message-store.mjs`, `director.mjs`와 `tests/message-mcp.test.mjs`, `tests/director-signal.test.mjs`에서 adapter-issued provenance의 director·role·worktree·Run/Dispatch 대조, arbitrary 문자열 거부, stored·submitted·received·acknowledged·handled 상태를 분리한다.
+1. 먼저 `message-mcp.mjs`, `message-store.mjs`, `director.mjs`와 `tests/message-mcp.test.mjs`, `tests/director-signal.test.mjs`에서 fixed launch receipt·server-start binding·pane/terminal observation을 org/state scope에 결속한다. process-lineage authentication API를 가정하지 않고 정상·invalid·ambiguous·binding 부재를 proof 수준으로 나누며, arbitrary 문자열이 고정 scope를 바꾸는 요청을 거부하고 stored·submitted·received·acknowledged·handled 상태를 분리한다. PRODUCT role launch 전 SDK startup preflight는 별도 구현 Worker 범위로 남긴다.
 2. 다음으로 `status.mjs`, `resources.mjs`와 `tests/supervision.test.mjs`, `tests/director-signal.test.mjs`에서 `activityAt`과 `semanticProgressAt`을 구분한다. legacy field 부재, explicit null, unknown/invalid proof, proven value와 시작 시각을 각각 시험해 출력만 변하는 정체·provider·감독자 부재의 escalation deduplication을 검증한다.
 3. 마지막으로 이미 main에 반영된 `role-launch.mjs`의 launch binding과 launch ledger를 읽어 `kickoff-registry.mjs`의 PM execution metadata 및 `teams-org.mjs` watch projection에 연결한다. 요청·구성 해석·화면 확인 모델과 proof를 구분하되, 모델 정책의 기존 launch receipt 형식은 바꾸지 않고 `tests/director-signal.test.mjs`와 watch 관련 회귀 테스트를 추가한다.
 
