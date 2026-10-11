@@ -16,7 +16,7 @@
 
 활성 `.mjs` 파일에는 모듈 JSDoc을 작성하고, 공개 export에는 인접 JSDoc과 `@param`·`@returns`를 붙입니다. 실행문은 180자를 넘기지 않습니다. 포맷은 Prettier가 결정하므로 직접 맞추려고 하지 말고 `npm run format`을 실행합니다.
 
-작업을 마치면 `npm run sync`로 공통 정보를 맞춘 뒤 `npm run lint`와 `npm test`를 실행해 통과를 확인하고 커밋합니다. 포맷 검사는 devDependency로 설치한 Prettier를 사용하므로, 새로 클론한 작업 트리에서는 `npm ci`를 먼저 실행합니다. 두 명령은 GitHub Actions의 `CI` 워크플로에서도 실행되기 때문에, 병합하기 전에 그 결과를 확인합니다.
+작업을 마치면 `npm run sync`로 공통 정보를 맞춘 뒤 `npm run lint`와 `npm test`를 실행해 통과를 확인하고 커밋합니다. 포맷 검사는 devDependency로 설치한 Prettier를 사용하므로, 새로 클론한 작업 트리에서는 `npm ci`를 먼저 실행합니다. 두 명령은 Jenkins의 Linux·macOS·Windows 검사에서도 실행되기 때문에, 병합하기 전에 그 결과를 확인합니다.
 
 검사 기준의 상세한 내용은 [코드 품질·문서화 기준](docs/CODE_QUALITY.md)에 정리되어 있습니다.
 
