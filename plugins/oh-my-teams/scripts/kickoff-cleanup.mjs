@@ -1,4 +1,5 @@
 /** Read-only reconciliation of a completed kickoff's Orca worktrees and Git evidence. */
+import { proveKickoffWorktreeOwnership } from "./worktree-ownership.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { assert, readJSON, withAsyncFileLock, writeJSON } from "./core.mjs";
@@ -349,7 +350,26 @@ export function evaluateKickoffCleanup(entry, observed) {
     const assigned = workers.filter((worker) =>
       workerInCandidate(worker, id, location),
     );
+    const ownership = observed.ownership?.[id];
     const reasons = [];
+    if (observed.ownership && ownership?.status !== "proven")
+      reasons.push(ownership?.reason ?? "candidate-ownership-unproven");
+    if (
+      observed.ownership &&
+      ownership?.status === "proven" &&
+      item &&
+      id !== entry.pm.worktreeId &&
+      item.parentWorktreeId !==
+        (previous?.parentWorktreeId ?? entry.pm.worktreeId)
+    )
+      reasons.push("candidate-parent-ownership-changed");
+    if (
+      observed.ownership &&
+      entry.releasedAt &&
+      id !== entry.pm.worktreeId &&
+      !previous?.instanceId
+    )
+      reasons.push("candidate-registration-instance-unproven");
     if (!inventoryComplete) reasons.push("inventory-incomplete");
     if (
       observed.currentInventory &&
@@ -409,6 +429,7 @@ export function evaluateKickoffCleanup(entry, observed) {
     const hostVerified =
       previous?.hostId && observed.hostIds?.includes(previous.hostId);
     const absenceVerified =
+      (!observed.ownership || ownership?.status === "proven") &&
       inventoryComplete &&
       (!observed.remoteHostsOmitted || hostVerified) &&
       (!observed.currentInventory ||
@@ -420,6 +441,7 @@ export function evaluateKickoffCleanup(entry, observed) {
       instanceId: item?.worktreeInstanceId ?? previous?.instanceId ?? null,
       hostId: item?.hostId ?? previous?.hostId ?? null,
       owner: entry.director?.terminalHandle ?? entry.pm.worktreeId,
+      ownership,
       status:
         removed && absenceVerified
           ? "already-removed"
@@ -454,7 +476,7 @@ export function evaluateKickoffCleanup(entry, observed) {
 async function gitObservation(location, delivered, projectDir, gitCommand) {
   if (!location || !fs.existsSync(location)) return null;
   try {
-    const [status, ignored, head] = await Promise.all([
+    const [status, ignored, head, branch] = await Promise.all([
       gitCommand(location, ["status", "--porcelain=v1", "-uall"]),
       gitCommand(location, [
         "ls-files",
@@ -464,6 +486,9 @@ async function gitObservation(location, delivered, projectDir, gitCommand) {
         "-z",
       ]),
       gitCommand(location, ["rev-parse", "HEAD"]),
+      gitCommand(location, ["symbolic-ref", "--quiet", "HEAD"]).catch(
+        () => null,
+      ),
     ]);
     let included = false;
     if (delivered?.mergeCommit) {
@@ -482,6 +507,7 @@ async function gitObservation(location, delivered, projectDir, gitCommand) {
     const ignoredPaths = ignored.split("\0").filter(Boolean);
     return {
       head,
+      branch,
       dirty: Boolean(status),
       ignored: ignoredPaths.length > 0,
       ignoredCount: ignoredPaths.length,
@@ -668,6 +694,12 @@ export async function scanKickoffCleanup(
     launches: readLaunches(orgFile),
     closures: readTerminalClosures(orgFile),
     git: gitStates,
+    ownership: Object.fromEntries(
+      ids.map((id) => [
+        id,
+        proveKickoffWorktreeOwnership(orgFile, entry, id, byId.get(id)),
+      ]),
+    ),
     absentPaths,
     errors,
     unattributedWorkers: unattributedWorkers.map((worker) => ({
@@ -833,6 +865,12 @@ async function reclaimKickoffCleanupUnderLock(
               shown.identity.key,
             `Worktree ${id} identity changed or could not be verified; preserve it`,
           );
+          if (candidate.git?.head)
+            assert(
+              shown.head === candidate.git.head &&
+                shown.branch === candidate.git.branch,
+              "Worktree Git identity changed before reclaim; preserve it",
+            );
           identityKey = shown.identity.key;
         } catch (error) {
           attempt.outcome = "refused";
@@ -840,8 +878,17 @@ async function reclaimKickoffCleanupUnderLock(
         }
         let transaction;
         if (identityKey) {
+          const ownership = proveKickoffWorktreeOwnership(orgFile, entry, id);
+          if (ownership.status !== "proven") {
+            attempt.outcome = "refused";
+            attempt.error = ownership.reason;
+            writeJSON(recordFile, record);
+            continue;
+          }
           transaction = prepare({
             type: "kickoff-reclaim",
+            ownership,
+            before: receiptBody(attempt.showReceipt).worktree,
             worktreeId: id,
             identityKey,
             sourceWorktreeId: worktreeId,

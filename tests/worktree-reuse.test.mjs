@@ -50,6 +50,8 @@ function fixture(t) {
   parentTo(parents[0]);
   let target = parents[1];
   const entry = (parent) => ({
+    registrationSeq: parents.indexOf(parent) + 1,
+    createdAt: "2026-01-01T00:00:00.000Z",
     pm: {
       worktreeId: parent.id,
       path: parent.path,

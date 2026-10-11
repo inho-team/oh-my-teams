@@ -734,9 +734,7 @@ test("branch cleanup deletes branches whose content has reached the merge commit
   const mergeCommit = git(["rev-parse", "HEAD"]);
   git(["push", "local-remote", "main"]);
 
-  fs.mkdirSync(path.join(repoDir, ".omt"), { recursive: true });
-  fs.copyFileSync(exampleOrg, path.join(repoDir, ".omt", "organization.json"));
-  // The entry records the merge commit as delivery proof.
+  // The no-organization compatibility contract still accepts Git delivery proof.
   const entry = {
     pm: { worktreeId: "branch-fixture" },
     delivery: { mode: "local-merge", branch: "main" },

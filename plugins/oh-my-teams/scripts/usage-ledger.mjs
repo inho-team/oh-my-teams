@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { assert, withFileLock } from "./core.mjs";
-import { listKickoffs } from "./kickoff-registry.mjs";
+import { listKickoffs, kickoffHashFor } from "./kickoff-registry.mjs";
 import { pathWithin } from "./usage-sources.mjs";
 
 /** Commands that append a launch line. */
@@ -330,6 +330,14 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
         },
       ),
     };
+    const owner = kickoffs.find(
+      (entry) => entry.pm.worktreeId === line.kickoffPmWorktreeId,
+    );
+    if (owner?.registrationSeq) {
+      line.kickoffHash = kickoffHashFor(owner);
+      line.kickoffRegistrationSeq = owner.registrationSeq;
+      line.kickoffCreatedAt = owner.createdAt;
+    }
     fs.appendFileSync(file, `${JSON.stringify(line)}\n`, { mode: 0o600 });
     return { recorded: true, file, line };
   });

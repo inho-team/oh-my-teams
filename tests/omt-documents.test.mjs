@@ -1148,9 +1148,10 @@ test("문서_참조_객체_원자성_인도", async (t) => {
     remoteName: "",
     callerCwd: tempDir,
   });
+  // Document authority and force cannot manufacture resource provenance.
   assert.deepEqual(afterDoc, {
-    deleted: ["feat/kickoff-work"],
-    skipped: [],
+    deleted: [],
+    skipped: ["feat/kickoff-work"],
     errors: [],
   });
 });
@@ -1329,9 +1330,10 @@ test("registrationSeq_결여_무결성_실패", async (t) => {
     orgFile,
     force: true,
   });
+  // Document authority and force cannot manufacture resource provenance.
   assert.deepEqual(forcedCleanup, {
-    deleted: ["feat/kickoff-work"],
-    skipped: [],
+    deleted: [],
+    skipped: ["feat/kickoff-work"],
     errors: [],
   });
 });

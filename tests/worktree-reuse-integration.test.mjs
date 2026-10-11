@@ -12,6 +12,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   registerKickoff,
+  kickoffHashFor,
   listKickoffs,
   releaseKickoff,
   recordDelivery,
@@ -41,6 +42,12 @@ import {
   runOrcaJson,
   reparentWorktree,
 } from "../plugins/oh-my-teams/scripts/orca-adapter.mjs";
+import {
+  saveDocument,
+  deliveryRefDocId,
+} from "../plugins/oh-my-teams/scripts/documents.mjs";
+import { proveKickoffWorktreeOwnership } from "../plugins/oh-my-teams/scripts/worktree-ownership.mjs";
+import { denyDirectorySync } from "./directory-durability-fixture.mjs";
 import { minimalRequirements } from "./requirements-draft-fixture.mjs";
 import { acceptTaskThroughRuntime } from "./accepted-workflow-fixture.mjs";
 
@@ -100,7 +107,7 @@ async function fixture(t) {
   const source = tree("source-pm");
   const child = tree("child", source);
   const target = tree("target-pm");
-  function claim(parent) {
+  function claim(parent, mode = "pull-request") {
     return registerKickoff(orgFile, {
       goal: "archived reuse",
       pm: {
@@ -110,13 +117,15 @@ async function fixture(t) {
       },
       organizationRevision: organization.revision,
       brief: path.join(repo, "brief.md"),
-      delivery: { mode: "pull-request", branch: "main" },
+      delivery: { mode, ...(mode === "none" ? {} : { branch: "main" }) },
       requirements: minimalRequirements(orgFile, parent.id),
       director: { terminalHandle: "director-fixture", checkoutPath: repo },
     });
   }
   let mutations = 0;
   let externalWorker = false;
+  let dispatchId = "source-dispatch";
+  let selectedChild = child;
   let inventoryChange = () => {};
   const sourceTerminal = {
     handle: "source-terminal",
@@ -148,7 +157,7 @@ async function fixture(t) {
       command[1] === "worker-release"
     ) {
       result = {
-        dispatchId: "source-dispatch",
+        dispatchId,
         state: "retained",
         reason: "external_terminal",
         processAction: "none",
@@ -235,7 +244,7 @@ async function fixture(t) {
           workers: externalWorker
             ? [
                 {
-                  dispatchId: "source-dispatch",
+                  dispatchId,
                   workerState: "succeeded",
                   dispatchStatus: "completed",
                   agentTerminalHandle: "source-terminal",
@@ -243,16 +252,16 @@ async function fixture(t) {
                   resource: {
                     ownershipState: "external",
                     retainedReason: "external_terminal",
-                    worktreeId: child.id,
+                    worktreeId: selectedChild.id,
                     terminalHandle: "source-terminal",
-                    ownerDispatchId: "source-dispatch",
-                    originDispatchId: "source-dispatch",
+                    ownerDispatchId: dispatchId,
+                    originDispatchId: dispatchId,
                     endpointId: "fixture-runtime",
                     endpointIncarnation: `${sourceTerminal.ptyId}:${sourceTerminal.incarnationId}`,
                   },
                   projection: {
                     host: { id: "local" },
-                    workspace: { id: child.id },
+                    workspace: { id: selectedChild.id },
                     liveness: {
                       verdict: "unverifiable",
                       reason: "missing_status",
@@ -264,16 +273,26 @@ async function fixture(t) {
         },
       }),
     });
-  async function acceptAndArchive(parent, workflowId) {
+  async function acceptAndArchive(
+    parent,
+    workflowId,
+    resource = child,
+    delivered = true,
+  ) {
+    selectedChild = resource;
+    sourceTerminal.worktreeId = resource.id;
+    sourceTerminal.ptyId = `${resource.id}@@pty`;
     const stateDir = `${parent.path}/.omt`;
     const accepted = await acceptTaskThroughRuntime({
       org: orgFile,
       stateDir,
       taskDir: parent.path,
       workflowId,
-      resultRepo: child.path,
+      resultRepo: resource.path,
     });
     await acceptWorkflowIntegration(stateDir, workflowId, accepted.revision);
+    dispatchId = readWorkflow(stateDir, workflowId).state.tasks.a.execution
+      .executionId;
     recordLaunch(orgFile, {
       via: "worker-start",
       role: "senior",
@@ -281,8 +300,8 @@ async function fixture(t) {
       workflowId,
       workflowTaskId: "a",
       terminal: "source-terminal",
-      workerId: "source-dispatch",
-      worktreePath: child.path,
+      workerId: dispatchId,
+      worktreePath: resource.path,
       worktreeProtocolVersion: 1,
     });
     terminalAttached = true;
@@ -290,13 +309,13 @@ async function fixture(t) {
       "terminal",
       "list",
       "--worktree",
-      `id:${child.id}`,
+      `id:${resource.id}`,
     ]);
     const releaseReceipt = await orca("orca", [
       "orchestration",
       "worker-release",
       "--dispatch",
-      "source-dispatch",
+      dispatchId,
     ]);
     const closeReceipt = await orca("orca", [
       "terminal",
@@ -308,21 +327,19 @@ async function fixture(t) {
       "terminal",
       "list",
       "--worktree",
-      `id:${child.id}`,
+      `id:${resource.id}`,
     ]);
     recordTerminalClosure(orgFile, {
-      worktreeId: child.id,
-      worktreePath: child.path,
-      identity: child.identity,
+      worktreeId: resource.id,
+      worktreePath: resource.path,
+      identity: resource.identity,
       beforeReceipt,
       afterReceipt,
       terminals: [
         {
           terminal: "source-terminal",
           dispatch: { result: { status: "clear" } },
-          releases: [
-            { dispatchId: "source-dispatch", receipt: releaseReceipt },
-          ],
+          releases: [{ dispatchId, receipt: releaseReceipt }],
           close: { receipt: closeReceipt },
         },
       ],
@@ -337,12 +354,13 @@ async function fixture(t) {
       ],
     });
     await requirementsFidelityConfirm(orgFile, parent.id, repo);
-    recordDelivery(orgFile, {
-      worktreeId: parent.id,
-      head,
-      mergeCommit: head,
-      remoteName: "",
-    });
+    if (delivered)
+      recordDelivery(orgFile, {
+        worktreeId: parent.id,
+        head,
+        mergeCommit: head,
+        remoteName: "",
+      });
     const cleanup = await scan({ orgFile, worktreeId: parent.id });
     return releaseKickoff(orgFile, {
       worktreeId: parent.id,
@@ -367,6 +385,8 @@ async function fixture(t) {
     execute,
     head,
     trees,
+    tree,
+    git,
     mutations: () => mutations,
     useExternalWorker: () => {
       externalWorker = true;
@@ -732,4 +752,289 @@ test("a missing global host is replaced only by exact current scoped terminal ob
       }
     });
   }
+});
+
+test("cross-archive-candidate-ownership: same PM incarnation cannot lend delivery to an older undelivered child", async (t) => {
+  const f = await fixture(t);
+  try {
+    assertDirectorySync(path.dirname(f.orgFile));
+  } catch (error) {
+    assert.equal(error.code, "worktree-durability-unavailable");
+    return t.skip("Directory metadata durability is unsupported");
+  }
+  f.claim(f.source, "none");
+  const original = await f.acceptAndArchive(
+    f.source,
+    "original-flow",
+    f.child,
+    false,
+  );
+  f.claim(f.source);
+  const deliveredChild = f.tree("delivered-child", f.source);
+  const delivered = await f.acceptAndArchive(
+    f.source,
+    "delivered-flow",
+    deliveredChild,
+  );
+  const originalEntry = readJSON(original.archived);
+  const deliveredEntry = readJSON(delivered.archived);
+  assert.equal(originalEntry.pm.worktreeId, deliveredEntry.pm.worktreeId);
+  assert.notEqual(
+    originalEntry.registrationSeq,
+    deliveredEntry.registrationSeq,
+  );
+  assert.notEqual(originalEntry.createdAt, deliveredEntry.createdAt);
+  assert.notEqual(
+    originalEntry.reuseEvidence.proof.kickoffHash,
+    deliveredEntry.reuseEvidence.proof.kickoffHash,
+  );
+  assert.deepEqual(
+    deliveredEntry.reuseEvidence.proof.workflows.map((row) => row.workflowId),
+    ["delivered-flow"],
+  );
+  const request = {
+    orgFile: f.orgFile,
+    worktreeId: f.source.id,
+    archiveFile: delivered.archived,
+    callerCwd: f.repo,
+  };
+  const history = path.dirname(delivered.archived);
+  writeJSON(path.join(history, "kickoff-145-delivery-20261006.json"), {
+    schemaVersion: 1,
+    kickoff: "older-summary",
+    sourceHead: f.head,
+    mergeCommit: f.head,
+    ci: { status: "passed" },
+    cleanup: {},
+  });
+  fs.writeFileSync(
+    path.join(history, "kickoff-unrelated-broken.json"),
+    "{broken",
+  );
+  const oldScan = await f.scan({ ...request, archiveFile: original.archived });
+  assert.ok(
+    oldScan.candidates
+      .find((row) => row.worktreeId === f.child.id)
+      .reasons.includes("head-not-delivered"),
+  );
+  const current = await f.scan(request);
+  const old = current.candidates.find((row) => row.worktreeId === f.child.id);
+  assert.equal(old.status, "preserve");
+  assert.ok(old.reasons.includes("candidate-kickoff-incarnation-unproven"));
+  const fresh = current.candidates.find(
+    (row) => row.worktreeId === deliveredChild.id,
+  );
+  assert.equal(fresh.status, "safe-to-remove", JSON.stringify(fresh.reasons));
+  assert.equal(fresh.ownership.workflowId, "delivered-flow");
+  assert.equal(fresh.ownership.excludedRegistrations.length, 2);
+  assert.ok(
+    fresh.ownership.excludedRegistrations.some(
+      (row) => row.reason === "archive-registration-identity-unproven",
+    ),
+  );
+  const damagedFile = delivered.archived.replace(/\.json$/, "-damaged.json");
+  fs.writeFileSync(damagedFile, "{broken");
+  const damaged = await f.scan(request);
+  assert.equal(
+    damaged.candidates.find((row) => row.worktreeId === deliveredChild.id)
+      .ownership.reason,
+    "kickoff-incarnation-history-unverifiable",
+  );
+  writeJSON(damagedFile, { ...deliveredEntry, releasedAt: undefined });
+  assert.equal(
+    proveKickoffWorktreeOwnership(f.orgFile, deliveredEntry, deliveredChild.id)
+      .reason,
+    "kickoff-incarnation-history-unverifiable",
+  );
+  fs.rmSync(damagedFile);
+  const conflicting = {
+    ...deliveredEntry,
+    registrationSeq: deliveredEntry.registrationSeq + 100,
+  };
+  writeJSON(
+    path.join(history, "kickoff-conflicting-registration.json"),
+    conflicting,
+  );
+  assert.equal(
+    proveKickoffWorktreeOwnership(f.orgFile, deliveredEntry, deliveredChild.id)
+      .reason,
+    "kickoff-incarnation-sequence-conflict",
+  );
+  fs.rmSync(path.join(history, "kickoff-conflicting-registration.json"));
+  assert.equal(fresh.ownership.executionId, "delivered-flow-a");
+  // Observe a genuinely live new child while attempting cleanup: neither that
+  // child nor the unrelated older child can be removed through the public API.
+  f.changeInventory((kind, receipt, command) => {
+    if (kind === "terminal" && command.includes(`id:${deliveredChild.id}`))
+      receipt.result.terminals = [
+        {
+          handle: "live-new",
+          worktreeId: deliveredChild.id,
+          executionHostId: "local",
+        },
+      ];
+  });
+  const removals = [];
+  await reclaimKickoffCleanup(request, {
+    scan: f.scan,
+    show: f.orca,
+    reclaim: async (_repo, options) => {
+      removals.push(options.id);
+    },
+  });
+  assert.deepEqual(removals, []);
+  f.changeInventory(() => {});
+  const stale = await reclaimKickoffCleanup(request, {
+    scan: async (input) => {
+      const snapshot = await f.scan(input);
+      for (const row of snapshot.candidates)
+        row.status =
+          row.worktreeId === f.child.id ? "safe-to-remove" : "preserve";
+      return snapshot;
+    },
+    show: f.orca,
+    reclaim: async (_repo, options) => {
+      removals.push(options.id);
+    },
+  });
+  assert.equal(stale.attempts.at(-1).outcome, "refused");
+  assert.equal(
+    stale.attempts.at(-1).error,
+    "candidate-kickoff-incarnation-unproven",
+  );
+  assert.deepEqual(removals, []);
+  // Even an unchecked-out old branch must not borrow the newer delivery.
+  f.git(["checkout", "--detach", f.head], f.child.path);
+  const remote = path.join(f.root, "remote.git");
+  f.git(["init", "--bare", remote]);
+  f.git(["remote", "add", "origin", remote]);
+  f.git(["push", "origin", "fix/child"]);
+  const localBefore = f.git(["rev-parse", "refs/heads/fix/child"]);
+  const remoteBefore = f.git(["ls-remote", "--heads", "origin", "fix/child"]);
+  for (const entry of [originalEntry, deliveredEntry]) {
+    const result = cleanupKickoffBranches({
+      projectDir: f.repo,
+      orgFile: f.orgFile,
+      entry,
+      branches: ["fix/child"],
+      remoteName: "origin",
+      callerCwd: f.repo,
+      force: true,
+    });
+    assert.deepEqual(result, {
+      deleted: [],
+      skipped: ["fix/child"],
+      errors: [],
+    });
+    assert.equal(f.git(["rev-parse", "refs/heads/fix/child"]), localBefore);
+    assert.equal(
+      f.git(["ls-remote", "--heads", "origin", "fix/child"]),
+      remoteBefore,
+    );
+  }
+  f.claim(f.target);
+  const reused = await withAutomaticWorktreeReuse(
+    f.request,
+    async (candidate) => ({ worktreeId: candidate?.worktreeId }),
+    f.ports,
+  );
+  assert.equal(
+    reused.worktreeId,
+    deliveredChild.id,
+    JSON.stringify(reused.reuseRejections),
+  );
+  assert.equal(
+    f.trees.get(deliveredChild.id).identity.instanceId,
+    "delivered-child",
+  );
+  assert.equal(f.trees.get(f.child.id).parentWorktreeId, f.source.id);
+  assert.equal(f.mutations(), 1);
+});
+
+test("a proven reclaimed task retains its exact branch ownership for local and remote cleanup", async (t) => {
+  const f = await fixture(t);
+  try {
+    assertDirectorySync(path.dirname(f.orgFile));
+  } catch (error) {
+    assert.equal(error.code, "worktree-durability-unavailable");
+    return t.skip("Directory metadata durability is unsupported");
+  }
+  f.claim(f.source);
+  const archive = await f.acceptAndArchive(f.source, "branch-flow");
+  const remote = path.join(f.root, "remote.git");
+  f.git(["init", "--bare", remote]);
+  f.git(["remote", "add", "origin", remote]);
+  f.git(["push", "origin", "fix/child"]);
+  const removals = [];
+  const result = await reclaimKickoffCleanup(
+    {
+      orgFile: f.orgFile,
+      worktreeId: f.source.id,
+      archiveFile: archive.archived,
+      callerCwd: f.repo,
+    },
+    {
+      scan: f.scan,
+      show: f.orca,
+      reclaim: async (_repo, options) => {
+        removals.push(options.id);
+        const item = f.trees.get(options.id);
+        f.git(["worktree", "remove", item.path]);
+        f.trees.delete(options.id);
+        return { result: { removed: options.id } };
+      },
+    },
+  );
+  assert.deepEqual(removals, [f.child.id]);
+  assert.equal(result.attempts[0].outcome, "removed");
+  const entry = readJSON(archive.archived);
+  const request = {
+    projectDir: f.repo,
+    orgFile: f.orgFile,
+    entry,
+    branches: ["fix/child"],
+    remoteName: "origin",
+    callerCwd: f.repo,
+  };
+  assert.deepEqual(cleanupKickoffBranches(request), {
+    deleted: [],
+    skipped: ["fix/child"],
+    errors: [],
+  });
+  const kickoffHash = kickoffHashFor(entry);
+  saveDocument(entry.pm.stateDir, {
+    schemaVersion: 1,
+    docId: deliveryRefDocId(kickoffHash, f.head),
+    stage: "delivery",
+    kickoffId: kickoffHash,
+    workflowId: null,
+    revision: 1,
+    state: "resolved",
+    author: { role: "pm", executionId: "branch-pm" },
+    createdAt: new Date().toISOString(),
+    basedOnRevision: null,
+    reason: "exact task delivered",
+    deliveredCommit: f.head,
+  });
+  await t.test(
+    "proven branch still requires directory durability before either deletion",
+    (sub) => {
+      denyDirectorySync(sub);
+      assert.throws(() => cleanupKickoffBranches(request), {
+        code: "worktree-durability-unavailable",
+      });
+      assert.equal(f.git(["rev-parse", "refs/heads/fix/child"]), f.head);
+      assert.notEqual(
+        f.git(["ls-remote", "--heads", "origin", "fix/child"]),
+        "",
+      );
+    },
+  );
+  const cleanup = cleanupKickoffBranches(request);
+  assert.deepEqual(cleanup, {
+    deleted: ["fix/child"],
+    skipped: [],
+    errors: [],
+  });
+  assert.equal(f.git(["ls-remote", "--heads", "origin", "fix/child"]), "");
 });

@@ -867,7 +867,7 @@ function cleanUp(fixture) {
   });
 }
 
-test("a recorded real merge commit lets cleanup delete the merged branch", (t) => {
+test("a recorded merge and document cannot authorize a branch with unproven kickoff ownership", (t) => {
   if (!durableSuccessSupported(t)) return;
   const fixture = gitProject(t);
   const mergeCommit = mergeWork(fixture);
@@ -901,10 +901,10 @@ test("a recorded real merge commit lets cleanup delete the merged branch", (t) =
   });
 
   const result = cleanUp(fixture);
-  assert.deepEqual(result.deleted, ["feat/work"]);
-  assert.deepEqual(result.skipped, []);
-  assert.equal(fixture.remoteHas("feat/work"), false);
-  assert.throws(() => fixture.git("rev-parse", "refs/heads/feat/work"));
+  assert.deepEqual(result.deleted, []);
+  assert.deepEqual(result.skipped, ["feat/work"]);
+  assert.equal(fixture.remoteHas("feat/work"), true);
+  assert.equal(fixture.git("rev-parse", "refs/heads/feat/work"), fixture.head);
 });
 
 test("a merge commit that only the remote branch holds is accepted, and its full id is stored", (t) => {
@@ -1583,8 +1583,10 @@ test("unsupported protocol branch cleanup preserves both local and remote delive
   });
 
   denyDirectorySync(t);
-  assert.throws(() => cleanUp(fixture), {
-    code: "worktree-durability-unavailable",
+  assert.deepEqual(cleanUp(fixture), {
+    deleted: [],
+    skipped: ["feat/work"],
+    errors: [],
   });
   assert.equal(fixture.remoteHas("feat/work"), true);
   assert.equal(fixture.git("rev-parse", "refs/heads/feat/work"), fixture.head);

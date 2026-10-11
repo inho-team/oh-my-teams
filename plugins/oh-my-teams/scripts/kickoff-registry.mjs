@@ -40,7 +40,9 @@ import {
   withWorktreeLockSync,
   withProjectWorktreeLockSync,
   retiredWorktrees,
+  readWorktreeTransitions,
 } from "./worktree-transactions.mjs";
+import { proveKickoffWorktreeOwnership } from "./worktree-ownership.mjs";
 import { captureWorktreeReuseEvidence } from "./worktree-reuse.mjs";
 
 /** Reasons a registered kickoff may be ended, in the order they end one. */
@@ -1981,8 +1983,32 @@ function cleanupKickoffBranchesUnderLock(
       continue;
     }
 
+    const ownership = branchOwnership(projectDir, anchor, entry, branch);
+    if (ownership.status !== "proven") {
+      skipped.push(branch);
+      continue;
+    }
+    // Remote deletion must refer to the same proven ref, not a newer remote tip.
+    const tip = tryGit(projectDir, [
+      "rev-parse",
+      "--verify",
+      `refs/heads/${branch}`,
+    ]);
+    if (remoteName) {
+      const remote = tryGit(projectDir, [
+        "ls-remote",
+        "--heads",
+        remoteName,
+        `refs/heads/${branch}`,
+      ]);
+      if (remote === null || (remote && remote.split(/\s+/)[0] !== tip)) {
+        skipped.push(branch);
+        continue;
+      }
+    }
     const transaction = prepare({
       type: "branch-cleanup",
+      ownership,
       sourceWorktreeId: entry.pm?.worktreeId ?? null,
       branch,
       remoteName,
@@ -2033,4 +2059,63 @@ function cleanupKickoffBranchesUnderLock(
   }
 
   return { deleted, skipped, errors };
+}
+
+// The project-only compatibility lock proves that no organization or protocol
+// journal exists. Organization-backed cleanup always requires a resource proof.
+function branchOwnership(projectDir, anchor, entry, branch) {
+  if (typeof anchor === "object") {
+    assert(
+      !["organization.json", "kickoffs", "history"].some((name) =>
+        fs.existsSync(path.join(anchor.directory, name)),
+      ) &&
+        readWorktreeTransitions(anchor).entries.every(
+          (item) =>
+            item.type === "branch-cleanup" &&
+            item.status === "completed" &&
+            item.ownership?.kind === "project-legacy",
+        ),
+      "Legacy branch cleanup cannot touch protocol or journal resources; preserve branches",
+    );
+    return { status: "proven", kind: "project-legacy" };
+  }
+  try {
+    const ref = `refs/heads/${branch}`;
+    const tip = tryGit(projectDir, ["rev-parse", "--verify", ref]);
+    if (!tip) return { status: "unproven" };
+    const listing = tryGit(projectDir, ["worktree", "list", "--porcelain"]);
+    if (listing === null || listing.split("\n").includes(`branch ${ref}`))
+      return { status: "unproven", reason: "branch-checkout-still-present" };
+    // A completed reclaim retains the exact last branch/head and epoch proof;
+    // it can authorize branch cleanup after the checkout itself is gone.
+    for (const transition of readWorktreeTransitions(
+      anchor,
+    ).entries.toReversed()) {
+      if (
+        transition.type !== "kickoff-reclaim" ||
+        transition.status !== "completed" ||
+        transition.before?.branch !== ref ||
+        transition.before?.head !== tip
+      )
+        continue;
+      const proof = proveKickoffWorktreeOwnership(
+        anchor,
+        entry,
+        transition.worktreeId,
+      );
+      if (
+        proof.status === "proven" &&
+        proof.kickoffHash === transition.ownership?.kickoffHash
+      )
+        return {
+          ...proof,
+          worktreeId: transition.worktreeId,
+          branch,
+          head: tip,
+        };
+    }
+  } catch {
+    /* Unknown or conflicting provenance always preserves the branch. */
+  }
+  return { status: "unproven", reason: "branch-kickoff-ownership-unproven" };
 }

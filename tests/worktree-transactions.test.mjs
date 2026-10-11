@@ -264,7 +264,6 @@ test("unsupported no-organization branch cleanup stays fenced away from protocol
             }
           : {}),
       };
-      denyDirectorySync(t);
       const invoke = () =>
         cleanupKickoffBranches({
           projectDir: directory,
@@ -272,6 +271,13 @@ test("unsupported no-organization branch cleanup stays fenced away from protocol
           branches: ["legacy-merged"],
           remoteName: "",
         });
+      if (mode !== "legacy") {
+        if (mode === "organization")
+          assert.deepEqual(invoke().skipped, ["legacy-merged"]);
+        else assert.throws(invoke, /preserve|unavailable|ENOENT/);
+        assert.equal(git("rev-parse", "refs/heads/legacy-merged"), head);
+      }
+      denyDirectorySync(t);
       if (mode === "legacy") {
         assert.deepEqual(invoke().deleted, ["legacy-merged"]);
         assert.throws(() =>
@@ -281,6 +287,14 @@ test("unsupported no-organization branch cleanup stays fenced away from protocol
           fs.existsSync(path.join(state, "worktree-transitions.json")),
           false,
         );
+      } else if (mode === "organization") {
+        // The organization route now refuses unproven ownership before prepare.
+        assert.deepEqual(invoke(), {
+          deleted: [],
+          skipped: ["legacy-merged"],
+          errors: [],
+        });
+        assert.equal(git("rev-parse", "refs/heads/legacy-merged"), head);
       } else {
         assert.throws(invoke, /preserve|unavailable|ENOENT/);
         assert.equal(git("rev-parse", "refs/heads/legacy-merged"), head);

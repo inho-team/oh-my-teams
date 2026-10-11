@@ -34,6 +34,18 @@ function workflowProofs(entry, orgFile) {
     .filter((item) => item.isDirectory())
     .map((item) => {
       const snapshot = readWorkflow(entry.pm.stateDir, item.name);
+      // A re-registered PM can retain earlier workflow files. Their accepted
+      // results belong to that earlier registration, even at the same HEAD.
+      if (
+        Date.parse(snapshot.state.createdAt) < Date.parse(entry.createdAt) &&
+        !launches.some(
+          (launch) =>
+            launch.workflowId === item.name &&
+            launch.kickoffPmWorktreeId === entry.pm.worktreeId &&
+            launch.at >= entry.createdAt,
+        )
+      )
+        return null;
       const tasks = Object.entries(snapshot.state.tasks).map(
         ([taskId, task]) => {
           if (task.state !== "accepted")
@@ -106,7 +118,8 @@ function workflowProofs(entry, orgFile) {
         tasks,
         integrationAcceptance,
       };
-    });
+    })
+    .filter(Boolean);
 }
 
 /**
@@ -507,6 +520,8 @@ export async function withAutomaticWorktreeReuse(
       recordSelection(request, found.rejected, source.worktreeId);
       const transaction = prepare({
         type: "reuse",
+        sourceKickoffHash: kickoffHashFor(source.entry),
+        targetKickoffHash: kickoffHashFor(found.current),
         worktreeId: source.worktreeId,
         before,
         sourceWorktreeId: source.entry.pm.worktreeId,

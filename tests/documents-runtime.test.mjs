@@ -715,7 +715,7 @@ function mergedRepo(t) {
   return { repoDir, head, mergeCommit };
 }
 
-test("cleanupKickoffBranches skips a branch until its kickoff's delivery-ref document is committed and owned", (t) => {
+test("cleanupKickoffBranches requires resource ownership in addition to a committed delivery document", (t) => {
   if (!durableSuccessSupported(t)) return;
   const fixture = project(t);
   const { entry, stateDir, kickoffHash } = kickoff(fixture, "wt-a", {
@@ -760,14 +760,15 @@ test("cleanupKickoffBranches skips a branch until its kickoff's delivery-ref doc
     remoteName: "",
     callerCwd: fixture.dir,
   });
+  // Document authority and force cannot manufacture resource provenance.
   assert.deepEqual(afterDoc, {
-    deleted: ["feat/kickoff-work"],
-    skipped: [],
+    deleted: [],
+    skipped: ["feat/kickoff-work"],
     errors: [],
   });
 });
 
-test("cleanupKickoffBranches's force bypasses a missing or mismatched delivery-ref document", (t) => {
+test("cleanupKickoffBranches force never bypasses unproven resource ownership", (t) => {
   if (!durableSuccessSupported(t)) return;
   const fixture = project(t);
   const { entry } = kickoff(fixture, "wt-a", {
@@ -784,9 +785,10 @@ test("cleanupKickoffBranches's force bypasses a missing or mismatched delivery-r
     remoteName: "",
     force: true,
   });
+  // Document authority and force cannot manufacture resource provenance.
   assert.deepEqual(forced, {
-    deleted: ["feat/kickoff-work"],
-    skipped: [],
+    deleted: [],
+    skipped: ["feat/kickoff-work"],
     errors: [],
   });
 });
@@ -927,9 +929,10 @@ test("cleanupKickoffBranches skips a registrationSeq-less entry registered after
     orgFile: fixture.org,
     force: true,
   });
+  // Document authority and force cannot manufacture resource provenance.
   assert.deepEqual(forced, {
-    deleted: ["feat/kickoff-work"],
-    skipped: [],
+    deleted: [],
+    skipped: ["feat/kickoff-work"],
     errors: [],
   });
 });

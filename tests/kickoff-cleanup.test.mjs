@@ -3,6 +3,7 @@ import {
   denyDirectorySync,
   durableSuccessSupported,
 } from "./directory-durability-fixture.mjs";
+import { recordLaunch } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -350,6 +351,14 @@ test("a completed archive retains child identity for read-only partial cleanup r
     pmPath,
     goal: "reconcile worktrees",
   });
+  recordLaunch(orgFile, {
+    via: "role-terminal",
+    role: "worker",
+    stateDir: path.join(pmPath, ".omt"),
+    callerCwd: pmPath,
+    worktreePath: childPath,
+    terminal: "child-fixture-terminal",
+  });
   let childPresent = true;
   let foreignWorker = true;
   let contextLiveness = {
@@ -513,6 +522,15 @@ async function reclaimFixture(t) {
     pmPath: path.join(project, "pm"),
     goal: "reclaim completed kickoff",
   });
+  for (const id of [firstId, secondId])
+    recordLaunch(orgFile, {
+      via: "role-terminal",
+      role: "worker",
+      stateDir: path.join(project, "pm", ".omt"),
+      callerCwd: path.join(project, "pm"),
+      worktreePath: id.split("::")[1],
+      terminal: `terminal-${id}`,
+    });
   const archived = (
     await releaseKickoff(orgFile, {
       worktreeId: pmId,
