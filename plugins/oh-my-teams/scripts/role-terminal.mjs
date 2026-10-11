@@ -1,15 +1,14 @@
 /**
  * Opens a role's interactive CLI in an Orca terminal and confirms it started.
  *
- * `orca terminal create --command` types the command into the new shell but
- * does not always submit it: the line sits at the prompt, no agent starts, and
- * a task sent afterwards lands on the shell instead. A session following the
- * steps by hand misses this, so the launch, the one corrective Enter and the
- * screen the caller must check are done here in one place.
+ * The new terminal is created empty so its Orca worktree identity can be
+ * checked before any agent command reaches it. A sent command can remain at
+ * the shell prompt, so the launch also checks whether one corrective Enter is
+ * needed before handing the terminal work.
  *
- * Readiness is judged from the screen alone. Orca's `tui-idle` wait is also
- * satisfied by an idle shell holding the unsubmitted command, so it cannot
- * tell a started agent from a stuck prompt.
+ * Readiness requires both an agent interface on screen and Orca's matching
+ * agent identity. Orca's `tui-idle` wait is also satisfied by an idle shell
+ * holding the unsubmitted command, so it cannot prove either condition.
  *
  * The tab title names the role. A title given only at creation did not always
  * survive: a PM tab opened with one was later shown under the agent's own
@@ -744,22 +743,67 @@ async function launchOnce({
   expectedWorktree,
   execute,
 }) {
+  const expectedPath = expectedWorktree ?? selectedWorktreeDirectory(worktree);
+  if (!expectedPath) {
+    const error = new Error(
+      `Cannot resolve worktree selector ${worktree} before creating a role terminal`,
+    );
+    error.preCreateRefusal = { reason: "unresolved-worktree-selector" };
+    throw error;
+  }
   const created = await runOrcaJson(
     orca,
-    [
-      "terminal",
-      "create",
-      "--worktree",
-      worktree,
-      "--title",
-      title,
-      "--command",
-      typed,
-    ],
+    ["terminal", "create", "--worktree", worktree, "--title", title],
     { execute },
   );
   const handle = created.result?.terminal?.handle;
   assert(handle, "Orca created no terminal handle");
+  const expectedId = worktree.startsWith("id:") ? worktree.slice(3) : null;
+  let shown;
+  try {
+    shown = (
+      await runOrcaJson(orca, ["terminal", "show", "--terminal", handle], {
+        execute,
+      })
+    ).result?.terminal;
+  } catch (cause) {
+    throw new Error(
+      `Terminal ${handle} placement could not be verified; preserve it for reconciliation (${cause.message})`,
+      { cause },
+    );
+  }
+  if (!terminalInWorktree(shown, handle, expectedId, expectedPath)) {
+    let closed = false;
+    if (shown?.handle === handle && !shown.agentIdentity) {
+      try {
+        const screen = await readScreen(orca, handle, execute);
+        if (untouchedShell(screen)) {
+          await runOrcaJson(orca, ["terminal", "close", "--terminal", handle], {
+            execute,
+          });
+          closed = true;
+        }
+      } catch {
+        // An unreadable or unconfirmed terminal remains for reconciliation.
+      }
+    }
+    throw new Error(
+      `Terminal ${handle} placement does not match ${worktree}; ` +
+        (closed
+          ? "the empty terminal was closed"
+          : "preserve it for reconciliation"),
+    );
+  }
+  if (shown.agentIdentity) {
+    throw new Error(
+      `Terminal ${handle} already contains an agent; preserve it for reconciliation without sending a role command`,
+    );
+  }
+  await runOrcaJson(
+    orca,
+    ["terminal", "send", "--terminal", handle, "--text", typed, "--enter"],
+    { execute },
+  );
 
   const until = async (budgetMs, done = (seen) => seen.started) => {
     const deadline = Date.now() + budgetMs;
@@ -772,7 +816,7 @@ async function launchOnce({
   };
 
   let seen = await until(settleMs);
-  let submission = "orca";
+  let submission = "sent";
   // Enter while the shell is still echoing would run a cut-off command.
   if (!seen.started && seen.typing) {
     seen = await until(settleMs, (now) => now.started || !now.typing);
@@ -813,6 +857,28 @@ async function launchOnce({
       }
     }
   }
+  let agentVerified = false;
+  let verificationFailure = seen.started
+    ? "agent-session-missing"
+    : "agent-not-ready";
+  if (seen.started) {
+    const deadline = Date.now() + readyMs;
+    do {
+      const current = (
+        await runOrcaJson(orca, ["terminal", "show", "--terminal", handle], {
+          execute,
+        })
+      ).result?.terminal;
+      if (!terminalInWorktree(current, handle, expectedId, expectedPath)) {
+        verificationFailure = "terminal-placement-changed";
+        break;
+      }
+      agentVerified =
+        current.agentIdentity === agentIdentityFor(command.provider);
+      if (agentVerified || Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    } while (true);
+  }
   return {
     handle,
     seen,
@@ -821,7 +887,45 @@ async function launchOnce({
     promptAnswers,
     trustRefusal,
     placed,
+    agentVerified,
+    verificationFailure: agentVerified ? null : verificationFailure,
   };
+}
+
+function selectedWorktreeDirectory(selector) {
+  if (selector === "active" || selector === "current") return process.cwd();
+  if (selector.startsWith("path:")) return selector.slice(5);
+  if (selector.startsWith("id:") && selector.lastIndexOf("::") > 3)
+    return selector.slice(selector.lastIndexOf("::") + 2);
+  return null;
+}
+
+function terminalInWorktree(terminal, handle, expectedId, expectedPath) {
+  if (
+    terminal?.handle !== handle ||
+    !terminal.worktreeId ||
+    !terminal.worktreePath ||
+    !expectedPath
+  )
+    return false;
+  const separator = terminal.worktreeId.lastIndexOf("::");
+  if (separator < 1) return false;
+  const samePath = (a, b) => {
+    try {
+      return fs.realpathSync.native(a) === fs.realpathSync.native(b);
+    } catch {
+      return false;
+    }
+  };
+  return (
+    (!expectedId || terminal.worktreeId === expectedId) &&
+    samePath(terminal.worktreePath, expectedPath) &&
+    samePath(terminal.worktreeId.slice(separator + 2), expectedPath)
+  );
+}
+
+function agentIdentityFor(provider) {
+  return provider === "agy" ? "antigravity" : provider;
 }
 
 /**
@@ -966,7 +1070,7 @@ export async function openRoleTerminal({
     expectedWorktree,
     execute,
   });
-  let { handle, seen, submission } = first;
+  let { handle, seen, submission, agentVerified, verificationFailure } = first;
   const asking = (lines) =>
     agyTrustQuestionVisible(lines) ||
     questionOnScreen(lines, {
@@ -990,17 +1094,18 @@ export async function openRoleTerminal({
       closeError = error.message;
     }
     if (reopened) {
-      ({ handle, seen, submission } = await launchOnce({
-        ...launch,
-        answerTrust: false,
-        supervision: null,
-        expectedWorktree,
-        execute,
-      }));
+      ({ handle, seen, submission, agentVerified, verificationFailure } =
+        await launchOnce({
+          ...launch,
+          answerTrust: false,
+          supervision: null,
+          expectedWorktree,
+          execute,
+        }));
     }
   }
   const trustBlocked = asking(seen.screen);
-  const ready = seen.started && !trustBlocked && !closeError;
+  const ready = seen.started && agentVerified && !trustBlocked && !closeError;
   const titlePinned = ready
     ? await pinTerminalTitle({ orca, handle, title: tabTitle, execute })
     : false;
@@ -1036,6 +1141,13 @@ export async function openRoleTerminal({
     reopened,
     ...(closeError ? { closeError } : {}),
     ready,
+    ...(ready
+      ? {}
+      : {
+          blockedReason:
+            verificationFailure ??
+            (trustBlocked ? "trust-question" : "agent-not-ready"),
+        }),
     title: tabTitle,
     titlePinned,
     shellsClosed,

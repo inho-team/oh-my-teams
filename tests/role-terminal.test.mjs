@@ -49,6 +49,16 @@ const example = () =>
   readJSON(path.resolve("plugins/oh-my-teams/examples/organization.json"));
 const PROMPT = "me@host project %";
 const GLOBAL_RUN = "run_global";
+const TEST_WORKTREE_ROOT = fs.mkdtempSync(
+  path.join(os.tmpdir(), "omt-role-placement-"),
+);
+const TEST_WORKTREE = path.join(TEST_WORKTREE_ROOT, "wt");
+const TEST_LITERACY = path.join(TEST_WORKTREE_ROOT, "literacy-site-research-2");
+fs.mkdirSync(TEST_WORKTREE);
+fs.mkdirSync(TEST_LITERACY);
+process.on("exit", () =>
+  fs.rmSync(TEST_WORKTREE_ROOT, { recursive: true, force: true }),
+);
 
 function runListReceipt(runs = [{ id: GLOBAL_RUN }], nextCursor = null) {
   return JSON.stringify({ ok: true, result: { runs, nextCursor } });
@@ -74,10 +84,18 @@ function workerListReceipt(
 // gives other terminals' screens.
 function fakeOrca(
   screens,
-  { closeFails = false, terminals = [], screens: others = {} } = {},
+  {
+    closeFails = false,
+    terminals = [],
+    screens: others = {},
+    placement = {},
+    noAgent = false,
+  } = {},
 ) {
   const calls = [];
   let created = 0;
+  let selector;
+  let sentCommand;
   const execute = async (argv) => {
     const [, noun, verb] = argv;
     calls.push(argv.slice(1, -1));
@@ -88,7 +106,35 @@ function fakeOrca(
     });
     if (verb === "create") {
       created += 1;
+      selector = argv[argv.indexOf("--worktree") + 1];
+      sentCommand = null;
       return reply({ terminal: { handle: `term_${created}` } });
+    }
+    if (verb === "show") {
+      const worktreePath =
+        selector === "active" || selector === "current"
+          ? process.cwd()
+          : selector.startsWith("path:")
+            ? selector.slice(5)
+            : selector.slice(selector.lastIndexOf("::") + 2);
+      return reply({
+        terminal: {
+          handle: `term_${created}`,
+          worktreeId: selector.startsWith("id:")
+            ? selector.slice(3)
+            : `repo::${worktreePath}`,
+          worktreePath,
+          agentIdentity:
+            noAgent || !sentCommand
+              ? null
+              : sentCommand.startsWith("agy ")
+                ? "antigravity"
+                : sentCommand.startsWith("claude ")
+                  ? "claude"
+                  : "codex",
+          ...placement,
+        },
+      });
     }
     // An idle shell satisfies tui-idle too, so the wait decides nothing.
     if (verb === "wait") return reply({ wait: { satisfied: true } });
@@ -98,7 +144,11 @@ function fakeOrca(
       const tail = screens.length > 1 ? screens.shift() : screens[0];
       return reply({ terminal: { source: "screen", tail } });
     }
-    if (verb === "send") return reply({ send: { accepted: true } });
+    if (verb === "send") {
+      const sent = argv[argv.indexOf("--text") + 1];
+      if (sent) sentCommand = sent;
+      return reply({ send: { accepted: true } });
+    }
     if (verb === "list") return reply({ terminals });
     if (verb === "rename") return reply({ rename: { title: argv.at(-2) } });
     if (verb === "close") {
@@ -206,15 +256,15 @@ test("an Agy Gemini role is launched with no width adjustment on any platform", 
     ],
   ]);
   const opened = await openRoleTerminal({
-    worktree: "id:repo::/tmp/wt",
+    worktree: `id:repo::${TEST_WORKTREE}`,
     command: gemini,
     execute: orca.execute,
     ...fast,
     platform: "darwin",
   });
-  assert.equal(orca.creates()[0][7], typed);
+  assert.equal(orca.sends()[0][5], typed);
   assert.equal(opened.ready, true);
-  assert.equal(opened.submission, "orca");
+  assert.equal(opened.submission, "sent");
   assert.equal(opened.launched, typed);
   assert.equal(opened.columns, null);
 });
@@ -290,6 +340,7 @@ test("Enter waits for the echo to finish and is then sent exactly once", async (
   // has been sent, the agent.
   let reads = 0;
   let entered = false;
+  let sends = 0;
   const calls = [];
   const execute = async (argv) => {
     const verb = argv[2];
@@ -299,6 +350,15 @@ test("Enter waits for the echo to finish and is then sent exactly once", async (
       stdout: JSON.stringify({ ok: true, result }),
     });
     if (verb === "create") return reply({ terminal: { handle: "term_1" } });
+    if (verb === "show")
+      return reply({
+        terminal: {
+          handle: "term_1",
+          worktreeId: `repo::${process.cwd()}`,
+          worktreePath: process.cwd(),
+          agentIdentity: sends ? "antigravity" : null,
+        },
+      });
     if (verb === "wait") return reply({ wait: { satisfied: true } });
     if (verb === "read") {
       reads += 1;
@@ -307,12 +367,14 @@ test("Enter waits for the echo to finish and is then sent exactly once", async (
       return reply({ terminal: { tail: [reads <= 3 ? cut : whole] } });
     }
     if (verb === "send") {
-      // Never Enter over a cut-off line.
-      assert.ok(
-        reads > 3,
-        "Enter was sent while the command was still echoing",
-      );
-      entered = true;
+      sends += 1;
+      if (sends > 1) {
+        assert.ok(
+          reads > 3,
+          "Enter was sent while the command was still echoing",
+        );
+        entered = true;
+      }
       return reply({ send: { accepted: true } });
     }
     if (verb === "list") return reply({ terminals: [] });
@@ -324,7 +386,7 @@ test("Enter waits for the echo to finish and is then sent exactly once", async (
     command,
     execute,
     settleMs: 5,
-    readyMs: 200,
+    readyMs: 1000,
     pollMs: 1,
     platform: "darwin",
     allowUnverified: true,
@@ -332,7 +394,7 @@ test("Enter waits for the echo to finish and is then sent exactly once", async (
   });
   assert.equal(opened.ready, true);
   assert.equal(opened.submission, "enter-sent");
-  assert.equal(calls.filter((call) => call[1] === "send").length, 1);
+  assert.equal(calls.filter((call) => call[1] === "send").length, 2);
 
   // An echo that never finishes is reported blocked, without any Enter.
   const stuck = fakeOrca([[cut]]);
@@ -344,7 +406,7 @@ test("Enter waits for the echo to finish and is then sent exactly once", async (
   });
   assert.equal(blocked.ready, false);
   assert.equal(blocked.status, "blocked");
-  assert.deepEqual(stuck.sends(), []);
+  assert.equal(stuck.sends().length, 1);
 });
 
 test("a role terminal Orca started itself gets no extra Enter", async () => {
@@ -353,13 +415,13 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
     [`${PROMPT} ${typedFor(command)}`, "Antigravity", ">"],
   ]);
   const opened = await openRoleTerminal({
-    worktree: "id:repo::/tmp/wt",
+    worktree: `id:repo::${TEST_WORKTREE}`,
     command,
     executable: "orca",
     execute: orca.execute,
     ...fast,
   });
-  assert.equal(opened.submission, "orca");
+  assert.equal(opened.submission, "sent");
   assert.equal(opened.trust, "not-asked");
   assert.equal(opened.reopened, null);
   assert.equal(opened.ready, true);
@@ -369,16 +431,115 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
     "terminal",
     "create",
     "--worktree",
-    "id:repo::/tmp/wt",
+    `id:repo::${TEST_WORKTREE}`,
     "--title",
     "[Senior] wt",
-    "--command",
-    typedFor(command),
   ]);
-  assert.deepEqual(orca.sends(), []);
+  assert.equal(orca.sends().length, 1);
   assert.deepEqual(orca.closes(), []);
   assert.equal(opened.title, "[Senior] wt");
   assert.equal(opened.titlePinned, true);
+});
+
+test("a misrouted empty terminal is closed before any agent command is sent", async () => {
+  const command = roleCommand(example(), "pm");
+  const orca = fakeOrca([["shell %"]], {
+    placement: {
+      worktreeId: "other::/tmp/elsewhere",
+      worktreePath: "/tmp/elsewhere",
+    },
+  });
+  await assert.rejects(
+    () =>
+      openRoleTerminal({
+        worktree: `id:repo::${TEST_WORKTREE}`,
+        command,
+        execute: orca.execute,
+        ...fast,
+      }),
+    /placement does not match.*empty terminal was closed/,
+  );
+  assert.equal(orca.sends().length, 0);
+  assert.deepEqual(orca.closes(), [
+    ["terminal", "close", "--terminal", "term_1"],
+  ]);
+});
+
+test("matching path text without filesystem identity cannot authorize a launch", async () => {
+  const command = roleCommand(example(), "pm");
+  const missing = path.join(os.tmpdir(), `omt-binding-missing-${process.pid}`);
+  assert.equal(fs.existsSync(missing), false);
+  const orca = fakeOrca([["shell %"]]);
+  await assert.rejects(
+    () =>
+      openRoleTerminal({
+        worktree: `id:repo::${missing}`,
+        command,
+        execute: orca.execute,
+        ...fast,
+      }),
+    /placement does not match.*empty terminal was closed/,
+  );
+  assert.equal(orca.sends().length, 0);
+  assert.equal(orca.closes().length, 1);
+});
+
+test("a returned terminal already running an agent is preserved without a command", async () => {
+  const command = roleCommand(example(), "pm");
+  const orca = fakeOrca([["Codex", "❯"]], {
+    placement: { agentIdentity: "codex" },
+  });
+  await assert.rejects(
+    () =>
+      openRoleTerminal({
+        worktree: `id:repo::${TEST_WORKTREE}`,
+        command,
+        execute: orca.execute,
+        ...fast,
+      }),
+    /already contains an agent.*preserve it/,
+  );
+  assert.equal(orca.sends().length, 0);
+  assert.equal(orca.closes().length, 0);
+});
+
+test("unverifiable terminal placement preserves the terminal without sending a command", async () => {
+  const command = roleCommand(example(), "pm");
+  const orca = fakeOrca([["shell %"]]);
+  const execute = async (argv, options) =>
+    argv[2] === "show"
+      ? { code: 1, stderr: "unavailable" }
+      : orca.execute(argv, options);
+  await assert.rejects(
+    () =>
+      openRoleTerminal({
+        worktree: `id:repo::${TEST_WORKTREE}`,
+        command,
+        execute,
+        ...fast,
+      }),
+    /placement could not be verified; preserve it/,
+  );
+  assert.equal(orca.sends().length, 0);
+  assert.equal(orca.closes().length, 0);
+});
+
+test("a shell screen without a verified agent session is blocked", async () => {
+  const command = roleCommand(example(), "pm");
+  const orca = fakeOrca(
+    [[`${PROMPT} ${typedFor(command)}`, "Claude Code", "❯"]],
+    { noAgent: true },
+  );
+  const opened = await openRoleTerminal({
+    worktree: `id:repo::${TEST_WORKTREE}`,
+    command,
+    execute: orca.execute,
+    ...fast,
+  });
+  assert.equal(opened.ready, false);
+  assert.equal(opened.status, "blocked");
+  assert.equal(opened.terminal, "term_1");
+  assert.equal(orca.closes().length, 0);
 });
 
 // The runner an auditor launch holds: trustedOrcaExecute over a fake Orca, with
@@ -422,7 +583,7 @@ test("T1 the trusted placeholder opens a role terminal through the trusted runne
   assert.equal(orca.spawned.length, 1);
   assert.equal(orca.spawned[0][4], "--version");
   const opened = await openRoleTerminal({
-    worktree: "id:repo::/tmp/wt",
+    worktree: `id:repo::${TEST_WORKTREE}`,
     command,
     executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
     execute: orca.execute,
@@ -462,7 +623,7 @@ test("T2 the trusted placeholder with a general runner, or none, is refused as a
     await assert.rejects(
       () =>
         openRoleTerminal({
-          worktree: "id:repo::/tmp/wt",
+          worktree: `id:repo::${TEST_WORKTREE}`,
           command,
           executable: TRUSTED_ORCA_EXECUTABLE_PLACEHOLDER,
           ...runner,
@@ -500,7 +661,7 @@ test("a typed but unsubmitted command is sent Enter exactly once", async () => {
   });
   assert.equal(opened.submission, "enter-sent");
   assert.equal(opened.ready, true);
-  assert.equal(started.sends().length, 1);
+  assert.equal(started.sends().length, 2);
 
   // Still at the prompt after the Enter: reported, never pressed again.
   const stuck = fakeOrca([typed]);
@@ -512,8 +673,14 @@ test("a typed but unsubmitted command is sent Enter exactly once", async () => {
   });
   assert.equal(blocked.ready, false);
   assert.equal(blocked.status, "blocked");
-  assert.deepEqual(stuck.sends(), [
-    ["terminal", "send", "--terminal", "term_1", "--text", "", "--enter"],
+  assert.deepEqual(stuck.sends().at(-1), [
+    "terminal",
+    "send",
+    "--terminal",
+    "term_1",
+    "--text",
+    "",
+    "--enter",
   ]);
   // A terminal that never became ready is not named as a working role.
   assert.deepEqual(stuck.renames(), []);
@@ -528,7 +695,7 @@ test("a ready role tab is renamed with its role tag after the agent starts", asy
     [`${PROMPT} ${typedFor(command)}`, "Claude Code", "❯"],
   ]);
   const opened = await openRoleTerminal({
-    worktree: "id:repo::/work/literacy-site-research-2",
+    worktree: `id:repo::${TEST_LITERACY}`,
     command,
     title: "PM: 문해력 사이트 조사",
     execute: orca.execute,
@@ -584,7 +751,7 @@ test("the worktree's unused plain shell is closed, other tabs are not", async ()
     screens,
   });
   const opened = await openRoleTerminal({
-    worktree: "id:repo::/work/literacy-site-research-2",
+    worktree: `id:repo::${TEST_LITERACY}`,
     command,
     execute: orca.execute,
     ...fast,
@@ -694,7 +861,7 @@ test("Agy's folder trust question is answered once, only when trust is selected"
   assert.deepEqual(opened.screen, agent);
   assert.deepEqual(
     trusted.sends().map((call) => call[3]),
-    ["term_1"],
+    ["term_1", "term_1", "term_2"],
   );
   assert.deepEqual(trusted.closes(), [
     ["terminal", "close", "--terminal", "term_1"],
@@ -720,7 +887,7 @@ test("Agy's folder trust question is answered once, only when trust is selected"
   assert.equal(blocked.status, "blocked");
   assert.equal(blocked.reopened, null);
   assert.equal(blocked.trust, "unresolved");
-  assert.equal(repeated.sends().length, 1);
+  assert.equal(repeated.sends().length, 2);
   assert.deepEqual(repeated.closes(), []);
 });
 
@@ -756,7 +923,7 @@ test("a reopened terminal asking for trust again is blocked, not reopened", asyn
   assert.equal(opened.reopened.closedTerminal, "term_1");
   assert.equal(opened.ready, false);
   assert.equal(opened.status, "blocked");
-  assert.equal(forgot.sends().length, 1);
+  assert.equal(forgot.sends().length, 3);
   assert.equal(forgot.closes().length, 1);
   assert.equal(forgot.creates().length, 2);
 });
@@ -1184,7 +1351,7 @@ test("--brief로 연 터미널이 이미 첫 턴을 마친 화면에서도 ready
   ];
   const orca = fakeOrca([observedScreen]);
   const opened = await openRoleTerminal({
-    worktree: "id:repo::/tmp/wt",
+    worktree: `id:repo::${TEST_WORKTREE}`,
     command,
     execute: orca.execute,
     ...fast,
@@ -1194,14 +1361,14 @@ test("--brief로 연 터미널이 이미 첫 턴을 마친 화면에서도 ready
   // 못한 채 통과할 수 있다.
   assert.equal(locateCommand(observedScreen, typedFor(command)), null);
   assert.equal(opened.ready, true);
-  assert.equal(opened.submission, "orca");
+  assert.equal(opened.submission, "sent");
   assert.equal(opened.trust, "not-asked");
   assert.equal(opened.status, undefined);
   // screenCheck: "required"이 요구하는 모델 대조: 화면에 요청한 모델 이름이
   // 여전히 남아 있어야 호출자가 대조할 수 있다.
   assert.equal(opened.modelRequested, "opus");
   assert.ok(opened.screen.some((line) => line.includes("Opus 5.5")));
-  assert.deepEqual(orca.sends(), []);
+  assert.equal(orca.sends().length, 1);
 });
 
 test("readLaunchEnvironment 환경 읽기 주입 가능", async () => {
@@ -1555,7 +1722,7 @@ test("Claude POSIX PM launches without approval and preserves evidence warnings 
         ...fast,
         allowUnverified: false,
         allowUnverifiedApproval: undefined,
-        worktree: "id:repo::/pm",
+        worktree: `id:repo::${TEST_WORKTREE}`,
         command,
         orcaVersion,
         executable: "orca",

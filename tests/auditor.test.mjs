@@ -3179,6 +3179,7 @@ test("T6 auditor launch failure after a terminal was created preserves the workt
 // launch that succeeds there proves the trusted runner is wired end to end.
 test("T7 auditor role-worktree-create succeeds through the real internal role-terminal path on one trusted runner", async (t) => {
   let typed = "";
+  let selector = "";
   const run = await launchAuditorThroughRealPath(t, {
     profile: "claude-current",
     name: "audit-t7",
@@ -3187,8 +3188,21 @@ test("T7 auditor role-worktree-create succeeds through the real internal role-te
         const verb = orcaArgs[1];
         const reply = (result) => orcaReply(result);
         if (verb === "create") {
-          typed = orcaArgs[orcaArgs.indexOf("--command") + 1];
+          selector = orcaArgs[orcaArgs.indexOf("--worktree") + 1];
           return reply({ terminal: { handle: "term_t7" } });
+        }
+        if (verb === "show")
+          return reply({
+            terminal: {
+              handle: "term_t7",
+              worktreeId: selector.slice(3),
+              worktreePath: selector.slice(selector.lastIndexOf("::") + 2),
+              agentIdentity: typed ? "claude" : null,
+            },
+          });
+        if (verb === "send") {
+          typed = orcaArgs[orcaArgs.indexOf("--text") + 1];
+          return reply({ send: { accepted: true } });
         }
         if (verb === "read")
           return reply({

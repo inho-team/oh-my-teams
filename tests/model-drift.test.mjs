@@ -82,7 +82,9 @@ test("model drift warning for model: null profiles via command paths", async (t)
     if (argsStr.includes("wait")) out = { ok: true, result: { wait: { satisfied: true } } };
     else if (argsStr.includes("dispatch")) out = { ok: true, result: { dispatch: { id: "d_1", run_id: "r_1" } } };
     else if (argsStr.includes("worker-start")) out = { ok: true, result: { dispatchId: "d_1", runId: "r_1" } };
-    else if (argsStr.includes("create") && argsStr.includes("terminal")) out = { ok: true, result: { terminal: { handle: "term_1", tail: [] } } };
+    else if (argsStr.includes("create") && argsStr.includes("terminal")) { fs.rmSync("${dir.replace(/\\/g, "\\\\")}/agent-sent", { force: true }); out = { ok: true, result: { terminal: { handle: "term_1", tail: [] } } }; }
+    else if (argsStr.includes("send") && argsStr.includes("terminal")) { fs.writeFileSync("${dir.replace(/\\/g, "\\\\")}/agent-sent", "1"); out = { ok: true, result: { send: { accepted: true } } }; }
+    else if (argsStr.includes("show") && argsStr.includes("terminal")) out = { ok: true, result: { terminal: { handle: "term_1", worktreeId: "repo::${dir.replace(/\\/g, "/")}", worktreePath: "${dir.replace(/\\/g, "\\\\")}", agentIdentity: fs.existsSync("${dir.replace(/\\/g, "\\\\")}/agent-sent") ? "claude" : null } } };
     else if (argsStr.includes("read") && argsStr.includes("terminal")) out = { ok: true, result: { terminal: { tail: ["STARTED"] } } };
     else if (argsStr.includes("status")) out = { ok: true, result: { runtime: { reachable: true, state: "ready" }, orca: { version: "3.2.0" } } };
     else if (argsStr.includes("show") && argsStr.includes("worktree")) out = { ok: true, result: { worktree: { id: "repo", path: "${dir.replace(/\\/g, "\\\\")}" } } };

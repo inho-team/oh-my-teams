@@ -43,24 +43,26 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.join(here, "fixtures", "prompt-screens");
+const CAPTURED_WORKTREE =
+  "/private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp.6Kiqw25mrE";
+const ROLE_WORKTREE = fs.mkdtempSync(
+  path.join(os.tmpdir(), "omt-prompt-role-"),
+);
+process.on("exit", () =>
+  fs.rmSync(ROLE_WORKTREE, { recursive: true, force: true }),
+);
 const screens = Object.fromEntries(
   fs
     .readdirSync(fixtureDir)
     .filter((name) => name.endsWith(".json"))
     .map((name) => [
       name.replace(/\.json$/, ""),
-      JSON.parse(fs.readFileSync(path.join(fixtureDir, name), "utf8")).lines,
+      JSON.parse(
+        fs.readFileSync(path.join(fixtureDir, name), "utf8"),
+      ).lines.map((line) => line.replaceAll(CAPTURED_WORKTREE, ROLE_WORKTREE)),
     ]),
 );
-// The folder the trust captures were taken in; Codex and Claude are answered
-// only when the screen names the worktree the role was launched in.
-// `path.resolve` matches what `recordLaunch` stores in the launch ledger: on
-// POSIX this literal is already absolute and resolve is a no-op, but on
-// Windows resolve adds the drive letter the ledger would also add, so the
-// fake terminal's raw worktreePath and the ledger's resolved one agree.
-const ROLE_WORKTREE = path.resolve(
-  "/private/var/folders/hp/nqxfzfgs7xz_fw2k8lh4gn7c0000gn/T/tmp.6Kiqw25mrE",
-);
+// Captured trust screens name this test's real temporary worktree.
 const example = path.resolve("plugins/oh-my-teams/examples/organization.json");
 const RUN = "run_pm";
 const PM = "term_pm";
@@ -271,6 +273,7 @@ function fakeOrca({
       terminals[next.handle] = {
         worktreePath: next.worktreePath ?? ROLE_WORKTREE,
         screen: next.screen,
+        launched: null,
       };
       queue[next.handle] = [...(next.advance ?? [])];
       return reply({ terminal: { handle: next.handle } });
@@ -286,7 +289,14 @@ function fakeOrca({
     const terminal = terminals[flag("--terminal")];
     assert.ok(terminal, `unexpected terminal in ${args.join(" ")}`);
     if (verb === "show")
-      return reply({ terminal: { worktreePath: terminal.worktreePath } });
+      return reply({
+        terminal: {
+          handle: flag("--terminal"),
+          worktreeId: `repo::${terminal.worktreePath}`,
+          worktreePath: terminal.worktreePath,
+          agentIdentity: terminal.launched,
+        },
+      });
     if (verb === "read")
       return reply({
         terminal: {
@@ -295,6 +305,12 @@ function fakeOrca({
         },
       });
     if (verb === "send") {
+      const sent = flag("--text");
+      if (/^(codex|claude|agy)\s/.test(sent)) {
+        terminal.launched =
+          sent.split(" ")[0] === "agy" ? "antigravity" : sent.split(" ")[0];
+        return reply({ send: { accepted: true } });
+      }
       const next = queue[flag("--terminal")]?.shift();
       if (next) terminal.screen = next;
       return reply({ send: { accepted: true } });
@@ -792,8 +808,8 @@ test("role-terminal answers a Codex trust question through the supervisor path a
   assert.equal(opened.terminal, "term_b");
   assert.equal(opened.ready, true);
   assert.equal(opened.reopened.closedTerminal, "term_a");
-  assert.deepEqual(orca.sentTo("term_a"), [{ text: "", enter: true }]);
-  assert.equal(orca.sentTo("term_b").length, 0);
+  assert.deepEqual(orca.sentTo("term_a").slice(1), [{ text: "", enter: true }]);
+  assert.equal(orca.sentTo("term_b").length, 1);
   assert.equal(opened.promptAnswers[0].keyBasis, "footer-text");
   const [line] = readPromptAnswers(fixture.stateDir);
   assert.equal(line.terminal, "term_a");
@@ -817,7 +833,7 @@ test("role-terminal answers Claude's trust question with Down, then Enter, and r
   assert.equal(opened.trust, "accepted");
   assert.equal(opened.terminal, "term_b");
   assert.equal(opened.reopened.closedTerminal, "term_a");
-  assert.deepEqual(orca.sentTo("term_a"), [
+  assert.deepEqual(orca.sentTo("term_a").slice(1), [
     { text: DOWN, enter: false },
     { text: "", enter: true },
   ]);
@@ -858,12 +874,6 @@ test("role-terminal sends no key without a supervisor context, for a caller that
     ],
     [
       "refused",
-      asks(path.join(fixture.dir, "junior-worktree")),
-      {},
-      "worktree-mismatch",
-    ],
-    [
-      "refused",
       asks(undefined, { [unrelated]: worktreeRecord(unrelated, null, null) }),
       {},
       "worktree-lineage-unproven",
@@ -881,11 +891,18 @@ test("role-terminal sends no key without a supervisor context, for a caller that
     assert.equal(opened.ready, false);
     assert.equal(opened.status, "blocked");
     assert.equal(opened.reopened, null);
-    assert.equal(orca.sentTo("term_a").length, 0);
+    assert.equal(orca.sentTo("term_a").length, 1);
     assert.equal(orca.closes().length, 0);
     if (refusal)
       assert.equal(readPromptAnswers(fixture.stateDir).at(-1).refusal, refusal);
   }
+  const misplaced = asks(path.join(fixture.dir, "junior-worktree"));
+  await assert.rejects(
+    () => openSenior(t, fixture, "codex-terra", misplaced),
+    /placement does not match/,
+  );
+  assert.equal(misplaced.sentTo("term_a").length, 0);
+  assert.equal(misplaced.closes().length, 0);
 });
 
 // The folder the ledger names for a role is whatever the launcher chose, so

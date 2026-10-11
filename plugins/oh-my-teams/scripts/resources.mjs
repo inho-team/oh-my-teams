@@ -440,6 +440,7 @@ export async function directorWatch(orgFile, options = {}) {
             listTerminals: options.listTerminals,
             execute: options.execute,
             strict: true,
+            presenceOnly: true,
           });
           terminalObservation = pmTerminal
             ? {
