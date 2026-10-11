@@ -32,6 +32,7 @@
  *
  * Esc is never sent, and no user configuration file is read or written.
  */
+import { transferredLineageProven } from "./worktree-reuse.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -911,7 +912,13 @@ export function recordRefusal(stateDir, fields, refusal, message) {
 // CLI call. Anything Orca does not report, or reports differently, is unproven.
 const MAX_LINEAGE_HOPS = 8;
 
-async function assertKickoffLineage({ actual, kickoff, orca, execute }) {
+async function assertKickoffLineage({
+  actual,
+  kickoff,
+  orca,
+  execute,
+  orgFile,
+}) {
   const pmId = kickoff.pm.worktreeId;
   const separator = pmId.indexOf("::");
   const unproven = (why) =>
@@ -947,7 +954,8 @@ async function assertKickoffLineage({ actual, kickoff, orca, execute }) {
     if (
       lineage?.worktreeId !== id ||
       lineage.parentWorktreeId !== parent ||
-      lineage.origin !== "cli" ||
+      (lineage.origin !== "cli" &&
+        !transferredLineageProven(orgFile, worktree)) ||
       lineage.capture?.confidence !== "explicit"
     )
       throw unproven(
@@ -963,6 +971,7 @@ async function assertKickoffLineage({ actual, kickoff, orca, execute }) {
 // Orca must show it as created under the kickoff's PM worktree, and no other
 // role may work there.
 async function assertRoleWorktree({
+  orgFile,
   terminal,
   role,
   kickoff,
@@ -994,7 +1003,7 @@ async function assertRoleWorktree({
   } catch (error) {
     throw new Refusal("worktree-shared", error.message);
   }
-  await assertKickoffLineage({ actual, kickoff, orca, execute });
+  await assertKickoffLineage({ actual, kickoff, orca, execute, orgFile });
   return actual;
 }
 
@@ -1067,6 +1076,7 @@ export async function authorizeLaunch({
     execute,
   });
   const worktree = await assertRoleWorktree({
+    orgFile,
     terminal,
     role,
     kickoff,
@@ -1182,6 +1192,7 @@ export async function answerPrompt({
       );
     known.worktree = launch.worktreePath;
     const worktree = await assertRoleWorktree({
+      orgFile,
       terminal,
       role: launch.role,
       kickoff,

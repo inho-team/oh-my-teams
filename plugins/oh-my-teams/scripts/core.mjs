@@ -275,6 +275,55 @@ export function writeJSON(file, value) {
 }
 
 /**
+ * Persists a journal before an external effect, including directory metadata.
+ * Unsupported directory synchronization fails closed before the caller mutates Orca.
+ * @param {string} file - Destination in an existing durable directory.
+ * @param {unknown} value - JSON journal value.
+ * @returns {void} Returns only after file and directory synchronization.
+ */
+export function writeDurableJSON(file, value) {
+  const directory = path.dirname(file);
+  assertDirectorySync(directory);
+  const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+  let descriptor;
+  try {
+    descriptor = fs.openSync(temporary, "wx", 0o600);
+    fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    fs.renameSync(temporary, file);
+    descriptor = fs.openSync(directory, "r");
+    fs.fsyncSync(descriptor);
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
+}
+
+/**
+ * Probes actual directory synchronization support without changing any files.
+ * @param {string} directory - Existing directory containing a durable journal.
+ * @returns {void} Returns only when the filesystem supports directory fsync.
+ */
+export function assertDirectorySync(directory) {
+  let descriptor;
+  try {
+    descriptor = fs.openSync(directory, "r");
+    fs.fsyncSync(descriptor);
+  } catch (cause) {
+    const error = new Error(
+      `Durable worktree journal unavailable: directory fsync failed for ${directory}; preserve candidates`,
+      { cause },
+    );
+    error.code = "worktree-durability-unavailable";
+    throw error;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+/**
  * Throws a normal Error when a runtime contract is not satisfied.
  *
  * @param {unknown} condition - Truthy value when the contract holds.

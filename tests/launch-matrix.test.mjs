@@ -813,3 +813,23 @@ test("Windows Agy 규칙은 세션 없는 대체 실행을 거부한다 (accepta
   assert.notEqual(gptOss.evidence, "verified");
   assert.equal(gptOss.evidence, "unverified");
 });
+
+test("Agy unknown trust never becomes a verified trusted launch", () => {
+  for (const trustRecordExists of [false, "unknown", undefined, null]) {
+    const result = predictLaunchPath({
+      runner: "agy",
+      model: "gemini-3.1-pro-high",
+      platform: "darwin",
+      shell: "posix",
+      trustRecordExists,
+      skipDangerousModePermissionPrompt: true,
+      allowUnverified: true,
+      allowUnverifiedApproval: "승인",
+      ...V,
+    });
+    assert.equal(result.path, "supervised-terminal");
+    assert.equal(result.nextOwner, "pm");
+    assert.ok(result.reason.includes("agent-trust-workspace"));
+    assert.notEqual(result.evidence, "verified");
+  }
+});
