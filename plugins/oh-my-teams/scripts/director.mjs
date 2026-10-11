@@ -888,6 +888,7 @@ export function findPmLaunch(orgFile, pmPath) {
  * @param {Function} [options.listTerminals] - Injectable terminal lister.
  * @param {Function} [options.execute] - Injectable command runner for the adapter path.
  * @param {boolean} [options.strict] - Throw for command or response failures.
+ * @param {boolean} [options.presenceOnly] - Report terminal presence without asserting a running agent.
  * @returns {Promise<string | undefined>} The terminal handle, or undefined.
  */
 export async function findPmTerminal(orgFile, pmPath, options = {}) {
@@ -904,12 +905,15 @@ export async function findPmTerminal(orgFile, pmPath, options = {}) {
   const live = terminals.some(
     (terminal) =>
       terminal?.handle === launch.terminal &&
-      terminal.agentIdentity ===
-        (launch.provider === "agy" ? "antigravity" : launch.provider) &&
-      typeof terminal.worktreeId === "string" &&
-      (options.worktreeId === undefined ||
-        terminal.worktreeId === options.worktreeId) &&
-      terminal.worktreeId.endsWith(`::${target}`) &&
+      (options.presenceOnly === true ||
+        terminal.agentIdentity ===
+          (launch.provider === "agy" ? "antigravity" : launch.provider)) &&
+      (options.presenceOnly === true && terminal.worktreeId == null
+        ? true
+        : typeof terminal.worktreeId === "string" &&
+          (options.worktreeId === undefined ||
+            terminal.worktreeId === options.worktreeId) &&
+          terminal.worktreeId.endsWith(`::${target}`)) &&
       typeof terminal.worktreePath === "string" &&
       path.resolve(terminal.worktreePath) === target,
   );
