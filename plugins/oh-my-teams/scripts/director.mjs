@@ -832,6 +832,12 @@ async function orcaTerminals(
   if (!Array.isArray(listed)) {
     return fallback("Orca terminal list returned an invalid terminal envelope");
   }
+  if (
+    strict &&
+    (payload?.result?.truncated === true || payload?.truncated === true)
+  ) {
+    Object.defineProperty(listed, "incomplete", { value: true });
+  }
   return listed;
 }
 
@@ -889,12 +895,18 @@ export async function findPmTerminal(orgFile, pmPath, options = {}) {
       orcaTerminals(options.orcaExecutable ?? "orca", options.execute, {
         strict: options.strict === true,
       }));
-  const live = (await list()).some(
+  const terminals = await list();
+  const live = terminals.some(
     (terminal) =>
       terminal?.handle === launch.terminal &&
       typeof terminal.worktreePath === "string" &&
       path.resolve(terminal.worktreePath) === target,
   );
+  if (!live && options.strict === true && terminals.incomplete === true) {
+    throw new Error(
+      "Orca terminal list is incomplete; PM absence is unverified",
+    );
+  }
   return live ? launch.terminal : undefined;
 }
 

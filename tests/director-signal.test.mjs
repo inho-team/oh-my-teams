@@ -1150,6 +1150,7 @@ test("directorWatch keeps invalid terminal adapter JSON and envelopes unverifiab
         error: { message: "terminal list denied" },
       }),
     },
+    orcaEnvelope({ terminals: [], truncated: true }),
   ]) {
     const runtime = await observePmTerminalAdapter(t, terminalListResult);
     assert.equal(runtime.terminalStatus, "unverifiable");
@@ -1161,20 +1162,45 @@ test("directorWatch keeps invalid terminal adapter JSON and envelopes unverifiab
     assert.equal(runtime.nextOwner, "director");
     assert.match(
       runtime.terminalError,
-      /invalid JSON|invalid terminal envelope|failed response envelope/,
+      /invalid JSON|invalid terminal envelope|failed response envelope|incomplete/,
     );
   }
 });
 
-test("directorWatch recognizes actual successful empty terminal adapter output as absent", async (t) => {
-  const runtime = await observePmTerminalAdapter(
-    t,
-    orcaEnvelope({ terminals: [] }),
-  );
-  assert.equal(runtime.terminalStatus, "absent");
-  assert.equal(runtime.terminalProof, "terminal-list-confirmed-absent");
-  assert.equal(runtime.source, "orca-terminal-list-and-launch-ledger");
+test("directorWatch preserves an exact PM terminal from an incomplete adapter list", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", "codex");
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "orca-test",
+    freeMemory: () => 1024 * 1024 * 1024,
+    execute: async (argv) =>
+      argv[1] === "terminal" && argv[2] === "list"
+        ? orcaEnvelope({
+            terminals: [{ handle: "term_pm", worktreePath: pmPath }],
+            truncated: true,
+          })
+        : { code: 1, stdout: "", stderr: "not used by terminal observation" },
+  });
+  const runtime = report.kickoffs.find((item) => item.worktreeId === worktreeId)
+    .observation.runtime;
+  assert.equal(runtime.terminal, "term_pm");
+  assert.equal(runtime.terminalStatus, "present-unverified");
+  assert.equal(runtime.terminalProof, "terminal-list-observed");
   assert.equal(runtime.terminalError, null);
+});
+
+test("directorWatch recognizes actual successful empty terminal adapter output as absent", async (t) => {
+  for (const terminalListResult of [
+    orcaEnvelope({ terminals: [] }),
+    { code: 0, stdout: "[]" },
+  ]) {
+    const runtime = await observePmTerminalAdapter(t, terminalListResult);
+    assert.equal(runtime.terminalStatus, "absent");
+    assert.equal(runtime.terminalProof, "terminal-list-confirmed-absent");
+    assert.equal(runtime.source, "orca-terminal-list-and-launch-ledger");
+    assert.equal(runtime.terminalError, null);
+  }
 });
 
 test("directorWatch does not claim terminal absence without a PM launch binding", async (t) => {
