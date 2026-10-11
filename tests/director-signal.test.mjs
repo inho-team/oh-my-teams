@@ -873,8 +873,20 @@ test("findPmTerminal takes the latest PM launch only while Orca still lists it",
   recordPmLaunch(orgFile, pmPath, "term_new");
   // The agent rewrites its title, so the title plays no part in the match.
   const listed = [
-    { handle: "term_new", worktreePath: pmPath, title: "✳ agent-set title" },
-    { handle: "term_old", worktreePath: pmPath, title: "[PM] stale" },
+    {
+      handle: "term_new",
+      worktreeId: `test-repo::${pmPath}`,
+      worktreePath: pmPath,
+      agentIdentity: "claude",
+      title: "✳ agent-set title",
+    },
+    {
+      handle: "term_old",
+      worktreeId: `test-repo::${pmPath}`,
+      worktreePath: pmPath,
+      agentIdentity: "claude",
+      title: "[PM] stale",
+    },
   ];
   assert.equal(
     await findPmTerminal(orgFile, pmPath, {
@@ -884,10 +896,34 @@ test("findPmTerminal takes the latest PM launch only while Orca still lists it",
   );
   assert.equal(
     await findPmTerminal(orgFile, pmPath, {
+      worktreeId: `another-repo::${pmPath}`,
+      listTerminals: async () => listed,
+    }),
+    undefined,
+    "a claim with another Orca worktree ID cannot use the PM terminal at the same path",
+  );
+  assert.equal(
+    await findPmTerminal(orgFile, pmPath, {
       listTerminals: async () => [listed[1]],
     }),
     undefined,
     "a closed latest PM terminal is not replaced by an older one",
+  );
+  assert.equal(
+    await findPmTerminal(orgFile, pmPath, {
+      listTerminals: async () => [{ ...listed[0], agentIdentity: null }],
+    }),
+    undefined,
+    "a shell with the recorded handle is not a PM agent",
+  );
+  assert.equal(
+    await findPmTerminal(orgFile, pmPath, {
+      listTerminals: async () => [
+        { ...listed[0], worktreeId: "other::/tmp/elsewhere" },
+      ],
+    }),
+    undefined,
+    "a terminal with the right path but another Orca identity is not the PM",
   );
   assert.equal(
     await findPmTerminal(orgFile, pmPath, {
@@ -913,7 +949,14 @@ test("directorWatch reports provider-overloaded from the PM's own terminal scree
   const report = await directorWatch(orgFile, {
     orcaExecutable: "no-such-orca-binary",
     freeMemory: () => 1024 * 1024 * 1024,
-    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    listTerminals: async () => [
+      {
+        handle: "term_pm",
+        worktreeId,
+        worktreePath: pmPath,
+        agentIdentity: "claude",
+      },
+    ],
     execute: async () =>
       orcaEnvelope({
         terminal: {
@@ -935,7 +978,14 @@ test("directorWatch reports none when the PM screen was read but does not show t
   const report = await directorWatch(orgFile, {
     orcaExecutable: "no-such-orca-binary",
     freeMemory: () => 1024 * 1024 * 1024,
-    listTerminals: async () => [{ handle: "term_pm", worktreePath: pmPath }],
+    listTerminals: async () => [
+      {
+        handle: "term_pm",
+        worktreeId,
+        worktreePath: pmPath,
+        agentIdentity: "claude",
+      },
+    ],
     execute: async () =>
       orcaEnvelope({
         terminal: { source: "screen", tail: ["Ready for input."] },
@@ -1923,7 +1973,12 @@ test("replySignal reports how far the PM notification got", async (t) => {
     signalId: id,
     text: "go",
     listTerminals: async () => [
-      { handle: "term_pm", worktreePath: pmPath, agentIdentity: "claude" },
+      {
+        handle: "term_pm",
+        worktreeId,
+        worktreePath: pmPath,
+        agentIdentity: "claude",
+      },
     ],
     execute: orca.execute,
   });
@@ -2017,8 +2072,8 @@ test("replySignal refuses a shell PM terminal and leaves reply in record", async
   assert.equal(result.replied, true);
   assert.equal(result.record.reply, "go");
   assert.equal(result.notified, false);
-  assert.equal(result.notifyError, "shell-terminal");
-  assert.equal(result.pmTerminal, "term_pm");
+  assert.equal(result.notifyError, "no-pm-terminal-found");
+  assert.equal(result.pmTerminal, undefined);
   // No send attempt was made.
   assert.equal(orca.textSends().length, 0);
   // Reply is in the record for PM to read through director-inbox.

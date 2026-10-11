@@ -222,6 +222,7 @@ import {
 import {
   acknowledgeDelivery,
   acknowledgeSignal,
+  findPmTerminal,
   listDeliveries,
   listInbox,
   notifyDirectorSignal,
@@ -4182,8 +4183,26 @@ export async function executeCommand(args, execute) {
       return showOrganization(args);
     case "validate":
       return { valid: Boolean(validateOrg(readJSON(args.org))) };
-    case "kickoff-claim":
-      return registerKickoff(args.org, readJSON(args.from));
+    case "kickoff-claim": {
+      const claim = readJSON(args.from);
+      if (!claim.selfPm) {
+        assert(
+          typeof claim.pm?.path === "string" && claim.pm.path,
+          "Kickoff PM path required",
+        );
+        assert(
+          typeof claim.pm.worktreeId === "string" && claim.pm.worktreeId,
+          "Kickoff PM worktree ID required",
+        );
+        assert(
+          await findPmTerminal(args.org, claim.pm.path, {
+            worktreeId: claim.pm.worktreeId,
+          }),
+          "Kickoff PM has no verified agent session in its registered worktree",
+        );
+      }
+      return registerKickoff(args.org, claim);
+    }
     case "kickoff-show": {
       const result = listKickoffs(args.org, args.worktree);
       for (const k of result.kickoffs) {
@@ -4905,6 +4924,7 @@ export async function executeCommand(args, execute) {
           : null,
         expectedWorktree: target,
       });
+      if (!opened.ready) return opened;
       if (args.state)
         await shadowModelCheck({
           org,

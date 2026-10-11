@@ -878,11 +878,12 @@ export function findPmLaunch(orgFile, pmPath) {
  * The agent inside a terminal rewrites its title, so the `[PM]` tag is not a
  * reliable marker; the launch ledger records which terminal role-terminal
  * opened for the PM ({@link findPmLaunch}). The latest such launch wins, and
- * it counts only while Orca still lists that terminal in the same worktree.
+ * it counts only while Orca still lists the matching agent in that worktree.
  *
  * @param {string} orgFile - Organization JSON path whose ledger is read.
  * @param {string} pmPath - PM worktree path recorded in the kickoff registry.
  * @param {object} [options] - Terminal-list options.
+ * @param {string} [options.worktreeId] - Exact Orca worktree ID required by a kickoff claim.
  * @param {string} [options.orcaExecutable] - Orca executable name or path.
  * @param {Function} [options.listTerminals] - Injectable terminal lister.
  * @param {Function} [options.execute] - Injectable command runner for the adapter path.
@@ -903,6 +904,12 @@ export async function findPmTerminal(orgFile, pmPath, options = {}) {
   const live = terminals.some(
     (terminal) =>
       terminal?.handle === launch.terminal &&
+      terminal.agentIdentity ===
+        (launch.provider === "agy" ? "antigravity" : launch.provider) &&
+      typeof terminal.worktreeId === "string" &&
+      (options.worktreeId === undefined ||
+        terminal.worktreeId === options.worktreeId) &&
+      terminal.worktreeId.endsWith(`::${target}`) &&
       typeof terminal.worktreePath === "string" &&
       path.resolve(terminal.worktreePath) === target,
   );
