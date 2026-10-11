@@ -121,23 +121,11 @@ test("a project runs several kickoffs, each from its own PM worktree", (t) => {
 
 test("sessions registering at the same moment all land in the registry", async (t) => {
   const fixture = project(t);
-  const terminals = [];
-  const launches = path.join(fixture.dir, ".omt", "usage", "launches.jsonl");
-  fs.mkdirSync(path.dirname(launches), { recursive: true });
+  const worktreeIds = [];
   const files = ["wt-a", "wt-b", "wt-c"].map((name) => {
     const pmPath = path.join(fixture.dir, name);
     const worktreeId = `test-repo::${pmPath}`;
-    const terminal = `term_${name}`;
-    terminals.push({
-      handle: terminal,
-      worktreeId,
-      worktreePath: pmPath,
-      agentIdentity: "claude",
-    });
-    fs.appendFileSync(
-      launches,
-      `${JSON.stringify({ via: "role-terminal", role: "pm", provider: "claude", worktreePath: pmPath, terminal })}\n`,
-    );
+    worktreeIds.push(worktreeId);
     const file = path.join(fixture.dir, `${name}.json`);
     const claim = claimFor(fixture, worktreeId);
     claim.pm.path = pmPath;
@@ -145,29 +133,24 @@ test("sessions registering at the same moment all land in the registry", async (
     writeJSON(file, claim);
     return file;
   });
-  const orca = path.join(fixture.dir, "orca");
-  fs.writeFileSync(
-    orca,
-    `#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ok:true,result:{terminals:${JSON.stringify(terminals)}}}));\n`,
-  );
-  fs.chmodSync(orca, 0o755);
-  const env = {
-    ...process.env,
-    PATH: `${fixture.dir}${path.delimiter}${process.env.PATH}`,
-  };
+  const registryUrl = new URL(
+    "../plugins/oh-my-teams/scripts/kickoff-registry.mjs",
+    import.meta.url,
+  ).href;
+  const registerScript = [
+    'import fs from "node:fs";',
+    `import { registerKickoff } from ${JSON.stringify(registryUrl)};`,
+    'registerKickoff(process.argv[1], JSON.parse(fs.readFileSync(process.argv[2], "utf8")));',
+  ].join("\n");
   const register = (file) =>
-    run(
-      [
-        process.execPath,
-        cli,
-        "kickoff-claim",
-        "--org",
-        fixture.org,
-        "--from",
-        file,
-      ],
-      { env },
-    );
+    run([
+      process.execPath,
+      "--input-type=module",
+      "-e",
+      registerScript,
+      fixture.org,
+      file,
+    ]);
 
   // Registrations serialize on one lock; a caller that meets it held is told
   // to read again, and retrying it must still leave every kickoff recorded.
@@ -177,10 +160,7 @@ test("sessions registering at the same moment all land in the registry", async (
     pending = pending.filter((_, index) => results[index].code !== 0);
   }
   assert.deepEqual(pending, []);
-  assert.deepEqual(
-    ids(fixture),
-    terminals.map((item) => item.worktreeId),
-  );
+  assert.deepEqual(ids(fixture), worktreeIds);
 });
 
 test("kickoff-claim refuses a PM worktree without a verified agent session", async (t) => {
