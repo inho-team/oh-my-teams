@@ -1,0 +1,136 @@
+# OMT 감시·보고 실패 경로 조사와 보완 설계
+
+## 목적과 조사 기준
+
+이 문서는 OMT가 Orca의 실행 소유권, 프로세스 종료, 재시도와 회수를 다시 구현하지 않는다는 전제에서 감시·보고의 실패 경로를 기록한다. 대상 HEAD는 `e8f9df0640472ce884c9a7b7fb62e0232b5a04ba`이고, 관측 시점은 2026-10-11 04:09:43 UTC이다. 이 문서에서 `요청 모델`은 역할 명령 또는 선택 파일이 요청한 값이고, `확인 모델`은 실행 원장 또는 화면에서 확인된 값이며, 어느 값도 없는 상태는 정상·실행 중·완료로 추정하지 않는다.
+
+실제 Orca에는 읽기 전용 명령만 사용했다. 원시 출력은 작업 트리 밖의 다음 경로에 보관했다.
+
+- `/tmp/omt-supervision-director-watch-20261011.json`: `director-watch`의 전체 관측이다.
+- `/tmp/omt-supervision-kickoff-show-20261011.json`: 등록부 관측이다.
+- `/tmp/omt-supervision-orca-status-20261011.json`: Orca 세션 상태 관측이다.
+- `/tmp/omt-supervision-worker-list-20261011.json`: Orca 전역 워커 목록 관측이다.
+- `/Users/jinsungkim/orca/oh-my-teams/.omt/usage/launches.jsonl:1024-1027`: PM과 이 Worker의 역할 실행 원장이다.
+
+다른 kickoff의 Message MCP 메시지는 수신·확인 처리하지 않았다. 이 문서의 메시지 격리 평가는 코드와 테스트, 그리고 등록부의 읽기 전용 집계만으로 수행했다.
+
+## 관측 결과 요약
+
+`node plugins/oh-my-teams/scripts/teams-org.mjs director-watch --org /Users/jinsungkim/orca/oh-my-teams/.omt/organization.json`은 `feat-supervision-reporting` PM에 `pmLiveness: "unverifiable"`, `providerOverload: "unknown"`, `pmModelDisplay: "Unknown host-default"`를 반환했다. 같은 PM의 실행 원장에는 2026-10-11 04:03:34 UTC에 `provider: "codex"`, `modelRequested: "gpt-6.1-sol"`, `modelResolved: "gpt-6.1-sol"`, PM 워크트리와 터미널이 기록되어 있다. 반면 등록부 항목은 PM의 `worktreeId`, `path`, `stateDir`만 보유하여 모델·provider·터미널·관측 시각을 보존하지 않는다.
+
+이는 화면의 실제 선택 모델을 증명하는 관측은 아니다. 역할 실행 경로의 바인딩은 모델 화면 증명을 `unproven`으로 구분할 수 있으므로, 보완 후에도 실행 원장의 요청·해결 값과 화면 확인 값을 별도 필드로 기록해야 한다.
+
+### 관측 계층의 경계
+
+터미널 목록의 connected 사실은 PTY 연결 또는 terminal 존재의 증거일 뿐이며, agent 생존·유휴·실제 진전의 증거가 아니다. agent 생존은 Orca가 제공하는 `projection.liveness`와 그 `source`·`observedAt`으로, 유휴는 별도의 worker observation으로, 실제 진전은 heartbeat·의미 있는 보고·output fingerprint 변화·수용 이벤트로 각각 기록해야 한다. Orca가 특정 계층의 상태를 제공하지 않으면 해당 계층은 `unverifiable`로 남기고, 다음 읽기 전용 관측 경로만 제시해야 한다.
+
+## 수용 기준 1: 실제 실패 경로와 영향
+
+### 재현된 경로
+
+1. 자원형 PM bootstrap이 역할 터미널을 열고 실행 원장에는 모델을 기록한다. 실행 원장 1024줄이 이 경로의 실제 증거이다.
+2. `registerKickoff`는 claim의 PM 객체에서 `worktreeId`, `path`, `stateDir`만 새 등록부 항목으로 복사한다([`kickoff-registry.mjs:1042`](../../plugins/oh-my-teams/scripts/kickoff-registry.mjs#L1042)~~[`1049`](../../plugins/oh-my-teams/scripts/kickoff-registry.mjs#L1049)). 현재 validator도 PM의 이 세 값만 요구한다([`kickoff-registry.mjs:293`](../../plugins/oh-my-teams/scripts/kickoff-registry.mjs#L293)~~[`298`](../../plugins/oh-my-teams/scripts/kickoff-registry.mjs#L298)).
+3. `kickoff-show`와 `director-watch`는 없는 `entry.pm.provider`와 `entry.pm.model`을 `displayModel`에 전달한다([`teams-org.mjs:3741`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L3741)~~[`3746`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L3746), [`5064`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L5064)~~[`5080`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L5080)). 그 결과 관측처럼 `Unknown host-default`가 표시된다.
+4. `queryPmLiveness`는 실행 원장의 PM terminal·worker identity를 사용하지 않고, 인자 없는 `orca orchestration worker-list --json`의 항목을 PM 워크트리 문자열로만 매칭한다([`resources.mjs:273`](../../plugins/oh-my-teams/scripts/resources.mjs#L273)~[`302`](../../plugins/oh-my-teams/scripts/resources.mjs#L302)). 매칭되는 항목이 없거나 응답을 읽지 못하면 `unverifiable`이다.
+
+영향은 감독자가 실행 중인 PM의 요청 모델, 확인 모델, Run·Dispatch·terminal identity, 마지막 관측 출처를 한 화면에서 대조할 수 없다는 점이다. `unverifiable` 자체는 안전한 값이지만, 왜 확인할 수 없는지와 마지막 양성 관측이 없어 다음 행동을 정확히 정하기 어렵다.
+
+### 보완 설계와 회귀 검증
+
+등록부의 PM 실행 메타데이터를 역할 launch receipt와 실행 원장에서 조립하되, 정적 kickoff claim과 실행 관측을 분리한다. 정적 필드에는 PM worktree, kickoff Run, 요청 provider·model, bootstrap 선택의 지문과 생성 시각을 보관한다. 동적 관측에는 terminal handle, Orca worker·dispatch identity, liveness verdict, `observedAt`, `source`, 확인 모델과 `modelProof`를 보관하며, 관측 실패는 이전 값을 정상으로 승격하지 않고 `unverifiable`과 원인을 남긴다.
+
+구현 테스트는 자원형 bootstrap claim에서 `gpt-6.1-sol`의 요청·해결 값이 등록부와 watch projection에 남는지, 화면 증명이 없으면 `modelProof: "unproven"`으로 남는지, 그리고 `worker-list` 누락·파싱 실패·알 수 없는 verdict가 `live`나 `exited`로 바뀌지 않는지를 검증해야 한다. 기존 `queryPmLiveness`의 보수적 판정 검증은 [`tests/director-signal.test.mjs:750`](../../tests/director-signal.test.mjs#L750)~[`835`](../../tests/director-signal.test.mjs#L835)에 있으나, PM 실행 identity와 요청/확인 모델의 end-to-end 결합 검증은 없다.
+
+## 수용 기준 2: 실행 신원과 상태 분리
+
+### 실패 경로와 영향
+
+현재 `directorWatch` 요약은 worktree, 목표, 신호, 슬롯, PM liveness와 provider overload만 반환한다([`resources.mjs:361`](../../plugins/oh-my-teams/scripts/resources.mjs#L361)~~[`399`](../../plugins/oh-my-teams/scripts/resources.mjs#L399)). PM launch를 찾는 함수는 실행 원장을 PM 역할·worktree·terminal 기준으로 조회하며([`director.mjs:724`](../../plugins/oh-my-teams/scripts/director.mjs#L724)~~[`778`](../../plugins/oh-my-teams/scripts/director.mjs#L778)), 그 결과는 provider-overload 판정에만 쓰인다([`resources.mjs:319`](../../plugins/oh-my-teams/scripts/resources.mjs#L319)~[`338`](../../plugins/oh-my-teams/scripts/resources.mjs#L338)). 따라서 PM과 Worker의 Run, Orca Task·Dispatch, terminal, provider·model, 모델 증명, 상태 관측 시각과 출처가 하나의 식별 가능한 관측 레코드가 되지 않는다.
+
+특히 상태를 `진행`, `유휴`, `종료`, `조회 실패`로 구분하려면 각 상태에 양성 근거가 필요하다. 현재 `queryPmLiveness`는 이 원칙을 지켜 조회 실패를 `unverifiable`로 반환하지만, watch projection에 조회 대상의 Run/Dispatch와 `observedAt`·`source`가 없어서 운영자가 사실과 추론을 분리하기 어렵다.
+
+### 보완 설계와 회귀 검증
+
+감시 projection은 역할별로 다음을 함께 보여야 한다: 논리 소유자(PM 또는 Worker), worktree, workflow task, Run, Orca task·dispatch, terminal, 요청 provider·model, 확인 provider·model과 증명 수준, liveness verdict, 마지막 활동 시각, 관측 시각, 관측 출처, 조회 오류이다. stale 관측은 마지막 관측의 사실로만 표시하고 현재 생존 또는 완료의 근거로 사용하지 않는다. 동일 worktree의 여러 Orca 항목이 있을 때에는 PM launch의 dispatch/terminal identity를 우선 사용하고, 식별자가 없으면 worktree 매칭 결과를 보조 증거로 표시해야 한다.
+
+회귀 검증은 하나의 PM worktree에 live·exited·unverifiable 항목이 공존하는 경우, terminal 재실행으로 launch가 교체되는 경우, worker-list 응답이 다른 Run에 한정되는 경우와 원격 조회 실패를 포함해야 한다. 각 경우 `live`와 `exited`는 긍정 Orca verdict에서만, 나머지는 `unverifiable`에서만 표시되어야 한다.
+
+## 수용 기준 3: 이사·PM 전달, 격리와 처리 상태
+
+### 실패 경로와 영향
+
+Message MCP 저장소는 kickoff hash와 수신 actor를 함께 검사하고, `receiveMessages`는 대상 actor와 `pending` 상태만 반환한다([`message-store.mjs:160`](../../plugins/oh-my-teams/scripts/message-store.mjs#L160)~~[`190`](../../plugins/oh-my-teams/scripts/message-store.mjs#L190)). `acknowledgeMessage`도 수신자만 확인할 수 있다([`message-store.mjs:214`](../../plugins/oh-my-teams/scripts/message-store.mjs#L214)~~[`239`](../../plugins/oh-my-teams/scripts/message-store.mjs#L239)). 이 자체는 한 PM state를 통해 actor별 메시지를 분리한다.
+
+그러나 `message-watch`는 등록된 모든 kickoff의 director 수신함을 평탄화해 반환한다([`teams-org.mjs:3339`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L3339)~[`3365`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L3365)). 현재 이사와 해당 kickoff의 `director.terminalHandle`을 비교하거나, 호출자의 소유권을 필터하지 않는다. 브리프에서 지적한 다른 이사 소유의 오래된 메시지가 먼저 반환되는 경로가 이 코드로 재현된다. 다른 kickoff 메시지를 읽는 것만으로 확인 처리되지는 않지만, 이사가 잘못된 inbox를 자기 업무처럼 처리할 위험이 있다.
+
+`director-signal`은 signal 레코드를 기록한 뒤 PM state의 Message MCP에 같은 메시지를 큐잉하고 `queued: true`를 반환한다([`teams-org.mjs:4966`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L4966)~~[`5004`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L5004)). 이는 저장 성공만 뜻하며 terminal 전달, 읽음, 처리 또는 응답을 증명하지 않는다. reply도 동일하게 `queued: true`일 뿐이다([`director.mjs:640`](../../plugins/oh-my-teams/scripts/director.mjs#L640)~~[`657`](../../plugins/oh-my-teams/scripts/director.mjs#L657)).
+
+### 보완 설계와 회귀 검증
+
+이사 inbox 조회는 호출 이사의 terminal identity 또는 명시한 director scope를 필수로 하고, 등록부의 `director.terminalHandle`과 일치하는 kickoff만 반환해야 한다. 익명·legacy 등록은 호환을 위해 읽기 전용의 별도 `unowned` 목록에 보존하되, 자동 ack·reply·notification의 대상이 되어서는 안 된다. PM inbox는 계속 자기 state의 kickoff hash로만 읽으며, 다른 state 경로를 전달해도 활성 kickoff binding을 확인해야 한다.
+
+신호와 메시지는 `stored`, `notification-attempted`, `terminal-submitted`, `received`, `acknowledged`, `replied`, `handled`를 별도 이벤트로 기록한다. 중복은 stable key와 동일 payload의 replay로만 인정하고, 동일 key·다른 payload는 거부한다. 재시작 뒤에는 저장된 pending 이벤트를 다시 조회하되, 입력 제출이 불명확한 경우에는 재전송하지 않고 사람의 확인 대상으로 올린다.
+
+회귀 검증은 두 이사의 두 kickoff, 하나의 legacy/anonymous entry, 메시지 재시작 전후, 중복 key, 잘못된 수신자의 ack, 화면 제출 실패를 포함해야 한다. `message-watch`가 다른 이사의 메시지를 반환하지 않고, `queued`가 읽음·처리됨으로 표현되지 않으며, 수신자만 ack할 수 있어야 한다. 기존 actor 격리 시험은 [`tests/message-mcp.test.mjs:299`](../../tests/message-mcp.test.mjs#L299)~[`340`](../../tests/message-mcp.test.mjs#L340)에 있으나, 이사 소유권 필터 시험은 추가가 필요하다.
+
+## 수용 기준 4: 장시간 무진전, provider 장애와 감독자 부재
+
+### 실패 경로와 영향
+
+`nextSupervisionAction`은 `unverifiable`을 진행으로 가정하지 않고 inspect 후 escalation하며, `exited`, human prompt, provider overload는 즉시 escalation한다([`status.mjs:52`](../../plugins/oh-my-teams/scripts/status.mjs#L52)~~[`153`](../../plugins/oh-my-teams/scripts/status.mjs#L153)). 무진전 검사와 진행 요청 횟수를 합산하는 기존 회귀 시험도 있다([`tests/supervision.test.mjs:88`](../../tests/supervision.test.mjs#L88)~~[`122`](../../tests/supervision.test.mjs#L122)). Claude 529 overload도 별도의 escalation reason으로 검사한다([`tests/supervision.test.mjs:230`](../../tests/supervision.test.mjs#L230)~[`253`](../../tests/supervision.test.mjs#L253)).
+
+하지만 PM 감독 projection은 Worker 판정의 입력인 마지막 활동, unanswered requests, inspections, last escalation을 내보내지 않는다. `directorWatch`의 provider overload는 PM launch provider가 `claude`일 때에만 화면을 읽고, terminal 또는 화면을 찾을 수 없으면 `unknown`으로 반환한다([`resources.mjs:305`](../../plugins/oh-my-teams/scripts/resources.mjs#L305)~[`351`](../../plugins/oh-my-teams/scripts/resources.mjs#L351)). 이는 보수적이지만 감독자 부재, notification 대상 terminal 손실, PM Run 조회 실패의 다음 담당자와 행동을 구조화하지 않는다.
+
+### 보완 설계와 회귀 검증
+
+감시기는 활동 화면 출력 자체를 진전으로 판단하지 말고, heartbeat, 작업 보고, output fingerprint 변화, 수용·완료 이벤트를 출처별로 기록해야 한다. 정해진 무진전 구간마다 `wait`, `ask-progress`, `inspect`, `escalate` 중 하나만 결정하고, 자동 retry·stop·소유권 탈취는 결정 결과에 포함하지 않는다. provider 장애와 감독자 부재는 같은 failure envelope에 관측값, 오류, 마지막 양성 관측, 다음 담당자, 필요한 행동을 남기고 이사에게 한 번 상승 보고한다.
+
+같은 failure reason은 새 활동이나 상태 변화 전까지 반복 알림하지 않는다. escalation은 `escalatedAt`과 reason을 갱신하고, terminal 입력이 이미 제출되었는지 불명확하면 재전송을 금지한다. 이사 terminal이 없거나 소유자를 증명하지 못하면 signal은 durable inbox에 남고 `supervisor-unavailable`로 표시해야 한다.
+
+회귀 검증은 활동 없는 live worker, 반복 `unverifiable`, worker_done 없는 exited worker, 529 overload, human prompt, 조회 시간 초과, PM terminal 상실, director terminal 재배정과 process restart를 포함한다. 모든 경우에 근거 없는 자동 종료·retry·release가 없고, 반복 tick이 동일 alert를 증식시키지 않으며, 새 활동 뒤에는 새 escalation cycle이 시작되어야 한다.
+
+## 수용 기준 5: 여러 kickoff를 보는 이사의 요약과 중복 억제
+
+### 실패 경로와 영향
+
+`director-watch`는 모든 kickoff의 pending signal 수, 슬롯, liveness와 overload를 병렬로 집계한다([`resources.mjs:361`](../../plugins/oh-my-teams/scripts/resources.mjs#L361)~[`399`](../../plugins/oh-my-teams/scripts/resources.mjs#L399)). 관측 당시 전체 결과는 pending signal 6개, active slot 5개였지만, 이 kickoff는 worker slot 1개와 pending signal 0개만 보였다. 해당 한 화면에서 마지막 확인 가능한 진전, 미해결 결정, 다음 행동, PM 실행 identity와 관측 시각이 함께 보이지 않으므로 긴급성의 근거를 비교할 수 없다.
+
+`progress` 신호는 전송 때 `status: "acknowledged"`와 `autoAcknowledged: true`로 저장되어 pending 목록에서 제외된다([`director.mjs:86`](../../plugins/oh-my-teams/scripts/director.mjs#L86)~~[`179`](../../plugins/oh-my-teams/scripts/director.mjs#L179)). 다만 아직 terminal 통지가 확인되지 않은 progress는 재통지 후보로 남는다([`director.mjs:352`](../../plugins/oh-my-teams/scripts/director.mjs#L352)~~[`373`](../../plugins/oh-my-teams/scripts/director.mjs#L373)). 따라서 `autoAcknowledged`는 이사가 읽거나 처리했다는 뜻이 아니며, 단지 action-required pending 목록을 줄이기 위한 정보성 신호의 상태이다.
+
+### 보완 설계와 회귀 검증
+
+이사 summary는 kickoff별로 우선순위가 있는 `attention` 항목을 제공해야 한다. 각 항목은 상태 변화, source와 observedAt, 마지막 확인 진전, 미해결 decision/blocked/close-ready, slot, liveness, failure reason, next owner·action을 보존한다. `progress`는 최근 진전 타임라인에는 남기되 decision queue와 완료 준비 gate를 통과한 것으로 해석하지 않는다. 기존 CLI JSON의 기존 필드는 호환을 유지하고 새 필드는 additive projection으로만 추가한다.
+
+회귀 검증은 progress만 있는 kickoff, pending decision, superseded close-ready, unconfirmed terminal delivery, 동일 escalation 반복, 새 활동 뒤의 새 escalation, 독립 delivery receipt를 한 watch 결과에서 함께 검증해야 한다. 기존 progress 자동 확인 시험은 [`tests/director-signal.test.mjs:158`](../../tests/director-signal.test.mjs#L158)~~[`177`](../../tests/director-signal.test.mjs#L177)에 있고, 독립 delivery의 watch 표시 시험은 [`tests/director-signal.test.mjs:2443`](../../tests/director-signal.test.mjs#L2443)~~[`2463`](../../tests/director-signal.test.mjs#L2463)에 있다.
+
+## 수용 기준 6: 구현·복구 회귀 검증과 인도 준비
+
+### 권고하는 구현 task 범위
+
+구현 task는 기존 감시 어댑터와 projection 경계 안에서 다음을 수행한다.
+
+1. PM bootstrap receipt와 launch ledger를 등록부의 실행 메타데이터 및 watch projection에 연결하고, 요청·해결·화면 확인 모델과 각 증명 수준을 구분한다.
+2. PM·Worker 관측 레코드를 identity, liveness, timestamp, source, last progress와 오류로 정규화하고, `unverifiable`을 보수적으로 유지한다.
+3. director scope가 있는 Message MCP 조회와 legacy/anonymous 격리 projection을 구현하며, stored·submitted·received·acknowledged·handled 상태를 혼동하지 않도록 signal lifecycle을 보강한다.
+4. 무진전·provider·감독자 부재의 escalation deduplication과 director summary의 next action을 기존 Orca 어댑터 호출 위에 추가한다.
+
+구현은 `orca-adapter.mjs`와 기존 `teams-org.mjs`의 공식 어댑터 경로를 사용해야 하며, Orca process·Run·Dispatch의 소유권을 복제하거나 내부 저장소를 직접 수정해서는 안 된다. 기존 CLI·snapshot의 필드와 동작은 유지하고 새 관측값은 호환 가능한 선택 필드로 추가해야 한다.
+
+모델 정책 작업이 먼저 통합해야 하는 공통 소유 범위는 `core.mjs`, `workflow.mjs`, `role-launch.mjs`, `teams-org.mjs`, `organization.schema.json`, 관련 스킬·회귀 테스트와 버전 metadata이다. 감시·보고 구현은 이 범위를 읽기 전용으로 대조하고, 통합 HEAD가 검증된 뒤 충돌 가능한 launch·workflow·schema 호출부를 다시 확인해야 한다. 조사에서 독립적으로 진행할 수 있는 범위는 `resources.mjs`, `director.mjs`, `message-store.mjs`, `message-mcp.mjs`, `status.mjs`의 관측·메시지 projection과 그 회귀 테스트이되, 공통 호출 계약 변경은 모델 정책 PM과 조율한다.
+
+### 권고하는 독립 검토 범위
+
+별도 실행과 별도 worktree의 검토자는 다음을 확인해야 한다.
+
+1. 실제 resource-PM bootstrap fixture가 `director-watch`의 model identity와 liveness identity를 채우며, 화면 증명이 없을 때 이를 확인 모델로 과장하지 않는지 확인한다.
+2. 두 이사와 여러 kickoff fixture에서 inbox 결과가 director ownership 밖으로 새지 않고, 다른 kickoff의 ack·reply가 거부되는지 확인한다.
+3. restart, duplicate signal, terminal submission 불명확, `autoAcknowledged` progress, close-ready supersede, provider overload, long silence, supervisor absence의 상태 전이를 독립적으로 재현한다.
+4. `git diff --check`, `npm run format`, `npm run sync`, `npm run lint`, `npm test` 및 최신 HEAD의 CI 결과가 실제 변경과 일치하는지 확인한다.
+
+### 남은 제약
+
+Orca가 제공하지 않는 화면 모델 증명, 원격 worker 상태 또는 terminal 출력은 확인 불가일 수 있다. 이 경우 모델과 상태는 `unknown` 또는 `unverifiable`로 남겨야 하며, 상태 표시를 좋게 보이게 하기 위해 정상·완료·전달됨으로 변환해서는 안 된다. 이 문서는 조사 결과이므로 실제 구현, 사용자 전역 설정 변경, plugin 갱신 예약, push·PR 생성·병합을 수행하지 않았다.
+
+## 검사 기록
+
+문서 작성 뒤 `git diff --check`와 `npx prettier --check docs/plan/supervision-reporting.md`를 실행한다. 이 조사 task의 계약상 필수 검사는 `git diff --check`이며, 전체 format·sync·lint·test·CI는 구현과 통합 단계에서 자원 슬롯을 확보한 뒤 수행해야 한다.
