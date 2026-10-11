@@ -9,6 +9,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -18,6 +19,7 @@ import {
   resolveRegisteredKickoffFromState,
 } from "./kickoff-registry.mjs";
 import { runTrustedOrcaJson } from "./orca-adapter.mjs";
+import { readLaunches } from "./usage-ledger.mjs";
 import {
   acknowledgeMessage,
   getMessage,
@@ -39,6 +41,13 @@ const tool = (name, description, properties, required = []) => ({
 });
 
 const string = { type: "string" };
+const samePath = (left, right) => {
+  try {
+    return fs.realpathSync.native(left) === fs.realpathSync.native(right);
+  } catch {
+    return path.resolve(left) === path.resolve(right);
+  }
+};
 const tools = [
   tool(
     "send_message",
@@ -125,6 +134,93 @@ export async function resolveMessageCallerSession(environment = process.env) {
 }
 
 /**
+ * Refuses a state mailbox unless the fixed server session belongs to the
+ * registered kickoff. The launch ledger is a startup binding, while the pane
+ * lookup is the current Orca observation; neither a request worktree nor a
+ * request terminal can widen this scope.
+ *
+ * @param {object} context - MCP server context fixed at startup.
+ * @param {{orgFile: string, worktreeId: string}} registration - Registered state binding.
+ * @returns {{kickoffHash: string, entry: object, session: object}} Fixed mailbox binding.
+ */
+function requireStateMailboxOwner(context, registration) {
+  const session = context.callerSession;
+  if (!session?.terminal && !session?.worktreePath) {
+    throw new Error(
+      "Message MCP ownership-unverifiable: recover from the registered role terminal or ask the PM to relaunch the bound server",
+    );
+  }
+  const entry = listKickoffs(registration.orgFile, registration.worktreeId)
+    .kickoffs[0];
+  if (!entry || entry.registrationSeq === undefined) {
+    throw new Error(
+      "Message MCP state does not name a current registered kickoff",
+    );
+  }
+  const terminal = String(session.terminal ?? "").trim();
+  const launches = readLaunches(registration.orgFile);
+  const boundLaunches = launches.filter(
+    (launch) =>
+      (!terminal || launch.terminal === terminal) &&
+      launch.kickoffPmWorktreeId === entry.pm.worktreeId &&
+      (!session.worktreePath ||
+        (typeof launch.worktreePath === "string" &&
+          samePath(launch.worktreePath, session.worktreePath))),
+  );
+  const bound = boundLaunches.length > 0;
+  if (!bound) {
+    throw new Error(
+      "Message MCP ownership-unverifiable: recover from the registered role terminal; caller session is not bound to this kickoff",
+    );
+  }
+  if (
+    context.actor === "pm" &&
+    !launches.some(
+      (launch) =>
+        (!terminal || launch.terminal === terminal) &&
+        launch.role === "pm" &&
+        launch.kickoffPmWorktreeId === entry.pm.worktreeId,
+    )
+  ) {
+    throw new Error("Message MCP PM actor does not match the bound PM launch");
+  }
+  if (!terminal && context.actor === "pm") {
+    if (boundLaunches.filter((launch) => launch.role === "pm").length !== 1)
+      throw new Error(
+        "Message MCP ownership-unverifiable: server-start worktree binding is ambiguous; relaunch from the recorded PM terminal",
+      );
+  }
+  if (
+    context.actor.startsWith("task:") &&
+    !boundLaunches.some(
+      (launch) => launch.workflowTaskId === context.actor.slice("task:".length),
+    )
+  ) {
+    throw new Error(
+      "Message MCP task actor does not match the bound task launch",
+    );
+  }
+  if (!terminal && context.actor.startsWith("task:")) {
+    const taskId = context.actor.slice("task:".length);
+    if (
+      boundLaunches.filter((launch) => launch.workflowTaskId === taskId)
+        .length !== 1
+    )
+      throw new Error(
+        "Message MCP ownership-unverifiable: server-start worktree binding is ambiguous; relaunch from the recorded task terminal",
+      );
+  }
+  if (
+    context.actor === "director" &&
+    terminal &&
+    entry.director?.terminalHandle !== terminal
+  ) {
+    throw new Error("Message MCP director does not own this kickoff state");
+  }
+  return { kickoffHash: kickoffHashFor(entry), entry, session };
+}
+
+/**
  * Execute one Message MCP tool with an identity fixed at server startup.
  * @param {{stateDir?: string, orgFile?: string, kickoffHash?: string, actor: string, callerSession?: object}} context - Bound mailbox and runtime-verified caller session.
  * @param {string} name - Tool name.
@@ -143,15 +239,30 @@ export async function handleMessageTool(context, name, args = {}) {
     const directorTerminal = String(
       context.callerSession?.terminal ?? "",
     ).trim();
-    if (!directorTerminal) {
+    const serverStartWorktree = context.callerSession?.worktreePath
+      ? path.resolve(context.callerSession.worktreePath)
+      : null;
+    if (!directorTerminal && !serverStartWorktree) {
       throw new Error(
         "Director Message MCP requires an Orca caller-session provenance",
       );
     }
-    const kickoffs = () =>
-      allKickoffs().filter(
-        (entry) => entry.director?.terminalHandle === directorTerminal,
-      );
+    const kickoffs = () => {
+      const owned = directorTerminal
+        ? allKickoffs().filter(
+            (entry) => entry.director?.terminalHandle === directorTerminal,
+          )
+        : allKickoffs().filter(
+            (entry) =>
+              entry.director?.checkoutPath &&
+              path.resolve(entry.director.checkoutPath) === serverStartWorktree,
+          );
+      if (!directorTerminal && owned.length !== 1)
+        throw new Error(
+          "Director Message MCP ownership-unverifiable: server-start worktree binding is absent or ambiguous; relaunch from the registered Director terminal",
+        );
+      return owned;
+    };
     const scope = () => {
       const entry = allKickoffs().find(
         (item) => item.pm.worktreeId === args.worktreeId,
@@ -163,9 +274,18 @@ export async function handleMessageTool(context, name, args = {}) {
           "Legacy or unowned kickoff is read-only and cannot use the director mailbox",
         );
       }
-      if (entry.director.terminalHandle !== directorTerminal) {
+      if (
+        directorTerminal &&
+        entry.director.terminalHandle !== directorTerminal
+      ) {
         throw new Error("Director terminal does not own this kickoff mailbox");
       }
+      if (
+        !kickoffs().some((owned) => owned.pm.worktreeId === entry.pm.worktreeId)
+      )
+        throw new Error(
+          "Director server-start binding does not own this kickoff mailbox",
+        );
       return {
         stateDir: entry.pm.stateDir,
         kickoffHash: kickoffHashFor(entry),
@@ -209,7 +329,10 @@ export async function handleMessageTool(context, name, args = {}) {
         messages,
         unowned,
         timedOut: messages.length === 0,
-        directorTerminal,
+        directorTerminal: directorTerminal || null,
+        provenance: directorTerminal
+          ? "orca-terminal-list-by-pane"
+          : "server-start-worktree-binding",
       };
     } else {
       const target = scope();
@@ -245,9 +368,13 @@ export async function handleMessageTool(context, name, args = {}) {
       structuredContent: result,
     };
   }
-  const kickoffHash =
-    context.kickoffHash ??
-    (await resolveRegisteredKickoffFromState(stateDir))?.kickoffHash;
+  const registration = context.kickoffHash
+    ? null
+    : await resolveRegisteredKickoffFromState(stateDir);
+  const binding = registration
+    ? requireStateMailboxOwner(context, registration)
+    : null;
+  const kickoffHash = context.kickoffHash ?? binding?.kickoffHash;
   if (!kickoffHash)
     throw new Error("Message MCP requires a registered kickoff state");
   let result;
@@ -334,13 +461,16 @@ if (
     process.exit(1);
   }
   try {
-    const callerSession = await resolveMessageCallerSession();
+    const callerSession = (await resolveMessageCallerSession()) ?? {
+      worktreePath: process.cwd(),
+      source: "server-start-worktree-binding",
+    };
     const context = {
       ...(values.org
         ? { orgFile: path.resolve(values.org) }
         : { stateDir: path.resolve(values.state) }),
       actor: validateMessageActor(values.actor),
-      ...(callerSession ? { callerSession } : {}),
+      callerSession,
     };
     await createMessageMcpServer(context).connect(new StdioServerTransport());
   } catch (error) {

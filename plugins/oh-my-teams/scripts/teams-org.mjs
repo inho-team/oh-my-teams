@@ -153,6 +153,7 @@ import {
 } from "./incidents.mjs";
 import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { nextSupervisionAction, organizationStatus } from "./status.mjs";
+import { recordSupervisionObservation } from "./supervision-reporting.mjs";
 import {
   shadowAutoObserve,
   shadowFailureFallback,
@@ -4541,10 +4542,16 @@ export async function executeCommand(args, execute) {
     case "supervision-next": {
       const org = validateOrg(readJSON(args.org));
       const observation = readJSON(args.observation);
-      const decision = nextSupervisionAction({
-        ...observation,
-        policy: supervisionPolicy(org),
-      });
+      const policy = supervisionPolicy(org);
+      const decision =
+        args.state && args.dispatch
+          ? recordSupervisionObservation({
+              stateDir: path.resolve(args.state),
+              dispatchId: args.dispatch,
+              observation,
+              policy,
+            })
+          : nextSupervisionAction({ ...observation, policy });
       if (args.state && args.dispatch)
         await shadowAutoObserve({
           org,
@@ -5102,9 +5109,10 @@ export async function executeCommand(args, execute) {
           (k) => k.pm.worktreeId === summary.worktreeId,
         );
         if (entry) {
+          const launch = summary.observation.launch;
           summary.pmModelDisplay = displayModel(
-            entry.pm.provider,
-            entry.pm.model,
+            launch.configuredProvider ?? launch.requestedProvider,
+            launch.configuredModel ?? launch.requestedModel,
           );
         }
       }

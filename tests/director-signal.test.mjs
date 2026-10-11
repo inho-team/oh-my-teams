@@ -831,6 +831,30 @@ test("queryPmLiveness asks Orca for worker-list with the given executable", asyn
   assert.ok(calls[0].options.timeoutMs > 0);
 });
 
+test("queryPmLiveness does not promote a same-worktree Worker to a role-terminal PM", async () => {
+  const verdict = await queryPmLiveness(
+    PM_ENTRY,
+    "orca",
+    async () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        result: {
+          workers: [
+            {
+              projection: {
+                workspace: { id: PM_ENTRY.pm.worktreeId },
+                liveness: { verdict: "live" },
+              },
+            },
+          ],
+        },
+      }),
+    }),
+    { terminal: "term_pm" },
+  );
+  assert.equal(verdict, "unverifiable");
+});
+
 // ─── PM terminal discovery and available memory ─────────────────────────────
 
 function recordPmLaunch(orgFile, worktreePath, terminal, provider = "claude") {
@@ -1070,6 +1094,9 @@ test("directorWatch records a role-terminal PM without promoting terminal presen
     (item) => item.worktreeId === worktreeId,
   );
   assert.equal(kickoff.pmLiveness, "unverifiable");
+  assert.equal(kickoff.observation.launch.requestedProvider, "codex");
+  assert.equal(kickoff.observation.launch.requestedModelProof, "unknown");
+  assert.equal(kickoff.observation.launch.observedModelProof, "not-observed");
   assert.equal(kickoff.observation.runtime.terminal, "term_pm");
   assert.equal(
     kickoff.observation.runtime.terminalStatus,
@@ -1079,6 +1106,8 @@ test("directorWatch records a role-terminal PM without promoting terminal presen
     kickoff.observation.runtime.nextAction,
     "inspect-agent-session-or-Run-before-claiming-liveness",
   );
+  assert.equal(kickoff.observation.runtime.dispatch.status, "none-recorded");
+  assert.equal(kickoff.observation.runtime.run.status, "unknown");
   assert.equal(
     kickoff.observation.runtime.source,
     "orca-terminal-list-and-launch-ledger",

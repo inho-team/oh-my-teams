@@ -20,11 +20,14 @@ const serverScript = fileURLToPath(
  * @returns {{ready: boolean, packagePath?: string, reason?: string}} Startup dependency verdict.
  */
 export function messageMcpDependencyStatus({ resolve } = {}) {
+  const checkedAt = new Date().toISOString();
   const resolvePackage = resolve ?? createRequire(serverScript).resolve;
   try {
     return {
       ready: true,
       packagePath: resolvePackage("@modelcontextprotocol/sdk/package.json"),
+      checkedAt,
+      source: "message-mcp-installation-probe",
     };
   } catch (error) {
     return {
@@ -33,6 +36,8 @@ export function messageMcpDependencyStatus({ resolve } = {}) {
         "Message MCP dependency @modelcontextprotocol/sdk is unavailable from the " +
         "plugin installation; prepare that installation before launching a role and retry startup verification",
       error: error.code ?? error.name,
+      checkedAt,
+      source: "message-mcp-installation-probe",
     };
   }
 }
@@ -58,6 +63,8 @@ export function messageMcpLaunch(
       available: false,
       startup: "dependency-unavailable",
       reason: dependencyStatus.reason,
+      source: dependencyStatus.source,
+      checkedAt: dependencyStatus.checkedAt,
     };
   }
   const command = process.execPath;
@@ -86,4 +93,34 @@ export function messageMcpLaunch(
     };
   }
   return { argv: [], available: false };
+}
+
+/**
+ * Refuses a role startup when its requested Message MCP could not start.
+ * Provider non-support remains a capability verdict, not a dependency error.
+ *
+ * @param {{available: boolean, startup?: string, reason?: string}} launch - MCP launch verdict.
+ * @returns {void}
+ * @throws {Error} When the installed MCP SDK is unavailable.
+ */
+export function assertMessageMcpStartup(launch) {
+  if (launch?.startup === "dependency-unavailable") {
+    const detail = [
+      `Message MCP startup blocked: ${launch.reason ?? "installation dependency unavailable"}`,
+      `source=${launch.source ?? "message-mcp-installation-probe"}`,
+      `checkedAt=${launch.checkedAt ?? "unknown"}`,
+      "nextOwner=director",
+      "nextAction=repair-plugin-installation-and-retry-role-launch",
+    ].join("; ");
+    const error = new Error(detail);
+    error.messageMcpStartup = {
+      status: "blocked",
+      reason: launch.reason ?? "installation dependency unavailable",
+      source: launch.source ?? "message-mcp-installation-probe",
+      checkedAt: launch.checkedAt ?? null,
+      nextOwner: "director",
+      nextAction: "repair-plugin-installation-and-retry-role-launch",
+    };
+    throw error;
+  }
 }

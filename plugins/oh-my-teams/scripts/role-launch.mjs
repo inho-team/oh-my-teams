@@ -29,7 +29,10 @@ import {
   assertModelAssignmentChoice,
   directorModelAssignment,
 } from "./model-assignment.mjs";
-import { messageMcpLaunch } from "./message-mcp-config.mjs";
+import {
+  assertMessageMcpStartup,
+  messageMcpLaunch,
+} from "./message-mcp-config.mjs";
 
 /**
  * How each provider's role reaches an Orca terminal, and under which agent id.
@@ -646,6 +649,7 @@ function profileArgv(org, label, profileId, profile, firstPrompt, messageMcp) {
         { orgFile: messageMcp.orgFile },
       )
     : null;
+  if (message) assertMessageMcpStartup(message);
   if (message) argv.push(...message.argv);
   if (firstPrompt !== undefined) {
     assert(

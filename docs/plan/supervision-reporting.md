@@ -162,6 +162,17 @@ organization MCP는 server 시작 때 고정된 launch receipt의 director termi
 
 Orca가 제공하지 않는 화면 모델 증명, 원격 worker 상태 또는 terminal 출력은 확인 불가일 수 있다. 이 경우 모델과 상태는 `unknown` 또는 `unverifiable`로 남겨야 하며, 상태 표시를 좋게 보이게 하기 위해 정상·완료·전달됨으로 변환해서는 안 된다. 이 문서는 조사 결과이므로 실제 구현, 사용자 전역 설정 변경, plugin 갱신 예약, push·PR 생성·병합을 수행하지 않았다.
 
+## 구현 결과와 현재 제약
+
+2026-10-11 구현 결과는 이 문서의 조사 기준과 구분해 기록한다. 구현 브랜치는 accepted 조사 통합 HEAD `0484b11e1c4860b1b540d3f767423bad972d2d61`을 병합한 뒤 Message MCP, 감독 상태 저장소, watch projection과 역할 시작 preflight를 보완했다.
+
+1. `message-mcp.mjs`는 Orca pane 관측이 있으면 그 terminal과 launch ledger를, pane 환경 변수가 없으면 role process의 고정 시작 worktree와 단일 launch receipt를 state scope에 결속한다. PM은 PM role launch, task actor는 같은 `workflowTaskId` launch를 추가로 요구하며, 다른 kickoff·다른 task·모호한 시작 worktree는 `ownership-unverifiable`과 재시작 담당자 안내로 거부한다. organization scope도 terminal 또는 단일 director checkout binding을 요구하므로, 임의 `worktreeId`나 terminal 요청이 scope를 바꾸지 못한다. 이는 여러 정상 이사의 우발적 혼입을 막는 binding이며, Orca 1.4.220에 없는 process-lineage authentication이나 동일 OS 사용자의 환경 변수 위조 방어를 주장하지 않는다.
+2. `resources.mjs`의 PM watch는 launch receipt의 요청 provider·model, 등록부의 구성 provider·model, 확인 모델의 부재와 proof, terminal·Run·Dispatch·liveness의 source와 observedAt을 분리한다. role-terminal PM은 exact Dispatch가 없으므로 같은 worktree의 다른 live Worker가 있어도 PM live로 승격하지 않으며 `unverifiable`과 다음 관측 행동을 유지한다.
+3. `supervision-reporting.mjs`와 `supervision-next`는 dispatch별 durable record에 마지막 proven semantic progress, actual action receipt로 확인된 inspect/ask count, escalation, pending decision과 local durable report proof를 저장한다. 단순 화면 출력, heartbeat, activity, 추천 action은 progress 또는 count 증가 근거가 아니며, valid evidence object와 과거 시각을 가진 semantic event만 새 cycle을 연다. duplicate tick과 재시작은 같은 reason을 다시 보고하지 않고 pending decision을 처리 evidence 전까지 보존하며, provider overload·보고 지연·감독자 부재는 next owner와 action을 분리한다.
+4. `message-mcp-config.mjs`와 `role-launch.mjs`는 Claude·Codex의 SDK dependency probe가 실패하면 source, checkedAt, recovery owner와 다음 행동을 포함한 startup block을 반환해 역할을 정상 준비로 표시하지 않는다. Agy의 MCP 미지원은 dependency failure가 아닌 unsupported capability로 유지한다. SDK cache 복구와 사용자 설정 변경은 여전히 Director의 책임이다.
+
+실제 읽기 전용 Orca 관측은 `/tmp/omt-supervision-a3-orca-observation.json`에 기록했다. 이 관측은 현재 dispatch `ctx_6d0bc56383b8`의 terminal, worktree, provider와 `agent_status` liveness를 별도로 보존하며, 다른 retained worker의 상태나 terminal 존재를 PM의 semantic progress로 해석하지 않는다. 최신 구현의 표적 회귀는 state/org MCP의 env 없는 고정 시작 binding·다른 kickoff/task 격리, PM role-terminal live 승격 방지, durable escalation dedup/restart, receipt 없는 추천 action, invalid/future semantic proof 및 pending decision 처리 경계를 검증한다.
+
 ## 검사 기록
 
 원래 조사에서 작업 트리 밖 의존성만 사용한 `npm test`는 `tests/document-mcp-read-only.test.mjs`와 `tests/message-mcp.test.mjs`가 `@modelcontextprotocol/sdk`를 찾지 못해 exit 1이었고, 로그는 `/tmp/omt-supervision-test-20261011.log`에 남아 있다. 이는 docs 변경이 아니라 현재 작업 트리에서 해석할 `node_modules`가 없던 환경 오류였다.

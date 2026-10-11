@@ -26,8 +26,10 @@ import {
   listInbox,
   processLiveness,
 } from "./director.mjs";
+import { findCoordinatorRun } from "./orca-adapter.mjs";
 import { readTerminalScreen } from "./prompt-submission.mjs";
 import { readScreenOverload } from "./limit-check.mjs";
+import { listSupervisionReports } from "./supervision-reporting.mjs";
 
 /** Resource kinds that may be acquired. */
 export const RESOURCE_KINDS = Object.freeze(["test", "worker", "build"]);
@@ -268,9 +270,15 @@ function inPmWorktree(worker, entry) {
  * @param {object} entry - Kickoff registry entry.
  * @param {string} [orcaExecutable] - Orca binary path.
  * @param {Function} [execute=run] - Injectable command runner.
+ * @param {{workerId?: string}|null} [pmLaunch] - Exact PM Dispatch binding.
  * @returns {Promise<"live"|"exited"|"unverifiable">} PM liveness verdict.
  */
-export async function queryPmLiveness(entry, orcaExecutable, execute = run) {
+export async function queryPmLiveness(
+  entry,
+  orcaExecutable,
+  execute = run,
+  pmLaunch = null,
+) {
   const argv = [
     orcaExecutable ?? "orca",
     "orchestration",
@@ -285,13 +293,27 @@ export async function queryPmLiveness(entry, orcaExecutable, execute = run) {
     // older Orca versions.
     const workers = Array.isArray(parsed) ? parsed : parsed?.result?.workers;
     if (!Array.isArray(workers)) return "unverifiable";
-    const verdicts = workers
-      .filter((worker) => inPmWorktree(worker, entry))
-      .map((worker) => {
-        const liveness = worker.projection?.liveness;
-        const verdict = liveness?.verdict ?? liveness;
-        return ORCA_LIVENESS.has(verdict) ? verdict : "unverifiable";
-      });
+    const candidates = workers.filter((worker) => inPmWorktree(worker, entry));
+    // A role-terminal PM has no supervised Dispatch. Other workers in the
+    // same worktree are not evidence that this PM is alive. When a launch
+    // receipt names a Dispatch, require that exact identity instead.
+    const bound = pmLaunch
+      ? pmLaunch.workerId
+        ? candidates.filter((worker) =>
+            [
+              worker.workerId,
+              worker.dispatchId,
+              worker.projection?.id,
+            ].includes(pmLaunch.workerId),
+          )
+        : []
+      : candidates;
+    const verdicts = bound.map((worker) => {
+      const liveness = worker.projection?.liveness;
+      const verdict = liveness?.verdict ?? liveness;
+      return ORCA_LIVENESS.has(verdict) ? verdict : "unverifiable";
+    });
+    if (pmLaunch && !pmLaunch.workerId) return "unverifiable";
     if (verdicts.includes("live")) return "live";
     if (verdicts.length > 0 && verdicts.every((v) => v === "exited")) {
       return "exited";
@@ -387,16 +409,18 @@ export async function directorWatch(orgFile, options = {}) {
             String(b.sentAt).localeCompare(String(a.sentAt)),
         );
       const pmSlots = slots.filter((s) => s.worktreeId === entry.pm.worktreeId);
+      const supervision = listSupervisionReports(entry.pm.stateDir);
+      const pmLaunch = findPmLaunch(orgFile, entry.pm.path);
       const workerLiveness = await queryPmLiveness(
         entry,
         options.orcaExecutable,
         options.execute,
+        pmLaunch,
       );
       // PMs opened through role-terminal are not supervised workers, so a
       // worker-list miss cannot mean the PM is absent. The launch ledger binds
       // the PM role to one terminal; findPmTerminal then independently checks
       // that Orca still lists that exact terminal in the registered worktree.
-      const pmLaunch = findPmLaunch(orgFile, entry.pm.path);
       let pmTerminal;
       try {
         pmTerminal = await findPmTerminal(orgFile, entry.pm.path, {
@@ -410,6 +434,17 @@ export async function directorWatch(orgFile, options = {}) {
       // launch record. It is a useful identity observation but never positive
       // agent liveness; only Orca's worker/session liveness may say "live".
       const liveness = workerLiveness;
+      let run = { status: "not-observed" };
+      if (pmTerminal) {
+        try {
+          run = await findCoordinatorRun(pmTerminal, {
+            executable: options.orcaExecutable,
+            execute: options.execute,
+          });
+        } catch {
+          run = { status: "unknown" };
+        }
+      }
       const providerOverload = await pmProviderOverload(
         orgFile,
         entry,
@@ -423,6 +458,14 @@ export async function directorWatch(orgFile, options = {}) {
         slots: pmSlots,
         pmLiveness: liveness,
         providerOverload,
+        supervision: supervision.map((record) => ({
+          dispatchId: record.dispatchId,
+          observedAt: record.observedAt,
+          source: record.source,
+          lastProvenProgress: record.lastProvenProgress,
+          pendingDecision: record.pendingDecision,
+          report: record.report,
+        })),
         observation: {
           liveness: {
             verdict: liveness,
@@ -430,9 +473,16 @@ export async function directorWatch(orgFile, options = {}) {
             observedAt,
           },
           launch: {
+            requestedProvider: pmLaunch?.provider ?? null,
             requestedModel: pmLaunch?.modelRequested ?? null,
+            requestedModelProof: pmLaunch?.modelRequested
+              ? "launch-ledger-requested"
+              : "unknown",
+            configuredProvider: entry.pm?.provider ?? null,
             configuredModel: entry.pm?.model ?? null,
+            configuredModelProof: entry.pm?.modelProof ?? "unknown",
             observedModel: null,
+            observedModelProof: "not-observed",
             source: "launch-ledger-and-kickoff-registry",
             observedAt,
           },
@@ -441,6 +491,10 @@ export async function directorWatch(orgFile, options = {}) {
             launchTerminal: pmLaunch?.terminal ?? entry.pm?.terminal ?? null,
             workerLiveness,
             terminalStatus: pmTerminal ? "present-unverified" : "absent",
+            run,
+            dispatch: pmLaunch?.workerId
+              ? { status: "recorded", id: pmLaunch.workerId }
+              : { status: "none-recorded" },
             nextOwner: pmTerminal ? "director" : "pm",
             nextAction: pmTerminal
               ? "inspect-agent-session-or-Run-before-claiming-liveness"
