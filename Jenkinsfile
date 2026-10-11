@@ -10,16 +10,32 @@ pipeline {
 
     stages {
         stage('Linux Node 22') {
-            agent { label 'docker' }
-            steps {
-                sh 'git config --global core.autocrlf false'
-                checkout scm
-                sh 'node --version && npm ci'
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { sh 'npm run quality' }
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { sh 'npm run format:check' }
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { sh 'npm test' }
+            agent { label 'macmini' }
+            environment {
+                PATH = "/opt/homebrew/bin:${env.PATH}"
+                DOCKER_HOST = 'unix:///Users/kimjinseong/.colima/ci/docker.sock'
             }
-            post { always { cleanWs(deleteDirs: true, notFailBuild: true) } }
+            steps {
+                checkout scm
+                sh 'colima start --profile ci --activate=false'
+                sh 'docker build -t inho-team-oh-my-teams-ci:node22 -f .ci/Dockerfile.linux .'
+                sh '''docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$WORKSPACE:/workspace" -w /workspace inho-team-oh-my-teams-ci:node22 sh .ci/run-linux.sh'''
+            }
+            post {
+                always {
+                    sh '''
+                        if docker info >/dev/null 2>&1; then
+                            running=$(docker ps -q)
+                            if [ -z "$running" ]; then
+                                colima stop --profile ci
+                            else
+                                echo "CI Docker has running containers; inspect them before stopping the profile."
+                            fi
+                        fi
+                    '''
+                    cleanWs(deleteDirs: true, notFailBuild: true)
+                }
+            }
         }
 
         stage('macOS Node 22') {
