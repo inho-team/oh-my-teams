@@ -14,6 +14,14 @@
 
 다른 kickoff의 Message MCP 메시지는 수신·확인 처리하지 않았다. 이 문서의 메시지 격리 평가는 코드와 테스트, 그리고 등록부의 읽기 전용 집계만으로 수행했다.
 
+## 재개 검토 기준과 증거 경계
+
+이 문서는 최초 실패 재현의 기준 HEAD `e8f9df0640472ce884c9a7b7fb62e0232b5a04ba`를 유지한다. 2026-10-11 재개에서는 정식 검토 기록 `/Users/jinsungkim/orca/workspaces/oh-my-teams/feat-supervision-reporting/.omt/reviews/supervision-investigation-review-a2.json`의 다섯 finding을 반영하고, PM 워크트리의 post-merge HEAD `c2e50e9302edb954378581c453839e6884cf400c`는 읽기 전용으로 대조했다. 따라서 이 절의 post-merge 인용은 병합 뒤에도 남은 결함의 소스 증거이고, 최초 A2 fixture·현재 워크트리 검사는 과거 `3699fcde6ef31d43fbd693684a07ab2afab55264`의 환경·시각 증거이며, 새 구현 Worker의 결과나 독립 재검토 결과는 아니다.
+
+`node /tmp/omt-supervision-handle-message-tool-repro.mjs`의 원시 결과 `/tmp/omt-supervision-handle-message-tool-repro-20261011.json`은 실제 `handleMessageTool` 함수를 두 이사 등록 fixture에 직접 호출했다. `contextKeys`는 `orgFile`, `actor`뿐이고, director A를 뜻하는 terminal·Orca Run·session provenance가 없어서 `receive_messages`가 기대 한 건 대신 두 director inbox를 반환했다. 이는 handler가 현재 호출자 소유권을 판정할 입력을 받지 않는다는 단위 재현이며, 실제 Orca가 다른 이사의 terminal에 메시지를 전송했다는 transport 증명은 아니다. 실제 transport의 수신·제출·화면 확인은 별도 Orca receipt 없이는 `unverifiable`로 남긴다.
+
+같은 fixture에서 director actor가 `ack_message`를 호출하면 결과는 해당 message ID, `actor: "director"`, `status: "acknowledged"`이고, 뒤의 `receive_messages`에는 그 worktree가 사라지고 다른 worktree의 pending 메시지만 남았다. 이는 고정 actor·kickoff hash를 쓰는 Message MCP 저장소가 그 수신자의 acknowledgement와 `acknowledgedAt`을 기록했다는 긍정 근거이다. 다만 ack는 수신자가 처리 뒤에 보내는 자기 보고이므로 사람의 읽음, 내용의 의미 판단, 외부 행동 또는 `handled`를 증명하지 않으며, `progress`의 `autoAcknowledged`와도 분리한다.
+
 ## 관측 결과 요약
 
 `node plugins/oh-my-teams/scripts/teams-org.mjs director-watch --org /Users/jinsungkim/orca/oh-my-teams/.omt/organization.json`은 `feat-supervision-reporting` PM에 `pmLiveness: "unverifiable"`, `providerOverload: "unknown"`, `pmModelDisplay: "Unknown host-default"`를 반환했다. 같은 PM의 실행 원장에는 2026-10-11 04:03:34 UTC에 `provider: "codex"`, `modelRequested: "gpt-6.1-sol"`, `modelResolved: "gpt-6.1-sol"`, PM 워크트리와 터미널이 기록되어 있다. 반면 등록부 항목은 PM의 `worktreeId`, `path`, `stateDir`만 보유하여 모델·provider·터미널·관측 시각을 보존하지 않는다.
@@ -49,6 +57,8 @@
 
 등록부의 PM 실행 메타데이터를 역할 launch receipt와 실행 원장에서 조립하되, 정적 kickoff claim과 실행 관측을 분리한다. 정적 필드에는 PM worktree, kickoff Run, 요청 provider·model, bootstrap 선택의 지문과 생성 시각을 보관한다. 동적 관측에는 terminal handle, Orca worker·dispatch identity, liveness verdict, `observedAt`, `source`, 확인 모델과 `modelProof`를 보관하며, 관측 실패는 이전 값을 정상으로 승격하지 않고 `unverifiable`과 원인을 남긴다.
 
+모델 정책이 main에 반영된 뒤에도 잔여 결함은 남아 있다. post-merge `role-launch.mjs:542`부터 `565`는 `modelRequested`, `modelProof: "unproven"`과 화면 확인 필요성을 launch binding에 기록하고, `teams-org.mjs:4491`부터 `4505`는 launch ledger에 요청·해결 모델을 기록한다. 반면 `kickoff-registry.mjs:1042`부터 `1049`는 여전히 PM의 `worktreeId`, `path`, `stateDir`만 등록하고, `teams-org.mjs:5074`부터 `5089`의 `director-watch`는 없는 `entry.pm.provider`, `entry.pm.model`을 display에 준다. 따라서 `Unknown host-default` 가시성 결함은 `c2e50e9302edb954378581c453839e6884cf400c`에서도 남아 있으며, 호환 구현은 모델 정책의 launch receipt 형식을 바꾸지 않고 그 receipt를 additive PM execution metadata와 watch projection으로 조립하는 범위여야 한다.
+
 구현 테스트는 자원형 bootstrap claim에서 `gpt-6.1-sol`의 요청·해결 값이 등록부와 watch projection에 남는지, 화면 증명이 없으면 `modelProof: "unproven"`으로 남는지, 그리고 `worker-list` 누락·파싱 실패·알 수 없는 verdict가 `live`나 `exited`로 바뀌지 않는지를 검증해야 한다. 기존 `queryPmLiveness`의 보수적 판정 검증은 [`tests/director-signal.test.mjs:750`](../../tests/director-signal.test.mjs#L750)~[`835`](../../tests/director-signal.test.mjs#L835)에 있으나, PM 실행 identity와 요청/확인 모델의 end-to-end 결합 검증은 없다.
 
 ## 수용 기준 2: 실행 신원과 상태 분리
@@ -73,15 +83,19 @@ Message MCP 저장소는 kickoff hash와 수신 actor를 함께 검사하고, `r
 
 그러나 `message-watch`는 등록된 모든 kickoff의 director 수신함을 평탄화해 반환한다([`teams-org.mjs:3339`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L3339)~[`3365`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L3365)). 현재 이사와 해당 kickoff의 `director.terminalHandle`을 비교하거나, 호출자의 소유권을 필터하지 않는다. 브리프에서 지적한 다른 이사 소유의 오래된 메시지가 먼저 반환되는 경로가 이 코드로 재현된다. 다른 kickoff 메시지를 읽는 것만으로 확인 처리되지는 않지만, 이사가 잘못된 inbox를 자기 업무처럼 처리할 위험이 있다.
 
+post-merge `message-mcp.mjs:96`부터 `176`의 organization-scoped handler도 `context.actor === "director"`만 검사한 뒤 모든 registered kickoff를 평탄화해 `receiveMessages`를 호출한다. 이 경로는 `args.worktreeId`로 scope를 고르는 send·ack·get과 달리 receive에는 caller terminal이나 session binding이 전혀 없다. 위의 handler fixture는 이 경로의 결함을 직접 재현하지만, synthetic context 호출이므로 실제 Orca terminal delivery가 발생했다는 증명은 아니다.
+
 `director-signal`은 signal 레코드를 기록한 뒤 PM state의 Message MCP에 같은 메시지를 큐잉하고 `queued: true`를 반환한다([`teams-org.mjs:4966`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L4966)부터 [`5004`](../../plugins/oh-my-teams/scripts/teams-org.mjs#L5004)). 이는 저장 성공만 뜻하며 terminal 전달, 읽음, 처리 또는 응답을 증명하지 않는다. reply도 동일하게 `queued: true`일 뿐이다([`director.mjs:640`](../../plugins/oh-my-teams/scripts/director.mjs#L640)부터 [`657`](../../plugins/oh-my-teams/scripts/director.mjs#L657)).
 
 ### 보완 설계와 회귀 검증
 
-이사 inbox 조회는 호출 이사의 terminal identity 또는 명시한 director scope를 필수로 하고, 등록부의 `director.terminalHandle`과 일치하는 kickoff만 반환해야 한다. 익명·legacy 등록은 호환을 위해 읽기 전용의 별도 `unowned` 목록에 보존하되, 자동 ack·reply·notification의 대상이 되어서는 안 된다. PM inbox는 계속 자기 state의 kickoff hash로만 읽으며, 다른 state 경로를 전달해도 활성 kickoff binding을 확인해야 한다.
+이사 inbox 조회는 임의 terminal 문자열이나 `--actor director`가 아니라 공식 `orca-adapter.mjs`가 Orca MCP transport/session에서 얻은 검증 가능한 caller provenance를 필수로 해야 한다. provenance는 최소한 실제 terminal handle, Run, Dispatch 또는 session identity, worktree, 관측 시각, 발급 source를 함께 묶고 adapter가 직접 만든 불변 receipt여야 하며, CLI 인자·환경 변수·MCP tool args로 주입한 값은 authority로 승격하지 않는다. post-merge adapter도 trusted executable을 고정하지만(`orca-adapter.mjs:219`부터 `322`), session handle을 실제 process lineage에 bind하는 일은 여전히 열린 설계라고 명시한다. 따라서 환경에 `ORCA_*` 값이 없을 때에도 organization MCP는 adapter-provenance의 terminal·Run을 등록부 `director.terminalHandle`·kickoff Run과 대조하고, state MCP는 같은 provenance의 worktree·Run·Dispatch·role을 resolved kickoff hash와 PM state에 대조해야 한다. 어느 한 증거가 없거나 불일치하면 receive·send·ack·get의 소유권을 `unverifiable`로 두고 권한 동작을 거부하며, legacy/unowned는 별도 읽기 전용 진단 목록만 제공한다.
 
-신호와 메시지는 `stored`, `notification-attempted`, `terminal-submitted`, `received`, `acknowledged`, `replied`, `handled`를 별도 이벤트로 기록한다. 중복은 stable key와 동일 payload의 replay로만 인정하고, 동일 key·다른 payload는 거부한다. 재시작 뒤에는 저장된 pending 이벤트를 다시 조회하되, 입력 제출이 불명확한 경우에는 재전송하지 않고 사람의 확인 대상으로 올린다.
+이사 inbox 조회는 위 provenance가 일치한 kickoff만 반환해야 한다. 익명·legacy 등록은 호환을 위해 읽기 전용의 별도 `unowned` 목록에 보존하되, 자동 ack·reply·notification의 대상이 되어서는 안 된다. PM inbox도 actor 문자열만으로는 충분하지 않으며, 동일한 state-bound provenance를 확인한 뒤 자기 kickoff hash만 읽어야 한다.
 
-회귀 검증은 두 이사의 두 kickoff, 하나의 legacy/anonymous entry, 메시지 재시작 전후, 중복 key, 잘못된 수신자의 ack, 화면 제출 실패를 포함해야 한다. `message-watch`가 다른 이사의 메시지를 반환하지 않고, `queued`가 읽음·처리됨으로 표현되지 않으며, 수신자만 ack할 수 있어야 한다. 기존 actor 격리 시험은 [`tests/message-mcp.test.mjs:299`](../../tests/message-mcp.test.mjs#L299)~[`340`](../../tests/message-mcp.test.mjs#L340)에 있으나, 이사 소유권 필터 시험은 추가가 필요하다.
+신호와 메시지는 `stored`, `notification-attempted`, `terminal-submitted`, `received`, `acknowledged`, `replied`, `handled`를 별도 이벤트로 기록한다. `acknowledged`는 fixed receiver가 작성한 `acknowledgedAt` 자기 보고 receipt로 표시하고, `handled`는 그와 다른 근거 있는 작업 결과 또는 명시적 처리 attestation이 있을 때만 기록한다. `autoAcknowledged`는 정보성 signal의 목록 상태일 뿐 수신자 ack 또는 handled receipt가 아니다. 중복은 stable key와 동일 payload의 replay로만 인정하고, 동일 key·다른 payload는 거부한다. 재시작 뒤에는 저장된 pending 이벤트를 다시 조회하되, 입력 제출이 불명확한 경우에는 재전송하지 않고 사람의 확인 대상으로 올린다.
+
+회귀 검증은 두 이사의 두 kickoff, 하나의 legacy/anonymous entry, 메시지 재시작 전후, 중복 key, 잘못된 수신자의 ack, 화면 제출 실패를 포함해야 한다. 추가로 org/state MCP 각각에서 provenance가 없는 경우와 임의 terminal·Run·Dispatch 문자열을 거부하고, adapter-issued provenance가 등록부와 일치할 때만 해당 inbox를 반환하는 시험이 필요하다. `message-watch`가 다른 이사의 메시지를 반환하지 않고, `queued`가 읽음·처리됨으로 표현되지 않으며, 수신자만 ack할 수 있어야 한다. 기존 actor 격리 시험은 [`tests/message-mcp.test.mjs:299`](../../tests/message-mcp.test.mjs#L299)~[`340`](../../tests/message-mcp.test.mjs#L340)에 있으나, 이사 소유권 필터 시험은 추가가 필요하다.
 
 ## 수용 기준 4: 장시간 무진전, provider 장애와 감독자 부재
 
@@ -95,9 +109,11 @@ Message MCP 저장소는 kickoff hash와 수신 actor를 함께 검사하고, `r
 
 감시기는 활동 화면 출력 자체를 진전으로 판단하지 말고, heartbeat와 terminal output fingerprint는 `activityAt`으로, 검증된 산출물·검사·수용 이벤트·근거 있는 단계 보고는 `semanticProgressAt`으로 출처와 proof 수준을 붙여 기록해야 한다. 무진전 타이머와 escalation 억제는 `semanticProgressAt`만으로 계산하며, 활동 변화는 화면 재조회 또는 보조 진단을 요청할 근거일 뿐 타이머와 escalation을 초기화하지 않는다. 정해진 무진전 구간마다 `wait`, `ask-progress`, `inspect`, `escalate` 중 하나만 결정하고, 자동 retry·stop·소유권 탈취는 결정 결과에 포함하지 않는다. provider 장애와 감독자 부재는 같은 failure envelope에 관측값, 오류, 마지막 양성 관측, 다음 담당자, 필요한 행동을 남기고 이사에게 한 번 상승 보고한다.
 
+`semanticProgressAt`의 compatibility 경계는 명시적이어야 한다. 필드가 전혀 없는 legacy observation만 versioned migration의 문서화된 시작 시각(`startedAt` 또는 최초 verified observation)을 사용하며, 그 시작 시각도 없으면 즉시 정상으로 가정하지 않고 `unverifiable` inspection을 낸다. 필드가 명시적 `null`, `unknown`, 잘못된 시각이면 의미 있는 진전이 증명되지 않은 상태이므로 `lastActivityAt`, heartbeat, output fingerprint로 대체하지 않고 시작 시각부터 무진전 경과를 계산하거나 시작 시각도 없으면 escalation 전에 inspect한다. proof가 있는 유효한 `semanticProgressAt`만 타이머의 기준을 갱신하고 recovery 또는 같은 failure reason의 새 cycle을 열 수 있다. 따라서 현재 post-merge `status.mjs:92`부터 `154`처럼 `lastActivityAt` 하나를 parse하는 계약은 이 네 상태를 표현하지 못하며 변경이 필요하다.
+
 같은 failure reason은 의미 있는 진전 또는 새 실패 원인이 확인되기 전까지 반복 알림하지 않는다. 활동 변화만으로는 이미 보고한 failure reason을 해제하거나 새 escalation cycle을 시작하지 않는다. escalation은 `escalatedAt`과 reason을 갱신하고, terminal 입력이 이미 제출되었는지 불명확하면 재전송을 금지한다. 이사 terminal이 없거나 소유자를 증명하지 못하면 signal은 durable inbox에 남고 `supervisor-unavailable`로 표시해야 한다.
 
-회귀 검증은 활동 없는 live worker, 출력만 변하는 worker, 반복 `unverifiable`, worker_done 없는 exited worker, 529 overload, human prompt, 조회 시간 초과, PM terminal 상실, director terminal 재배정과 process restart를 포함한다. 모든 경우에 근거 없는 자동 종료·retry·release가 없고, 반복 tick이 동일 alert를 증식시키지 않으며, semantic progress가 증명될 때에만 새 escalation cycle이 시작되어야 한다.
+회귀 검증은 활동 없는 live worker, 출력만 변하는 worker, 반복 `unverifiable`, worker_done 없는 exited worker, 529 overload, human prompt, 조회 시간 초과, PM terminal 상실, director terminal 재배정과 process restart를 포함한다. 특히 `semanticProgressAt`이 없는 legacy record, 명시적 `null`, `unknown`/invalid proof, 유효하고 proven인 시각을 분리해 검사하고, null·unknown이 activity 시각으로 fallback되지 않으며 proven 시각만 recovery를 만드는지 확인해야 한다. 모든 경우에 근거 없는 자동 종료·retry·release가 없고, 반복 tick이 동일 alert를 증식시키지 않으며, semantic progress가 증명될 때에만 새 escalation cycle이 시작되어야 한다.
 
 ## 수용 기준 5: 여러 kickoff를 보는 이사의 요약과 중복 억제
 
@@ -119,13 +135,13 @@ Message MCP 저장소는 kickoff hash와 수신 actor를 함께 검사하고, `r
 
 구현 task는 기존 감시 어댑터와 projection 경계 안에서 다음을 수행한다.
 
-1. 먼저 `message-store.mjs`, `message-mcp.mjs`, `director.mjs`와 `tests/message-mcp.test.mjs`, `tests/director-signal.test.mjs`에서 director scope와 stored·submitted·received·acknowledged·handled 상태를 분리한다.
-2. 다음으로 `status.mjs`, `resources.mjs`와 `tests/supervision.test.mjs`, `tests/director-signal.test.mjs`에서 `activityAt`과 `semanticProgressAt`을 구분하고, 출력만 변하는 정체·provider·감독자 부재의 escalation deduplication을 검증한다.
-3. 마지막으로 PM bootstrap receipt와 launch ledger를 등록부의 실행 메타데이터 및 watch projection에 연결하여 요청·구성 해석·화면 확인 모델과 proof를 구분한다. 이 단계의 `teams-org.mjs`, workflow·launch·schema 경계와 관련 회귀 테스트는 모델 정책 작업의 통합 HEAD 뒤에 조율한다.
+1. 먼저 `orca-adapter.mjs`에 org/state MCP 모두가 쓸 caller-provenance port를 만들고, `message-mcp.mjs`, `message-store.mjs`, `director.mjs`와 `tests/message-mcp.test.mjs`, `tests/director-signal.test.mjs`에서 adapter-issued provenance의 director·role·worktree·Run/Dispatch 대조, arbitrary 문자열 거부, stored·submitted·received·acknowledged·handled 상태를 분리한다.
+2. 다음으로 `status.mjs`, `resources.mjs`와 `tests/supervision.test.mjs`, `tests/director-signal.test.mjs`에서 `activityAt`과 `semanticProgressAt`을 구분한다. legacy field 부재, explicit null, unknown/invalid proof, proven value와 시작 시각을 각각 시험해 출력만 변하는 정체·provider·감독자 부재의 escalation deduplication을 검증한다.
+3. 마지막으로 이미 main에 반영된 `role-launch.mjs`의 launch binding과 launch ledger를 읽어 `kickoff-registry.mjs`의 PM execution metadata 및 `teams-org.mjs` watch projection에 연결한다. 요청·구성 해석·화면 확인 모델과 proof를 구분하되, 모델 정책의 기존 launch receipt 형식은 바꾸지 않고 `tests/director-signal.test.mjs`와 watch 관련 회귀 테스트를 추가한다.
 
 구현은 `orca-adapter.mjs`와 기존 `teams-org.mjs`의 공식 어댑터 경로를 사용해야 하며, Orca process·Run·Dispatch의 소유권을 복제하거나 내부 저장소를 직접 수정해서는 안 된다. 기존 CLI·snapshot의 필드와 동작은 유지하고 새 관측값은 호환 가능한 선택 필드로 추가해야 한다.
 
-모델 정책 작업이 먼저 통합해야 하는 공통 소유 범위는 `core.mjs`, `workflow.mjs`, `role-launch.mjs`, `teams-org.mjs`, `organization.schema.json`, 관련 스킬·회귀 테스트와 버전 metadata이다. 감시·보고 구현은 이 범위를 읽기 전용으로 대조하고, 통합 HEAD가 검증된 뒤 충돌 가능한 launch·workflow·schema 호출부를 다시 확인해야 한다. 조사에서 독립적으로 진행할 수 있는 범위는 `resources.mjs`, `director.mjs`, `message-store.mjs`, `message-mcp.mjs`, `status.mjs`의 관측·메시지 projection과 그 회귀 테스트이되, 공통 호출 계약 변경은 모델 정책 PM과 조율한다.
+모델 정책의 PR #167은 `c2e50e9302edb954378581c453839e6884cf400c`으로 main에 반영되었으므로, 이전 조사 시점의 "통합 뒤 조율"은 완료된 선행 조건으로 정정한다. 감시·보고 구현은 그 HEAD의 `role-launch.mjs`, `teams-org.mjs`, `kickoff-registry.mjs` 호출 형식을 읽기 전용으로 대조하고, additive metadata projection만 추가한다. 조사에서 우선 진행할 범위는 `orca-adapter.mjs`, `resources.mjs`, `director.mjs`, `message-store.mjs`, `message-mcp.mjs`, `status.mjs`와 회귀 테스트이며, launch receipt·workflow·schema의 공통 계약을 바꿔야 하면 모델 정책 PM과 다시 조율한다.
 
 ### 권고하는 독립 검토 범위
 
@@ -144,6 +160,8 @@ Orca가 제공하지 않는 화면 모델 증명, 원격 worker 상태 또는 te
 
 원래 조사에서 작업 트리 밖 의존성만 사용한 `npm test`는 `tests/document-mcp-read-only.test.mjs`와 `tests/message-mcp.test.mjs`가 `@modelcontextprotocol/sdk`를 찾지 못해 exit 1이었고, 로그는 `/tmp/omt-supervision-test-20261011.log`에 남아 있다. 이는 docs 변경이 아니라 현재 작업 트리에서 해석할 `node_modules`가 없던 환경 오류였다.
 
-2026-10-11 재개 검사에서는 배정된 현재 워크트리에 `npm ci`를 실행해 95개 패키지를 설치했고 exit 0이었다(`/tmp/omt-supervision-a2-npm-ci-20261011.log`). 이어서 현재 워크트리의 `npm run format`, `npm run sync`, `npm run lint`, `npm test`는 모두 exit 0이었다(`/tmp/omt-supervision-a2-format-20261011.log`, `/tmp/omt-supervision-a2-sync-20261011.log`, `/tmp/omt-supervision-a2-lint-20261011.log`, `/tmp/omt-supervision-a2-test-20261011.log`). `npm test`는 총 1,357개 중 1,320개 통과, 0개 실패, 37개 건너뜀으로 끝났고 종료 코드 요약은 `/tmp/omt-supervision-a2-check-summary-20261011.txt`에 남겼다.
+2026-10-11 재개 검사에서는 배정된 현재 워크트리에 `npm ci`를 실행해 95개 패키지를 설치했고 exit 0이었다(`/tmp/omt-supervision-a2-npm-ci-20261011.log`). 이어서 현재 워크트리의 `npm run format`, `npm run sync`, `npm run lint`, `npm test`는 모두 exit 0이었다(`/tmp/omt-supervision-a2-format-20261011.log`, `/tmp/omt-supervision-a2-sync-20261011.log`, `/tmp/omt-supervision-a2-lint-20261011.log`, `/tmp/omt-supervision-a2-test-20261011.log`). `npm test`는 총 1,357개 중 1,320개 통과, 0개 실패, 37개 건너뜀으로 끝났고 종료 코드 요약은 `/tmp/omt-supervision-a2-check-summary-20261011.txt`에 남겼다. 이 broad 검사는 소스·테스트가 당시 조사 HEAD `3699fcde6ef31d43fbd693684a07ab2afab55264`와 같을 때의 결과라서, post-merge `c2e50e9302edb954378581c453839e6884cf400c` 읽기 전용 대조나 이후 구현 Worker의 검사로 해석하지 않는다.
 
 이 문서의 Markdown Prettier 쓰기·확인은 모두 exit 0이었고(`/tmp/omt-supervision-a2-markdown-write-20261011.log`, `/tmp/omt-supervision-a2-markdown-check-20261011.log`), `git diff --check`도 exit 0이었다(`/tmp/omt-supervision-a2-diff-check-20261011.log`). 문서 검사 종료 코드 요약은 `/tmp/omt-supervision-a2-doc-check-summary-20261011.txt`에 남겼으며, frozen task `verify`는 새 커밋 HEAD에서 실행해 별도 JSON 보고서로 남긴다.
+
+이번 workflow-rework 문서 보완은 source와 tests를 변경하지 않았으므로, 위의 broad 검사와 같은 환경·동일 소스 조건을 불필요하게 반복하지 않는다. 대신 Markdown Prettier, `git diff --check`, 새 HEAD에서 frozen task revision 1 hash `aac104f2b02c359a87fda24c531c481d9c420fb0268d5d15fca8319e41a5a0a6`의 `verify`를 새 Dispatch `ctx_8dc61e8d1300`와 결속해 실행하고, 그 evidence와 gates report의 시각·HEAD를 이 절 및 PM 보고에 기록한다.
