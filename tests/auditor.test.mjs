@@ -1,4 +1,8 @@
 /** Auditor checkpoints: objection/response/ruling records and acceptance gates. */
+import {
+  denyDirectorySync,
+  durableSuccessSupported,
+} from "./directory-durability-fixture.mjs";
 import nodeTest, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -1613,6 +1617,7 @@ test("role-worktree-create (D2 rule 6): a swallowed launch-ledger write failure 
     fixture.dir,
   );
 
+  fs.mkdirSync(fixture.entry.pm.path, { recursive: true });
   const result = await createRoleWorktree(
     {
       org: fixture.org,
@@ -1625,6 +1630,7 @@ test("role-worktree-create (D2 rule 6): a swallowed launch-ledger write failure 
       base: "f".repeat(40),
     },
     {
+      callerCwd: fixture.entry.pm.path,
       organization: () => readJSON(fixture.org),
       environment: async () => ({
         platform: "darwin",
@@ -1875,7 +1881,7 @@ test(
 );
 
 test(
-  "role-worktree-create (counterexample 13): a D4-colliding auditor workspace is reclaimed before any " +
+  "role-worktree-create (counterexample 13): an unproven D4-colliding auditor workspace is preserved before any " +
     "terminal-open port runs, and create() itself never runs without director authority or a matching --repo",
   async (t) => {
     const fixture = kickoff(t, "wt-1", {
@@ -1907,7 +1913,9 @@ test(
       nextAction: "",
     });
 
-    // [A] The D4 collision itself, exercised through orca-adapter.mjs's own
+    // [A] An ambiguous D4-colliding receipt lacks immutable identity. Preserve
+    // the existing PM directory; no remove may reach the trusted runner.
+    // The collision is exercised through orca-adapter.mjs's own
     // createWorktreeWithRoleSession rather than a mock that reinvents its
     // contract: `execute` records every Orca invocation this real function
     // issues, so this proves both that it always rejects a D4 collision
@@ -1968,16 +1976,16 @@ test(
               },
             },
           ),
-        /was reclaimed/,
+        /automatic reclamation failed/,
       );
       assert.equal(openCalls, 0);
       assert.equal(calls.length, 2);
-      assert.deepEqual(calls[1].slice(1, 4), [
-        "worktree",
-        "remove",
-        "--worktree",
-      ]);
-      assert.equal(calls[1][4], "id:wt_d4_audit");
+      assert.deepEqual(calls[1].slice(1, 3), ["worktree", "show"]);
+      assert.equal(
+        calls.some((call) => call[2] === "remove"),
+        false,
+      );
+      assert.equal(fs.existsSync(fixture.entry.pm.path), true);
     }
 
     // [B] A caller without director authority, or with a --repo that is not
@@ -2801,6 +2809,7 @@ function trustedLaunchOver(handler) {
 // unverified. `terminal` decides what the terminal verbs answer.
 function gitBackedOrca(repo, { laterVersion = "1.4.210", terminal } = {}) {
   let versionReads = 0;
+  let workspace = null;
   const fail = (stderr) => ({ code: 1, stdout: "", stderr, timedOut: false });
   return async (orcaArgs, options) => {
     const [noun, verb] = orcaArgs;
@@ -2826,13 +2835,31 @@ function gitBackedOrca(repo, { laterVersion = "1.4.210", terminal } = {}) {
         dir,
         after("--base-branch"),
       ]);
-      return orcaReply({ worktree: { id: `wt_${name}::${dir}`, path: dir } });
+      workspace = {
+        id: `wt_${name}::${dir}`,
+        path: dir,
+        parentWorktreeId: "wt-1",
+        identity: {
+          key: `wt_${name}::${dir}`,
+          instanceId: `instance-${name}`,
+          executionHostId: "local",
+        },
+      };
+      return orcaReply({ worktree: workspace });
     }
+    if (noun === "worktree" && verb === "show")
+      return orcaReply({ worktree: workspace });
+    if (noun === "worktree" && verb === "ps")
+      return orcaReply({
+        worktrees: workspace ? [workspace] : [],
+        truncated: false,
+      });
     if (noun === "worktree" && verb === "remove") {
-      const id = after("--worktree").slice("id:".length);
+      const id = after("--worktree").replace(/^(identity|id):/, "");
       const [handle, dir] = id.split("::");
       git(options.cwd, ["worktree", "remove", "--force", dir]);
       git(options.cwd, ["branch", "-D", handle.slice("wt_".length)]);
+      workspace = null;
       return orcaReply({ removed: id });
     }
     if (noun === "terminal" && terminal) return terminal(orcaArgs, fail);
@@ -2921,6 +2948,7 @@ const orcaCallsOf = (spawned, ...words) =>
   spawned.filter((call) => words.every((word, i) => call[1 + i] === word));
 
 test("T3 auditor role-worktree-create reclaims a worktree whose launch is refused before any terminal exists, through the real internal role-terminal path", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   // The real role-terminal command reads its own environment: a trusted
   // version that no longer verifies refuses the launch before terminal create.
   const run = await launchAuditorThroughRealPath(t, {
@@ -2965,6 +2993,7 @@ test("T3 auditor role-worktree-create reclaims a worktree whose launch is refuse
 });
 
 test("T4 auditor creation and reclaim use the one trusted runner and leave no git worktree or branch behind", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const run = await launchAuditorThroughRealPath(t, {
     profile: "claude-current",
     name: "audit-t4",
@@ -2988,7 +3017,9 @@ test("T4 auditor creation and reclaim use the one trusted runner and leave no gi
     "status --json",
     "worktree create",
     "--version",
+    "worktree show",
     "worktree remove",
+    "worktree ps",
   ]);
   // The repository itself is left exactly as it was found.
   assert.deepEqual(run.after, run.before);
@@ -8231,4 +8262,23 @@ test("f7-10: a single recorded result repository behaves as before and needs nei
   await assertUnchanged(fixture, () =>
     assert.rejects(() => f7Decide(fixture, fixture.repo), /nothing to decide/),
   );
+});
+
+test("unsupported directory durability preserves the refused auditor resource without removal", async (t) => {
+  denyDirectorySync(t);
+  const run = await launchAuditorThroughRealPath(t, {
+    profile: "claude-current",
+    name: "audit-no-directory-sync",
+    orca: { laterVersion: "unversioned build" },
+  });
+  assert.match(run.rejection?.message ?? "", /preserve the residual/);
+  assert.equal(
+    orcaCallsOf(run.trusted.spawned, "worktree", "remove").length,
+    0,
+  );
+  assert.equal(
+    orcaCallsOf(run.trusted.spawned, "worktree", "create").length,
+    1,
+  );
+  assert.equal(orcaCallsOf(run.trusted.spawned, "terminal").length, 0);
 });

@@ -1,4 +1,8 @@
 /** Covers the director role: ladder placement, launch refusal, header, registry, and close authority. */
+import {
+  denyDirectorySync,
+  durableSuccessSupported,
+} from "./directory-durability-fixture.mjs";
 import { after } from "node:test";
 import { cloneTemplateProject, cleanupTemplates } from "./template-factory.mjs";
 after(() => cleanupTemplates());
@@ -863,7 +867,8 @@ function cleanUp(fixture) {
   });
 }
 
-test("a recorded real merge commit lets cleanup delete the merged branch", (t) => {
+test("a recorded merge and document cannot authorize a branch with unproven kickoff ownership", (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = gitProject(t);
   const mergeCommit = mergeWork(fixture);
   fixture.git("push", "origin", "main");
@@ -896,10 +901,10 @@ test("a recorded real merge commit lets cleanup delete the merged branch", (t) =
   });
 
   const result = cleanUp(fixture);
-  assert.deepEqual(result.deleted, ["feat/work"]);
-  assert.deepEqual(result.skipped, []);
-  assert.equal(fixture.remoteHas("feat/work"), false);
-  assert.throws(() => fixture.git("rev-parse", "refs/heads/feat/work"));
+  assert.deepEqual(result.deleted, []);
+  assert.deepEqual(result.skipped, ["feat/work"]);
+  assert.equal(fixture.remoteHas("feat/work"), true);
+  assert.equal(fixture.git("rev-parse", "refs/heads/feat/work"), fixture.head);
 });
 
 test("a merge commit that only the remote branch holds is accepted, and its full id is stored", (t) => {
@@ -1543,4 +1548,46 @@ test("Worker 경로: 원장 close-ready와 감사 brief·outcome 수용을 모�
   assert.equal(delivered.merged, true);
   assert.equal(gitCmd(fixture.project, "rev-parse", "HEAD^2"), fixture.head);
   assert.ok(fs.existsSync(path.join(fixture.project, "docs", "report.md")));
+});
+
+test("unsupported protocol branch cleanup preserves both local and remote delivery branches", (t) => {
+  const fixture = gitProject(t);
+  const mergeCommit = mergeWork(fixture);
+  fixture.git("push", "origin", "main");
+
+  const recorded = recordDelivery(fixture.org, {
+    worktreeId: "wt-git",
+    head: fixture.head,
+    mergeCommit,
+  });
+  assert.equal(recorded.entry.delivered.head, fixture.head);
+  assert.equal(recorded.entry.delivered.mergeCommit, mergeCommit);
+
+  // Save the delivery-ref document before cleanup
+  const kickoffHash = resolveKickoffHash(fixture.org, "wt-git");
+  const docId = deliveryRefDocId(kickoffHash, mergeCommit);
+  const [entry] = listKickoffs(fixture.org, "wt-git").kickoffs;
+  saveDocument(entry.pm.stateDir, {
+    schemaVersion: 1,
+    docId,
+    stage: "delivery",
+    kickoffId: kickoffHash,
+    workflowId: null,
+    revision: 1,
+    state: "resolved",
+    author: { role: "pm", executionId: "exec-1" },
+    createdAt: new Date().toISOString(),
+    basedOnRevision: null,
+    reason: "delivery recorded",
+    deliveredCommit: mergeCommit,
+  });
+
+  denyDirectorySync(t);
+  assert.deepEqual(cleanUp(fixture), {
+    deleted: [],
+    skipped: ["feat/work"],
+    errors: [],
+  });
+  assert.equal(fixture.remoteHas("feat/work"), true);
+  assert.equal(fixture.git("rev-parse", "refs/heads/feat/work"), fixture.head);
 });
