@@ -451,3 +451,28 @@ export async function startWorker(
     failure: translateLocalFailure(response),
   });
 }
+
+/**
+ * Resolves the conventional owner's state directory without creating user settings.
+ * @param {string} projectDir - Main checkout of a conventional Git repository.
+ * @returns {string} Canonical project state directory, creating only the directory if absent.
+ */
+export function projectStateDirectory(projectDir) {
+  const project = fs.realpathSync(projectDir);
+  const common = runTrustedGitSync(project, [
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ]);
+  assert(
+    common.status === 0 &&
+      !common.timedOut &&
+      fs.realpathSync(common.stdout.trim()) ===
+        fs.realpathSync(path.join(project, ".git")) &&
+      fs.statSync(path.join(project, ".git")).isDirectory(),
+    "No organization anchor: use the main project checkout or provide its readable --org file; preserve branches",
+  );
+  const directory = path.join(project, ".omt");
+  fs.mkdirSync(directory, { recursive: true });
+  return fs.realpathSync(directory);
+}

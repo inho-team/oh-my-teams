@@ -55,12 +55,14 @@ export function terminalClosureLedgerFile(orgFile) {
 }
 
 /**
- * Reads every launch line, skipping a line a crashed writer left incomplete.
+ * Reads launch lines; safety proofs reject incomplete lines in strict mode.
  *
  * @param {string} orgFile - Organization JSON path.
+ * @param {object} [options] - Strict parsing for ownership evidence.
+ * @param {boolean} [options.strict=false] - Reject malformed lines instead of skipping them.
  * @returns {object[]} Launch lines in the order they were appended.
  */
-export function readLaunches(orgFile) {
+export function readLaunches(orgFile, { strict = false } = {}) {
   const file = ledgerFile(orgFile);
   if (!fs.existsSync(file)) return [];
   return fs
@@ -70,7 +72,11 @@ export function readLaunches(orgFile) {
       if (!line.trim()) return [];
       try {
         return [JSON.parse(line)];
-      } catch {
+      } catch (error) {
+        if (strict)
+          throw new Error(
+            `Launch ledger contains an unreadable record: ${error.message}`,
+          );
         return [];
       }
     });
@@ -281,6 +287,7 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
       schemaVersion: 1,
       at: now,
       via: launch.via,
+      worktreeProtocolVersion: launch.worktreeProtocolVersion ?? null,
       role: launch.role,
       profile: launch.profile ?? null,
       provider: launch.provider ?? null,

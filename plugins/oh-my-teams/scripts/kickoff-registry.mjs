@@ -7,11 +7,13 @@ import { isDeepStrictEqual } from "node:util";
 import {
   AUDITOR_ROLE,
   assert,
+  assertDirectorySync,
   hash,
   readJSON,
   validateOrg,
   withFileLock,
   writeJSON,
+  writeDurableJSON,
 } from "./core.mjs";
 import { closeKickoffSignals } from "./director.mjs";
 import { resolveGitCommonDir } from "./local-adapter.mjs";
@@ -33,6 +35,13 @@ import {
 import { deliveryRefDocId, documentState } from "./documents.mjs";
 import { assertDirectorAuthority } from "./delivery.mjs";
 import { readLaunches } from "./usage-ledger.mjs";
+import {
+  withWorktreeLock,
+  withWorktreeLockSync,
+  withProjectWorktreeLockSync,
+  retiredWorktrees,
+} from "./worktree-transactions.mjs";
+import { captureWorktreeReuseEvidence } from "./worktree-reuse.mjs";
 
 /** Reasons a registered kickoff may be ended, in the order they end one. */
 export const RELEASE_REASONS = ["completed", "disbanded", "taken-over"];
@@ -1041,6 +1050,11 @@ export function registerKickoff(orgFile, request) {
     for (const warning of warnings) console.warn(`[omt] Warning: ${warning}`);
     const entry = validateEntry({
       schemaVersion: 1,
+      reuseProtocol: {
+        version: 1,
+        registeredBy: "kickoff-claim",
+        organizationFile: fs.realpathSync(orgFile),
+      },
       goal: claim.goal,
       pm: {
         worktreeId,
@@ -1615,7 +1629,31 @@ export function recordDelivery(
  *   a takeover is requested without authorization, or (for `completed`) the
  *   ledger/audit check fails.
  */
-export async function releaseKickoff(
+export async function releaseKickoff(orgFile, request) {
+  return withWorktreeLock(orgFile, async (prepare) => {
+    let transaction;
+    let durabilityError;
+    try {
+      assertDirectorySync(path.dirname(fs.realpathSync(orgFile)));
+    } catch (error) {
+      if (error.code !== "worktree-durability-unavailable") throw error;
+      durabilityError = error.message;
+    }
+    const result = await releaseKickoffUnderLock(
+      orgFile,
+      request,
+      (operation) => {
+        if (!durabilityError) transaction = prepare(operation);
+      },
+      durabilityError,
+    );
+    return transaction
+      ? transaction.complete(result)
+      : { ...result, reuseUnavailable: durabilityError };
+  });
+}
+
+async function releaseKickoffUnderLock(
   orgFile,
   {
     worktreeId,
@@ -1626,6 +1664,8 @@ export async function releaseKickoff(
     head,
     repo,
   },
+  prepare,
+  durabilityError,
 ) {
   if (reason === "completed") {
     const [entry] = listKickoffs(orgFile, worktreeId).kickoffs;
@@ -1759,13 +1799,30 @@ export async function releaseKickoff(
       "history",
       `kickoff-${entryName(worktreeId)}-${entry.createdAt.replace(/[:.]/g, "-")}.json`,
     );
-    writeJSON(archived, {
+    const reuseEvidence =
+      reason === "completed"
+        ? durabilityError
+          ? { schemaVersion: 1, status: "unavailable", reason: durabilityError }
+          : captureWorktreeReuseEvidence(entry, orgFile)
+        : undefined;
+    prepare({
+      type: "kickoff-release",
+      worktreeId,
+      archive: archived,
+      kickoffHash: entry.registrationSeq ? kickoffHashFor(entry) : null,
+    });
+    fs.mkdirSync(path.dirname(archived), { recursive: true });
+    if (!durabilityError)
+      assertDirectorySync(path.dirname(path.dirname(archived)));
+    (durabilityError ? writeJSON : writeDurableJSON)(archived, {
       ...entry,
+      ...(reuseEvidence ? { reuseEvidence } : {}),
       releasedAt: new Date().toISOString(),
       releaseReason: reason,
       ...(cleanupRecord ? { cleanup: cleanupRecord } : {}),
     });
     fs.unlinkSync(file);
+    if (!durabilityError) assertDirectorySync(path.dirname(file));
     return { released: true, reason, archived, entry };
   });
   // The inbox lock is taken only after the registry lock is released, so a
@@ -1800,15 +1857,38 @@ export async function releaseKickoff(
  *   deleted, and `force` does not bypass that refusal.
  * @returns {{deleted: string[], skipped: string[], errors: string[]}} Result.
  */
-export function cleanupKickoffBranches({
-  projectDir,
-  entry,
-  branches,
-  remoteName = "origin",
-  callerCwd = process.cwd(),
-  force = false,
-  orgFile,
-}) {
+export function cleanupKickoffBranches(request) {
+  const orgFile =
+    request.orgFile ??
+    request.entry?.reuseProtocol?.organizationFile ??
+    path.join(request.projectDir, ".omt", "organization.json");
+  if (
+    request.orgFile === undefined &&
+    !request.entry?.reuseProtocol &&
+    !fs.existsSync(orgFile)
+  ) {
+    return withProjectWorktreeLockSync(request.projectDir, (prepare, anchor) =>
+      cleanupKickoffBranchesUnderLock(request, prepare, anchor),
+    );
+  }
+  return withWorktreeLockSync(orgFile, (prepare) =>
+    cleanupKickoffBranchesUnderLock(request, prepare, orgFile),
+  );
+}
+
+function cleanupKickoffBranchesUnderLock(
+  {
+    projectDir,
+    entry,
+    branches,
+    remoteName = "origin",
+    callerCwd = process.cwd(),
+    force = false,
+    orgFile,
+  },
+  prepare,
+  anchor,
+) {
   assert(
     typeof projectDir === "string" && projectDir,
     "projectDir required for branch cleanup",
@@ -1875,8 +1955,17 @@ export function cleanupKickoffBranches({
     }
   }
 
+  const retiredBranches = new Set(
+    retiredWorktrees(anchor, entry.pm?.worktreeId).map((item) =>
+      item.before?.branch?.replace(/^refs\/heads\//, ""),
+    ),
+  );
   for (const branch of branches) {
     if (!branch || typeof branch !== "string") continue;
+    if (retiredBranches.has(branch.replace(/^refs\/heads\//, ""))) {
+      skipped.push(branch);
+      continue;
+    }
 
     // Verify that the branch's content has reached the delivery target before
     // deleting it. Branch name or PR status alone is not sufficient.
@@ -1892,6 +1981,12 @@ export function cleanupKickoffBranches({
       continue;
     }
 
+    const transaction = prepare({
+      type: "branch-cleanup",
+      sourceWorktreeId: entry.pm?.worktreeId ?? null,
+      branch,
+      remoteName,
+    });
     // Delete the remote branch first so a local failure does not leave
     // the remote in a state the caller cannot see.
     if (remoteName) {
@@ -1914,6 +2009,27 @@ export function cleanupKickoffBranches({
     } else {
       deleted.push(branch);
     }
+    if (errors.some((error) => error.endsWith(`:${branch}`))) break;
+    const remaining = tryGit(projectDir, [
+      "for-each-ref",
+      "--format=%(refname)",
+      `refs/heads/${branch}`,
+    ]);
+    assert(
+      remaining === "",
+      "Deleted branch still exists; preserve transition for reconciliation",
+    );
+    if (remoteName)
+      assert(
+        tryGit(projectDir, [
+          "ls-remote",
+          "--heads",
+          remoteName,
+          `refs/heads/${branch}`,
+        ]) === "",
+        "Remote deletion unverified",
+      );
+    transaction.complete({ branch, deleted: true });
   }
 
   return { deleted, skipped, errors };

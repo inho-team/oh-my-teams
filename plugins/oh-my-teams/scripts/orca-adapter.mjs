@@ -686,6 +686,39 @@ export async function reclaimWorktree(
 }
 
 /**
+ * Changes a parent using server-issued identities; the caller must fence and postcheck it.
+ * Orca supplies no expected-parent compare-and-set, so this is not a transaction by itself.
+ * @param {string} repo - Registered target PM checkout.
+ * @param {object} options - Child and parent identity keys and optional runner.
+ * @returns {Promise<object>} Raw mutation receipt, never proof of final ownership.
+ */
+export async function reparentWorktree(
+  repo,
+  { identityKey, parentIdentityKey, executable, execute = run },
+) {
+  assert(
+    typeof identityKey === "string" && identityKey,
+    "Child identity required",
+  );
+  assert(
+    typeof parentIdentityKey === "string" && parentIdentityKey,
+    "Parent identity required",
+  );
+  return runOrcaJson(
+    selectOrcaExecutable(executable),
+    [
+      "worktree",
+      "set",
+      "--worktree",
+      `identity:${identityKey}`,
+      "--parent-worktree",
+      `identity:${parentIdentityKey}`,
+    ],
+    { cwd: repo, execute },
+  );
+}
+
+/**
  * Creates a worktree and requires a real role-terminal session before handing
  * it to the caller. Only an explicit, observed no-session result is reclaimed;
  * a thrown or ambiguous launch is preserved for reconciliation.
@@ -717,12 +750,17 @@ export async function createWorktreeWithRoleSession(repo, options) {
   if (session?.sessionObserved === false) {
     let reclaimed;
     try {
-      reclaimed = await reclaimWorktree(repo, {
-        id: workspace.id,
-        executable: workspace.executable,
-        discovery: workspace.discovery,
-        execute: options.execute,
-      });
+      const remove = (identityKey) =>
+        reclaimWorktree(repo, {
+          id: workspace.id,
+          identityKey,
+          executable: workspace.executable,
+          discovery: workspace.discovery,
+          execute: options.execute,
+        });
+      reclaimed = options.reclaimWithProof
+        ? await options.reclaimWithProof(workspace, remove)
+        : await remove();
     } catch (cause) {
       // A default shell can remain after a role-terminal refusal.  The
       // worktree id is the only safe reconciliation target, so never lose it

@@ -246,7 +246,7 @@ const MATRIX_RULES = [
   // win32는 규칙 2-1이 먼저 걸러내므로, 이 규칙은 실질적으로 POSIX(darwin·linux)에만 적용됩니다.
   {
     match: ({ runner, trustRecordExists }) =>
-      runner === "agy" && !trustRecordExists,
+      runner === "agy" && trustRecordExists !== true,
     result: {
       path: "supervised-terminal",
       reason: ["agent-trust-workspace"],
@@ -338,7 +338,7 @@ const MATRIX_RULES = [
   // claude 계열도 통과하며, 폭 조정 여부와 결과가 같아 gemini·gpt-oss 한정 조건은 근거를 잃었다.
   {
     match: ({ runner, platform, trustRecordExists }) =>
-      runner === "agy" && platform !== "win32" && trustRecordExists,
+      runner === "agy" && platform !== "win32" && trustRecordExists === true,
     result: {
       path: "supervised-terminal",
       reason: [],

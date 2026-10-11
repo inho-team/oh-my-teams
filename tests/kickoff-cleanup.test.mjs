@@ -36,6 +36,7 @@ const worktrees = [
     worktreeId: pm,
     path: "/tmp/pm",
     worktreeInstanceId: "pm-instance",
+    hostId: "local",
     childWorktreeIds: [child],
     liveTerminalCount: 0,
   },
@@ -43,6 +44,7 @@ const worktrees = [
     worktreeId: child,
     path: "/tmp/child",
     worktreeInstanceId: "child-instance",
+    hostId: "local",
     parentWorktreeId: pm,
     liveTerminalCount: 0,
   },
@@ -197,6 +199,7 @@ test("a matching Orca PTY kill receipt proves a role launch ended", () => {
   ];
   input.closures = [
     {
+      identity: { instanceId: "child-instance", executionHostId: "local" },
       at: "2026-09-29T00:20:00.000Z",
       worktreeId: child,
       worktreePath: "/tmp/child",
@@ -542,6 +545,7 @@ async function reclaimFixture(t) {
       result: {
         worktree: {
           id,
+          parentWorktreeId: id === pmId ? null : pmId,
           path: id.split("::")[1],
           identity: {
             key: `wt2:local:${id}-instance`,
@@ -607,8 +611,10 @@ test("an Orca removal error stays unverified and is not retried", async (t) => {
     result.attempts.every((attempt) => attempt.outcome === "unverified"),
   );
   assert.match(result.attempts[0].error, /Orca refused removal/);
-  const retried = await reclaimKickoffCleanup(fixture.request, fixture);
-  assert.equal(retried.attempts.length, result.attempts.length);
+  await assert.rejects(
+    () => reclaimKickoffCleanup(fixture.request, fixture),
+    /Unresolved/,
+  );
   assert.deepEqual(fixture.calls, []);
 });
 
@@ -674,7 +680,10 @@ test("an unobserved Orca removal is not repeated on reentry", async (t) => {
   });
   assert.equal(uncertain.attempts[0].outcome, "unverified");
   assert.match(uncertain.attempts[0].error, /inventory unavailable/);
-  await reclaimKickoffCleanup(fixture.request, fixture);
+  await assert.rejects(
+    () => reclaimKickoffCleanup(fixture.request, fixture),
+    /Unresolved/,
+  );
   assert.equal(
     fixture.calls.filter((id) => id === fixture.ids.secondId).length,
     1,

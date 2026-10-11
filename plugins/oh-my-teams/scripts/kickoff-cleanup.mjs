@@ -14,10 +14,17 @@ import {
   selectOrcaExecutable,
 } from "./orca-adapter.mjs";
 import { readLaunches, readTerminalClosures } from "./usage-ledger.mjs";
+import {
+  retiredWorktrees,
+  withWorktreeLock,
+} from "./worktree-transactions.mjs";
 
 function archivedEntry(orgFile, archiveFile, worktreeId) {
-  const directory = path.join(path.dirname(path.resolve(orgFile)), "history");
-  const file = path.resolve(archiveFile);
+  const directory = path.join(
+    path.dirname(fs.realpathSync(orgFile)),
+    "history",
+  );
+  const file = fs.realpathSync(archiveFile);
   assert(
     path.dirname(file) === directory,
     "Archive must be in the organization's history directory",
@@ -110,7 +117,21 @@ function receiptBody(receipt) {
   return receipt?.result ?? receipt ?? {};
 }
 
-function closureProvesLaunch(closure, launch, worktreeId, location) {
+function closureProvesLaunch(
+  closure,
+  launch,
+  worktreeId,
+  location,
+  instanceId,
+  hostId,
+) {
+  if (
+    !instanceId ||
+    !hostId ||
+    closure.identity?.instanceId !== instanceId ||
+    closure.identity?.executionHostId !== hostId
+  )
+    return false;
   if (
     closure?.worktreeId !== worktreeId ||
     path.resolve(closure.worktreePath ?? "") !== path.resolve(location) ||
@@ -150,7 +171,14 @@ function closureProvesLaunch(closure, launch, worktreeId, location) {
   );
 }
 
-function closedLaunchesProven(launches, closures, id, location) {
+function closedLaunchesProven(
+  launches,
+  closures,
+  id,
+  location,
+  instanceId,
+  hostId,
+) {
   if (typeof location !== "string") return false;
   const owned = launches.filter((launch) => launch.worktreePath === location);
   return (
@@ -159,7 +187,14 @@ function closedLaunchesProven(launches, closures, id, location) {
       (launch) =>
         typeof launch.terminal === "string" &&
         closures.some((closure) =>
-          closureProvesLaunch(closure, launch, id, location),
+          closureProvesLaunch(
+            closure,
+            launch,
+            id,
+            location,
+            instanceId,
+            hostId,
+          ),
         ),
     )
   );
@@ -180,6 +215,12 @@ export function evaluateKickoffCleanup(entry, observed) {
   const byId = new Map(worktrees.map((item) => [item.worktreeId, item]));
   const candidates = candidateIds(entry, worktrees).map((id) => {
     const item = byId.get(id);
+    if (observed.retired?.includes(id))
+      return {
+        worktreeId: id,
+        status: "transferred",
+        reasons: ["ownership-transferred"],
+      };
     const location = worktreePath(id, item, entry);
     const previous = entry.cleanup?.candidates?.find(
       (candidate) => candidate.worktreeId === id,
@@ -233,6 +274,8 @@ export function evaluateKickoffCleanup(entry, observed) {
         observed.closures ?? [],
         id,
         location,
+        item?.worktreeInstanceId,
+        item?.hostId,
       )
     )
       reasons.push("process-exit-unproven");
@@ -269,7 +312,9 @@ export function evaluateKickoffCleanup(entry, observed) {
     runId: entry.runId,
     scannedAt: observed.scannedAt ?? new Date().toISOString(),
     inventoryComplete,
-    status: candidates.every((item) => item.status === "already-removed")
+    status: candidates.every((item) =>
+      ["already-removed", "transferred"].includes(item.status),
+    )
       ? "clean"
       : "cleanup-pending",
     candidates,
@@ -395,7 +440,7 @@ async function allWorkerObservations(executable, orca, requiredRunId) {
  * @returns {Promise<object>} Conservative cleanup inventory.
  */
 export async function scanKickoffCleanup(
-  { orgFile, worktreeId, archiveFile, executable },
+  { orgFile, worktreeId, archiveFile, executable, integrationCommit },
   {
     orca = runOrcaJson,
     gitCommand = git,
@@ -456,7 +501,7 @@ export async function scanKickoffCleanup(
     if (location && !fs.existsSync(location)) absentPaths.push(location);
     gitStates[id] = await gitObservation(
       location,
-      entry.delivered,
+      integrationCommit ? { mergeCommit: integrationCommit } : entry.delivered,
       ownerProject(orgFile),
       gitCommand,
     );
@@ -465,6 +510,9 @@ export async function scanKickoffCleanup(
     worktrees,
     terminals,
     workers,
+    retired: retiredWorktrees(orgFile, worktreeId).map(
+      (entry) => entry.worktreeId,
+    ),
     launches: readLaunches(orgFile),
     closures: readTerminalClosures(orgFile),
     git: gitStates,
@@ -505,10 +553,17 @@ function isDescendant(candidate, ancestorId, candidates) {
  * @param {object} [ports] - Injectable read-only scanner and Orca reclaimer.
  * @returns {Promise<object>} Durable per-candidate cleanup result.
  */
-export async function reclaimKickoffCleanup(
+export async function reclaimKickoffCleanup(request, ports = {}) {
+  return withWorktreeLock(request.orgFile, (prepare) =>
+    reclaimKickoffCleanupUnderLock(request, { ...ports, prepare }),
+  );
+}
+
+async function reclaimKickoffCleanupUnderLock(
   { orgFile, worktreeId, archiveFile, executable, callerCwd = process.cwd() },
   {
     scan = scanKickoffCleanup,
+    prepare,
     show = runOrcaJson,
     reclaim = reclaimWorktree,
   } = {},
@@ -567,7 +622,7 @@ export async function reclaimKickoffCleanup(
         const pendingChild = latest.candidates.some(
           (item) =>
             item.worktreeId !== id &&
-            item.status !== "already-removed" &&
+            !["already-removed", "transferred"].includes(item.status) &&
             (id === worktreeId || isDescendant(item, id, latest.candidates)),
         );
         if (
@@ -605,6 +660,7 @@ export async function reclaimKickoffCleanup(
               shown.path === candidate.path &&
               shown.identity?.instanceId === candidate.instanceId &&
               shown.identity?.executionHostId === candidate.hostId &&
+              shown.parentWorktreeId === candidate.parentWorktreeId &&
               typeof shown.identity?.key === "string" &&
               shown.identity.key,
             `Worktree ${id} identity changed or could not be verified; preserve it`,
@@ -614,7 +670,14 @@ export async function reclaimKickoffCleanup(
           attempt.outcome = "refused";
           attempt.error = error.message;
         }
+        let transaction;
         if (identityKey) {
+          transaction = prepare({
+            type: "kickoff-reclaim",
+            worktreeId: id,
+            identityKey,
+            sourceWorktreeId: worktreeId,
+          });
           try {
             attempt.receipt = await reclaim(ownerProject(orgFile), {
               id,
@@ -642,6 +705,9 @@ export async function reclaimKickoffCleanup(
           }
         }
         writeJSON(recordFile, record);
+        if (transaction && attempt.outcome === "removed")
+          transaction.complete(attempt);
+        if (transaction && attempt.outcome !== "removed") break;
       }
       try {
         record.latest = await scan(request);

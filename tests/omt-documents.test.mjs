@@ -1342,6 +1342,10 @@ test("orgFile_부재_기본_동작_조회_실패_거부", (t) => {
     delivery: { mode: "local-merge", branch: "main" },
     delivered: { head: mergeCommit, mergeCommit },
   };
+  assert.equal(
+    fs.existsSync(path.join(repoDir, ".omt", "organization.json")),
+    false,
+  );
   const withoutOrgFile = cleanupKickoffBranches({
     projectDir: repoDir,
     entry: registrationSeqLessEntry,
@@ -1353,6 +1357,15 @@ test("orgFile_부재_기본_동작_조회_실패_거부", (t) => {
     skipped: [],
     errors: [],
   });
+
+  assert.equal(
+    fs.existsSync(path.join(repoDir, ".omt", "organization.json")),
+    false,
+  );
+  const journal = readJSON(
+    path.join(repoDir, ".omt", "worktree-transitions.json"),
+  );
+  assert.equal(journal.entries[0].status, "completed");
 
   const { repoDir: repoDir2, mergeCommit: mergeCommit2 } = mergedGitRepo(t);
   const missingOrgFile = path.join(repoDir2, "does-not-exist.json");
