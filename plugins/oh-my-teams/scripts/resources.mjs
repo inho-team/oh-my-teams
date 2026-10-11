@@ -377,7 +377,7 @@ async function pmProviderOverload(orgFile, entry, options) {
  * @param {string} [options.orcaExecutable] - Orca binary path.
  * @param {Function} [options.freeMemory] - Injectable free-memory reporter.
  * @param {Function} [options.listTerminals] - Injectable async Orca terminal lister, for tests.
- * @param {Function} [options.execute] - Injectable command runner for the PM screen read.
+ * @param {Function} [options.execute] - Injectable command runner for PM observation adapters.
  * @returns {Promise<object>} Watch report with signals, slots, memory, and kickoffs.
  */
 export async function directorWatch(orgFile, options = {}) {
@@ -438,6 +438,8 @@ export async function directorWatch(orgFile, options = {}) {
           pmTerminal = await findPmTerminal(orgFile, entry.pm.path, {
             orcaExecutable: options.orcaExecutable,
             listTerminals: options.listTerminals,
+            execute: options.execute,
+            strict: true,
           });
           terminalObservation = pmTerminal
             ? {

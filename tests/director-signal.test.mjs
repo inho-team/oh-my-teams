@@ -1090,6 +1090,93 @@ test("directorWatch distinguishes confirmed PM terminal absence from query failu
   assert.equal(kickoff.observation.runtime.terminalError, null);
 });
 
+async function observePmTerminalAdapter(t, terminalListResult) {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", "codex");
+  const calls = [];
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "orca-test",
+    freeMemory: () => 1024 * 1024 * 1024,
+    execute: async (argv) => {
+      calls.push(argv);
+      if (argv[1] === "terminal" && argv[2] === "list") {
+        return terminalListResult;
+      }
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "not used by terminal observation",
+      };
+    },
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.deepEqual(calls.at(-1), ["orca-test", "terminal", "list", "--json"]);
+  return kickoff.observation.runtime;
+}
+
+test("directorWatch keeps actual nonzero terminal adapter responses unverifiable", async (t) => {
+  const runtime = await observePmTerminalAdapter(t, {
+    code: 42,
+    stdout: "",
+    stderr: "orca terminal list unavailable",
+  });
+  assert.equal(runtime.terminalStatus, "unverifiable");
+  assert.equal(runtime.terminalProof, "query-failed");
+  assert.equal(
+    runtime.source,
+    "orca-terminal-list-query-failed-and-launch-ledger",
+  );
+  assert.equal(runtime.nextOwner, "director");
+  assert.match(runtime.terminalError, /exited with code 42/);
+  assert.match(runtime.terminalError, /orca terminal list unavailable/);
+});
+
+test("directorWatch keeps invalid terminal adapter JSON and envelopes unverifiable", async (t) => {
+  for (const terminalListResult of [
+    { code: 0, stdout: "{" },
+    {
+      code: 0,
+      stdout: JSON.stringify({ ok: true, result: { terminals: {} } }),
+    },
+    { code: 0, stdout: JSON.stringify({ ok: true, result: {} }) },
+    {
+      code: 0,
+      stdout: JSON.stringify({
+        ok: false,
+        result: { terminals: [] },
+        error: { message: "terminal list denied" },
+      }),
+    },
+  ]) {
+    const runtime = await observePmTerminalAdapter(t, terminalListResult);
+    assert.equal(runtime.terminalStatus, "unverifiable");
+    assert.equal(runtime.terminalProof, "query-failed");
+    assert.equal(
+      runtime.source,
+      "orca-terminal-list-query-failed-and-launch-ledger",
+    );
+    assert.equal(runtime.nextOwner, "director");
+    assert.match(
+      runtime.terminalError,
+      /invalid JSON|invalid terminal envelope|failed response envelope/,
+    );
+  }
+});
+
+test("directorWatch recognizes actual successful empty terminal adapter output as absent", async (t) => {
+  const runtime = await observePmTerminalAdapter(
+    t,
+    orcaEnvelope({ terminals: [] }),
+  );
+  assert.equal(runtime.terminalStatus, "absent");
+  assert.equal(runtime.terminalProof, "terminal-list-confirmed-absent");
+  assert.equal(runtime.source, "orca-terminal-list-and-launch-ledger");
+  assert.equal(runtime.terminalError, null);
+});
+
 test("directorWatch does not claim terminal absence without a PM launch binding", async (t) => {
   const { orgFile, worktreeId } = makeProject(t);
   let listed = false;

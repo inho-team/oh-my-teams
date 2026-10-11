@@ -774,19 +774,65 @@ export async function replySignal(orgFile, request) {
   };
 }
 
-// Lists Orca terminals as plain records; any failure yields an empty list so
-// that a missing Orca only skips notification. `execute` is the same
-// injectable command runner every other Orca call in this module takes, so
-// `notifyTerminal` and `findPmTerminal` parse one terminal-list response the
-// same way instead of each keeping its own copy.
-async function orcaTerminals(orcaExecutable, execute = run) {
-  const result = await execute([orcaExecutable, "terminal", "list", "--json"], {
-    timeoutMs: 10000,
-  });
-  if (result.code !== 0) return [];
-  const payload = JSON.parse(result.stdout);
+// Lists Orca terminals as plain records. Notification uses its default
+// best-effort mode: a missing or malformed response merely skips terminal
+// input. Supervision passes `strict` so an adapter failure cannot be confused
+// with a successful empty list observation.
+async function orcaTerminals(
+  orcaExecutable,
+  execute = run,
+  { strict = false } = {},
+) {
+  const fallback = (message, cause) => {
+    if (strict) {
+      const detail = cause instanceof Error ? cause.message : cause;
+      throw new Error(detail ? `${message}: ${detail}` : message);
+    }
+    return [];
+  };
+  let result;
+  try {
+    result = await execute([orcaExecutable, "terminal", "list", "--json"], {
+      timeoutMs: 10000,
+    });
+  } catch (error) {
+    return fallback("Orca terminal list command failed", error);
+  }
+  if (!result || typeof result !== "object") {
+    return fallback("Orca terminal list returned an invalid command result");
+  }
+  if (result.code !== 0) {
+    return fallback(
+      `Orca terminal list exited with code ${result.code}`,
+      typeof result.stderr === "string" && result.stderr.trim()
+        ? result.stderr.trim()
+        : undefined,
+    );
+  }
+  if (typeof result.stdout !== "string") {
+    return fallback("Orca terminal list returned a non-string JSON payload");
+  }
+  let payload;
+  try {
+    payload = JSON.parse(result.stdout);
+  } catch (error) {
+    return fallback("Orca terminal list returned invalid JSON", error);
+  }
+  if (payload && typeof payload === "object" && payload.ok === false) {
+    const error =
+      typeof payload.error === "string"
+        ? payload.error
+        : payload.error?.message;
+    return fallback(
+      "Orca terminal list returned a failed response envelope",
+      error,
+    );
+  }
   const listed = payload?.result?.terminals ?? payload?.terminals ?? payload;
-  return Array.isArray(listed) ? listed : [];
+  if (!Array.isArray(listed)) {
+    return fallback("Orca terminal list returned an invalid terminal envelope");
+  }
+  return listed;
 }
 
 /**
@@ -826,7 +872,11 @@ export function findPmLaunch(orgFile, pmPath) {
  *
  * @param {string} orgFile - Organization JSON path whose ledger is read.
  * @param {string} pmPath - PM worktree path recorded in the kickoff registry.
- * @param {object} [options] - `orcaExecutable`, or an injectable `listTerminals`.
+ * @param {object} [options] - Terminal-list options.
+ * @param {string} [options.orcaExecutable] - Orca executable name or path.
+ * @param {Function} [options.listTerminals] - Injectable terminal lister.
+ * @param {Function} [options.execute] - Injectable command runner for the adapter path.
+ * @param {boolean} [options.strict] - Throw for command or response failures.
  * @returns {Promise<string | undefined>} The terminal handle, or undefined.
  */
 export async function findPmTerminal(orgFile, pmPath, options = {}) {
@@ -835,7 +885,10 @@ export async function findPmTerminal(orgFile, pmPath, options = {}) {
   if (!launch) return undefined;
   const list =
     options.listTerminals ??
-    (() => orcaTerminals(options.orcaExecutable ?? "orca"));
+    (() =>
+      orcaTerminals(options.orcaExecutable ?? "orca", options.execute, {
+        strict: options.strict === true,
+      }));
   const live = (await list()).some(
     (terminal) =>
       terminal?.handle === launch.terminal &&

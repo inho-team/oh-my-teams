@@ -480,7 +480,6 @@ test("Director Message MCP confines reads and writes to terminal-owned kickoffs"
 
 test("Message MCP stdio refuses a registered mailbox without caller provenance", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-stdio-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const { state } = registeredState(root);
   const script = path.resolve("plugins/oh-my-teams/scripts/message-mcp.mjs");
   const client = new Client({ name: "omt-message-test", version: "1.0.0" });
@@ -488,10 +487,18 @@ test("Message MCP stdio refuses a registered mailbox without caller provenance",
     command: process.execPath,
     args: [script, "--state", state, "--actor", "pm"],
   });
-  await client.connect(transport);
   t.after(async () => {
-    await client.close();
+    try {
+      await client.close();
+    } finally {
+      try {
+        await transport.close();
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
   });
+  await client.connect(transport);
   const listed = await client.listTools();
   assert.deepEqual(
     listed.tools.map((tool) => tool.name),
@@ -516,7 +523,6 @@ test("Message MCP stdio refuses a registered mailbox without caller provenance",
 
 test("Message MCP stdio uses a fixed launch worktree when pane env is absent", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-message-stdio-ok-"));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const { state } = registeredState(root);
   const script = path.resolve("plugins/oh-my-teams/scripts/message-mcp.mjs");
   const client = new Client({
@@ -529,10 +535,18 @@ test("Message MCP stdio uses a fixed launch worktree when pane env is absent", a
     cwd: root,
     env: { ORCA_AGENT_PANE: "", ORCA_TERMINAL_HANDLE: "" },
   });
-  await client.connect(transport);
   t.after(async () => {
-    await client.close();
+    try {
+      await client.close();
+    } finally {
+      try {
+        await transport.close();
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
   });
+  await client.connect(transport);
   const received = await client.callTool({
     name: "receive_messages",
     arguments: {},
