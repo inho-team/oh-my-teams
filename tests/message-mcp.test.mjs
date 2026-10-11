@@ -27,7 +27,10 @@ import {
   executeCommand,
   parseArgs,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
-import { messageMcpLaunch } from "../plugins/oh-my-teams/scripts/message-mcp-config.mjs";
+import {
+  messageMcpDependencyStatus,
+  messageMcpLaunch,
+} from "../plugins/oh-my-teams/scripts/message-mcp-config.mjs";
 import { deliverEventToMessage } from "../plugins/oh-my-teams/scripts/document-event-delivery.mjs";
 import { roleCommand } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 
@@ -157,6 +160,22 @@ test("Role launch attaches Message MCP through session arguments", () => {
   );
 });
 
+test("Message MCP launch reports an installation dependency failure before role startup", () => {
+  const dependencyStatus = messageMcpDependencyStatus({
+    resolve: () => {
+      const error = new Error("missing");
+      error.code = "MODULE_NOT_FOUND";
+      throw error;
+    },
+  });
+  const launch = messageMcpLaunch("codex", "/tmp/omt-state", "pm", {
+    dependencyStatus,
+  });
+  assert.equal(launch.available, false);
+  assert.equal(launch.startup, "dependency-unavailable");
+  assert.match(launch.reason, /prepare that installation/);
+});
+
 function registeredState(root) {
   execFileSync("git", ["init", root], { stdio: "ignore" });
   const state = path.join(root, ".omt");
@@ -224,7 +243,11 @@ test("Director signals and replies use the OMT mailbox without terminal input", 
   assert.equal(directorMessages.length, 1);
   assert.equal(directorMessages[0].id, signal.messageId);
   const directorTool = await handleMessageTool(
-    { orgFile, actor: "director", directorTerminal: "term_director" },
+    {
+      orgFile,
+      actor: "director",
+      callerSession: { terminal: "term_director", source: "test" },
+    },
     "receive_messages",
   );
   assert.equal(
@@ -307,14 +330,22 @@ test("Director Message MCP confines reads and writes to terminal-owned kickoffs"
   sendMessage(state, kickoffHash, { ...message, key: "owner-check" });
 
   const foreign = await handleMessageTool(
-    { orgFile, actor: "director", directorTerminal: "term_other" },
+    {
+      orgFile,
+      actor: "director",
+      callerSession: { terminal: "term_other", source: "test" },
+    },
     "receive_messages",
   );
   assert.deepEqual(foreign.structuredContent.messages, []);
   await assert.rejects(
     () =>
       handleMessageTool(
-        { orgFile, actor: "director", directorTerminal: "term_other" },
+        {
+          orgFile,
+          actor: "director",
+          callerSession: { terminal: "term_other", source: "test" },
+        },
         "ack_message",
         {
           worktreeId,

@@ -1054,6 +1054,37 @@ test("directorWatch separates launch request, liveness observation, and stored p
   assert.equal(kickoff.observation.lastStoredProgress.autoAcknowledged, true);
 });
 
+test("directorWatch records a role-terminal PM without promoting terminal presence to live", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm", "codex");
+
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [
+      { handle: "term_pm", worktreePath: pmPath, agentIdentity: "codex" },
+    ],
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.equal(kickoff.pmLiveness, "unverifiable");
+  assert.equal(kickoff.observation.runtime.terminal, "term_pm");
+  assert.equal(
+    kickoff.observation.runtime.terminalStatus,
+    "present-unverified",
+  );
+  assert.equal(
+    kickoff.observation.runtime.nextAction,
+    "inspect-agent-session-or-Run-before-claiming-liveness",
+  );
+  assert.equal(
+    kickoff.observation.runtime.source,
+    "orca-terminal-list-and-launch-ledger",
+  );
+});
+
 test("replySignal reports that no PM terminal was found instead of claiming delivery", async (t) => {
   const { orgFile, worktreeId } = makeProject(t);
   const { id } = sendSignal(orgFile, {

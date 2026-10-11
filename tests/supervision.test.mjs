@@ -158,6 +158,24 @@ test("output-only activity cannot reset a semantic-progress escalation", () => {
   assert.equal(result.semanticProgressAt, minutesAgo(60));
 });
 
+test("explicitly unknown semantic progress never falls back to activity", () => {
+  const result = next({
+    liveness: "live",
+    lastActivityAt: minutesAgo(1),
+    semanticProgressAt: null,
+    inspections: 2,
+  });
+  assert.equal(result.action, "escalate");
+  assert.equal(result.reason, "no-activity-after-checks");
+  assert.equal(result.semanticProgressProof, "unknown");
+});
+
+test("missing semantic progress preserves the legacy activity compatibility rule", () => {
+  const result = next({ liveness: "live", lastActivityAt: minutesAgo(1) });
+  assert.equal(result.reason, "recent-activity");
+  assert.equal(result.semanticProgressProof, "legacy-activity");
+});
+
 test("verified semantic progress starts a new supervision assessment", () => {
   const escalatedAt = minutesAgo(10);
   const result = next({

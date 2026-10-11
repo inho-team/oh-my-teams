@@ -17,6 +17,7 @@ import {
   listKickoffs,
   resolveRegisteredKickoffFromState,
 } from "./kickoff-registry.mjs";
+import { runTrustedOrcaJson } from "./orca-adapter.mjs";
 import {
   acknowledgeMessage,
   getMessage,
@@ -87,8 +88,45 @@ const tools = [
 ];
 
 /**
+ * Resolves the terminal hosting this MCP server from Orca's pane identity.
+ * A bare terminal handle is intentionally insufficient: it can name another
+ * Director. Orca injects the tab/leaf pair for the current process, and the
+ * trusted adapter re-observes the matching live terminal. This also works
+ * when a role terminal does not expose ORCA_TERMINAL_HANDLE.
+ *
+ * @param {NodeJS.ProcessEnv} [environment=process.env] - Session environment.
+ * @returns {Promise<{terminal: string, worktreePath: string | null, source: string} | null>} Verified caller session or null.
+ */
+export async function resolveMessageCallerSession(environment = process.env) {
+  const pane = String(environment.ORCA_AGENT_PANE ?? "").trim();
+  const [tabId, leafId] = pane.split(":");
+  if (!tabId || !leafId) return null;
+  try {
+    const observed = await runTrustedOrcaJson(["terminal", "list"]);
+    const terminals = observed.result?.terminals;
+    if (!Array.isArray(terminals)) return null;
+    const terminal = terminals.find(
+      (item) => item?.tabId === tabId && item?.leafId === leafId,
+    );
+    if (!terminal?.handle || terminal.orphaned === true) return null;
+    const inherited = String(environment.ORCA_TERMINAL_HANDLE ?? "").trim();
+    if (inherited && inherited !== terminal.handle) return null;
+    return {
+      terminal: terminal.handle,
+      worktreePath:
+        typeof terminal.worktreePath === "string"
+          ? terminal.worktreePath
+          : null,
+      source: "orca-terminal-list-by-pane",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Execute one Message MCP tool with an identity fixed at server startup.
- * @param {{stateDir?: string, orgFile?: string, kickoffHash?: string, actor: string}} context - Bound kickoff or director organization and caller.
+ * @param {{stateDir?: string, orgFile?: string, kickoffHash?: string, actor: string, callerSession?: object}} context - Bound mailbox and runtime-verified caller session.
  * @param {string} name - Tool name.
  * @param {object} [args] - Tool arguments.
  * @returns {Promise<object>} MCP tool response.
@@ -102,10 +140,12 @@ export async function handleMessageTool(context, name, args = {}) {
       listKickoffs(context.orgFile).kickoffs.filter(
         (entry) => entry.registrationSeq !== undefined,
       );
-    const directorTerminal = String(context.directorTerminal ?? "").trim();
+    const directorTerminal = String(
+      context.callerSession?.terminal ?? "",
+    ).trim();
     if (!directorTerminal) {
       throw new Error(
-        "Director Message MCP requires ORCA_TERMINAL_HANDLE provenance",
+        "Director Message MCP requires an Orca caller-session provenance",
       );
     }
     const kickoffs = () =>
@@ -246,7 +286,7 @@ export async function handleMessageTool(context, name, args = {}) {
 
 /**
  * Create an MCP server bound to one registered kickoff and role actor.
- * @param {{stateDir?: string, orgFile?: string, kickoffHash?: string, actor: string}} context - Bound kickoff or director organization and caller.
+ * @param {{stateDir?: string, orgFile?: string, kickoffHash?: string, actor: string, callerSession?: object}} context - Bound mailbox and runtime-verified caller session.
  * @returns {Server} MCP server.
  */
 export function createMessageMcpServer(context) {
@@ -294,14 +334,13 @@ if (
     process.exit(1);
   }
   try {
+    const callerSession = await resolveMessageCallerSession();
     const context = {
       ...(values.org
         ? { orgFile: path.resolve(values.org) }
         : { stateDir: path.resolve(values.state) }),
       actor: validateMessageActor(values.actor),
-      ...(values.org
-        ? { directorTerminal: process.env.ORCA_TERMINAL_HANDLE }
-        : {}),
+      ...(callerSession ? { callerSession } : {}),
     };
     await createMessageMcpServer(context).connect(new StdioServerTransport());
   } catch (error) {

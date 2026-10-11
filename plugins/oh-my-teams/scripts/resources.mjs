@@ -387,7 +387,29 @@ export async function directorWatch(orgFile, options = {}) {
             String(b.sentAt).localeCompare(String(a.sentAt)),
         );
       const pmSlots = slots.filter((s) => s.worktreeId === entry.pm.worktreeId);
-      const liveness = await queryPmLiveness(entry, options.orcaExecutable);
+      const workerLiveness = await queryPmLiveness(
+        entry,
+        options.orcaExecutable,
+        options.execute,
+      );
+      // PMs opened through role-terminal are not supervised workers, so a
+      // worker-list miss cannot mean the PM is absent. The launch ledger binds
+      // the PM role to one terminal; findPmTerminal then independently checks
+      // that Orca still lists that exact terminal in the registered worktree.
+      const pmLaunch = findPmLaunch(orgFile, entry.pm.path);
+      let pmTerminal;
+      try {
+        pmTerminal = await findPmTerminal(orgFile, entry.pm.path, {
+          orcaExecutable: options.orcaExecutable,
+          listTerminals: options.listTerminals,
+        });
+      } catch {
+        pmTerminal = undefined;
+      }
+      // A connected terminal may be an empty shell, an idle agent, or a stale
+      // launch record. It is a useful identity observation but never positive
+      // agent liveness; only Orca's worker/session liveness may say "live".
+      const liveness = workerLiveness;
       const providerOverload = await pmProviderOverload(
         orgFile,
         entry,
@@ -408,11 +430,24 @@ export async function directorWatch(orgFile, options = {}) {
             observedAt,
           },
           launch: {
-            requestedModel:
-              findPmLaunch(orgFile, entry.pm.path)?.modelRequested ?? null,
+            requestedModel: pmLaunch?.modelRequested ?? null,
             configuredModel: entry.pm?.model ?? null,
             observedModel: null,
             source: "launch-ledger-and-kickoff-registry",
+            observedAt,
+          },
+          runtime: {
+            terminal: pmTerminal ?? null,
+            launchTerminal: pmLaunch?.terminal ?? entry.pm?.terminal ?? null,
+            workerLiveness,
+            terminalStatus: pmTerminal ? "present-unverified" : "absent",
+            nextOwner: pmTerminal ? "director" : "pm",
+            nextAction: pmTerminal
+              ? "inspect-agent-session-or-Run-before-claiming-liveness"
+              : "reconcile-launch-record-and-Orca-observation",
+            source: pmTerminal
+              ? "orca-terminal-list-and-launch-ledger"
+              : "orca-worker-list-and-launch-ledger",
             observedAt,
           },
           ...(progressSignals[0]

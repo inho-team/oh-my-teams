@@ -296,6 +296,12 @@ export function validateEntry(stored) {
   for (const key of ["path", "stateDir"]) {
     assert(text(pm[key]), `Kickoff pm ${key} required`);
   }
+  for (const key of ["provider", "model", "modelProof", "terminal"]) {
+    assert(
+      pm[key] === undefined || pm[key] === null || text(pm[key]),
+      `Kickoff pm ${key} must be a non-empty string or null when present`,
+    );
+  }
   assert(
     entry.selfPm === undefined || text(entry.selfPm),
     "Kickoff selfPm must state why no handoff was possible",
@@ -1046,6 +1052,12 @@ export function registerKickoff(orgFile, request) {
         worktreeId,
         path: pmPath,
         stateDir: path.resolve(text(claim.pm.stateDir) ?? ""),
+        ...(text(claim.pm.provider) ? { provider: claim.pm.provider } : {}),
+        ...(text(claim.pm.model) ? { model: claim.pm.model } : {}),
+        ...(text(claim.pm.modelProof)
+          ? { modelProof: claim.pm.modelProof }
+          : {}),
+        ...(text(claim.pm.terminal) ? { terminal: claim.pm.terminal } : {}),
       },
       runId: claim.runId ?? null,
       organizationRevision: revision,

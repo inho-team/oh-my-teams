@@ -114,9 +114,11 @@ export function nextSupervisionAction({
   const nowMs = new Date(now).getTime();
   if (Number.isNaN(nowMs)) throw new Error(`Invalid now: ${now}`);
   // `lastActivityAt` remains a useful diagnostic, but terminal redraws and
-  // heartbeats do not prove work advanced. Keep the legacy fallback for older
-  // callers that did not yet record semantic progress.
-  const progressAt = semanticProgressAt ?? lastActivityAt;
+  // heartbeats do not prove work advanced. Only an absent legacy field may
+  // use it: an explicit null means semantic progress is unknown and must not
+  // silently become recent activity.
+  const hasSemanticProgress = Object.hasOwn(arguments[0], "semanticProgressAt");
+  const progressAt = hasSemanticProgress ? semanticProgressAt : lastActivityAt;
   const last = Date.parse(progressAt ?? "");
   const silentMs = Number.isNaN(last) ? null : Math.max(0, nowMs - last);
   const silentMinutes = silentMs === null ? null : Math.floor(silentMs / 60000);
@@ -126,7 +128,12 @@ export function nextSupervisionAction({
     reason,
     silentMinutes,
     activityAt: lastActivityAt ?? null,
-    semanticProgressAt: semanticProgressAt ?? null,
+    semanticProgressAt: hasSemanticProgress ? semanticProgressAt : null,
+    semanticProgressProof: hasSemanticProgress
+      ? semanticProgressAt === null
+        ? "unknown"
+        : "proven"
+      : "legacy-activity",
     display:
       reason === "recent-activity"
         ? "진행 중"
