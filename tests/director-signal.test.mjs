@@ -1055,6 +1055,67 @@ test("directorWatch keeps every kickoff's own report when one PM terminal lookup
   // The rest of directorWatch's report is unaffected by the one kickoff's failure.
   assert.equal(typeof report.freeMemoryBytes, "number");
   assert.equal(kickoff.pmLiveness, "unverifiable");
+  assert.equal(kickoff.observation.runtime.terminalStatus, "unverifiable");
+  assert.equal(kickoff.observation.runtime.terminalProof, "query-failed");
+  assert.equal(
+    kickoff.observation.runtime.source,
+    "orca-terminal-list-query-failed-and-launch-ledger",
+  );
+  assert.equal(kickoff.observation.runtime.nextOwner, "director");
+  assert.match(kickoff.observation.runtime.terminalError, /Unexpected end/);
+});
+
+test("directorWatch distinguishes confirmed PM terminal absence from query failure", async (t) => {
+  const { orgFile, dir, worktreeId } = makeProject(t);
+  const pmPath = path.join(dir, "pm-worktree");
+  recordPmLaunch(orgFile, pmPath, "term_pm");
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => [],
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.equal(kickoff.observation.runtime.terminalStatus, "absent");
+  assert.equal(
+    kickoff.observation.runtime.terminalProof,
+    "terminal-list-confirmed-absent",
+  );
+  assert.equal(
+    kickoff.observation.runtime.source,
+    "orca-terminal-list-and-launch-ledger",
+  );
+  assert.equal(kickoff.observation.runtime.nextOwner, "director");
+  assert.equal(kickoff.observation.runtime.terminalError, null);
+});
+
+test("directorWatch does not claim terminal absence without a PM launch binding", async (t) => {
+  const { orgFile, worktreeId } = makeProject(t);
+  let listed = false;
+  const report = await directorWatch(orgFile, {
+    orcaExecutable: "no-such-orca-binary",
+    freeMemory: () => 1024 * 1024 * 1024,
+    listTerminals: async () => {
+      listed = true;
+      return [];
+    },
+  });
+  const kickoff = report.kickoffs.find(
+    (item) => item.worktreeId === worktreeId,
+  );
+  assert.equal(listed, false);
+  assert.equal(kickoff.observation.runtime.terminalStatus, "unverifiable");
+  assert.equal(
+    kickoff.observation.runtime.terminalProof,
+    "launch-binding-missing",
+  );
+  assert.equal(
+    kickoff.observation.runtime.source,
+    "launch-ledger-and-kickoff-registry",
+  );
+  assert.equal(kickoff.observation.runtime.nextOwner, "director");
+  assert.equal(kickoff.observation.runtime.terminalError, null);
 });
 
 test("directorWatch separates launch request, liveness observation, and stored progress", async (t) => {

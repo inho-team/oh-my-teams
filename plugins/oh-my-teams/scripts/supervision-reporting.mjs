@@ -212,6 +212,10 @@ function reportDecision({ observation, previous, policy }) {
           : "unknown",
       activityAt: observation.lastActivityAt ?? null,
       display: "감독자 관측 불가",
+      progressAdvanced: Boolean(progressAdvanced),
+      confirmedActionReceipt: receipt,
+      effectiveUnansweredRequests: unansweredRequests,
+      effectiveInspections: inspections,
     };
   }
   if (delayed) {
@@ -227,6 +231,10 @@ function reportDecision({ observation, previous, policy }) {
           : "unknown",
       activityAt: observation.lastActivityAt ?? null,
       display: "보고 지연",
+      progressAdvanced: Boolean(progressAdvanced),
+      confirmedActionReceipt: receipt,
+      effectiveUnansweredRequests: unansweredRequests,
+      effectiveInspections: inspections,
     };
   }
   const decision = nextSupervisionAction(base);
@@ -292,18 +300,18 @@ export function recordSupervisionObservation({
       pending,
       new Date(now).getTime(),
     );
-    const unansweredRequests = progressAdvanced
-      ? 0
-      : (decision.effectiveUnansweredRequests ??
-        previous?.unansweredRequests ??
-        observation.unansweredRequests ??
-        0);
-    const inspections = progressAdvanced
-      ? 0
-      : (decision.effectiveInspections ??
-        previous?.inspections ??
-        observation.inspections ??
-        0);
+    const unansweredRequests =
+      decision.effectiveUnansweredRequests ??
+      (progressAdvanced
+        ? 0
+        : (previous?.unansweredRequests ??
+          observation.unansweredRequests ??
+          0));
+    const inspections =
+      decision.effectiveInspections ??
+      (progressAdvanced
+        ? 0
+        : (previous?.inspections ?? observation.inspections ?? 0));
     const next = {
       schemaVersion: 1,
       dispatchId,
@@ -326,7 +334,12 @@ export function recordSupervisionObservation({
         ? [...new Set([...(previous?.actionReceiptIds ?? []), receipt.id])]
         : (previous?.actionReceiptIds ?? []),
       escalation,
-      pendingDecision: progressAdvanced || resolved ? null : pending,
+      pendingDecision:
+        decision.action === "escalate"
+          ? pending
+          : progressAdvanced || resolved
+            ? null
+            : pending,
       report: {
         state: "stored",
         proof: "local-durable",

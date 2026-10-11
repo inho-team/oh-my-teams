@@ -422,13 +422,51 @@ export async function directorWatch(orgFile, options = {}) {
       // the PM role to one terminal; findPmTerminal then independently checks
       // that Orca still lists that exact terminal in the registered worktree.
       let pmTerminal;
-      try {
-        pmTerminal = await findPmTerminal(orgFile, entry.pm.path, {
-          orcaExecutable: options.orcaExecutable,
-          listTerminals: options.listTerminals,
-        });
-      } catch {
+      let terminalObservation;
+      if (!pmLaunch?.terminal) {
         pmTerminal = undefined;
+        terminalObservation = {
+          status: "unverifiable",
+          source: "launch-ledger-and-kickoff-registry",
+          proof: "launch-binding-missing",
+          error: null,
+          nextOwner: "director",
+          nextAction: "recover-the-PM-launch-binding-before-observation",
+        };
+      } else {
+        try {
+          pmTerminal = await findPmTerminal(orgFile, entry.pm.path, {
+            orcaExecutable: options.orcaExecutable,
+            listTerminals: options.listTerminals,
+          });
+          terminalObservation = pmTerminal
+            ? {
+                status: "present-unverified",
+                source: "orca-terminal-list-and-launch-ledger",
+                proof: "terminal-list-observed",
+                nextOwner: "director",
+                nextAction:
+                  "inspect-agent-session-or-Run-before-claiming-liveness",
+              }
+            : {
+                status: "absent",
+                source: "orca-terminal-list-and-launch-ledger",
+                proof: "terminal-list-confirmed-absent",
+                nextOwner: "director",
+                nextAction: "reconcile-launch-record-and-Orca-observation",
+              };
+        } catch (error) {
+          pmTerminal = undefined;
+          terminalObservation = {
+            status: "unverifiable",
+            source: "orca-terminal-list-query-failed-and-launch-ledger",
+            proof: "query-failed",
+            error: error instanceof Error ? error.message : String(error),
+            nextOwner: "director",
+            nextAction:
+              "re-run-terminal-observation-or-recover-the-observation-path",
+          };
+        }
       }
       // A connected terminal may be an empty shell, an idle agent, or a stale
       // launch record. It is a useful identity observation but never positive
@@ -490,18 +528,16 @@ export async function directorWatch(orgFile, options = {}) {
             terminal: pmTerminal ?? null,
             launchTerminal: pmLaunch?.terminal ?? entry.pm?.terminal ?? null,
             workerLiveness,
-            terminalStatus: pmTerminal ? "present-unverified" : "absent",
+            terminalStatus: terminalObservation.status,
+            terminalProof: terminalObservation.proof,
+            terminalError: terminalObservation.error ?? null,
             run,
             dispatch: pmLaunch?.workerId
               ? { status: "recorded", id: pmLaunch.workerId }
               : { status: "none-recorded" },
-            nextOwner: pmTerminal ? "director" : "pm",
-            nextAction: pmTerminal
-              ? "inspect-agent-session-or-Run-before-claiming-liveness"
-              : "reconcile-launch-record-and-Orca-observation",
-            source: pmTerminal
-              ? "orca-terminal-list-and-launch-ledger"
-              : "orca-worker-list-and-launch-ledger",
+            nextOwner: terminalObservation.nextOwner,
+            nextAction: terminalObservation.nextAction,
+            source: terminalObservation.source,
             observedAt,
           },
           ...(progressSignals[0]

@@ -301,3 +301,64 @@ test("locally submitted observations do not default to official Orca provenance"
   });
   assert.equal(result.supervision.source, "supervisor-submitted");
 });
+
+test("progress and performed receipts survive normal and early-return decisions", (t) => {
+  const stateDir = state(t);
+  const progress = {
+    semanticProgressAt: now,
+    semanticProgressEvidence: { kind: "frozen-verify", key: "progress-1" },
+    semanticProgressSource: "verify",
+    actionReceipt: {
+      id: "inspect-with-progress",
+      action: "inspect",
+      status: "performed",
+      at: now,
+      evidence: { kind: "orca-observation", key: "observation-1" },
+    },
+  };
+  const cases = [
+    ["normal", {}],
+    ["absent", { supervisor: { status: "absent" } }],
+    [
+      "delayed",
+      { report: { state: "submitted", pendingAt: "2026-10-11T05:58:00.000Z" } },
+    ],
+  ];
+  for (const [label, extra] of cases) {
+    const result = recordSupervisionObservation({
+      stateDir,
+      dispatchId: `ctx_${label}_progress_receipt`,
+      policy,
+      observation: { liveness: "live", now, ...progress, ...extra },
+    });
+    assert.equal(result.progressAdvanced, true, label);
+    assert.equal(
+      result.confirmedActionReceipt.id,
+      "inspect-with-progress",
+      label,
+    );
+    assert.equal(result.effectiveInspections, 1, label);
+    assert.equal(result.supervision.inspections, 1, label);
+    assert.deepEqual(
+      result.supervision.lastProvenProgress.evidence,
+      progress.semanticProgressEvidence,
+      label,
+    );
+    assert.deepEqual(
+      result.supervision.actionReceiptIds,
+      ["inspect-with-progress"],
+      label,
+    );
+    if (label === "normal") {
+      assert.equal(result.supervision.pendingDecision, null);
+    } else {
+      assert.equal(
+        result.supervision.pendingDecision.reason,
+        result.reason,
+        label,
+      );
+      assert.ok(result.supervision.pendingDecision.cycle, label);
+      assert.ok(result.supervision.pendingDecision.nextOwner, label);
+    }
+  }
+});
