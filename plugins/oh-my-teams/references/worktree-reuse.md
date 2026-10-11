@@ -8,7 +8,7 @@ PM은 등록된 PM 체크아웃에서 `role-worktree-create`에 새 작업의 wo
 
 자동 재사용의 원천은 이 프로토콜로 등록된 킥오프여야 합니다. 등록 당시의 조직 파일 정본과 프로토콜 표식, 해당 워크트리의 실행 기록을 확인합니다. 완료 시점에는 실제 workflow의 작업별 수용 결정과 통합 결정 및 구성 작업의 revision·attempt·acceptedResult를 대조하여 보관 증명을 고정합니다. 이전 버전으로 등록된 킥오프를 새 버전에서 해제하는 것만으로는 참여 기록이 생기지 않습니다. 과거 기록을 직접 수정하여 소급 등록하지 않습니다.
 
-다른 활성 킥오프의 워크트리는 후보가 아닙니다. 보관된 원천도 실제 Orca와 Git을 다시 조사합니다. 정확한 instance와 execution host, 현재 부모, lineage, 자식 워크트리 부재, 모든 Run과 Dispatch 및 연결 터미널의 종료, 깨끗한 작업 디렉터리와 통합 HEAD의 포함 관계를 증명해야 합니다. 현재 터미널 목록이 비었다는 사실만으로 과거 실행의 종료를 추정하지 않습니다. 외부 터미널의 완료된 Dispatch가 `missing_status`로 남아 있으면 현재의 완전한 빈 목록에 더해 정확한 instance·host, PTY incarnation, runtime·tab, Dispatch release와 `ptyKilled: true` 영수증을 모두 대조합니다. 이 결속이 없거나 살아 있는 터미널·다른 Dispatch가 있으면 거부합니다. 정확한 instance에 대응하는 종료 영수증이 있어야 합니다. 누락되거나 읽을 수 없는 증명은 후보의 거부 사유로 남습니다.
+다른 활성 킥오프의 워크트리는 후보가 아닙니다. 보관된 원천도 실제 Orca와 Git을 다시 조사합니다. 정확한 instance와 execution host, 현재 부모, lineage, 자식 워크트리 부재, 모든 Run과 Dispatch 및 연결 터미널의 종료, 깨끗한 작업 디렉터리와 통합 HEAD의 포함 관계를 증명해야 합니다. 현재 터미널 목록이 비었다는 사실만으로 과거 실행의 종료를 추정하지 않습니다. 외부 터미널의 완료된 Dispatch가 `missing_status`로 남아 있으면 현재의 완전한 빈 목록에 더해 정확한 instance·host, PTY incarnation, runtime·tab, Dispatch release와 `ptyKilled: true` 영수증을 모두 대조합니다. 현재 worktree 조회와 terminal 조회의 hostScope를 따로 보존하고 대상 host가 양쪽 hostIds에 포함되며 omittedHostIds에 없음을 확인합니다. 두 조회는 완전하고 같은 runtime에서 와야 하며 외부 종료 증명은 그 runtime에도 일치해야 합니다. 대상 외 원격 host가 빠진 것만으로 검증된 local 후보를 거부하지 않습니다. 이 결속이 없거나 살아 있는 터미널·다른 Dispatch가 있으면 거부합니다. 정확한 instance에 대응하는 종료 영수증이 있어야 합니다. 누락되거나 읽을 수 없는 증명은 후보의 거부 사유로 남습니다.
 
 조직 디렉터리의 `worktree-reuse-decisions.json`에는 선택 결과와 후보별 거부 사유가 기록됩니다. 보관 증명은 수용 이력을 고정하며, 현재 프로세스나 Git 상태를 대신 증명하지 않습니다.
 

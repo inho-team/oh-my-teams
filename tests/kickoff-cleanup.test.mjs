@@ -353,14 +353,18 @@ test("a completed archive retains child identity for read-only partial cleanup r
     reason: "unsupervised_settled",
   };
   const orca = async (_executable, args) => ({
+    _meta: { runtimeId: "fixture-runtime" },
     result:
       args[0] === "worktree"
         ? {
+            hostScope: { hostIds: ["local"], omittedHostIds: [] },
+            truncated: false,
             worktrees: [
               {
                 worktreeId: pmId,
                 path: pmPath,
                 worktreeInstanceId: "pm-fixture-instance",
+                hostId: "local",
                 childWorktreeIds: childPresent ? [childId] : [],
               },
               ...(childPresent
@@ -369,6 +373,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
                       worktreeId: childId,
                       path: childPath,
                       worktreeInstanceId: "child-fixture-instance",
+                      hostId: "local",
                       parentWorktreeId: pmId,
                     },
                   ]
@@ -376,7 +381,11 @@ test("a completed archive retains child identity for read-only partial cleanup r
             ],
           }
         : args[0] === "terminal"
-          ? { terminals: [] }
+          ? {
+              terminals: [],
+              hostScope: { hostIds: ["local"], omittedHostIds: [] },
+              truncated: false,
+            }
           : args[1] === "run-list"
             ? args.includes("--cursor")
               ? { runs: [{ id: "run-another-kickoff" }], nextCursor: null }
@@ -703,6 +712,16 @@ function closedExternalObservation() {
     tabId: "tab-exact",
   };
   const scope = { hostIds: ["local"], omittedHostIds: ["unrelated-remote"] };
+  input.currentInventory = Object.fromEntries(
+    ["worktree", "terminal"].map((kind) => [
+      kind,
+      {
+        hostScope: structuredClone(scope),
+        runtimeId: runtime.runtimeId,
+        truncated: false,
+      },
+    ]),
+  );
   input.workers[1] = {
     dispatchId,
     workerState: "succeeded",
@@ -792,6 +811,22 @@ test("a settled external Dispatch needs exact PTY incarnation and closure to ove
     "safe-to-remove",
   );
   const cases = {
+    currentProvenanceMissing: (v) => {
+      delete v.currentInventory;
+    },
+    currentTargetAbsent: (v) => {
+      v.currentInventory.terminal.hostScope.hostIds = ["other-host"];
+    },
+    currentTargetOmitted: (v) => {
+      v.currentInventory.terminal.hostScope.omittedHostIds.push("local");
+    },
+    currentRuntimeMismatch: (v) => {
+      v.currentInventory.terminal.runtimeId = "new-runtime";
+    },
+    currentBothRuntimeChanged: (v) => {
+      v.currentInventory.terminal.runtimeId = "new-runtime";
+      v.currentInventory.worktree.runtimeId = "new-runtime";
+    },
     active: (v) => {
       v.workers[1].dispatchStatus = "running";
     },

@@ -171,12 +171,34 @@ function closureProvesLaunch(
   );
 }
 
+// Keep the two current inventories separate: worktree visibility does not prove
+// that the terminal query covered the same host or came from the same runtime.
+function currentInventoryProven(observed, hostId) {
+  const { worktree, terminal } = observed.currentInventory ?? {};
+  return (
+    typeof hostId === "string" &&
+    hostId.length > 0 &&
+    typeof worktree?.runtimeId === "string" &&
+    worktree.runtimeId.length > 0 &&
+    terminal?.runtimeId === worktree.runtimeId &&
+    [worktree, terminal].every(
+      (inventory) =>
+        inventory.truncated === false &&
+        Array.isArray(inventory.hostScope?.hostIds) &&
+        Array.isArray(inventory.hostScope?.omittedHostIds) &&
+        inventory.hostScope.hostIds.includes(hostId) &&
+        !inventory.hostScope.omittedHostIds.includes(hostId),
+    )
+  );
+}
+
 // An external terminal's worker row can retain missing_status after its PTY
 // has been positively killed. Only a settled row with the exact incarnation
 // and closure may override that stale projection; absence alone never does.
 function closedExternalWorker(row, observed, item, id, location) {
   if (
     !item ||
+    !currentInventoryProven(observed, item.hostId) ||
     !["completed", "failed"].includes(row.dispatchStatus) ||
     !["succeeded", "failed"].includes(row.workerState) ||
     row.terminalState !== "retained" ||
@@ -230,6 +252,7 @@ function closedExternalWorker(row, observed, item, id, location) {
       terminal.tabId === close.tabId &&
       typeof runtime === "string" &&
       runtime === row.resource.endpointId &&
+      observed.currentInventory.terminal.runtimeId === runtime &&
       closure.afterReceipt?._meta?.runtimeId === runtime &&
       proof.close.receipt?._meta?.runtimeId === runtime &&
       !before.truncated &&
@@ -317,6 +340,11 @@ export function evaluateKickoffCleanup(entry, observed) {
     );
     const reasons = [];
     if (!inventoryComplete) reasons.push("inventory-incomplete");
+    if (
+      observed.currentInventory &&
+      !currentInventoryProven(observed, item?.hostId ?? previous?.hostId)
+    )
+      reasons.push("current-inventory-provenance-unverified");
     if (!item) reasons.push("orca-worktree-unlisted");
     if (
       item?.path &&
@@ -370,7 +398,10 @@ export function evaluateKickoffCleanup(entry, observed) {
     const hostVerified =
       previous?.hostId && observed.hostIds?.includes(previous.hostId);
     const absenceVerified =
-      inventoryComplete && (!observed.remoteHostsOmitted || hostVerified);
+      inventoryComplete &&
+      (!observed.remoteHostsOmitted || hostVerified) &&
+      (!observed.currentInventory ||
+        currentInventoryProven(observed, previous?.hostId));
     return {
       worktreeId: id,
       path: location,
@@ -397,6 +428,7 @@ export function evaluateKickoffCleanup(entry, observed) {
     runId: entry.runId,
     scannedAt: observed.scannedAt ?? new Date().toISOString(),
     inventoryComplete,
+    currentInventory: observed.currentInventory ?? null,
     status: candidates.every((item) =>
       ["already-removed", "transferred"].includes(item.status),
     )
@@ -614,6 +646,19 @@ export async function scanKickoffCleanup(
     })),
     remoteHostsOmitted,
     hostIds: treeResult?.hostScope?.hostIds ?? [],
+    currentInventory: Object.fromEntries(
+      ["worktree", "terminal"].map((kind, index) => [
+        kind,
+        {
+          hostScope: values[index]?.hostScope ?? null,
+          truncated: values[index]?.truncated ?? null,
+          runtimeId:
+            results[index].status === "fulfilled"
+              ? (results[index].value?._meta?.runtimeId ?? null)
+              : null,
+        },
+      ]),
+    ),
     inventoryComplete: errors.length === 0,
   });
 }

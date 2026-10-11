@@ -116,15 +116,23 @@ async function fixture(t) {
     });
   }
   let mutations = 0;
+  let externalWorker = false;
+  let inventoryChange = () => {};
+  const sourceTerminal = {
+    handle: "source-terminal",
+    worktreeId: child.id,
+    executionHostId: "local",
+    ptyId: `${child.id}@@pty`,
+    incarnationId: "source-incarnation",
+    tabId: "source-tab",
+  };
   let terminalAttached = false;
   const execute = async (argv) => {
     const command = argv.slice(1);
     let result;
     if (command[0] === "terminal" && command[1] === "list")
       result = {
-        terminals: terminalAttached
-          ? [{ handle: "source-terminal", worktreeId: child.id }]
-          : [],
+        terminals: terminalAttached ? [sourceTerminal] : [],
       };
     else if (command[0] === "terminal" && command[1] === "close") {
       terminalAttached = false;
@@ -194,9 +202,25 @@ async function fixture(t) {
       };
       result = { worktree: structuredClone(item) };
     } else throw new Error(`Unexpected Orca transport: ${command.join(" ")}`);
+    const receipt = {
+      ok: true,
+      result,
+      _meta: { runtimeId: "fixture-runtime" },
+    };
+    if (
+      command[1] === "ps" ||
+      (command[0] === "terminal" && command[1] === "list")
+    ) {
+      result.hostScope = {
+        hostIds: ["local"],
+        omittedHostIds: ["unrelated-remote"],
+      };
+      result.truncated = false;
+      inventoryChange(command[0], receipt);
+    }
     return {
       code: 0,
-      stdout: JSON.stringify({ ok: true, result }),
+      stdout: JSON.stringify(receipt),
       stderr: "",
       timedOut: false,
     };
@@ -206,7 +230,39 @@ async function fixture(t) {
   const scan = (request) =>
     scanKickoffCleanup(request, {
       orca,
-      workerInventory: async () => ({ result: { workers: [] } }),
+      workerInventory: async () => ({
+        result: {
+          workers: externalWorker
+            ? [
+                {
+                  dispatchId: "source-dispatch",
+                  workerState: "succeeded",
+                  dispatchStatus: "completed",
+                  agentTerminalHandle: "source-terminal",
+                  terminalState: "retained",
+                  resource: {
+                    ownershipState: "external",
+                    retainedReason: "external_terminal",
+                    worktreeId: child.id,
+                    terminalHandle: "source-terminal",
+                    ownerDispatchId: "source-dispatch",
+                    originDispatchId: "source-dispatch",
+                    endpointId: "fixture-runtime",
+                    endpointIncarnation: `${sourceTerminal.ptyId}:${sourceTerminal.incarnationId}`,
+                  },
+                  projection: {
+                    host: { id: "local" },
+                    workspace: { id: child.id },
+                    liveness: {
+                      verdict: "unverifiable",
+                      reason: "missing_status",
+                    },
+                  },
+                },
+              ]
+            : [],
+        },
+      }),
     });
   async function acceptAndArchive(parent, workflowId) {
     const stateDir = `${parent.path}/.omt`;
@@ -312,6 +368,12 @@ async function fixture(t) {
     head,
     trees,
     mutations: () => mutations,
+    useExternalWorker: () => {
+      externalWorker = true;
+    },
+    changeInventory: (change) => {
+      inventoryChange = change;
+    },
     request: {
       orgFile,
       stateDir: `${target.path}/.omt`,
@@ -448,4 +510,118 @@ test("missing closure evidence preserves an archived source despite an empty liv
     ),
   );
   assert.equal(fs.existsSync(f.child.path), true);
+});
+
+test("current inventory provenance fences real scanner, transfer and reclaim despite exact historical closure", async (t) => {
+  const f = await fixture(t);
+  try {
+    assertDirectorySync(path.dirname(f.orgFile));
+  } catch (error) {
+    assert.equal(error.code, "worktree-durability-unavailable");
+    return t.skip("This filesystem cannot persist directory metadata");
+  }
+  f.claim(f.source);
+  const archive = await f.acceptAndArchive(f.source, "host-scope-source");
+  f.claim(f.target);
+  f.useExternalWorker();
+  const request = {
+    orgFile: f.orgFile,
+    worktreeId: f.source.id,
+    archiveFile: archive.archived,
+    callerCwd: f.repo,
+  };
+  const safe = await f.scan(request);
+  assert.equal(
+    safe.candidates.find((item) => item.worktreeId === f.child.id).status,
+    "safe-to-remove",
+  );
+  assert.deepEqual(safe.currentInventory.terminal.hostScope.omittedHostIds, [
+    "unrelated-remote",
+  ]);
+  const cases = {
+    "target-host-absent": (r) => {
+      r.result.hostScope.hostIds = ["another-host"];
+    },
+    "target-host-omitted": (r) => {
+      r.result.hostScope.omittedHostIds.push("local");
+    },
+    "scope-unknown": (r) => {
+      delete r.result.hostScope;
+    },
+    "empty-hosts": (r) => {
+      r.result.hostScope.hostIds = [];
+    },
+    "omissions-unknown": (r) => {
+      delete r.result.hostScope.omittedHostIds;
+    },
+    truncated: (r) => {
+      r.result.truncated = true;
+    },
+    "completeness-unknown": (r) => {
+      delete r.result.truncated;
+    },
+    "runtime-unknown": (r) => {
+      delete r._meta;
+    },
+    "runtime-changed": (r) => {
+      r._meta.runtimeId = "other-runtime";
+    },
+  };
+  for (const kind of ["terminal", "worktree", "both"]) {
+    for (const [name, change] of Object.entries(cases)) {
+      await t.test(`${kind}: ${name}`, async () => {
+        f.changeInventory((command, receipt) => {
+          if (kind === "both" || command === kind) change(receipt);
+        });
+        const scan = await f.scan(request);
+        const candidate = scan.candidates.find(
+          (item) => item.worktreeId === f.child.id,
+        );
+        assert.equal(candidate.status, "preserve");
+        assert.ok(
+          candidate.reasons.some((reason) =>
+            [
+              "current-inventory-provenance-unverified",
+              "worker-unsettled-or-unverifiable",
+            ].includes(reason),
+          ),
+        );
+        let selected = false;
+        const result = await withAutomaticWorktreeReuse(
+          f.request,
+          async (candidate) => {
+            selected = Boolean(candidate);
+            return { selected };
+          },
+          f.ports,
+        );
+        assert.equal(result.selected, false);
+        assert.ok(result.reuseRejections.length > 0);
+        assert.equal(f.mutations(), 0);
+        let removals = 0;
+        await reclaimKickoffCleanup(request, {
+          scan: f.scan,
+          show: f.orca,
+          reclaim: async () => {
+            removals += 1;
+          },
+        });
+        assert.equal(removals, 0);
+        assert.equal(fs.existsSync(f.child.path), true);
+        assert.equal(f.child.parentWorktreeId, f.source.id);
+      });
+    }
+  }
+  f.changeInventory(() => {});
+  const reused = await withAutomaticWorktreeReuse(
+    f.request,
+    async (candidate) => ({ worktreeId: candidate?.worktreeId }),
+    f.ports,
+  );
+  assert.equal(
+    reused.worktreeId,
+    f.child.id,
+    JSON.stringify(reused.reuseRejections),
+  );
+  assert.equal(f.mutations(), 1);
 });
