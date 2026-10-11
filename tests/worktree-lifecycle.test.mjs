@@ -1,4 +1,5 @@
 /** Regressions for session-bound OMT worktree creation and headless rejection. */
+import { durableSuccessSupported } from "./directory-durability-fixture.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -1434,6 +1435,7 @@ test("CLI usage admits only an explicit paired cross-workflow reuse source", () 
 });
 
 test("an integrated child is reclaimed only after every lifecycle proof", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const f = reclaimSandbox(t);
   const calls = [];
   const result = await reclaimIntegratedRoleWorktree(
@@ -1519,6 +1521,7 @@ test("an integrated child is reclaimed only after every lifecycle proof", async 
 });
 
 test("an active or unproven child is preserved instead of reclaimed", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const f = reclaimSandbox(t);
   let reclaimed = false;
   await assert.rejects(
@@ -1717,6 +1720,7 @@ test("ambiguous Orca release, close, or terminal-list receipts preserve the chil
 });
 
 test("an accepted promotion can reclaim its retired Junior worktree", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const f = reclaimSandbox(t);
   let listed = 0;
   const result = await reclaimIntegratedRoleWorktree(
@@ -1887,6 +1891,7 @@ function previouslyClosedRole(f) {
 }
 
 test("an exact past closure and current empty inventory allow safe role reclaim", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const f = reclaimSandbox(t);
   const old = previouslyClosedRole(f);
   const result = await reclaimIntegratedRoleWorktree(
@@ -1926,6 +1931,7 @@ test("an exact past closure and current empty inventory allow safe role reclaim"
 });
 
 test("a reviewed promotion reuses its proven closed worktree without creating another", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const f = reclaimSandbox(t);
   const old = previouslyClosedRole(f);
   const state = {
@@ -1978,6 +1984,7 @@ test("a reviewed promotion reuses its proven closed worktree without creating an
 });
 
 test("an empty inventory with no ownership history cannot authorize reclaim", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const f = reclaimSandbox(t);
   const old = previouslyClosedRole(f);
   await assert.rejects(
@@ -2017,6 +2024,7 @@ test("an empty inventory with no ownership history cannot authorize reclaim", as
 });
 
 test("a reviewed promotion with no ownership history preserves the worktree", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const f = reclaimSandbox(t);
   const old = previouslyClosedRole(f);
   await assert.rejects(

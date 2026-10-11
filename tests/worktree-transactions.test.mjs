@@ -1,4 +1,5 @@
 /** Deterministic concurrency and crash-boundary checks for the shared worktree fence. */
+import { denyDirectorySync } from "./directory-durability-fixture.mjs";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
@@ -204,4 +205,86 @@ test("legacy project cleanup and a subsequently registered organization use the 
     );
   });
   assert.deepEqual(readWorktreeTransitions(org).entries, []);
+});
+
+test("unsupported no-organization branch cleanup stays fenced away from protocol and journal resources", async (t) => {
+  for (const mode of [
+    "legacy",
+    "organization",
+    "registration",
+    "history",
+    "journal",
+    "protocol-entry",
+  ]) {
+    await t.test(mode, (t) => {
+      const { directory } = fixture(t);
+      const git = (...args) =>
+        execFileSync("git", args, {
+          cwd: directory,
+          encoding: "utf8",
+          stdio: "pipe",
+        }).trim();
+      git("init", "-q");
+      git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.test",
+        "commit",
+        "--allow-empty",
+        "-qm",
+        "base",
+      );
+      const head = git("rev-parse", "HEAD");
+      git("branch", "legacy-merged");
+      const state = path.join(directory, ".omt");
+      fs.mkdirSync(state);
+      if (mode === "organization")
+        fs.writeFileSync(path.join(state, "organization.json"), "{}");
+      if (mode === "registration") fs.mkdirSync(path.join(state, "kickoffs"));
+      if (mode === "history") fs.mkdirSync(path.join(state, "history"));
+      if (mode === "journal")
+        fs.writeFileSync(
+          path.join(state, "worktree-transitions.json"),
+          JSON.stringify({
+            schemaVersion: 1,
+            entries: [
+              { status: "completed", type: "reuse", branch: "legacy-merged" },
+            ],
+          }),
+        );
+      const entry = {
+        delivery: { mode: "local-merge" },
+        delivered: { mergeCommit: head },
+        ...(mode === "protocol-entry"
+          ? {
+              reuseProtocol: {
+                organizationFile: path.join(state, "organization.json"),
+              },
+            }
+          : {}),
+      };
+      denyDirectorySync(t);
+      const invoke = () =>
+        cleanupKickoffBranches({
+          projectDir: directory,
+          entry,
+          branches: ["legacy-merged"],
+          remoteName: "",
+        });
+      if (mode === "legacy") {
+        assert.deepEqual(invoke().deleted, ["legacy-merged"]);
+        assert.throws(() =>
+          git("rev-parse", "--verify", "refs/heads/legacy-merged"),
+        );
+        assert.equal(
+          fs.existsSync(path.join(state, "worktree-transitions.json")),
+          false,
+        );
+      } else {
+        assert.throws(invoke, /preserve|unavailable|ENOENT/);
+        assert.equal(git("rev-parse", "refs/heads/legacy-merged"), head);
+      }
+    });
+  }
 });

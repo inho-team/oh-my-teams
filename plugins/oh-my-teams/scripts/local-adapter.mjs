@@ -464,11 +464,18 @@ export function projectStateDirectory(projectDir) {
     "--path-format=absolute",
     "--git-common-dir",
   ]);
+  const actual =
+    common.status === 0
+      ? fs.statSync(common.stdout.trim(), { bigint: true })
+      : null;
+  const expected = fs.statSync(path.join(project, ".git"), { bigint: true });
   assert(
     common.status === 0 &&
       !common.timedOut &&
-      fs.realpathSync(common.stdout.trim()) ===
-        fs.realpathSync(path.join(project, ".git")) &&
+      actual.isDirectory() &&
+      actual.ino !== 0n &&
+      actual.dev === expected.dev &&
+      actual.ino === expected.ino &&
       fs.statSync(path.join(project, ".git")).isDirectory(),
     "No organization anchor: use the main project checkout or provide its readable --org file; preserve branches",
   );

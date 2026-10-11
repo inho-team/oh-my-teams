@@ -194,10 +194,47 @@ export async function transactWorktree(orgFile, operation, mutate) {
 export function withProjectWorktreeLockSync(projectDir, inspect) {
   const anchor = { directory: projectStateDirectory(projectDir) };
   projectAnchors.add(anchor);
-  return withWorktreeLockSync(anchor, (prepare) =>
-    inspect((operation) => {
-      assertDirectorySync(path.dirname(anchor.directory));
-      return prepare(operation);
-    }, anchor),
-  );
+  return withWorktreeLockSync(anchor, (prepare) => {
+    let active = true;
+    try {
+      return inspect((operation) => {
+        assert(active, "Legacy transaction escaped its lock");
+        let unsupported;
+        try {
+          assertDirectorySync(path.dirname(anchor.directory));
+          assertDirectorySync(anchor.directory);
+        } catch (error) {
+          if (error.code !== "worktree-durability-unavailable") throw error;
+          unsupported = error;
+        }
+        if (!unsupported) return prepare(operation);
+        // A genuinely pre-organization repository has no participating owner or
+        // transition resources. Do not extend this exception to registered work.
+        assert(
+          operation.type === "branch-cleanup" &&
+            !["organization.json", "kickoffs", "history"].some((name) =>
+              fs.existsSync(path.join(anchor.directory, name)),
+            ) &&
+            readWorktreeTransitions(anchor).entries.length === 0,
+          "Legacy branch cleanup cannot touch protocol or journal resources; preserve branches",
+        );
+        let completed = false;
+        return {
+          legacyLifecycle: {
+            mode: "no-organization-branch",
+            durable: false,
+            reason: unsupported.message,
+          },
+          complete(result) {
+            assert(active, "Legacy transaction escaped its lock");
+            assert(!completed, "Legacy branch cleanup already completed");
+            completed = true;
+            return result;
+          },
+        };
+      }, anchor);
+    } finally {
+      active = false;
+    }
+  });
 }

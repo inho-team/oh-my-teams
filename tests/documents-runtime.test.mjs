@@ -1,4 +1,5 @@
 /** The structured .omt document runtime: docId/docRef, revisions, locking, and legacyRef (3.5-3.7, 3.10). */
+import { durableSuccessSupported } from "./directory-durability-fixture.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -715,6 +716,7 @@ function mergedRepo(t) {
 }
 
 test("cleanupKickoffBranches skips a branch until its kickoff's delivery-ref document is committed and owned", (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = project(t);
   const { entry, stateDir, kickoffHash } = kickoff(fixture, "wt-a", {
     mode: "local-merge",
@@ -766,6 +768,7 @@ test("cleanupKickoffBranches skips a branch until its kickoff's delivery-ref doc
 });
 
 test("cleanupKickoffBranches's force bypasses a missing or mismatched delivery-ref document", (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = project(t);
   const { entry } = kickoff(fixture, "wt-a", {
     mode: "local-merge",
@@ -890,6 +893,7 @@ test("releaseKickoff refuses a registrationSeq-less entry registered after docum
 });
 
 test("cleanupKickoffBranches skips a registrationSeq-less entry registered after documentSystemActivatedAt as an integrity failure", (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = project(t);
   writeJSON(fixture.org, {
     ...readJSON(fixture.org),

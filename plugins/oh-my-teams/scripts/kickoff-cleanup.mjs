@@ -10,6 +10,7 @@ import {
 } from "./kickoff-registry.mjs";
 import {
   reclaimWorktree,
+  listWorktreeTerminals,
   runOrcaJson,
   selectOrcaExecutable,
 } from "./orca-adapter.mjs";
@@ -173,14 +174,24 @@ function closureProvesLaunch(
 
 // Keep the two current inventories separate: worktree visibility does not prove
 // that the terminal query covered the same host or came from the same runtime.
-function currentInventoryProven(observed, hostId) {
-  const { worktree, terminal } = observed.currentInventory ?? {};
+function currentTerminalInventory(observed, id) {
+  const inventory = observed.currentInventory;
+  return inventory?.scopedTerminals
+    ? inventory.scopedTerminals[id]
+    : inventory?.terminal;
+}
+
+function currentInventoryProven(observed, hostId, id) {
+  const worktree = observed.currentInventory?.worktree;
+  const terminal = currentTerminalInventory(observed, id);
   return (
     typeof hostId === "string" &&
     hostId.length > 0 &&
     typeof worktree?.runtimeId === "string" &&
     worktree.runtimeId.length > 0 &&
     terminal?.runtimeId === worktree.runtimeId &&
+    (!observed.currentInventory.scopedTerminals ||
+      (terminal.worktreeId === id && terminal.rowsVerified === true)) &&
     [worktree, terminal].every(
       (inventory) =>
         inventory.truncated === false &&
@@ -198,7 +209,7 @@ function currentInventoryProven(observed, hostId) {
 function closedExternalWorker(row, observed, item, id, location) {
   if (
     !item ||
-    !currentInventoryProven(observed, item.hostId) ||
+    !currentInventoryProven(observed, item.hostId, id) ||
     !["completed", "failed"].includes(row.dispatchStatus) ||
     !["succeeded", "failed"].includes(row.workerState) ||
     row.terminalState !== "retained" ||
@@ -252,7 +263,7 @@ function closedExternalWorker(row, observed, item, id, location) {
       terminal.tabId === close.tabId &&
       typeof runtime === "string" &&
       runtime === row.resource.endpointId &&
-      observed.currentInventory.terminal.runtimeId === runtime &&
+      currentTerminalInventory(observed, id).runtimeId === runtime &&
       closure.afterReceipt?._meta?.runtimeId === runtime &&
       proof.close.receipt?._meta?.runtimeId === runtime &&
       !before.truncated &&
@@ -342,7 +353,7 @@ export function evaluateKickoffCleanup(entry, observed) {
     if (!inventoryComplete) reasons.push("inventory-incomplete");
     if (
       observed.currentInventory &&
-      !currentInventoryProven(observed, item?.hostId ?? previous?.hostId)
+      !currentInventoryProven(observed, item?.hostId ?? previous?.hostId, id)
     )
       reasons.push("current-inventory-provenance-unverified");
     if (!item) reasons.push("orca-worktree-unlisted");
@@ -401,7 +412,7 @@ export function evaluateKickoffCleanup(entry, observed) {
       inventoryComplete &&
       (!observed.remoteHostsOmitted || hostVerified) &&
       (!observed.currentInventory ||
-        currentInventoryProven(observed, previous?.hostId));
+        currentInventoryProven(observed, previous?.hostId, id));
     return {
       worktreeId: id,
       path: location,
@@ -611,6 +622,30 @@ export async function scanKickoffCleanup(
   );
   const ids = candidateIds(entry, worktrees);
   const byId = new Map(worktrees.map((item) => [item.worktreeId, item]));
+  const scopedTerminals = {};
+  for (const id of ids) {
+    const hostId =
+      byId.get(id)?.hostId ??
+      entry.cleanup?.candidates?.find((item) => item.worktreeId === id)?.hostId;
+    try {
+      const receipt = await listWorktreeTerminals(selected, id, orca);
+      const body = receipt?.result;
+      scopedTerminals[id] = {
+        worktreeId: id,
+        hostScope: body?.hostScope ?? null,
+        truncated: body?.truncated ?? null,
+        runtimeId: receipt?._meta?.runtimeId ?? null,
+        rowsVerified:
+          Array.isArray(body?.terminals) &&
+          body.terminals.every(
+            (row) => row.worktreeId === id && row.executionHostId === hostId,
+          ),
+      };
+      if (Array.isArray(body?.terminals)) terminals.push(...body.terminals);
+    } catch (error) {
+      scopedTerminals[id] = { worktreeId: id, error: error.message };
+    }
+  }
   const gitStates = {};
   const absentPaths = [];
   for (const id of ids) {
@@ -646,19 +681,22 @@ export async function scanKickoffCleanup(
     })),
     remoteHostsOmitted,
     hostIds: treeResult?.hostScope?.hostIds ?? [],
-    currentInventory: Object.fromEntries(
-      ["worktree", "terminal"].map((kind, index) => [
-        kind,
-        {
-          hostScope: values[index]?.hostScope ?? null,
-          truncated: values[index]?.truncated ?? null,
-          runtimeId:
-            results[index].status === "fulfilled"
-              ? (results[index].value?._meta?.runtimeId ?? null)
-              : null,
-        },
-      ]),
-    ),
+    currentInventory: {
+      scopedTerminals,
+      ...Object.fromEntries(
+        ["worktree", "terminal"].map((kind, index) => [
+          kind,
+          {
+            hostScope: values[index]?.hostScope ?? null,
+            truncated: values[index]?.truncated ?? null,
+            runtimeId:
+              results[index].status === "fulfilled"
+                ? (results[index].value?._meta?.runtimeId ?? null)
+                : null,
+          },
+        ]),
+      ),
+    },
     inventoryComplete: errors.length === 0,
   });
 }

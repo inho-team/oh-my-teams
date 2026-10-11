@@ -60,7 +60,9 @@ function workflowProofs(entry, orgFile) {
           const location = worktreeId.slice(worktreeId.indexOf("::") + 2);
           const launchProofs = launches.filter(
             (launch) =>
-              launch.worktreePath === location && launch.at >= entry.createdAt,
+              typeof launch.worktreePath === "string" &&
+              path.resolve(launch.worktreePath) === path.resolve(location) &&
+              launch.at >= entry.createdAt,
           );
           assert(
             launchProofs.length > 0 &&

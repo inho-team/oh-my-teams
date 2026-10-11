@@ -1,4 +1,5 @@
 /** The kickoff registry: many kickoffs per project, one per PM worktree. */
+import { durableSuccessSupported } from "./directory-durability-fixture.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -694,6 +695,7 @@ test("branch cleanup skips when delivered record is absent", (t) => {
 });
 
 test("branch cleanup deletes branches whose content has reached the merge commit", (t) => {
+  if (!durableSuccessSupported(t)) return;
   // Build a temporary Git repository so no live branches are touched.
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-branch-cleanup-"));
   t.after(() => fs.rmSync(repoDir, { recursive: true, force: true }));

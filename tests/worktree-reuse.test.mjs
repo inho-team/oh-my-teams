@@ -24,7 +24,7 @@ function fixture(t) {
     };
   });
   const child = {
-    id: `repo::${root}/child`,
+    id: `repo::${path.join(root, "child")}`,
     path: `${root}/child`,
     repoId: "repo",
     head: "head",
@@ -301,7 +301,7 @@ async function discoveryFixture(t) {
   const task = {
     state: "accepted",
     role: "worker",
-    worktreeId: `repo::${root}/child`,
+    worktreeId: `repo::${path.join(root, "child")}`,
     revision: 1,
     attemptId: "attempt-1",
     taskHash: "task-hash",
@@ -350,7 +350,7 @@ async function discoveryFixture(t) {
   recordLaunch(orgFile, {
     via: "worker-start",
     role: "worker",
-    worktreePath: `${root}/child`,
+    worktreePath: path.join(root, "child"),
     stateDir,
     workflowId: "source-flow",
     workflowTaskId: "source",
@@ -463,4 +463,25 @@ test("directory fsync failure never becomes a transfer or a fresh-worktree fallb
   assert.equal(f.mutations(), 0);
   assert.equal(f.child.parentWorktreeId, f.parents[0].id);
   assert.deepEqual(readWorktreeTransitions(f.orgFile).entries, []);
+});
+
+test("source discovery normalizes launch locations without rewriting the exact worktree identity", async (t) => {
+  const { discoverReusableWorktrees } =
+    await import("../plugins/oh-my-teams/scripts/worktree-reuse.mjs");
+  const f = await discoveryFixture(t);
+  const original = f.workflow.tasks.source.worktreeId;
+  const offset = original.indexOf("::") + 2;
+  const location = original.slice(offset);
+  const alias =
+    original.slice(0, offset) +
+    path.dirname(location) +
+    path.sep +
+    "." +
+    path.sep +
+    path.basename(location);
+  f.workflow.tasks.source.worktreeId = alias;
+  f.save();
+  const result = discoverReusableWorktrees(f.orgFile, f.target);
+  assert.equal(result.candidates.length, 1, JSON.stringify(result.rejected));
+  assert.equal(result.candidates[0].worktreeId, alias);
 });

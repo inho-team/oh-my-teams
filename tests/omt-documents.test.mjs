@@ -4,6 +4,7 @@
  * commit 2796c7a, worktree omt-docs-w2-design-legacy). The two rows "PM 로스터 조건"과
  * "PL 필드 단위 수정 범위"는 별도 작업 w2-09가 다루므로 이 파일에서는 제외한다.
  */
+import { durableSuccessSupported } from "./directory-durability-fixture.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -12,6 +13,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
+  assertDirectorySync,
   fileSha256,
   readJSON,
   run,
@@ -988,6 +990,7 @@ test("동시_갱신", async () => {
 // 전에는 force 없이 완결이 거부되고, 커밋된 뒤에는 force 없이도 완결되며, 완결 이후에도
 // delivery-ref 문서가 그대로 조회됨을 확인한다.
 test("문서_참조_객체_원자성_인도", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const tempDir = makeTempDir();
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
@@ -1234,6 +1237,7 @@ test("기존_kickoff_등록_항목_레거시_판정", async (t) => {
 // documentSystemActivatedAt 이후 등록되었는데 registrationSeq가 없는 entry는 integrity-failure로
 // 판정되어, releaseKickoff와 cleanupKickoffBranches 모두 force 없이는 거부되고 force로만 우회된다.
 test("registrationSeq_결여_무결성_실패", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const tempDir = makeTempDir();
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
@@ -1362,10 +1366,13 @@ test("orgFile_부재_기본_동작_조회_실패_거부", (t) => {
     fs.existsSync(path.join(repoDir, ".omt", "organization.json")),
     false,
   );
-  const journal = readJSON(
-    path.join(repoDir, ".omt", "worktree-transitions.json"),
-  );
-  assert.equal(journal.entries[0].status, "completed");
+  const journalFile = path.join(repoDir, ".omt", "worktree-transitions.json");
+  if (fs.existsSync(journalFile))
+    assert.equal(readJSON(journalFile).entries[0].status, "completed");
+  else
+    assert.throws(() => assertDirectorySync(path.dirname(journalFile)), {
+      code: "worktree-durability-unavailable",
+    });
 
   const { repoDir: repoDir2, mergeCommit: mergeCommit2 } = mergedGitRepo(t);
   const missingOrgFile = path.join(repoDir2, "does-not-exist.json");

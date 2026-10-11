@@ -1829,3 +1829,27 @@ export async function findCoordinatorRun(
   }
   return { status: "active", runId: currentRun.id };
 }
+
+/**
+ * Reads current terminals for one exact worktree using Orca's supported selector.
+ * @param {string} executable - Selected Orca executable.
+ * @param {string} worktreeId - Exact repository-qualified worktree ID.
+ * @param {Function} [read=runOrcaJson] - JSON reader for the current runtime.
+ * @returns {Promise<object>} Unmodified receipt, including host scope and runtime provenance.
+ */
+export function listWorktreeTerminals(
+  executable,
+  worktreeId,
+  read = runOrcaJson,
+) {
+  assert(
+    typeof worktreeId === "string" && worktreeId.includes("::"),
+    "Exact worktree ID required for terminal inventory",
+  );
+  return read(executable, [
+    "terminal",
+    "list",
+    "--worktree",
+    `id:${worktreeId}`,
+  ]);
+}

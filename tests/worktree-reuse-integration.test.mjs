@@ -216,7 +216,7 @@ async function fixture(t) {
         omittedHostIds: ["unrelated-remote"],
       };
       result.truncated = false;
-      inventoryChange(command[0], receipt);
+      inventoryChange(command[0], receipt, command);
     }
     return {
       code: 0,
@@ -624,4 +624,112 @@ test("current inventory provenance fences real scanner, transfer and reclaim des
     JSON.stringify(reused.reuseRejections),
   );
   assert.equal(f.mutations(), 1);
+});
+
+test("a missing global host is replaced only by exact current scoped terminal observations", async (t) => {
+  const f = await fixture(t);
+  try {
+    assertDirectorySync(path.dirname(f.orgFile));
+  } catch (error) {
+    assert.equal(error.code, "worktree-durability-unavailable");
+    return t.skip("Durable transfer success requires directory sync");
+  }
+  f.claim(f.source);
+  const archive = await f.acceptAndArchive(f.source, "scoped-source");
+  f.claim(f.target);
+  f.useExternalWorker();
+  const request = {
+    orgFile: f.orgFile,
+    worktreeId: f.source.id,
+    archiveFile: archive.archived,
+    callerCwd: f.repo,
+  };
+  const cases = {
+    missing: (r) => {
+      delete r.result.hostScope;
+    },
+    omitted: (r) => {
+      r.result.hostScope.omittedHostIds.push("local");
+    },
+    absent: (r) => {
+      r.result.hostScope.hostIds = [];
+    },
+    runtime: (r) => {
+      r._meta.runtimeId = "different";
+    },
+    truncated: (r) => {
+      r.result.truncated = true;
+    },
+    unavailable: () => {
+      throw new Error("scoped lookup unavailable");
+    },
+    alive: (r) => {
+      r.result.terminals = [
+        {
+          handle: "new-terminal",
+          worktreeId: f.child.id,
+          executionHostId: "local",
+        },
+      ];
+    },
+    foreign: (r) => {
+      r.result.terminals = [
+        {
+          handle: "foreign-terminal",
+          worktreeId: f.source.id,
+          executionHostId: "local",
+        },
+      ];
+    },
+    unknownHost: (r) => {
+      r.result.terminals = [{ handle: "new-terminal", worktreeId: f.child.id }];
+    },
+    success: () => {},
+  };
+  for (const [name, change] of Object.entries(cases)) {
+    await t.test(name, async () => {
+      f.changeInventory((kind, receipt, args) => {
+        if (kind !== "terminal") return;
+        assert.equal(args.includes("--host"), false);
+        if (!args.includes("--worktree")) {
+          receipt.result.hostScope.hostIds = [];
+          receipt.result.hostScope.omittedHostIds.unshift("local");
+        } else if (args[args.indexOf("--worktree") + 1] === `id:${f.child.id}`)
+          change(receipt);
+      });
+      const scan = await f.scan(request);
+      const candidate = scan.candidates.find(
+        (v) => v.worktreeId === f.child.id,
+      );
+      assert.deepEqual(scan.currentInventory.terminal.hostScope.hostIds, []);
+      if (name === "success") {
+        assert.equal(candidate.status, "safe-to-remove");
+        const reused = await withAutomaticWorktreeReuse(
+          f.request,
+          async (v) => ({ id: v?.worktreeId }),
+          f.ports,
+        );
+        assert.equal(reused.id, f.child.id);
+        assert.equal(f.mutations(), 1);
+      } else {
+        assert.equal(candidate.status, "preserve");
+        const reused = await withAutomaticWorktreeReuse(
+          f.request,
+          async (v) => ({ selected: Boolean(v) }),
+          f.ports,
+        );
+        assert.equal(reused.selected, false);
+        assert.equal(f.mutations(), 0);
+        let removed = 0;
+        await reclaimKickoffCleanup(request, {
+          scan: f.scan,
+          show: f.orca,
+          reclaim: async () => {
+            removed++;
+          },
+        });
+        assert.equal(removed, 0);
+      }
+    });
+  }
 });

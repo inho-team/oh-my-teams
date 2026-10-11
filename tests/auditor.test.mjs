@@ -1,4 +1,8 @@
 /** Auditor checkpoints: objection/response/ruling records and acceptance gates. */
+import {
+  denyDirectorySync,
+  durableSuccessSupported,
+} from "./directory-durability-fixture.mjs";
 import nodeTest, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -2944,6 +2948,7 @@ const orcaCallsOf = (spawned, ...words) =>
   spawned.filter((call) => words.every((word, i) => call[1 + i] === word));
 
 test("T3 auditor role-worktree-create reclaims a worktree whose launch is refused before any terminal exists, through the real internal role-terminal path", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   // The real role-terminal command reads its own environment: a trusted
   // version that no longer verifies refuses the launch before terminal create.
   const run = await launchAuditorThroughRealPath(t, {
@@ -2988,6 +2993,7 @@ test("T3 auditor role-worktree-create reclaims a worktree whose launch is refuse
 });
 
 test("T4 auditor creation and reclaim use the one trusted runner and leave no git worktree or branch behind", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const run = await launchAuditorThroughRealPath(t, {
     profile: "claude-current",
     name: "audit-t4",
@@ -8256,4 +8262,23 @@ test("f7-10: a single recorded result repository behaves as before and needs nei
   await assertUnchanged(fixture, () =>
     assert.rejects(() => f7Decide(fixture, fixture.repo), /nothing to decide/),
   );
+});
+
+test("unsupported directory durability preserves the refused auditor resource without removal", async (t) => {
+  denyDirectorySync(t);
+  const run = await launchAuditorThroughRealPath(t, {
+    profile: "claude-current",
+    name: "audit-no-directory-sync",
+    orca: { laterVersion: "unversioned build" },
+  });
+  assert.match(run.rejection?.message ?? "", /preserve the residual/);
+  assert.equal(
+    orcaCallsOf(run.trusted.spawned, "worktree", "remove").length,
+    0,
+  );
+  assert.equal(
+    orcaCallsOf(run.trusted.spawned, "worktree", "create").length,
+    1,
+  );
+  assert.equal(orcaCallsOf(run.trusted.spawned, "terminal").length, 0);
 });

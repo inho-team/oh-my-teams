@@ -1864,7 +1864,7 @@ export function cleanupKickoffBranches(request) {
     path.join(request.projectDir, ".omt", "organization.json");
   if (
     request.orgFile === undefined &&
-    !request.entry?.reuseProtocol &&
+    !Object.hasOwn(request.entry ?? {}, "reuseProtocol") &&
     !fs.existsSync(orgFile)
   ) {
     return withProjectWorktreeLockSync(request.projectDir, (prepare, anchor) =>

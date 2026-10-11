@@ -1,4 +1,8 @@
 /** Regression tests for conservative kickoff worktree reconciliation. */
+import {
+  denyDirectorySync,
+  durableSuccessSupported,
+} from "./directory-durability-fixture.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -589,6 +593,7 @@ async function reclaimFixture(t) {
 }
 
 test("reclaim removes safe children before their PM and stores receipts", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = await reclaimFixture(t);
   const result = await reclaimKickoffCleanup(fixture.request, fixture);
   assert.deepEqual(fixture.calls, [
@@ -607,6 +612,7 @@ test("reclaim removes safe children before their PM and stores receipts", async 
 });
 
 test("an Orca removal error stays unverified and is not retried", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = await reclaimFixture(t);
   const result = await reclaimKickoffCleanup(fixture.request, {
     scan: fixture.scan,
@@ -655,6 +661,7 @@ test("a replacement between scan and show is refused before Orca removal", async
 });
 
 test("partial cleanup preserves a blocked sibling and reentry removes only remaining candidates", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = await reclaimFixture(t);
   fixture.preserved.add(fixture.ids.firstId);
   const first = await reclaimKickoffCleanup(fixture.request, fixture);
@@ -672,6 +679,7 @@ test("partial cleanup preserves a blocked sibling and reentry removes only remai
 });
 
 test("an unobserved Orca removal is not repeated on reentry", async (t) => {
+  if (!durableSuccessSupported(t)) return;
   const fixture = await reclaimFixture(t);
   let scans = 0;
   const scan = async () => {
@@ -882,4 +890,14 @@ test("a settled external Dispatch needs exact PTY incarnation and closure to ove
       name,
     );
   }
+});
+
+test("unsupported directory durability never removes a protocol archived child", async (t) => {
+  const fixture = await reclaimFixture(t);
+  denyDirectorySync(t);
+  await assert.rejects(() => reclaimKickoffCleanup(fixture.request, fixture), {
+    code: "worktree-durability-unavailable",
+  });
+  assert.deepEqual(fixture.calls, []);
+  assert.equal(fixture.removed.size, 0);
 });
