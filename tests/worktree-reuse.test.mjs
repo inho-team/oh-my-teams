@@ -224,6 +224,26 @@ test("a preserved source falls back without preparing a transfer", async (t) => 
   assert.deepEqual(readWorktreeTransitions(f.orgFile).entries, []);
 });
 
+test("an unproven current inventory stops another child from being created", async (t) => {
+  const f = fixture(t);
+  f.setSources([f.source(f.parents[1], "earlier", "accepted")]);
+  f.ports.scan = async () => ({ inventoryComplete: false, candidates: [] });
+  let launched = false;
+  await assert.rejects(
+    () =>
+      withAutomaticWorktreeReuse(
+        f.request(),
+        async () => {
+          launched = true;
+        },
+        f.ports,
+      ),
+    /reconcile it before creating another child/,
+  );
+  assert.equal(launched, false);
+  assert.equal(f.mutations(), 0);
+});
+
 test("a changed instance after mutation leaves a prepared journal and blocks retries", async (t) => {
   const f = fixture(t);
   try {
@@ -400,9 +420,6 @@ test("active cross-workflow discovery requires matching integration task, attemp
       f.workflow.integration.decision.componentResults.source.acceptedResult =
         "another";
     },
-    () => {
-      f.workflow.status = "running";
-    },
   ]) {
     f.workflow.integration = structuredClone(original);
     f.workflow.status = "accepted";
@@ -416,6 +433,42 @@ test("active cross-workflow discovery requires matching integration task, attemp
       ),
     );
   }
+});
+
+test("an accepted task in an open workflow remains reusable across tasks and workflows", async (t) => {
+  const { discoverReusableWorktrees } =
+    await import("../plugins/oh-my-teams/scripts/worktree-reuse.mjs");
+  const { writeJSON } = await import("../plugins/oh-my-teams/scripts/core.mjs");
+  const f = await discoveryFixture(t);
+  f.workflow.status = "ready";
+  f.workflow.integration = { required: true };
+  f.workflow.tasks.next = { state: "pending", role: "worker", revision: 1 };
+  writeJSON(
+    path.join(
+      f.target.stateDir,
+      "workflows",
+      "source-flow",
+      "tasks",
+      "next",
+      "revisions",
+      "1.json",
+    ),
+    { id: "next" },
+  );
+  f.save();
+  const sameWorkflow = {
+    ...f.target,
+    workflowId: "source-flow",
+    taskId: "next",
+  };
+  const result = discoverReusableWorktrees(f.orgFile, sameWorkflow);
+  assert.equal(result.candidates.length, 1, JSON.stringify(result.rejected));
+  assert.equal(result.candidates[0].taskId, "source");
+  assert.equal(
+    discoverReusableWorktrees(f.orgFile, f.target).candidates.length,
+    1,
+    "a different workflow in the same kickoff can reuse an accepted task",
+  );
 });
 
 test("a legacy active source remains ineligible even with accepted integration", async (t) => {
