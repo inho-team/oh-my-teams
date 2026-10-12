@@ -9,6 +9,7 @@ import path from "node:path";
 import { assertDirectorySync } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   readWorktreeTransitions,
+  reconcileAbsentRoleWorktree,
   transactWorktree,
   transactWorktreeSync,
   withWorktreeLock,
@@ -29,6 +30,127 @@ function fixture(t) {
   fs.writeFileSync(org, "{}");
   return { directory, org };
 }
+
+function interruptedReclaimFixture(t) {
+  const project = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omt-interrupted-reclaim-")),
+  );
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  const state = path.join(project, ".omt");
+  fs.mkdirSync(state);
+  const org = path.join(state, "organization.json");
+  fs.writeFileSync(org, "{}");
+  const child = path.join(project, "removed-child");
+  const worktreeId = `repo-1::${child}`;
+  fs.writeFileSync(
+    path.join(state, "worktree-transitions.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      entries: [
+        {
+          id: "interrupted-reclaim",
+          type: "role-reclaim",
+          worktreeId,
+          identityKey: "wt2:local:recorded-instance",
+          status: "prepared",
+          startedAt: "2026-10-12T00:00:00.000Z",
+        },
+      ],
+    }),
+  );
+  const evidence = {
+    orca: async (_executable, args) =>
+      args[0] === "worktree"
+        ? {
+            result: {
+              worktrees: [{ id: `repo-1::${project}`, path: project }],
+              truncated: false,
+              hostScope: { hostIds: ["local"], omittedHostIds: [] },
+            },
+            _meta: { runtimeId: "runtime-1" },
+          }
+        : {
+            result: {
+              terminals: [],
+              truncated: false,
+              hostScope: { hostIds: ["local"], omittedHostIds: [] },
+            },
+            _meta: { runtimeId: "runtime-1" },
+          },
+    gitCommand: async () => `worktree ${project}\0HEAD abc\0\0`,
+  };
+  return { project, org, child, worktreeId, evidence };
+}
+
+test("an interrupted role reclaim can be reconciled only after independent absence proofs", async (t) => {
+  const { org, child, worktreeId, evidence } = interruptedReclaimFixture(t);
+  await assert.rejects(
+    () => withWorktreeLock(org, () => assert.fail("unsafe mutation")),
+    /worktree-transition-reconcile.*interrupted-reclaim/,
+  );
+  const unsafe = [
+    {
+      ...evidence,
+      orca: async (executable, args) => {
+        const receipt = await evidence.orca(executable, args);
+        if (args[0] === "worktree")
+          receipt.result.worktrees.push({ id: worktreeId });
+        return receipt;
+      },
+    },
+    {
+      ...evidence,
+      orca: async (executable, args) => {
+        const receipt = await evidence.orca(executable, args);
+        if (args[0] === "terminal")
+          receipt.result.terminals.push({ worktreeId });
+        return receipt;
+      },
+    },
+    { ...evidence, gitCommand: async () => `worktree ${child}\0HEAD abc\0\0` },
+    { ...evidence, present: () => true },
+  ];
+  for (const ports of unsafe) {
+    await assert.rejects(
+      () => reconcileAbsentRoleWorktree(org, "interrupted-reclaim", ports),
+      /not proven|still contains/,
+    );
+    assert.equal(readWorktreeTransitions(org).entries[0].status, "prepared");
+  }
+  let result;
+  try {
+    result = await reconcileAbsentRoleWorktree(
+      org,
+      "interrupted-reclaim",
+      evidence,
+    );
+  } catch (error) {
+    if (error.code !== "worktree-durability-unavailable") throw error;
+    return t.skip("Durable directory sync is unavailable on this host");
+  }
+  assert.equal(result.status, "absent-after-interruption");
+  assert.equal(readWorktreeTransitions(org).entries[0].status, "completed");
+  assert.equal(await withWorktreeLock(org, () => "unblocked"), "unblocked");
+});
+
+test("reconciliation preserves a prepared record when Orca changes during the proof", async (t) => {
+  const { org, worktreeId, evidence } = interruptedReclaimFixture(t);
+  let reads = 0;
+  await assert.rejects(
+    () =>
+      reconcileAbsentRoleWorktree(org, "interrupted-reclaim", {
+        ...evidence,
+        orca: async (executable, args) => {
+          const receipt = await evidence.orca(executable, args);
+          if (args[0] === "worktree" && ++reads === 2)
+            receipt.result.worktrees.push({ id: worktreeId });
+          return receipt;
+        },
+      }),
+    /changed before reconciliation/,
+  );
+  assert.equal(readWorktreeTransitions(org).entries[0].status, "prepared");
+});
 
 test("a symlink alias and synchronous cleanup cannot enter an asynchronous transfer fence", async (t) => {
   const { directory, org } = fixture(t);

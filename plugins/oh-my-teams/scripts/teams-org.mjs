@@ -121,6 +121,7 @@ import { withAutomaticWorktreeReuse } from "./worktree-reuse.mjs";
 import {
   withWorktreeLock,
   readWorktreeTransitions,
+  reconcileAbsentRoleWorktree,
 } from "./worktree-transactions.mjs";
 import {
   attachWorkspace,
@@ -319,6 +320,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                         (reclaims an accepted and integrated child only after every related
                         Dispatch is released, every owned terminal is closed, no other terminal
                         remains, its commit is preserved by --merge-commit, and Git is clean)
+  worktree-transition-reconcile --org FILE --transition ID [--orca EXECUTABLE]
+                        (resolves one interrupted local role-reclaim only when Orca, Git,
+                        terminal, and filesystem inventories all prove the child absent)
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
   attach-workspace --org FILE --task FILE --repo DIR --workspace DIR
@@ -645,6 +649,7 @@ export const ALLOWED_OPTIONS = {
     "merge-commit",
     "orca",
   ],
+  "worktree-transition-reconcile": ["org", "transition", "orca"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -954,6 +959,7 @@ export const REQUIRED_OPTIONS = {
     "worktree",
     "merge-commit",
   ],
+  "worktree-transition-reconcile": ["org", "transition"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -4552,6 +4558,10 @@ export async function executeCommand(args, execute, ports = {}) {
       return createRoleWorktree(args);
     case "role-worktree-reclaim":
       return reclaimIntegratedRoleWorktree(args);
+    case "worktree-transition-reconcile":
+      return reconcileAbsentRoleWorktree(args.org, args.transition, {
+        executable: args.orca,
+      });
     case "prepare-input":
       return prepareInput(
         validateOrg(readJSON(args.org)),
