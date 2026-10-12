@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ALLOWED_OPTIONS } from "../plugins/oh-my-teams/scripts/cli-spec.mjs";
+import {
+  ALLOWED_OPTIONS,
+  validateArgs,
+} from "../plugins/oh-my-teams/scripts/cli-spec.mjs";
 
 const skills = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,4 +33,25 @@ test("active role instructions do not invoke removed mailbox or supervision comm
   for (const command of ["director-signal", "director-reply", "worker-start"]) {
     assert.ok(ALLOWED_OPTIONS[command], command);
   }
+});
+
+test("new organization drafts accept resources without the retired role model ladder", () => {
+  assert.doesNotThrow(() =>
+    validateArgs({
+      command: "org-draft",
+      name: "team",
+      resources: "codex",
+      output: "/tmp/draft.json",
+    }),
+  );
+  assert.throws(
+    () =>
+      validateArgs({
+        command: "org-draft",
+        name: "team",
+        models: "codex:default",
+        output: "/tmp/draft.json",
+      }),
+    /Unknown option: --models/,
+  );
 });

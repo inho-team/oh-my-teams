@@ -1,16 +1,11 @@
 /** The tier-and-model draft form builds, and the defaults it records. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import {
   DEPTH_ROLES,
-  readJSON,
   resolveRole,
   validateOrg,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
-import { executeCommand } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import {
   DRAFT_DEFAULTS,
   draftOrganization,
@@ -173,52 +168,4 @@ test("a resource organization rejects an unverified account or pool", () => {
   const org = draftResourceOrganization({ name: "team", resources: ["codex"] });
   org.resources["codex-current"].account = "other-account";
   assert.throws(() => validateOrg(org), /Invalid subscription resource/);
-});
-
-test("draft and init save through a fixed catalog, without overwriting", async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-draft-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const draft = path.join(dir, "draft.json");
-  const args = {
-    command: "org-draft",
-    name: "team",
-    tiers: "2",
-    models: "claude:default,agy:gemini-3.8-flash-high",
-    output: draft,
-  };
-  const execute = async (argv) => {
-    const key = argv.join(" ");
-    if (key === "claude --version") {
-      return { code: 0, stdout: "Claude Code test version", stderr: "" };
-    }
-    if (key === "agy models") {
-      return {
-        code: 0,
-        stdout: "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n",
-        stderr: "",
-      };
-    }
-    return { code: 1, stdout: "", stderr: "spawn codex ENOENT" };
-  };
-
-  await executeCommand(args, execute);
-
-  const org = path.join(dir, ".omt", "organization.json");
-  // init is a separate save action from org-draft, so it names its own
-  // explicit evidence for the draft's claude:default host-default profile
-  // rather than inheriting org-draft's --models as proof of that intent.
-  await executeCommand(
-    {
-      command: "init",
-      org,
-      from: draft,
-      "host-default": "claude-default",
-    },
-    execute,
-  );
-  assert.equal(readJSON(org).roles.junior.parent, "pm");
-
-  // The draft path could be the live organization file; overwriting it would
-  // bypass the rule that init never replaces an existing organization.
-  await assert.rejects(executeCommand(args, execute), /Draft output exists/);
 });
