@@ -117,7 +117,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 | Git | ✓ | 저장소 관리, worktree 생성 |
 | Codex CLI 또는 Claude Code | ✓ | 구독별 에이전트 실행(Codex) 또는 기본 실행기(Claude) |
 | Orca CLI | ✓ | workflow 감독, orchestration, 상태 관리 |
-| Orca Desktop | 선택 | GUI 기반 작업 모니터링 |
+| Orca Desktop | ✓ | 감독 worker의 터미널 실행과 상태 확인 |
 | OpenCodex 런타임 | 선택(설치기가 준비) | 고정 계정 실행: 조직 파일에서 `runner` 필드를 설정한 프로필만 사용 |
 | gh (GitHub CLI) | 선택 | pull request 생성 및 관리 |
 

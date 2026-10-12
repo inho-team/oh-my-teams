@@ -235,7 +235,7 @@
     },
     {
       "id": "orca-desktop",
-      "requiredFor": ["orca-gui", "supervised-worker", "desktop-terminal"],
+      "requiredFor": ["supervised-worker", "desktop-terminal"],
       "platforms": ["macos", "windows"],
       "detect": {
         "binary": {
@@ -255,7 +255,7 @@
             "_meta.runtimeId or result.runtime.runtimeId"
           ]
         },
-        "process": "Orca desktop process must be observable on the host before GUI-dependent features are enabled.",
+        "process": "Orca desktop process must be observable on the host before supervised workers or desktop terminals are enabled.",
         "featureChecks": [
           {
             "description": "Confirm that an owned worktree is visible in status JSON."
