@@ -39,7 +39,7 @@ import path from "node:path";
 import { assert, run, withAsyncFileLock } from "./core.mjs";
 import { kickoffOwner } from "./delivery.mjs";
 import { kickoffHashFor, listKickoffs } from "./kickoff-registry.mjs";
-import { sendMessage } from "./message-store.mjs";
+import { sendOrcaMessage } from "./orca-adapter.mjs";
 import {
   probeTerminalBlock,
   runOrcaJson,
@@ -677,11 +677,11 @@ export async function answerTerminalPrompt({
           appendRecord(stateDir, reservation);
           const sent = await redirectWorker({
             found,
-            supervisor,
-            stateDir,
+            terminal,
             messageTarget,
             kickoffHash,
-            key: `prompt:${fingerprint}:${digest}`,
+            orca,
+            execute,
           });
           const record = {
             ...reservation,
@@ -804,11 +804,11 @@ export async function answerTerminalPrompt({
 // told through a message to ask the supervisor instead.
 async function redirectWorker({
   found,
-  supervisor,
-  stateDir,
+  terminal,
   messageTarget,
   kickoffHash,
-  key,
+  orca,
+  execute,
 }) {
   const subject = "질문 화면: 감독자에게 다시 물어 주세요";
   try {
@@ -816,17 +816,19 @@ async function redirectWorker({
       messageTarget && kickoffHash,
       "Prompt redirect requires a kickoff task address",
     );
-    const from =
-      supervisor.role === "pm" ? "pm" : `task:${supervisor.workflowTaskId}`;
-    const result = sendMessage(stateDir, kickoffHash, {
-      from,
-      to: `task:${messageTarget}`,
-      key,
-      type: "instruction",
+    const result = await sendOrcaMessage({
+      to: terminal,
+      type: "status",
       subject,
       body: found.instruction ?? found.reason ?? subject,
+      executable: orca,
+      execute,
     });
-    return { sent: true, subject, messageId: result.message.id };
+    return {
+      sent: true,
+      subject,
+      messageId: result?.message?.id ?? result?.id ?? null,
+    };
   } catch (error) {
     return { sent: false, subject, error: error.message };
   }

@@ -2,7 +2,6 @@
 import { durableSuccessSupported } from "./directory-durability-fixture.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -16,12 +15,7 @@ import {
   assertDirectorySync,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import { predictLaunchPath } from "../plugins/oh-my-teams/scripts/launch-matrix.mjs";
-import { runTurn } from "../plugins/oh-my-teams/scripts/headless-runner.mjs";
 import * as headlessRuntime from "../plugins/oh-my-teams/scripts/headless.mjs";
-import {
-  answerHeadless,
-  startHeadlessWorker,
-} from "../plugins/oh-my-teams/scripts/headless.mjs";
 import {
   ALLOWED_OPTIONS,
   createRoleWorktree,
@@ -1548,7 +1542,7 @@ test("CLI usage admits only an explicit paired cross-workflow reuse source", () 
     },
   );
   assert.match(
-    fs.readFileSync("plugins/oh-my-teams/scripts/teams-org.mjs", "utf8"),
+    fs.readFileSync("plugins/oh-my-teams/scripts/cli-spec.mjs", "utf8"),
     /\[--prior-workflow-id ID --prior-task-id ID\]/,
   );
 });
@@ -1935,17 +1929,6 @@ test("the CLI rejects new headless launches and Windows Agy has no sessionless f
   assert.ok(result.reason.includes("agy-interactive-terminal-unavailable"));
 });
 
-test("direct headless exports fail closed", () => {
-  assert.throws(
-    () => startHeadlessWorker({}),
-    /New headless execution was removed/,
-  );
-  assert.throws(
-    () => answerHeadless("/legacy", "old", "continue"),
-    /Headless follow-up turns were removed/,
-  );
-});
-
 test("headless record reader has no retained launch implementation", () => {
   const runtime = fs.readFileSync(
     path.resolve("plugins/oh-my-teams/scripts/headless.mjs"),
@@ -1954,26 +1937,8 @@ test("headless record reader has no retained launch implementation", () => {
   assert.equal(Object.hasOwn(headlessRuntime, "headlessCommand"), false);
   assert.doesNotMatch(runtime, /\blaunchTurn\b/);
   assert.doesNotMatch(runtime, /\bspawn\s*\(/);
-  assert.doesNotMatch(runtime, /headless-runner\.mjs/);
-});
-
-test("headless runner rejects public and node entry execution before any provider spawn", async (t) => {
-  const turnDir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-retired-runner-"));
-  t.after(() => fs.rmSync(turnDir, { recursive: true, force: true }));
-  await assert.rejects(
-    () => runTurn(turnDir),
-    /New headless runner execution was removed/,
-  );
-  assert.equal(fs.existsSync(path.join(turnDir, "pids.json")), false);
-  const runner = path.resolve(
-    "plugins/oh-my-teams/scripts/headless-runner.mjs",
-  );
-  const direct = spawnSync(process.execPath, [runner, turnDir], {
-    encoding: "utf8",
-  });
-  assert.equal(direct.status, 1);
-  assert.match(direct.stderr, /New headless runner execution was removed/);
-  assert.equal(fs.existsSync(path.join(turnDir, "pids.json")), false);
+  assert.equal(Object.hasOwn(headlessRuntime, "startHeadlessWorker"), false);
+  assert.equal(Object.hasOwn(headlessRuntime, "answerHeadless"), false);
 });
 
 function previouslyClosedRole(f) {

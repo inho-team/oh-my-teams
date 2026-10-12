@@ -3357,13 +3357,20 @@ test("role-terminal handler wires readOrcaVersion/skipAgyVersion/throwOnUnverifi
   // here is that the shared function still carries all four, and that the
   // auditor branch still reads its environment only through it.
   const source = fs.readFileSync(cli, "utf8");
-  const inputsStart = source.indexOf(
+  const lifecycleSource = fs.readFileSync(
+    new URL(
+      "../plugins/oh-my-teams/scripts/worktree-commands.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const inputsStart = lifecycleSource.indexOf(
     "export function auditorLaunchEnvironmentInputs(",
   );
   assert.notEqual(inputsStart, -1, "auditorLaunchEnvironmentInputs not found");
-  const inputs = source.slice(
+  const inputs = lifecycleSource.slice(
     inputsStart,
-    source.indexOf("\n}\n", inputsStart),
+    lifecycleSource.indexOf("\n}\n", inputsStart),
   );
   assert.match(
     inputs,

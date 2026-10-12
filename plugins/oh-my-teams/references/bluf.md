@@ -43,11 +43,11 @@ oh my teams의 모든 역할이 보고하거나 지시할 때 따르는 공통 �
 
 사용자에게 전달하는 최종 결과를 한국어로 쓰는 자세한 기준은 [`korean-result-reporting.md`](korean-result-reporting.md)가 이 순서를 사용자 보고에 맞게 풀어 쓴다.
 
-## Run 생성 후 Message MCP 정형 문서 계약
+## Run 생성 후 Orca 정형 문서 메시지 계약
 
-Run이 생성된 뒤 배정자와 역할이 Message MCP로 정형 문서를 다룰 때는 다음 계약을 따른다.
+Run이 생성된 뒤 배정자와 역할이 Orca 메시지로 정형 문서를 다룰 때는 다음 계약을 따른다.
 
-**`send_message`의 본문 필드:**
+**메시지 본문 필드:**
 
 ```json
 {

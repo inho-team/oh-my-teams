@@ -23,17 +23,11 @@ export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const JEV_INPUT_USD_PER_MTOK = 0.042;
 
 const STATE_DIRECTORY = "judgments";
-const MESSAGE_CHARS = 2000;
-const OUTPUT_TAIL_CHARS = 6000;
 const SCREEN_TAIL_CHARS = 4000;
 const FAILURE_CHARS = 4000;
 
 const clip = (text, limit) => String(text ?? "").slice(0, limit);
 const tail = (text, limit) => String(text ?? "").slice(-limit);
-
-function noul(instructions, criteria) {
-  return { type: "noul", instructions, criteria };
-}
 
 function choice(instructions, criteria) {
   return { type: "choice", instructions, criteria };
@@ -220,134 +214,6 @@ export async function judge({
 function write(directory, record) {
   writeJSON(path.join(directory, `${record.id}.json`), record);
   return record;
-}
-
-/**
- * Judges whether a Delivery of status messages needed the supervisor.
- *
- * Only a Delivery made entirely of `status` messages is judged, because that is
- * the only kind a later filter could hold back: `worker_done`, `question` and
- * `escalation` always wake the supervisor.
- *
- * @param {object} options - `org`, `stateDir`, the `delivery` returned by the wait, and fetch/env overrides.
- * @returns {Promise<object | null>} The record, or null when nothing was judged.
- */
-export async function shadowStatusFilter({ delivery, ...options }) {
-  const messages = delivery?.messages ?? [];
-  if (
-    messages.length === 0 ||
-    !messages.every((message) => message?.type === "status")
-  )
-    return null;
-  return judge({
-    ...options,
-    point: "status-filter",
-    state: {
-      messages: messages.map((message) => ({
-        type: message.type,
-        subject: clip(message.subject, 300),
-        body: clip(message.body ?? message.payload, MESSAGE_CHARS),
-      })),
-    },
-    questions: {
-      needs_action: noul(
-        "Does any message in `messages` require the supervisor to act now, for example by answering a question, " +
-          "deciding something, handling a blocker or failure, or accepting finished work? " +
-          "A routine progress update that needs no reply is not an action.",
-        {
-          true: "At least one message needs the supervisor to act now.",
-          false:
-            "Every message is a routine progress update that needs no reply.",
-        },
-      ),
-      kind: choice(
-        "Which best describes the most important message in `messages`?",
-        {
-          progress:
-            "Routine progress: the current step, finished and remaining items, and no blocker.",
-          blocker:
-            "Reports a blocker, a failure, or that the worker cannot continue.",
-          question: "Asks the supervisor a question or requests a decision.",
-          completion: "Says the assigned work is finished.",
-          other: "None of the above.",
-        },
-      ),
-    },
-    context: {
-      deliveryId: delivery.deliveryId ?? null,
-      messageCount: messages.length,
-    },
-  });
-}
-
-// worker-read's page layout is Orca's; every string under `result` is kept in
-// order, so a changed row shape still yields the text a person would read.
-function outputText(envelope) {
-  const parts = [];
-  const visit = (value) => {
-    if (typeof value === "string") parts.push(value);
-    else if (Array.isArray(value)) value.forEach(visit);
-    else if (value && typeof value === "object")
-      Object.values(value).forEach(visit);
-  };
-  visit(envelope?.result);
-  return parts.join("\n");
-}
-
-/**
- * Judges what a stalled worker is doing from the end of its output.
- *
- * @param {object} options - `org`, `stateDir`, `dispatchId`, the `decision` from
- *   `nextSupervisionAction`, the observed `liveness`, `readOutput` returning a
- *   worker-read envelope, and fetch/env overrides.
- * @returns {Promise<object | null>} The record, or null when nothing was judged.
- */
-export async function shadowAutoObserve({
-  dispatchId,
-  decision,
-  liveness,
-  readOutput,
-  ...options
-}) {
-  const policy = jevPolicy(options.org);
-  if (
-    !policy?.points.includes("auto-observe") ||
-    !options.stateDir ||
-    !dispatchId
-  )
-    return null;
-  let text;
-  try {
-    text = outputText(await readOutput(dispatchId));
-  } catch {
-    return null;
-  }
-  if (!text.trim()) return null;
-  return judge({
-    ...options,
-    point: "auto-observe",
-    state: { worker_output_tail: tail(text, OUTPUT_TAIL_CHARS) },
-    questions: {
-      state: choice(
-        "What is the worker doing, judged from the end of its output in `worker_output_tail`?",
-        {
-          working: "Still producing output or running tools on its task.",
-          "waiting-for-input":
-            "Stopped at a prompt, a permission question, or a question to a person.",
-          "usage-limit": "Stopped by a usage, quota, or rate limit.",
-          crashed: "The agent exited, crashed, or returned to a shell prompt.",
-          finished: "Says its work is finished but has not reported it.",
-          unclear: "The output does not show which of these applies.",
-        },
-      ),
-    },
-    context: {
-      dispatchId,
-      liveness: liveness ?? null,
-      action: decision?.action ?? null,
-      reason: decision?.reason ?? null,
-    },
-  });
 }
 
 /**

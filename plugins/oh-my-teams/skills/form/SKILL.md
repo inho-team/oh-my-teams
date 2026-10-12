@@ -39,7 +39,6 @@ node <runtime> model-catalog --codex-home <codex-home>
 - 각 역할의 상위 역할은 서열상 바로 위 역할이다. 선택한 실행기는 현재 로그인 계정(`account: current`)으로 기록하고, 실행기별로 하나의 `pool`을 만들어 같은 구독의 소진을 우회하지 않게 한다.
 - 자원별 동시 실행 한도는 기본 1이고, 자원별 호출 한도와 `policy.maxCalls`는 기본 3이다. 역할의 시도 횟수는 1이며, 대체 profile은 두지 않고, 할당량이 소진되면 중단한다. 추가 자원이나 대체 profile은 `adjust`에서 사용자가 고르게 하며, 이 값도 `adjust`에서 명시적으로 바꿀 수 있다.
 - 모델과 추론 강도는 결성 조직에 기록하지 않는다. 카탈로그가 실패했을 때 host default나 고정 모델을 추측하여 넣지 않는다.
-- 감독 역할은 `worker_done`을 보내지 않은 worker가 15분(`policy.supervision.progressCheckMs: 900000`) 동안 활동이 없으면 진행 상황을 묻고, 답이 없는 요청이 2회(`unansweredLimit: 2`)에 이르면 상위에 보고한다. 이 정책은 메시지 한 통 외에 호출을 쓰지 않으며, 재시도나 종료를 스스로 하지 않는다.
 - advisor profile은 해당 기능이 필요할 때 `adjust`에서 검증된 자원 범위와 별도로 명시한다.
 - 감사(`org.auditor`)는 결성 단계에서 만들지 않는다. 이사 또는 독립 정책이 필요할 때 배정하며, PM이 감사 신원과 판정 권한을 선택하지 않는다.
 

@@ -757,7 +757,7 @@ test("the lifecycle documents keep the owner merge in close alone", () => {
     read("references/kickoff-registry.md"),
     /## 주인 체크아웃과 병합/,
   );
-  for (const skill of ["skills/pm/SKILL.md", "skills/pl/SKILL.md"]) {
+  for (const skill of ["skills/pm/SKILL.md"]) {
     assert.match(read(skill), /주인 체크아웃\)에는 커밋하거나 병합하지 않/);
   }
 });

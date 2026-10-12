@@ -3,7 +3,6 @@ import {
   ACTIVE_ROLES,
   DEPTH_ROLES,
   FULL_DEPTH,
-  SUPERVISION_DEFAULTS,
   assert,
   validateOrg,
 } from "./core.mjs";
@@ -13,8 +12,7 @@ import {
  *
  * None of them spends more than the models the user chose: one worker per role,
  * one attempt, no fallback onto another profile, a stop on exhaustion, and no
- * assistant calls. A silent worker is asked for progress and then escalated on
- * the supervision defaults, which never retry or stop anything by themselves.
+ * assistant calls.
  * `adjust` changes any of them later.
  */
 export const DRAFT_DEFAULTS = Object.freeze({
@@ -25,7 +23,6 @@ export const DRAFT_DEFAULTS = Object.freeze({
     maxCalls: 3,
     timeoutMs: 300000,
     repeatFailureLimit: 1,
-    supervision: SUPERVISION_DEFAULTS,
   }),
 });
 
@@ -155,10 +152,7 @@ function buildOrganization(name, roles, models) {
     pools,
     profiles,
     roles: bindings,
-    policy: {
-      ...DRAFT_DEFAULTS.policy,
-      supervision: { ...DRAFT_DEFAULTS.policy.supervision },
-    },
+    policy: { ...DRAFT_DEFAULTS.policy },
   });
 }
 
@@ -230,10 +224,6 @@ export function draftResourceOrganization({
     pools,
     resources: registered,
     roles,
-    policy: {
-      ...DRAFT_DEFAULTS.policy,
-      maxCalls,
-      supervision: { ...DRAFT_DEFAULTS.policy.supervision },
-    },
+    policy: { ...DRAFT_DEFAULTS.policy, maxCalls },
   });
 }

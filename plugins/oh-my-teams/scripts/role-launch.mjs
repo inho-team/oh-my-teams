@@ -29,10 +29,6 @@ import {
   assertModelAssignmentChoice,
   directorModelAssignment,
 } from "./model-assignment.mjs";
-import {
-  assertMessageMcpStartup,
-  messageMcpLaunch,
-} from "./message-mcp-config.mjs";
 
 /**
  * How each provider's role reaches an Orca terminal, and under which agent id.
@@ -592,7 +588,7 @@ const PROVIDER_EXECUTABLES = Object.freeze({
 // bypass flag, model, effort, Codex's update-check override, Claude's
 // autocompact window and the first prompt. Shared by the role and director
 // commands so both type the same line into a terminal.
-function profileArgv(org, label, profileId, profile, firstPrompt, messageMcp) {
+function profileArgv(org, label, profileId, profile, firstPrompt) {
   assert(
     BARE_COMMAND.test(profile.command[0]),
     `${label} profile ${profileId} must name a bare executable name on PATH, not ${profile.command[0]}`,
@@ -641,16 +637,6 @@ function profileArgv(org, label, profileId, profile, firstPrompt, messageMcp) {
   const autoCompact =
     profile.provider === "claude" ? claudeAutoCompact(org) : null;
   if (autoCompact) argv.push("--autocompact", autoCompact);
-  const message = messageMcp
-    ? messageMcpLaunch(
-        profile.provider,
-        messageMcp.stateDir,
-        messageMcp.actor,
-        { orgFile: messageMcp.orgFile },
-      )
-    : null;
-  if (message) assertMessageMcpStartup(message);
-  if (message) argv.push(...message.argv);
   if (firstPrompt !== undefined) {
     assert(
       typeof firstPrompt === "string" && firstPrompt.trim(),
@@ -673,11 +659,6 @@ function profileArgv(org, label, profileId, profile, firstPrompt, messageMcp) {
     effortRequested: profile.effort ?? null,
     ...(runner ? { runner } : {}),
     autoCompact,
-    ...(message
-      ? {
-          messageMcp: { actor: messageMcp.actor, available: message.available },
-        }
-      : {}),
   };
 }
 
@@ -703,7 +684,6 @@ function profileArgv(org, label, profileId, profile, firstPrompt, messageMcp) {
  *   command's own argument, built with {@link kickoffBriefPrompt} rather than
  *   free text. Only added when the profile's provider has a confirmed entry
  *   in {@link FIRST_PROMPT_ARG}.
- * @param {string} [run.messageState] - Registered or soon-to-be registered PM state.
  * @returns {object} Role, profile, argv, shell command, requested model and
  *   the Claude `--autocompact` value (null for other providers).
  * @throws {Error} When the role is not held, the profile cannot be launched,
@@ -720,7 +700,6 @@ export function roleCommand(
     pmSelection,
     workflowTask,
     workflowState,
-    messageState,
   } = {},
 ) {
   const org = validateOrg(
@@ -753,22 +732,11 @@ export function roleCommand(
   const profileId = roleProfileId(org, role, handoffProfile);
   const profile = org.profiles[profileId];
   launchableProfile(role, profileId, profile);
-  const messageActor =
-    role === ROOT_ROLE ? "pm" : workflowTask ? `task:${workflowTask}` : null;
   return {
     role,
     profile: profileId,
     provider: profile.provider,
-    ...profileArgv(
-      org,
-      `Role ${role}`,
-      profileId,
-      profile,
-      firstPrompt,
-      messageState && messageActor
-        ? { stateDir: messageState, actor: messageActor }
-        : null,
-    ),
+    ...profileArgv(org, `Role ${role}`, profileId, profile, firstPrompt),
   };
 }
 
@@ -813,7 +781,6 @@ export function directorBriefPrompt(briefPath) {
  * @param {string} [request.model] - Model for an explicit provider.
  * @param {string} [request.effort] - Effort for an explicit provider.
  * @param {string} [request.firstPrompt] - Prompt from {@link directorBriefPrompt}.
- * @param {string} [request.messageOrg] - Organization registry for the director mailbox.
  * @returns {object} Role `director`, profile, argv, shell command, requested
  *   model and effort.
  * @throws {Error} When both or neither of profile and provider are given, the
@@ -822,7 +789,7 @@ export function directorBriefPrompt(briefPath) {
  */
 export function directorCommand(
   requestedOrg,
-  { profile: profileId, provider, model, effort, firstPrompt, messageOrg } = {},
+  { profile: profileId, provider, model, effort, firstPrompt } = {},
 ) {
   const org = validateOrg(requestedOrg);
   let id;
@@ -888,14 +855,7 @@ export function directorCommand(
     role: DIRECTOR_ROLE,
     profile: id,
     provider: profile.provider,
-    ...profileArgv(
-      org,
-      "Director",
-      id,
-      profile,
-      firstPrompt,
-      messageOrg ? { orgFile: messageOrg, actor: "director" } : null,
-    ),
+    ...profileArgv(org, "Director", id, profile, firstPrompt),
   };
 }
 
@@ -909,8 +869,13 @@ export function directorCommand(
  */
 export function readRoleCharter(role, directory = skillsDir) {
   assert(ROLES.includes(role), `Unknown role: ${role}`);
+  const charterRole = ["pl", "senior", "junior"].includes(role)
+    ? role === "pl"
+      ? "pm"
+      : "worker"
+    : role;
   const text = fs
-    .readFileSync(path.join(directory, role, "SKILL.md"), "utf8")
+    .readFileSync(path.join(directory, charterRole, "SKILL.md"), "utf8")
     .replace(/\r\n/g, "\n");
   const start = text.indexOf(`${CHARTER_HEADING}\n`);
   assert(start >= 0, `${role} skill has no ${CHARTER_HEADING} section`);
@@ -995,7 +960,7 @@ export function roleSpec(
     ...(workflowId ? [`workflow: ${workflowId} (state ${stateDir})`] : []),
     ...checkpointRule(workflowId, stateDir, workflowTask),
     ...handoffBrief(workflowState, workflowTask),
-    `역할 스킬 전문: ${path.join(skillsDir, role, "SKILL.md")}`,
+    `역할 스킬 전문: ${path.join(skillsDir, ["pl", "senior", "junior"].includes(role) ? (role === "pl" ? "pm" : "worker") : role, "SKILL.md")}`,
     "",
     "아래 권한·책임·한계를 벗어나는 요청은 수행하지 않고, 거부 사유와 함께 보고 대상에게 돌려보낸다.",
     // Untracked files count toward verify's fingerprint, and the literacy-test
