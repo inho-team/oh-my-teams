@@ -8,7 +8,7 @@ Claude Code·Codex용 **에이전트 조직 플러그인**. 이사는 사용자�
 |---|---|
 | `help` | 설치된 생애주기·역할·지원 스킬과 사용 시점을 표로 안내 |
 | `form` | PM과 Worker의 모델을 골라 상설 조직을 결성하고, 나머지는 비용이 늘지 않는 기본값으로 저장 |
-| `kickoff` | 하나의 개발 Goal을 시작하거나 재개하고, PM이 Worker를 지휘하여 완료 조건까지 지속 감독 |
+| `kickoff` | 사용자가 팀 실행과 지속 감독을 요청했을 때 개발 Goal을 시작하거나 재개 |
 | `status` | 상설 조직과 현재 Goal·실행 팀·워크트리·검증 상태를 구분하여 표시 |
 | `adjust` | 요청한 상설 조직 설정만 수정하고 이전 설정 보존. 추론 강도·대체 순서·인원·별도 계정은 여기서 정함 |
 | `close` | 성공한 Goal의 PR/MR·병합·워크트리 정리와 완료 기록 처리 |
@@ -16,6 +16,8 @@ Claude Code·Codex용 **에이전트 조직 플러그인**. 이사는 사용자�
 | `director-terminal` | 새 이사 세션을 사용자가 보는 Orca 탭에 열고, 기존 이사가 감독하던 kickoff를 그 세션에 넘김 |
 
 Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한다. Codex에서는 플러그인의 해당 스킬을 호출하거나 같은 뜻으로 요청한다. `pm`은 kickoff 내부의 지휘 역할로 유지한다. 조직 구성 후 구독을 다시 묻지 않는다. 실행 중 작업은 시작 당시 조직 스냅샷을 유지한다.
+
+일반적인 수정·조사·QA는 현재 세션에서 직접 수행한다. 이때 OMT의 조직, kickoff, workflow와 새 워크트리는 필요하지 않다. 사용자가 팀 실행과 지속 감독을 요청할 때에만 `kickoff`를 사용하고, 같은 목표가 진행 중이면 기존 kickoff를 재개한다. 선택 기준은 [실행 경로](plugins/oh-my-teams/references/execution-path.md)에 정리했다.
 
 구독·모델·승인처럼 사용자가 정해야 하는 항목은 [사용자 선택 질문 계약](plugins/oh-my-teams/references/user-choice.md)을 따른다. 호스트가 구조화된 선택 도구를 제공하면 그것으로 묻고(Claude Code에서는 `AskUserQuestion`), 제공하지 않으면 번호를 매긴 선택지를 한 번에 제시한다. Codex CLI 0.154.0에는 이 용도로 확인된 도구가 없으므로 후자를 쓴다.
 
@@ -37,7 +39,7 @@ Director  사용자 소통·중대한 결정·최종 병합과 종료
    └─ Worker  구현·설계·독립 검토
 ```
 
-작은 작업에서는 PM만 사용하며, 구현과 독립 검토가 필요한 작업은 서로 다른 Worker 실행에 배정합니다. 진행 중인 이전 kickoff는 저장된 PL·Senior·Junior 역할 스냅샷을 유지합니다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`를 사용합니다.
+팀 실행 안에서 PM이 직접 처리할 수 있는 작업에는 Worker를 추가하지 않습니다. 구현과 독립 검토를 분리해야 하는 작업은 서로 다른 Worker 실행에 배정합니다. 진행 중인 이전 kickoff는 저장된 PL·Senior·Junior 역할 스냅샷을 유지합니다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`를 사용합니다.
 
 ## 설치
 
@@ -147,7 +149,7 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 
 ### 여러 kickoff 동시 진행
 
-한 프로젝트에서 kickoff를 몇 개든 동시에 진행할 수 있다. kickoff마다 선언 세션이 PM 워크트리를 따로 만들어 넘기고, 그 워크트리 ID로 `.omt/kickoffs/`에 등록한다. `status`는 등록된 kickoff를 모두 보여 주고, `close`와 `disband`는 지목한 kickoff만 종료한다. 한 워크트리에는 kickoff를 하나만 등록할 수 있다. PM 세션 하나가 Goal 하나를 소유하고 Run 하나를 바인딩하기 때문이다.
+서로 독립된 목표라면 한 프로젝트에서 여러 kickoff를 동시에 진행할 수 있다. kickoff마다 선언 세션이 PM 워크트리를 따로 만들어 넘기고, 그 워크트리 ID로 `.omt/kickoffs/`에 등록한다. `status`는 등록된 kickoff를 모두 보여 주고, `close`와 `disband`는 지목한 kickoff만 종료한다. 한 워크트리에는 kickoff를 하나만 등록할 수 있다. PM 세션 하나가 Goal 하나를 소유하고 Run 하나를 바인딩하기 때문이다.
 
 워크트리가 나뉘어 파일 충돌은 없지만 구독 할당량은 나뉘지 않는다. 역할별 동시 인원과 호출 예산은 kickoff마다 따로 계산되므로, 같은 구독을 쓰는 kickoff가 둘이면 조직 파일에 적은 동시 인원의 두 배까지 워커가 함께 돌 수 있다. 필요하면 각 kickoff의 실행 깊이를 낮추거나 `adjust`로 동시 인원을 줄인다.
 
@@ -223,7 +225,7 @@ npm run lint
 
 버전과 감사 수치처럼 여러 파일이 되풀이하는 값은 `scripts/metadata.mjs`가 정본에서 파생한다. 파일마다 직접 고치지 않고 정본만 바꾼 뒤 `npm run sync`를 실행하며, `npm run sync:check`는 고치지 않고 어긋난 곳만 보고한다. 정본과 따라가는 파일의 대응은 [AGENTS.md](AGENTS.md)에 표로 정리했다.
 
-제한된 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행한다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 PM state를 써야 동시 인원 제한이 적용된다. 복잡한 작업의 감독 실행은 PL 스킬을 따른다.
+팀 실행에서 별도 Worker가 필요한 제한 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행할 수 있다. `prepare`는 새 워크트리를 만들므로 현재 세션에서 직접 처리하는 일반 작업에는 사용하지 않는다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 PM state를 써야 동시 인원 제한이 적용된다. 기존 PL 역할의 감독 절차는 진행 중인 이전 kickoff에만 적용한다.
 
 감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows의 Agy 역할은 역할 터미널 경로가 검증되지 않아 실행 matrix가 거부하므로 PM에게 보고하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
 

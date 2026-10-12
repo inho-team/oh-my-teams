@@ -1,15 +1,15 @@
 ---
 name: kickoff
-description: 저장된 oh my teams 조직으로 하나의 개발 목표를 시작하거나 재개하고, 검증 가능한 완료 조건까지 Goal처럼 지속해서 감독한다. 팀을 모아 끝까지 진행해 달라는 요청에 사용한다.
+description: 사용자가 팀 실행과 지속 감독을 요청했을 때 저장된 조직으로 개발 목표를 시작하거나 재개한다. 일반적인 직접 수정·조사·QA에는 사용하지 않는다.
 ---
 
 # 팀 킥오프
 
-특정 개발 과제를 수행하는 실행 팀의 진입점이다. 상설 조직이 없으면 `form`으로 먼저 결성한다. 조직이 있으면 구독이나 모델을 다시 묻지 않고 kickoff 시점의 조직 revision을 실행 스냅샷으로 고정한다.
+팀을 구성해 지속 감독할 개발 과제의 진입점이다. 먼저 [`../../references/execution-path.md`](../../references/execution-path.md)의 실행 경로를 확인한다. 직접 처리할 작업에는 kickoff를 시작하지 않는다. 상설 조직이 없으면 `form`으로 먼저 결성한다. 조직이 있으면 구독이나 모델을 다시 묻지 않고 kickoff 시점의 조직 revision을 실행 스냅샷으로 고정한다.
 
 ## 하나의 지속 실행 권한
 
-한 프로젝트에서 kickoff를 몇 개든 동시에 진행할 수 있다. 각 kickoff는 자기 PM 워크트리에서 감독되고, 어떤 kickoff가 어느 워크트리에서 도는지는 등록부에 남는다. 시작하기 전에 등록된 kickoff를 조회하고, 인계를 마친 뒤에 등록한다. 현재 스킬 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석한다.
+서로 독립된 목표라면 한 프로젝트에서 여러 kickoff를 동시에 진행할 수 있다. 각 kickoff는 자기 PM 워크트리에서 감독되고, 어떤 kickoff가 어느 워크트리에서 도는지는 등록부에 남는다. 시작하기 전에 등록된 kickoff를 조회하고, 인계를 마친 뒤에 등록한다. 현재 스킬 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석한다.
 
 ```text
 node <runtime> kickoff-show --org <project>/.omt/organization.json
