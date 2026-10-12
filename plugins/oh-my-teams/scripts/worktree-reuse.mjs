@@ -383,6 +383,74 @@ export function transferredLineageProven(orgFile, worktree) {
   );
 }
 
+async function verifyReusableCandidate({
+  request,
+  source,
+  target,
+  base,
+  executable,
+  scan,
+  readShown,
+  gitCommand,
+}) {
+  const last = readWorktreeTransitions(request.orgFile)
+    .entries.filter(
+      (entry) =>
+        entry.worktreeId === source.worktreeId && entry.type === "reuse",
+    )
+    .at(-1);
+  assert(
+    !last ||
+      (last.targetWorktreeId === source.entry.pm.worktreeId &&
+        last.workflowId === source.workflowId &&
+        last.taskId === source.taskId),
+    "source-ownership-retired",
+  );
+  const observed = await scan({
+    orgFile: request.orgFile,
+    worktreeId: source.entry.pm.worktreeId,
+    archiveFile: source.archiveFile,
+    executable,
+    integrationCommit: source.archiveFile ? undefined : base,
+  });
+  const candidate = observed.candidates.find(
+    (item) => item.worktreeId === source.worktreeId,
+  );
+  assert(
+    observed.inventoryComplete && candidate?.status === "safe-to-remove",
+    candidate?.reasons?.join(",") || "source-inventory-unproven",
+  );
+  const before = await readShown(source.worktreeId);
+  const parent = await readShown(source.entry.pm.worktreeId);
+  assert(
+    before.id === source.worktreeId &&
+      before.path === candidate.path &&
+      before.repoId === target.repoId &&
+      before.identity.instanceId === candidate.instanceId &&
+      before.identity.executionHostId === candidate.hostId,
+    "source-identity-changed",
+  );
+  assert(
+    before.parentWorktreeId === parent.id &&
+      (validLineage(before, parent) ||
+        transferredLineageProven(request.orgFile, before)),
+    "source-lineage-unproven",
+  );
+  assert(before.childWorktreeIds?.length === 0, "source-has-children");
+  assert(before.head === candidate.git.head, "source-head-changed");
+  await gitCommand(before.path, [
+    "merge-base",
+    "--is-ancestor",
+    before.head,
+    base,
+  ]);
+  assert(
+    !(await gitCommand(before.path, ["status", "--porcelain=v1", "-uall"])),
+    "source-git-dirty",
+  );
+  return before;
+}
+
 /**
  * Selects and reserves one proven candidate under the common mutation fence.
  * The launch callback runs inside the fence; errors after prepare preserve the candidate.
@@ -447,67 +515,17 @@ export async function withAutomaticWorktreeReuse(
     let currentInventoryUnproven = false;
     for (const source of found.candidates) {
       let before;
-      let candidate;
       try {
-        const last = readWorktreeTransitions(request.orgFile)
-          .entries.filter(
-            (entry) =>
-              entry.worktreeId === source.worktreeId && entry.type === "reuse",
-          )
-          .at(-1);
-        assert(
-          !last ||
-            (last.targetWorktreeId === source.entry.pm.worktreeId &&
-              last.workflowId === source.workflowId &&
-              last.taskId === source.taskId),
-          "source-ownership-retired",
-        );
-        const observed = await scan({
-          orgFile: request.orgFile,
-          worktreeId: source.entry.pm.worktreeId,
-          archiveFile: source.archiveFile,
-          executable,
-          integrationCommit: source.archiveFile ? undefined : base,
-        });
-        candidate = observed.candidates.find(
-          (item) => item.worktreeId === source.worktreeId,
-        );
-        assert(
-          observed.inventoryComplete && candidate?.status === "safe-to-remove",
-          candidate?.reasons?.join(",") || "source-inventory-unproven",
-        );
-        before = await readShown(source.worktreeId);
-        const parent = await readShown(source.entry.pm.worktreeId);
-        assert(
-          before.id === source.worktreeId &&
-            before.path === candidate.path &&
-            before.repoId === target.repoId &&
-            before.identity.instanceId === candidate.instanceId &&
-            before.identity.executionHostId === candidate.hostId,
-          "source-identity-changed",
-        );
-        assert(
-          before.parentWorktreeId === parent.id &&
-            (validLineage(before, parent) ||
-              transferredLineageProven(request.orgFile, before)),
-          "source-lineage-unproven",
-        );
-        assert(before.childWorktreeIds?.length === 0, "source-has-children");
-        assert(before.head === candidate.git.head, "source-head-changed");
-        await gitCommand(before.path, [
-          "merge-base",
-          "--is-ancestor",
-          before.head,
+        before = await verifyReusableCandidate({
+          request,
+          source,
+          target,
           base,
-        ]);
-        assert(
-          !(await gitCommand(before.path, [
-            "status",
-            "--porcelain=v1",
-            "-uall",
-          ])),
-          "source-git-dirty",
-        );
+          executable,
+          scan,
+          readShown,
+          gitCommand,
+        });
       } catch (error) {
         if (
           source.entry.pm.worktreeId === found.current.pm.worktreeId &&
