@@ -11,6 +11,7 @@ import {
 } from "./kickoff-registry.mjs";
 import {
   reclaimWorktree,
+  completeInventoryRows,
   listWorktreeTerminals,
   runOrcaJson,
   selectOrcaExecutable,
@@ -747,6 +748,11 @@ export async function scanKickoffCleanup(
       !settledContextDispatch(worker),
   );
   if (unattributedWorkers.length) errors.push("worker-workspace-unattributed");
+  if (
+    !completeInventoryRows(treeResult, "worktrees") ||
+    !completeInventoryRows(terminalResult, "terminals")
+  )
+    errors.push("orca-inventory-count-or-coverage-incomplete");
   if (treeResult?.truncated || terminalResult?.truncated)
     errors.push("orca-inventory-truncated");
   const remoteHostsOmitted = Boolean(
@@ -769,11 +775,13 @@ export async function scanKickoffCleanup(
         truncated: body?.truncated ?? null,
         runtimeId: receipt?._meta?.runtimeId ?? null,
         rowsVerified:
-          Array.isArray(body?.terminals) &&
+          completeInventoryRows(body, "terminals") &&
           body.terminals.every(
             (row) => row.worktreeId === id && row.executionHostId === hostId,
           ),
       };
+      if (!completeInventoryRows(body, "terminals"))
+        errors.push(`scoped-terminal-inventory-incomplete:${id}`);
       if (Array.isArray(body?.terminals)) terminals.push(...body.terminals);
     } catch (error) {
       scopedTerminals[id] = { worktreeId: id, error: error.message };

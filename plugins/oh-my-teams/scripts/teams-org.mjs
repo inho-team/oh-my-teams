@@ -98,6 +98,7 @@ import {
   requirementsRetrofit,
 } from "./requirements.mjs";
 import {
+  completeInventoryRows,
   checkTerminalIdle,
   createWorktreeWithRoleSession,
   discoverOrcaRuntime,
@@ -1623,6 +1624,7 @@ async function listWorktreeTerminals({
   orca,
   list,
   identity,
+  runtimeId,
 }) {
   const listed = await list(
     selectOrcaExecutable(orca),
@@ -1637,12 +1639,8 @@ async function listWorktreeTerminals({
         identity?.executionHostId),
     "Orca did not prove the worktree terminal list; preserve the worktree",
   );
-  if (receiptBody(listed).hostScope?.omittedHostIds?.length) {
-    assertHostInventory(
-      listed,
-      identity.executionHostId,
-      listed?._meta?.runtimeId,
-    );
+  if (identity) {
+    assertHostInventory(listed, identity.executionHostId, runtimeId);
     assert(
       terminals.every((row) => row.worktreeId === worktreeId),
       "Scoped terminal inventory contains another worktree",
@@ -1743,6 +1741,7 @@ async function proveAndCloseOwnedTerminals({
   launches,
   closures,
   identity,
+  runtimeId,
   active,
   release,
   close,
@@ -1778,6 +1777,7 @@ async function proveAndCloseOwnedTerminals({
     orca,
     list,
     identity,
+    runtimeId,
   });
   const expected = new Set(owned.map((entry) => entry.terminal));
   const actual = new Set(
@@ -1818,6 +1818,7 @@ async function proveAndCloseOwnedTerminals({
     orca,
     list,
     identity,
+    runtimeId,
   });
   assert(
     after.terminals.length === 0,
@@ -2562,6 +2563,7 @@ async function createRoleWorktreeUnderLock(
   );
   let promotionTransaction;
   let promotionIdentity;
+  let promotionRuntimeId;
   const created = existingRoleWorktree
     ? await (async () => {
         const workspace = {
@@ -2605,13 +2607,13 @@ async function createRoleWorktreeUnderLock(
             ]);
           }
           if (lifecycle && promotesInPlace) {
-            const shown = (
-              await show(
-                selectOrcaExecutable(args.orca),
-                ["worktree", "show", "--worktree", `id:${workspace.id}`],
-                { cwd: args.repo },
-              )
-            ).result?.worktree;
+            const shownReceipt = await show(
+              selectOrcaExecutable(args.orca),
+              ["worktree", "show", "--worktree", `id:${workspace.id}`],
+              { cwd: args.repo },
+            );
+            const shown = shownReceipt.result?.worktree;
+            promotionRuntimeId = shownReceipt?._meta?.runtimeId;
             assert(
               shown?.id === workspace.id &&
                 shown.identity?.key &&
@@ -2669,6 +2671,7 @@ async function createRoleWorktreeUnderLock(
                 launches: launches(args.org),
                 closures: closures(args.org),
                 identity: promotionIdentity,
+                runtimeId: promotionRuntimeId,
                 active,
                 release,
                 close,
@@ -2995,15 +2998,17 @@ async function reclaimIntegratedRoleWorktreeUnderLock(
         last.taskId === args["workflow-task"]),
     "Role worktree ownership transferred; preserve it",
   );
-  const identity = (
-    await show(
-      selectOrcaExecutable(args.orca),
-      ["worktree", "show", "--worktree", `id:${worktreeId}`],
-      { cwd: repo },
-    )
-  ).result?.worktree;
+  const identityReceipt = await show(
+    selectOrcaExecutable(args.orca),
+    ["worktree", "show", "--worktree", `id:${worktreeId}`],
+    { cwd: repo },
+  );
+  const identity = identityReceipt.result?.worktree;
+  const runtimeId = identityReceipt?._meta?.runtimeId;
   assert(
-    identity?.id === worktreeId &&
+    typeof runtimeId === "string" &&
+      runtimeId.length > 0 &&
+      identity?.id === worktreeId &&
       identity.identity?.key &&
       identity.identity.instanceId &&
       identity.identity.executionHostId &&
@@ -3065,6 +3070,7 @@ async function reclaimIntegratedRoleWorktreeUnderLock(
     launches: worktreeLaunches,
     closures: closures(args.org),
     identity: identity.identity,
+    runtimeId,
     active,
     release,
     close,
@@ -3094,15 +3100,15 @@ async function reclaimIntegratedRoleWorktreeUnderLock(
       ),
     "Role reclaim global session or Dispatch proof is incomplete",
   );
-  const latestIdentity = (
-    await show(
-      selectOrcaExecutable(args.orca),
-      ["worktree", "show", "--worktree", `id:${worktreeId}`],
-      { cwd: repo },
-    )
-  ).result?.worktree;
+  const latestReceipt = await show(
+    selectOrcaExecutable(args.orca),
+    ["worktree", "show", "--worktree", `id:${worktreeId}`],
+    { cwd: repo },
+  );
+  const latestIdentity = latestReceipt.result?.worktree;
   assert(
-    latestIdentity?.identity?.key === identity.identity.key &&
+    latestReceipt?._meta?.runtimeId === runtimeId &&
+      latestIdentity?.identity?.key === identity.identity.key &&
       latestIdentity.parentWorktreeId === identity.parentWorktreeId,
     "Role reclaim identity or parent changed; preserve it",
   );
@@ -3112,21 +3118,21 @@ async function reclaimIntegratedRoleWorktreeUnderLock(
     identityKey: identity.identity.key,
     executable: args.orca,
   });
-  const inventory = (
-    await show(selectOrcaExecutable(args.orca), ["worktree", "ps"], {
-      cwd: repo,
-    })
-  ).result;
+  const inventoryReceipt = await show(
+    selectOrcaExecutable(args.orca),
+    ["worktree", "ps"],
+    { cwd: repo },
+  );
+  const inventory = inventoryReceipt?.result;
   assert(
-    Array.isArray(inventory?.worktrees) &&
-      !inventory.truncated &&
-      (!inventory.hostScope?.omittedHostIds?.length ||
-        (inventory.hostScope.hostIds?.includes(
-          identity.identity.executionHostId,
-        ) &&
-          !inventory.hostScope.omittedHostIds.includes(
-            identity.identity.executionHostId,
-          ))) &&
+    inventoryReceipt?._meta?.runtimeId === runtimeId &&
+      completeInventoryRows(inventory, "worktrees") &&
+      Array.isArray(inventory.hostScope?.hostIds) &&
+      Array.isArray(inventory.hostScope?.omittedHostIds) &&
+      inventory.hostScope.hostIds.includes(identity.identity.executionHostId) &&
+      !inventory.hostScope.omittedHostIds.includes(
+        identity.identity.executionHostId,
+      ) &&
       !inventory.worktrees.some((item) => item.worktreeId === worktreeId),
     "Role reclaim postcheck incomplete",
   );

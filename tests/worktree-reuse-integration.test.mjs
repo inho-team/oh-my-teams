@@ -225,6 +225,7 @@ async function fixture(t) {
         omittedHostIds: ["unrelated-remote"],
       };
       result.truncated = false;
+      result.totalCount = (result.terminals ?? result.worktrees).length;
       inventoryChange(command[0], receipt, command);
     }
     return {

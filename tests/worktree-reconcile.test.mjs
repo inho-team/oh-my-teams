@@ -1,5 +1,6 @@
 /** Synthetic-only regressions for interrupted reclaim preservation and refusal boundaries. */
 import test from "node:test";
+import { reclaimIntegratedRoleWorktree } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -167,6 +168,7 @@ function fixture(t) {
   const listed = (terminals = []) =>
     receipt({
       terminals,
+      totalCount: terminals.length,
       truncated: false,
       hostScope: { hostIds: ["local"], omittedHostIds: ["unrelated"] },
     });
@@ -338,6 +340,7 @@ function fixture(t) {
         });
       if (args[0] === "worktree")
         return receipt({
+          totalCount: 1,
           worktrees: [
             {
               worktreeId: child.id,
@@ -448,6 +451,7 @@ test("target-host completeness retains unrelated omissions but rejects missing m
     _meta: { runtimeId: "r" },
     result: {
       terminals: [],
+      totalCount: 0,
       truncated: false,
       hostScope: { hostIds: ["local"], omittedHostIds: ["remote"] },
     },
@@ -980,5 +984,180 @@ test("legacy adoption rejects absent acknowledgment, unfinished invocation and u
       );
       assert.deepEqual(fs.readFileSync(f.journal), before);
     });
+  }
+});
+
+test("adoption and the real scanner refuse contradictory inventory counts and coverage", async (t) => {
+  for (const query of ["scoped-terminal", "global-terminal", "worktree"]) {
+    for (const corruption of ["total", "missing-total", "coverage"]) {
+      await t.test(`${query}/${corruption}`, async (t) => {
+        const f = fixture(t);
+        const original = f.ports.orca;
+        f.ports.orca = async (exe, args) => {
+          const receipt = await original(exe, args);
+          const match =
+            query === "worktree"
+              ? args[0] === "worktree" && args[1] === "ps"
+              : args[0] === "terminal" &&
+                args.includes("--worktree") === (query === "scoped-terminal");
+          if (match) {
+            if (corruption === "total") receipt.result.totalCount += 1;
+            if (corruption === "missing-total")
+              delete receipt.result.totalCount;
+            if (corruption === "coverage")
+              receipt.result.coverage = { complete: false };
+          }
+          return receipt;
+        };
+        const before = fs.readFileSync(f.journal);
+        await assert.rejects(() => f.invoke(), /inventory|proof incomplete/);
+        assert.deepEqual(fs.readFileSync(f.journal), before);
+        assert.equal(
+          fs.existsSync(
+            path.join(f.root, ".omt/worktree-transition-resolutions.json"),
+          ),
+          false,
+        );
+      });
+    }
+  }
+});
+
+test("normal reclaim binds every inventory to the original runtime and complete counts", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  for (const omitted of [[], ["unrelated"]]) {
+    for (const fault of [
+      "none",
+      "pre-runtime",
+      "pre-total",
+      "pre-coverage",
+      "pre-missing-host",
+      "post-runtime",
+      "post-total",
+      "final-runtime",
+      "final-total",
+      "final-coverage",
+      "final-missing-host",
+    ]) {
+      await t.test(
+        `${omitted.length ? "unrelated-omitted" : "all-hosts"}/${fault}`,
+        async (t) => {
+          const f = fixture(t);
+          write(f.journal, { schemaVersion: 1, entries: [] });
+          const effects = [];
+          let lists = 0;
+          const inventory = (key, rows) => ({
+            ok: true,
+            id: "read",
+            _meta: { runtimeId: "runtime" },
+            result: {
+              [key]: rows,
+              totalCount: rows.length,
+              truncated: false,
+              hostScope: { hostIds: ["local"], omittedHostIds: omitted },
+            },
+          });
+          function corrupt(receipt, stage) {
+            if (fault === `${stage}-runtime`)
+              receipt._meta.runtimeId = "OTHER-RUNTIME";
+            if (fault === `${stage}-total`) receipt.result.totalCount += 1;
+            if (fault === `${stage}-coverage`)
+              receipt.result.coverage = { complete: false };
+            if (fault === `${stage}-missing-host`)
+              delete receipt.result.hostScope;
+            return receipt;
+          }
+          const invoke = () =>
+            reclaimIntegratedRoleWorktree(
+              {
+                org: f.org,
+                state: f.owner.pm.stateDir,
+                "workflow-id": "flow",
+                "workflow-task": "task",
+                repo: f.owner.pm.path,
+                worktree: f.child.id,
+                "merge-commit": head,
+              },
+              {
+                read: () => ({ state: f.workflow }),
+                show: async (exe, args) =>
+                  args[1] === "ps"
+                    ? corrupt(inventory("worktrees", []), "final")
+                    : f.ports.orca(exe, args),
+                scan: f.ports.scan,
+                launches: () => [f.launch],
+                closures: () => [],
+                recordClosure: () => {},
+                git: f.ports.git,
+                active: async () => ({ status: "clear" }),
+                list: async () => {
+                  const first = lists++ === 0;
+                  return corrupt(
+                    inventory(
+                      "terminals",
+                      first
+                        ? [
+                            {
+                              handle: "terminal",
+                              worktreeId: f.child.id,
+                              executionHostId: "local",
+                            },
+                          ]
+                        : [],
+                    ),
+                    first ? "pre" : "post",
+                  );
+                },
+                release: async (id) => {
+                  effects.push("release");
+                  return {
+                    result: {
+                      dispatchId: id,
+                      state: "retained",
+                      reason: "external_terminal",
+                      processAction: "none",
+                    },
+                  };
+                },
+                close: async () => {
+                  effects.push("close");
+                  return {
+                    result: {
+                      close: {
+                        handle: "terminal",
+                        tabId: "tab",
+                        ptyKilled: true,
+                      },
+                    },
+                  };
+                },
+                reclaim: async () => {
+                  effects.push("remove");
+                  fs.rmSync(f.child.path, { recursive: true });
+                  return { removed: true };
+                },
+              },
+            );
+          if (fault === "none") {
+            const result = await invoke();
+            assert.equal(result.worktreeId, f.child.id);
+          } else {
+            await assert.rejects(invoke, /inventory|postcheck/);
+            assert.equal(
+              readWorktreeTransitions(f.org).entries.at(-1).status,
+              "prepared",
+            );
+          }
+          assert.deepEqual(
+            effects,
+            fault.startsWith("pre-")
+              ? []
+              : fault.startsWith("post-")
+                ? ["release", "close"]
+                : ["release", "close", "remove"],
+          );
+        },
+      );
+    }
   }
 });

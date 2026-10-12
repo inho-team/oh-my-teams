@@ -372,6 +372,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
         ? {
             hostScope: { hostIds: ["local"], omittedHostIds: [] },
             truncated: false,
+            totalCount: childPresent ? 2 : 1,
             worktrees: [
               {
                 worktreeId: pmId,
@@ -396,6 +397,7 @@ test("a completed archive retains child identity for read-only partial cleanup r
         : args[0] === "terminal"
           ? {
               terminals: [],
+              totalCount: 0,
               hostScope: { hostIds: ["local"], omittedHostIds: [] },
               truncated: false,
             }

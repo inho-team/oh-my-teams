@@ -29,7 +29,7 @@ import {
   main,
   parseArgs,
   recordLaunchSafely,
-  reclaimIntegratedRoleWorktree,
+  reclaimIntegratedRoleWorktree as reclaimRole,
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { draftResourceOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import {
@@ -43,6 +43,44 @@ import {
   registryDirectory,
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import { minimalRequirements } from "./requirements-draft-fixture.mjs";
+
+// Legacy test bodies specify payloads only. This fixture supplies the complete
+// public envelope and exact row ownership for those synthetic successful readers.
+function completeFixtureReceipt(receipt, worktreeId) {
+  const body = receipt?.result;
+  if (!body) return receipt;
+  const key = Array.isArray(body.terminals)
+    ? "terminals"
+    : Array.isArray(body.worktrees)
+      ? "worktrees"
+      : null;
+  if (key) {
+    body.totalCount ??= body[key].length;
+    body.truncated ??= false;
+    body.hostScope ??= { hostIds: ["local"], omittedHostIds: [] };
+    if (key === "terminals")
+      body.terminals = body.terminals.map((row) => ({
+        worktreeId,
+        executionHostId: "local",
+        ...row,
+      }));
+  }
+  return {
+    ...receipt,
+    _meta: receipt._meta ?? { runtimeId: "fixture-runtime" },
+  };
+}
+async function reclaimIntegratedRoleWorktree(args, ports) {
+  return reclaimRole(args, {
+    ...ports,
+    show: async (...call) =>
+      completeFixtureReceipt(await ports.show(...call), args.worktree),
+    list: ports.list
+      ? async (...call) =>
+          completeFixtureReceipt(await ports.list(...call), args.worktree)
+      : undefined,
+  });
+}
 
 function reclaimSandbox(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omt-role-reclaim-"));
@@ -78,21 +116,24 @@ function reclaimSandbox(t) {
       })),
     }),
     show: async (_executable, args) =>
-      args[1] === "ps"
-        ? { result: { worktrees: [] } }
-        : {
-            result: {
-              worktree: {
-                id: args.at(-1).slice(3),
-                parentWorktreeId: pmId,
-                identity: {
-                  key: "exact-child",
-                  instanceId: "child-instance",
-                  executionHostId: "local",
+      completeFixtureReceipt(
+        args[1] === "ps"
+          ? { result: { worktrees: [] } }
+          : {
+              result: {
+                worktree: {
+                  id: args.at(-1).slice(3),
+                  parentWorktreeId: pmId,
+                  identity: {
+                    key: "exact-child",
+                    instanceId: "child-instance",
+                    executionHostId: "local",
+                  },
                 },
               },
             },
-          },
+        args.at(-1).slice(3),
+      ),
   };
 }
 
@@ -2040,7 +2081,11 @@ test("an exact past closure and current empty inventory allow safe role reclaim"
       active: async () => assert.fail("historically closed terminal"),
       release: async () => assert.fail("already released"),
       close: async () => assert.fail("already closed"),
-      list: async () => ({ result: { terminals: [] } }),
+      list: async () =>
+        completeFixtureReceipt(
+          { result: { terminals: [] } },
+          `repo::${f.root}/child`,
+        ),
       git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
       reclaim: async (_repo, options) => ({ removed: options.id }),
     },
@@ -2086,7 +2131,11 @@ test("a reviewed promotion reuses its proven closed worktree without creating an
       active: async () => assert.fail("already closed"),
       release: async () => assert.fail("already released"),
       close: async () => assert.fail("already closed"),
-      list: async () => ({ result: { terminals: [] } }),
+      list: async () =>
+        completeFixtureReceipt(
+          { result: { terminals: [] } },
+          `repo::${f.root}/child`,
+        ),
       git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
       create: async () => assert.fail("must reuse"),
       promote: async () => ({ transition: { toWorktreeId: old.worktreeId } }),
@@ -2133,7 +2182,11 @@ test("an empty inventory with no ownership history cannot authorize reclaim", as
           scan: f.scan,
           launches: () => [],
           closures: () => [old.closure],
-          list: async () => ({ result: { terminals: [] } }),
+          list: async () =>
+            completeFixtureReceipt(
+              { result: { terminals: [] } },
+              `repo::${f.root}/child`,
+            ),
           git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
           reclaim: async () => assert.fail("unknown ownership"),
         },
@@ -2177,7 +2230,11 @@ test("a reviewed promotion with no ownership history preserves the worktree", as
           scan: f.scan,
           launches: () => [],
           closures: () => [old.closure],
-          list: async () => ({ result: { terminals: [] } }),
+          list: async () =>
+            completeFixtureReceipt(
+              { result: { terminals: [] } },
+              `repo::${f.root}/child`,
+            ),
           git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
           create: async () => assert.fail("must preserve"),
           open: async () => assert.fail("must not launch"),
@@ -2280,6 +2337,7 @@ function legacyLifecycleFixture(
     matrix: supervised,
     scan: f.scan,
     show: async (_exe, args) => ({
+      _meta: { runtimeId: "fixture-runtime" },
       result:
         args[1] === "ps"
           ? { worktrees: [] }
@@ -2305,7 +2363,21 @@ function legacyLifecycleFixture(
       return closedTerminal("old-terminal");
     },
     list: async () => ({
-      result: { terminals: attached ? [{ handle: "old-terminal" }] : [] },
+      _meta: { runtimeId: "fixture-runtime" },
+      result: {
+        terminals: attached
+          ? [
+              {
+                handle: "old-terminal",
+                worktreeId: child.id,
+                executionHostId: "local",
+              },
+            ]
+          : [],
+        totalCount: attached ? 1 : 0,
+        truncated: false,
+        hostScope: { hostIds: ["local"], omittedHostIds: [] },
+      },
     }),
     git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
     create: async () => assert.fail("must not create"),

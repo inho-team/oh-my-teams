@@ -1853,3 +1853,24 @@ export function listWorktreeTerminals(
     `id:${worktreeId}`,
   ]);
 }
+
+/**
+ * Checks that an Orca inventory contains every row declared by its response.
+ * @param {object} body - Unmodified result payload including completeness metadata.
+ * @param {string} field - Inventory array field, such as terminals or worktrees.
+ * @returns {boolean} Whether counts and explicit completeness signals agree.
+ */
+export function completeInventoryRows(body, field) {
+  return (
+    Array.isArray(body?.[field]) &&
+    body.truncated === false &&
+    Number.isInteger(body.totalCount) &&
+    body.totalCount >= 0 &&
+    body.totalCount === body[field].length &&
+    body.incomplete !== true &&
+    body.complete !== false &&
+    body.coverage?.complete !== false &&
+    body.coverage?.truncated !== true &&
+    !body.errors?.length
+  );
+}

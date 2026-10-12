@@ -8,7 +8,11 @@ import { readWorkflow } from "./workflow.mjs";
 import { git } from "./evidence.mjs";
 import { readLaunches, readTerminalClosures } from "./usage-ledger.mjs";
 import { scanKickoffCleanup } from "./kickoff-cleanup.mjs";
-import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
+import {
+  completeInventoryRows,
+  runOrcaJson,
+  selectOrcaExecutable,
+} from "./orca-adapter.mjs";
 import {
   reconcileWorktreeTransition,
   readWorktreeTransitions,
@@ -182,8 +186,7 @@ export function assertHostInventory(receipt, hostId, runtimeId) {
     typeof runtimeId === "string" &&
       runtimeId.length > 0 &&
       receipt?._meta?.runtimeId === runtimeId &&
-      body?.truncated === false &&
-      Array.isArray(body.terminals) &&
+      completeInventoryRows(body, "terminals") &&
       Array.isArray(body.hostScope?.hostIds) &&
       Array.isArray(body.hostScope?.omittedHostIds) &&
       body.hostScope.hostIds.includes(hostId) &&
