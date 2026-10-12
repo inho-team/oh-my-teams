@@ -290,7 +290,7 @@ test("workflow task ownership rejects before every role-worktree effect", async 
       /Unknown workflow task missing/,
     ],
     [
-      "unreviewed-junior-to-senior",
+      "cross-role-task-reuse",
       { worktree: "repo::/repo/senior-existing" },
       {
         current: {
@@ -745,180 +745,6 @@ test("the operational role-worktree command opens the session inside creation", 
   assert.equal(creation.base, "c".repeat(40));
   assert.equal(opened.id, "wt_a");
   assert.equal(result.session.terminal, "term_a");
-});
-
-test("a Junior-to-Senior rework reuses a clean, session-bound Senior worktree", async () => {
-  let created = false;
-  let promotion;
-  const result = await createRoleWorktree(
-    {
-      org: "/repo/.omt/organization.json",
-      role: "senior",
-      repo: "/repo",
-      name: "task-a-senior",
-      base: "d".repeat(40),
-      state: "/repo/.omt",
-      "workflow-id": "workflow-w2-00",
-      "workflow-task": "w2-00",
-      worktree: "repo::/repo/senior-existing",
-    },
-    {
-      organization: roleOrganization,
-      environment,
-      matrix: supervised,
-      create: async () => {
-        created = true;
-        throw new Error("promotion must reuse the Senior worktree");
-      },
-      read: () =>
-        workflowSnapshot({
-          tasks: {
-            "w2-00": {
-              role: "junior",
-              state: "reviewed",
-              worktreeId: "repo::/repo/junior-rejected",
-            },
-            "senior-prior": {
-              role: "senior",
-              state: "accepted",
-              worktreeId: "repo::/repo/senior-existing",
-            },
-          },
-        }),
-      git: async (repo, argv) => {
-        if (argv[0] === "status") return "";
-        if (argv[0] === "rev-parse" && argv[1] === "HEAD")
-          return repo === path.resolve("/repo") ? "integration-a" : "senior-a";
-        if (argv[0] === "rev-parse") return "integration-a";
-        if (argv[0] === "merge-base") return "";
-        throw new Error(`unexpected git: ${argv.join(" ")}`);
-      },
-      launches: () => [
-        {
-          via: "worker-start",
-          workflowId: "workflow-w2-00",
-          workflowTaskId: "senior-prior",
-          worktreePath: "/repo/senior-existing",
-          terminal: "senior-prior-terminal",
-          workerId: "senior-prior-dispatch",
-        },
-      ],
-      closures: () => [],
-      recordClosure: () => {},
-      active: async () => ({ status: "clear" }),
-      release: async (dispatchId) => releasedExternalTerminal(dispatchId),
-      close: async (_orca, argv) => closedTerminal(argv.at(-1)),
-      list: (() => {
-        let calls = 0;
-        return async () => ({
-          result: {
-            terminals:
-              calls++ === 0 ? [{ handle: "senior-prior-terminal" }] : [],
-          },
-        });
-      })(),
-      open: async (workspace) => ({
-        ready: true,
-        terminal: "senior-terminal",
-        role: "senior",
-        worktree: `id:${workspace.id}`,
-        modelRequested: "gpt-5.6-sol",
-      }),
-      promote: async (...args) => {
-        promotion = args;
-        return { transition: { id: "promotion-w2-00" } };
-      },
-    },
-  );
-  assert.equal(created, false);
-  assert.equal(result.id, "repo::/repo/senior-existing");
-  assert.equal(result.session.terminal, "senior-terminal");
-  assert.equal(promotion[3].fromWorktreeId, "repo::/repo/junior-rejected");
-  assert.equal(promotion[3].toWorktreeId, "repo::/repo/senior-existing");
-  assert.equal(promotion[3].base, "d".repeat(40));
-  assert.equal(result.transition.id, "promotion-w2-00");
-});
-
-test("a reviewed Junior task promotes in its own worktree after its terminal closes", async () => {
-  const worktreeId = "repo::/repo/junior-reviewed";
-  let created = false;
-  let closureRecorded = false;
-  let promoted;
-  const result = await createRoleWorktree(
-    {
-      org: "/repo/.omt/organization.json",
-      role: "senior",
-      repo: "/repo",
-      name: "same-task-senior",
-      base: "d".repeat(40),
-      state: "/repo/.omt",
-      "workflow-id": "workflow-promotion",
-      "workflow-task": "reviewed",
-      worktree: worktreeId,
-    },
-    {
-      organization: roleOrganization,
-      environment,
-      matrix: supervised,
-      create: async () => {
-        created = true;
-      },
-      read: () =>
-        workflowSnapshot({
-          tasks: {
-            reviewed: { role: "junior", state: "reviewed", worktreeId },
-          },
-        }),
-      git: async (_repo, argv) => {
-        if (argv[0] === "status") return "";
-        if (argv[0] === "rev-parse") return "reviewed-commit";
-        throw new Error(`unexpected git: ${argv.join(" ")}`);
-      },
-      launches: () => [
-        {
-          via: "worker-start",
-          workflowId: "workflow-promotion",
-          workflowTaskId: "reviewed",
-          worktreePath: "/repo/junior-reviewed",
-          terminal: "junior-terminal",
-          workerId: "junior-dispatch",
-        },
-      ],
-      closures: () => [],
-      recordClosure: () => {
-        closureRecorded = true;
-      },
-      active: async () => ({ status: "clear" }),
-      release: async (dispatchId) => releasedExternalTerminal(dispatchId),
-      close: async (_orca, argv) => closedTerminal(argv.at(-1)),
-      list: (() => {
-        let calls = 0;
-        return async () => ({
-          result: {
-            terminals: calls++ === 0 ? [{ handle: "junior-terminal" }] : [],
-          },
-        });
-      })(),
-      open: async (workspace) => {
-        assert.equal(closureRecorded, true);
-        return {
-          ready: true,
-          terminal: "senior-terminal",
-          role: "senior",
-          worktree: `id:${workspace.id}`,
-          modelRequested: "gpt-5.6-sol",
-        };
-      },
-      promote: async (...args) => {
-        promoted = args[3];
-        return { transition: { id: "promotion-same-worktree" } };
-      },
-    },
-  );
-  assert.equal(created, false);
-  assert.equal(result.id, worktreeId);
-  assert.equal(promoted.fromWorktreeId, worktreeId);
-  assert.equal(promoted.toWorktreeId, worktreeId);
 });
 
 test("a new same-role task reuses only an accepted, integrated, idle worktree", async () => {
@@ -1832,72 +1658,6 @@ test("ambiguous Orca release, close, or terminal-list receipts preserve the chil
   }
 });
 
-test("an accepted promotion can reclaim its retired Junior worktree", async (t) => {
-  if (!durableSuccessSupported(t)) return;
-  const f = reclaimSandbox(t);
-  let listed = 0;
-  const result = await reclaimIntegratedRoleWorktree(
-    {
-      org: `${f.root}/.omt/organization.json`,
-      state: `${f.root}/.omt`,
-      "workflow-id": "workflow-promotion",
-      "workflow-task": "w2-00",
-      repo: `${f.root}/integration`,
-      worktree: `repo::${f.root}/junior-rejected`,
-      "merge-commit": "merge-a",
-    },
-    {
-      show: f.show,
-      scan: f.scan,
-      read: () => ({
-        state: {
-          tasks: {
-            "w2-00": {
-              state: "accepted",
-              role: "junior",
-              worktreeId: `repo::${f.root}/senior-fixed`,
-              worktreeTransitions: [
-                {
-                  usedAt: "2026-09-29T00:00:00.000Z",
-                  fromWorktreeId: `repo::${f.root}/junior-rejected`,
-                },
-              ],
-            },
-          },
-        },
-      }),
-      launches: () => [
-        {
-          via: "worker-start",
-          workflowId: "workflow-promotion",
-          workflowTaskId: "w2-00",
-          worktreePath: `${f.root}/junior-rejected`,
-          terminal: "junior-terminal",
-          workerId: "junior-dispatch",
-        },
-      ],
-      closures: () => [],
-      recordClosure: () => {},
-      active: async () => ({ status: "clear" }),
-      git: async (_repo, argv) => {
-        if (argv[0] === "status") return "";
-        if (argv[0] === "rev-parse" && argv[1] === "HEAD") return "junior-a";
-        return "merge-a";
-      },
-      release: async (dispatchId) => releasedExternalTerminal(dispatchId),
-      close: async (_orca, argv) => closedTerminal(argv.at(-1)),
-      list: async () => ({
-        result: {
-          terminals: listed++ === 0 ? [{ handle: "junior-terminal" }] : [],
-        },
-      }),
-      reclaim: async (_repo, options) => ({ removed: options.id }),
-    },
-  );
-  assert.equal(result.worktreeId, `repo::${f.root}/junior-rejected`);
-  assert.equal(result.reclaimed.removed, `repo::${f.root}/junior-rejected`);
-});
-
 test("an interactive terminal launch keeps its session when its ledger write fails", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ledger-failure-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -2014,59 +1774,6 @@ test("an exact past closure and current empty inventory allow safe role reclaim"
   assert.deepEqual(result.terminals, []);
 });
 
-test("a reviewed promotion reuses its proven closed worktree without creating another", async (t) => {
-  if (!durableSuccessSupported(t)) return;
-  const f = reclaimSandbox(t);
-  const old = previouslyClosedRole(f);
-  const state = {
-    tasks: {
-      "closed-task": {
-        role: "junior",
-        state: "reviewed",
-        worktreeId: old.worktreeId,
-      },
-    },
-  };
-  const result = await createRoleWorktree(
-    {
-      org: `${f.root}/.omt/organization.json`,
-      state: `${f.root}/.omt`,
-      "workflow-id": "closed-flow",
-      "workflow-task": "closed-task",
-      repo: `${f.root}/integration`,
-      role: "senior",
-      name: "unused",
-      base: "head",
-    },
-    {
-      callerCwd: `${f.root}/integration`,
-      read: () => workflowSnapshot(state),
-      environment,
-      matrix: supervised,
-      show: f.show,
-      scan: f.scan,
-      launches: () => [old.launch],
-      closures: () => [old.closure],
-      recordClosure: () => assert.fail("do not replace the prior closure"),
-      active: async () => assert.fail("already closed"),
-      release: async () => assert.fail("already released"),
-      close: async () => assert.fail("already closed"),
-      list: async () => ({ result: { terminals: [] } }),
-      git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
-      create: async () => assert.fail("must reuse"),
-      promote: async () => ({ transition: { toWorktreeId: old.worktreeId } }),
-      open: async () => ({
-        ready: true,
-        terminal: "new-terminal",
-        role: "senior",
-        worktree: `id:${old.worktreeId}`,
-        modelRequested: "model",
-      }),
-    },
-  );
-  assert.equal(result.id, old.worktreeId);
-});
-
 test("an empty inventory with no ownership history cannot authorize reclaim", async (t) => {
   if (!durableSuccessSupported(t)) return;
   const f = reclaimSandbox(t);
@@ -2104,51 +1811,6 @@ test("an empty inventory with no ownership history cannot authorize reclaim", as
         },
       ),
     /No owned Dispatch/,
-  );
-});
-
-test("a reviewed promotion with no ownership history preserves the worktree", async (t) => {
-  if (!durableSuccessSupported(t)) return;
-  const f = reclaimSandbox(t);
-  const old = previouslyClosedRole(f);
-  await assert.rejects(
-    () =>
-      createRoleWorktree(
-        {
-          org: `${f.root}/.omt/organization.json`,
-          state: `${f.root}/.omt`,
-          "workflow-id": "closed-flow",
-          "workflow-task": "closed-task",
-          repo: `${f.root}/integration`,
-          role: "senior",
-          name: "unused",
-          base: "head",
-        },
-        {
-          callerCwd: `${f.root}/integration`,
-          read: () =>
-            workflowSnapshot({
-              tasks: {
-                "closed-task": {
-                  role: "junior",
-                  state: "reviewed",
-                  worktreeId: old.worktreeId,
-                },
-              },
-            }),
-          environment,
-          matrix: supervised,
-          show: f.show,
-          scan: f.scan,
-          launches: () => [],
-          closures: () => [old.closure],
-          list: async () => ({ result: { terminals: [] } }),
-          git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
-          create: async () => assert.fail("must preserve"),
-          open: async () => assert.fail("must not launch"),
-        },
-      ),
-    /ownership|owned|launch/i,
   );
 });
 
@@ -2274,20 +1936,6 @@ function legacyLifecycleFixture(
     }),
     git: async (_repo, args) => (args[0] === "rev-parse" ? "head" : ""),
     create: async () => assert.fail("must not create"),
-    promote: async () => {
-      mutations.push("promote");
-      return { transition: { toWorktreeId: child.id } };
-    },
-    open: async () => {
-      mutations.push("open");
-      return {
-        ready: true,
-        terminal: "new-terminal",
-        role: "senior",
-        worktree: `id:${child.id}`,
-        modelRequested: "model",
-      };
-    },
     reclaim: async (_repo, options) => {
       mutations.push("remove");
       return { removed: options.id };
@@ -2305,11 +1953,9 @@ function legacyLifecycleFixture(
     worktree: child.id,
     "merge-commit": "head",
   };
-  const run = (kind) => {
-    task.state = kind === "promotion" ? "reviewed" : "accepted";
-    return kind === "promotion"
-      ? createRoleWorktree(args, ports)
-      : reclaimIntegratedRoleWorktree(args, ports);
+  const run = () => {
+    task.state = "accepted";
+    return reclaimIntegratedRoleWorktree(args, ports);
   };
   return {
     ...f,
@@ -2327,20 +1973,20 @@ function legacyLifecycleFixture(
   };
 }
 
-test("unsupported directory durability preserves proven legacy promotion and reclaim without claiming protocol support", async (t) => {
-  for (const kind of ["promotion", "reclaim"]) {
+test("unsupported directory durability preserves proven legacy reclaim without claiming protocol support", async (t) => {
+  for (const kind of ["reclaim"]) {
     for (const connected of [false, true]) {
       await t.test(
         `${kind}: ${connected ? "connected owned terminal" : "exact historical closure"}`,
         async (t) => {
           const f = legacyLifecycleFixture(t, { connected });
           unavailableDirectorySync(t);
-          const result = await f.run(kind);
+          const result = await f.run();
           assert.equal(result.legacyLifecycle.mode, "legacy-same-task");
           assert.equal(result.legacyLifecycle.durable, false);
           assert.deepEqual(f.mutations, [
             ...(connected ? ["release", "close"] : []),
-            ...(kind === "promotion" ? ["open", "promote"] : ["remove"]),
+            "remove",
           ]);
           assert.equal(
             fs.existsSync(
@@ -2354,12 +2000,12 @@ test("unsupported directory durability preserves proven legacy promotion and rec
   }
 });
 
-test("unsupported new-protocol promotion and reclaim make zero external mutations", async (t) => {
-  for (const kind of ["promotion", "reclaim"])
+test("unsupported new-protocol reclaim makes zero external mutations", async (t) => {
+  for (const kind of ["reclaim"])
     await t.test(kind, async (t) => {
       const f = legacyLifecycleFixture(t, { protocol: true, connected: true });
       unavailableDirectorySync(t);
-      await assert.rejects(() => f.run(kind), {
+      await assert.rejects(() => f.run(), {
         code: "worktree-durability-unavailable",
       });
       assert.deepEqual(f.mutations, []);
@@ -2458,19 +2104,19 @@ test("legacy compatibility rejects new owners, journal resources and ambiguous h
     },
   };
   for (const [label, change] of Object.entries(changes))
-    for (const kind of ["promotion", "reclaim"]) {
+    for (const kind of ["reclaim"]) {
       await t.test(`${kind}: ${label}`, async (t) => {
         const f = legacyLifecycleFixture(t);
         change(f);
         unavailableDirectorySync(t);
-        await assert.rejects(() => f.run(kind));
+        await assert.rejects(() => f.run());
         assert.deepEqual(f.mutations, []);
       });
     }
 });
 
 test("a durable prepare failure never falls back to legacy compatibility after a successful capability probe", async (t) => {
-  for (const kind of ["promotion", "reclaim"])
+  for (const kind of ["reclaim"])
     await t.test(kind, async (t) => {
       const f = legacyLifecycleFixture(t);
       try {
@@ -2491,7 +2137,7 @@ test("a durable prepare failure never falls back to legacy compatibility after a
         return sync(fd);
       });
       try {
-        await f.run(kind);
+        await f.run();
         assert.fail("must refuse interrupted preparation");
       } catch (error) {
         assert.equal(error.code, "worktree-durability-unavailable");

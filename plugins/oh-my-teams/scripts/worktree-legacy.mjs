@@ -114,7 +114,7 @@ export async function prepareRoleLifecycle(
   if (!unavailable) return prepare(operation);
   if (!owner || Object.hasOwn(owner, "reuseProtocol")) throw unavailable;
   assert(
-    operation.type === "role-promotion" || operation.type === "role-reclaim",
+    operation.type === "role-reclaim",
     "Legacy lifecycle cannot transfer ownership",
   );
   assert(

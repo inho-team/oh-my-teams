@@ -133,7 +133,6 @@ import {
   acceptWorkflowIntegration,
   createWorkflow,
   readWorkflow,
-  prepareRolePromotion,
   recordSettlement,
   releaseReservation,
   resumeWorkflow,
@@ -2016,9 +2015,6 @@ export async function executeCommand(args, execute, ports = {}) {
         command.role,
         args.worktree,
         process.cwd(),
-        args.promotionTaskId
-          ? { promotionTaskId: args.promotionTaskId }
-          : undefined,
       );
       const allowUnverifiedApproval = args["allow-unverified"];
       assert(

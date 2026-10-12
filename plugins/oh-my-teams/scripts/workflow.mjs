@@ -2365,83 +2365,6 @@ function worktreePathFromReceipt(worktreeId) {
 }
 
 /**
- * Records a Junior-to-Senior handoff only after the Senior role worktree proves
- * it matches the rejected Junior commit.
- *
- * @param {string} stateDir - PM workflow store.
- * @param {string} id - Workflow identifier.
- * @param {string} taskId - Reworked task identifier.
- * @param {object} transition - Role worktree and commit proof.
- * @param {string} transition.fromWorktreeId - Rejected Junior worktree.
- * @param {string} transition.toWorktreeId - Senior worktree, possibly the closed Junior worktree.
- * @param {string} transition.fromWorktreePath - Rejected Junior path.
- * @param {string} transition.toWorktreePath - Senior path, possibly the source path.
- * @param {string} transition.base - Requested child base revision.
- * @param {object} [ports] - Injectable evidence ports for focused tests.
- * @param {Function} [ports.gitEvidence=git] - Git evidence reader.
- * @returns {Promise<object>} Durable transition record for `workflow-rework`.
- * @throws {Error} When the base, task state, or role transition is not proven.
- */
-export async function prepareRolePromotion(
-  stateDir,
-  id,
-  taskId,
-  { fromWorktreeId, toWorktreeId, fromWorktreePath, toWorktreePath, base },
-  { gitEvidence = git } = {},
-) {
-  const oldPath = path.resolve(fromWorktreePath);
-  const newPath = path.resolve(toWorktreePath);
-  const previousHead = await gitEvidence(oldPath, ["rev-parse", "HEAD"]);
-  const resolvedBase = await gitEvidence(oldPath, [
-    "rev-parse",
-    `${base}^{commit}`,
-  ]);
-  const newHead = await gitEvidence(newPath, ["rev-parse", "HEAD"]);
-  assert(
-    resolvedBase === previousHead && newHead === previousHead,
-    "Senior role worktree must match the rejected Junior commit",
-  );
-
-  return withWorkflowUpdate(stateDir, id, () => {
-    const { state, dir } = readWorkflow(stateDir, id);
-    const item = state.tasks[taskId];
-    assert(item, `Unknown promotion task ${taskId}`);
-    assert(
-      item.role === "junior" &&
-        ["submitted", "review-pending", "reviewed"].includes(item.state),
-      "Only a reviewed Junior task may promote to Senior in the same attempt",
-    );
-    assert(
-      item.worktreeId === fromWorktreeId,
-      `Promotion source must be the task's Junior worktree ${item.worktreeId}`,
-    );
-    const transition = {
-      id: `promotion-${crypto.randomUUID()}`,
-      kind: "junior-to-senior",
-      fromRole: "junior",
-      toRole: "senior",
-      fromWorktreeId,
-      toWorktreeId,
-      baseCommit: previousHead,
-      preparedAt: new Date().toISOString(),
-    };
-    item.worktreeTransitions = [
-      ...(item.worktreeTransitions ?? []),
-      transition,
-    ];
-    appendWorkflowEvent(dir, state, {
-      id: transition.id,
-      type: "role-worktree-promotion-prepared",
-      taskId,
-      transition,
-    });
-    state.revision += 1;
-    saveWorkflowState(stateDir, id, state);
-    return { state, transition };
-  });
-}
-
-/**
  * Hands a task back to its implementer after a required review asked for changes.
  *
  * A review that concluded `changes-requested` or `inconclusive`, or left a
@@ -2516,20 +2439,9 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       !executions.includes(input.receipt.executionId),
       "Rework needs a new execution, not one already recorded",
     );
-    const transition = (item.worktreeTransitions ?? []).find(
-      (entry) =>
-        entry.id === input.transitionId &&
-        !entry.usedAt &&
-        entry.fromWorktreeId === item.worktreeId &&
-        entry.toWorktreeId === input.receipt.worktreeId &&
-        entry.fromRole === "junior" &&
-        entry.toRole === "senior",
-    );
     assert(
-      !item.worktreeId ||
-        item.worktreeId === input.receipt.worktreeId ||
-        transition,
-      `Task ${input.taskId} must reuse its role worktree ${item.worktreeId} unless a verified Junior-to-Senior transition exists`,
+      !item.worktreeId || item.worktreeId === input.receipt.worktreeId,
+      `Task ${input.taskId} must reuse its role worktree ${item.worktreeId}`,
     );
     const spent = (attempt.priorCallsUsed ?? 0) + (attempt.callsUsed ?? 0);
     assert(
@@ -2544,18 +2456,11 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
       "Workflow running capacity exhausted",
     );
     assert(
-      roleRunningCount(state, transition?.toRole ?? item.role) <
-        organization.roles[canonicalRole(transition?.toRole ?? item.role)]
-          .concurrency,
-      `No ${transition?.toRole ?? item.role} concurrency slot available`,
+      roleRunningCount(state, item.role) <
+        organization.roles[canonicalRole(item.role)].concurrency,
+      `No ${item.role} concurrency slot available`,
     );
-    const receipt = transition
-      ? {
-          ...input.receipt,
-          executionRole: transition.toRole,
-          transitionId: transition.id,
-        }
-      : input.receipt;
+    const receipt = input.receipt;
 
     item.rework.push({
       fromAttempt: item.attemptId,
@@ -2577,11 +2482,6 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
     attempt.status = "running";
     item.execution = receipt;
     item.worktreeId = receipt.worktreeId;
-    if (transition) {
-      transition.usedAt = new Date().toISOString();
-      transition.executionId = receipt.executionId;
-      item.executionRole = transition.toRole;
-    }
     item.workerRunId = null;
     item.acceptedResult = null;
     item.state = "running";
