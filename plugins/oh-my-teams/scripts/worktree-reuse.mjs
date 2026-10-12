@@ -264,14 +264,22 @@ export function discoverReusableWorktrees(orgFile, target) {
           }
           const component =
             workflow.state.integration?.decision?.componentResults?.[taskId];
-          if (
-            workflow.state.status !== "accepted" ||
-            !workflow.integrationAcceptance ||
-            !component ||
-            component.acceptedResult !== task.acceptedResult ||
-            component.attemptId !== task.attemptId ||
-            component.revision !== task.revision
-          ) {
+          const sameKickoffOpenWorkflow =
+            entry === current &&
+            ["ready", "running", "integration-pending"].includes(
+              workflow.state.status,
+            );
+          const integrated =
+            workflow.state.status === "accepted" &&
+            workflow.integrationAcceptance &&
+            component?.acceptedResult === task.acceptedResult &&
+            component.attemptId === task.attemptId &&
+            component.revision === task.revision;
+          // An accepted task in this kickoff may lend its checkout before the
+          // whole workflow is accepted. The live Orca and Git scan below still
+          // proves its HEAD reached the PM base and no session or Dispatch
+          // owns it. Archived kickoffs still require final integration proof.
+          if (!integrated && !sameKickoffOpenWorkflow) {
             rejected.push({
               worktreeId,
               reason: "source-integration-decision-mismatch",
@@ -436,6 +444,7 @@ export async function withAutomaticWorktreeReuse(
       base === (await gitCommand(request.repo, ["rev-parse", "HEAD"])),
       "Reuse base must match current integration HEAD",
     );
+    let currentInventoryUnproven = false;
     for (const source of found.candidates) {
       let before;
       let candidate;
@@ -500,6 +509,11 @@ export async function withAutomaticWorktreeReuse(
           "source-git-dirty",
         );
       } catch (error) {
+        if (
+          source.entry.pm.worktreeId === found.current.pm.worktreeId &&
+          error.message === "source-inventory-unproven"
+        )
+          currentInventoryUnproven = true;
         found.rejected.push({
           worktreeId: source.worktreeId,
           reason: error.message,
@@ -569,6 +583,10 @@ export async function withAutomaticWorktreeReuse(
       "Explicit worktree failed reuse proofs",
     );
     recordSelection(request, found.rejected, null);
+    assert(
+      !currentInventoryUnproven,
+      "Current kickoff has a reusable worktree with unproven inventory; reconcile it before creating another child",
+    );
     const result = await launch(null, prepare, found.rejected);
     return { ...result, reuseRejections: found.rejected };
   });
