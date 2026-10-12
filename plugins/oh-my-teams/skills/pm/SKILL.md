@@ -79,10 +79,10 @@ PM은 원래 목표의 수용 기준이 모두 충족되었는지에 대한 최�
 
 제한된 편집은 [`../../examples/task.json`](../../examples/task.json)을 채워 런타임 `prepare` → `work`를 사용합니다. 일반적인 탐색·설계·복잡한 구현은 감독 Worker에게 배정합니다. 여러 작업의 분할과 통합은 PM이 직접 관리하며, 부모 대화 전문 대신 작업 조건·파일·근거 위치만 주고 [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 완료 조건부터 씁니다.
 
-감독 worker는 다음처럼 역할, 조직 파일과 이번 kickoff의 workflow로 터미널을 연 뒤 그 터미널에 작업을 넘긴다. `role-terminal`과 `worker-start`가 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 agent·모델·강도를 정하고, `worker-start` 래퍼가 `--spec` 앞에 받는 역할의 권한·책임·한계와 조직 파일·workflow·PM state 경로를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로 이 경로들이 머리글에 필요하다.
+감독 worker는 다음처럼 역할, 조직 파일과 이번 kickoff의 workflow로 터미널을 연 뒤 그 터미널에 작업을 넘긴다. 새 workflow child를 만들 때 `--fresh-reason`에는 PM이 확인한 실제 격리 사유를 적는다. `role-terminal`과 `worker-start`가 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 agent·모델·강도를 정하고, `worker-start` 래퍼가 `--spec` 앞에 받는 역할의 권한·책임·한계와 조직 파일·workflow·PM state 경로를 붙인다. worker는 `.omt/`가 없는 다른 워크트리에서 실행될 수 있으므로 이 경로들이 머리글에 필요하다.
 
 ```text
-node <runtime> role-worktree-create --org <project>/.omt/organization.json --role worker --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>
+node <runtime> role-worktree-create --org <project>/.omt/organization.json --role worker --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --fresh-reason "<실제 격리 사유>"
 node <runtime> terminal-idle-check --terminal <handle>
 node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
 node <runtime> worker-start --org <project>/.omt/organization.json --role worker --repo <pm-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --terminal <handle> --worktree id:<worktreeId> --spec "<구체적인 작업>"
