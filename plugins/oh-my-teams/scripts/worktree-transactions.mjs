@@ -12,8 +12,28 @@ import {
 } from "./core.mjs";
 
 import { projectStateDirectory } from "./local-adapter.mjs";
+import { git } from "./evidence.mjs";
+import { runOrcaJson, selectOrcaExecutable } from "./orca-adapter.mjs";
 
 const projectAnchors = new WeakSet();
+
+function unresolvedMessage(orgFile, journal) {
+  const pending = journal.entries.find((entry) => entry.status !== "completed");
+  const identity = pending ? `${pending.id} (${pending.type})` : "unknown";
+  const recovery =
+    pending?.type === "role-reclaim" &&
+    pending.identityKey?.startsWith("wt2:local:")
+      ? `; if the child is gone, verify it with worktree-transition-reconcile --org ${orgFile} --transition ${pending.id}`
+      : "; reconcile the journal before changing worktrees";
+  return `Unresolved worktree transition ${identity}; preserve candidates${recovery}`;
+}
+
+function assertNoPending(orgFile, journal) {
+  assert(
+    journal.entries.every((entry) => entry.status === "completed"),
+    unresolvedMessage(orgFile, journal),
+  );
+}
 
 function locations(orgFile) {
   const directory = projectAnchors.has(orgFile)
@@ -42,6 +62,152 @@ export function readWorktreeTransitions(orgFile) {
   return value;
 }
 
+function pathPresent(location) {
+  try {
+    fs.lstatSync(location);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+/**
+ * Closes one interrupted local role reclaim only after independent Orca, Git,
+ * terminal, and filesystem inventories all prove its child is absent.
+ * The outcome records external absence rather than inventing a successful reclaim.
+ * @param {string} orgFile - Canonical organization file.
+ * @param {string} transitionId - Exact prepared transition identifier.
+ * @param {object} [ports] - Injectable read-only adapters for focused tests.
+ * @returns {Promise<object>} Durable reconciliation result and observed evidence.
+ */
+export async function reconcileAbsentRoleWorktree(
+  orgFile,
+  transitionId,
+  {
+    orca = runOrcaJson,
+    gitCommand = git,
+    executable,
+    present = pathPresent,
+  } = {},
+) {
+  return withAsyncFileLock(
+    locations(orgFile).lock,
+    async () => {
+      const journal = readWorktreeTransitions(orgFile);
+      const pending = journal.entries.filter(
+        (entry) => entry.status !== "completed",
+      );
+      assert(
+        pending.length === 1 && pending[0].id === transitionId,
+        "Reconciliation requires the exact sole prepared transition",
+      );
+      const entry = pending[0];
+      assert(
+        entry.status === "prepared" && entry.type === "role-reclaim",
+        "Only an interrupted role-reclaim can use absent-worktree reconciliation",
+      );
+      assert(
+        entry.identityKey?.startsWith("wt2:local:") &&
+          typeof entry.worktreeId === "string" &&
+          entry.worktreeId.includes("::"),
+        "Only a local worktree with recorded Orca identity can be reconciled",
+      );
+      const separator = entry.worktreeId.indexOf("::");
+      const repoId = entry.worktreeId.slice(0, separator);
+      const worktreePath = entry.worktreeId.slice(separator + 2);
+      assert(
+        repoId && path.isAbsolute(worktreePath),
+        "Prepared worktree identity is invalid",
+      );
+      const repo = path.dirname(path.dirname(fs.realpathSync(orgFile)));
+      const selected = selectOrcaExecutable(executable);
+      const [listed, terminals, gitWorktrees] = await Promise.all([
+        orca(selected, ["worktree", "list", "--repo", `id:${repoId}`], {
+          cwd: repo,
+        }),
+        orca(selected, ["terminal", "list"], { cwd: repo }),
+        gitCommand(repo, ["worktree", "list", "--porcelain", "-z"]),
+      ]);
+      const treeInventory = listed.result;
+      const terminalInventory = terminals.result;
+      assert(
+        Array.isArray(treeInventory?.worktrees) &&
+          !treeInventory.truncated &&
+          treeInventory.hostScope?.omittedHostIds?.length === 0 &&
+          treeInventory.hostScope?.hostIds?.includes("local") &&
+          treeInventory.worktrees.some(
+            (item) => item.id === `${repoId}::${repo}` && item.path === repo,
+          ) &&
+          !treeInventory.worktrees.some((item) => item.id === entry.worktreeId),
+        "Orca has not proven the local worktree absent",
+      );
+      assert(
+        Array.isArray(terminalInventory?.terminals) &&
+          !terminalInventory.truncated &&
+          terminalInventory.hostScope?.hostIds?.includes("local") &&
+          !terminalInventory.terminals.some(
+            (item) => item.worktreeId === entry.worktreeId,
+          ) &&
+          listed._meta?.runtimeId &&
+          listed._meta.runtimeId === terminals._meta?.runtimeId,
+        "Orca has not proven the local role terminals absent",
+      );
+      const gitPaths = gitWorktrees
+        .split("\0")
+        .filter((item) => item.startsWith("worktree "))
+        .map((item) => item.slice("worktree ".length));
+      assert(
+        !gitPaths.some(
+          (item) => path.resolve(item) === path.resolve(worktreePath),
+        ) && !present(worktreePath),
+        "Git or the filesystem still contains the worktree",
+      );
+      const [latestTrees, latestTerminals] = await Promise.all([
+        orca(selected, ["worktree", "list", "--repo", `id:${repoId}`], {
+          cwd: repo,
+        }),
+        orca(selected, ["terminal", "list"], { cwd: repo }),
+      ]);
+      assert(
+        latestTrees._meta?.runtimeId === listed._meta.runtimeId &&
+          latestTerminals._meta?.runtimeId === listed._meta.runtimeId &&
+          Array.isArray(latestTrees.result?.worktrees) &&
+          !latestTrees.result.truncated &&
+          latestTrees.result.hostScope?.omittedHostIds?.length === 0 &&
+          !latestTrees.result.worktrees.some(
+            (item) => item.id === entry.worktreeId,
+          ) &&
+          Array.isArray(latestTerminals.result?.terminals) &&
+          !latestTerminals.result.truncated &&
+          !latestTerminals.result.terminals.some(
+            (item) => item.worktreeId === entry.worktreeId,
+          ) &&
+          !present(worktreePath),
+        "Worktree or terminal inventory changed before reconciliation",
+      );
+      const result = {
+        status: "absent-after-interruption",
+        observedAt: new Date().toISOString(),
+        worktreeId: entry.worktreeId,
+        identityKey: entry.identityKey,
+        evidence: {
+          orcaRepoInventory: listed._meta?.runtimeId ?? null,
+          orcaTerminalInventory: terminals._meta?.runtimeId ?? null,
+          gitWorktrees: gitPaths,
+          pathAbsent: true,
+        },
+      };
+      entry.status = "completed";
+      entry.finishedAt = result.observedAt;
+      entry.result = result;
+      writeDurableJSON(locations(orgFile).journal, journal);
+      return result;
+    },
+    "Organization worktree transition already in progress",
+  );
+}
+
 /**
  * Finds resources permanently retired from one source kickoff after a transfer.
  * @param {string} orgFile - Organization journal anchor.
@@ -60,10 +226,7 @@ export function retiredWorktrees(orgFile, worktreeId) {
 
 function prepare(orgFile, operation, isActive = () => true) {
   const value = readWorktreeTransitions(orgFile);
-  assert(
-    !value.entries.some((entry) => entry.status !== "completed"),
-    "Unresolved worktree transition; preserve candidates and reconcile the journal",
-  );
+  assertNoPending(orgFile, value);
   const entry = {
     id: crypto.randomUUID(),
     ...operation,
@@ -101,10 +264,7 @@ export async function withWorktreeLock(orgFile, inspect) {
     locations(orgFile).lock,
     async () => {
       const journal = readWorktreeTransitions(orgFile);
-      assert(
-        !journal.entries.some((entry) => entry.status !== "completed"),
-        "Unresolved worktree transition; preserve candidates",
-      );
+      assertNoPending(orgFile, journal);
       let active = true;
       try {
         return await inspect((operation) => {
@@ -130,10 +290,7 @@ export function withWorktreeLockSync(orgFile, inspect) {
     locations(orgFile).lock,
     () => {
       const journal = readWorktreeTransitions(orgFile);
-      assert(
-        !journal.entries.some((entry) => entry.status !== "completed"),
-        "Unresolved worktree transition; preserve candidates",
-      );
+      assertNoPending(orgFile, journal);
       let active = true;
       try {
         return inspect((operation) => {

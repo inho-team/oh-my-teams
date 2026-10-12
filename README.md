@@ -151,6 +151,8 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 
 서로 독립된 목표라면 한 프로젝트에서 여러 kickoff를 동시에 진행할 수 있다. kickoff마다 선언 세션이 PM 워크트리를 따로 만들어 넘기고, 그 워크트리 ID로 `.omt/kickoffs/`에 등록한다. `status`는 등록된 kickoff를 모두 보여 주고, `close`와 `disband`는 지목한 kickoff만 종료한다. 한 워크트리에는 kickoff를 하나만 등록할 수 있다. PM 세션 하나가 Goal 하나를 소유하고 Run 하나를 바인딩하기 때문이다.
 
+회수 도중 중단되어 `.omt/worktree-transitions.json`에 `prepared` 기록이 남으면 새 워크트리 작업이 차단된다. `role-reclaim`에서 이미 사라진 로컬 자식 워크트리는 오류에 표시된 ID로 `worktree-transition-reconcile --org <organization.json> --transition <id>`를 실행한다. 이 명령은 Orca 워크트리·터미널, Git과 실제 경로가 모두 부재를 증명할 때에만 기록을 종결하며, 다른 중단 유형이나 남아 있는 워크트리는 보존한다.
+
 워크트리가 나뉘어 파일 충돌은 없지만 구독 할당량은 나뉘지 않는다. 역할별 동시 인원과 호출 예산은 kickoff마다 따로 계산되므로, 같은 구독을 쓰는 kickoff가 둘이면 조직 파일에 적은 동시 인원의 두 배까지 워커가 함께 돌 수 있다. 필요하면 각 kickoff의 실행 깊이를 낮추거나 `adjust`로 동시 인원을 줄인다.
 
 ### 추론 강도
