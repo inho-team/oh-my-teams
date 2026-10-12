@@ -1628,6 +1628,7 @@ test("role-worktree-create (D2 rule 6): a swallowed launch-ledger write failure 
       state: fixture.entry.pm.stateDir,
       name: "task-ledger-error",
       base: "f".repeat(40),
+      "fresh-reason": "The task needs an isolated Senior checkout",
     },
     {
       callerCwd: fixture.entry.pm.path,
@@ -2591,6 +2592,7 @@ test(
         "workflow-id": "wf-d2-cx15",
         "workflow-task": "a",
         state: unregisteredState,
+        "fresh-reason": "The Senior task needs an isolated checkout",
       },
       fixture.entry.pm.path,
       /No kickoff is registered with pm state directory/,
@@ -2603,6 +2605,7 @@ test(
         "workflow-id": "wf-d2-cx15",
         "workflow-task": "a",
         state: fixture.entry.pm.stateDir,
+        "fresh-reason": "The Senior task needs an isolated checkout",
       },
       fixture.entry.pm.path,
       /does not match kickoff wt-1's PM worktree/,
@@ -2627,6 +2630,46 @@ test(
   },
 );
 
+test("automatic candidate miss never invents a fresh reason before Orca creation", async (t) => {
+  const fixture = boundKickoff(t);
+  await createFixtureWorkflow(fixture, "wf-no-candidate");
+  let created = false;
+  await withCwd(fixture.entry.pm.path, () =>
+    assert.rejects(
+      () =>
+        createRoleWorktree(
+          {
+            org: fixture.org,
+            role: "senior",
+            repo: fixture.entry.pm.path,
+            "workflow-id": "wf-no-candidate",
+            "workflow-task": "a",
+            state: fixture.entry.pm.stateDir,
+            name: "candidate-miss",
+            base: "f".repeat(40),
+          },
+          {
+            environment: d2Environment,
+            matrix: d2Matrix,
+            reuse: {
+              discover: () => ({
+                current: fixture.entry,
+                candidates: [],
+                rejected: [],
+              }),
+            },
+            create: async () => {
+              created = true;
+              throw new Error("Orca creation must not be reached");
+            },
+          },
+        ),
+      /A new workflow child requires --fresh-reason/,
+    ),
+  );
+  assert.equal(created, false);
+});
+
 test("role-worktree-create (counterexample 9): a normal first child under its own kickoff is created, and its internal role-terminal open passes the binding table", async (t) => {
   const fixture = boundKickoff(t);
   await createFixtureWorkflow(fixture, "wf-d2-cx9");
@@ -2641,6 +2684,7 @@ test("role-worktree-create (counterexample 9): a normal first child under its ow
     state: fixture.entry.pm.stateDir,
     name: "d2-cx9",
     base: "f".repeat(40),
+    "fresh-reason": "The task needs an isolated Senior checkout",
   };
   const sessions = [];
   const ports = (open) => ({
@@ -3337,7 +3381,7 @@ test("role-terminal handler wires readOrcaVersion/skipAgyVersion/throwOnUnverifi
     "resolveAuditorLaunchExecution call not found",
   );
   const envCallStart = source.indexOf(
-    "env = await readLaunchEnvironment({",
+    "env = await (ports.readLaunchEnvironment ?? readLaunchEnvironment)({",
     resolveCallStart,
   );
   assert.notEqual(envCallStart, -1, "readLaunchEnvironment call not found");

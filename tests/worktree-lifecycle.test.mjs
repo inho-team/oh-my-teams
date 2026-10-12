@@ -25,6 +25,7 @@ import {
 import {
   ALLOWED_OPTIONS,
   createRoleWorktree,
+  executeCommand,
   main,
   parseArgs,
   recordLaunchSafely,
@@ -32,6 +33,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 import { draftResourceOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import {
+  readLaunches,
   readTerminalClosures,
   terminalClosureLedgerFile,
 } from "../plugins/oh-my-teams/scripts/usage-ledger.mjs";
@@ -396,6 +398,7 @@ test("workflow worktree preflight uses the frozen organization snapshot", async 
             state: "/repo/.omt",
             "workflow-id": "workflow-r15",
             "workflow-task": "senior-task",
+            "fresh-reason": "This Senior task needs an isolated checkout",
           },
           {
             organization: () => {
@@ -459,6 +462,7 @@ test("workflow worktree preflight uses the frozen organization snapshot", async 
     state: "/repo/.omt",
     "workflow-id": "resource-workflow",
     "workflow-task": "resource-task",
+    "fresh-reason": "The Worker needs its own isolated checkout",
   };
   const resourceState = (nextStaffing) => ({
     roles: ["pm", "worker"],
@@ -1035,7 +1039,7 @@ test("an accepted same-role worktree prevents silent creation of another child",
   };
   await assert.rejects(
     () => createRoleWorktree(args, ports),
-    /Reuse an existing role worktree.*--fresh-reason/,
+    /A new workflow child requires --fresh-reason/,
   );
   assert.equal(created, false);
   const result = await createRoleWorktree(
@@ -1051,6 +1055,121 @@ test("an accepted same-role worktree prevents silent creation of another child",
     result.freshReason,
     "The prior role worktree still has a live session",
   );
+  assert.deepEqual(result.worktreeSelection, {
+    schemaVersion: 1,
+    decision: "new-child",
+    scope: "current-workflow-and-automatic-discovery",
+    workflowId: "workflow-reuse",
+    workflowTaskId: "next",
+    role: "senior",
+    currentWorkflowAcceptedSameRole: [
+      { taskId: "prior", worktreeId: "repo::/repo/senior-existing" },
+    ],
+    reuseRejections: [],
+    isolationReason: "The prior role worktree still has a live session",
+  });
+});
+
+test("a new workflow child without an isolation reason is refused before creation", async () => {
+  let created = false;
+  await assert.rejects(
+    () =>
+      createRoleWorktree(
+        {
+          org: "/repo/.omt/organization.json",
+          role: "senior",
+          repo: "/repo",
+          name: "first-child",
+          base: "b".repeat(40),
+          state: "/repo/.omt",
+          "workflow-id": "first-workflow",
+          "workflow-task": "first-task",
+        },
+        {
+          organization: roleOrganization,
+          environment,
+          matrix: supervised,
+          read: () =>
+            workflowSnapshot({
+              tasks: { "first-task": { role: "senior", state: "pending" } },
+            }),
+          create: async () => {
+            created = true;
+            throw new Error("Orca creation must not be reached");
+          },
+        },
+      ),
+    /A new workflow child requires --fresh-reason/,
+  );
+  assert.equal(created, false);
+});
+
+test("new child selection reaches its role-session launch ledger", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-worktree-selection-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const orgFile = path.join(dir, "organization.json");
+  fs.writeFileSync(orgFile, JSON.stringify(roleOrganization()));
+  const worktreeId = `repo::${path.join(dir, "child")}`;
+  const result = await createRoleWorktree(
+    {
+      org: orgFile,
+      role: "senior",
+      repo: dir,
+      name: "new-child",
+      base: "a".repeat(40),
+      state: path.join(dir, ".omt"),
+      "workflow-id": "selection-workflow",
+      "workflow-task": "selection-task",
+      "fresh-reason": "This role session needs an isolated checkout",
+    },
+    {
+      organization: roleOrganization,
+      environment,
+      matrix: supervised,
+      reuseRejections: [
+        {
+          worktreeId: "repo::/repo/unavailable",
+          reason: "source-not-completed",
+        },
+      ],
+      read: () =>
+        workflowSnapshot({
+          tasks: { "selection-task": { role: "senior", state: "pending" } },
+        }),
+      create: async (_repo, options) => {
+        const workspace = { id: worktreeId, path: path.join(dir, "child") };
+        return { workspace, session: await options.openRoleSession(workspace) };
+      },
+      open: async (workspace, launchArgs) => {
+        assert.equal(launchArgs.viaRoleWorktreeCreate, true);
+        const terminalArgs = { ...launchArgs };
+        delete terminalArgs.state;
+        delete terminalArgs["workflow-id"];
+        delete terminalArgs["workflow-task"];
+        return executeCommand(terminalArgs, undefined, {
+          readLaunchEnvironment: environment,
+          openRoleTerminal: async ({ command }) => ({
+            ready: true,
+            terminal: "selection-terminal",
+            role: command.role,
+            worktree: `id:${workspace.id}`,
+            modelRequested: command.modelRequested,
+          }),
+        });
+      },
+    },
+  );
+  const recorded = readLaunches(orgFile)[0].worktreeSelection;
+  assert.equal(result.id, worktreeId);
+  assert.deepEqual(recorded, result.worktreeSelection);
+  assert.equal(
+    recorded.isolationReason,
+    "This role session needs an isolated checkout",
+  );
+  assert.deepEqual(recorded.currentWorkflowAcceptedSameRole, []);
+  assert.deepEqual(recorded.reuseRejections, [
+    { worktreeId: "repo::/repo/unavailable", reason: "source-not-completed" },
+  ]);
 });
 
 test("two consecutive role-worktree reuses retain and verify prior closure proofs", async (t) => {

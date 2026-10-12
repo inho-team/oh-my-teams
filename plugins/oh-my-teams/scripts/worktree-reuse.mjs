@@ -411,7 +411,7 @@ export async function withAutomaticWorktreeReuse(
       );
       recordSelection(request, found.rejected, null);
       return {
-        ...(await launch(null, prepare)),
+        ...(await launch(null, prepare, found.rejected)),
         reuseRejections: found.rejected,
       };
     }
@@ -557,7 +557,11 @@ export async function withAutomaticWorktreeReuse(
         "Post-transfer identity, parent or HEAD unproven; preserve candidate",
       );
       transaction.complete({ after, receipt });
-      const result = await launch({ ...source, before, after, base }, prepare);
+      const result = await launch(
+        { ...source, before, after, base },
+        prepare,
+        found.rejected,
+      );
       return { ...result, reuseRejections: found.rejected };
     }
     assert(
@@ -565,7 +569,7 @@ export async function withAutomaticWorktreeReuse(
       "Explicit worktree failed reuse proofs",
     );
     recordSelection(request, found.rejected, null);
-    const result = await launch(null, prepare);
+    const result = await launch(null, prepare, found.rejected);
     return { ...result, reuseRejections: found.rejected };
   });
 }

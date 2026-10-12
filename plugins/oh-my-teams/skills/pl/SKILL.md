@@ -48,11 +48,11 @@ PL은 분할 계획이 목표를 빠짐없이 덮는지, 하위 결과가 충돌
 
 ## 하위 역할 배정
 
-PL은 PM이 띄운 감독 worker로 실행된다. Orca의 중첩 worker 깊이는 기본값이 1이라 PM의 worker인 PL은 기본 설정에서 하위 worker를 시작할 수 없고, 새 Run을 만들어도 깊이는 초기화되지 않는다. 그러므로 기본 설정에서는 분할 계획을 PM에게 돌려보내고, 사용자가 Orca 설정의 Nested worker depth를 2 이상으로 올린 경우에만 자기 터미널에서 Run을 따로 만들어 바인딩한 뒤 하위 worker를 시작한다. 조직 파일, workflow ID와 PM state 경로는 받은 지시문 머리글에 적힌 값을 그대로 사용한다.
+PL은 PM이 띄운 감독 worker로 실행된다. Orca의 중첩 worker 깊이는 기본값이 1이라 PM의 worker인 PL은 기본 설정에서 하위 worker를 시작할 수 없고, 새 Run을 만들어도 깊이는 초기화되지 않는다. 그러므로 기본 설정에서는 분할 계획을 PM에게 돌려보내고, 사용자가 Orca 설정의 Nested worker depth를 2 이상으로 올린 경우에만 자기 터미널에서 Run을 따로 만들어 바인딩한 뒤 하위 worker를 시작한다. 조직 파일, workflow ID와 PM state 경로는 받은 지시문 머리글에 적힌 값을 그대로 사용한다. 새 workflow child를 만들 때 `--fresh-reason`에는 실제 격리 사유를 적는다.
 
 ```text
 <orca> orchestration run-create --objective "<PM이 맡긴 분할 목표>" --json
-node <runtime> role-worktree-create --org <organization.json> --role junior --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id>
+node <runtime> role-worktree-create --org <organization.json> --role junior --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> --fresh-reason "<실제 격리 사유>"
 node <runtime> terminal-idle-check --terminal <junior-handle>
 node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision <n> --execution <reserve.json>
 node <runtime> worker-start --org <organization.json> --role junior --repo <pl-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <junior-handle> --worktree id:<worktreeId> --spec "<구체적인 구현 작업>"
