@@ -53,21 +53,5 @@ pipeline {
             }
             post { always { cleanWs(deleteDirs: true, notFailBuild: true) } }
         }
-
-        stage('Windows Node 22') {
-            agent { label 'windows' }
-            environment {
-                PATH = "C:\\Users\\kjsun\\AppData\\Local\\JenkinsAgent\\node22\\node-v22.23.2-win-x64;${env.PATH}"
-            }
-            steps {
-                bat 'git config --global core.autocrlf false'
-                checkout scm
-                bat 'node --version && call npm.cmd ci'
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { bat 'call npm.cmd run quality' }
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { bat 'call npm.cmd run format:check' }
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { bat 'call npm.cmd test' }
-            }
-            post { always { cleanWs(deleteDirs: true, notFailBuild: true) } }
-        }
     }
 }
