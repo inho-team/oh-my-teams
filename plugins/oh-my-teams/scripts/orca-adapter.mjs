@@ -429,6 +429,48 @@ export async function runOrcaJson(
 }
 
 /**
+ * Sends a role notification through Orca's Run mailbox.
+ * @param {object} request - Message and execution context.
+ * @param {string} request.to - Orca Run, Dispatch, or terminal recipient.
+ * @param {string} request.subject - Short subject.
+ * @param {string} request.body - Message body.
+ * @param {string} [request.type="status"] - Orca message type.
+ * @param {string} [request.executable] - Selected Orca executable.
+ * @param {string} [request.cwd] - Invocation directory.
+ * @param {Function} [request.execute] - Test command runner.
+ * @returns {Promise<object>} Orca's message receipt.
+ */
+export async function sendOrcaMessage({
+  to,
+  subject,
+  body,
+  type = "status",
+  executable,
+  cwd,
+  execute = run,
+}) {
+  assert(typeof to === "string" && to, "Orca recipient is required");
+  assert(typeof subject === "string" && subject, "Orca subject is required");
+  const argv = [
+    "orchestration",
+    "send",
+    "--to",
+    to,
+    "--type",
+    type,
+    "--subject",
+    subject,
+    "--body",
+    String(body ?? ""),
+  ];
+  const response = await runOrcaJson(selectOrcaExecutable(executable), argv, {
+    cwd,
+    execute,
+  });
+  return response.result;
+}
+
+/**
  * Executes one Orca JSON command through the fixed, trusted, allowlisted
  * invocation `trustedOrcaExecute` builds, and validates its transport
  * envelope exactly as `runOrcaJson` does.
@@ -1674,128 +1716,6 @@ export function abandonWorker(dispatchId, options = {}) {
  */
 export function releaseWorker(dispatchId, options = {}) {
   return dispatchVerb("worker-release", dispatchId, options);
-}
-
-// A heartbeat proves liveness only; its payload names the Dispatch it is for.
-function heartbeatDispatch(message) {
-  try {
-    const payload = JSON.parse(message.payload ?? "null");
-    return typeof payload?.dispatchId === "string" ? payload.dispatchId : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Waits on a Run's coordinator mailbox until a message other than a heartbeat arrives.
- *
- * In one kickoff 11 of 68 PM turns were started by nothing but a worker
- * heartbeat. Orca pushes "You have N orchestration messages" into the
- * coordinator session for every unread type that no waiter's `--types`
- * covers, so a `check --wait --types worker_done,...` still let heartbeats
- * wake the model. This loop waits without `--types`, which keeps Orca from
- * pushing anything while it waits, and consumes heartbeat-only Deliveries
- * itself by acknowledging them with the next `check --ack`, so the same
- * heartbeat is neither replayed nor pushed later. A Delivery holding any other
- * message is returned unacknowledged: the caller processes every message and
- * passes its `deliveryId` as `ack` to the next wait, as with a raw `check`.
- *
- * @param {object} options - Wait options.
- * @param {string} options.runId - Run whose coordinator mailbox is read.
- * @param {number} options.timeoutMs - Overall wait, normally `policy.supervision.progressCheckMs`.
- * @param {string} [options.ack] - Delivery the caller finished processing, acknowledged first.
- * @param {string} [options.executable] - Orca executable.
- * @param {string} [options.cwd] - Directory the Orca commands run from.
- * @param {Function} [options.execute=run] - Injectable command runner.
- * @param {Function} [options.now=Date.now] - Injectable clock in milliseconds.
- * @returns {Promise<object>} `{timedOut: false, deliveryId, messages, heartbeats, lastHeartbeats}`
- *   with the non-heartbeat messages, or `{timedOut: true, deliveryId, heartbeats, lastHeartbeats}`.
- *   Either way a non-null `deliveryId` is passed as `ack` to the next wait.
- * @throws {Error} When Orca refuses a check, for example because another waiter holds the Run.
- */
-export async function waitForSupervisionMessage({
-  runId,
-  timeoutMs,
-  ack,
-  executable,
-  cwd,
-  execute = run,
-  now = Date.now,
-}) {
-  assert(runId, "A Run id is required");
-  assert(
-    Number.isInteger(timeoutMs) && timeoutMs > 0,
-    "timeoutMs must be a positive integer",
-  );
-  const selected = selectOrcaExecutable(executable);
-  const deadline = now() + timeoutMs;
-  const lastHeartbeats = {};
-  let heartbeats = 0;
-  let pendingAck = ack;
-  for (;;) {
-    const remaining = deadline - now();
-    // A heartbeat-only Delivery left unacknowledged at the deadline is handed
-    // back as `deliveryId`, which the caller acknowledges on its next wait.
-    if (remaining <= 0)
-      return {
-        timedOut: true,
-        runId,
-        deliveryId: pendingAck ?? null,
-        heartbeats,
-        lastHeartbeats,
-      };
-    const args = ["orchestration", "check", "--run", runId];
-    if (pendingAck) args.push("--ack", pendingAck);
-    args.push("--wait", "--timeout-ms", String(remaining));
-    const envelope = await runOrcaJson(selected, args, {
-      cwd,
-      timeoutMs: remaining + 30000,
-      execute,
-    });
-    pendingAck = undefined;
-    const result = envelope.result ?? {};
-    const messages = Array.isArray(result.messages) ? result.messages : [];
-    const others = messages.filter((message) => message?.type !== "heartbeat");
-    for (const message of messages) {
-      if (message?.type !== "heartbeat") continue;
-      heartbeats += 1;
-      const dispatch =
-        heartbeatDispatch(message) ?? message.from_handle ?? "unknown";
-      if (
-        !lastHeartbeats[dispatch] ||
-        lastHeartbeats[dispatch] < message.created_at
-      ) {
-        lastHeartbeats[dispatch] = message.created_at ?? null;
-      }
-    }
-    if (others.length > 0) {
-      return {
-        timedOut: false,
-        runId,
-        deliveryId: result.deliveryId ?? null,
-        replayed: result.replayed === true,
-        messages: others,
-        heartbeats,
-        lastHeartbeats,
-      };
-    }
-    // A heartbeat-only Delivery is acknowledged on the next check; an empty
-    // result has nothing to acknowledge.
-    if (result.deliveryId) {
-      pendingAck = result.deliveryId;
-      continue;
-    }
-    // Nothing arrived: the wait timed out or was cancelled. An empty answer
-    // Orca did not mark either way is read the same, so the loop never spins.
-    return {
-      timedOut: true,
-      ...(result.cancelled === true ? { cancelled: true } : {}),
-      runId,
-      deliveryId: null,
-      heartbeats,
-      lastHeartbeats,
-    };
-  }
 }
 
 /**

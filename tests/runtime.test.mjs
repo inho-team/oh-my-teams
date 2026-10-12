@@ -2510,46 +2510,6 @@ test("show command formats provider and model as human readable display string",
   );
 });
 
-test("director-watch command includes pmModelDisplay", async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-watch-"));
-  const orgFile = path.join(dir, "org.json");
-  const org = clone();
-  const pmProfileId = org.roles.pm.profile;
-  org.profiles[pmProfileId].provider = "agy";
-  org.profiles[pmProfileId].model = "claude-sonnet-4-6";
-  fs.writeFileSync(orgFile, JSON.stringify(org, null, 2));
-
-  const claim = {
-    schemaVersion: 1,
-    organizationRevision: 1,
-    goal: "watch test",
-    brief: "x",
-    createdAt: new Date().toISOString(),
-    runId: null,
-    pm: {
-      worktreeId: "pm-wt",
-      path: "x",
-      stateDir: "x",
-      provider: "agy",
-      model: "claude-sonnet-4-6",
-    },
-  };
-  const regDir = path.join(dir, "kickoffs");
-  fs.mkdirSync(regDir, { recursive: true });
-  fs.writeFileSync(path.join(regDir, "pm-wt.json"), JSON.stringify(claim));
-
-  const shown = await run([
-    process.execPath,
-    path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs"),
-    "director-watch",
-    "--org",
-    orgFile,
-  ]);
-  assert.equal(shown.code, 0, shown.stderr);
-  const output = JSON.parse(shown.stdout);
-  assert.equal(output.kickoffs[0].pmModelDisplay, "Agy claude-sonnet-4-6");
-});
-
 test("kickoff-show command includes pm.modelDisplay", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-kickoff-"));
   const orgFile = path.join(dir, "org.json");

@@ -21,13 +21,9 @@ Claude에서는 `/oh-my-teams:form`, `/oh-my-teams:kickoff` 등으로 호출한�
 
 구독·모델·승인처럼 사용자가 정해야 하는 항목은 [사용자 선택 질문 계약](plugins/oh-my-teams/references/user-choice.md)을 따른다. 호스트가 구조화된 선택 도구를 제공하면 그것으로 묻고(Claude Code에서는 `AskUserQuestion`), 제공하지 않으면 번호를 매긴 선택지를 한 번에 제시한다. Codex CLI 0.154.0에는 이 용도로 확인된 도구가 없으므로 후자를 쓴다.
 
-**2.8.3 변경:** 실험 기능으로 TypeSafe Jev shadow 판단을 추가했다. 조직의 `policy.experimental.jev`를 켜면 `supervision-wait`, `supervision-next`, `role-terminal`, `failure-classify`가 명령 안에서 Jev에게 좁은 판단을 묻고 `<state>/judgments`에 기록한다. 명령의 결과와 게이트는 바뀌지 않으며, 블록이 없으면 꺼져 있다. 규칙은 [Jev 실험 기능](plugins/oh-my-teams/references/jev.md)에 있다.
 
-**2.8.0 변경:** 감독과 검토에 드는 토큰을 줄였다. Claude 역할 터미널은 `--autocompact 250k`로 열리며, 값은 조직의 `policy.claudeAutoCompact`로 바꿀 수 있다. 이미 연 Claude 터미널에 다른 task나 검토를 넘기면 `worker-start`가 먼저 `/clear`로 대화를 비운다. 감독 역할은 heartbeat만 온 경우에는 깨어나지 않는 `supervision-wait`로 worker를 기다린다. Junior 구현은 첫 검토에서 반려되면 Senior에게 넘어가고, 검토자는 첫 검토에서 finding을 한 번에 모두 적으며 재검토에서는 수정 diff만 확인한다. 이사의 신호함에서는 `progress` 신호가 미처리 목록에 남지 않고, 새 `close-ready`가 이전 것을 대체하며, `kickoff-release`가 그 kickoff에 남은 신호를 정리한다. OpenCodex runner 프로필은 runner를 거치는 `headless-start`로만 실행하며, `role-command`와 `worker-start`는 runner 없이 실행하지 않도록 거부한다. (이후 `headless-start` 실행 경로가 제거되어 현재는 실행 경로가 아니다.)
 
-**2.6.1 변경:** 구현 task의 담당을 추론 강도로 정한다. 설계와 구현이 한 번에 필요한 상위 등급 구현은 Senior가 직접 맡고, 닫힌 범위의 구현은 Junior가 맡는다. Senior가 구현한 task는 다른 Senior 실행이나 PL·PM이 검토한다. 기준은 [pm](plugins/oh-my-teams/skills/pm/SKILL.md)의 「구현 등급」에 있다.
 
-**2.6.0 변경:** Intern 역할을 삭제했다. 좁은 편집·인용 수집·반복 실무는 Junior가 직접 맡으며, 실행 깊이는 1~4가 된다. `intern`을 선언한 조직 파일은 런타임이 거부하므로, Intern 프로필이 필요하면 Junior로 옮기고 `intern` 역할과 허용 목록 항목을 지운 뒤 `adjust`로 저장한다. 2.6.0 이전에 시작한 kickoff의 workflow 스냅샷과 기록은 `intern`을 `junior`로, 깊이 5를 깊이 4로 읽으므로 그대로 이어서 진행할 수 있다.
 
 **2.0.0 비호환 변경:** 생애주기 스킬 이름에서 `team-` 접두어를 제거했다. `team-form`은 `form`, `team-kickoff`는 `kickoff`가 되었으며 `status`, `adjust`, `close`, `disband`, `help`도 같다. 이전 호환 별칭 `team-setup`, `team-show`, `team-edit`, `org-setup`, `org-show`, `org-edit`과 `director`는 모두 삭제했으므로 그 이름으로는 스킬을 찾을 수 없다. 조직 파일 형식과 런타임 명령은 바뀌지 않았으므로 기존 `.omt/` 설정은 그대로 쓴다.
 
@@ -39,7 +35,9 @@ Director  사용자 소통·중대한 결정·최종 병합과 종료
    └─ Worker  구현·설계·독립 검토
 ```
 
-팀 실행 안에서 PM이 직접 처리할 수 있는 작업에는 Worker를 추가하지 않습니다. 구현과 독립 검토를 분리해야 하는 작업은 서로 다른 Worker 실행에 배정합니다. 진행 중인 이전 kickoff는 저장된 PL·Senior·Junior 역할 스냅샷을 유지합니다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`를 사용합니다.
+팀 실행 안에서 PM이 직접 처리할 수 있는 작업에는 Worker를 추가하지 않습니다. 구현과 독립 검토를 분리해야 하는 작업은 서로 다른 Worker 실행에 배정합니다. 실제 감독에는 Orca `orchestration`, 워크트리·터미널·회수에는 `orca-cli`를 사용합니다.
+
+역할 워크트리를 새로 만들기 전에는 Orca의 전체 목록을 확인합니다. 보존 중인 워크트리가 한 kickoff에 8개 또는 한 저장소에 12개가 되면 새로 만들지 않고 기존 워크트리를 재사용하거나 회수해야 합니다. 목록이 불완전할 때에도 생성을 중단합니다.
 
 ## 설치
 
@@ -141,7 +139,7 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 
 ### 실행 깊이
 
-새 kickoff의 깊이 1은 PM만, 깊이 2는 PM과 Worker를 사용한다. 깊이 2가 기본이며, 독립 검토가 필요하면 같은 역할의 다른 실행 ID와 워크트리에 배정한다. 이전 조직의 깊이 1~4와 PL·Senior·Junior 기록은 기존 kickoff의 실행 스냅샷에서만 유지한다.
+새 kickoff의 깊이 1은 PM만, 깊이 2는 PM과 Worker를 사용한다. 깊이 2가 기본이며, 독립 검토가 필요하면 같은 역할의 다른 실행 ID와 워크트리에 배정한다.
 
 깊이는 사용자에게 묻지 않고 PM이 정해 사유와 함께 알리며, 사용자가 다른 깊이를 말하면 따른다. 처음 깊이는 workflow 요청의 `depth`에 기록되고, 실행 중에는 `workflow-depth` 명령으로 바꾼다. 올리기는 언제든 가능하다. 내리기는 빠지는 역할에 예약되었거나 실행 중인 작업이 없을 때만 런타임이 허용하며, 종료를 확인하지 못한 워커도 정산 전까지는 실행 중으로 본다. 대기 중인 작업은 원래 요청된 역할을 기준으로 다시 배정되고, 이미 실행을 마친 작업은 실행한 역할을 유지한다. 모든 변경은 사유·근거와 함께 `depthHistory`에 남는다.
 
@@ -227,9 +225,9 @@ npm run lint
 
 버전과 감사 수치처럼 여러 파일이 되풀이하는 값은 `scripts/metadata.mjs`가 정본에서 파생한다. 파일마다 직접 고치지 않고 정본만 바꾼 뒤 `npm run sync`를 실행하며, `npm run sync:check`는 고치지 않고 어긋난 곳만 보고한다. 정본과 따라가는 파일의 대응은 [AGENTS.md](AGENTS.md)에 표로 정리했다.
 
-팀 실행에서 별도 Worker가 필요한 제한 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행할 수 있다. `prepare`는 새 워크트리를 만들므로 현재 세션에서 직접 처리하는 일반 작업에는 사용하지 않는다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 PM state를 써야 동시 인원 제한이 적용된다. 기존 PL 역할의 감독 절차는 진행 중인 이전 kickoff에만 적용한다.
+팀 실행에서 별도 Worker가 필요한 제한 편집은 기존 [task v1 예제](plugins/oh-my-teams/examples/task.json) 또는 목표·수용 기준·검토 요구를 고정하는 [task v2 예제](plugins/oh-my-teams/examples/task.v2.json)를 채워 `prepare` → `work`로 수행할 수 있다. `prepare`는 새 워크트리를 만들므로 현재 세션에서 직접 처리하는 일반 작업에는 사용하지 않는다. `prepare`가 반환한 worktree·조직 스냅샷·작업 파일·공유 state를 그대로 전달한다. 여러 워커는 같은 PM state를 써야 동시 인원 제한이 적용된다.
 
-감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows의 Agy 역할은 역할 터미널 경로가 검증되지 않아 실행 matrix가 거부하므로 PM에게 보고하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 worker는 `supervision-next`의 판정에 따라 진행 요청과 상향 보고로 처리한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
+감독 worker는 `worker-start --org <organization.json> --role <역할>`로만 시작한다. Claude·Codex·Agy 역할은 모두 `role-terminal`로 프로필의 모델·강도와 권한 우회 플래그를 담은 명령의 터미널을 먼저 열고, 그 터미널을 `--terminal`로 넘긴다. `worker-start --agent`는 인자를 더할 수 없어 권한 우회 플래그를 Orca 설정에 맡겨야 하므로, 래퍼는 `--terminal` 없는 시작과 손으로 적은 `--agent`·`--model`·`--effort`를 거부한다. 결과의 `binding.modelProof`는 화면에서 모델을 확인해야 한다는 뜻의 `unproven`이나, 모델을 요청하지 않은 `unrequested`다. kickoff 안에서는 `--workflow-id`와 `--state`를 함께 넘겨 workflow에 고정된 조직 스냅샷과 실행 깊이의 역할로 시작한다. Windows의 Agy 역할은 역할 터미널 경로가 검증되지 않아 실행 matrix가 거부하므로 PM에게 보고하고, Ollama 역할은 `work` 하네스로 실행한다. 작업 지시문 앞에는 받는 역할 스킬의 `권한·책임·한계` 절이 붙으므로, 각 역할은 자신이 쓸 수 있는 명령과 보고 대상, 하지 말아야 할 일을 지시문에서 바로 읽는다. PM은 `role-command`가 만든 명령으로 띄우고, 무응답 Worker는 Orca 상태를 확인해 보고한다. 자세한 절차는 [Orca 런타임 참조](plugins/oh-my-teams/references/orca-runtime.md)에 있다.
 
 감사 정책(`org.auditor`의 선언 여부)은 kickoff를 claim할 때 그 kickoff에 고정되며, 이후 조직 파일을 고쳐도 이미 고정된 정책은 바뀌지 않는다. 정책이 고정되지 않은 채 등록된 기존 kickoff는 이사가 `kickoff-audit-policy-retrofit`을 한 번 실행해 정책을 고정해야 `worker-start`, close-ready, `workflow-accept`가 진행된다. 2026-09-29 기준으로 #139 외에 등록된 기존 kickoff 4건이 병합 뒤 이 일회성 절차를 거쳐야 한다. 감사 미설정(`auditorConfigured`가 false)으로 고정한 kickoff와 kickoff 없이 만든 독립 workflow는 기존 동작을 그대로 유지한다. 이 고정은 정책 결속일 뿐이며 감사자의 신원을 증명했다거나 기록을 위조할 수 없다는 뜻이 아니다.
 

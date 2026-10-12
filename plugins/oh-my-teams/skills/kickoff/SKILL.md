@@ -40,7 +40,7 @@ kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook �
    읽기 전용 QA만을 위한 workflow task와 새 워크트리는 만들지 않습니다. 기존 실행을 재사용할 수 없으면 PM이 사용 가능한 기존 체크아웃에서 직접 확인하거나 실행기의 서브에이전트에 맡깁니다.
 3. 각 주기마다 코드 변경, 새 검사 결과, 검토 결과, 명확해진 장애물 중 하나 이상의 확인 가능한 진전을 남긴다.
 4. 실패하면 같은 시도를 무한 반복하지 않는다. 실패 원인과 시도를 기록하고 접근 방법이나 담당 역할을 바꾼다. `work` 실행·attempt마다 적용되는 provider 호출 한도, workflow의 호출 예산과 attempt 한도, 사용자가 정한 중단 조건을 지킨다. 대화형 역할 터미널의 턴은 이 한도에 세지 않으므로, 사용량은 `usage-report`로 따로 확인한다.
-5. worker를 기다리는 동안 `supervision-wait`의 대기 시간이 끝날 때마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.
+5. worker를 기다리는 동안 Orca `orchestration check`의 대기 시간이 끝날 때마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.
 6. 대화가 이어지거나 재개되면 authoritative Goal, workflow, Run과 worker 상태를 먼저 대조한다. 계획만 존재하거나 worker 상태가 불명확하다는 이유로 새 작업을 중복 생성하지 않는다.
 
 주기를 도는 동안의 판단은 [`../../references/autonomy.md`](../../references/autonomy.md)의 경계를 따른다. 브리프의 범위 안에서 끝나는 판단은 이사와 PM이 정하고 보고하며, 확정한 계약의 변경, 브리프 밖의 새 범위, 되돌릴 수 없고 사용자가 소유한 대상에 주는 영향, 사용자만 아는 암묵지에 해당할 때에만 사용자에게 확인한다.

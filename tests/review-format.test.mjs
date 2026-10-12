@@ -54,11 +54,10 @@ test("a finding in another shape is refused with the expected format", () => {
 });
 
 test("the reviewer's own instructions carry the record format", () => {
-  // The format lives in Senior's charter, which role-spec puts at the head of
-  // every task a Senior receives.
-  const org = example("organization.json");
-  const spec = roleSpec(org, "senior", "출처 표본을 대조해 검토한다.");
-  assert.match(spec, /`review-record`의 입력 형식으로 직접 작성한다/);
+  // The current Worker charter travels with each review assignment.
+  const org = example("organization.three-tier.json");
+  const spec = roleSpec(org, "worker", "출처 표본을 대조해 검토한다.");
+  assert.match(spec, /`review-record`의 입력 형식으로 직접 작성합니다/);
   assert.match(spec, /`status`\(`open`·`resolved`·`accepted-risk`\)/);
   assert.match(spec, /review\.changes-requested\.json/);
 });
@@ -81,5 +80,4 @@ test("the PM skill runs a rejected review through workflow-rework", () => {
   const pm = read("pm/SKILL.md");
   assert.match(pm, /node <runtime> workflow-rework --id/);
   assert.match(pm, /retry`가 아니라 검토 반려 루프/);
-  assert.match(read("pl/SKILL.md"), /workflow-rework/);
 });

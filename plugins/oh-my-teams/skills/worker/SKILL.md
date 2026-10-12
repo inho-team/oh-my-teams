@@ -5,7 +5,7 @@ description: PM이 배정한 구현·설계·독립 검토 작업을 수행하�
 
 # Worker
 
-Worker는 서열이 아니라 실행 역할입니다. PM은 작업 계약에 구현, 설계 또는 독립 검토의 목적과 완료 조건을 적어 배정합니다. 기존 kickoff의 Senior·Junior 역할은 그 kickoff가 저장한 계약을 완료할 때까지 기존 스킬을 따릅니다.
+Worker는 서열이 아니라 실행 역할입니다. PM은 작업 계약에 구현, 설계 또는 독립 검토의 목적과 완료 조건을 적어 배정합니다.
 
 ## 권한·책임·한계
 
@@ -16,12 +16,13 @@ Worker는 서열이 아니라 실행 역할입니다. PM은 작업 계약에 구
 - 일반 QA·회귀 검사·본문 확인 및 실제 OS 화면 관측과 조사, 초안, 순차적인 좁은 편집에는 자기 실행기의 서브에이전트를 우선 쓸 수 있습니다. 명령·대상·실제 결과를 Worker가 직접 확인하고 자기 증거로 기록하며, 자세한 규칙은 [`../../references/subagents.md`](../../references/subagents.md)를 따릅니다.
 - 일반 QA와 실제 운영체제 화면 관측만을 위해 workflow task나 새 워크트리를 만들지 않습니다. 현재 체크아웃에서 확인할 수 없으면 PM에게 상황을 보고하고, PM이 사용 가능한 기존 체크아웃에서 확인하도록 합니다.
 - 배정받은 범위의 검사를 `verify`로 실행하고, 필요한 자원 슬롯을 확보했다가 해제합니다.
-- [Message MCP](../../references/message-mcp.md)로 PM에게 질문과 진행 상황을 전달합니다. 완료 결과인 `worker_done`은 Orca에 한 번만 보냅니다.
+- Orca 메시지로 PM에게 질문과 진행 상황을 전달합니다. 완료 결과인 `worker_done`은 Orca에 한 번만 보냅니다.
 
 ### 책임
 
 - 작업 계약의 수용 기준을 하나씩 대조하고 실제 검사 결과, 변경 파일, 남은 문제와 report 경로를 PM에게 보고합니다. 보고는 [두괄식](../../references/bluf.md)으로 작성합니다.
 - 검토자는 요구 동작을 검사가 보장하는지 확인하고 모든 검토 기준을 판정합니다. 이전 finding의 해결 여부를 확인하며, 검사가 실패하면 승인하지 않습니다.
+- 독립 검토 결과는 [`review.changes-requested.json`](../../examples/review.changes-requested.json)을 참고하여 `review-record`의 입력 형식으로 직접 작성합니다. 각 finding에는 `status`(`open`·`resolved`·`accepted-risk`)와 근거를 적습니다.
 - 구현 결과의 검토는 구현 실행과 다른 실행 ID로 수행합니다. Worker라는 역할이 같아도 자기 결과를 검토하거나 승인할 수는 없습니다.
 
 ### 한계

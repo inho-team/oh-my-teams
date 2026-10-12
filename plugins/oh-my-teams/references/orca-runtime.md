@@ -210,7 +210,7 @@ node <runtime> prompt-answer --org <organization.json> --terminal <handle> --wor
 1. 화면을 읽고 분류한다. 렌더된 화면을 얻지 못하면 키를 보내지 않는다. 분류기가 알아보지 못한 화면은 아래 「분류기가 알아보지 못한 화면」을 따른다.
 2. 화면이 캡처된 신뢰 질문이거나 기존 동작이 확인된 질문이면 분류기가 정한 키를 한 번 보낸다. Esc는 어떤 경우에도 보내지 않으며, 보낼 수 있는 키는 Enter와 Down뿐이다. Claude의 신뢰 질문은 Down 뒤 Enter가 필요하지만 두 키를 이어 보내지 않고, 화면이 바뀐 것을 읽은 뒤 각 화면 상태마다 키 하나씩 보낸다.
 3. 키를 보내기 전에 시도를 먼저 기록해 같은 질문에 두 번 답하지 않도록 예약하고, 키를 보낸 뒤에는 화면을 다시 읽는다. 질문이 사라졌으면 `resolved`, 다음 질문으로 넘어갔으면 `advanced`이며, 화면이 그대로이거나 읽히지 않으면 `unresolved`다. 결과가 `unresolved`이면 같은 키를 다시 보내지 않고 화면을 증거로 붙여 상위에 보고한다. 예약만 남고 최종 기록이 없는 시도(프로세스가 중간에 끝난 경우)는 `status`에 `sending`으로 보이며, 키가 나갔는지 알 수 없으므로 다시 보내지 않고 화면을 읽어 상위에 보고한다.
-4. 사용자 질문(`user-question`)처럼 키로 답할 수 없는 화면은 키를 보내지 않고 역할에게 Message MCP로 지시를 전달하거나(`redirected`), 판정할 수 없는 화면이면 `escalate`로 돌려준다. 같은 사용자 질문 화면 상태에는 지시를 한 번만 보낸다. 화면 상태는 화면 판정과 질문 본문으로 구분하므로, 헤더와 선택지가 같아도 질문 본문이 다른 화면은 새 질문으로 보고 각각 한 번씩 지시한다. 감독 루프가 같은 화면을 다시 읽어도 `already-answered`로 거부하고 `next`는 `await-worker`이며 지시는 다시 나가지 않는다(전송이 실패한 시도는 전달된 것으로 세지 않으므로 다시 시도할 수 있다). 예약만 남고 최종 기록이 없는 재지시(`sending`)도 전송 여부를 알 수 없으므로 키 경로와 같이 다시 보내지 않는다. 명령 승인 화면은 캡처된 적이 없으므로 아직 분류기가 알아보지 못하며, 이 화면의 처리는 아래 「분류기가 알아보지 못한 화면」을 따른다.
+4. 사용자 질문(`user-question`)처럼 키로 답할 수 없는 화면은 키를 보내지 않고 역할에게 Orca 메시지로 지시를 전달하거나(`redirected`), 판정할 수 없는 화면이면 `escalate`로 돌려준다. 같은 사용자 질문 화면 상태에는 지시를 한 번만 보낸다. 화면 상태는 화면 판정과 질문 본문으로 구분하므로, 헤더와 선택지가 같아도 질문 본문이 다른 화면은 새 질문으로 보고 각각 한 번씩 지시한다. 감독 루프가 같은 화면을 다시 읽어도 `already-answered`로 거부하고 `next`는 `await-worker`이며 지시는 다시 나가지 않는다(전송이 실패한 시도는 전달된 것으로 세지 않으므로 다시 시도할 수 있다). 예약만 남고 최종 기록이 없는 재지시(`sending`)도 전송 여부를 알 수 없으므로 키 경로와 같이 다시 보내지 않는다. 명령 승인 화면은 캡처된 적이 없으므로 아직 분류기가 알아보지 못하며, 이 화면의 처리는 아래 「분류기가 알아보지 못한 화면」을 따른다.
 5. 결과의 `next`가 `resume-precheck`이면 `terminal-idle-check`부터 다시 진행하고, `worker-start`는 그 점검이 idle을 돌려준 뒤에만 실행한다. 신뢰 질문에 답한 터미널은 「역할 터미널 열기」 5번 항목의 절차대로 닫고 한 번만 다시 연 뒤 점검한다.
 
 **분류기가 알아보지 못한 화면.** 분류기가 어떤 질문으로도 인식하지 못한 화면(캡처되지 않은 명령 승인과 업데이트 안내가 여기에 든다)은 작업 출력일 수도 있고 Orca가 질문으로 보는 화면일 수도 있다. 그래서 `prompt-answer`는 사전 점검과 같은 `terminal wait --terminal <handle> --for tui-idle --timeout-ms 3000 --json`을 실행해 Orca의 응답(`result.wait.satisfied`, `blockedReason`)을 읽고, 어느 경우에도 키와 지시를 보내지 않는다.
@@ -230,7 +230,7 @@ node <runtime> prompt-answer --org <organization.json> --terminal <handle> --wor
 
 ### 역할 간 메시지 전달
 
-역할 간 질문, 진행 보고, 지시와 결정은 [Message MCP](message-mcp.md)의 저장형 메시지로 전달한다. 메시지를 보낸 뒤 수신자가 처리할 때까지 메시지함에 남으며, 수신자는 처리한 뒤 확인한다. `director-signal`과 `director-reply`도 이 경로를 사용한다. Orca의 터미널 입력은 역할 시작과 CLI 질문에 답하는 절차에만 사용한다. 터미널에 입력된 글이 Enter 없이 남거나 화면 판정이 불가능해도 역할 간 메시지는 보관된다.
+역할 간 질문과 진행 보고는 Orca `orchestration send`로 전달합니다. 수신자는 Orca `orchestration check`에서 메시지를 확인합니다. `director-signal`과 `director-reply`는 OMT 신호 기록을 남긴 뒤 Orca 메시지로 알립니다.
 
 ### 역할 탭 제목
 
@@ -283,36 +283,7 @@ node <runtime> director-terminal --org <project>/.omt/organization.json (--profi
 
 ## 무응답 worker 감독
 
-감독 역할(PM, PL)은 worker를 기다릴 때 원시 `check --wait` 대신 다음 명령을 쓴다.
-
-```text
-node <runtime> supervision-wait --run <runId> --org <organization.json> --state <pm-state> --mailbox <내 주소> [--ack <deliveryId>]
-```
-
-이 명령은 Orca의 `worker_done`과 지정한 Message MCP 메시지함을 함께 기다린다. `source: "message-mcp"`이면 메시지를 처리한 뒤 `message-ack`으로 확인한다. Orca 전달의 `deliveryId`는 실행 정산 후 다음 대기에 `--ack`으로 넘긴다. heartbeat는 명령 안에서 처리하며, 대기 시간이 끝나면 감독자는 아래 무응답 점검을 수행한다.
-
-대기 시간이 끝난 것은 완료나 실패의 근거가 아니지만, 아무것도 하지 않고 다시 기다리는 근거도 아니다. 감독 역할(PM, PL)은 대기 시간을 조직의 `policy.supervision.progressCheckMs`로 두고, 제한 시간이 지날 때마다 `worker_done`을 보내지 않은 worker 각각에 대해 다음을 수행한다. 값이 없는 조직은 기본값 15분(`900000`)과 `unansweredLimit` 2를 쓴다.
-
-1. `worker-list`로 liveness를, `worker-show --dispatch <id>`로 `observation.agentWait`를 조회한다. worker의 provider가 `claude`이면 대기 주기마다 아래 「사용 한도 handoff」 1단계의 `worker-limit-check`를 `--terminal <handle>`과 함께 실행해 `overload` 값도 함께 조회한다. `verdict`나 `inspect`/`escalate` 단계를 기다리지 않고 매 주기 확인하는 이유는, 이 정체 하나만 대기 시간을 다 채우고서야 보고되는 것을 막기 위해서이다.
-2. 관측 파일을 만들고 `node <runtime> supervision-next --org <organization.json> --state <pm-state> --dispatch <id> --observation <observation.json>`을 실행한다. `lastActivityAt`에는 마지막 heartbeat·메시지·출력 변화 시각을 넣되, 이것은 liveness 표시일 뿐 semantic progress가 아니다. semantic progress는 `semanticProgressAt`과 구조화된 `semanticProgressEvidence`가 함께 증명할 때만 기록하며, 활동·출력·heartbeat 변화로 요청 수, 확인 수, escalation cycle 또는 pending decision을 비우지 않는다. `ask-progress` 또는 `inspect`를 실제로 수행한 뒤에는 action·시각·증거를 가진 `actionReceipt`를 다음 관측에 넣고, 현재 pending decision을 처리했으면 현재 `decisionCycle` 또는 같은 `reason`·`escalatedAt`에 결속된 `pendingDecisionResolution`과 증거를 넣는다. 1단계에서 조회한 `overload`가 `true`이면 `providerOverload`에 그대로 옮긴다. 결과의 `report.state: "stored"`은 로컬 durable 기록일 뿐 전송·수신·ack·handled를 뜻하지 않는다.
-3. 결과의 `action`대로 행동한다. `providerOverload`가 `true`이면 무응답 시간이나 진행 요청 횟수와 무관하게 곧바로 `escalate`가 되며, `reason`은 `provider-overloaded`이다.
-
-| action         | 행동                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wait`         | 다시 `supervision-wait`로 기다린다. `reason`이 `already-escalated`이면 같은 정체를 다시 보고하지 않고, 사용자 보고에는 `display`를 그대로 적는다.                                                                                                                                                                                                                                                                                             |
-| `ask-progress` | `message-send --state <pm-state> --actor <내 주소> --to task:<workflow task ID> --key <고유 키> --type question --subject "진행 상황 요청" --body "현재 단계, 끝낸 항목과 남은 항목, 장애물을 알려 주세요."`으로 묻고, 요청 수를 하나 늘린다.                                                                                                                                                                                                                                        |
-| `inspect`      | `worker-show`와 `worker-read --dispatch <id> --source auto --limit <n>`으로 상태와 최근 출력을 확인하고 `inspections`를 하나 늘린다. 확인에서 새 활동을 찾았으면 관측값을 고쳐 다시 판정한다.                                                                                                                                                                                                                                             |
-| `escalate`     | `worker-read`의 제한된 출력, liveness, 무응답 시간과 보낸 요청을 증거로 붙여 상위에 보고한다. PL은 `message-send --type escalation`으로 PM에게, PM은 사용자에게 보고한다. `failureClassify`가 `true`이면 그 증거로 `failure-classify`를 실행한다. 보고한 시각을 `escalatedAt`으로, 판정의 `reason`을 `escalatedReason`으로 기록한다. 같은 종료나 같은 입력 대기는 다시 보고하지 않고, 보고한 뒤 사실이 바뀌었을 때만 다시 보고한다. |
-
-`escalate`의 `reason`이 `waiting-on-human-prompt`이면 사람을 기다리지 않고 먼저 `worker-read`로 화면을 확인한다. 화면이 폴더 신뢰처럼 캡처된 질문이면 「프롬프트 질문 답하기」 절의 `prompt-answer`로 감독자가 답하고 `terminal-idle-check`부터 다시 진행한다. 명령 승인처럼 분류기가 알아보지 못하는 화면은 `prompt-answer`가 키 없이 `escalate`로 끝낸다. 그 명령이 `escalate`나 `unresolved`를 돌려주거나 감독자 확인에서 거부되었을 때, 또는 사람이 정해야 하는 질문일 때에는 위 표의 `escalate` 행이 아니라 「프롬프트 질문 답하기」 절의 「사람이 필요한 경우」를 따른다. PL은 PM에게 `escalation`을 보내고, PM은 사람이 정해야 하는 것에 한해 `director-signal`로 이사에게 알린다.
-
-`escalate`의 `reason`이 `provider-overloaded`이면 worker의 터미널 화면이 Claude의 `API Error: 529 Overloaded`로 끝난 채 다음 입력을 기다리고 있다. 감독 역할은 "계속"이나 그와 같은 뜻의 입력을 자동으로 다시 보내지 않는다. 같은 요청을 두 번 보내지 않는 제약과, 529 직후의 turn이 어디까지 진행되었는지는 화면만으로 판정할 수 없다는 사정 때문이다. PL은 PM에게 `escalation`을 보내고, PM은 `director-signal`로 이사에게 알린다. 다시 보낼지는 보고를 받은 쪽이 정한다.
-
-이 판정은 재시도나 종료를 결정하지 않는다. 종료와 재시도는 위 「worker-start 실패 복구」와 `failure-classify` 결과를 따른다. `unverifiable` worker는 살아 있다고 간주하지 않고 확인이나 보고로 보낸다. 사용자에게 상태를 알릴 때 무응답 worker는 `진행 중`이 아니라 결과의 `display`대로 `무응답 N분`으로 적는다.
-
-`supervision-next`의 durable state/dispatch 경로는 모든 일반 PM·PL 감독에 사용한다. 조직이 실험 Jev 판단을 켰으면(`policy.experimental.jev`) `supervision-wait`에도 `--state <pm-state>`를 넘긴다. 두 명령이 돌려주는 결과는 바뀌지 않으며, 판단은 상태 디렉터리의 `judgments`에만 기록된다. 규칙은 [`jev.md`](jev.md)를 따른다.
-
-하위 worker는 진행 요청을 받으면 `message-send --state <pm-state> --actor <내 주소> --to <감독자 주소> --key <고유 키> --type status --subject "진행 상황" --body <진행 상황>`으로 현재 단계, 끝낸 항목과 남은 항목, 장애물을 곧바로 답하고, injected preamble이 정한 주기로 heartbeat를 보낸다. 답의 첫 줄에는 [`bluf.md`](bluf.md)대로 현재 단계와 예상되는 다음 사건을 쓰고, 끝낸 항목과 남은 항목, 장애물은 그 뒤에 쓴다.
+PM은 `orca orchestration check --run <runId> --wait 30000`으로 Worker의 메시지와 `worker_done`을 확인합니다. 대기 시간이 끝나면 `worker-list`, `worker-show`, `worker-read`로 실제 상태를 확인합니다. 대기 시간이나 heartbeat만으로 완료 또는 진행을 판단하지 않습니다. 상태가 불명확하면 이사에게 근거와 함께 보고합니다. 질문 화면은 `prompt-answer`로 처리하고, 재시도와 종료는 `failure-classify`의 판정에 따릅니다.
 
 ## 사용 한도 handoff
 
@@ -334,7 +305,6 @@ worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 
    | `none`    | 한도로 끝나지 않았다. 무응답 감독 절차를 그대로 따른다.                                                                                                                       |
    | `unknown` | 세션 기록도 화면도 읽지 못했다. 한도로 추정하지 않고 무응답 감독의 `inspect`나 `escalate`로 보낸다.                                                                           |
 
-   provider가 `claude`이고 화면을 읽었으면(`--terminal`을 넘겼으면) 결과에 `overload` 값이 함께 온다. 이 값은 `verdict`와 별개이며 `verdict`가 `none`이어도 `true`일 수 있다. Claude의 `API Error: 529 Overloaded`는 provider의 용량 부족(`retry`, 잠시 뒤 같은 프로필로 자동 재시도)과 다른 경로를 타야 하므로 `verdict`에 섞이지 않는다. `overload`가 `true`이면 이 단계가 아니라 위 「무응답 worker 감독」 1단계로 돌아가 `providerOverload`를 관측 파일에 옮긴다. Director는 PM의 화면도 같은 문장으로 판정하므로, `director-watch` 결과의 kickoff마다 `providerOverload`가 `provider-overloaded`/`none`/`unknown` 가운데 하나로 함께 온다.
 
 3. **정산:** 한도에 걸린 터미널을 「worker-start 실패 복구」의 2단계대로 `worker-stop`으로 멈추고, 종료를 확인하지 못하면 `worker-abandon`으로 봉인한다. 워크트리와 커밋은 지우지 않는다. 이어서 현재 attempt를 `workflow-settle`로 `failed` 정산한다. `failure`에는 `kind: "rate-limited"`, `limitKind: "usage-limit"`, 판정 결과를 옮긴 `message`와 `evidence`를 적는다. headless worker는 결과의 `outcome`이 `rate-limited`이고 `limitKind`가 함께 보고되므로, 그 값을 그대로 옮긴다.
 4. **경로 확인:** 정산한 task의 `failure.route.category`가 `capacity-handoff`이면 5단계로 간다. 조직 정책(`policy.onExhaustion`)이 `stop`이거나 남은 fallback이 없으면 `quota-exhausted`가 되며, 이때에는 handoff하지 않고 판정 결과의 `limit.resetsAt` 또는 `limit.resetsIn`을 붙여 이사에게 `blocked`로 보고한다.

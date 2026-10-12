@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
-  headlessStatus,
+  headlessTurns,
   readHeadlessStream,
 } from "../plugins/oh-my-teams/scripts/headless.mjs";
 import {
@@ -542,10 +542,16 @@ test("headless streams report usage for each provider, summed over turns", (t) =
       },
     ],
   );
-  const status = headlessStatus(state, "junior-1", { codexHome });
-  assert.deepEqual(status.sessions, ["claude-headless"]);
-  assert.equal(status.usage.promptTokens, 115 + 125);
-  assert.deepEqual(status.usageTurns, { measured: 2, total: 2 });
+  const turns = headlessTurns(state, "junior-1", { codexHome }).turns;
+  assert.deepEqual(
+    [...new Set(turns.map((turn) => turn.session).filter(Boolean))],
+    ["claude-headless"],
+  );
+  assert.equal(
+    turns.reduce((sum, turn) => sum + turn.usage.promptTokens, 0),
+    115 + 125,
+  );
+  assert.equal(turns.length, 2);
 
   headlessWorker(
     state,

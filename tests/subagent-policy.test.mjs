@@ -194,8 +194,8 @@ test("the reference and the pm and worker skills state the worktree order", () =
   assert.match(workerSkill, /「워크트리 순서」/);
 });
 
-test("pm, worker and the legacy role skills link to the rule", () => {
-  for (const name of ["pm", "worker", "pl", "senior", "junior"]) {
+test("PM and Worker skills link to the rule", () => {
+  for (const name of ["pm", "worker"]) {
     assert.match(
       read("skills", name, "SKILL.md"),
       /\(\.\.\/\.\.\/references\/subagents\.md\)/,

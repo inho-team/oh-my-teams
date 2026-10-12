@@ -18,7 +18,6 @@ Jev는 텍스트를 생성하지 않고, 자연어와 상태를 받아 Choice(�
     "jev": {
       "mode": "shadow",
       "model": "jev-1.13.0",
-      "points": ["status-filter", "auto-observe", "model-check", "failure-fallback"],
       "budgetPerKickoff": 500,
       "timeoutMs": 2000
     }
@@ -38,12 +37,9 @@ Jev는 텍스트를 생성하지 않고, 자연어와 상태를 받아 Choice(�
 
 | 지점 | 실행되는 명령 | 판단 대상 | 질문 |
 |---|---|---|---|
-| `status-filter` | `supervision-wait --org --state` | `status` 메시지로만 이루어진 전달 | Noul: 감독자가 지금 행동해야 하는가, Choice: 진행·막힘·질문·완료·기타 |
-| `auto-observe` | `supervision-next --dispatch --state` | 그 worker의 `worker-read` 출력 끝부분 | Choice: 작업 중·입력 대기·한도 걸림·비정상 종료·보고 없는 완료·판단 불가 |
 | `model-check` | `role-terminal --state` | 역할 터미널의 마지막 화면 | Choice: 요청 모델과 일치·다른 모델·모델 표시 없음 |
 | `failure-fallback` | `failure-classify --org --state` | 결정적 규칙이 `unknown`으로 둔 실패 | Choice: 실패 분류 10종과 판단 불가 |
 
-`worker_done`, `question`, `escalation` 메시지는 구조로 판정할 수 있으므로 `status-filter`의 대상이 아니다. `supervision-next`, `failure-classify`, liveness처럼 이미 결정적으로 판정하는 결과는 어느 모드에서도 바뀌지 않는다.
 
 ## 실패와 기록
 
@@ -54,6 +50,5 @@ Jev는 텍스트를 생성하지 않고, 자연어와 상태를 받아 Choice(�
 
 ## 효과를 확인하는 방법
 
-shadow 기록을 실제 행동과 대조한다. `status-filter`는 Noul 값이 낮았던 전달 뒤에 PM이 실제로 행동했는지, `auto-observe`는 판단 뒤에 이어진 `supervision-next`의 결과와 상위 보고 내용이 일치했는지, `model-check`는 PM이 화면에서 확인한 모델과 일치했는지, `failure-fallback`은 Senior가 최종으로 내린 분류와 일치했는지를 본다.
 
 판단을 동작에 반영하는 모드를 도입하려면 기존 채택 기준을 따른다. 품질을 낮추지 않으면서 역할의 턴이나 토큰이 약 10% 이상 줄어야 하며, 놓친 메시지나 잘못 보낸 실패가 하나라도 있으면 토큰 절약만으로 채택하지 않는다. Jev는 영어가 주 학습 언어이므로 질문은 영어로 쓰고, 임계값은 한국어 보고로 따로 검증한다.

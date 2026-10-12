@@ -873,7 +873,7 @@ test("the launch documents keep each role out of another role's worktree", () =>
   assert.match(runtime, /### 역할과 워크트리/);
   assert.match(runtime, /검토 대상을 \*\*경로와 커밋으로 읽고\*\*/);
   assert.match(runtime, /is where <역할> works on task <task>/);
-  for (const skill of ["skills/pm/SKILL.md", "skills/pl/SKILL.md"]) {
+  for (const skill of ["skills/pm/SKILL.md"]) {
     assert.match(read(skill), /`역할과 워크트리` 절/);
   }
 });

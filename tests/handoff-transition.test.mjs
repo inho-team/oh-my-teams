@@ -632,7 +632,6 @@ test("the skills and runtime reference carry the usage-limit handoff procedure",
   const pm = read("skills/pm/SKILL.md");
   assert.match(pm, /`workflow-handoff`/);
   assert.match(pm, /`사용 한도 handoff` 절/);
-  assert.match(read("skills/pl/SKILL.md"), /`workflow-handoff`는 PM이 수행/);
   assert.match(read("skills/adjust/SKILL.md"), /^## 대체 프로필$/m);
   assert.match(read("skills/form/SKILL.md"), /`adjust`에서 사용자가 고르게/);
 });

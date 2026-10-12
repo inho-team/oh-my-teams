@@ -9,7 +9,7 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 
 프로젝트 `.omt/organization.json`을 읽는다. 없으면 `form`으로 이동한다. 사용자 요청으로 바뀌는 항목에 대해서만 필요한 선택을 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 받는다. 기존 구독 배정을 전부 다시 묻지 않는다.
 
-1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리합니다. 신규 조직의 역할 ID는 `pm`과 `worker`이며, Worker의 부모는 PM입니다. 기존 조직의 `pl`·`senior`·`junior`는 이전 kickoff를 위한 호환 경로에만 남겨 둡니다. 기존 조직을 전환하려면 진행 중인 kickoff의 스냅샷은 그대로 두고, 새 설정의 PL 책임을 PM에게, Senior·Junior 책임을 Worker에게 옮긴 뒤 기존 역할과 허용 목록 항목을 삭제하여 `edit`로 저장합니다. 모델·추론 강도·대체 순서·인원과 자문 예산도 요청 범위에서 조정할 수 있습니다.
+1. 현재 revision과 역할·프로필을 읽고 변경 전후를 정리합니다. 새 조직의 역할 ID는 `pm`과 `worker`이며, Worker의 부모는 PM입니다. 모델·추론 강도·대체 순서·인원과 자문 예산을 요청 범위에서 조정할 수 있습니다.
 2. 새 구독이나 과금 경로를 임의로 선택하지 않는다. 계정 연결은 아래 「계정과 실행기」를 따른다.
 3. 수정안을 별도 JSON에 쓰고 현재 스킬 기준 `../../scripts/teams-org.mjs`를 호출한다.
 
@@ -21,7 +21,6 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 - 동시 인원·시도 횟수 1, 대체 프로필 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`) 3. 이 한도는 `work` 한 번과 workflow attempt 하나의 provider 호출 수 상한이며, 대화형 역할 터미널의 턴은 세지 않는다.
 - 자문자: `advisors`가 비어 있어 모든 역할의 `advise` 호출이 거부된다. 허용하면 자문 예산(`policy.adviceBudget`)은 kickoff 상태 하나당 6회가 기본값이다.
 - 계정: 모든 프로필이 현재 로그인 계정을 쓰며, 같은 실행기의 프로필은 하나의 `pool`로 묶여 있다.
-- 무응답 감독: `policy.supervision`이 `progressCheckMs: 900000`(15분), `unansweredLimit: 2`다. 이 값이 없는 이전 조직도 같은 기본값으로 읽힌다.
 - 실험 기능: `policy.experimental`이 없어 모든 실험이 꺼져 있다. 사용자가 요청하면 Jev shadow 판단을 켤 수 있으며, 켜는 값과 기록 방식은 [`../../references/jev.md`](../../references/jev.md)를 따른다. shadow 모드는 명령의 결과를 바꾸지 않지만 TypeSafe API 호출 비용이 들고 `TYPESAFE_API_KEY`가 필요하다는 점을 함께 알린다.
 - Claude 세션 압축: `policy.claudeAutoCompact`가 없어 Claude 역할 터미널은 `--autocompact 250k`로 열린다. 100000부터 1000000까지의 정수 토큰이나 `"auto"`(플래그 생략)를 받는다. 값을 키우면 압축이 늦어지는 대신 호출마다 보내는 문맥이 커진다.
 
@@ -34,7 +33,6 @@ description: 저장된 oh my teams 상설 조직의 역할, 인원, 구독·모�
 - 한 task의 handoff 횟수는 적어 둔 대체 프로필 수를 넘지 않으며, handoff는 workflow의 시도 예산을 쓰지 않는다. 다만 이어받은 프로필도 그 구독의 사용량을 쓴다.
 - 진행 중인 kickoff는 생성 시의 조직 스냅샷을 쓰므로, 바꾼 대체 순서는 다음 kickoff부터 적용된다.
 
-무응답 감독 값을 바꿀 때에는 `policy.supervision`의 두 값을 함께 적는다. `progressCheckMs`는 60000부터 86400000까지, `unansweredLimit`는 1부터 10까지 받으며, 한쪽만 적은 블록은 런타임이 거부한다. 간격을 줄이면 진행 요청 메시지가 늘어나고, 한도를 높이면 상위 보고가 늦어진다는 점을 함께 알린다. 이 정책은 재시도나 종료를 결정하지 않는다.
 
 ## 역할과 프리셋
 

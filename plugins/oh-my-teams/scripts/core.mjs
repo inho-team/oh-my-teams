@@ -1043,7 +1043,6 @@ export function validateOrg(org) {
       org.policy.repeatFailureLimit >= 1,
     "repeatFailureLimit required",
   );
-  validateSupervision(org.policy.supervision);
   validateExperimental(org.policy.experimental);
   assert(
     org.policy.adviceBudget === undefined ||
@@ -1106,69 +1105,12 @@ export function adviceBudget(org) {
 }
 
 /**
- * Stall-handling values used when an organization records none.
- *
- * A supervisor asks a silent worker for progress after 15 minutes and escalates
- * after two unanswered requests. Asking costs one message and escalating costs
- * none, so the defaults spend nothing beyond what the organization already runs.
- */
-export const SUPERVISION_DEFAULTS = Object.freeze({
-  progressCheckMs: 900000,
-  unansweredLimit: 2,
-});
-
-// Organizations saved before this policy existed carry no `supervision`, and
-// they stay valid by reading the defaults. A present block must be complete, so
-// a half-written edit is refused rather than silently merged.
-function validateSupervision(supervision) {
-  if (supervision === undefined) return;
-  // An unknown key is most likely a misspelled one, which would otherwise be
-  // ignored while the default it meant to replace keeps applying.
-  assert(
-    supervision &&
-      typeof supervision === "object" &&
-      Object.keys(supervision).every((key) =>
-        Object.hasOwn(SUPERVISION_DEFAULTS, key),
-      ),
-    "supervision accepts only progressCheckMs and unansweredLimit",
-  );
-  assert(
-    Number.isInteger(supervision.progressCheckMs) &&
-      supervision.progressCheckMs >= 60000 &&
-      supervision.progressCheckMs <= 86400000,
-    "supervision.progressCheckMs must be 60000..86400000",
-  );
-  assert(
-    Number.isInteger(supervision.unansweredLimit) &&
-      supervision.unansweredLimit >= 1 &&
-      supervision.unansweredLimit <= 10,
-    "supervision.unansweredLimit must be 1..10",
-  );
-}
-
-/**
- * Reads an organization's stall-handling policy, filling in the defaults.
- *
- * @param {object} org - Validated organization.
- * @returns {{progressCheckMs: number, unansweredLimit: number}} Effective policy.
- */
-export function supervisionPolicy(org) {
-  return { ...SUPERVISION_DEFAULTS, ...(org.policy?.supervision ?? {}) };
-}
-
-/**
  * Decision points where an experimental Jev judgment may be recorded.
  *
  * Each point sits inside a runtime command that already has the input, so a
- * judgment costs no role turn: the supervision wait, the stalled-worker check,
- * the role terminal's model screen, and a failure the rules leave unknown.
+ * judgment costs no role turn: the role terminal's model screen and a failure the rules leave unknown.
  */
-export const JEV_POINTS = Object.freeze([
-  "status-filter",
-  "auto-observe",
-  "model-check",
-  "failure-fallback",
-]);
+export const JEV_POINTS = Object.freeze(["model-check", "failure-fallback"]);
 
 /**
  * Modes the experimental Jev block accepts.
