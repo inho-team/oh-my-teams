@@ -28,13 +28,16 @@ const cli = path.resolve("plugins/oh-my-teams/scripts/teams-org.mjs");
 const exampleOrg = path.resolve(
   "plugins/oh-my-teams/examples/organization.json",
 );
+const currentOrg = path.resolve(
+  "plugins/oh-my-teams/examples/organization.three-tier.json",
+);
 
-function project(t) {
+function project(t, { current = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-registry-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const org = path.join(dir, ".omt", "organization.json");
   fs.mkdirSync(path.dirname(org), { recursive: true });
-  fs.copyFileSync(exampleOrg, org);
+  fs.copyFileSync(current ? currentOrg : exampleOrg, org);
   const brief = path.join(dir, "brief.md");
   fs.writeFileSync(brief, "goal, acceptance criteria, non-goals\n");
   return { dir, org, brief };
@@ -164,7 +167,7 @@ test("sessions registering at the same moment all land in the registry", async (
 });
 
 test("kickoff-claim refuses a PM worktree without a verified agent session", async (t) => {
-  const fixture = project(t);
+  const fixture = project(t, { current: true });
   const file = path.join(fixture.dir, "claim.json");
   writeJSON(file, claimFor(fixture, "wt-shell"));
   const result = await run([
@@ -181,8 +184,26 @@ test("kickoff-claim refuses a PM worktree without a verified agent session", asy
   assert.deepEqual(ids(fixture), []);
 });
 
-test("kickoff-claim refuses a different Orca worktree ID at the same PM path", async (t) => {
+test("kickoff-claim refuses a new run from a retired role organization", async (t) => {
   const fixture = project(t);
+  const file = path.join(fixture.dir, "legacy-claim.json");
+  writeJSON(file, claimFor(fixture, "wt-legacy"));
+  const result = await run([
+    process.execPath,
+    cli,
+    "kickoff-claim",
+    "--org",
+    fixture.org,
+    "--from",
+    file,
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /New kickoffs require a PM\/Worker organization/);
+  assert.deepEqual(ids(fixture), []);
+});
+
+test("kickoff-claim refuses a different Orca worktree ID at the same PM path", async (t) => {
+  const fixture = project(t, { current: true });
   const pmPath = path.join(fixture.dir, "wt-a");
   const actualWorktreeId = `test-repo::${pmPath}`;
   const claimedWorktreeId = `another-repo::${pmPath}`;

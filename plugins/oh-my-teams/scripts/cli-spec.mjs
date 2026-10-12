@@ -4,7 +4,6 @@ import { assert } from "./core.mjs";
 /** Usage text for the supported command surface. */
 export const HELP = `oh my teams organization runtime on Orca (Node >=22)
   org-draft --name NAME --resources provider,... --output FILE [--concurrency N --max-calls N]
-  org-draft --name NAME --models PM,WORKER --output FILE [--tiers 1-4 (legacy)]
   init --org FILE --from CONFIG
   edit --org FILE --from CONFIG --revision N
   preset --org FILE --name opus-first|balanced|single-subscription|advisor-codex|advisor-claude --revision N
@@ -282,8 +281,6 @@ export const ALLOWED_OPTIONS = {
   ],
   "org-draft": [
     "name",
-    "tiers",
-    "models",
     "resources",
     "concurrency",
     "max-calls",
@@ -822,12 +819,8 @@ export function validateArgs(args) {
   }
   if (args.command === "org-draft") {
     assert(
-      Boolean(args.models) !== Boolean(args.resources),
-      "org-draft requires exactly one of --resources or --models",
-    );
-    assert(
-      args.resources === undefined || args.tiers === undefined,
-      "--tiers is only available for the legacy --models compatibility input",
+      typeof args.resources === "string" && args.resources.trim(),
+      "org-draft requires --resources",
     );
   }
 }

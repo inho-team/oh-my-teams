@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ACTIVE_ROLES,
   assert,
   AUDITOR_ROLE,
   chart,
@@ -159,11 +160,7 @@ import {
 import { compareQuotaSnapshots, recordQuotaSnapshot } from "./quota.mjs";
 import { organizationStatus } from "./status.mjs";
 import { shadowFailureFallback, shadowModelCheck } from "./jev.mjs";
-import {
-  draftOrganization,
-  draftResourceOrganization,
-  draftThreeTierOrganization,
-} from "./org-draft.mjs";
+import { draftResourceOrganization } from "./org-draft.mjs";
 import {
   bindKickoffRun,
   classifyKickoffEntry,
@@ -1141,64 +1138,23 @@ function directorCallerTerminal(args) {
 }
 
 async function writeDraft(args, execute) {
+  assert(
+    typeof args.resources === "string" && args.resources.trim(),
+    "org-draft requires --resources",
+  );
   const output = path.resolve(args.output);
   // A draft path that already holds a file may be the live organization, and
   // writing over it would skip the no-overwrite rule init keeps.
   assert(!fs.existsSync(output), "Draft output exists; choose a new path");
-  const resourceDraft = args.resources !== undefined;
-  const organization = resourceDraft
-    ? draftResourceOrganization({
-        name: args.name,
-        resources: args.resources.split(","),
-        concurrency:
-          args.concurrency === undefined ? undefined : Number(args.concurrency),
-        maxCalls:
-          args["max-calls"] === undefined
-            ? undefined
-            : Number(args["max-calls"]),
-      })
-    : args.tiers === undefined && args.models.split(",").length === 2
-      ? draftThreeTierOrganization({
-          name: args.name,
-          models: args.models.split(","),
-        })
-      : draftOrganization({
-          name: args.name,
-          tiers: args.tiers === undefined ? undefined : Number(args.tiers),
-          models: args.models.split(","),
-        });
-  if (resourceDraft) {
-    const catalogReceipt = await revalidateOrgForSave(organization, {
-      codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
-      execute,
-    });
-    writeJSON(output, organization);
-    return { output, organization, catalogReceipt };
-  }
-  const projectDir = path.dirname(output);
-  const defaults = await resolveHostDefaults({ project: projectDir });
-  if (defaults.codex?.error) {
-    process.stderr.write(
-      `Warning: Failed to resolve Codex defaults: ${defaults.codex.error}\n`,
-    );
-  }
-  if (defaults.claude?.error) {
-    process.stderr.write(
-      `Warning: Failed to resolve Claude defaults: ${defaults.claude.error}\n`,
-    );
-  }
-  // Observational only: resolveAndCheckDrift reads this back as its drift
-  // baseline, never as the profile's selected model (model stays null here).
-  const hostDefaultIds = [];
-  for (const [id, profile] of Object.entries(organization.profiles)) {
-    if (profile.model === null) {
-      profile.modelResolvedAtFormation =
-        defaults[profile.provider]?.model ?? null;
-      hostDefaultIds.push(id);
-    }
-  }
+  const organization = draftResourceOrganization({
+    name: args.name,
+    resources: args.resources.split(","),
+    concurrency:
+      args.concurrency === undefined ? undefined : Number(args.concurrency),
+    maxCalls:
+      args["max-calls"] === undefined ? undefined : Number(args["max-calls"]),
+  });
   const catalogReceipt = await revalidateOrgForSave(organization, {
-    explicitHostDefaultIds: hostDefaultIds,
     codexHome: args["codex-home"] && path.resolve(args["codex-home"]),
     execute,
   });
@@ -1380,6 +1336,13 @@ export async function executeCommand(args, execute, ports = {}) {
     case "validate":
       return { valid: Boolean(validateOrg(readJSON(args.org))) };
     case "kickoff-claim": {
+      const organization = validateOrg(readJSON(args.org));
+      assert(
+        Object.keys(organization.roles).every((role) =>
+          ACTIVE_ROLES.includes(role),
+        ),
+        "New kickoffs require a PM/Worker organization; form or adjust the legacy organization first",
+      );
       const claim = readJSON(args.from);
       if (!claim.selfPm) {
         assert(
