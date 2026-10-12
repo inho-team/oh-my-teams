@@ -126,7 +126,7 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 역할은 다른 역할의 task가 작업하는 워크트리에서 시작하지 않는다. literacy-test kickoff에서 PM은 Agy가 이미 신뢰를 받아 둔 Junior의 워크트리에 Agy Senior 검토자를 띄웠고, 검토 뒤 그 워크트리에는 URL 확인용 Playwright 파일(`package.json`, `node_modules/`, 테스트 스크립트)이 커밋되지 않은 채 Junior의 보고서 옆에 남았다. 같은 워크트리를 쓰면 한 역할의 부산물이 다른 역할의 산출물에 섞이고, 누가 남긴 변경인지도 가릴 수 없다.
 
-- 검토 역할은 검토 대상을 **경로와 커밋으로 읽고**, 자기 워크트리에서 실행한다. PL이나 PM이 띄운 Senior는 `--worktree current`로 띄운 역할의 워크트리를 쓰고, 파일을 만들어야 하는 검토는 새 워크트리를 만든다.
+- 검토 역할은 검토 대상을 **경로와 커밋으로 읽고**, 구현과 다른 실행 ID 및 별도 워크트리에서 실행한다. 기존 검토 워크트리가 있으면 재사용 증명을 먼저 적용하고, 안전하게 재사용할 수 없는 경우에만 새 워크트리를 만든다. 이전 kickoff의 PL이나 PM이 띄운 Senior는 `--worktree current`로 띄운 역할의 워크트리를 쓰는 기존 절차를 따른다.
 - Agy의 폴더 신뢰 질문은 `role-terminal`이 감독자 경로로 답하고 터미널을 다시 열어 처리하므로, 신뢰를 피하려고 이미 신뢰된 다른 역할의 워크트리를 빌리지 않는다.
 - `role-terminal`과 `worker-start`는 `--workflow-id`와 `--state`를 받으면, workflow의 각 시도에 기록된 `worktreeId`와 역할을 대조해 이 규칙을 강제한다. 워크트리가 다른 역할의 것이면 터미널을 만들기 전에 `is where <역할> works on task <task>`로 거부한다. 워크트리를 기록한 역할 자신과, 그 역할이 배정할 수 있는 하위 역할은 허용한다. 검토 역할은 Junior의 워크트리에서 시작하지 않는다. 다만 검토를 마친 Junior 작업을 Senior가 재작업할 때에는 `role-worktree-create`가 기존 세션 종료와 Git 상태를 증명한 뒤 같은 워크트리에 새 역할 세션을 열 수 있다. `new-child`는 아직 아무도 쓰지 않는 워크트리라 대조하지 않으며, `current`와 `active`는 `worker-start`에서는 `--repo`, `role-terminal`에서는 명령을 실행한 디렉터리로 해석한다. 이 거부를 우회하려고 워크트리 선택자를 바꾸지 않는다.
 
@@ -142,6 +142,8 @@ node <runtime> worker-start --org <organization.json> --role <역할> --repo <ru
 ```
 
 `workflow-attach`는 같은 역할의 수정·재시도를 receipt의 `worktreeId`에 고정한다. 새 작업의 `role-worktree-create`는 같은 킥오프와 완료된 다른 킥오프에서 적격 후보를 자동으로 조사한다. 수용·통합·소유권·종료·Git 증명을 갖춘 후보가 있으면 재사용하며, `--fresh-reason`으로 조사를 건너뛸 수 없다. Junior 작업을 Senior에게 넘길 때에는 검토가 끝난 Junior 워크트리의 종료와 신원 및 Git 상태를 증명한 뒤 같은 워크트리를 사용한다. 원래 task의 `role`은 Junior로 보존하고 Senior 실행 역할은 전환 기록에 남긴다. 참여 조건, 거부 기록, 공통 잠금과 중단 후 보존 및 운영체제의 내구성 제한은 [워크트리 자동 재사용과 회수](worktree-reuse.md)를 따른다.
+
+신규 workflow child를 만들기 전에는 자동 조사에서 확인한 후보와 거부 근거, 별도 격리가 필요한 이유를 작업 기록에 남긴다. 후보가 없어도 호출자의 `--fresh-reason`이 없으면 Orca 생성 전에 거부된다. 새 역할 터미널의 launch ledger에는 현재 workflow의 수용된 같은 역할 task와 자동 발견 경로의 거부 결과가 범위와 함께 기록된다. 이 기록은 모든 교차 workflow 후보를 조사했다는 뜻이 아니며, `--fresh-reason`은 런타임이 의미적 진위를 증명한 값이 아닌 호출자의 진술이다. 정식 독립 검토에는 구현과 다른 실행 ID를 유지한다.
 
 **수용·통합 후 중간 회수.** PM은 해당 task가 `accepted`이고 PM 통합 HEAD가 증명되면 다른 workflow task가 남아 있어도 다음 명령을 실행한다. 이 명령은 usage ledger의 `worker-start` receipt에서 terminal·Dispatch를 찾고, Run-bound 호출의 암묵적 `worker-list`를 전역 근거로 쓰지 않는다. 대신 모든 `run-list` cursor page를 읽고 각 Run에 명시 `worker-list --run <id>`를 실행해 모든 worker cursor page의 `scope.source`가 `flag`이고 scope Run ID가 요청 ID와 같은지 확인한 뒤에만 `clear`로 판정한다. 이어서 자식 HEAD와 `--merge-commit`이 PM 통합 HEAD에 포함되는지, 자식 Git 상태가 terminal close 전후 모두 깨끗한지 확인한다. settled Dispatch를 release하고 역할 터미널을 닫은 뒤, 정확한 handle·tabId·`ptyKilled:true`, Dispatch clear·release, 사후 빈 terminal list 영수증을 `usage/terminal-closures.jsonl`에 반드시 보존하고 Orca에 회수를 요청한다. 다음 재사용은 이 완전한 closure proof가 있는 과거 terminal만 제외하며, 목록에 보이지 않는다는 사실만으로 종료를 추정하지 않는다. ledger, Run·worker page, 종료, commit, 병합, Git 상태 중 하나라도 증명하지 못하면 어느 것도 회수하지 않고 워크트리를 보존한다.
 

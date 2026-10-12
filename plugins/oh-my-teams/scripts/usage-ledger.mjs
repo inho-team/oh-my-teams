@@ -265,6 +265,7 @@ function withLedgerLock(file, callback) {
  * @param {string} [launch.callerCwd] - Directory the command ran from.
  * @param {string} [launch.handoffFrom] - Profile a handoff launch replaces.
  * @param {number} [launch.handoffIndex] - Handoff number of that task.
+ * @param {object} [launch.worktreeSelection] - Runtime-reviewed candidate scope and caller-supplied reason for a new workflow child.
  * @param {string} [now] - Timestamp to record; the current time by default.
  * @returns {{recorded: true, file: string, line: object}} The stored line.
  * @throws {Error} When the ledger cannot be written.
@@ -302,6 +303,9 @@ export function recordLaunch(orgFile, launch, now = new Date().toISOString()) {
       workerId: launch.workerId ?? null,
       callerCwd,
       workflowId: launch.workflowId ?? null,
+      ...(launch.via === "role-terminal" && launch.worktreeSelection
+        ? { worktreeSelection: launch.worktreeSelection }
+        : {}),
       ...(launch.via === "worker-start" || launch.workflowTaskId
         ? { workflowTaskId: launch.workflowTaskId ?? null }
         : {}),

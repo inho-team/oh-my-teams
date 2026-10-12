@@ -310,6 +310,7 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                         integration, Dispatch release, terminal closure, and Git-clean proof;
                         a reviewed Junior task can promote in its own clean worktree after closure;
                         automatically checks active workflows and protocol-enrolled completed archives;
+                        every new workflow child needs caller-supplied --fresh-reason, even with no candidates;
                         --fresh-reason never bypasses safe-candidate selection;
                         cross-workflow reuse requires the explicit accepted prior pair;
                         a proven no-session launch is reclaimed, an ambiguous launch is preserved)
@@ -2066,7 +2067,8 @@ export async function createRoleWorktree(args, ports = {}) {
       );
     }
     if (!existing) {
-      const { "fresh-reason": requestedFreshReason, ...reuseArgs } = args;
+      const reuseArgs = { ...args };
+      delete reuseArgs["fresh-reason"];
       return withAutomaticWorktreeReuse(
         {
           orgFile: args.org,
@@ -2079,22 +2081,18 @@ export async function createRoleWorktree(args, ports = {}) {
           executable: args.orca,
           selectedWorktreeId: args.worktree,
         },
-        (source, prepare) =>
+        (source, prepare, reuseRejections) =>
           createRoleWorktreeUnderLock(
             source
               ? {
                   ...reuseArgs,
                   worktree: source.worktreeId,
                 }
-              : {
-                  ...args,
-                  "fresh-reason":
-                    requestedFreshReason ??
-                    "Automatic candidate inspection found no proven reusable worktree",
-                },
+              : args,
             {
               ...ports,
               lifecycle: { prepare, current },
+              reuseRejections,
               automaticSource: source
                 ? {
                     workflowId: source.workflowId,
@@ -2124,6 +2122,7 @@ async function createRoleWorktreeUnderLock(
   {
     create = createWorktreeWithRoleSession,
     automaticSource = null,
+    reuseRejections = [],
     lifecycle,
     show = runOrcaJson,
     scan = scanKickoffCleanup,
@@ -2218,6 +2217,7 @@ async function createRoleWorktreeUnderLock(
   let snapshot = null;
   let state = null;
   let task = null;
+  let freshSelection = null;
   if (hasWorkflow) {
     snapshot = read(path.resolve(args.state), args["workflow-id"]);
     state = snapshot?.state;
@@ -2322,12 +2322,26 @@ async function createRoleWorktreeUnderLock(
             (item.executionRole ?? item.role) === args.role &&
             (item.worktreeId ?? item.execution?.worktreeId),
         )
-        .map(([taskId]) => taskId);
+        .map(([taskId, item]) => ({
+          taskId,
+          worktreeId: item.worktreeId ?? item.execution?.worktreeId,
+        }));
       assert(
-        (!promotion && acceptedSameRole.length === 0) || args["fresh-reason"],
-        `Reuse an existing role worktree before creating another, or give --fresh-reason explaining why it is unavailable ` +
-          `(promotion: ${Boolean(promotion)}; accepted same-role tasks: ${acceptedSameRole.join(", ") || "none"})`,
+        args["fresh-reason"],
+        `A new workflow child requires --fresh-reason explaining why a separate worktree is needed ` +
+          `(promotion: ${Boolean(promotion)}; accepted same-role tasks: ${acceptedSameRole.map((item) => item.taskId).join(", ") || "none"})`,
       );
+      freshSelection = {
+        schemaVersion: 1,
+        decision: "new-child",
+        scope: "current-workflow-and-automatic-discovery",
+        workflowId: args["workflow-id"],
+        workflowTaskId: args["workflow-task"],
+        role: args.role,
+        currentWorkflowAcceptedSameRole: acceptedSameRole,
+        reuseRejections,
+        isolationReason: args["fresh-reason"].trim(),
+      };
     }
   }
   // A workflow freezes its organization. This happens only after task and
@@ -2471,29 +2485,28 @@ async function createRoleWorktreeUnderLock(
     !args.worktree || reusable || promotesInPlace,
     "--worktree requires an accepted prior task of the same role or the reviewed Junior task's own worktree",
   );
-  const openRoleSession =
-    open ??
-    ((workspace) =>
-      executeCommand({
-        ...args,
-        command: "role-terminal",
-        worktree: `id:${workspace.id}`,
-        // Marks this as role-worktree-create's own internal first-session
-        // open, never reachable through the CLI (role-terminal's
-        // ALLOWED_OPTIONS has no such key; validateArgs would reject it).
-        // role-terminal's general-branch binding check trusts this marker,
-        // and only this marker, to open a session in a worktree that has no
-        // earlier via="role-terminal" ledger line yet.
-        viaRoleWorktreeCreate: true,
-        // Hands the internal role-terminal the launch's own trusted runner,
-        // so terminal calls and any reclaim share one instance. Never
-        // reachable through the CLI: ALLOWED_OPTIONS has no such key.
-        ...(auditorTrustedLaunch
-          ? { trustedLaunch: auditorTrustedLaunch }
-          : {}),
-        ...(pmBootstrap ? { pmSelection: pmBootstrap.selection } : {}),
-        ...(promotesInPlace ? { promotionTaskId: args["workflow-task"] } : {}),
-      }));
+  const openRoleSession = (workspace) => {
+    const launchArgs = {
+      ...args,
+      command: "role-terminal",
+      worktree: `id:${workspace.id}`,
+      // Marks this as role-worktree-create's own internal first-session
+      // open, never reachable through the CLI (role-terminal's
+      // ALLOWED_OPTIONS has no such key; validateArgs would reject it).
+      // role-terminal's general-branch binding check trusts this marker,
+      // and only this marker, to open a session in a worktree that has no
+      // earlier via="role-terminal" ledger line yet.
+      viaRoleWorktreeCreate: true,
+      ...(freshSelection ? { worktreeSelection: freshSelection } : {}),
+      // Hands the internal role-terminal the launch's own trusted runner,
+      // so terminal calls and any reclaim share one instance. Never
+      // reachable through the CLI: ALLOWED_OPTIONS has no such key.
+      ...(auditorTrustedLaunch ? { trustedLaunch: auditorTrustedLaunch } : {}),
+      ...(pmBootstrap ? { pmSelection: pmBootstrap.selection } : {}),
+      ...(promotesInPlace ? { promotionTaskId: args["workflow-task"] } : {}),
+    };
+    return open ? open(workspace, launchArgs) : executeCommand(launchArgs);
+  };
   const existingRoleWorktree = Boolean(
     args.worktree && (promotion || reusable),
   );
@@ -2800,6 +2813,7 @@ async function createRoleWorktreeUnderLock(
     ...(args["fresh-reason"]
       ? { freshReason: args["fresh-reason"].trim() }
       : {}),
+    ...(freshSelection ? { worktreeSelection: freshSelection } : {}),
     ...(reusable
       ? {
           reusedFrom: {
@@ -4072,16 +4086,17 @@ function assertTrustedAuditorLaunch(launch) {
  *   fake model catalog instead of spawning the real executables. Real CLI
  *   invocations never pass this; `fetchModelCatalog` falls back to spawning
  *   the actual claude/codex/agy binaries.
+ * @param {object} [ports] - Injectable role-terminal opener and environment reader for focused ledger tests.
  * @returns {Promise<object|undefined>} The command's JSON-serializable result.
  */
-export async function executeCommand(args, execute) {
+export async function executeCommand(args, execute, ports = {}) {
   if (
     args.command === "role-terminal" &&
     !args.viaRoleWorktreeCreate &&
     !args.viaWorktreeFence
   ) {
     return withWorktreeLock(args.org, () =>
-      executeCommand({ ...args, viaWorktreeFence: true }, execute),
+      executeCommand({ ...args, viaWorktreeFence: true }, execute, ports),
     );
   }
   switch (args.command) {
@@ -4880,7 +4895,7 @@ export async function executeCommand(args, execute) {
       // 알 수 없는 값은 'unknown'으로 전달하여 표가 unverified로 처리합니다.
       let env;
       try {
-        env = await readLaunchEnvironment({
+        env = await (ports.readLaunchEnvironment ?? readLaunchEnvironment)({
           worktreePath: target ?? undefined,
           orcaExecutable: versionExecutable,
           ...(auditorEntry
@@ -4897,7 +4912,7 @@ export async function executeCommand(args, execute) {
         }
         throw error;
       }
-      const opened = await openRoleTerminal({
+      const opened = await (ports.openRoleTerminal ?? openRoleTerminal)({
         worktree: args.worktree,
         command,
         title: args.title,
@@ -4957,6 +4972,9 @@ export async function executeCommand(args, execute) {
           terminal: opened.terminal,
           workflowId: args["workflow-id"] ?? null,
           stateDir: args.state ?? null,
+          ...(args.worktreeSelection
+            ? { worktreeSelection: args.worktreeSelection }
+            : {}),
           ...runCtx.handoff,
         }),
       };
