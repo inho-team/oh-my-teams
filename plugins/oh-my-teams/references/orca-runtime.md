@@ -434,3 +434,13 @@ PL의 "배정 관련 필드만"이라는 수정 범위(design 3.4.3절)도 own-d
 3. `doc-id`로 `docId`를 조립하고 `doc-show`로 해당 문서의 현재 revision과 경로를 확인한다.
 
 등록부에 "마지막으로 참조한 문서" 같은 별도 색인을 추가하지 않으며, `resolveKickoffHash`는 활성 등록부만 조회하므로 release된 kickoff의 문서에는 이 절차를 쓰지 않고 그 kickoff의 closure-record `kickoffId`를 직접 쓴다.
+
+### 중단된 role-reclaim의 보존 정산
+
+`role-worktree-reconcile --org FILE --proof FILE`은 등록된 이사 checkout에서 실행하는 보존 정산 명령이다. 워크트리를 제거하거나 터미널을 닫지 않는다. 원 `prepared` 원장 파일은 그대로 두고 별도 `worktree-transition-resolutions.json`에 `preserved-not-reclaimed` 기록을 추가한다. 이 기록은 회수 성공, task 수용 또는 Goal 완료를 뜻하지 않는다. 이후 회수에는 정상 `role-worktree-reclaim` 검사를 다시 통과해야 한다. 구버전 런타임은 별도 정산을 해석하지 못하므로 계속 보존할 수 있다.
+
+현재 지원 범위는 고정된 0dc 소스의 terminal-list 거부이고, 모든 과거 소유 터미널의 정확한 Dispatch release와 PTY close가 `prepared` 이전에 완료된 경우뿐이다. 런타임은 등록부와 workflow, accepted decision, 검증 로그, launch/closure 원장을 직접 읽는다. Git에서 읽은 원 소스의 SHA가 검토된 값과 일치해야 하며, 현행 Orca instance·HEAD·부모·호스트·전체 Run의 소유권과 종료 상태를 두 차례 확인한다. 원 실행의 argv·cwd·종료 코드·시각과 사전 준비 자료 및 오류 파일도 해시로 고정하여 정산에 보존한다. 단순한 `safe-to-remove` 요약이나 `effects=false` 선언은 증거가 아니다. 불명확한 효과, 후행 close/release, 다른 소스, 변경된 HEAD 또는 불완전한 호스트 목록은 거부한다.
+
+proof JSON은 `schemaVersion: 1`, canonical `org`, `entryId`, 원장 바이트의 `journalSha256`, `ownerWorktreeId`, `worktreeId`, `identityKey`, `expectedHead`, `workflowId`, `taskId`, `kickoffHash`, `snapshotHash`를 담는다. `artifacts.execution`, `artifacts.preparation`, `artifacts.stderr`에는 원 파일의 `path`와 `sha256`을 적는다. `snapshotHash`는 런타임이 읽는 `{owner, workflow, task, acceptance, evidence, launches, closures}`의 JSON SHA이며, 관련 launch/closure만 포함한다. 이 해시들은 변경 감지용이며 호출자가 부여하는 권위가 아니다. 원 실패 자료가 부족하면 재작성하지 말고 보존한다.
+
+이사 확인은 기존 저장소의 등록된 checkout 권한 계약을 사용하며 OS 호출자 인증을 제공하지 않는다. 같은 UID의 악의적 프로세스나 사용자가 직접 원장을 변조하는 공격을 해결하지 않으며, Plane의 역할별 OS 신원 증거로 사용할 수 없다. 공개 명령은 `--force`를 제공하지 않는다.

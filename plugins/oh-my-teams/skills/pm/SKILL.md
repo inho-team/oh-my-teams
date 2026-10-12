@@ -227,3 +227,5 @@ worker가 사용 한도에 걸리면 [`../../references/orca-runtime.md`](../../
 ## 이사에게 결과 전달
 
 이사가 한국어로 요청했으면 최종 결과도 자연스러운 한국어로 쓴다. 내부 task·dispatch·gate 순서를 그대로 나열하지 말고, 확인된 사실을 이사가 판단하기 쉬운 인과관계로 다시 구성한다. 구체적인 작성 기준과 예시는 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)를 읽고 따른다.
+
+중단된 워크트리 전환이 후속 작업을 막으면 원 `prepared` 기록과 실패 영수증을 보존하여 이사에게 보고한다. 공개 `role-worktree-reconcile`의 보존 정산은 이사가 판단하며, PM은 원장을 수정하거나 이를 task 수용 또는 회수 성공으로 간주하지 않는다.

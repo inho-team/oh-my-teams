@@ -88,9 +88,11 @@ export function readLaunches(orgFile, { strict = false } = {}) {
  * receipt before treating a past terminal as closed.
  *
  * @param {string} orgFile - Organization JSON path.
+ * @param {object} options - Strict parsing for recovery and other safety proofs.
+ * @param {boolean} options.strict - Reject malformed records instead of ignoring them.
  * @returns {object[]} Closure proofs in append order.
  */
-export function readTerminalClosures(orgFile) {
+export function readTerminalClosures(orgFile, { strict = false } = {}) {
   const file = terminalClosureLedgerFile(orgFile);
   if (!fs.existsSync(file)) return [];
   return fs
@@ -100,7 +102,11 @@ export function readTerminalClosures(orgFile) {
       if (!line.trim()) return [];
       try {
         return [JSON.parse(line)];
-      } catch {
+      } catch (error) {
+        if (strict)
+          throw new Error(
+            `Terminal closure ledger contains an unreadable record: ${error.message}`,
+          );
         return [];
       }
     });

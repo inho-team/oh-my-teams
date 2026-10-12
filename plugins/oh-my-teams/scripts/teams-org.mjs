@@ -117,6 +117,10 @@ import {
 } from "./orca-adapter.mjs";
 import { withRuntimeSignal } from "./adapters.mjs";
 import { prepareRoleLifecycle } from "./worktree-legacy.mjs";
+import {
+  reconcilePreparedRoleWorktree,
+  assertHostInventory,
+} from "./worktree-reconcile.mjs";
 import { withAutomaticWorktreeReuse } from "./worktree-reuse.mjs";
 import {
   withWorktreeLock,
@@ -319,6 +323,9 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                         (reclaims an accepted and integrated child only after every related
                         Dispatch is released, every owned terminal is closed, no other terminal
                         remains, its commit is preserved by --merge-commit, and Git is clean)
+  role-worktree-reconcile --org FILE --proof FILE [--orca EXECUTABLE]
+                        (owning Director only; append preserved-not-reclaimed after exact
+                        legacy no-effect proofs, without rewriting the prepared journal)
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
   attach-workspace --org FILE --task FILE --repo DIR --workspace DIR
@@ -645,6 +652,7 @@ export const ALLOWED_OPTIONS = {
     "merge-commit",
     "orca",
   ],
+  "role-worktree-reconcile": ["org", "proof", "orca"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -954,6 +962,7 @@ export const REQUIRED_OPTIONS = {
     "worktree",
     "merge-commit",
   ],
+  "role-worktree-reconcile": ["org", "proof"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -1597,7 +1606,13 @@ function assertClosedReceipt(receipt, terminal) {
   );
 }
 
-async function listWorktreeTerminals({ repo, worktreeId, orca, list }) {
+async function listWorktreeTerminals({
+  repo,
+  worktreeId,
+  orca,
+  list,
+  identity,
+}) {
   const listed = await list(
     selectOrcaExecutable(orca),
     ["terminal", "list", "--worktree", `id:${worktreeId}`],
@@ -1607,9 +1622,21 @@ async function listWorktreeTerminals({ repo, worktreeId, orca, list }) {
   assert(
     Array.isArray(terminals) &&
       !receiptBody(listed).truncated &&
-      !receiptBody(listed).hostScope?.omittedHostIds?.length,
+      (!receiptBody(listed).hostScope?.omittedHostIds?.length ||
+        identity?.executionHostId),
     "Orca did not prove the worktree terminal list; preserve the worktree",
   );
+  if (receiptBody(listed).hostScope?.omittedHostIds?.length) {
+    assertHostInventory(
+      listed,
+      identity.executionHostId,
+      listed?._meta?.runtimeId,
+    );
+    assert(
+      terminals.every((row) => row.worktreeId === worktreeId),
+      "Scoped terminal inventory contains another worktree",
+    );
+  }
   return { terminals, receipt: listed };
 }
 
@@ -1734,7 +1761,13 @@ async function proveAndCloseOwnedTerminals({
     );
     dispatchesByTerminal.set(entry.terminal, dispatch);
   }
-  const before = await listWorktreeTerminals({ repo, worktreeId, orca, list });
+  const before = await listWorktreeTerminals({
+    repo,
+    worktreeId,
+    orca,
+    list,
+    identity,
+  });
   const expected = new Set(owned.map((entry) => entry.terminal));
   const actual = new Set(
     before.terminals
@@ -1768,7 +1801,13 @@ async function proveAndCloseOwnedTerminals({
     assertClosedReceipt(receipt, entry.terminal);
     closed.push({ terminal: entry.terminal, receipt });
   }
-  const after = await listWorktreeTerminals({ repo, worktreeId, orca, list });
+  const after = await listWorktreeTerminals({
+    repo,
+    worktreeId,
+    orca,
+    list,
+    identity,
+  });
   assert(
     after.terminals.length === 0,
     "A connected terminal remains after close; preserve the worktree",
@@ -2999,6 +3038,10 @@ async function reclaimIntegratedRoleWorktreeUnderLock(
         worktreeId,
         identityKey: identity.identity.key,
         sourceWorktreeId: owner.pm.worktreeId,
+        expectedHead: head,
+        workflowId: args["workflow-id"],
+        taskId: args["workflow-task"],
+        phase: "before-terminal-proof",
       },
     },
     { prepare, show, launches: launches(args.org, { strict: true }) },
@@ -3066,7 +3109,13 @@ async function reclaimIntegratedRoleWorktreeUnderLock(
   assert(
     Array.isArray(inventory?.worktrees) &&
       !inventory.truncated &&
-      !inventory.hostScope?.omittedHostIds?.length &&
+      (!inventory.hostScope?.omittedHostIds?.length ||
+        (inventory.hostScope.hostIds?.includes(
+          identity.identity.executionHostId,
+        ) &&
+          !inventory.hostScope.omittedHostIds.includes(
+            identity.identity.executionHostId,
+          ))) &&
       !inventory.worktrees.some((item) => item.worktreeId === worktreeId),
     "Role reclaim postcheck incomplete",
   );
@@ -4552,6 +4601,8 @@ export async function executeCommand(args, execute, ports = {}) {
       return createRoleWorktree(args);
     case "role-worktree-reclaim":
       return reclaimIntegratedRoleWorktree(args);
+    case "role-worktree-reconcile":
+      return reconcilePreparedRoleWorktree(args);
     case "prepare-input":
       return prepareInput(
         validateOrg(readJSON(args.org)),
