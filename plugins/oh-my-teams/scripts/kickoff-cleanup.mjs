@@ -518,20 +518,77 @@ async function gitObservation(location, delivered, projectDir, gitCommand) {
   }
 }
 
-async function allWorkerObservations(executable, orca, requiredRunId) {
+async function allWorkerObservations(
+  executable,
+  orca,
+  requiredRunId,
+  strict = false,
+) {
+  const receipts = [];
+  let runtimeId;
+  const observe = async (args) => {
+    const receipt = await orca(executable, args);
+    const result = receiptBody(receipt);
+    assert(
+      result.truncated !== true &&
+        result.incomplete !== true &&
+        result.complete !== false &&
+        result.coverage?.complete !== false &&
+        !result.errors?.length &&
+        !result.hostScope?.omittedHostIds?.length,
+      "Orca Run or Dispatch coverage is incomplete",
+    );
+    if (strict) {
+      assert(
+        receipt.ok === true &&
+          typeof receipt.id === "string" &&
+          typeof receipt._meta?.runtimeId === "string",
+        "Orca inventory provenance unavailable",
+      );
+      runtimeId ??= receipt._meta.runtimeId;
+      assert(
+        receipt._meta.runtimeId === runtimeId,
+        "Orca inventory runtime changed",
+      );
+      assert(
+        !result.warnings?.some(
+          (warning) =>
+            !/^Showing \d+ of \d+ Dispatches, newest first; more are on later pages\. Follow page\.nextCursor with --cursor\.$/.test(
+              warning,
+            ),
+        ),
+        "Orca inventory coverage warning",
+      );
+      receipts.push({ args, receipt });
+    }
+    return result;
+  };
   const runs = [];
   let cursor;
   const seen = new Set();
   do {
     const args = ["orchestration", "run-list", "--limit", "100"];
     if (cursor) args.push("--cursor", cursor);
-    const result = receiptBody(await orca(executable, args));
+    const result = await observe(args);
+    if (strict)
+      assert(
+        Object.hasOwn(result, "nextCursor") &&
+          (result.nextCursor === null ||
+            (typeof result.nextCursor === "string" && result.nextCursor)),
+        "Orca Run pagination is unproven",
+      );
     assert(Array.isArray(result.runs), "Orca Run inventory is unavailable");
     runs.push(...result.runs);
     cursor = result.nextCursor ?? null;
     assert(!cursor || !seen.has(cursor), "Orca Run inventory cursor repeated");
     if (cursor) seen.add(cursor);
   } while (cursor);
+  if (strict)
+    assert(
+      new Set(runs.map((run) => run.id)).size === runs.length &&
+        runs.some((run) => run.id === requiredRunId),
+      "Orca Run snapshot has duplicate or missing owner Run",
+    );
   const workers = [];
   const ids = [
     ...new Set([
@@ -550,6 +607,8 @@ async function allWorkerObservations(executable, orca, requiredRunId) {
         const rows = [];
         let pageCursor;
         const pageSeen = new Set();
+        let total;
+        const dispatchIds = new Set();
         do {
           const args = [
             "orchestration",
@@ -561,11 +620,40 @@ async function allWorkerObservations(executable, orca, requiredRunId) {
             "100",
           ];
           if (pageCursor) args.push("--cursor", pageCursor);
-          const result = receiptBody(await orca(executable, args));
+          const result = await observe(args);
+          if (strict) {
+            assert(
+              result.scope?.run === runId &&
+                result.scope.source === "flag" &&
+                Number.isInteger(result.page?.total) &&
+                result.page.total >= 0 &&
+                Number.isInteger(result.page.limit) &&
+                result.page.limit > 0 &&
+                typeof result.page.hasMore === "boolean" &&
+                Object.hasOwn(result.page, "nextCursor"),
+              "Orca Dispatch pagination or Run scope unproven",
+            );
+            total ??= result.page.total;
+            assert(
+              total === result.page.total &&
+                result.page.hasMore === Boolean(result.page.nextCursor),
+              "Orca Dispatch snapshot changed",
+            );
+          }
           assert(
             Array.isArray(result.workers),
             `Orca worker inventory for ${runId} is unavailable`,
           );
+          if (strict) {
+            for (const row of result.workers) {
+              assert(
+                typeof row.dispatchId === "string" &&
+                  !dispatchIds.has(row.dispatchId),
+                "Orca Dispatch duplicated across pages",
+              );
+              dispatchIds.add(row.dispatchId);
+            }
+          }
           rows.push(...result.workers);
           pageCursor = result.page?.hasMore ? result.page.nextCursor : null;
           assert(
@@ -578,12 +666,19 @@ async function allWorkerObservations(executable, orca, requiredRunId) {
           );
           if (pageCursor) pageSeen.add(pageCursor);
         } while (pageCursor);
+        if (strict)
+          assert(rows.length === total, "Orca Dispatch page total mismatch");
         return rows;
       }),
     );
     workers.push(...listed.flat());
   }
-  return { result: { workers } };
+  return {
+    result: {
+      workers,
+      ...(strict ? { provenance: { runtimeId, receipts } } : {}),
+    },
+  };
 }
 
 /**
@@ -594,7 +689,14 @@ async function allWorkerObservations(executable, orca, requiredRunId) {
  * @returns {Promise<object>} Conservative cleanup inventory.
  */
 export async function scanKickoffCleanup(
-  { orgFile, worktreeId, archiveFile, executable, integrationCommit },
+  {
+    orgFile,
+    worktreeId,
+    archiveFile,
+    executable,
+    integrationCommit,
+    requireCompleteWorkerInventory = false,
+  },
   {
     orca = runOrcaJson,
     gitCommand = git,
@@ -610,7 +712,12 @@ export async function scanKickoffCleanup(
   const results = await Promise.allSettled([
     orca(selected, ["worktree", "ps"]),
     orca(selected, ["terminal", "list"]),
-    workerInventory(selected, orca, entry.runId),
+    workerInventory(
+      selected,
+      orca,
+      entry.runId,
+      requireCompleteWorkerInventory,
+    ),
   ]);
   const values = results.map((result, index) => {
     if (result.status === "fulfilled") return result.value?.result ?? null;
@@ -684,7 +791,7 @@ export async function scanKickoffCleanup(
       gitCommand,
     );
   }
-  return evaluateKickoffCleanup(entry, {
+  const evaluation = evaluateKickoffCleanup(entry, {
     worktrees,
     terminals,
     workers,
@@ -731,6 +838,12 @@ export async function scanKickoffCleanup(
     },
     inventoryComplete: errors.length === 0,
   });
+  return {
+    ...evaluation,
+    ...(requireCompleteWorkerInventory
+      ? { workerInventory: workerResult?.provenance ?? null }
+      : {}),
+  };
 }
 
 function isDescendant(candidate, ancestorId, candidates) {

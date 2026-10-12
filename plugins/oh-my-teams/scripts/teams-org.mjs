@@ -119,6 +119,7 @@ import { withRuntimeSignal } from "./adapters.mjs";
 import { prepareRoleLifecycle } from "./worktree-legacy.mjs";
 import {
   reconcilePreparedRoleWorktree,
+  adoptLegacyRoleWorktree,
   assertHostInventory,
 } from "./worktree-reconcile.mjs";
 import { withAutomaticWorktreeReuse } from "./worktree-reuse.mjs";
@@ -324,8 +325,10 @@ const HELP = `oh my teams organization runtime on Orca (Node >=22)
                         Dispatch is released, every owned terminal is closed, no other terminal
                         remains, its commit is preserved by --merge-commit, and Git is clean)
   role-worktree-reconcile --org FILE --proof FILE [--orca EXECUTABLE]
-                        (owning Director only; append preserved-not-reclaimed after exact
-                        legacy no-effect proofs, without rewriting the prepared journal)
+                        (read-only diagnosis: automatic no-effect recovery is unsupported)
+  role-worktree-preserve-legacy --org FILE --proof FILE --reason TEXT
+                        --acknowledgment adopted-exited-invocation-plus-reviewed-control-flow
+                        [--orca EXECUTABLE] (Director evidence adoption; historical effects unknown)
   prepare-input --org FILE --task FILE --repo DIR --output DIR
   prepare-verify --input DIR
   attach-workspace --org FILE --task FILE --repo DIR --workspace DIR
@@ -653,6 +656,13 @@ export const ALLOWED_OPTIONS = {
     "orca",
   ],
   "role-worktree-reconcile": ["org", "proof", "orca"],
+  "role-worktree-preserve-legacy": [
+    "org",
+    "proof",
+    "reason",
+    "acknowledgment",
+    "orca",
+  ],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -963,6 +973,7 @@ export const REQUIRED_OPTIONS = {
     "merge-commit",
   ],
   "role-worktree-reconcile": ["org", "proof"],
+  "role-worktree-preserve-legacy": ["org", "proof", "reason", "acknowledgment"],
   "prepare-input": ["org", "task", "repo", "output"],
   "prepare-verify": ["input"],
   "attach-workspace": [
@@ -4603,6 +4614,8 @@ export async function executeCommand(args, execute, ports = {}) {
       return reclaimIntegratedRoleWorktree(args);
     case "role-worktree-reconcile":
       return reconcilePreparedRoleWorktree(args);
+    case "role-worktree-preserve-legacy":
+      return adoptLegacyRoleWorktree(args);
     case "prepare-input":
       return prepareInput(
         validateOrg(readJSON(args.org)),

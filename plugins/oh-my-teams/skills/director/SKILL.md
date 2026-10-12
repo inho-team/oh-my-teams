@@ -161,4 +161,4 @@ node <runtime> resource-release --org <project>/.omt/organization.json --slot <s
 
 `--owner-pid`에는 슬롯을 점유하는 오래 실행되는 프로세스(작업을 실행하는 세션이나 worker)의 PID를 넘긴다. 그 프로세스가 끝나면 다음 획득 때 슬롯이 회수된다. 생략하면 소유자가 알 수 없는 슬롯이 되어 자동으로 회수되지 않고 `resource-release`로만 해제되므로, 결과의 `warning`이 알려 주는 슬롯 ID를 작업이 끝날 때 반드시 해제한다.
 
-중단된 `role-reclaim`이 조직 fence를 막는 경우에는 원장을 수동으로 고치거나 기존 명령을 반복하지 않는다. 공개 `role-worktree-reconcile`의 제한된 보존 정산과 증거 형식은 [Orca 런타임 계약](../../references/orca-runtime.md)의 해당 절을 따른다. 정산 성공도 회수 성공이나 kickoff 수용으로 보고하지 않으며, 실제 회수는 최신 소유권·종료·호스트 증거를 다시 확인한 뒤 정상 명령으로 수행한다.
+중단된 `role-reclaim`이 조직 fence를 막는 경우에는 원장을 수동으로 고치거나 기존 명령을 반복하지 않는다. 공개 `role-worktree-preserve-legacy`의 제한된 보존 채택과 증거 형식은 [Orca 런타임 계약](../../references/orca-runtime.md)의 해당 절을 따른다. 정산 성공도 회수 성공이나 kickoff 수용으로 보고하지 않으며, 실제 회수는 최신 소유권·종료·호스트 증거를 다시 확인한 뒤 정상 명령으로 수행한다.

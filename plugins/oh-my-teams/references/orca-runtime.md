@@ -435,12 +435,25 @@ PL의 "배정 관련 필드만"이라는 수정 범위(design 3.4.3절)도 own-d
 
 등록부에 "마지막으로 참조한 문서" 같은 별도 색인을 추가하지 않으며, `resolveKickoffHash`는 활성 등록부만 조회하므로 release된 kickoff의 문서에는 이 절차를 쓰지 않고 그 kickoff의 closure-record `kickoffId`를 직접 쓴다.
 
-### 중단된 role-reclaim의 보존 정산
+### 중단된 role-reclaim의 보존 채택
 
-`role-worktree-reconcile --org FILE --proof FILE`은 등록된 이사 checkout에서 실행하는 보존 정산 명령이다. 워크트리를 제거하거나 터미널을 닫지 않는다. 원 `prepared` 원장 파일은 그대로 두고 별도 `worktree-transition-resolutions.json`에 `preserved-not-reclaimed` 기록을 추가한다. 이 기록은 회수 성공, task 수용 또는 Goal 완료를 뜻하지 않는다. 이후 회수에는 정상 `role-worktree-reclaim` 검사를 다시 통과해야 한다. 구버전 런타임은 별도 정산을 해석하지 못하므로 계속 보존할 수 있다. 실제 복구와 후속 lifecycle은 병합된 새 런타임의 CLI 경로로 실행하며, 구버전 원장을 수정하여 호환시키지 않는다. 기존 GUI 제품 소스와 실행 중인 서버는 유지하고, 기존 kickoff의 역할 스냅샷도 소급 변경하지 않는다.
+현재 제공하는 복구 경로는 등록된 이사가 증거를 심의한 뒤 실행하는 `role-worktree-preserve-legacy`이다.
 
-현재 지원 범위는 고정된 0dc 소스의 terminal-list 거부이고, 모든 과거 소유 터미널의 정확한 Dispatch release와 PTY close가 `prepared` 이전에 완료된 경우뿐이다. 런타임은 등록부와 workflow, accepted decision, 검증 로그, launch/closure 원장을 직접 읽는다. Git에서 읽은 원 소스의 SHA가 검토된 값과 일치해야 하며, 현행 Orca instance·HEAD·부모·호스트·전체 Run의 소유권과 종료 상태를 두 차례 확인한다. 원 실행의 argv·cwd·종료 코드·시각과 사전 준비 자료 및 오류 파일도 해시로 고정하여 정산에 보존한다. 단순한 `safe-to-remove` 요약이나 `effects=false` 선언은 증거가 아니다. 불명확한 효과, 후행 close/release, 다른 소스, 변경된 HEAD 또는 불완전한 호스트 목록은 거부한다.
+```sh
+node plugins/oh-my-teams/scripts/teams-org.mjs role-worktree-preserve-legacy \
+  --org /absolute/project/.omt/organization.json --proof /absolute/proof.json \
+  --reason "원 실행 종료 자료와 현재 보존 증거를 검토하여 채택한 구체적인 이유" \
+  --acknowledgment adopted-exited-invocation-plus-reviewed-control-flow
+```
 
-proof JSON은 `schemaVersion: 1`, canonical `org`, `entryId`, 원장 바이트의 `journalSha256`, `ownerWorktreeId`, `worktreeId`, `identityKey`, `expectedHead`, `workflowId`, `taskId`, `kickoffHash`, `snapshotHash`를 담는다. `artifacts.execution`, `artifacts.preparation`, `artifacts.stderr`에는 원 파일의 `path`와 `sha256`을 적는다. `snapshotHash`는 런타임이 읽는 `{owner, workflow, task, acceptance, evidence, launches, closures}`의 JSON SHA이며, 관련 launch/closure만 포함한다. 이 해시들은 변경 감지용이며 호출자가 부여하는 권위가 아니다. 원 실패 자료가 부족하면 재작성하지 말고 보존한다.
+이 명령은 워크트리 제거, 터미널 종료 또는 workflow 수용을 실행하지 않는다. 원 `prepared` 원장 바이트와 실패 자료를 유지하고 별도 `worktree-transition-resolutions.json`에 schema 2의 `legacy-preservation-adopted` 결과를 추가한다. `originalOutcome: unknown`, `effects: unknown`, `reclaimSucceeded: false`, `availableNativeTrace: false`를 반드시 남긴다. 이후 회수에는 정상 `role-worktree-reclaim`의 최신 검사를 다시 통과해야 한다.
 
-이사 확인은 기존 저장소의 등록된 checkout 권한 계약을 사용하며 OS 호출자 인증을 제공하지 않는다. 같은 UID의 악의적 프로세스나 사용자가 직접 원장을 변조하는 공격을 해결하지 않으며, Plane의 역할별 OS 신원 증거로 사용할 수 없다. 공개 명령은 `--force`를 제공하지 않는다.
+원 명령의 argv·cwd·종료 코드 1·시각·정확한 오류 자료는 이사가 심의하여 채택하는 역사 자료이다. 파일 SHA와 현재 Git blob만으로 과거 실행 provenance를 자동 인증하지 않는다. 검토된 0dc 소스에서 해당 scoped-list 거부는 await된 응답 뒤이면서 제거 요청보다 앞이고 선행 release/close도 각각 await된다. 이 고정 제어 흐름과 채택된 종료 결과에 근거해 원 실행이 더 진행하지 않는다고 제한적으로 추론하며, 이를 `quiescenceBasis: adopted-exited-invocation-plus-reviewed-control-flow`로 표시한다. Native audit를 직접 확인했다거나 과거 효과가 없었다고 주장하지 않는다. timeout, signal, 중간 중단, 다른 source/error 또는 종료 자료 부재는 거부한다.
+
+현재 보존 상태의 검사는 이사의 선언으로 대체하지 않는다. 런타임은 등록부·workflow·accepted decision·검증 로그와 strict launch/closure 원장을 직접 읽고, 현재 Orca의 exact instance·CLI lineage·부모 instance·HEAD·clean 상태와 PM 통합 ancestry를 확인한다. 원 생성 정보는 보존된 child-show와 현행 Orca lineage를 대조한다. 모든 Run/Dispatch 페이지의 cursor·total·scope·runtime·coverage를 확인하고 원 응답을 보존한다. target-host terminal 목록이 완전해야 하며 무관한 host 누락과 구분한다. 모순되거나 미확인인 과거 종료 영수증은 현재 종료 증거로 사용하지 않는다. 자식이나 주인 PM의 resource slot이 남으면 자동 해제하지 않고 먼저 정산하도록 거부한다. 명시적인 prepared HEAD·task·phase 충돌, 새 실행, 증거 변경 또는 불완전 목록도 거부한다.
+
+proof JSON은 `schemaVersion: 1`, canonical `org`, `entryId`, 원장 바이트의 `journalSha256`, `ownerWorktreeId`, `worktreeId`, `identityKey`, `expectedHead`, `workflowId`, `taskId`, `kickoffHash`, `snapshotHash`를 담는다. `artifacts.execution`, `artifacts.preparation`, `artifacts.stderr`, `artifacts.creation`에는 원 파일의 `path`와 `sha256`을 적는다. creation은 사전 preparation의 childShow SHA와 일치하는 원 Orca child-show 영수증이다. `snapshotHash`는 런타임이 읽는 `{owner, workflow, task, acceptance, evidence, launches, closures}`의 JSON SHA이며, 관련 launch/closure만 포함한다. 이 해시들은 변경 감지용이며 호출자가 부여하는 권위가 아니다. 원 자료가 부족하면 사후에 만들어 채우지 말고 보존한다.
+
+자동 무효과 복구는 이번 릴리스의 지원 범위가 아니다. `role-worktree-reconcile`은 `unsupported-legacy-provenance`를 반환하는 읽기 전용 진단이며 상태를 쓰지 않는다. 실제 2325의 prepared에는 원 실행의 사전 source/input anchor가 없으므로 자동 no-effect로 수용할 수 없다. 미래 capture 프로토콜도 이번 변경에 포함하지 않는다.
+
+구버전 런타임은 별도 정산을 해석하지 못해 계속 unresolved로 볼 수 있다. 실제 복구와 후속 lifecycle은 병합된 새 런타임의 CLI 경로로 실행하며, 원장을 수동 수정하여 호환시키지 않는다. 기존 GUI 제품 소스와 서버, 기존 kickoff의 역할 스냅샷은 유지한다. 이사 확인은 기존 registered checkout 계약이며 OS 호출자 인증이 아니다. 같은 UID의 악의적 원장 변조를 방어하거나 Plane 역할 신원을 증명한다고 설명하지 않는다. 공개 명령에는 `--force`가 없다.

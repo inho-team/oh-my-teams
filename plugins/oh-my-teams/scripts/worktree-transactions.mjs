@@ -31,6 +31,21 @@ function digest(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+function validPreservation(record) {
+  return (
+    record?.reclaimSucceeded === false &&
+    (record.disposition === "preserved-not-reclaimed" ||
+      (record.schemaVersion === 2 &&
+        record.disposition === "legacy-preservation-adopted" &&
+        record.originalOutcome === "unknown" &&
+        record.effects === "unknown" &&
+        record.availableNativeTrace === false &&
+        record.quiescenceBasis ===
+          "adopted-exited-invocation-plus-reviewed-control-flow" &&
+        record.adoption?.noEffectCertified === false))
+  );
+}
+
 function resolutionsFor(orgFile, journal) {
   const file = locations(orgFile).resolutions;
   if (!fs.existsSync(file)) return [];
@@ -54,7 +69,7 @@ function resolutionsFor(orgFile, journal) {
         !ids.has(record.entryId) &&
         original?.type === "role-reclaim" &&
         original.status === "prepared" &&
-        record.disposition === "preserved-not-reclaimed" &&
+        validPreservation(record) &&
         record.reclaimSucceeded === false &&
         record.entryHash === hash(original) &&
         record.journalSha256 === digest(bytes) &&
@@ -79,7 +94,8 @@ function unresolved(orgFile, journal) {
 
 /**
  * Appends a preservation disposition under the canonical fence without rewriting the failed journal.
- * The inspector must independently prove ownership and absence of effects; request data is only a CAS guard.
+ * The inspector enforces its preservation contract; legacy adoption retains unknown historical effects.
+ * Request data is only a CAS guard, never the authority for a preservation disposition.
  * @param {string} orgFile - Canonical organization anchor.
  * @param {object} request - Exact entry ID, journal byte hash and immutable request hash.
  * @param {Function} inspect - Read-only proof callback, called under the organization fence.
@@ -117,11 +133,7 @@ export async function reconcileWorktreeTransition(orgFile, request, inspect) {
       );
       const entry = pending[0];
       const proof = await inspect(structuredClone(entry));
-      assert(
-        proof?.disposition === "preserved-not-reclaimed" &&
-          proof.reclaimSucceeded === false,
-        "Preservation proof required",
-      );
+      assert(validPreservation(proof), "Preservation proof required");
       assert(
         fs.readFileSync(files.journal).equals(journalBytes) &&
           fs.readFileSync(fs.realpathSync(orgFile)).equals(organizationBytes) &&

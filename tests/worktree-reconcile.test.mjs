@@ -5,6 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
+import vm from "node:vm";
+import { scanKickoffCleanup } from "../plugins/oh-my-teams/scripts/kickoff-cleanup.mjs";
 import { hash, readJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   kickoffHashFor,
@@ -12,6 +14,7 @@ import {
 } from "../plugins/oh-my-teams/scripts/kickoff-registry.mjs";
 import {
   reconcilePreparedRoleWorktree,
+  adoptLegacyRoleWorktree,
   assertHostInventory,
 } from "../plugins/oh-my-teams/scripts/worktree-reconcile.mjs";
 import {
@@ -75,6 +78,27 @@ function fixture(t) {
     parentWorktreeId: owner.pm.worktreeId,
     identity,
     childWorktreeIds: [],
+    repoId: "repo",
+    createdAt: Date.parse("2026-01-01T00:30:00Z"),
+    lineage: {
+      worktreeId: `repo::${childPath}`,
+      worktreeInstanceId: "instance",
+      parentWorktreeId: owner.pm.worktreeId,
+      parentWorktreeInstanceId: "parent-instance",
+      origin: "cli",
+      capture: { confidence: "explicit" },
+      createdAt: Date.parse("2026-01-01T00:30:00Z"),
+    },
+  };
+  const parent = {
+    id: owner.pm.worktreeId,
+    path: pm,
+    repoId: "repo",
+    identity: {
+      key: "parent",
+      instanceId: "parent-instance",
+      executionHostId: "local",
+    },
   };
   const entry = {
     id: "interrupted",
@@ -92,6 +116,18 @@ function fixture(t) {
     acceptedResult: "accepted",
     workerRunId: "ctx_worker",
     worktreeId: child.id,
+    attemptId: "attempt",
+    attempts: [
+      {
+        id: "attempt",
+        attachedAt: "2026-01-01T01:00:00Z",
+        receipt: {
+          executionId: "ctx_worker",
+          worktreeId: child.id,
+          terminal: "terminal",
+        },
+      },
+    ],
   };
   const workflow = { tasks: { task } };
   const log = path.join(owner.pm.stateDir, "evidence/log.txt");
@@ -119,6 +155,8 @@ function fixture(t) {
     workerId: "ctx_worker",
     worktreePath: childPath,
     kickoffPmWorktreeId: owner.pm.worktreeId,
+    workflowId: "flow",
+    workflowTaskId: "task",
   };
   const receipt = (result) => ({
     id: "request",
@@ -215,10 +253,15 @@ function fixture(t) {
     command: { argv },
   };
   const artifacts = {
+    creation: receipt({ worktree: structuredClone(child) }),
     execution,
     preparation,
     stderr:
       "Orca did not prove the worktree terminal list; preserve the worktree\n",
+  };
+  preparation.childShow = {
+    path: path.join(root, "creation.json"),
+    sha256: hash(JSON.stringify(artifacts.creation)),
   };
   request.artifacts = {};
   for (const [key, value] of Object.entries(artifacts)) {
@@ -287,33 +330,61 @@ function fixture(t) {
     },
     orca: async (_exe, args) => {
       calls.push(args);
-      return args[0] === "worktree"
-        ? receipt({ worktree: structuredClone(child) })
-        : listed();
+      if (args[0] === "worktree" && args[1] === "show")
+        return receipt({
+          worktree: structuredClone(
+            args.at(-1) === `id:${owner.pm.worktreeId}` ? parent : child,
+          ),
+        });
+      if (args[0] === "worktree")
+        return receipt({
+          worktrees: [
+            {
+              worktreeId: child.id,
+              path: child.path,
+              parentWorktreeId: owner.pm.worktreeId,
+              worktreeInstanceId: child.identity.instanceId,
+              hostId: "local",
+              childWorktreeIds: [],
+            },
+          ],
+          truncated: false,
+          hostScope: { hostIds: ["local"], omittedHostIds: ["unrelated"] },
+        });
+      if (args[0] === "terminal") return listed();
+      if (args[1] === "run-list")
+        return receipt({ runs: [{ id: owner.runId }], nextCursor: null });
+      if (args[1] === "worker-list")
+        return receipt({
+          workers: [
+            {
+              dispatchId: "ctx_worker",
+              resource: { worktreeId: child.id },
+              terminalState: "released",
+              projection: { liveness: { verdict: "exited" } },
+            },
+          ],
+          page: { limit: 100, total: 1, hasMore: false, nextCursor: null },
+          scope: { run: owner.runId, source: "flag" },
+        });
+      throw new Error(`Unexpected Orca call ${args}`);
     },
-    scan: async () => ({
-      inventoryComplete: true,
-      candidates: [
-        {
-          worktreeId: child.id,
-          status: "safe-to-remove",
-          instanceId: identity.instanceId,
-          hostId: "local",
-          ownership: {
-            workflowId: "flow",
-            taskId: "task",
-            acceptedResult: "accepted",
-          },
-        },
-      ],
-    }),
+    scan: async (request) =>
+      scanKickoffCleanup(request, { orca: ports.orca, gitCommand: ports.git }),
   };
   const invoke = async () => {
     const cwd = process.cwd();
     process.chdir(root);
     try {
-      return await reconcilePreparedRoleWorktree(
-        { org, proof: proofFile },
+      return await adoptLegacyRoleWorktree(
+        {
+          org,
+          proof: proofFile,
+          reason:
+            "Director adopts the preserved primary completion material with unknown historical effects.",
+          acknowledgment:
+            "adopted-exited-invocation-plus-reviewed-control-flow",
+        },
         ports,
       );
     } finally {
@@ -321,6 +392,8 @@ function fixture(t) {
     }
   };
   return {
+    parent,
+    artifacts,
     root,
     org,
     owner,
@@ -343,13 +416,16 @@ function fixture(t) {
   };
 }
 
-test("legacy reconciliation preserves original bytes, appends a distinct disposition and reopens only normal gates", async (t) => {
+test("legacy adoption preserves original bytes and unknown effects, reopening only normal gates", async (t) => {
   if (!durableSuccessSupported(t)) return;
   const f = fixture(t);
   const before = fs.readFileSync(f.journal);
   await assert.rejects(() => withWorktreeLock(f.org, () => {}), /Unresolved/);
   const result = await f.invoke();
-  assert.equal(result.disposition, "preserved-not-reclaimed");
+  assert.equal(result.disposition, "legacy-preservation-adopted");
+  assert.equal(result.effects, "unknown");
+  assert.equal(result.originalOutcome, "unknown");
+  assert.equal(result.availableNativeTrace, false);
   assert.equal(result.reclaimSucceeded, false);
   assert.deepEqual(fs.readFileSync(f.journal), before);
   assert.equal(readWorktreeTransitions(f.org).entries[0].status, "prepared");
@@ -616,4 +692,293 @@ test("a crash before resolution persistence and an unfenced journal change leave
     ),
     false,
   );
+});
+
+test("independent review counterexamples remain refused with the real cleanup scanner", async (t) => {
+  const legacyOwned = vm.runInNewContext(
+    source.slice(
+      source.indexOf("function receiptBody("),
+      source.indexOf("async function proveAndCloseOwnedTerminals("),
+    ) + "; ownedTerminals",
+    {
+      path,
+      assert: (ok, message) => {
+        if (!ok) throw new Error(message);
+      },
+    },
+  );
+  for (const kind of [
+    "contradictory-close",
+    "unverifiable-release",
+    "lexical-launch-time",
+    "head-conflict",
+    "workflow-conflict",
+    "task-conflict",
+    "phase-conflict",
+    "unknown-field",
+    "truncated-runs",
+    "truncated-workers",
+    "missing-run-cursor",
+    "missing-worker-page",
+    "wrong-run",
+    "wrong-runtime",
+    "page-total",
+    "coverage-warning",
+    "omitted-host",
+    "missing-lineage",
+    "changed-parent-instance",
+    "changed-original-lineage",
+    "forged-artifacts",
+    "future-time",
+  ]) {
+    await t.test(kind, async (t) => {
+      const f = fixture(t);
+      let expected;
+      if (kind === "contradictory-close") {
+        f.closure.terminals[0].close.receipt.result.extra = {
+          ptyKilled: false,
+        };
+        expected = /contradictory PTY/;
+      }
+      if (kind === "unverifiable-release") {
+        f.closure.terminals[0].releases[0].receipt.result.warning =
+          "terminal_stop_unverifiable";
+        expected = /unverifiable terminal/;
+      }
+      if (kind === "lexical-launch-time") {
+        f.launch.at = "2026-01-01T03:30:00+02:00";
+        expected = /prior release and closure proof/;
+      }
+      for (const [key, field, value] of [
+        ["head-conflict", "expectedHead", "b".repeat(40)],
+        ["workflow-conflict", "workflowId", "other"],
+        ["task-conflict", "taskId", "other"],
+        ["phase-conflict", "phase", "after-close"],
+      ]) {
+        if (kind === key) {
+          f.entry[field] = value;
+          expected = /conflicts/;
+        }
+      }
+      if (kind === "unknown-field") {
+        f.entry.effectsStarted = true;
+        expected = /Unsupported prepared/;
+      }
+      if (kind === "missing-lineage") {
+        delete f.child.lineage;
+        expected = /lineage|instance/;
+      }
+      if (kind === "changed-parent-instance") {
+        f.parent.identity.instanceId = "other";
+        expected = /lineage|instance/;
+      }
+      if (kind === "changed-original-lineage") {
+        f.child.lineage.capture.confidence = "inferred";
+        expected = /lineage|instance/;
+      }
+      f.persist();
+      if (["forged-artifacts", "future-time"].includes(kind)) {
+        const original = readJSON(f.request.artifacts.execution.path);
+        if (kind === "forged-artifacts") original.argv[0] = "not-node";
+        else original.at = "2099-01-01T00:00:00Z";
+        write(f.request.artifacts.execution.path, original);
+        f.request.artifacts.execution.sha256 = hash(
+          fs.readFileSync(f.request.artifacts.execution.path, "utf8"),
+        );
+        write(f.proofFile, f.request);
+        expected = /Original failure provenance/;
+      }
+      if (
+        [
+          "contradictory-close",
+          "unverifiable-release",
+          "lexical-launch-time",
+        ].includes(kind)
+      ) {
+        assert.equal(
+          legacyOwned(
+            [f.launch],
+            [f.closure],
+            f.child.id,
+            f.child.path,
+            f.child.identity,
+          ).length,
+          1,
+        );
+      }
+      if (
+        [
+          "truncated-runs",
+          "truncated-workers",
+          "missing-run-cursor",
+          "missing-worker-page",
+          "wrong-run",
+          "wrong-runtime",
+          "page-total",
+          "coverage-warning",
+          "omitted-host",
+        ].includes(kind)
+      ) {
+        const original = f.ports.orca;
+        f.ports.orca = async (exe, args) => {
+          const receipt = await original(exe, args);
+          if (args[1] === "run-list") {
+            if (kind === "truncated-runs") receipt.result.truncated = true;
+            if (kind === "missing-run-cursor") delete receipt.result.nextCursor;
+          }
+          if (args[1] === "worker-list") {
+            if (kind === "truncated-workers") receipt.result.truncated = true;
+            if (kind === "missing-worker-page") delete receipt.result.page;
+            if (kind === "wrong-run") receipt.result.scope.run = "other";
+            if (kind === "wrong-runtime") receipt._meta.runtimeId = "other";
+            if (kind === "page-total") receipt.result.page.total = 2;
+            if (kind === "coverage-warning")
+              receipt.result.warnings = ["Remote host unavailable"];
+            if (kind === "omitted-host")
+              receipt.result.hostScope = { omittedHostIds: ["remote"] };
+          }
+          return receipt;
+        };
+        expected = /Global ownership, Dispatch or process proof incomplete/;
+      }
+      const before = fs.readFileSync(f.journal);
+      await assert.rejects(() => f.invoke(), expected);
+      assert.deepEqual(fs.readFileSync(f.journal), before);
+      assert.equal(
+        fs.existsSync(
+          path.join(f.root, ".omt/worktree-transition-resolutions.json"),
+        ),
+        false,
+      );
+    });
+  }
+});
+
+test("strict scanner traverses and preserves all Run and Dispatch pages", async (t) => {
+  if (!durableSuccessSupported(t)) return;
+  const f = fixture(t);
+  const original = f.ports.orca;
+  f.ports.orca = async (exe, args) => {
+    const receipt = await original(exe, args);
+    if (args[1] === "run-list" && !args.includes("--cursor"))
+      receipt.result.nextCursor = "run-page-2";
+    else if (args[1] === "run-list")
+      receipt.result = { runs: [{ id: "run_other" }], nextCursor: null };
+    if (args[1] === "worker-list") {
+      const run = args[args.indexOf("--run") + 1];
+      receipt.result.scope.run = run;
+      if (run === "run_other") {
+        receipt.result.workers = [];
+        receipt.result.page.total = 0;
+      } else if (!args.includes("--cursor")) {
+        receipt.result.page = {
+          limit: 1,
+          total: 2,
+          hasMore: true,
+          nextCursor: "worker-page-2",
+        };
+      } else {
+        receipt.result.workers = [
+          {
+            dispatchId: "ctx_other",
+            terminalState: "released",
+            resource: { worktreeId: "other" },
+            projection: { liveness: { verdict: "exited" } },
+          },
+        ];
+        receipt.result.page = {
+          limit: 1,
+          total: 2,
+          hasMore: false,
+          nextCursor: null,
+        };
+      }
+    }
+    return receipt;
+  };
+  const result = await f.invoke();
+  assert.equal(
+    result.currentEvidence.inventory.workerInventory.receipts.length,
+    5,
+  );
+  assert(
+    result.currentEvidence.inventory.workerInventory.receipts.some((record) =>
+      record.args.includes("worker-page-2"),
+    ),
+  );
+});
+
+test("automatic recovery diagnoses unsupported legacy provenance and never writes a resolution", async (t) => {
+  const f = fixture(t);
+  const before = fs.readFileSync(f.journal);
+  await assert.rejects(
+    () => reconcilePreparedRoleWorktree({ org: f.org, proof: f.proofFile }),
+    /unsupported-legacy-provenance/,
+  );
+  assert.deepEqual(fs.readFileSync(f.journal), before);
+  assert.equal(
+    fs.existsSync(
+      path.join(f.root, ".omt/worktree-transition-resolutions.json"),
+    ),
+    false,
+  );
+});
+
+test("legacy adoption rejects absent acknowledgment, unfinished invocation and unsettled resources", async (t) => {
+  for (const kind of [
+    "acknowledgment",
+    "timeout",
+    "interrupted",
+    "signal",
+    "unsettled-slot",
+    "unknown-source",
+    "other-error",
+  ]) {
+    await t.test(kind, async (t) => {
+      const f = fixture(t);
+      if (kind === "acknowledgment") {
+        await assert.rejects(
+          () =>
+            adoptLegacyRoleWorktree({
+              org: f.org,
+              proof: f.proofFile,
+              reason: "explicit reason with adequate length",
+            }),
+          /acknowledgment/,
+        );
+        return;
+      }
+      if (["timeout", "interrupted", "signal"].includes(kind)) {
+        const execution = readJSON(f.request.artifacts.execution.path);
+        execution[kind === "timeout" ? "timedOut" : kind] =
+          kind === "signal" ? "SIGTERM" : true;
+        write(f.request.artifacts.execution.path, execution);
+        f.request.artifacts.execution.sha256 = hash(
+          fs.readFileSync(f.request.artifacts.execution.path, "utf8"),
+        );
+        write(f.proofFile, f.request);
+      }
+      if (kind === "unsettled-slot")
+        write(path.join(f.root, ".omt/resources/slot.json"), {
+          id: "slot",
+          worktreeId: f.owner.pm.worktreeId,
+        });
+      if (kind === "unknown-source") {
+        const git = f.ports.git;
+        f.ports.git = (repo, args) =>
+          args[0] === "show" ? source + "changed" : git(repo, args);
+      }
+      if (kind === "other-error") {
+        write(f.request.artifacts.stderr.path, "unknown timeout");
+        f.request.artifacts.stderr.sha256 = hash("unknown timeout");
+        write(f.proofFile, f.request);
+      }
+      const before = fs.readFileSync(f.journal);
+      await assert.rejects(
+        () => f.invoke(),
+        /provenance|slots remain|Unsupported original/,
+      );
+      assert.deepEqual(fs.readFileSync(f.journal), before);
+    });
+  }
 });
