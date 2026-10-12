@@ -62,7 +62,6 @@ export const HELP = `oh my teams organization runtime on Orca (Node >=22)
                         (creates a child only while opening and proving its Orca role session;
                         reuses a proven idle same-role worktree only after prior acceptance,
                         integration, Dispatch release, terminal closure, and Git-clean proof;
-                        a reviewed Junior task can promote in its own clean worktree after closure;
                         automatically checks active workflows and protocol-enrolled completed archives;
                         every new workflow child needs caller-supplied --fresh-reason, even with no candidates;
                         --fresh-reason never bypasses safe-candidate selection;

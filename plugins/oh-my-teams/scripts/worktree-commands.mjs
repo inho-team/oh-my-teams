@@ -39,7 +39,7 @@ import {
   withWorktreeLock,
   readWorktreeTransitions,
 } from "./worktree-transactions.mjs";
-import { readWorkflow, prepareRolePromotion } from "./workflow.mjs";
+import { readWorkflow } from "./workflow.mjs";
 import {
   isSameOrWithinByIdentity,
   listKickoffs,
@@ -278,22 +278,6 @@ async function preflightRoleWorktree(
     `Role ${args.role} is refused by the launch matrix before worktree creation: ${prediction.reason.join(", ")}. ${prediction.nextAction}`,
   );
   return { command, prediction };
-}
-
-function trustedTaskExecutionRole(task) {
-  if (typeof task?.executionRole !== "string") return null;
-  if (task.executionRole === task.role) return task.executionRole;
-  const transition = (task.worktreeTransitions ?? []).find(
-    (entry) =>
-      entry?.id === task.execution?.transitionId &&
-      entry.kind === "junior-to-senior" &&
-      entry.fromRole === task.role &&
-      entry.toRole === task.executionRole &&
-      entry.toWorktreeId === task.worktreeId &&
-      entry.usedAt &&
-      task.execution?.executionRole === task.executionRole,
-  );
-  return transition ? task.executionRole : null;
 }
 
 function receiptBody(receipt) {
@@ -765,13 +749,8 @@ export async function createRoleWorktree(args, ports = {}) {
         fs.realpathSync(current.pm.path),
       "Automatic reuse must run in the registered PM checkout",
     );
-    const requestedRole = trustedTaskExecutionRole(task) ?? task.role;
-    const promotion =
-      task.role === "junior" &&
-      args.role === "senior" &&
-      task.state === "reviewed";
     assert(
-      requestedRole === args.role || promotion,
+      task.role === args.role,
       "Automatic reuse target execution role mismatch",
     );
     await preflightRoleWorktree(
@@ -790,17 +769,6 @@ export async function createRoleWorktree(args, ports = {}) {
       },
     );
     const existing = task.worktreeId ?? task.execution?.worktreeId;
-    if (existing && promotion) {
-      return withWorktreeLock(args.org, (prepare) =>
-        createRoleWorktreeUnderLock(
-          {
-            ...args,
-            worktree: existing,
-          },
-          { ...ports, lifecycle: { prepare, current } },
-        ),
-      );
-    }
     if (!existing) {
       const reuseArgs = { ...args };
       delete reuseArgs["fresh-reason"];
@@ -863,7 +831,6 @@ async function createRoleWorktreeUnderLock(
     scan = scanKickoffCleanup,
     open,
     executeCommand,
-    promote = prepareRolePromotion,
     read = readWorkflow,
     git = gitEvidence,
     organization = (orgFile) => validateOrg(readJSON(orgFile)),
@@ -884,7 +851,7 @@ async function createRoleWorktreeUnderLock(
 ) {
   // The auditor is out-of-ladder (role-terminal's own comment: it never
   // folds, never runs a workflow), so it takes none of the workflow-task
-  // promotion/reuse machinery below: --state alone names the audited
+  // reuse machinery below: --state alone names the audited
   // kickoff, exactly as role-terminal --role auditor itself requires, and
   // creation always makes a brand-new worktree (never --worktree reuse),
   // so its session proof is one unit with its creation (audit-worktree-create-path).
@@ -947,9 +914,7 @@ async function createRoleWorktreeUnderLock(
         args["fresh-reason"].trim()),
     "--fresh-reason is only valid for a new workflow child and must explain why reuse is unavailable",
   );
-  let promotion = null;
   let reusable = automaticSource;
-  let promotesInPlace = false;
   let snapshot = null;
   let state = null;
   let task = null;
@@ -964,40 +929,16 @@ async function createRoleWorktreeUnderLock(
     task = state.tasks[args["workflow-task"]];
     assert(task, `Unknown workflow task ${args["workflow-task"]}`);
     const existing = task?.worktreeId ?? task?.execution?.worktreeId;
-    promotion =
-      existing &&
-      task.role === "junior" &&
-      args.role === "senior" &&
-      ["submitted", "review-pending", "reviewed"].includes(task.state)
-        ? { fromWorktreeId: existing }
-        : null;
-    promotesInPlace = Boolean(
-      promotion &&
-      task.state === "reviewed" &&
-      args.worktree === promotion.fromWorktreeId,
-    );
-    if (promotesInPlace) {
-      const conflictingTask = Object.entries(state.tasks).find(
-        ([taskId, item]) =>
-          taskId !== args["workflow-task"] &&
-          item.state !== "accepted" &&
-          (item.worktreeId ?? item.execution?.worktreeId) === args.worktree,
-      );
-      assert(
-        !conflictingTask,
-        `Worktree ${args.worktree} is also owned by current workflow task ${conflictingTask?.[0]}`,
-      );
-    }
-    const assignedRole = trustedTaskExecutionRole(task) ?? task.role;
+    const assignedRole = task.role;
     assert(
-      promotion || assignedRole === args.role,
-      `Workflow task ${args["workflow-task"]} is assigned to ${assignedRole ?? "no role"}, not ${args.role}; only a reviewed Junior-to-Senior promotion may change roles`,
+      assignedRole === args.role,
+      `Workflow task ${args["workflow-task"]} is assigned to ${assignedRole ?? "no role"}, not ${args.role}`,
     );
     assert(
-      !existing || promotion,
+      !existing,
       `Task ${args["workflow-task"]} already has worktree ${existing}; reuse it with role-terminal instead of creating another`,
     );
-    if (args.worktree && !promotesInPlace && !automaticSource) {
+    if (args.worktree && !automaticSource) {
       let source = null;
       if (sourceWorkflowId) {
         const sourceState =
@@ -1065,7 +1006,7 @@ async function createRoleWorktreeUnderLock(
       assert(
         args["fresh-reason"],
         `A new workflow child requires --fresh-reason explaining why a separate worktree is needed ` +
-          `(promotion: ${Boolean(promotion)}; accepted same-role tasks: ${acceptedSameRole.map((item) => item.taskId).join(", ") || "none"})`,
+          `(accepted same-role tasks: ${acceptedSameRole.map((item) => item.taskId).join(", ") || "none"})`,
       );
       freshSelection = {
         schemaVersion: 1,
@@ -1218,8 +1159,8 @@ async function createRoleWorktreeUnderLock(
         : {},
   );
   assert(
-    !args.worktree || reusable || promotesInPlace,
-    "--worktree requires an accepted prior task of the same role or the reviewed Junior task's own worktree",
+    !args.worktree || reusable,
+    "--worktree requires an accepted prior task of the same role",
   );
   const openRoleSession = (workspace) => {
     const launchArgs = {
@@ -1239,14 +1180,11 @@ async function createRoleWorktreeUnderLock(
       // reachable through the CLI: ALLOWED_OPTIONS has no such key.
       ...(auditorTrustedLaunch ? { trustedLaunch: auditorTrustedLaunch } : {}),
       ...(pmBootstrap ? { pmSelection: pmBootstrap.selection } : {}),
-      ...(promotesInPlace ? { promotionTaskId: args["workflow-task"] } : {}),
     };
     assert(open || executeCommand, "Role terminal handler required");
     return open ? open(workspace, launchArgs) : executeCommand(launchArgs);
   };
-  const existingRoleWorktree = Boolean(
-    args.worktree && (promotion || reusable),
-  );
+  const existingRoleWorktree = Boolean(args.worktree && reusable);
   if (!existingRoleWorktree && create === createWorktreeWithRoleSession) {
     await assertChildWorktreeCapacity({
       parentWorktreeId:
@@ -1255,8 +1193,6 @@ async function createRoleWorktreeUnderLock(
       executable: args.orca,
     });
   }
-  let promotionTransaction;
-  let promotionIdentity;
   const created = existingRoleWorktree
     ? await (async () => {
         const workspace = {
@@ -1272,88 +1208,26 @@ async function createRoleWorktreeUnderLock(
           !clean,
           "A reused role worktree must be clean before opening a new role session",
         );
-        if (reusable || promotesInPlace) {
+        if (reusable) {
           const previousHead = await git(workspace.path, ["rev-parse", "HEAD"]);
           const integrationCommit = await git(workspace.path, [
             "rev-parse",
             `${args.base}^{commit}`,
           ]);
-          if (promotesInPlace) {
-            assert(
-              previousHead === integrationCommit,
-              "In-place Senior promotion must start from the reviewed Junior commit",
-            );
-          } else {
-            const integrationHead = await git(path.resolve(args.repo), [
-              "rev-parse",
-              "HEAD",
-            ]);
-            assert(
-              integrationCommit === integrationHead,
-              "A reused role worktree must be based on the current PM integration HEAD",
-            );
-            await git(workspace.path, [
-              "merge-base",
-              "--is-ancestor",
-              previousHead,
-              integrationCommit,
-            ]);
-          }
-          if (lifecycle && promotesInPlace) {
-            const shown = (
-              await show(
-                selectOrcaExecutable(args.orca),
-                ["worktree", "show", "--worktree", `id:${workspace.id}`],
-                { cwd: args.repo },
-              )
-            ).result?.worktree;
-            assert(
-              shown?.id === workspace.id &&
-                shown.identity?.key &&
-                shown.parentWorktreeId === lifecycle.current.pm.worktreeId,
-              "Promotion worktree ownership unproven",
-            );
-            const latest = readWorktreeTransitions(args.org)
-              .entries.filter(
-                (entry) =>
-                  entry.type === "reuse" && entry.worktreeId === workspace.id,
-              )
-              .at(-1);
-            assert(
-              !latest ||
-                (latest.targetWorktreeId === lifecycle.current.pm.worktreeId &&
-                  latest.workflowId === args["workflow-id"] &&
-                  latest.taskId === args["workflow-task"]),
-              "Promotion worktree belongs to another assignment",
-            );
-            promotionIdentity = shown.identity;
-            promotionTransaction = await prepareRoleLifecycle(
-              {
-                orgFile: args.org,
-                owner: lifecycle.current,
-                workflowState: state,
-                task: state.tasks[args["workflow-task"]],
-                workflowId: args["workflow-id"],
-                taskId: args["workflow-task"],
-                child: shown,
-                expectedHead: previousHead,
-                executable: args.orca,
-                repo: args.repo,
-                operation: {
-                  type: "role-promotion",
-                  worktreeId: workspace.id,
-                  identityKey: shown.identity.key,
-                  workflowId: args["workflow-id"],
-                  taskId: args["workflow-task"],
-                },
-              },
-              {
-                prepare: lifecycle.prepare,
-                show,
-                launches: launches(args.org, { strict: true }),
-              },
-            );
-          }
+          const integrationHead = await git(path.resolve(args.repo), [
+            "rev-parse",
+            "HEAD",
+          ]);
+          assert(
+            integrationCommit === integrationHead,
+            "A reused role worktree must be based on the current PM integration HEAD",
+          );
+          await git(workspace.path, [
+            "merge-base",
+            "--is-ancestor",
+            previousHead,
+            integrationCommit,
+          ]);
           const terminalEvidence = automaticSource
             ? null
             : await proveAndCloseOwnedTerminals({
@@ -1363,7 +1237,6 @@ async function createRoleWorktreeUnderLock(
                 orca: args.orca,
                 launches: launches(args.org),
                 closures: closures(args.org),
-                identity: promotionIdentity,
                 active,
                 release,
                 close,
@@ -1371,25 +1244,6 @@ async function createRoleWorktreeUnderLock(
               });
           if (terminalEvidence?.terminals.length)
             recordClosure(terminalEvidence);
-          if (lifecycle && promotesInPlace) {
-            const observed = await scan({
-              orgFile: args.org,
-              worktreeId: lifecycle.current.pm.worktreeId,
-              executable: args.orca,
-              integrationCommit,
-            });
-            assert(
-              observed.inventoryComplete &&
-                observed.candidates.some(
-                  (item) =>
-                    item.worktreeId === workspace.id &&
-                    item.status === "safe-to-remove",
-                ),
-              "Promotion source has unproven sessions, Dispatches or Git state",
-            );
-          }
-          if (promotionTransaction?.revalidate)
-            await promotionTransaction.revalidate();
           if (automaticSource)
             await git(workspace.path, [
               "merge",
@@ -1404,7 +1258,7 @@ async function createRoleWorktreeUnderLock(
             session.role === args.role &&
             session.worktree === `id:${workspace.id}` &&
             session.modelRequested,
-          "Existing Senior worktree has no matching proven role session",
+          "Reused worktree has no matching proven role session",
         );
         return { workspace, session };
       })()
@@ -1528,33 +1382,9 @@ async function createRoleWorktreeUnderLock(
           };
         },
       });
-  let transition;
-  if (promotion) {
-    transition = await promote(
-      path.resolve(args.state),
-      args["workflow-id"],
-      args["workflow-task"],
-      {
-        ...promotion,
-        toWorktreeId: created.workspace.id,
-        fromWorktreePath: pathFromWorktreeId(promotion.fromWorktreeId),
-        toWorktreePath: created.workspace.path,
-        base: args.base,
-      },
-    );
-  }
-  if (promotionTransaction?.revalidate) await promotionTransaction.revalidate();
-  if (promotionTransaction)
-    promotionTransaction.complete({
-      workspace: created.workspace,
-      transition: transition?.transition,
-    });
   return {
     ...created.workspace,
     session: created.session,
-    ...(promotionTransaction?.legacyLifecycle
-      ? { legacyLifecycle: promotionTransaction.legacyLifecycle }
-      : {}),
     ...(args["fresh-reason"]
       ? { freshReason: args["fresh-reason"].trim() }
       : {}),
@@ -1567,7 +1397,6 @@ async function createRoleWorktreeUnderLock(
           },
         }
       : {}),
-    ...(transition ? { transition: transition.transition } : {}),
     ...(pmBootstrap
       ? {
           pmBootstrap: {

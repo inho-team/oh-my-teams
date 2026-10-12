@@ -128,7 +128,7 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 - 검토 역할은 검토 대상을 **경로와 커밋으로 읽고**, 구현과 다른 실행 ID 및 별도 워크트리에서 실행한다. 기존 검토 워크트리가 있으면 재사용 증명을 먼저 적용하고, 안전하게 재사용할 수 없는 경우에만 새 워크트리를 만든다. 이전 kickoff의 PL이나 PM이 띄운 Senior는 `--worktree current`로 띄운 역할의 워크트리를 쓰는 기존 절차를 따른다.
 - Agy의 폴더 신뢰 질문은 `role-terminal`이 감독자 경로로 답하고 터미널을 다시 열어 처리하므로, 신뢰를 피하려고 이미 신뢰된 다른 역할의 워크트리를 빌리지 않는다.
-- `role-terminal`과 `worker-start`는 `--workflow-id`와 `--state`를 받으면, workflow의 각 시도에 기록된 `worktreeId`와 역할을 대조해 이 규칙을 강제한다. 워크트리가 다른 역할의 것이면 터미널을 만들기 전에 `is where <역할> works on task <task>`로 거부한다. 워크트리를 기록한 역할 자신과, 그 역할이 배정할 수 있는 하위 역할은 허용한다. 검토 역할은 Junior의 워크트리에서 시작하지 않는다. 다만 검토를 마친 Junior 작업을 Senior가 재작업할 때에는 `role-worktree-create`가 기존 세션 종료와 Git 상태를 증명한 뒤 같은 워크트리에 새 역할 세션을 열 수 있다. `new-child`는 아직 아무도 쓰지 않는 워크트리라 대조하지 않으며, `current`와 `active`는 `worker-start`에서는 `--repo`, `role-terminal`에서는 명령을 실행한 디렉터리로 해석한다. 이 거부를 우회하려고 워크트리 선택자를 바꾸지 않는다.
+- `role-terminal`과 `worker-start`는 `--workflow-id`와 `--state`를 받으면, workflow의 각 시도에 기록된 `worktreeId`와 역할을 대조해 이 규칙을 강제한다. 워크트리가 다른 역할의 것이면 터미널을 만들기 전에 `is where <역할> works on task <task>`로 거부한다. 워크트리를 기록한 역할 자신과, 그 역할이 배정할 수 있는 하위 역할은 허용한다. 검토 역할은 구현 역할의 워크트리에서 시작하지 않는다. `new-child`는 아직 아무도 쓰지 않는 워크트리라 대조하지 않으며, `current`와 `active`는 `worker-start`에서는 `--repo`, `role-terminal`에서는 명령을 실행한 디렉터리로 해석한다. 이 거부를 우회하려고 워크트리 선택자를 바꾸지 않는다.
 
 ### 역할 터미널에서 시작
 
@@ -141,7 +141,7 @@ node <runtime> workflow-reserve --id <workflowId> --state <pm-state> --revision 
 node <runtime> worker-start --org <organization.json> --role <역할> --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> [--purpose review] --terminal <handle> --worktree id:<worktreeId> --spec <작업>
 ```
 
-`workflow-attach`는 같은 역할의 수정·재시도를 receipt의 `worktreeId`에 고정한다. 새 작업의 `role-worktree-create`는 같은 킥오프와 완료된 다른 킥오프에서 적격 후보를 자동으로 조사한다. 수용·통합·소유권·종료·Git 증명을 갖춘 후보가 있으면 재사용하며, `--fresh-reason`으로 조사를 건너뛸 수 없다. Junior 작업을 Senior에게 넘길 때에는 검토가 끝난 Junior 워크트리의 종료와 신원 및 Git 상태를 증명한 뒤 같은 워크트리를 사용한다. 원래 task의 `role`은 Junior로 보존하고 Senior 실행 역할은 전환 기록에 남긴다. 참여 조건, 거부 기록, 공통 잠금과 중단 후 보존 및 운영체제의 내구성 제한은 [워크트리 자동 재사용과 회수](worktree-reuse.md)를 따른다.
+`workflow-attach`는 같은 역할의 수정·재시도를 receipt의 `worktreeId`에 고정한다. 새 작업의 `role-worktree-create`는 같은 킥오프와 완료된 다른 킥오프에서 적격 후보를 자동으로 조사한다. 수용·통합·소유권·종료·Git 증명을 갖춘 후보가 있으면 재사용하며, `--fresh-reason`으로 조사를 건너뛸 수 없다. 참여 조건, 거부 기록, 공통 잠금과 중단 후 보존 및 운영체제의 내구성 제한은 [워크트리 자동 재사용과 회수](worktree-reuse.md)를 따른다.
 
 신규 workflow child를 만들기 전에는 자동 조사에서 확인한 후보와 거부 근거, 별도 격리가 필요한 이유를 작업 기록에 남긴다. 후보가 없어도 호출자의 `--fresh-reason`이 없으면 Orca 생성 전에 거부된다. 새 역할 터미널의 launch ledger에는 현재 workflow의 수용된 같은 역할 task와 자동 발견 경로의 거부 결과가 범위와 함께 기록된다. 이 기록은 모든 교차 workflow 후보를 조사했다는 뜻이 아니며, `--fresh-reason`은 런타임이 의미적 진위를 증명한 값이 아닌 호출자의 진술이다. 정식 독립 검토에는 구현과 다른 실행 ID를 유지한다.
 
