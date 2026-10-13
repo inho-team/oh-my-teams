@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   evaluateKickoffCleanup,
+  finishKickoff,
   reclaimKickoffCleanup,
   scanKickoffCleanup,
 } from "../plugins/oh-my-teams/scripts/kickoff-cleanup.mjs";
@@ -26,6 +27,102 @@ import {
   requirementsFidelityConfirm,
 } from "../plugins/oh-my-teams/scripts/requirements.mjs";
 import { minimalRequirements } from "./requirements-draft-fixture.mjs";
+
+test("kickoff finish releases before reclaiming and returns the archive proof", async () => {
+  const calls = [];
+  const request = {
+    orgFile: "/project/.omt/organization.json",
+    worktreeId: "repo::/pm",
+  };
+  const candidates = {
+    status: "cleanup-pending",
+    candidates: [{ worktreeId: request.worktreeId }],
+  };
+  const result = await finishKickoff(request, {
+    scan: async (input) => {
+      calls.push("scan");
+      assert.equal(input.worktreeId, request.worktreeId);
+      return candidates;
+    },
+    release: async (orgFile, input) => {
+      calls.push("release");
+      assert.equal(orgFile, request.orgFile);
+      assert.equal(input.reason, "completed");
+      assert.equal(input.cleanup, candidates);
+      return { released: true, archived: "/project/.omt/history/kickoff.json" };
+    },
+    reclaim: async (input) => {
+      calls.push("reclaim");
+      assert.equal(input.archiveFile, "/project/.omt/history/kickoff.json");
+      return { latest: { status: "clean" } };
+    },
+  });
+  assert.deepEqual(calls, ["scan", "release", "reclaim"]);
+  assert.equal(result.status, "clean");
+  assert.equal(result.archived, "/project/.omt/history/kickoff.json");
+});
+
+test("kickoff finish leaves the archive available when reclamation is uncertain", async () => {
+  const request = {
+    orgFile: "/project/.omt/organization.json",
+    worktreeId: "repo::/pm",
+  };
+  const result = await finishKickoff(request, {
+    scan: async () => ({ candidates: [{ worktreeId: request.worktreeId }] }),
+    release: async () => ({
+      released: true,
+      archived: "/project/.omt/history/kickoff.json",
+    }),
+    reclaim: async () => {
+      throw new Error("Orca inventory incomplete");
+    },
+  });
+  assert.equal(result.status, "blocked");
+  assert.equal(result.archived, "/project/.omt/history/kickoff.json");
+  assert.match(result.cleanupError, /Orca inventory incomplete/);
+});
+
+test("kickoff finish blocks completion when cleanup remains or its final scan fails", async () => {
+  const request = {
+    orgFile: "/project/.omt/organization.json",
+    worktreeId: "repo::/pm",
+  };
+  for (const cleanup of [
+    { latest: { status: "cleanup-pending" } },
+    { latest: { status: "clean" }, scanError: "final inventory unavailable" },
+  ]) {
+    const result = await finishKickoff(request, {
+      scan: async () => ({ candidates: [{ worktreeId: request.worktreeId }] }),
+      release: async () => ({
+        released: true,
+        archived: "/project/.omt/history/kickoff.json",
+      }),
+      reclaim: async () => cleanup,
+    });
+    assert.equal(result.status, "blocked");
+    assert.equal(result.archived, "/project/.omt/history/kickoff.json");
+  }
+});
+
+test("kickoff finish does not reclaim if release fails", async () => {
+  let reclaimed = false;
+  await assert.rejects(
+    finishKickoff(
+      { orgFile: "/project/.omt/organization.json", worktreeId: "repo::/pm" },
+      {
+        scan: async () => ({ candidates: [] }),
+        release: async () => {
+          throw new Error("delivery is not recorded");
+        },
+        reclaim: async () => {
+          reclaimed = true;
+        },
+      },
+    ),
+    /delivery is not recorded/,
+  );
+  assert.equal(reclaimed, false);
+});
 
 const pm = "repo::/tmp/pm";
 const child = "repo::/tmp/child";

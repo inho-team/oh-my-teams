@@ -180,6 +180,7 @@ import {
   verifyHandoffClaim,
 } from "./kickoff-registry.mjs";
 import {
+  finishKickoff,
   reclaimKickoffCleanup,
   scanKickoffCleanup,
 } from "./kickoff-cleanup.mjs";
@@ -1423,6 +1424,15 @@ export async function executeCommand(args, execute, ports = {}) {
         orgFile: args.org,
         worktreeId: args.worktree,
         archiveFile: args["history-file"],
+        executable: args.orca,
+      });
+    case "kickoff-finish":
+      return finishKickoff({
+        orgFile: args.org,
+        worktreeId: args.worktree,
+        force: Boolean(args.force),
+        repo: args.repo,
+        head: args.head,
         executable: args.orca,
       });
     case "kickoff-release": {

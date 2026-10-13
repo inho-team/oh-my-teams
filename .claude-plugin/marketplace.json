@@ -3,7 +3,7 @@
   "owner": { "name": "inho-team" },
   "metadata": {
     "description": "oh my teams — an agent organization running on Orca",
-    "version": "2.18.3"
+    "version": "2.18.4"
   },
   "plugins": [
     {
