@@ -32,6 +32,11 @@ export const HELP = `oh my teams organization runtime on Orca (Node >=22)
   kickoff-release --org FILE --worktree ID
                   --reason completed|disbanded|taken-over [--force]
                   (also closes that kickoff's pending director signals)
+  kickoff-finish --org FILE --worktree ID [--head SHA --repo DIR]
+                 [--force] [--orca EXECUTABLE]
+                 (releases a completed kickoff, archives it, then reclaims
+                 every worktree that passes a fresh safety check; reports
+                 blocked with the archive path when cleanup remains)
   kickoff-cleanup-candidates --org FILE --worktree ID [--history-file FILE]
   kickoff-cleanup-reclaim --org FILE --worktree ID --history-file FILE
   kickoff-branch-cleanup --org FILE --worktree ID
@@ -306,6 +311,7 @@ export const ALLOWED_OPTIONS = {
     "reason",
   ],
   "kickoff-release": ["org", "worktree", "reason", "force", "repo", "head"],
+  "kickoff-finish": ["org", "worktree", "force", "repo", "head", "orca"],
   "kickoff-cleanup-candidates": ["org", "worktree", "history-file", "orca"],
   "kickoff-cleanup-reclaim": ["org", "worktree", "history-file", "orca"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches", "remote", "force"],
@@ -640,6 +646,7 @@ export const REQUIRED_OPTIONS = {
     "reason",
   ],
   "kickoff-release": ["org", "worktree", "reason"],
+  "kickoff-finish": ["org", "worktree"],
   "kickoff-cleanup-candidates": ["org", "worktree"],
   "kickoff-cleanup-reclaim": ["org", "worktree", "history-file"],
   "kickoff-branch-cleanup": ["org", "worktree", "branches"],

@@ -13,7 +13,7 @@ description: 성공한 oh my teams kickoff를 검증하고 허가된 PR/MR 생�
 
 종료할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회한다. kickoff가 여럿이면 사용자가 지목한 것만 종료한다. 기록된 `pm.stateDir`이 아래 명령의 `<pm-state>`이고, 회수 대상은 기록된 PM 워크트리와 그 아래의 자식 워크트리다. 이 절차는 PM 세션이 아니라 이사가 맡는다. 자기가 서 있는 워크트리는 스스로 제거할 수 없으므로, kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
-1. 원래 Goal의 모든 수용 기준, 필수 검토, 최신 HEAD의 검사와 미해결 사항을 확인한다. 요구 원장이 있는 kickoff는 `kickoff-check-close-ready`와 `deliverKickoff`, `kickoff-release --reason completed`가 원장 완결성(userVisible 기준의 제시 증거, 원문 대조 완전성, 미충족 항목의 항목별 예외)을 자동으로 검사하므로 눈으로 다시 세지 않는다. 다만 이 검사는 기록의 무결성과 연결(해시·HEAD·ledgerHash·권한)만 강제하며, 결과가 사용자 원문의 의미를 충족하는지는 PM이 `requirements-fidelity`로, 이사가 `requirements-fidelity-confirm`으로 대조한 판단에 의존한다. kickoff에 고정된 `auditPolicy.auditorConfigured`가 참인 kickoff에서는 같은 세 지점이 `checkpoints.brief.acceptance`와 `checkpoints.outcome.acceptance`도 함께 확인하며, 원장이나 결과·제시 증거가 감사 수용 이후에 바뀌었으면 그 수용은 이미 무효가 되어 있으므로 재수용을 먼저 받은 뒤 종료를 진행한다. 근거는 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)의 A.3·B.5를 따른다.
+1. 원래 Goal의 모든 수용 기준, 필수 검토, 최신 HEAD의 검사와 미해결 사항을 확인한다. 요구 원장이 있는 kickoff는 `kickoff-check-close-ready`와 `deliverKickoff`, `kickoff-finish`가 원장 완결성(userVisible 기준의 제시 증거, 원문 대조 완전성, 미충족 항목의 항목별 예외)을 자동으로 검사하므로 눈으로 다시 세지 않는다. 다만 이 검사는 기록의 무결성과 연결(해시·HEAD·ledgerHash·권한)만 강제하며, 결과가 사용자 원문의 의미를 충족하는지는 PM이 `requirements-fidelity`로, 이사가 `requirements-fidelity-confirm`으로 대조한 판단에 의존한다. kickoff에 고정된 `auditPolicy.auditorConfigured`가 참인 kickoff에서는 같은 세 지점이 `checkpoints.brief.acceptance`와 `checkpoints.outcome.acceptance`도 함께 확인하며, 원장이나 결과·제시 증거가 감사 수용 이후에 바뀌었으면 그 수용은 이미 무효가 되어 있으므로 재수용을 먼저 받은 뒤 종료를 진행한다. 근거는 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)의 A.3·B.5를 따른다.
 2. 눈으로 확인하지 말고 게이트를 실행한다. `merge-check`는 필수 검토와 PM 수용이 source·task hash에 연결되기 전에는 병합을 거부하며, 비정상 종료는 병합 중단 조건이다.
 
 ```text
@@ -65,15 +65,14 @@ node <runtime> kickoff-cleanup-candidates --org <project>/.omt/organization.json
 node <runtime> kickoff-branch-cleanup --org <project>/.omt/organization.json --worktree <pm-worktree-id> --branches <branch>[,<branch>...] [--remote <remote-name>]
 ```
 
-8. 환경이 워크트리 삭제를 지원하지만 별도 최종 승인이 필요한 경우에는 정확한 대상을 제시하고 승인을 받은 뒤 삭제한다. 승인은 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 받으며, 삭제 대상과 되돌릴 수 없다는 사실을 선택지에 함께 적는다. 환경이 삭제 자체를 지원하지 않으면 불가능한 승인을 요구하지 않고 사용자가 실행할 정리 절차를 제공한다.
-9. 요청된 전달과 정리가 모두 끝난 뒤에만 kickoff Goal을 완료 처리한다. 환경 제약으로 정리를 사용자에게 넘긴 경우에는 남은 정리 항목을 명시해 보고한 뒤 완료 처리한다.
-10. 마지막으로 이 kickoff의 등록 항목을 해제한다. `delivery.mode`가 `local-merge`인데 `deliver`가 병합을 기록하지 않았으면 `--reason completed`는 거부된다. 브리프가 요구한 전달 없이 완료로 닫으려면 사용자의 결정을 받은 뒤에만 `--force`를 붙이고, 전달하지 않은 사실을 보고에 적는다. 이 단계를 건너뛰면 `status`가 끝난 kickoff를 계속 진행 중으로 보여 주고, 그 워크트리에서 새 kickoff를 등록할 수 없다. 완료 해제는 워크트리별 정리 판정과 남은 소유자를 보관 기록에 남긴다. `cleanup-pending`인 후보는 나중에 보관 기록으로 재조회한다. 해제하면 이 kickoff에 남은 미처리 신호가 `closed` 상태로 정리되고, 결과의 `closedSignals`에 그 ID가 나온다.
+8. 사용자가 이미 전달과 회수를 허가했다면 그 범위 안에서 `kickoff-finish`를 실행한다. 별도 최종 승인이 실제로 필요한 환경에서만 정확한 삭제 대상을 제시하고 [`../../references/user-choice.md`](../../references/user-choice.md)에 따라 확인한다.
+9. `kickoff-finish`로 등록 항목을 해제하고 보관한 다음 안전 판정을 다시 받은 워크트리를 자식부터 회수한다. `delivery.mode`가 `local-merge`인데 `deliver`가 병합을 기록하지 않았으면 완료 해제는 거부된다. 요청된 전달 없이 닫으려면 사용자의 결정을 받은 경우에만 `--force`를 붙인다. 회수 실패나 보존 대상이 있으면 결과는 `blocked`이며 보관 경로가 함께 나온다.
 
 ```text
-node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <pm-worktree-id> --reason completed
+node <runtime> kickoff-finish --org <project>/.omt/organization.json --worktree <pm-worktree-id>
 ```
 
-완료 보관 기록이 생긴 뒤에는 이사의 체크아웃에서 후보를 다시 확인하고 안전 판정을 받은 워크트리만 Orca로 회수한다. 명령은 후보마다 최신 증거를 다시 읽고 자식을 먼저 처리하며, Orca의 거부와 사후 확인 실패를 `<project>/.omt/history`의 정리 기록에 남긴다. 실제 회수를 확인하지 못한 후보는 재진입 때 자동으로 같은 제거 요청을 반복하지 않는다.
+10. 결과가 `clean`이고 요청된 전달과 검증이 끝난 뒤에만 kickoff Goal을 완료 처리한다. `blocked`라면 보관 경로와 회수 기록을 확인하고, 불명확한 삭제를 자동으로 재시도하지 않는다. 증거를 보완해 다시 정리할 때에는 아래 명령을 사용한다. 환경이 삭제를 지원하지 않으면 남은 항목을 정확히 보고하고 사용자의 결정을 따른다.
 
 ```text
 node <runtime> kickoff-cleanup-reclaim --org <project>/.omt/organization.json --worktree <pm-worktree-id> --history-file <project>/.omt/history/kickoff-<id>.json

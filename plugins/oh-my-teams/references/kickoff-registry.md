@@ -30,7 +30,7 @@
 }
 ```
 
-`director`는 이사가 자기 식별자를 기록하는 항목이다. `terminalHandle`은 이사 세션의 소유권을 식별하고, `checkoutPath`는 `deliver`, `kickoff-release`, `kickoff-branch-cleanup`, `kickoff-merge-record`를 실행해도 되는 유일한 작업 디렉터리다. 필드 이름은 정확히 이 둘이어야 한다. `director`를 아예 적지 않은 요청은 이전 등록과 같은 호환 경로로 받아들이지만, 그 항목에서는 위 명령의 권한 검사가 경고만 남기고 진행한다.
+`director`는 이사가 자기 식별자를 기록하는 항목이다. `terminalHandle`은 이사 세션의 소유권을 식별하고, `checkoutPath`는 `deliver`, `kickoff-finish`, `kickoff-release`, `kickoff-branch-cleanup`, `kickoff-merge-record`를 실행해도 되는 유일한 작업 디렉터리다. 필드 이름은 정확히 이 둘이어야 한다. `director`를 아예 적지 않은 요청은 이전 등록과 같은 호환 경로로 받아들이지만, 그 항목에서는 위 명령의 권한 검사가 경고만 남기고 진행한다.
 
 런타임은 요청 파일의 키를 다음과 같이 다룬다. 위 형식에 없는 키는 항목에 저장되지 않으므로 등록은 성공하되 무시한 키를 `warnings`와 표준 오류의 `[omt] Warning:` 줄로 알린다. `director.terminalHandle`을 `terminal`이나 `handle`로 적는 식의 오타가 조용히 이사 기록 없는 등록이 되는 것을 막기 위해서다. `director`가 있는데 `checkoutPath`가 없으면 작업 디렉터리로 대신 채우지 않고 등록을 거부한다.
 
@@ -96,13 +96,14 @@ current 판정을 받은 kickoff는 종료할 때 자기 06. 인도 단계 deliv
 node <runtime> kickoff-show --org <project>/.omt/organization.json
 node <runtime> kickoff-claim --org <project>/.omt/organization.json --from <claim.json>
 node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <id> --run <runId>
-node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <id> --reason completed
+node <runtime> kickoff-finish --org <project>/.omt/organization.json --worktree <id>
+node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <id> --reason disbanded|taken-over
 node <runtime> kickoff-merge-record --org <project>/.omt/organization.json --worktree <id> --head <검증한 HEAD> --merge-commit <병합 커밋> [--remote <remote-name>]
 node <runtime> kickoff-branch-cleanup --org <project>/.omt/organization.json --worktree <id> --branches <branch>[,<branch>...] [--remote <remote-name>]
 node <runtime> deliver --org <project>/.omt/organization.json --worktree <id> --source <통합 워크트리> --head <검증한 HEAD> --evidence <evidence.json> --task <task.json> [--report <report.json> --state <pm-state>]
 ```
 
-`kickoff-show`는 등록된 kickoff 전체를 돌려주며, `--worktree`를 주면 그 PM 워크트리의 항목만 돌려준다. `kickoff-bind`는 같은 `runId`를 다시 넣는 호출은 그대로 성공하지만 다른 Run을 넣으면 거부한다. 수신 확인을 놓친 재실행과 Run이 둘로 갈라지는 상황은 서로 다른 사건이기 때문이다. `kickoff-release`의 `--reason`은 `completed`, `disbanded`, `taken-over` 가운데 하나이며, 다른 kickoff의 항목은 건드리지 않는다. 해제한 kickoff에 남은 미처리 이사 신호는 `closed` 상태(`closedBy: "kickoff-release"`, `closedReason`)로 정리된다. `deliver`는 `delivery.mode`가 `local-merge`인 kickoff만 병합하고, 병합한 HEAD와 주인 브랜치의 병합 커밋을 항목의 `delivered`에 남긴다. `local-merge` kickoff는 `delivered`가 없으면 `--reason completed`로 해제되지 않으며, 사용자가 전달 없이 닫기로 결정한 경우에만 `--force`를 붙인다.
+`kickoff-show`는 등록된 kickoff 전체를 돌려주며, `--worktree`를 주면 그 PM 워크트리의 항목만 돌려준다. `kickoff-bind`는 같은 `runId`를 다시 넣는 호출은 그대로 성공하지만 다른 Run을 넣으면 거부한다. 수신 확인을 놓친 재실행과 Run이 둘로 갈라지는 상황은 서로 다른 사건이기 때문이다. 성공한 kickoff는 `kickoff-finish`가 등록 해제, 보관, 안전한 워크트리 회수를 순서대로 수행한다. 회수가 남으면 `blocked`와 보관 경로를 반환하며, 불명확한 삭제를 자동으로 재시도하지 않는다. `kickoff-release`의 `--reason`은 `completed`, `disbanded`, `taken-over` 가운데 하나이며, 다른 kickoff의 항목은 건드리지 않는다. 해제한 kickoff에 남은 미처리 이사 신호는 `closed` 상태(`closedBy: "kickoff-release"`, `closedReason`)로 정리된다. `deliver`는 `delivery.mode`가 `local-merge`인 kickoff만 병합하고, 병합한 HEAD와 주인 브랜치의 병합 커밋을 항목의 `delivered`에 남긴다. `local-merge` kickoff는 `delivered`가 없으면 `--reason completed`로 해제되지 않으며, 사용자가 전달 없이 닫기로 결정한 경우에만 `--force`를 붙인다.
 
 `kickoff-merge-record`는 PR이 외부에서 병합된 뒤 그 병합 커밋을 등록부에 남기며, 이사만 실행한다. 기록하기 전에 주인 체크아웃의 git으로 세 가지를 확인하고 하나라도 어긋나면 거부한다. `--merge-commit`이 실제 커밋이어야 하고, `delivery.branch`(로컬 브랜치 또는 `--remote`로 고른 원격의 같은 이름 브랜치, 기본 `origin`)에서 도달할 수 있어야 하며, `--head`가 그 병합 커밋에 포함되어야 한다. PR이 원격에서 병합되었다면 먼저 주인 체크아웃에서 `git fetch`를 실행한다. 이 검사를 통과한 값만 `delivered`에 전체 커밋 ID로 저장되므로, 병합되지 않은 브랜치의 끝 커밋을 병합 커밋으로 적어 `kickoff-branch-cleanup`이 그 브랜치를 지우게 만들 수 없다. 병합 커밋이 `--head`를 포함하지 않는 squash 병합은 이 검사에서 거부되며, `kickoff-branch-cleanup`도 브랜치 커밋이 병합 커밋에 포함되어야 삭제하므로 같은 이유로 삭제하지 않는다.
 
@@ -155,7 +156,7 @@ A가 PM을 겸하는 것은 호스트에 인계 수단 자체가 없을 때뿐�
 
 ## 종료
 
-kickoff의 항목은 `close` 또는 `disband`가 끝난 뒤에 `kickoff-release`로 해제한다. 목표를 달성하지 못했더라도 해체를 마쳤으면 해제해야 한다. 그러지 않으면 `status`가 끝난 kickoff를 계속 진행 중으로 보여 주고, 그 워크트리에서 새 kickoff를 등록할 수 없다. 해제된 항목은 지워지지 않고 `.omt/history/`에 해제 시각과 사유가 붙어 보관된다.
+kickoff의 항목은 성공 시 `kickoff-finish`로, `disband` 후에는 `kickoff-release`로 해제한다. 목표를 달성하지 못했더라도 해체를 마쳤으면 해제해야 한다. 그러지 않으면 `status`가 끝난 kickoff를 계속 진행 중으로 보여 주고, 그 워크트리에서 새 kickoff를 등록할 수 없다. 해제된 항목은 지워지지 않고 `.omt/history/`에 해제 시각과 사유가 붙어 보관된다.
 
 PM의 liveness가 `unverifiable`이라는 이유로 항목을 자동 해제하지 않는다. 세 값을 서로 대체하지 않는 규율은 [`orca-runtime.md`](orca-runtime.md)의 `worker-list와 liveness` 절을 따른다. 사용자가 응답하지 않는 PM의 kickoff를 끝내기로 결정한 경우에만 `--reason taken-over --force`를 사용하고, 마지막으로 확인한 liveness와 결정 사유를 보고에 남긴다. `taken-over`는 `--force` 없이는 거부되므로, 조회 실패가 곧바로 종료로 이어지지 않는다.
 

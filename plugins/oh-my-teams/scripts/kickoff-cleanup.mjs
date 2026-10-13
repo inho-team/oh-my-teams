@@ -1,4 +1,4 @@
-/** Read-only reconciliation of a completed kickoff's Orca worktrees and Git evidence. */
+/** Kickoff worktree reconciliation and safe reclamation through Orca. */
 import { proveKickoffWorktreeOwnership } from "./worktree-ownership.mjs";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,6 +7,7 @@ import { git } from "./evidence.mjs";
 import {
   listKickoffs,
   ownerProject,
+  releaseKickoff,
   validateEntry,
 } from "./kickoff-registry.mjs";
 import {
@@ -41,6 +42,65 @@ function archivedEntry(orgFile, archiveFile, worktreeId) {
     "Only completed kickoff archives have cleanup candidates",
   );
   return entry;
+}
+
+/**
+ * Completes a kickoff and immediately reclaims every worktree proven safe.
+ * An uncertain removal remains in the archive for explicit reconciliation;
+ * this call never repeats it automatically.
+ *
+ * @param {object} request - Director's completed kickoff and delivery evidence.
+ * @param {object} [ports] - Injectable scanner, releaser, and reclaimer.
+ * @returns {Promise<object>} Release, archived path, cleanup proof, and status.
+ */
+export async function finishKickoff(
+  { orgFile, worktreeId, force = false, repo, head, executable, callerCwd },
+  {
+    scan = scanKickoffCleanup,
+    release = releaseKickoff,
+    reclaim = reclaimKickoffCleanup,
+  } = {},
+) {
+  const cleanup = await scan({ orgFile, worktreeId, executable });
+  const released = await release(orgFile, {
+    worktreeId,
+    reason: "completed",
+    force,
+    cleanup,
+    repo,
+    head,
+    callerCwd,
+  });
+  assert(
+    released?.released && released.archived,
+    "Kickoff release did not produce an archive",
+  );
+  const request = {
+    orgFile,
+    worktreeId,
+    archiveFile: released.archived,
+    executable,
+    callerCwd,
+  };
+  try {
+    const reclaimed = await reclaim(request);
+    return {
+      status:
+        !reclaimed.scanError && reclaimed.latest?.status === "clean"
+          ? "clean"
+          : "blocked",
+      archived: released.archived,
+      release: released,
+      cleanup: reclaimed,
+    };
+  } catch (error) {
+    return {
+      status: "blocked",
+      archived: released.archived,
+      release: released,
+      cleanupError: error.message,
+    };
+  }
 }
 
 function candidateIds(entry, worktrees) {
