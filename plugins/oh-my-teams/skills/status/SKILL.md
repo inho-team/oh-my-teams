@@ -17,7 +17,7 @@ node <runtime> show --org <project>/.omt/organization.json --state <pm-state>
 `kickoff-show`가 돌려준 각 항목의 `pm.stateDir`이 두 번째 명령의 `--state` 인자다. `active: false`이면 진행 중인 kickoff가 없다고 알리고 다른 워크트리를 뒤져 실행 상태를 추측하지 않는다. 같은 구독을 쓰는 kickoff가 둘 이상이면 함께 할당량을 소모하고 있다는 점도 표시한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
 
 
-조직도에는 선언된 역할만 나타납니다. 신규 조직의 이사는 호스트 세션이며 조직 파일에는 PM과 Worker만 나타납니다. 기존 조직에서 생략된 역할은 누락으로 보고하지 않고, 그 책임을 이어받은 역할을 알립니다. 설정된 조직도와 실제 실행 상태를 구분해 전달합니다. 로컬 하네스 보고서가 없으면 실행 상태는 `unsettled`이며 종료 증거가 아닙니다. 감독 작업의 실시간 상태는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery로 kickoff가 기록한 실행 파일을 그대로 사용해 해당 Run의 `worker-list`에서 확인합니다. 이 세션에서 discovery를 이미 마쳤으면 기록된 실행 파일로 조회만 하고 가이드를 다시 읽지 않습니다. `live / unverifiable / exited`를 그대로 보존합니다.
+조직도에는 선언된 역할만 나타납니다. 이사는 호스트 세션이며 조직 파일에는 PM과 선택적인 Worker만 나타납니다. Worker가 생략되면 그 책임을 PM이 맡는다고 알립니다. 설정된 조직도와 실제 실행 상태를 구분해 전달합니다. 로컬 하네스 보고서가 없으면 실행 상태는 `unsettled`이며 종료 증거가 아닙니다. 감독 작업의 실시간 상태는 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 discovery로 kickoff가 기록한 실행 파일을 그대로 사용해 해당 Run의 `worker-list`에서 확인합니다. 이 세션에서 discovery를 이미 마쳤으면 기록된 실행 파일로 조회만 하고 가이드를 다시 읽지 않습니다. `live / unverifiable / exited`를 그대로 보존합니다.
 
 workflow가 있으면 `workflow-status`가 돌려주는 현재 `depth`와 이번 실행이 쓰는 `roles`, 그리고 `depthHistory`의 변경 사유를 함께 표시한다. 조직도에 있지만 이번 실행 깊이에 포함되지 않은 역할은 누락이 아니라 이번 실행에서 쓰지 않는 역할로 표시한다.
 
