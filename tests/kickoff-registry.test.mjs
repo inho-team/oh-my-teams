@@ -186,6 +186,9 @@ test("kickoff-claim refuses a PM worktree without a verified agent session", asy
 
 test("kickoff-claim refuses a new run from a retired role organization", async (t) => {
   const fixture = project(t);
+  const org = readJSON(fixture.org);
+  org.roles.pl = { ...org.roles.worker, parent: "pm" };
+  writeJSON(fixture.org, org);
   const file = path.join(fixture.dir, "legacy-claim.json");
   writeJSON(file, claimFor(fixture, "wt-legacy"));
   const result = await run([
@@ -198,7 +201,7 @@ test("kickoff-claim refuses a new run from a retired role organization", async (
     file,
   ]);
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /New kickoffs require a PM\/Worker organization/);
+  assert.match(result.stderr, /Roles must be named from pm\/worker/);
   assert.deepEqual(ids(fixture), []);
 });
 

@@ -6,12 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ACTIVE_ROLES,
+  ROLES,
   assert,
   AUDITOR_ROLE,
   chart,
   displayModel,
-  migrateLegacyOrg,
   readJSON,
   ROOT_ROLE,
   run as runOrcaCommand,
@@ -1309,7 +1308,7 @@ export async function executeCommand(args, execute, ports = {}) {
           expectedRevision: Number(args.revision),
         });
       }
-      const previousOrg = validateOrg(migrateLegacyOrg(readJSON(args.org)));
+      const previousOrg = validateOrg(readJSON(args.org));
       assert(
         Number(args.revision) === previousOrg.revision,
         "Organization changed; read it again before editing",
@@ -1338,9 +1337,7 @@ export async function executeCommand(args, execute, ports = {}) {
     case "kickoff-claim": {
       const organization = validateOrg(readJSON(args.org));
       assert(
-        Object.keys(organization.roles).every((role) =>
-          ACTIVE_ROLES.includes(role),
-        ),
+        Object.keys(organization.roles).every((role) => ROLES.includes(role)),
         "New kickoffs require a PM/Worker organization; form or adjust the legacy organization first",
       );
       const claim = readJSON(args.from);

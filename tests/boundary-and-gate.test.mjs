@@ -207,8 +207,8 @@ test("a settled task never lets another task report the workflow as ready", asyn
     goal: "Derived status",
     repo: ".",
     tasks: [
-      { file: "alpha.json", role: "junior" },
-      { file: "beta.json", role: "junior" },
+      { file: "alpha.json", role: "worker" },
+      { file: "beta.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 4, maxCalls: 4 },
@@ -291,7 +291,7 @@ test("a model that answered from another model is a profile fault, not a workspa
 
   const workspace = {
     category: "environment-context",
-    nextOwner: "pl",
+    nextOwner: "pm",
     action: "rebind-workspace",
     retryable: true,
   };

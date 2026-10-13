@@ -3,16 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import {
-  ACTIVE_FULL_DEPTH,
   FULL_DEPTH,
   ROLES,
   assert,
-  canonicalRole,
   definedRoles,
   depthRoles,
   foldRole,
   hash,
-  migrateLegacyOrg,
   readJSON,
   validateOrg,
   writeJSON,
@@ -422,8 +419,7 @@ function createInitialState(request, org, tasks, staffing) {
   const roleByTask = Object.fromEntries(
     request.tasks.map((item, index) => [tasks[index].id, item.role]),
   );
-  const depth =
-    request.depth ?? (Object.hasOwn(org.roles, "worker") ? 2 : FULL_DEPTH);
+  const depth = request.depth ?? FULL_DEPTH;
   const roles = depthRoles(definedRoles(org), depth);
   return {
     schemaVersion: 1,
@@ -497,17 +493,6 @@ export async function createWorkflow(
 ) {
   validateWorkflowRequest(request);
   validateOrg(org);
-  assert(
-    !Object.hasOwn(org.roles, "worker") ||
-      request.depth === undefined ||
-      request.depth <= ACTIVE_FULL_DEPTH,
-    `Worker organization depth must be 1..${ACTIVE_FULL_DEPTH}`,
-  );
-  assert(
-    !Object.hasOwn(org.roles, "worker") ||
-      request.tasks.every((item) => ["pm", "worker"].includes(item.role)),
-    "Worker organization tasks must use pm or worker roles",
-  );
   const repo = fs.realpathSync(path.resolve(baseDir, request.repo));
   const tasks = await freezeTasks(request, baseDir, repo);
   const staffing = org.resources
@@ -590,9 +575,15 @@ export async function createWorkflow(
  */
 export function readWorkflow(stateDir, id) {
   const snapshot = readWorkflowSnapshot(stateDir, id);
-  // A workflow frozen before 2.6.0 may bind intern; it runs on the migrated
-  // ladder, and its stored roles resolve through the legacy aliases.
-  return { ...snapshot, organization: migrateLegacyOrg(snapshot.organization) };
+  validateOrg(snapshot.organization);
+  assert(
+    (snapshot.state.roles ?? []).every((role) => ROLES.includes(role)) &&
+      Object.values(snapshot.state.tasks ?? {}).every((item) =>
+        ROLES.includes(item.role),
+      ),
+    "Workflow contains retired roles; it cannot be resumed",
+  );
+  return snapshot;
 }
 
 function validateStaffingChange(input) {
@@ -744,7 +735,7 @@ function tasksConflict(left, right) {
 // Whether a limit may hand the task over depends on the frozen organization:
 // its exhaustion policy and the role's declared fallbacks not yet used here.
 function limitContext(organization, item) {
-  const binding = organization?.roles[canonicalRole(item.role)];
+  const binding = organization?.roles[item.role];
   if (!binding) return {};
   return {
     onExhaustion: organization.policy.onExhaustion,
@@ -921,10 +912,8 @@ function dispatchCapacity(state) {
 }
 
 function roleRunningCount(state, role) {
-  // A task saved before 2.6.0 may name intern; it holds a Junior slot.
   return Object.values(state.tasks).filter(
-    (item) =>
-      occupiesSlot(item) && canonicalRole(item.role) === canonicalRole(role),
+    (item) => occupiesSlot(item) && item.role === role,
   ).length;
 }
 
@@ -946,11 +935,11 @@ function dispatchActions(state, tasks, organization) {
       continue;
     }
     const selectedForRole = selected.filter(
-      (id) => canonicalRole(state.tasks[id].role) === canonicalRole(item.role),
+      (id) => state.tasks[id].role === item.role,
     ).length;
     if (
       roleRunningCount(state, item.role) + selectedForRole >=
-      organization.roles[canonicalRole(item.role)].concurrency
+      organization.roles[item.role].concurrency
     ) {
       continue;
     }
@@ -1676,7 +1665,7 @@ function beginExecution(stateDir, id, expectedRevision, input, reserveOnly) {
     );
     assert(
       roleRunningCount(state, item.role) <
-        organization.roles[canonicalRole(item.role)].concurrency,
+        organization.roles[item.role].concurrency,
       `No ${item.role} concurrency slot available`,
     );
     const callAllowance =
@@ -2130,7 +2119,7 @@ export function claimWorkflowCall(stateDir, id, input) {
     );
     assert(
       item.taskHash === input.taskHash &&
-        canonicalRole(item.role) === canonicalRole(input.role) &&
+        item.role === input.role &&
         state.organizationHash === input.organizationHash,
       "Worker does not match frozen workflow inputs",
     );
@@ -2457,7 +2446,7 @@ export function reworkTask(stateDir, id, expectedRevision, input) {
     );
     assert(
       roleRunningCount(state, item.role) <
-        organization.roles[canonicalRole(item.role)].concurrency,
+        organization.roles[item.role].concurrency,
       `No ${item.role} concurrency slot available`,
     );
     const receipt = input.receipt;
@@ -2738,7 +2727,7 @@ export function handoffTask(stateDir, id, expectedRevision, input) {
       organization.policy.onExhaustion === "fallback",
       "Organization policy does not allow a fallback handoff",
     );
-    const binding = organization.roles[canonicalRole(item.role)];
+    const binding = organization.roles[item.role];
     const handoffs = item.handoffs ?? [];
     const from = handoffs.at(-1)?.to ?? binding.profile;
     assert(
@@ -2856,12 +2845,9 @@ export function setWorkflowDepth(stateDir, id, expectedRevision, input) {
       "Workflow changed; read state again",
     );
 
-    const org = migrateLegacyOrg(readJSON(path.join(dir, "organization.json")));
+    const org = validateOrg(readJSON(path.join(dir, "organization.json")));
     const from = state.depth ?? FULL_DEPTH;
-    // Roles saved before 2.6.0 may list intern, which Junior now holds.
-    const previous = [
-      ...new Set((state.roles ?? definedRoles(org)).map(canonicalRole)),
-    ];
+    const previous = state.roles ?? definedRoles(org);
     const roles = depthRoles(definedRoles(org), input.depth);
     assert(
       input.depth !== from || roles.join() !== previous.join(),
@@ -2870,8 +2856,7 @@ export function setWorkflowDepth(stateDir, id, expectedRevision, input) {
 
     const removed = previous.filter((role) => !roles.includes(role));
     const busy = Object.entries(state.tasks).filter(
-      ([, item]) =>
-        occupiesSlot(item) && removed.includes(canonicalRole(item.role)),
+      ([, item]) => occupiesSlot(item) && removed.includes(item.role),
     );
     assert(
       busy.length === 0,

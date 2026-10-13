@@ -1,14 +1,7 @@
 /** Prepares immutable task inputs and attaches verified runtime workspaces. */
 import fs from "node:fs";
 import path from "node:path";
-import {
-  assert,
-  hash,
-  migrateLegacyOrg,
-  readJSON,
-  validateOrg,
-  writeJSON,
-} from "./core.mjs";
+import { assert, hash, readJSON, validateOrg, writeJSON } from "./core.mjs";
 import { git } from "./evidence.mjs";
 import { taskHash, validateTask } from "./contracts.mjs";
 import { executionAdapter } from "./adapters.mjs";
@@ -183,10 +176,7 @@ export async function attachWorkspace(input) {
  */
 export function readPreparedInput(directory) {
   return {
-    // Prepared before 2.6.0, the snapshot may still bind intern.
-    org: validateOrg(
-      migrateLegacyOrg(readJSON(path.join(directory, "organization.json"))),
-    ),
+    org: validateOrg(readJSON(path.join(directory, "organization.json"))),
     task: validateTask(readJSON(path.join(directory, "task.json"))),
     input: readJSON(path.join(directory, "input.json")),
   };

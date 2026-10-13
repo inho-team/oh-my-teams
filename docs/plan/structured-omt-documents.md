@@ -1,5 +1,7 @@
 # `.omt` 정형 문서 체계 설계
 
+> 이 문서는 당시 설계와 검토 근거를 보존한 기록이다. 현재 런타임의 역할은 PM과 Worker이며, 아래 PL·Senior·Junior 권한 및 필드 범위는 더 이상 적용되지 않는다. 현재 권한은 `plugins/oh-my-teams/scripts/document-authority.mjs`와 문서 스키마를 따른다.
+
 이 문서는 브리프 `/Users/jinsungkim/orca/oh-my-teams/.omt/briefs/structured-omt-documents-2026-09-27.md`(revision `sha256:f9d5fae50ec0d020a9cf2e4b4566699853a3cee69935aa27c4a566049edde692`)가 요청한 첫 작업 파동의 산출물이다. 이 파동은 조사와 설계만 수행하며, 어떤 런타임·스키마·스킬·테스트도 바꾸지 않는다. 독립 검토를 통과한 뒤에야 두 번째 작업 파동이 이 설계를 구현한다.
 
 ## 1단계: 지속 객체 전수 조사

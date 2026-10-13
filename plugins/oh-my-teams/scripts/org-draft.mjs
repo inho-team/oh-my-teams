@@ -1,11 +1,5 @@
 /** Drafts a first organization from a ladder size and one model per tier. */
-import {
-  ACTIVE_ROLES,
-  DEPTH_ROLES,
-  FULL_DEPTH,
-  assert,
-  validateOrg,
-} from "./core.mjs";
+import { ROLES, assert, validateOrg } from "./core.mjs";
 
 /**
  * Operating values a drafted organization starts with.
@@ -79,27 +73,6 @@ function profileId({ provider, model }) {
 }
 
 /**
- * Builds a validated organization for the chosen ladder and tier models.
- *
- * Profiles use the current account of each provider, and every profile of one
- * provider shares a pool, because the runtime skips an exhausted pool only when
- * the profiles drawing on it are grouped. No profile records an effort, so each
- * CLI applies its own default until `adjust` sets one.
- *
- * @param {object} request - Draft request.
- * @param {string} request.name - Organization name.
- * @param {number} [request.tiers=FULL_DEPTH] - Ladder size from 1 to 4.
- * @param {string[]} request.models - One `provider:model` choice per tier.
- * @returns {object} Validated organization ready for `init --from`.
- * @throws {Error} When the ladder, a choice, or the result is invalid.
- */
-export function draftOrganization({ name, tiers = FULL_DEPTH, models }) {
-  const roles = DEPTH_ROLES[tiers];
-  assert(roles, `tiers must be 1..${FULL_DEPTH}`);
-  return buildOrganization(name, roles, models);
-}
-
-/**
  * Forms the Director–PM–Worker organization without legacy middle ranks.
  *
  * @param {object} request - New organization name and PM/Worker model choices.
@@ -108,7 +81,7 @@ export function draftOrganization({ name, tiers = FULL_DEPTH, models }) {
  * @returns {object} Validated two-role organization.
  */
 export function draftThreeTierOrganization({ name, models }) {
-  return buildOrganization(name, ACTIVE_ROLES, models);
+  return buildOrganization(name, ROLES, models);
 }
 
 function buildOrganization(name, roles, models) {
@@ -207,7 +180,7 @@ export function draftResourceOrganization({
   }
 
   const roles = {};
-  ACTIVE_ROLES.forEach((role, index, ladder) => {
+  ROLES.forEach((role, index, ladder) => {
     roles[role] = {
       parent: index === 0 ? null : ladder[index - 1],
       concurrency,

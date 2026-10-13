@@ -28,7 +28,7 @@ import {
   roleSpec,
 } from "../plugins/oh-my-teams/scripts/role-launch.mjs";
 import { resolveHostDefaults } from "../plugins/oh-my-teams/scripts/host-defaults.mjs";
-import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { draftThreeTierOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { main } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
 
 const example = () =>
@@ -46,10 +46,10 @@ function tempDir(t) {
 }
 
 test("a role launches with the agent and model its profile pins", () => {
-  // The incident: PL was bound to a Codex profile, yet the PM typed
-  // `worker-start --agent codex` with no --model and PL ran on another model.
-  const launch = resolveRoleLaunch(example(), "pl", {}, { terminal: "t1" });
-  assert.equal(launch.role, "pl");
+  const org = example();
+  org.roles.worker.profile = "codex-current";
+  const launch = resolveRoleLaunch(org, "worker", {}, { terminal: "t1" });
+  assert.equal(launch.role, "worker");
   assert.equal(launch.provider, "codex");
   assert.equal(launch.agent, "codex");
   assert.equal(launch.via, "terminal");
@@ -58,12 +58,11 @@ test("a role launches with the agent and model its profile pins", () => {
 });
 
 test("a host-default profile launches without a model and says so", () => {
-  const org = draftOrganization({
+  const org = draftThreeTierOrganization({
     name: "team",
-    tiers: 2,
     models: ["claude:default", "codex:default"],
   });
-  const launch = resolveRoleLaunch(org, "junior", {}, { terminal: "t1" });
+  const launch = resolveRoleLaunch(org, "worker", {}, { terminal: "t1" });
   assert.equal(launch.agent, "codex");
   assert.equal(launch.model, null);
 
@@ -80,29 +79,30 @@ test("no Claude or Codex role is started by agent id, which cannot carry the byp
   // role-terminal, whose command carries the flag and the model, and handed
   // its task with --terminal.
   const org = example();
-  org.roles.junior.profile = "claude-current";
+  org.roles.worker.profile = "claude-current";
   org.profiles["claude-current"].model = "sonnet";
-  for (const [role, provider] of [
-    ["pl", "codex"],
-    ["junior", "claude"],
-    ["senior", "agy"],
+  for (const [profile, provider] of [
+    ["codex-current", "codex"],
+    ["claude-current", "claude"],
+    ["agy-opus", "agy"],
   ]) {
+    org.roles.worker.profile = profile;
     assert.throws(
-      () => resolveRoleLaunch(org, role),
+      () => resolveRoleLaunch(org, "worker"),
       new RegExp(`${provider}.*role-terminal.*--terminal`, "s"),
     );
     // Restating the profile does not reopen a launch by agent id either.
     const { agent, model } = resolveRoleLaunch(
       org,
-      role,
+      "worker",
       {},
       { terminal: "t1" },
     );
     assert.throws(
-      () => resolveRoleLaunch(org, role, { agent, model }),
+      () => resolveRoleLaunch(org, "worker", { agent, model }),
       /role-terminal/,
     );
-    const command = roleCommand(org, role);
+    const command = roleCommand(org, "worker");
     assert.equal(command.argv[1], PERMISSION_BYPASS[provider]);
     assert.equal(command.argv[command.argv.indexOf("--model") + 1], model);
   }
@@ -113,23 +113,23 @@ test("an Agy role starts in a terminal opened with its model, never by agent id"
   // Codex and Cursor only, so refusing Agy outright left every Agy role with
   // no sanctioned launch at all.
   assert.throws(
-    () => resolveRoleLaunch(example(), "senior"),
+    () => resolveRoleLaunch(example(), "worker"),
     /agy.*role-terminal.*--terminal/s,
   );
-  const launch = resolveRoleLaunch(example(), "senior", {}, { terminal: "t1" });
+  const launch = resolveRoleLaunch(example(), "worker", {}, { terminal: "t1" });
   assert.equal(launch.via, "terminal");
   assert.equal(launch.agent, "antigravity");
-  assert.equal(launch.model, "gemini-3.8-flash-high");
+  assert.equal(launch.model, "claude-opus-4-6-thinking");
   const binding = launchBinding(launch);
   assert.equal(binding.modelProof, "unproven");
   assert.equal(binding.screenCheck, "required");
 
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   assert.deepEqual(command.argv, [
     "agy",
     "--dangerously-skip-permissions",
     "--model",
-    "gemini-3.8-flash-high",
+    "claude-opus-4-6-thinking",
   ]);
 
   // Ollama has no interactive agent in Orca; its roles run through `work`.
@@ -142,9 +142,9 @@ test("an Agy role starts in a terminal opened with its model, never by agent id"
     model: "qwen3:8b",
     contextTokens: 32768,
   };
-  org.roles.junior.profile = "local";
+  org.roles.worker.profile = "local";
   assert.throws(
-    () => resolveRoleLaunch(org, "junior", {}, { terminal: "t1" }),
+    () => resolveRoleLaunch(org, "worker", {}, { terminal: "t1" }),
     /ollama.*work/s,
   );
 });
@@ -158,7 +158,8 @@ test("a reused terminal takes no launch values, matching or not", () => {
     { agent: "codex" },
   ]) {
     assert.throws(
-      () => resolveRoleLaunch(example(), "pl", explicit, { terminal: "t1" }),
+      () =>
+        resolveRoleLaunch(example(), "worker", explicit, { terminal: "t1" }),
       /--terminal/,
     );
   }
@@ -171,8 +172,9 @@ test("a named account or a path command cannot be launched as a plain name", () 
     account: "work",
     command: ["codex", "--profile", "work"],
   };
+  org.roles.worker.profile = "codex-current";
   assert.throws(
-    () => resolveRoleLaunch(org, "pl", {}, { terminal: "t1" }),
+    () => resolveRoleLaunch(org, "worker", {}, { terminal: "t1" }),
     /current account/,
   );
   // PowerShell runs a quoted path as a string, not as a command.
@@ -194,12 +196,12 @@ test("a named account or a path command cannot be launched as a plain name", () 
       runtimeFingerprint: `sha256:${"a".repeat(64)}`,
     },
   };
-  org.roles.junior.profile = "ocx";
-  assert.equal(roleCommand(org, "junior").runner.actualRunner, "codex");
+  org.roles.worker.profile = "ocx";
+  assert.equal(roleCommand(org, "worker").runner.actualRunner, "codex");
   // F-6: an interactive terminal would run the runner profile as whatever Codex
   // login it has, so worker-start refuses it and points at headless-start.
   assert.throws(
-    () => resolveRoleLaunch(org, "junior", {}, { terminal: "t1" }),
+    () => resolveRoleLaunch(org, "worker", {}, { terminal: "t1" }),
     /runs through the opencodex runner; there is no supported interactive Orca terminal path/,
   );
 });
@@ -222,11 +224,11 @@ test("role-command refuses to print a native command for a runner profile", asyn
       runtimeFingerprint: `sha256:${"a".repeat(64)}`,
     },
   };
-  org.roles.junior.profile = "ocx";
+  org.roles.worker.profile = "ocx";
   const orgFile = path.join(dir, "organization.json");
   fs.writeFileSync(orgFile, JSON.stringify(org));
   await assert.rejects(
-    () => main(["role-command", "--org", orgFile, "--role", "junior"]),
+    () => main(["role-command", "--org", orgFile, "--role", "worker"]),
     /no interactive Orca terminal path; role-command would print a native Codex command/,
   );
 });
@@ -237,16 +239,18 @@ test("PM is never started as a worker", () => {
     /PM runs in its own terminal/,
   );
   // A reduced team folds PL's work onto PM, which then does it itself.
-  const org = draftOrganization({
+  const org = draftThreeTierOrganization({
     name: "team",
-    tiers: 2,
     models: ["claude:default", "codex:default"],
   });
-  assert.throws(() => resolveRoleLaunch(org, "pl"), /pl is not declared/);
-  // A declared role left out of this run's depth says so instead.
   assert.throws(
-    () => resolveRoleLaunch(example(), "pl", {}, { roles: ["pm", "junior"] }),
-    /pl is not in this run's roles/,
+    () => resolveRoleLaunch(org, "pm"),
+    /PM runs in its own terminal/,
+  );
+  // A declared Worker left out of this run's depth says so instead.
+  assert.throws(
+    () => resolveRoleLaunch(example(), "worker", {}, { roles: ["pm"] }),
+    /worker is not in this run's roles/,
   );
 });
 
@@ -254,8 +258,8 @@ test("a role handed its task in a terminal proves its model on the screen only",
   // Orca records no model for a --terminal start, and the terminal keeps the
   // model its command was opened with, so only the screen can confirm it.
   const terra = example();
-  terra.roles.pl.profile = "codex-terra";
-  const launch = resolveRoleLaunch(terra, "pl", {}, { terminal: "t1" });
+  terra.roles.worker.profile = "codex-terra";
+  const launch = resolveRoleLaunch(terra, "worker", {}, { terminal: "t1" });
   const binding = launchBinding(launch);
   assert.equal(binding.via, "terminal");
   assert.equal(binding.modelRequested, "gpt-5.6-terra");
@@ -448,24 +452,23 @@ test("every role skill states its authority, responsibility and limits", () => {
 });
 
 test("a spec handed to a subordinate opens with that role's charter", () => {
-  const org = draftOrganization({
+  const org = draftThreeTierOrganization({
     name: "team",
-    tiers: 3,
-    models: ["claude:default", "codex:default", "codex:default"],
+    models: ["claude:default", "codex:default"],
   });
-  const spec = roleSpec(org, "junior", "value.txt의 오타를 고친다.");
+  const spec = roleSpec(org, "worker", "value.txt의 오타를 고친다.");
   const [header, task] = spec.split("\n# 작업\n");
-  assert.match(header, /^# oh my teams 역할 지시\n역할: Junior/);
-  assert.match(header, /보고 대상: Senior/);
+  assert.match(header, /^# oh my teams 역할 지시\n역할: Worker/);
+  assert.match(header, /보고 대상: PM/);
   // Nothing sits below Junior, so it carries no other role's work; PL is not
   // declared in a three-tier team, so PM carries PL's.
   assert.match(header, /이번 실행에 없어 이어받는 역할: 없음/);
   assert.match(
     roleSpec(org, "pm", "나눈다."),
-    /이번 실행에 없어 이어받는 역할: PL\n/,
+    /이번 실행에 없어 이어받는 역할: 없음/,
   );
   assert.match(header, /직접 배정할 수 있는 역할: 없음/);
-  assert.ok(header.includes(readRoleCharter("junior")));
+  assert.ok(header.includes(readRoleCharter("worker")));
   assert.equal(task.trim(), "value.txt의 오타를 고친다.");
   // Every worker reads only its spec, so the BLUF rule rides in the header
   // and points at a reference that exists wherever the worker runs.
@@ -476,26 +479,32 @@ test("a spec handed to a subordinate opens with that role's charter", () => {
   const bluf = header.match(/^두괄식 기준 전문: (.+)$/m)?.[1];
   assert.ok(bluf && path.isAbsolute(bluf) && fs.existsSync(bluf), bluf);
 
-  const pl = roleSpec(example(), "pl", "분할한다.");
-  assert.match(pl, /직접 배정할 수 있는 역할: Senior, Junior\n/);
+  const pm = roleSpec(example(), "pm", "분할한다.");
+  assert.match(pm, /직접 배정할 수 있는 역할: Worker\n/);
 
   // A run at a shallower depth folds with its own role list, not the ladder.
-  const shallow = roleSpec(example(), "junior", "고친다.", {
-    roles: ["pm", "junior"],
+  const shallow = roleSpec(example(), "worker", "고친다.", {
+    roles: ["pm", "worker"],
   });
   assert.match(shallow, /보고 대상: PM/);
   assert.match(shallow, /이번 실행에 없어 이어받는 역할: 없음/);
   assert.match(
-    roleSpec(example(), "pm", "나눈다.", { roles: ["pm", "junior"] }),
-    /이번 실행에 없어 이어받는 역할: PL, Senior\n/,
+    roleSpec(example(), "pm", "나눈다.", { roles: ["pm", "worker"] }),
+    /이번 실행에 없어 이어받는 역할: 없음/,
   );
   assert.throws(
-    () => resolveRoleLaunch(example(), "pl", {}, { roles: ["pm", "junior"] }),
-    /folds to pm/,
+    () =>
+      resolveRoleLaunch(
+        example(),
+        "worker",
+        {},
+        { roles: ["pm"], terminal: "t1" },
+      ),
+    /worker is not in this run's roles/,
   );
 
   // A nested supervisor is told where the organization and the workflow live.
-  const located = roleSpec(example(), "pl", "나눈다.", {
+  const located = roleSpec(example(), "pm", "나눈다.", {
     orgFile: "/p/.omt/organization.json",
     workflowId: "wf-1",
     stateDir: "/c/.omt",
@@ -506,18 +515,20 @@ test("a spec handed to a subordinate opens with that role's charter", () => {
     () =>
       resolveRoleLaunch(
         example(),
-        "junior",
+        "worker",
         {},
-        { roles: ["pm", "pl"], terminal: "t1" },
+        { roles: ["pm"], terminal: "t1" },
       ),
-    /junior is not in this run's roles; its work folds to pl/,
+    /worker is not in this run's roles/,
   );
 });
 
 test("worker-start requires the organization and role and refuses before Orca", async (t) => {
   const dir = tempDir(t);
   const orgFile = path.join(dir, "organization.json");
-  writeJSON(orgFile, example());
+  const org = example();
+  org.roles.worker.profile = "codex-current";
+  writeJSON(orgFile, org);
 
   await assert.rejects(
     () =>
@@ -526,7 +537,7 @@ test("worker-start requires the organization and role and refuses before Orca", 
   );
   // The refusal happens while reading the profile, so no Orca executable is
   // ever resolved; a missing binary would otherwise mask it.
-  for (const role of ["pl", "senior"]) {
+  for (const role of ["worker"]) {
     await assert.rejects(
       () =>
         main([
@@ -556,7 +567,7 @@ test("worker-start requires the organization and role and refuses before Orca", 
         "--org",
         orgFile,
         "--role",
-        "pl",
+        "worker",
         "--spec",
         "x",
         "--terminal",
@@ -579,7 +590,7 @@ test("worker-start requires the organization and role and refuses before Orca", 
         "--org",
         orgFile,
         "--role",
-        "pl",
+        "worker",
         "--spec",
         "x",
         "--terminal",
@@ -605,28 +616,29 @@ test("a terminal is opened and handed work only for a role the run holds", async
     subscription: "Codex",
     model: "gpt-5.5",
   };
-  org.roles.junior.profile = "codex-55";
-  org.roles.senior.profile = "agy-oss";
-  const roles = ["pm", "junior"];
+  org.roles.worker.profile = "codex-55";
+  const roles = ["pm"];
   assert.throws(
-    () => roleCommand(org, "senior", { roles }),
-    /senior is not in this run's roles.*pm/s,
+    () => roleCommand(org, "worker", { roles }),
+    /worker is not in this run's roles.*pm/s,
   );
   assert.throws(
-    () => resolveRoleLaunch(org, "senior", {}, { roles, terminal: "t1" }),
-    /senior is not in this run's roles.*pm/s,
+    () => resolveRoleLaunch(org, "worker", {}, { roles, terminal: "t1" }),
+    /worker is not in this run's roles.*pm/s,
   );
+  const active = ["pm", "worker"];
   assert.equal(
-    resolveRoleLaunch(org, "junior", {}, { roles, terminal: "t1" }).role,
-    "junior",
+    resolveRoleLaunch(org, "worker", {}, { roles: active, terminal: "t1" })
+      .role,
+    "worker",
   );
   // Asking for the role that does hold the work is fine, and PM is PM.
-  assert.equal(roleCommand(org, "junior", { roles }).argv[3], "gpt-5.5");
-  assert.equal(roleCommand(org, "pm", { roles }).role, "pm");
-  assert.throws(
-    () => roleCommand(org, "pl", { roles }),
-    /not in this run's roles/,
+  assert.equal(
+    roleCommand(org, "worker", { roles: active }).argv[3],
+    "gpt-5.5",
   );
+  assert.equal(roleCommand(org, "pm", { roles: active }).role, "pm");
+  assert.equal(roleCommand(org, "pm", { roles }).role, "pm");
 
   // Through the CLI, role-command reads the frozen organization and roles.
   const state = tempDir(t);
@@ -639,7 +651,7 @@ test("a terminal is opened and handed work only for a role the run holds", async
       goal: "Fix a typo",
       repo: ".",
       depth: 2,
-      tasks: [{ file: "task-a.json", role: "junior" }],
+      tasks: [{ file: "task-a.json", role: "worker" }],
       policy: { maxRunning: 1, maxReviewPending: 1 },
       budget: { maxAttempts: 1, maxCalls: 1 },
     },
@@ -648,12 +660,12 @@ test("a terminal is opened and handed work only for a role the run holds", async
   );
   const live = example();
   live.profiles["agy-oss"].model = "gpt-oss-120b-medium";
-  live.roles.junior.profile = "codex-luna";
+  live.roles.worker.profile = "codex-luna";
   const orgFile = path.join(repo, "organization.json");
   writeJSON(orgFile, live);
   const common = ["--org", orgFile, "--workflow-id", "wf-2", "--state", state];
   const printed = await capture(() =>
-    main(["role-command", "--role", "junior", ...common]),
+    main(["role-command", "--role", "worker", ...common]),
   );
   assert.deepEqual(JSON.parse(printed).argv, [
     "codex",
@@ -663,142 +675,25 @@ test("a terminal is opened and handed work only for a role the run holds", async
     "--config",
     "check_for_update_on_startup=false",
   ]);
-  await assert.rejects(
-    () => main(["role-command", "--role", "senior", ...common]),
-    /not in this run's roles/,
-  );
 });
 
-test("a role does not start in the worktree another role's task works in", async (t) => {
-  // literacy-test: PM opened the Agy Senior reviewer in Junior's worktree
-  // because Agy had been trusted there, and the review's Playwright files were
-  // left uncommitted beside Junior's report.
-  const juniorId = "repo-1::/w/literacy-test/literacy-report-junior";
-  const plId = "repo-1::/w/literacy-test/literacy-pl";
+test("a PM does not start in a worktree owned by a Worker task", () => {
+  const workerWorktree = "repo-1::/w/task-worker";
   const state = {
     tasks: {
       report: {
-        role: "junior",
-        execution: { worktreeId: juniorId },
-        attempts: [{ receipt: { worktreeId: juniorId, role: "junior" } }],
+        role: "worker",
+        execution: { worktreeId: workerWorktree },
+        attempts: [{ receipt: { worktreeId: workerWorktree, role: "worker" } }],
       },
-      split: { role: "pl", attempts: [{ receipt: { worktreeId: plId } }] },
-      waiting: { role: "senior", attempts: [{ id: "reserved" }] },
     },
   };
-  const pmWorktree = "/w/literacy-test/literacy-site-research-2";
   assert.throws(
-    () => assertWorktreeUnshared(state, "senior", `id:${juniorId}`, pmWorktree),
-    /literacy-report-junior is where junior works on task report; senior does not start there/,
+    () => assertWorktreeUnshared(state, "pm", `id:${workerWorktree}`, "/w/pm"),
+    /where worker works on task report; pm does not start there/,
   );
-  assert.throws(
-    () =>
-      assertWorktreeUnshared(
-        state,
-        "senior",
-        "current",
-        "/w/literacy-test/literacy-report-junior",
-      ),
-    /where junior works/,
-  );
-  assert.throws(
-    () =>
-      assertWorktreeUnshared(
-        state,
-        "pl",
-        `path:/w/literacy-test/literacy-report-junior`,
-        pmWorktree,
-      ),
-    /where junior works/,
-  );
-  // The owner itself, a role the owner supervises, a new child worktree, the
-  // PM's own worktree, and a launch outside any workflow all pass.
-  assertWorktreeUnshared(state, "junior", `id:${juniorId}`, pmWorktree);
-  assertWorktreeUnshared(
-    state,
-    "senior",
-    "current",
-    "/w/literacy-test/literacy-pl",
-  );
-  assertWorktreeUnshared(
-    state,
-    "senior",
-    "new-child",
-    "/w/literacy-test/literacy-report-junior",
-  );
-  assertWorktreeUnshared(state, "senior", "current", pmWorktree);
-  assertWorktreeUnshared(undefined, "senior", `id:${juniorId}`, pmWorktree);
-
-  // Through the CLI, role-terminal reads the workflow's record and refuses
-  // before any terminal is created.
-  const stateDir = tempDir(t);
-  const repo = await workflowRepo(t);
-  await createWorkflow(
-    stateDir,
-    {
-      schemaVersion: 1,
-      id: "wf-share",
-      goal: "Write a report",
-      repo: ".",
-      depth: 4,
-      tasks: [{ file: "task-a.json", role: "junior" }],
-      policy: { maxRunning: 1, maxReviewPending: 1 },
-      budget: { maxAttempts: 1, maxCalls: 2 },
-    },
-    example(),
-    repo,
-  );
-  const { revision } = readWorkflow(stateDir, "wf-share").state;
-  attachExecution(stateDir, "wf-share", revision, {
-    schemaVersion: 1,
-    eventId: "attach-1",
-    attemptId: "attempt-1",
-    taskId: "task-a",
-    receipt: {
-      executionId: "ctx_1",
-      runId: "run_1",
-      taskId: "task_1",
-      dispatchId: "ctx_1",
-      worktreeId: juniorId,
-    },
-  });
-  const orgFile = path.join(repo, "organization.json");
-  writeJSON(orgFile, example());
-  const common = [
-    "--org",
-    orgFile,
-    "--workflow-id",
-    "wf-share",
-    "--state",
-    stateDir,
-  ];
-  for (const command of [
-    ["role-terminal", "--role", "senior", "--worktree", `id:${juniorId}`],
-    [
-      "worker-start",
-      "--role",
-      "senior",
-      "--repo",
-      repo,
-      "--spec",
-      "x",
-      "--worktree",
-      `id:${juniorId}`,
-      "--terminal",
-      "term_1",
-    ],
-  ]) {
-    await assert.rejects(
-      () =>
-        main([
-          ...command,
-          ...common,
-          "--orca",
-          path.join(repo, "missing-orca"),
-        ]),
-      /is where junior works on task task-a; senior does not start there/,
-    );
-  }
+  assertWorktreeUnshared(state, "worker", `id:${workerWorktree}`, "/w/pm");
+  assertWorktreeUnshared(state, "pm", "new-child", "/w/pm");
 });
 
 test("the launch documents keep each role out of another role's worktree", () => {
@@ -809,7 +704,7 @@ test("the launch documents keep each role out of another role's worktree", () =>
     );
   const runtime = read("references/orca-runtime.md");
   assert.match(runtime, /### 역할과 워크트리/);
-  assert.match(runtime, /검토 대상을 \*\*경로와 커밋으로 읽고\*\*/);
+  assert.match(runtime, /검토자는 구현 결과를 경로와 커밋으로 읽고/);
   assert.match(runtime, /is where <역할> works on task <task>/);
   for (const skill of ["skills/pm/SKILL.md"]) {
     assert.match(read(skill), /`역할과 워크트리` 절/);
@@ -867,7 +762,7 @@ test("a workflow launch reads the organization snapshot the workflow froze", asy
     baseRef: "HEAD",
   });
   const frozen = example();
-  frozen.roles.pl.profile = "codex-terra";
+  frozen.roles.worker.profile = "codex-terra";
   await createWorkflow(
     state,
     {
@@ -875,7 +770,7 @@ test("a workflow launch reads the organization snapshot the workflow froze", asy
       id: "wf-1",
       goal: "Split the work",
       repo: ".",
-      tasks: [{ file: "task-a.json", role: "junior" }],
+      tasks: [{ file: "task-a.json", role: "worker" }],
       policy: { maxRunning: 1, maxReviewPending: 1 },
       budget: { maxAttempts: 1, maxCalls: 1 },
     },
@@ -885,8 +780,7 @@ test("a workflow launch reads the organization snapshot the workflow froze", asy
 
   // The live organization later drops PL entirely.
   const live = example();
-  delete live.roles.pl;
-  live.roles.senior.parent = "pm";
+  live.roles.worker.profile = "agy-opus";
   const orgFile = path.join(repo, "organization.json");
   writeJSON(orgFile, live);
 
@@ -899,7 +793,7 @@ test("a workflow launch reads the organization snapshot the workflow froze", asy
       "--org",
       orgFile,
       "--role",
-      "pl",
+      "worker",
       "--spec",
       "나눈다.",
       "--workflow-id",
@@ -911,7 +805,7 @@ test("a workflow launch reads the organization snapshot the workflow froze", asy
     console.log = log;
   }
   const spec = JSON.parse(output.join("\n")).spec;
-  assert.match(spec, /역할: PL/);
+  assert.match(spec, /역할: Worker/);
   assert.match(spec, /workflow: wf-1/);
 
   await assert.rejects(
@@ -921,7 +815,7 @@ test("a workflow launch reads the organization snapshot the workflow froze", asy
         "--org",
         orgFile,
         "--role",
-        "pl",
+        "worker",
         "--repo",
         repo,
         "--spec",
@@ -934,7 +828,7 @@ test("a workflow launch reads the organization snapshot the workflow froze", asy
         path.join(repo, "missing-orca"),
       ]),
     // The live file no longer declares PL; the frozen snapshot binds it to terra.
-    /Role pl uses codex \(profile codex-terra\)/,
+    /Role worker uses codex \(profile codex-terra\)/,
   );
 });
 

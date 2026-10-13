@@ -1,4 +1,4 @@
-/** Tests the new Director–PM–Worker organization without changing saved legacy runs. */
+/** Tests the Director–PM–Worker organization and retired role rejection. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs, { readFileSync } from "node:fs";
@@ -24,6 +24,7 @@ import { classifyFailure } from "../plugins/oh-my-teams/scripts/failures.mjs";
 import { validateReviewInput } from "../plugins/oh-my-teams/scripts/gates.mjs";
 import {
   createWorkflow,
+  readWorkflow,
   setWorkflowDepth,
 } from "../plugins/oh-my-teams/scripts/workflow.mjs";
 
@@ -40,9 +41,8 @@ test("formation binds only PM and Worker; PM owns planning and integration", () 
   assert.deepEqual(depthRoles(definedRoles(org), 1), ["pm"]);
   assert.deepEqual(depthRoles(definedRoles(org), 2), ["pm", "worker"]);
   assert.throws(() => depthRoles(definedRoles(org), 3), /Depth must be 1\.\.2/);
-  assert.equal(foldRole(definedRoles(org), "pl"), "pm");
-  assert.equal(foldRole(definedRoles(org), "senior"), "worker");
-  assert.equal(foldRole(definedRoles(org), "junior"), "worker");
+  assert.equal(foldRole(definedRoles(org), "worker"), "worker");
+  assert.throws(() => foldRole(definedRoles(org), "pl"), /Unknown role/);
   assert.equal(
     foldRole(definedRoles(org), classifyFailure({ kind: "scope" }).nextOwner),
     "pm",
@@ -61,7 +61,7 @@ test("formation binds only PM and Worker; PM owns planning and integration", () 
   assert.equal(roleTitle("worker", "task"), "[Worker] task");
 });
 
-test("a new workflow defaults to PM and Worker and folds legacy ownership", async (context) => {
+test("a new workflow defaults to PM and Worker and rejects retired roles", async (context) => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "omt-three-tier-"));
   context.after(() => fs.rmSync(repo, { recursive: true, force: true }));
   for (const arguments_ of [
@@ -136,7 +136,7 @@ test("a new workflow defaults to PM and Worker and folds legacy ownership", asyn
       org,
       repo,
     ),
-    /must use pm or worker roles/,
+    /role from pm\/worker/,
   );
   assert.throws(
     () =>
@@ -149,12 +149,31 @@ test("a new workflow defaults to PM and Worker and folds legacy ownership", asyn
       }),
     /Depth must be 1\.\.2/,
   );
+  const workflowDir = path.join(stateDir, "workflows", request.id);
+  const frozenOrgFile = path.join(workflowDir, "organization.json");
+  const frozenOrg = JSON.parse(fs.readFileSync(frozenOrgFile, "utf8"));
+  writeJSON(frozenOrgFile, {
+    ...frozenOrg,
+    roles: { ...frozenOrg.roles, pl: { ...frozenOrg.roles.worker } },
+  });
+  assert.throws(
+    () => readWorkflow(stateDir, request.id),
+    /Roles must be named from pm\/worker/,
+  );
+  writeJSON(frozenOrgFile, frozenOrg);
+  const stateFile = path.join(workflowDir, "state.json");
+  const savedState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  writeJSON(stateFile, { ...savedState, roles: ["pm", "pl"] });
+  assert.throws(
+    () => readWorkflow(stateDir, request.id),
+    /Workflow contains retired roles/,
+  );
 });
 
 test("a new organization cannot mix Worker with the retired ranks", () => {
   const org = organization();
   org.roles.pl = { ...org.roles.worker };
-  assert.throws(() => validateOrg(org), /cannot declare legacy/);
+  assert.throws(() => validateOrg(org), /Roles must be named from pm\/worker/);
 });
 
 test("published schemas accept Worker organizations, tasks, reviews, and document authors", () => {

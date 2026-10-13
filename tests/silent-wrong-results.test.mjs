@@ -173,7 +173,7 @@ test("a model answer about rate limits is not read as exhausted capacity", () =>
 test("a missing environment reference fails as configuration, not as budget", async (t) => {
   const dir = await repo(t);
   const org = structuredClone(organization);
-  org.profiles[org.roles.junior.profile].env = {
+  org.profiles[org.roles.worker.profile].env = {
     AUTH_TOKEN: "OMT_ABSENT_TEST_TOKEN",
   };
   const stateDir = path.join(dir, ".omt");
@@ -258,7 +258,7 @@ test("a retired attempt id cannot be reused to overwrite a settled attempt", asy
     id: "attempt-reuse",
     goal: "Reject a retired attempt id",
     repo: ".",
-    tasks: [{ file: "alpha.json", role: "junior" }],
+    tasks: [{ file: "alpha.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 3, maxCalls: 3 },
   };
@@ -300,7 +300,7 @@ test("a retired attempt id cannot be reused to overwrite a settled attempt", asy
     schemaVersion: 1,
     eventId: "retry-one",
     taskId: "alpha",
-    resolvedBy: "junior",
+    resolvedBy: "worker",
     resolution: "fixed the check",
     evidence: "runs/alpha-fix",
   });

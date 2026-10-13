@@ -163,7 +163,7 @@ const taskV2 = {
     {
       id: "semantic-review",
       kind: "agent-review",
-      role: "senior",
+      role: "worker",
       criteria: ["scope-review"],
     },
   ],
@@ -204,36 +204,31 @@ test("first setup is idempotent; explicit edits archive and reject stale revisio
   );
 });
 test("graph validation accepts branches and rejects cycle/missing profile/second root", () => {
-  assert.ok(chart(validateOrg(clone())).includes("JUNIOR"));
+  assert.ok(chart(validateOrg(clone())).includes("WORKER"));
   const cycle = clone();
-  cycle.roles.pl.parent = "junior";
-  assert.throws(() => validateOrg(cycle), /cycle/);
+  cycle.roles.pm.parent = "worker";
+  assert.throws(() => validateOrg(cycle), /only root/);
   const bad = clone();
-  bad.roles.junior.profile = "missing";
+  bad.roles.worker.profile = "missing";
   assert.throws(() => validateOrg(bad), /profile/);
   const root = clone();
-  root.roles.senior.parent = null;
+  root.roles.worker.parent = null;
   assert.throws(() => validateOrg(root), /root/);
 });
 test("default organization uses the responsibility hierarchy and routing", () => {
   const org = validateOrg(clone());
-  assert.equal(org.roles.pl.parent, "pm");
-  assert.equal(org.roles.senior.parent, "pl");
-  assert.equal(org.roles.junior.parent, "senior");
-  assert.deepEqual(Object.keys(org.roles), ["pm", "pl", "senior", "junior"]);
+  assert.equal(org.roles.pm.parent, null);
+  assert.equal(org.roles.worker.parent, "pm");
+  assert.deepEqual(Object.keys(org.roles), ["pm", "worker"]);
   assert.deepEqual(
-    ["pm", "pl", "senior", "junior"].map((role) => org.roles[role].concurrency),
+    ["pm", "worker"].map((role) => org.roles[role].concurrency),
     // Every Agy role draws on one shared quota pool, so the shipped default
     // holds a single slot each and extra parallelism is opted into per team.
-    [1, 1, 1, 1],
+    [1, 1],
   );
-  assert.equal(org.profiles[org.roles.pl.profile].model, "gpt-5.6-sol");
+  assert.equal(org.profiles[org.roles.pm.profile].model, null);
   assert.equal(
-    org.profiles[org.roles.senior.profile].model,
-    "gemini-3.8-flash-high",
-  );
-  assert.equal(
-    org.profiles[org.roles.junior.profile].model,
+    org.profiles[org.roles.worker.profile].model,
     "claude-opus-4-6-thinking",
   );
   assert.ok(
@@ -524,10 +519,11 @@ test("the example organization offers every listed Codex model as its own profil
 });
 test("the organization chart states the effort each role actually runs at", () => {
   const org = clone();
-  assert.match(chart(org), /PL: codex-current .* effort=provider-default/);
+  org.roles.worker.profile = "codex-current";
+  assert.match(chart(org), /WORKER: codex-current .* effort=provider-default/);
 
   org.profiles["codex-current"].effort = "high";
-  assert.match(chart(org), /PL: codex-current .* effort=high/);
+  assert.match(chart(org), /WORKER: codex-current .* effort=high/);
 });
 test("no bound profile in the example changes the effort the call used to run at", () => {
   // Adding the field must not silently deepen an existing organization's calls,
@@ -539,8 +535,8 @@ test("no bound profile in the example changes the effort the call used to run at
 test("failed OSS output promotes once to configured fallback and preserves org snapshot", async (t) => {
   const dir = await repo(t),
     org = clone();
-  org.roles.junior.profile = "agy-oss";
-  org.roles.junior.fallbacks = ["agy-sonnet"];
+  org.roles.worker.profile = "agy-oss";
+  org.roles.worker.fallbacks = ["agy-sonnet"];
   let calls = 0;
   const result = await work(dir, org, task, {
     stateDir: path.join(dir, ".omt"),
@@ -587,8 +583,8 @@ test("quota stop does not switch subscriptions; repeated failure never becomes s
   assert.equal(result.status, "failed");
   assert.equal(calls, 1);
   const retryOrg = clone();
-  retryOrg.roles.junior.profile = "agy-oss";
-  retryOrg.roles.junior.fallbacks = ["agy-sonnet"];
+  retryOrg.roles.worker.profile = "agy-oss";
+  retryOrg.roles.worker.fallbacks = ["agy-sonnet"];
   const failed = await work(dir, retryOrg, task, {
     stateDir: path.join(dir, ".omt"),
     call: async () => response({ edits: [] }),
@@ -616,10 +612,10 @@ test("provider editing workspace outside JSON protocol is blocked and preserved"
 test("concurrency locks block extra workers and are released after settlement", async (t) => {
   const dir = await repo(t),
     org = clone();
-  org.roles.junior.concurrency = 1;
+  org.roles.worker.concurrency = 1;
   const stateDir = path.join(dir, ".omt");
   fs.mkdirSync(path.join(stateDir, "slots"), { recursive: true });
-  fs.writeFileSync(path.join(stateDir, "slots", "junior-0.lock"), "owned");
+  fs.writeFileSync(path.join(stateDir, "slots", "worker-0.lock"), "owned");
   await assert.rejects(
     () => work(dir, org, task, { stateDir, call: async () => response({}) }),
     /occupied/,
@@ -628,7 +624,7 @@ test("concurrency locks block extra workers and are released after settlement", 
 test("timed-out provider retains the slot and does not start fallback", async (t) => {
   const dir = await repo(t),
     org = clone();
-  org.roles.junior.concurrency = 1;
+  org.roles.worker.concurrency = 1;
   const stateDir = path.join(dir, ".omt");
   const result = await work(dir, org, task, {
     stateDir,
@@ -636,7 +632,7 @@ test("timed-out provider retains the slot and does not start fallback", async (t
   });
   assert.equal(result.status, "failed");
   assert.equal(result.calls.length, 1);
-  assert.ok(fs.existsSync(path.join(stateDir, "slots", "junior-0.lock")));
+  assert.ok(fs.existsSync(path.join(stateDir, "slots", "worker-0.lock")));
 });
 test("base and check argv changes invalidate success even with identical source", async (t) => {
   const dir = await repo(t),
@@ -1099,7 +1095,7 @@ test("task v2 cannot be accepted before independent review and stale source inva
     schemaVersion: 1,
     id: "review-value",
     requirementId: "semantic-review",
-    reviewer: { kind: "agent-review", role: "senior", executionId: "senior-1" },
+    reviewer: { kind: "agent-review", role: "worker", executionId: "senior-1" },
     implementationExecutionId: report.runId,
     conclusion: "approved",
     criteria: [
@@ -1149,7 +1145,7 @@ test("same execution cannot satisfy an independent review requirement", async (t
     requirementId: "semantic-review",
     reviewer: {
       kind: "agent-review",
-      role: "senior",
+      role: "worker",
       executionId: report.runId,
     },
     implementationExecutionId: report.runId,
@@ -1184,7 +1180,7 @@ test("an open finding cannot be erased by omitting it from a later approved revi
     schemaVersion: 1,
     id: "review-rejected",
     requirementId: "semantic-review",
-    reviewer: { kind: "agent-review", role: "senior", executionId: "senior-1" },
+    reviewer: { kind: "agent-review", role: "worker", executionId: "senior-1" },
     implementationExecutionId: report.runId,
     conclusion: "changes-requested",
     criteria: [
@@ -1206,7 +1202,7 @@ test("an open finding cannot be erased by omitting it from a later approved revi
     schemaVersion: 1,
     id: "review-omits-finding",
     requirementId: "semantic-review",
-    reviewer: { kind: "agent-review", role: "senior", executionId: "senior-2" },
+    reviewer: { kind: "agent-review", role: "worker", executionId: "senior-2" },
     implementationExecutionId: report.runId,
     conclusion: "approved",
     criteria: [
@@ -1254,7 +1250,7 @@ test("status reports persisted gate owner and keeps unknown usage/cost explicit"
   ]);
   assert.equal(shown.code, 0, shown.stderr);
   const output = JSON.parse(shown.stdout);
-  assert.equal(output.runs[0].nextOwner, "senior");
+  assert.equal(output.runs[0].nextOwner, "worker");
   assert.equal(output.usage.missingUsageCalls, 1);
   assert.equal(output.usage.missingCostCalls, 1);
   assert.equal(output.pools["agy-shared"].status, "unknown");
@@ -1552,8 +1548,8 @@ test("workflow schedules only dependency-ready tasks and requires reconciliation
     goal: "Complete A then B",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 6 },
@@ -1618,7 +1614,7 @@ test("workflow deduplicates settlements, ignores stale attempts, and enforces to
     id: "workflow-events",
     goal: "Exercise event safety",
     repo: ".",
-    tasks: [{ file: "task.json", role: "junior" }],
+    tasks: [{ file: "task.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 2 },
   };
@@ -1702,8 +1698,8 @@ test("workflow rejects dependency cycles and avoids parallel shared-contract con
     goal: "Serialize shared contract work",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 5 },
@@ -1735,8 +1731,8 @@ test("workflow rejects dependency cycles and avoids parallel shared-contract con
     ...request,
     id: "workflow-cycle",
     tasks: [
-      { file: "ca.json", role: "junior" },
-      { file: "cb.json", role: "junior" },
+      { file: "ca.json", role: "worker" },
+      { file: "cb.json", role: "worker" },
     ],
   };
   await assert.rejects(
@@ -1784,8 +1780,8 @@ test("workflow offers independent tasks together within role and workflow limits
     goal: "Run independent tasks together",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 2, maxCalls: 4 },
@@ -1793,7 +1789,7 @@ test("workflow offers independent tasks together within role and workflow limits
   // Concurrent dispatch, not the shipped slot default, is under test, so this
   // organization opts into the second junior slot explicitly.
   const parallelOrganization = clone();
-  parallelOrganization.roles.junior.concurrency = 2;
+  parallelOrganization.roles.worker.concurrency = 2;
   await createWorkflow(stateDir, request, parallelOrganization, dir);
   assert.deepEqual(
     resumeWorkflow(stateDir, request.id, 1).actions.map(
@@ -1851,7 +1847,7 @@ test("failure routing uses deterministic signals and does not retry ambiguous wo
   assert.equal(
     classifyFailure({ message: "unrecognized failure", evidence: "run.log" })
       .nextOwner,
-    "senior",
+    "pm",
   );
 });
 test("workflow retry preserves attempts and cumulative budget", async (t) => {
@@ -1864,7 +1860,7 @@ test("workflow retry preserves attempts and cumulative budget", async (t) => {
     id: "workflow-retry",
     goal: "Retry with preserved history",
     repo: ".",
-    tasks: [{ file: "task.json", role: "junior" }],
+    tasks: [{ file: "task.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 3 },
   };
@@ -1902,7 +1898,7 @@ test("workflow retry preserves attempts and cumulative budget", async (t) => {
     schemaVersion: 1,
     eventId: "retry-r1",
     taskId: "retry-task",
-    resolvedBy: "junior",
+    resolvedBy: "worker",
     resolution: "Corrected the boundary logic",
     evidence: "review/fix-1.md",
   });
@@ -1938,7 +1934,7 @@ test("lesson candidates are deduplicated and never auto-promoted", (t) => {
       resolution: "Added a boundary regression test",
       reproduction: "Run node --test boundary.test.mjs",
       target: "organization-eval",
-      owner: "senior",
+      owner: "worker",
     };
   const first = recordLessonCandidate(stateDir, lesson),
     second = recordLessonCandidate(stateDir, lesson);
@@ -2388,7 +2384,7 @@ test("ungrounded answers route to workspace rebinding", () => {
   ]) {
     assert.deepEqual(classifyFailure(input), {
       category: "environment-context",
-      nextOwner: "pl",
+      nextOwner: "pm",
       action: "rebind-workspace",
       retryable: true,
     });

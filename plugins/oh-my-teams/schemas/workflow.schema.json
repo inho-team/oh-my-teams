@@ -13,11 +13,25 @@
     "budget"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
-    "goal": { "type": "string", "minLength": 1 },
-    "repo": { "type": "string", "minLength": 1 },
-    "integrationTask": { "type": "string", "minLength": 1 },
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
+    "integrationTask": {
+      "type": "string",
+      "minLength": 1
+    },
     "staffing": {
       "type": "object",
       "$comment": "A resource-based workflow freezes the director's catalog evidence, PM choice, and task choices. workflow.mjs validates resource identity and authorization against the frozen organization."
@@ -25,8 +39,8 @@
     "depth": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 4,
-      "description": "New organizations use 1 PM or 2 PM+Worker. Saved legacy organizations use 1 PM; 2 +Junior; 3 +Senior; 4 +PL. A saved depth of 5 reads as 4."
+      "maximum": 2,
+      "description": "Depth 1 runs PM alone; depth 2 runs PM and Worker."
     },
     "tasks": {
       "type": "array",
@@ -36,8 +50,13 @@
         "additionalProperties": false,
         "required": ["file", "role"],
         "properties": {
-          "file": { "type": "string", "minLength": 1 },
-          "role": { "enum": ["pm", "pl", "senior", "junior", "worker"] }
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "enum": ["pm", "worker"]
+          }
         }
       }
     },
@@ -46,8 +65,14 @@
       "additionalProperties": false,
       "required": ["maxRunning", "maxReviewPending"],
       "properties": {
-        "maxRunning": { "type": "integer", "minimum": 1 },
-        "maxReviewPending": { "type": "integer", "minimum": 1 }
+        "maxRunning": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxReviewPending": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "budget": {
@@ -55,8 +80,14 @@
       "additionalProperties": false,
       "required": ["maxAttempts", "maxCalls"],
       "properties": {
-        "maxAttempts": { "type": "integer", "minimum": 1 },
-        "maxCalls": { "type": "integer", "minimum": 1 }
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxCalls": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     }
   }

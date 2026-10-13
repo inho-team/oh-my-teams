@@ -90,7 +90,7 @@ const validRequest = () => ({
   id: "safety-request",
   goal: "Ship it",
   repo: ".",
-  tasks: [{ file: "alpha.json", role: "junior" }],
+  tasks: [{ file: "alpha.json", role: "worker" }],
   policy: { maxRunning: 1, maxReviewPending: 1 },
   budget: { maxAttempts: 1, maxCalls: 1 },
 });
@@ -191,7 +191,7 @@ test("a workflow request is rejected field by field before any file is read", ()
     [{ repo: "   " }, /repository required/],
     [{ tasks: [] }, /tasks required/],
     [{ tasks: [{ file: "a.json", role: "director" }] }, /file and a role/],
-    [{ tasks: [{ file: "", role: "junior" }] }, /file and a role/],
+    [{ tasks: [{ file: "", role: "worker" }] }, /file and a role/],
     [{ policy: { maxRunning: 0, maxReviewPending: 1 } }, /maxRunning required/],
     [
       { policy: { maxRunning: 1, maxReviewPending: 0 } },
@@ -221,7 +221,7 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
       {
         id: "senior-review",
         kind: "agent-review",
-        role: "senior",
+        role: "worker",
         criteria: ["correctness", "scope"],
       },
     ],
@@ -232,7 +232,7 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
     requirementId: "senior-review",
     reviewer: {
       kind: "agent-review",
-      role: "senior",
+      role: "worker",
       executionId: "review-exec",
     },
     implementationExecutionId: "impl-exec",
@@ -248,15 +248,17 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
   const invalid = [
     [{ schemaVersion: 2 }, /schemaVersion=1 and id required/],
     [
-      { reviewer: { kind: "human", role: "senior", executionId: "x" } },
+      { reviewer: { kind: "human", role: "worker", executionId: "x" } },
       /required kind\/role\/execution identity/,
     ],
     [
-      { reviewer: { kind: "agent-review", role: "junior", executionId: "x" } },
+      {
+        reviewer: { kind: "agent-review", role: "director", executionId: "x" },
+      },
       /required kind\/role\/execution identity/,
     ],
     [
-      { reviewer: { kind: "agent-review", role: "senior", executionId: "  " } },
+      { reviewer: { kind: "agent-review", role: "worker", executionId: "  " } },
       /required kind\/role\/execution identity/,
     ],
     // The reviewer must not be the execution that produced the work.
@@ -317,7 +319,7 @@ test("a review cannot approve itself, skip a criterion, or carry an open finding
             id: "f1",
             status: "accepted-risk",
             description: "x",
-            authority: "junior",
+            authority: "worker",
             reason: "ok",
           },
         ],
@@ -521,7 +523,7 @@ test("matrix로 차단된 실행 전 거부는 workflow attempt를 소비하지 
       import.meta.url,
     ),
   );
-  const gemini = roleCommand(org, "senior");
+  const gemini = roleCommand(org, "worker");
 
   // Windows Agy는 matrix에서 차단된다.
   let thrown = null;

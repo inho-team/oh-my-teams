@@ -2,8 +2,15 @@
   "schemaVersion": 1,
   "revision": 1,
   "name": "small-team",
-  "modelPolicy": { "preset": "custom", "revision": 1 },
-  "pools": { "codex-current": { "label": "Codex current account" } },
+  "modelPolicy": {
+    "preset": "custom",
+    "revision": 1
+  },
+  "pools": {
+    "codex-current": {
+      "label": "Codex current account"
+    }
+  },
   "profiles": {
     "codex-default": {
       "provider": "codex",

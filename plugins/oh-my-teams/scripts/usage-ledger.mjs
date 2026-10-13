@@ -213,7 +213,7 @@ function samePath(a, b) {
  * The state directory names the kickoff most directly. A launch run from
  * inside the PM worktree belongs to it too. A launch run from a worktree an
  * earlier launch of the kickoff opened, or from below it, belongs to the same kickoff, which is
- * how a PL's own launches are traced back through the PL's worktree.
+ * how launches from a child worktree are traced to their kickoff.
  *
  * @param {object[]} kickoffs - Registry entries (`pm.worktreeId`, `pm.path`, `pm.stateDir`).
  * @param {object[]} launches - Earlier ledger lines.

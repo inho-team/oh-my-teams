@@ -21,7 +21,7 @@ export function classifyFailure(input = {}) {
   const message = String(input.message ?? input.reason ?? "");
 
   if (input.processState === "unknown" || input.timedOut) {
-    return route("process-unknown", "pl", "reconcile-execution", false);
+    return route("process-unknown", "pm", "reconcile-execution", false);
   }
   const limited = input.kind === "rate-limited";
   // Missing capacity clears on its own, so the same profile is tried again
@@ -57,7 +57,7 @@ export function classifyFailure(input = {}) {
     input.kind === "scope" ||
     /context too large|split large|scope too large/i.test(message)
   ) {
-    return route("scope-too-large", "pl", "split-task", false);
+    return route("scope-too-large", "pm", "split-task", false);
   }
   // A model that answered from another model is a profile problem, not a
   // workspace problem: rebinding the workspace would leave the wrong model in
@@ -96,35 +96,35 @@ export function classifyFailure(input = {}) {
     input.grounded === false ||
     /different tree|do not exist in this workspace/i.test(message)
   ) {
-    return route("environment-context", "pl", "rebind-workspace", true);
+    return route("environment-context", "pm", "rebind-workspace", true);
   }
   if (
     input.kind === "environment" ||
     input.exitCode === 127 ||
     /fixture|tool not found|environment/i.test(message)
   ) {
-    return route("environment-failure", "pl", "repair-environment", true);
+    return route("environment-failure", "pm", "repair-environment", true);
   }
   if (
     input.kind === "contract" ||
     /contract conflict|dependency revision/i.test(message)
   ) {
-    return route("contract-conflict", "pl", "revise-shared-contract", false);
+    return route("contract-conflict", "pm", "revise-shared-contract", false);
   }
   if (
     input.kind === "review" ||
     /changes-requested|review rejected/i.test(message)
   ) {
-    return route("review-rejection", "junior", "resolve-findings", true);
+    return route("review-rejection", "worker", "resolve-findings", true);
   }
   if (
     input.kind === "implementation" ||
     input.checkFailed ||
     /check failed|test failed|implementation/i.test(message)
   ) {
-    return route("implementation-error", "junior", "fix-implementation", true);
+    return route("implementation-error", "worker", "fix-implementation", true);
   }
-  return route("unknown", "senior", "classify-with-evidence", false);
+  return route("unknown", "pm", "classify-with-evidence", false);
 }
 
 /**

@@ -17,7 +17,6 @@ import {
   AUDITOR_ROLE,
   DIRECTOR_ROLE,
   ROLE_LADDER,
-  ACTIVE_ROLES,
   ROLES,
   ROOT_ROLE,
   fileSha256,
@@ -57,7 +56,7 @@ import {
   requirementsFidelity,
   requirementsFidelityConfirm,
 } from "../plugins/oh-my-teams/scripts/requirements.mjs";
-import { draftOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
+import { draftThreeTierOrganization } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import {
   ACCEPTED_RISK_AUTHORITIES,
   acceptOutcome,
@@ -208,22 +207,21 @@ test("DIRECTOR_ROLE is 'director' and sits above pm in ROLE_LADDER", () => {
   // director is not in ROLES (감독 worker 목록)
   assert.equal(ROLES.includes(DIRECTOR_ROLE), false);
   // ROLE_LADDER contains all ROLES after director
-  assert.deepEqual(ROLE_LADDER.slice(1), ACTIVE_ROLES);
+  assert.deepEqual(ROLE_LADDER.slice(1), ROLES);
 });
 
 test("director does not appear in foldRole or resolveRole: existing folding is unchanged", () => {
   const org = example();
   // foldRole은 ROLES만 본다; director를 넣으면 Unknown role 오류
-  assert.throws(() => foldRole(["pm", "pl"], DIRECTOR_ROLE), /Unknown role/);
+  assert.throws(() => foldRole(["pm", "pm"], DIRECTOR_ROLE), /Unknown role/);
   // resolveRole도 마찬가지
   assert.throws(() => resolveRole(org, DIRECTOR_ROLE), /Unknown role/);
   // 기존 접힘: pl 선언 안 된 팀에서 pl → pm으로 접힘
-  const twoTier = draftOrganization({
+  const twoTier = draftThreeTierOrganization({
     name: "mini",
-    tiers: 2,
     models: ["claude:default", "codex:default"],
   });
-  assert.equal(resolveRole(twoTier, "pl"), "pm");
+  assert.equal(resolveRole(twoTier, "pm"), "pm");
 });
 
 test("pm and director do not fold into each other", () => {
@@ -233,27 +231,19 @@ test("pm and director do not fold into each other", () => {
   assert.throws(() => foldRole(["pm"], DIRECTOR_ROLE), /Unknown role/);
 });
 
-// 71cb8dd 병합(Director/PM/Worker 재편, AUDITOR_ROLE 도입)이 기존 PL/Senior/Junior
-// 계보와 새 Worker/Auditor 계보를 모두 보존하는지 확인하는 호환성 회귀 테스트.
-test("a legacy PL/Senior/Junior organization keeps its full fold and dispatch surface after the Worker/auditor reorg", () => {
+test("PM dispatches to Worker while the director stays outside the role roster", () => {
   const org = example();
-  const declared = ["pm", "pl", "senior", "junior"];
+  const declared = ["pm", "worker"];
   assert.deepEqual(Object.keys(org.roles), declared);
-  // 선언된 각 역할은 병합 전과 마찬가지로 스스로에게 그대로 접힌다.
-  for (const role of declared) {
-    assert.equal(foldRole(declared, role), role);
-  }
-  // worker가 선언되지 않은 조직에서 worker 요청은 여전히 가장 가까운 선언 역할로 접힌다.
-  assert.equal(foldRole(declared, "worker"), "junior");
-  // PM의 dispatch 권한은 worker가 추가된 뒤에도 pl/senior/junior를 그대로 포함한다.
-  assert.deepEqual(DISPATCH_AUTHORITY.pm, ["pl", "senior", "junior", "worker"]);
-  // roleCommand는 auditor 분기와 무관하게 선언된 profile로 junior를 그대로 실행한다.
-  const command = roleCommand(org, "junior", { roles: declared });
-  assert.equal(command.role, "junior");
-  assert.equal(command.profile, org.roles.junior.profile);
+  assert.deepEqual(DISPATCH_AUTHORITY.pm, ["worker"]);
+  assert.deepEqual(DISPATCH_AUTHORITY.worker, []);
+  assert.equal(foldRole(declared, "worker"), "worker");
+  assert.throws(() => foldRole(declared, DIRECTOR_ROLE), /Unknown role/);
+  const command = roleCommand(org, "worker", { roles: declared });
+  assert.equal(command.profile, org.roles.worker.profile);
 });
 
-test("org.auditor coexists with AUDITOR_ROLE and Worker on a three-tier organization without polluting ROLES/ACTIVE_ROLES", () => {
+test("org.auditor coexists with Worker without entering the role roster", () => {
   const org = readJSON(
     new URL(
       "../plugins/oh-my-teams/examples/organization.three-tier.json",
@@ -263,9 +253,8 @@ test("org.auditor coexists with AUDITOR_ROLE and Worker on a three-tier organiza
   org.auditor = { profile: "codex-default" };
   const declared = ["pm", "worker"];
   assert.deepEqual(Object.keys(org.roles), declared);
-  // auditor는 out-of-ladder 역할이므로 ROLES·ACTIVE_ROLES 어디에도 섞이지 않는다.
+  // auditor는 역할 서열 밖에 있으므로 ROLES에 들어가지 않는다.
   assert.equal(ROLES.includes(AUDITOR_ROLE), false);
-  assert.equal(ACTIVE_ROLES.includes(AUDITOR_ROLE), false);
   // foldRole은 auditor를 모르는 역할로 취급해 거부한다: auditor는 folding 대상이 아니다.
   assert.throws(() => foldRole(declared, AUDITOR_ROLE), /Unknown role/);
   // worker는 그대로 선언된 역할로 접히고, roleCommand는 auditor 요청을
@@ -336,14 +325,10 @@ test("all PM-and-below role specs include the no-direct-user-contact sentence", 
   }
 });
 
-test("sub-PM roles still report to their folded parent, not to 이사", () => {
-  // pl reports to pm (not 이사)
-  const pl = roleSpec(example(), "pl", "나눈다.");
-  assert.match(pl, /보고 대상: PM/);
-  assert.doesNotMatch(pl, /보고 대상: 이사/);
-  // junior reports to senior
-  const junior = roleSpec(example(), "junior", "구현한다.");
-  assert.match(junior, /보고 대상: Senior/);
+test("Worker reports to PM rather than the director", () => {
+  const spec = roleSpec(example(), "worker", "구현한다.");
+  assert.match(spec, /보고 대상: PM/);
+  assert.doesNotMatch(spec, /보고 대상: 이사/);
 });
 
 // ─── 4. 이사 기록이 없는 기존 조직·등록부의 호환 ────────────────────────
@@ -1101,7 +1086,7 @@ test("the review schema and the runtime accept the same accepted-risk authoritie
       {
         id: "review-senior",
         kind: "agent-review",
-        role: "senior",
+        role: "worker",
         criteria: ["semantic"],
       },
     ],
@@ -1115,7 +1100,7 @@ test("the review schema and the runtime accept the same accepted-risk authoritie
     requirementId: "review-senior",
     reviewer: {
       kind: "agent-review",
-      role: "senior",
+      role: "worker",
       executionId: "reviewer-exec",
     },
     implementationExecutionId: "implementation-exec",
@@ -1134,7 +1119,7 @@ test("the review schema and the runtime accept the same accepted-risk authoritie
   for (const authority of schemaAuthorities) {
     assert.equal(validateReviewInput(review(authority), task).id, "review-1");
   }
-  for (const authority of ["senior", "junior", undefined]) {
+  for (const authority of ["worker", "worker", undefined]) {
     assert.throws(
       () => validateReviewInput(review(authority), task),
       /Accepted risk needs PM\/user\/director authority/,

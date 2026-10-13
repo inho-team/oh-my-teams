@@ -4,7 +4,6 @@ import path from "node:path";
 import {
   ROLES,
   assert,
-  canonicalRole,
   readJsonDirectory,
   writeJSON,
   withAsyncFileLock,
@@ -49,16 +48,11 @@ const decisionFile = (stateDir, id) =>
 const gateFile = (stateDir, taskId) =>
   path.join(stateDir, "gates", `${taskId}.json`);
 
-// A task contract names the role that reviews it in a full ladder. An
-// organization that omits that role folds the duty onto a more senior one, so a
-// reviewer at or above the required rank satisfies the requirement while a more
-// junior one still cannot. Reviewer independence is a separate check on
-// execution identity, so this never weakens it.
+// PM may review work when a workflow runs without Worker. Reviewer independence
+// is checked separately using execution identity.
 function seniorEnoughToReview(reviewerRole, requiredRole) {
-  if (requiredRole === "worker")
-    return reviewerRole === "worker" || reviewerRole === "pm";
-  const required = ROLES.indexOf(canonicalRole(requiredRole));
-  const reviewer = ROLES.indexOf(canonicalRole(reviewerRole));
+  const required = ROLES.indexOf(requiredRole);
+  const reviewer = ROLES.indexOf(reviewerRole);
   return required >= 0 && reviewer >= 0 && reviewer <= required;
 }
 

@@ -47,16 +47,9 @@ test("model drift warning for model: null profiles via command paths", async (t)
         attempts: 1,
         fallbacks: [],
       },
-      pl: {
+      worker: {
         parent: "pm",
         profile: "p1",
-        concurrency: 1,
-        attempts: 1,
-        fallbacks: [],
-      },
-      junior: {
-        parent: "pm",
-        profile: "p3",
         concurrency: 1,
         attempts: 1,
         fallbacks: [],
@@ -147,7 +140,7 @@ test("model drift warning for model: null profiles via command paths", async (t)
     "--org",
     orgFile,
     "--role",
-    "pm",
+    "worker",
     "--worktree",
     wtArg,
     "--orca",
@@ -165,7 +158,7 @@ test("model drift warning for model: null profiles via command paths", async (t)
     "--org",
     orgFile,
     "--role",
-    "pl",
+    "worker",
     "--repo",
     dir,
     "--terminal",
@@ -186,7 +179,7 @@ test("model drift warning for model: null profiles via command paths", async (t)
     "--org",
     orgFile,
     "--role",
-    "pl",
+    "worker",
     "--repo",
     dir,
     "--terminal",
@@ -218,13 +211,15 @@ test("model drift warning for model: null profiles via command paths", async (t)
       JSON.stringify(res4.warnings),
   );
 
+  orgData.roles.worker.profile = "p3";
+  fs.writeFileSync(orgFile, JSON.stringify(orgData, null, 2));
   setModel("opus");
   const res5 = await runCmd([
     "role-terminal",
     "--org",
     orgFile,
     "--role",
-    "junior",
+    "worker",
     "--worktree",
     wtArg,
     "--orca",
@@ -240,7 +235,7 @@ test("model drift warning for model: null profiles via command paths", async (t)
     "--org",
     orgFile,
     "--role",
-    "junior",
+    "worker",
     "--repo",
     dir,
     "--terminal",

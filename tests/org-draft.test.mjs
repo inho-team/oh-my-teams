@@ -1,129 +1,55 @@
-/** The tier-and-model draft form builds, and the defaults it records. */
+/** PM/Worker and resource organization draft tests. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  DEPTH_ROLES,
   resolveRole,
   validateOrg,
 } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
   DRAFT_DEFAULTS,
-  draftOrganization,
   draftResourceOrganization,
+  draftThreeTierOrganization,
 } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 
-function models(count) {
-  return Array.from({ length: count }, () => "claude:default");
-}
-
-test("each ladder size declares its roles as a single chain under PM", () => {
-  for (const [tiers, roles] of Object.entries(DEPTH_ROLES)) {
-    const org = draftOrganization({
-      name: "team",
-      tiers: Number(tiers),
-      models: models(roles.length),
-    });
-    assert.deepEqual(Object.keys(org.roles), roles);
-    roles.forEach((role, index) => {
-      assert.equal(
-        org.roles[role].parent,
-        index === 0 ? null : roles[index - 1],
-      );
-    });
-  }
-});
-
-test("an omitted role's work folds onto the tier above it", () => {
-  const org = draftOrganization({
+test("a model draft binds PM and Worker in one chain", () => {
+  const org = draftThreeTierOrganization({
     name: "team",
-    tiers: 3,
-    models: models(3),
+    models: ["claude:default", "codex:default"],
   });
-  // Three tiers drop PL. Splitting work addressed to PL must land on PM, or it
-  // reaches nobody; the roles three tiers keep resolve to themselves.
-  assert.equal(resolveRole(org, "pl"), "pm");
-  assert.equal(resolveRole(org, "senior"), "senior");
-  assert.equal(resolveRole(org, "junior"), "junior");
-});
-
-test("a draft spends nothing beyond the models the user chose", () => {
-  const org = draftOrganization({
-    name: "team",
-    tiers: 4,
-    models: [
-      "claude:default",
-      "agy:claude-opus-4-6-thinking",
-      "agy:gemini-3.1-pro-high",
-      "agy:gemini-3.8-flash-high",
-    ],
-  });
-  // Formation asks for models only. Anything else it saved without asking has
-  // to be the least costly value, so a user who never opens adjust is never
-  // billed for a fallback or a parallel slot they did not pick.
+  assert.deepEqual(Object.keys(org.roles), ["pm", "worker"]);
+  assert.equal(org.roles.pm.parent, null);
+  assert.equal(org.roles.worker.parent, "pm");
+  assert.equal(resolveRole(org, "worker"), "worker");
   for (const binding of Object.values(org.roles)) {
     assert.equal(binding.concurrency, DRAFT_DEFAULTS.concurrency);
     assert.equal(binding.attempts, 1);
     assert.deepEqual(binding.fallbacks, []);
   }
   assert.equal(org.policy.onExhaustion, "stop");
-
-  // Effort is left to each CLI until adjust sets it.
   for (const profile of Object.values(org.profiles)) {
     assert.equal(Object.hasOwn(profile, "effort"), false);
   }
 });
 
-test("Gemini choices become Agy profiles with the exact model IDs", () => {
-  const org = draftOrganization({
+test("model drafts share a provider pool and refuse incomplete choices", () => {
+  const org = draftThreeTierOrganization({
     name: "team",
-    tiers: 2,
     models: ["agy:gemini-3.1-pro-high", "agy:gemini-3.8-flash-high"],
   });
-  const chosen = Object.values(org.profiles).map((profile) => [
-    profile.provider,
-    profile.model,
-  ]);
-  assert.deepEqual(chosen, [
-    ["agy", "gemini-3.1-pro-high"],
-    ["agy", "gemini-3.8-flash-high"],
-  ]);
-});
-
-test("profiles of one provider share a pool, and a repeated model one profile", () => {
-  const org = draftOrganization({
-    name: "team",
-    tiers: 3,
-    models: ["codex:default", "agy:claude-sonnet-4-6", "agy:claude-sonnet-4-6"],
-  });
-  // The runtime skips an exhausted pool only for profiles grouped into it, so
-  // ungrouped profiles of one account would keep retrying a spent quota.
-  assert.deepEqual(Object.keys(org.pools).sort(), [
-    "agy-current",
-    "codex-current",
-  ]);
+  assert.deepEqual(Object.keys(org.pools), ["agy-current"]);
   assert.equal(Object.keys(org.profiles).length, 2);
-  assert.equal(org.roles.senior.profile, org.roles.junior.profile);
-  assert.equal(org.profiles[org.roles.pm.profile].model, null);
-});
-
-test("a draft refuses what it cannot fill in without asking", () => {
   assert.throws(
-    () => draftOrganization({ name: "t", tiers: 5, models: models(5) }),
-    /tiers must be 1\.\.4/,
-  );
-  assert.throws(
-    () => draftOrganization({ name: "t", tiers: 2, models: models(1) }),
+    () =>
+      draftThreeTierOrganization({ name: "team", models: ["codex:default"] }),
     /exactly one model per tier/,
   );
-  // An Ollama window cannot be guessed: a prompt larger than the window is
-  // truncated silently and the answer still looks normal.
   assert.throws(
-    () => draftOrganization({ name: "t", tiers: 1, models: ["ollama:qwen3"] }),
+    () =>
+      draftThreeTierOrganization({
+        name: "team",
+        models: ["ollama:qwen3", "codex:default"],
+      }),
     /adjust after formation/,
-  );
-  assert.throws(
-    () => draftOrganization({ name: "t", tiers: 1, models: ["opus"] }),
-    /provider:model/,
   );
 });
 

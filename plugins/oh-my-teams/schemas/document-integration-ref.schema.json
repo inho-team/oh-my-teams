@@ -21,23 +21,54 @@
     "extensionHistory"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "docId": { "type": "string", "minLength": 1 },
-    "stage": { "const": "implementation" },
-    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "schemaVersion": {
+      "const": 1
+    },
+    "docId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stage": {
+      "const": "implementation"
+    },
+    "kickoffId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "workflowId": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$",
       "$comment": "Never null: an integration task only exists once a multi-task workflow has been created (3.1 확정된 결정)."
     },
-    "revision": { "type": "integer", "minimum": 1 },
-    "state": { "enum": ["open", "in-review", "resolved"] },
-    "author": { "$ref": "#/$defs/author" },
-    "createdAt": { "type": "string", "format": "date-time" },
-    "basedOnRevision": {
-      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    "revision": {
+      "type": "integer",
+      "minimum": 1
     },
-    "reason": { "type": "string", "minLength": 1 },
+    "state": {
+      "enum": ["open", "in-review", "resolved"]
+    },
+    "author": {
+      "$ref": "#/$defs/author"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "basedOnRevision": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
     "integrationTaskRef": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$",
@@ -55,8 +86,14 @@
         "additionalProperties": false,
         "required": ["taskHash", "reason"],
         "properties": {
-          "taskHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-          "reason": { "type": "string", "minLength": 1 }
+          "taskHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "$comment": "One entry per extendIntegrationChecks call (3.2: taskHash + reason at that call)."
@@ -69,9 +106,12 @@
       "required": ["role", "executionId"],
       "properties": {
         "role": {
-          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+          "enum": ["director", "pm", "worker"]
         },
-        "executionId": { "type": "string", "minLength": 1 }
+        "executionId": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     }
   }

@@ -96,14 +96,14 @@ export const HELP = `oh my teams organization runtime on Orca (Node >=22)
                --profile runs the fallback a workflow-handoff recorded for
                --workflow-task;
                the terminal comes from role-terminal; the worker's tab title
-               starts with its role tag, e.g. [PL]; a Claude terminal that
+               starts with its role tag, e.g. [Worker]; a Claude terminal that
                last received a different task, or any review, gets /clear first)
   terminal-idle-check --terminal HANDLE [--orca EXECUTABLE]
                (run before workflow-reserve for a reused terminal)
   prompt-answer --org FILE --terminal HANDLE --workflow-id ID --state DIR
                 [--role ROLE] [--orca EXECUTABLE]
                 (the role's supervisor answers the question that stopped its terminal:
-                only the Run-bound PM, or the PL that started the role; one key per
+                only the Run-bound PM; one key per
                 screen state, then the screen is read again; every attempt is recorded
                 in <state>/prompt-answers.jsonl. status: resolved | advanced |
                 unresolved | redirected | escalate | no-question | refused)

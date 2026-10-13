@@ -85,7 +85,7 @@ const workflowTask = (id) => ({
 });
 
 // A workflow whose state.roles is depthRoles(definedRoles(org), depth): depth 1
-// -> ["pm"], depth 3 -> ["pm", "senior", "junior"] (core.mjs DEPTH_ROLES).
+// -> ["pm"], depth 3 -> ["pm", "worker", "worker"] (core.mjs DEPTH_ROLES).
 async function createTestWorkflow(dir, stateDir, id, depth) {
   const taskFile = path.join(dir, `${id}-task.json`);
   writeJSON(taskFile, workflowTask(`${id}-task`));
@@ -95,7 +95,7 @@ async function createTestWorkflow(dir, stateDir, id, depth) {
     goal: "Test document authority",
     repo: ".",
     depth,
-    tasks: [{ file: `${id}-task.json`, role: "junior" }],
+    tasks: [{ file: `${id}-task.json`, role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 3, maxCalls: 4 },
   };
@@ -107,7 +107,7 @@ function envelope({
   stageSlug,
   docType,
   localId,
-  author = { role: "senior", executionId: "doc-writer" },
+  author = { role: "worker", executionId: "doc-writer" },
   revision = 1,
   basedOnRevision = null,
   ...extra
@@ -175,7 +175,7 @@ test("doc-save allows a PM to author design/design-contract when the workflow sn
 test("doc-save refuses a PM design/design-contract save when the workflow snapshot's state.roles includes senior or junior (3.4.2, branch 1, reject)", async (t) => {
   const dir = await repo(t);
   const stateDir = path.join(dir, ".omt");
-  await createTestWorkflow(dir, stateDir, "wf-roster-reject", 3);
+  await createTestWorkflow(dir, stateDir, "wf-roster-reject", 2);
 
   const result = await docSave(
     dir,
@@ -332,173 +332,6 @@ test("doc-save prefers the workflow snapshot's state.roles over its organization
   assert.match(rejected.stderr, /PM may not author design\/design-contract/);
 });
 
-// --- 3.4.3 PL field-scope restriction ---------------------------------------
-
-test("doc-save allows a PM's first revision of workflow-task-ref, then a PL's next revision changing only attemptRefs (3.4.3, normal flow)", async (t) => {
-  const dir = tempDir(t);
-  const stateDir = path.join(dir, ".omt");
-
-  const rev1 = envelope({
-    workflowId: "wf-task-ref",
-    stageSlug: "implementation",
-    docType: "workflow-task-ref",
-    localId: "task-1",
-    author: { role: "pm", executionId: "pm-1" },
-    workflowRef: {
-      path: ".omt/workflows/wf-task-ref/request.json",
-      sha256: "a".repeat(64),
-    },
-    taskRef: {
-      path: ".omt/workflows/wf-task-ref/tasks/task-1/revisions/1.json",
-      sha256: "b".repeat(64),
-    },
-    attemptRefs: [],
-    designRef: null,
-  });
-  const first = await docSave(dir, stateDir, rev1);
-  assert.equal(first.code, 0, first.stderr);
-
-  const rev2 = envelope({
-    workflowId: "wf-task-ref",
-    stageSlug: "implementation",
-    docType: "workflow-task-ref",
-    localId: "task-1",
-    author: { role: "pl", executionId: "pl-1" },
-    revision: 2,
-    basedOnRevision: 1,
-    workflowRef: rev1.workflowRef,
-    taskRef: rev1.taskRef,
-    attemptRefs: ["attempt-1"],
-    designRef: null,
-  });
-  const second = await docSave(dir, stateDir, rev2, [
-    "--expected-revision",
-    "1",
-  ]);
-  assert.equal(second.code, 0, second.stderr);
-});
-
-test("doc-save refuses a PL's next revision of implementation/workflow-task-ref when workflowRef changes alongside attemptRefs (3.4.3, reject)", async (t) => {
-  const dir = tempDir(t);
-  const stateDir = path.join(dir, ".omt");
-
-  const rev1 = envelope({
-    workflowId: "wf-task-ref",
-    stageSlug: "implementation",
-    docType: "workflow-task-ref",
-    localId: "task-1",
-    author: { role: "pm", executionId: "pm-1" },
-    workflowRef: {
-      path: ".omt/workflows/wf-task-ref/request.json",
-      sha256: "a".repeat(64),
-    },
-    taskRef: {
-      path: ".omt/workflows/wf-task-ref/tasks/task-1/revisions/1.json",
-      sha256: "b".repeat(64),
-    },
-    attemptRefs: [],
-    designRef: null,
-  });
-  const first = await docSave(dir, stateDir, rev1);
-  assert.equal(first.code, 0, first.stderr);
-
-  const rev2 = envelope({
-    workflowId: "wf-task-ref",
-    stageSlug: "implementation",
-    docType: "workflow-task-ref",
-    localId: "task-1",
-    author: { role: "pl", executionId: "pl-1" },
-    revision: 2,
-    basedOnRevision: 1,
-    workflowRef: { path: rev1.workflowRef.path, sha256: "c".repeat(64) },
-    taskRef: rev1.taskRef,
-    attemptRefs: ["attempt-1"],
-    designRef: null,
-  });
-  const second = await docSave(dir, stateDir, rev2, [
-    "--expected-revision",
-    "1",
-  ]);
-  assert.notEqual(second.code, 0);
-  assert.match(second.stderr, /PL may only change attemptRefs/);
-});
-
-test("doc-save allows a PL's next revision of implementation/integration-ref to change only taskHashRef and extensionHistory (3.4.3, allow)", async (t) => {
-  const dir = tempDir(t);
-  const stateDir = path.join(dir, ".omt");
-
-  const rev1 = envelope({
-    workflowId: "wf-integration-ref",
-    stageSlug: "implementation",
-    docType: "integration-ref",
-    localId: "integration-1",
-    author: { role: "pm", executionId: "pm-1" },
-    integrationTaskRef: "integration-1",
-    taskHashRef: "a".repeat(64),
-    extensionHistory: [],
-  });
-  const first = await docSave(dir, stateDir, rev1);
-  assert.equal(first.code, 0, first.stderr);
-
-  const rev2 = envelope({
-    workflowId: "wf-integration-ref",
-    stageSlug: "implementation",
-    docType: "integration-ref",
-    localId: "integration-1",
-    author: { role: "pl", executionId: "pl-1" },
-    revision: 2,
-    basedOnRevision: 1,
-    integrationTaskRef: rev1.integrationTaskRef,
-    taskHashRef: "b".repeat(64),
-    extensionHistory: [{ taskHash: "b".repeat(64), reason: "extend checks" }],
-  });
-  const second = await docSave(dir, stateDir, rev2, [
-    "--expected-revision",
-    "1",
-  ]);
-  assert.equal(second.code, 0, second.stderr);
-});
-
-test("doc-save refuses a PL's next revision of implementation/integration-ref when integrationTaskRef changes (3.4.3, reject)", async (t) => {
-  const dir = tempDir(t);
-  const stateDir = path.join(dir, ".omt");
-
-  const rev1 = envelope({
-    workflowId: "wf-integration-ref",
-    stageSlug: "implementation",
-    docType: "integration-ref",
-    localId: "integration-1",
-    author: { role: "pm", executionId: "pm-1" },
-    integrationTaskRef: "integration-1",
-    taskHashRef: "a".repeat(64),
-    extensionHistory: [],
-  });
-  const first = await docSave(dir, stateDir, rev1);
-  assert.equal(first.code, 0, first.stderr);
-
-  const rev2 = envelope({
-    workflowId: "wf-integration-ref",
-    stageSlug: "implementation",
-    docType: "integration-ref",
-    localId: "integration-1",
-    author: { role: "pl", executionId: "pl-1" },
-    revision: 2,
-    basedOnRevision: 1,
-    integrationTaskRef: "integration-2",
-    taskHashRef: "b".repeat(64),
-    extensionHistory: [{ taskHash: "b".repeat(64), reason: "extend checks" }],
-  });
-  const second = await docSave(dir, stateDir, rev2, [
-    "--expected-revision",
-    "1",
-  ]);
-  assert.notEqual(second.code, 0);
-  assert.match(
-    second.stderr,
-    /PL may only change taskHashRef and extensionHistory/,
-  );
-});
-
 // --- authority boundary: neither rule widens who may author what -----------
 
 test("doc-save's PM roster condition does not widen design/design-contract authority: a junior still may not author it (authority not widened)", async (t) => {
@@ -512,13 +345,13 @@ test("doc-save's PM roster condition does not widen design/design-contract autho
       stageSlug: "design",
       docType: "design-contract",
       localId: "design-1",
-      author: { role: "junior", executionId: "junior-1" },
+      author: { role: "director", executionId: "director-1" },
     }),
   );
   assert.notEqual(result.code, 0);
   assert.match(
     result.stderr,
-    /Role junior may not author design\/design-contract/,
+    /Role director may not author design\/design-contract/,
   );
 });
 
@@ -533,7 +366,7 @@ test("doc-save's PM roster condition does not restrict a senior author of design
       stageSlug: "design",
       docType: "design-contract",
       localId: "design-1",
-      author: { role: "senior", executionId: "senior-1" },
+      author: { role: "worker", executionId: "senior-1" },
     }),
   );
   assert.equal(result.code, 0, result.stderr);

@@ -127,7 +127,7 @@ node plugins/oh-my-teams/scripts/teams-org.mjs runtime-install \
 
 Codex 계정의 모델 카탈로그는 계정과 CLI 버전에 따라 달라진다. codex-cli 0.154.0(2026-09-16)의 `codex debug models`에는 `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`가 선택 가능한 모델로 들어 있었고, `config.toml`에 `model`이 없으면 이 가운데 첫 항목이 실행된다. 설치 때 `agy models`와 Codex 카탈로그로 다시 확인한다. Claude·Codex의 미지정 모델은 `null`로 저장해 호스트 기본값을 쓴다.
 
-새 조직의 구조 예제는 [PM·Worker 조직](plugins/oh-my-teams/examples/organization.three-tier.json)이다. 이전 [네 역할 예제](plugins/oh-my-teams/examples/organization.json)는 진행 중인 kickoff의 역할 스냅샷과 이전 설정을 이해하기 위한 호환 자료이며, 새 결성의 기본값이 아니다. 모든 역할의 동시 실행 슬롯은 기본 1이다.
+새 조직의 구조 예제는 [PM·Worker 조직](plugins/oh-my-teams/examples/organization.json)이다. 모든 역할의 동시 실행 슬롯은 기본 1이다.
 
 Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model` 인자로 전달한다. 요청 모델이 적용됐다는 증거가 없으면 기본 모델로 조용히 전환하지 않는다.
 
@@ -135,7 +135,7 @@ Agy 프로필의 GPT-OSS·Sonnet·Opus는 모두 정확한 모델 ID를 `--model
 
 `form`은 PM과 Worker가 사용할 모델만 한 번에 묻는다. 직급이나 실행 깊이는 묻지 않는다. PM은 목표 달성을 책임지고 구현·설계·독립 검토가 필요할 때 Worker를 배정한다. 선택지는 결성 직전에 실행한 `model-catalog` 조회 결과를 바탕으로 제시하며, 확인된 목록에 없는 모델은 자유 입력 `provider:model`로 받는다. `org-draft`는 구독 자원만 받아 새 조직을 만든다.
 
-PL·Senior·Junior가 들어 있는 과거 조직은 기존 기록 조회에 사용할 수 있지만 새 kickoff에는 등록할 수 없다. 새 작업을 시작하려면 PM·Worker 조직으로 조정한다.
+PL·Senior·Junior가 들어 있는 과거 조직과 workflow 스냅샷은 현재 런타임에서 실행하거나 재개할 수 없다. 새 작업을 시작하려면 PM·Worker 조직을 만든다.
 
 묻지 않은 값은 사용자가 고른 모델보다 더 쓰지 않는 쪽으로 저장된다. 모든 프로필은 현재 로그인 계정을 쓰고 같은 실행기끼리 하나의 pool로 묶이며, 역할별 동시 인원과 시도는 1, 대체 프로필은 없음, 소진 시 중단, 호출 한도(`policy.maxCalls`)는 3이다. 이 한도는 `work` 한 번이 쓰는 provider 호출 수와 workflow attempt 하나에 배정되는 호출 수의 상한이며, 대화형 역할 터미널의 턴은 세지 않는다. 감독 역할은 15분 동안 활동이 없는 worker에게 진행 상황을 묻고, 답이 없는 요청이 2회에 이르면 상위에 보고한다. 추론 강도는 기록하지 않아 각 CLI 기본값을 쓴다. 다만 Agy는 Gemini 모델에 기본 강도를 두지 않고 강도 없이 부르면 거부하므로, `model-catalog`가 돌려주는 Gemini id는 강도가 이미 포함되어 있어(예: `gemini-3.8-flash-medium`) 그 값을 그대로 쓰면 따로 정할 필요가 없다. 자유 입력으로 강도 없는 이름을 받았으면 보완한 강도를 결성 보고에 적는다. 이 값들은 `org-draft` 명령이 기록하며 모두 `adjust`에서 바꾼다. 로컬 Ollama 모델은 컨텍스트 창을 확인해 기록해야 하므로 결성 후 `adjust`에서 추가한다.
 

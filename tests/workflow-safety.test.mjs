@@ -53,8 +53,8 @@ test("component acceptance cannot bypass failed or stale integration evidence", 
     repo: ".",
     integrationTask: "integration.json",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 4 },
@@ -172,7 +172,7 @@ test("worker enforces persisted workflow allowance before a second provider call
   const dir = await repo(t),
     stateDir = path.join(dir, ".omt");
   const fallbackOrganization = structuredClone(organization);
-  fallbackOrganization.roles.junior.fallbacks = ["agy-oss"];
+  fallbackOrganization.roles.worker.fallbacks = ["agy-oss"];
   fs.writeFileSync(path.join(dir, ".gitignore"), ".omt/\n");
   fs.writeFileSync(path.join(dir, "a.txt"), "unchanged");
   writeJSON(path.join(dir, "a.json"), task("a"));
@@ -181,7 +181,7 @@ test("worker enforces persisted workflow allowance before a second provider call
     id: "worker-budget",
     goal: "Bound actual provider calls",
     repo: ".",
-    tasks: [{ file: "a.json", role: "junior" }],
+    tasks: [{ file: "a.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 1 },
   };
@@ -258,7 +258,7 @@ test("a one-task workflow closes on its task's acceptance, without an integratio
     id: "single-task",
     goal: "Write one report",
     repo: ".",
-    tasks: [{ file: "a.json", role: "junior" }],
+    tasks: [{ file: "a.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 1, maxCalls: 1 },
   };
@@ -346,7 +346,7 @@ test("a review that asks for changes hands the task back within its attempt", as
     id: "rework-loop",
     goal: "Write a report a reviewer accepts",
     repo: ".",
-    tasks: [{ file: "a.json", role: "junior" }],
+    tasks: [{ file: "a.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 1, maxCalls: 3 },
   };
@@ -426,7 +426,7 @@ test("a review that asks for changes hands the task back within its attempt", as
 
   const reworked = rework("rw-1", "reject-first", "second");
   assert.equal(reworked.tasks.a.state, "running");
-  assert.equal(reworked.tasks.a.role, "junior");
+  assert.equal(reworked.tasks.a.role, "worker");
   assert.equal(reworked.tasks.a.execution.executionId, "second");
   assert.equal(reworked.tasks.a.worktreeId, "repo::/w/report");
   // The review sent the work back, so no new attempt is spent.
@@ -505,8 +505,8 @@ test("prelaunch reservation blocks duplicate launches and attaches without spend
     goal: "Reserve before launch",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 1, maxReviewPending: 2 },
     budget: { maxAttempts: 2, maxCalls: 2 },
@@ -568,8 +568,8 @@ test("parallel attempts reserve allowances and reject spending another attempt b
     goal: "Bound parallel usage",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 3 },
@@ -578,7 +578,7 @@ test("parallel attempts reserve allowances and reject spending another attempt b
   // organization opts into a second junior slot instead of inheriting the
   // single shared-pool slot the shipped examples pin.
   const parallelOrganization = structuredClone(organization);
-  parallelOrganization.roles.junior.concurrency = 2;
+  parallelOrganization.roles.worker.concurrency = 2;
   await createWorkflow(stateDir, request, parallelOrganization, dir);
   const receipt = (id) => ({
     executionId: id,
@@ -697,8 +697,8 @@ test("attachExecution enforces workflow running capacity and active conflicts", 
     goal: "test",
     repo: ".",
     tasks: [
-      { file: "first.json", role: "junior" },
-      { file: "second.json", role: "junior" },
+      { file: "first.json", role: "worker" },
+      { file: "second.json", role: "worker" },
     ],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 3, maxCalls: 3 },
@@ -790,7 +790,7 @@ test("resumeWorkflow rejects pending and stale-execution gates", async (t) => {
     id: "safety-gate",
     goal: "test",
     repo: ".",
-    tasks: [{ file: "gated.json", role: "junior" }],
+    tasks: [{ file: "gated.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 3 },
   };
@@ -876,7 +876,7 @@ test("headless receipt is rejected after sessionless execution removal", async (
     id: "headless-receipt-test",
     goal: "Test headless receipt validation",
     repo: ".",
-    tasks: [{ file: "a.json", role: "junior" }],
+    tasks: [{ file: "a.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 3, maxCalls: 3 },
   };
@@ -890,7 +890,7 @@ test("headless receipt is rejected after sessionless execution removal", async (
   writeJSON(path.join(workerDir, "worker.json"), {
     schemaVersion: 1,
     id: "worker-abc123",
-    role: "junior",
+    role: "worker",
     profile: "agy-profile",
     provider: "agy",
     binary: ["agy"],
@@ -1006,7 +1006,7 @@ test("headless receipt is rejected after sessionless execution removal", async (
   writeJSON(path.join(workerDirWrong, "worker.json"), {
     schemaVersion: 1,
     id: "worker-wrong-path",
-    role: "junior",
+    role: "worker",
     profile: "agy-profile",
     provider: "agy",
     binary: ["agy"],

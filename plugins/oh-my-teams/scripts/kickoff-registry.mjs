@@ -789,7 +789,7 @@ export function sharesWorktreeWithAny(target, candidates) {
  * A `stateDir` outside any Git working tree, whose owner project has no
  * `.omt/organization.json`, whose organization has never registered any
  * kickoff at all, or that sits in a DIFFERENT worktree of the owner Git
- * repository than any registered kickoff's own `pm.path` — a Senior/Worker
+ * repository than any registered kickoff's own `pm.path` — a Worker
  * child worktree's own task state, for instance — resolves to `null`:
  * genuinely unregistered solo usage, where the caller's own
  * orgFile/worktreeId (if any) apply unchanged. Only a `stateDir` that sits
@@ -877,7 +877,7 @@ export async function resolveRegisteredKickoffFromState(
     // else inside the one audited PM worktree to dodge the objection check
     // below, exactly as much as a direct child of `pm-wt` would be. A
     // legitimate DIFFERENT worktree of the same owner Git repository (a
-    // Senior/Worker child worktree's own task state, for instance) is
+    // Worker child worktree's own task state, for instance) is
     // ordinary unregistered solo usage and must fall through to `null`, not
     // fail-closed, or every child worktree under an audited organization
     // would be unable to accept at all — but a worktree nested inside a

@@ -41,11 +41,11 @@ const full = () =>
 
 test("an organization may omit every role except PM", () => {
   const org = reduced();
-  assert.deepEqual(definedRoles(org), ["pm", "junior"]);
+  assert.deepEqual(definedRoles(org), ["pm", "worker"]);
   assert.equal(validateOrg(org), org);
 
   const solo = structuredClone(org);
-  delete solo.roles.junior;
+  delete solo.roles.worker;
   assert.equal(definedRoles(validateOrg(solo)).length, 1);
 
   const headless = structuredClone(org);
@@ -55,35 +55,36 @@ test("an organization may omit every role except PM", () => {
 
 test("a role may not hang off a parent the organization never declared", () => {
   const org = reduced();
-  org.roles.junior.parent = "pl";
-  assert.throws(() => validateOrg(org), /Invalid parent: junior/);
+  org.roles.worker.parent = "director";
+  assert.throws(() => validateOrg(org), /Invalid parent: worker/);
 });
 
 test("role names stay fixed so routing and skills keep addressing them", () => {
   const org = reduced();
-  org.roles.reviewer = { ...org.roles.junior };
+  org.roles.reviewer = { ...org.roles.worker };
   assert.throws(() => validateOrg(org), /Roles must be named from/);
 });
 
 test("work addressed to an absent role folds onto the closest declared one", () => {
   const org = reduced();
+  delete org.roles.worker;
   assert.deepEqual(
-    ["pm", "pl", "senior", "junior"].map((role) => resolveRole(org, role)),
-    ["pm", "pm", "pm", "junior"],
+    ["pm", "worker"].map((role) => resolveRole(org, role)),
+    ["pm", "pm"],
   );
-  // A full ladder resolves every role to itself, so folding is inert there.
+  // An organization with Worker resolves each role to itself.
   assert.deepEqual(
-    ["pm", "pl", "senior", "junior"].map((role) => resolveRole(full(), role)),
-    ["pm", "pl", "senior", "junior"],
+    ["pm", "worker"].map((role) => resolveRole(full(), role)),
+    ["pm", "worker"],
   );
   assert.throws(() => resolveRole(org, "cto"), /Unknown role: cto/);
-  assert.throws(() => foldRole(["junior"], "pm"), /No declared role/);
+  assert.throws(() => foldRole(["worker"], "pm"), /No declared role/);
 });
 
 test("the chart renders only the roles a reduced organization declares", () => {
   const rendered = chart(reduced());
   assert.match(rendered, /^PM: agy-opus/m);
-  assert.match(rendered, /^ {2}JUNIOR: agy-sonnet/m);
+  assert.match(rendered, /^ {2}WORKER: agy-sonnet/m);
   for (const absent of ["PL:", "SENIOR:", "INTERN:"]) {
     assert.equal(rendered.includes(absent), false);
   }
@@ -104,18 +105,21 @@ test("a reviewer at or above the required rank satisfies the requirement", () =>
     findings: [],
   });
   // PM takes the review over when the organization declares no senior.
-  for (const role of ["pm", "pl", "senior"]) {
+  for (const role of ["pm", "worker"]) {
     assert.equal(validateReviewInput(review(role), task).id, "review-1");
   }
-  assert.throws(() => validateReviewInput(review("junior"), task), /Reviewer/);
+  assert.throws(
+    () => validateReviewInput(review("director"), task),
+    /Reviewer/,
+  );
 });
 
 test("the single-subscription preset serializes roles and drops shared-quota fallbacks", () => {
   const org = full();
-  org.roles.junior.concurrency = 4;
-  org.roles.junior.fallbacks = ["agy-sonnet", "claude-current"];
+  org.roles.worker.concurrency = 4;
+  org.roles.worker.fallbacks = ["agy-sonnet", "claude-current"];
   const { changes, organization } = previewPreset(org, "single-subscription");
-  const junior = changes.find((change) => change.role === "junior");
+  const junior = changes.find((change) => change.role === "worker");
   assert.deepEqual(junior.after, {
     profile: "agy-opus",
     // agy-sonnet shares the agy-shared pool with agy-opus and is already gone
@@ -147,14 +151,15 @@ test("a workflow folds task assignment and failure routing onto declared roles",
     id: "reduced-fold",
     goal: "Run a four-role plan on a two-role team",
     repo: ".",
-    tasks: [{ file: "a.json", role: "senior" }],
+    depth: 1,
+    tasks: [{ file: "a.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 2 },
   };
   const state = await createWorkflow(stateDir, request, reduced(), dir);
-  assert.deepEqual(state.roles, ["pm", "junior"]);
+  assert.deepEqual(state.roles, ["pm"]);
   assert.equal(state.tasks.a.role, "pm");
-  assert.equal(state.tasks.a.requestedRole, "senior");
+  assert.equal(state.tasks.a.requestedRole, "worker");
 
   attachExecution(stateDir, request.id, state.revision, {
     schemaVersion: 1,
@@ -194,7 +199,7 @@ test("a workflow folds task assignment and failure routing onto declared roles",
   );
   const { route } = settled.state.tasks.a.failure;
   assert.equal(route.nextOwner, "pm");
-  assert.equal(route.routedOwner, "pl");
+  assert.equal(route.routedOwner, undefined);
 });
 
 const reviewedTask = () => ({
@@ -207,7 +212,7 @@ const reviewedTask = () => ({
     {
       id: "review-senior",
       kind: "agent-review",
-      role: "senior",
+      role: "worker",
       criteria: ["semantic"],
     },
   ],

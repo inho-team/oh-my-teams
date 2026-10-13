@@ -59,7 +59,7 @@ function orcaReceipt(state, extra = {}) {
 test("runtime codes route without naming the runtime in failure routing", () => {
   const reconcile = {
     category: "process-unknown",
-    nextOwner: "pl",
+    nextOwner: "pm",
     action: "reconcile-execution",
     retryable: false,
   };
@@ -218,7 +218,7 @@ test("a state the hint table never saw still reaches a reconciling route", async
   assert.equal(receipt.failure.code, "cancelled");
   assert.deepEqual(classifyFailure(receipt.failure), {
     category: "process-unknown",
-    nextOwner: "pl",
+    nextOwner: "pm",
     action: "reconcile-execution",
     retryable: false,
   });
@@ -711,7 +711,7 @@ test("a killed local call is unverifiable and routes for reconciliation", async 
   assert.equal(receipt.failure.code, "call_unobserved");
   assert.deepEqual(classifyFailure(receipt.failure), {
     category: "process-unknown",
-    nextOwner: "pl",
+    nextOwner: "pm",
     action: "reconcile-execution",
     retryable: false,
   });

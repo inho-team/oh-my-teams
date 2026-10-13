@@ -248,7 +248,7 @@ test("the launch matrix refuses before role-worktree creation", async () => {
       createRoleWorktree(
         {
           org: "/repo/.omt/organization.json",
-          role: "junior",
+          role: "worker",
           repo: "/repo",
           name: "blocked-task",
           base: "a".repeat(40),
@@ -277,7 +277,7 @@ test("workflow task ownership rejects before every role-worktree effect", async 
       "role-mismatch-new",
       {},
       { current: { role: "pm", state: "pending" } },
-      /assigned to pm, not senior/,
+      /assigned to pm, not worker/,
     ],
     [
       "unknown-task-cross-workflow-reuse",
@@ -294,12 +294,12 @@ test("workflow task ownership rejects before every role-worktree effect", async 
       { worktree: "repo::/repo/senior-existing" },
       {
         current: {
-          role: "junior",
+          role: "pm",
           state: "pending",
           worktreeId: "repo::/repo/junior-rejected",
         },
       },
-      /assigned to junior, not senior/,
+      /assigned to pm, not worker/,
     ],
   ]) {
     const effects = [];
@@ -308,7 +308,7 @@ test("workflow task ownership rejects before every role-worktree effect", async 
         createRoleWorktree(
           {
             org: "/repo/.omt/organization.json",
-            role: "senior",
+            role: "worker",
             repo: "/repo",
             name: "ownership-rejection",
             base: "a".repeat(40),
@@ -347,7 +347,7 @@ test("role-worktree workflow options reject a state-only context before creation
       createRoleWorktree(
         {
           org: "/repo/.omt/organization.json",
-          role: "senior",
+          role: "worker",
           repo: "/repo",
           name: "state-only-context",
           base: "a".repeat(40),
@@ -367,71 +367,74 @@ test("role-worktree workflow options reject a state-only context before creation
 });
 
 test("workflow worktree preflight uses the frozen organization snapshot", async (t) => {
-  await t.test("preserves the legacy frozen-profile path", async () => {
-    const frozen = roleOrganization();
-    frozen.revision = 15;
-    const live = structuredClone(frozen);
-    live.revision = 16;
-    live.profiles[live.roles.senior.profile] = {
-      ...live.profiles[live.roles.senior.profile],
-      provider: "claude",
-      model: "claude-sonnet-5",
-    };
-    let liveReads = 0;
-    let created = false;
-    let preflight;
-    await assert.rejects(
-      () =>
-        createRoleWorktree(
-          {
-            org: "/repo/.omt/organization.json",
-            role: "senior",
-            repo: "/repo",
-            name: "frozen-preflight",
-            base: "a".repeat(40),
-            state: "/repo/.omt",
-            "workflow-id": "workflow-r15",
-            "workflow-task": "senior-task",
-            "fresh-reason": "This Senior task needs an isolated checkout",
-          },
-          {
-            organization: () => {
-              liveReads += 1;
-              return live;
+  await t.test(
+    "uses the frozen profile during worktree preflight",
+    async () => {
+      const frozen = roleOrganization();
+      frozen.revision = 15;
+      const live = structuredClone(frozen);
+      live.revision = 16;
+      live.profiles[live.roles.worker.profile] = {
+        ...live.profiles[live.roles.worker.profile],
+        provider: "claude",
+        model: "claude-sonnet-5",
+      };
+      let liveReads = 0;
+      let created = false;
+      let preflight;
+      await assert.rejects(
+        () =>
+          createRoleWorktree(
+            {
+              org: "/repo/.omt/organization.json",
+              role: "worker",
+              repo: "/repo",
+              name: "frozen-preflight",
+              base: "a".repeat(40),
+              state: "/repo/.omt",
+              "workflow-id": "workflow-r15",
+              "workflow-task": "senior-task",
+              "fresh-reason": "This Senior task needs an isolated checkout",
             },
-            read: () =>
-              workflowSnapshot(
-                {
-                  tasks: {
-                    "senior-task": { role: "senior", state: "pending" },
+            {
+              organization: () => {
+                liveReads += 1;
+                return live;
+              },
+              read: () =>
+                workflowSnapshot(
+                  {
+                    tasks: {
+                      "senior-task": { role: "worker", state: "pending" },
+                    },
                   },
-                },
-                frozen,
-              ),
-            environment: async () => ({
-              platform: "win32",
-              shell: "powershell",
-              trustRecordExists: false,
-              codexTrustRecordExists: false,
-              orcaVersion: "1.4.210",
-              cliVersion: "1.2.11",
-            }),
-            matrix: (input) => {
-              preflight = input;
-              return predictLaunchPath(input);
+                  frozen,
+                ),
+              environment: async () => ({
+                platform: "win32",
+                shell: "powershell",
+                trustRecordExists: false,
+                codexTrustRecordExists: false,
+                orcaVersion: "1.4.210",
+                cliVersion: "1.2.11",
+              }),
+              matrix: (input) => {
+                preflight = input;
+                return predictLaunchPath(input);
+              },
+              create: async () => {
+                created = true;
+              },
             },
-            create: async () => {
-              created = true;
-            },
-          },
-        ),
-      /agy-interactive-terminal-unavailable/,
-    );
-    assert.equal(liveReads, 0);
-    assert.equal(created, false);
-    assert.equal(preflight.runner, "agy");
-    assert.equal(preflight.model, "gemini-3.8-flash-high");
-  });
+          ),
+        /agy-interactive-terminal-unavailable/,
+      );
+      assert.equal(liveReads, 0);
+      assert.equal(created, false);
+      assert.equal(preflight.runner, "agy");
+      assert.equal(preflight.model, "claude-opus-4-6-thinking");
+    },
+  );
 
   const organization = draftResourceOrganization({
     name: "resource-preflight",
@@ -721,7 +724,7 @@ test("the operational role-worktree command opens the session inside creation", 
   const result = await createRoleWorktree(
     {
       org: "/repo/.omt/organization.json",
-      role: "junior",
+      role: "worker",
       repo: "/repo",
       name: "task-a",
       base: "c".repeat(40),
@@ -753,7 +756,7 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
   const result = await createRoleWorktree(
     {
       org: "/repo/.omt/organization.json",
-      role: "senior",
+      role: "worker",
       repo: "/repo",
       name: "next-senior-task",
       base: "e".repeat(40),
@@ -772,9 +775,9 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
       read: () =>
         workflowSnapshot({
           tasks: {
-            next: { role: "senior", state: "pending" },
+            next: { role: "worker", state: "pending" },
             prior: {
-              role: "senior",
+              role: "worker",
               state: "accepted",
               worktreeId: "repo::/repo/senior-existing",
             },
@@ -812,7 +815,7 @@ test("a new same-role task reuses only an accepted, integrated, idle worktree", 
       open: async (workspace) => ({
         ready: true,
         terminal: "new-senior-terminal",
-        role: "senior",
+        role: "worker",
         worktree: `id:${workspace.id}`,
         modelRequested: "gpt-5.6-sol",
       }),
@@ -826,7 +829,7 @@ test("an accepted same-role worktree prevents silent creation of another child",
   let created = false;
   const args = {
     org: "/repo/.omt/organization.json",
-    role: "senior",
+    role: "worker",
     repo: "/repo",
     name: "next-senior-task",
     base: "e".repeat(40),
@@ -841,9 +844,9 @@ test("an accepted same-role worktree prevents silent creation of another child",
     read: () =>
       workflowSnapshot({
         tasks: {
-          next: { role: "senior", state: "pending" },
+          next: { role: "worker", state: "pending" },
           prior: {
-            role: "senior",
+            role: "worker",
             state: "accepted",
             worktreeId: "repo::/repo/senior-existing",
           },
@@ -881,7 +884,7 @@ test("an accepted same-role worktree prevents silent creation of another child",
     scope: "current-workflow-and-automatic-discovery",
     workflowId: "workflow-reuse",
     workflowTaskId: "next",
-    role: "senior",
+    role: "worker",
     currentWorkflowAcceptedSameRole: [
       { taskId: "prior", worktreeId: "repo::/repo/senior-existing" },
     ],
@@ -897,7 +900,7 @@ test("a new workflow child without an isolation reason is refused before creatio
       createRoleWorktree(
         {
           org: "/repo/.omt/organization.json",
-          role: "senior",
+          role: "worker",
           repo: "/repo",
           name: "first-child",
           base: "b".repeat(40),
@@ -911,7 +914,7 @@ test("a new workflow child without an isolation reason is refused before creatio
           matrix: supervised,
           read: () =>
             workflowSnapshot({
-              tasks: { "first-task": { role: "senior", state: "pending" } },
+              tasks: { "first-task": { role: "worker", state: "pending" } },
             }),
           create: async () => {
             created = true;
@@ -933,7 +936,7 @@ test("new child selection reaches its role-session launch ledger", async (t) => 
   const result = await createRoleWorktree(
     {
       org: orgFile,
-      role: "senior",
+      role: "worker",
       repo: dir,
       name: "new-child",
       base: "a".repeat(40),
@@ -954,7 +957,7 @@ test("new child selection reaches its role-session launch ledger", async (t) => 
       ],
       read: () =>
         workflowSnapshot({
-          tasks: { "selection-task": { role: "senior", state: "pending" } },
+          tasks: { "selection-task": { role: "worker", state: "pending" } },
         }),
       create: async (_repo, options) => {
         const workspace = { id: worktreeId, path: path.join(dir, "child") };
@@ -1003,7 +1006,7 @@ test("two consecutive role-worktree reuses retain and verify prior closure proof
   let cycle = 0;
   const args = {
     org: path.join(closureDir, "organization.json"),
-    role: "senior",
+    role: "worker",
     repo: "/repo",
     name: "reused-senior-task",
     base: "c".repeat(40),
@@ -1021,11 +1024,11 @@ test("two consecutive role-worktree reuses retain and verify prior closure proof
     read: (_stateDir, workflowId) =>
       workflowSnapshot(
         workflowId === "current-workflow"
-          ? { tasks: { "next-task": { role: "senior", state: "pending" } } }
+          ? { tasks: { "next-task": { role: "worker", state: "pending" } } }
           : {
               tasks: {
                 "accepted-task": {
-                  role: "senior",
+                  role: "worker",
                   state: "accepted",
                   worktreeId: "repo::/repo/senior-existing",
                 },
@@ -1087,7 +1090,7 @@ test("two consecutive role-worktree reuses retain and verify prior closure proof
     open: async (workspace) => ({
       ready: true,
       terminal: cycle === 0 ? "first-reuse-terminal" : "second-reuse-terminal",
-      role: "senior",
+      role: "worker",
       worktree: `id:${workspace.id}`,
       modelRequested: "gpt-5.6-sol",
     }),
@@ -1152,7 +1155,7 @@ test("a named accepted task in another workflow can safely reuse its same-role w
   const result = await createRoleWorktree(
     {
       org: "/repo/.omt/organization.json",
-      role: "senior",
+      role: "worker",
       repo: "/repo",
       name: "cross-workflow-senior",
       base: "f".repeat(40),
@@ -1171,12 +1174,12 @@ test("a named accepted task in another workflow can safely reuse its same-role w
         reads.push(workflowId);
         return workflowSnapshot(
           workflowId === "current-workflow"
-            ? { tasks: { "next-task": { role: "senior", state: "pending" } } }
+            ? { tasks: { "next-task": { role: "worker", state: "pending" } } }
             : {
                 tasks: {
                   "accepted-task": {
                     state: "accepted",
-                    executionRole: "senior",
+                    executionRole: "worker",
                     worktreeId: "repo::/repo/senior-existing",
                   },
                 },
@@ -1215,7 +1218,7 @@ test("a named accepted task in another workflow can safely reuse its same-role w
       open: async (workspace) => ({
         ready: true,
         terminal: "cross-workflow-senior-terminal",
-        role: "senior",
+        role: "worker",
         worktree: `id:${workspace.id}`,
         modelRequested: "gpt-5.6-sol",
       }),
@@ -1233,7 +1236,7 @@ test("cross-workflow reuse refuses an unnamed or non-accepted source task", asyn
     [
       "unnamed",
       {},
-      { tasks: { prior: { state: "accepted", role: "senior" } } },
+      { tasks: { prior: { state: "accepted", role: "worker" } } },
     ],
     [
       "not-accepted",
@@ -1245,7 +1248,7 @@ test("cross-workflow reuse refuses an unnamed or non-accepted source task", asyn
         tasks: {
           "other-task": {
             state: "rejected",
-            role: "senior",
+            role: "worker",
             worktreeId: "repo::/repo/senior-existing",
           },
         },
@@ -1258,7 +1261,7 @@ test("cross-workflow reuse refuses an unnamed or non-accepted source task", asyn
         createRoleWorktree(
           {
             org: "/repo/.omt/organization.json",
-            role: "senior",
+            role: "worker",
             repo: "/repo",
             name: "cross-workflow-refusal",
             base: "0".repeat(40),
@@ -1277,7 +1280,7 @@ test("cross-workflow reuse refuses an unnamed or non-accepted source task", asyn
                 workflowId === "current-workflow"
                   ? {
                       tasks: {
-                        "next-task": { role: "senior", state: "pending" },
+                        "next-task": { role: "worker", state: "pending" },
                       },
                     }
                   : sourceState,
@@ -1301,7 +1304,7 @@ test("cross-workflow reuse refuses a worktree claimed by another current task", 
       createRoleWorktree(
         {
           org: "/repo/.omt/organization.json",
-          role: "senior",
+          role: "worker",
           repo: "/repo",
           name: "cross-workflow-conflict",
           base: "0".repeat(40),
@@ -1321,9 +1324,9 @@ test("cross-workflow reuse refuses a worktree claimed by another current task", 
               workflowId === "current-workflow"
                 ? {
                     tasks: {
-                      "next-task": { role: "senior", state: "pending" },
+                      "next-task": { role: "worker", state: "pending" },
                       "other-task": {
-                        role: "senior",
+                        role: "worker",
                         state: "running",
                         worktreeId: "repo::/repo/senior-existing",
                       },
@@ -1332,7 +1335,7 @@ test("cross-workflow reuse refuses a worktree claimed by another current task", 
                 : {
                     tasks: {
                       "accepted-task": {
-                        role: "senior",
+                        role: "worker",
                         state: "accepted",
                         worktreeId: "repo::/repo/senior-existing",
                       },
@@ -1666,7 +1669,7 @@ test("an interactive terminal launch keeps its session when its ledger write fai
   fs.writeFileSync(path.join(dir, "usage"), "not a directory");
   const result = recordLaunchSafely(orgFile, "2026-09-29T00:00:00.000Z", {
     via: "role-terminal",
-    role: "senior",
+    role: "worker",
     terminal: "already-open-terminal",
   });
   assert.match(result.ledgerError, /EEXIST|ENOTDIR|not a directory/);
@@ -1897,7 +1900,7 @@ function legacyLifecycleFixture(
     workflowId: "closed-flow",
   };
   const history = [roleLaunch, old.launch];
-  const task = { role: "junior", state: "reviewed", worktreeId: child.id };
+  const task = { role: "worker", state: "reviewed", worktreeId: child.id };
   const mutations = [];
   let attached = connected;
   const ports = {
@@ -1947,7 +1950,7 @@ function legacyLifecycleFixture(
     "workflow-id": "closed-flow",
     "workflow-task": "closed-task",
     repo: owner.pm.path,
-    role: "senior",
+    role: "worker",
     name: "unused",
     base: "head",
     worktree: child.id,

@@ -75,7 +75,7 @@ export async function createSingleTaskWorkflow(
   stateDir,
   repoDir,
   workflowId,
-  { checks, role = "senior", taskId = "a" } = {},
+  { checks, role = "worker", taskId = "a" } = {},
 ) {
   writeJSON(path.join(repoDir, `${taskId}.json`), {
     ...taskBody(taskId),

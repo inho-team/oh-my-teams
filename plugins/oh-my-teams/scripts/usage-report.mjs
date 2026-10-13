@@ -11,13 +11,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import {
-  displayModel,
-  assert,
-  canonicalRole,
-  readJSON,
-  writeJSON,
-} from "./core.mjs";
+import { displayModel, assert, readJSON, writeJSON } from "./core.mjs";
 import { modelVerdict } from "./headless.mjs";
 import {
   kickoffEntryName,
@@ -378,8 +372,7 @@ function tokenWeight(record) {
 export function summarizeByRole(records) {
   const byRole = {};
   for (const record of records) {
-    // Sessions recorded before 2.6.0 may name intern; they count toward Junior.
-    const role = (byRole[canonicalRole(record.role)] ??= {
+    const role = (byRole[record.role] ??= {
       models: { requested: [], reported: [] },
       modelsDisplay: { requested: [], reported: [] },
       sources: [],
@@ -440,7 +433,7 @@ export function usageShare(records, byRole) {
   for (const record of records) {
     const weight = tokenWeight(record);
     if (weight === null) continue;
-    const key = canonicalRole(record.role);
+    const key = record.role;
     weights[key] = (weights[key] ?? 0) + weight;
     total += weight;
   }

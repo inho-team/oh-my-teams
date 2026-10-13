@@ -47,22 +47,8 @@
       "attempts": 1,
       "fallbacks": []
     },
-    "pl": {
+    "worker": {
       "parent": "pm",
-      "profile": "codex-current",
-      "concurrency": 1,
-      "attempts": 1,
-      "fallbacks": []
-    },
-    "senior": {
-      "parent": "pl",
-      "profile": "agy-opus",
-      "concurrency": 1,
-      "attempts": 1,
-      "fallbacks": []
-    },
-    "junior": {
-      "parent": "pl",
       "profile": "agy-opus",
       "concurrency": 1,
       "attempts": 1,
