@@ -15,7 +15,7 @@ description: 최초 oh my teams 상설 조직에 검증된 구독 자원과 고�
 
 묻는 방식은 [`../../references/user-choice.md`](../../references/user-choice.md)를 따르며, 질문은 한 번으로 끝난다. 사용자는 현재 로그인한 Codex·Claude·Agy 가운데 이 조직이 사용할 구독 자원을 선택한다. 사용자가 선택하지 않은 실행기·계정·구독은 조직에 추가하지 않는다.
 
-기존 역할별 profile 조직은 명시적인 호환 입력으로 계속 읽는다. 축소 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 기존 조직이나 진행 중인 kickoff snapshot의 모델, pool, fallback, 호출 한도와 역할 권한을 새 자원 계약으로 추측하여 바꾸지 않는다. 새 조직의 역할 ID는 `pm`과 `worker`이며, 기존 역할이 있는 kickoff에는 저장된 스냅샷을 적용한다.
+PM·Worker 역할별 profile 조직은 호환 입력으로 읽는다. 축소 구조는 [`../../examples/organization.single-subscription.json`](../../examples/organization.single-subscription.json)에서 확인한다. 진행 중인 kickoff 스냅샷의 모델, pool, fallback, 호출 한도와 역할 권한을 새 자원 계약으로 추측하여 바꾸지 않는다. 과거 역할이 들어 있는 조직과 스냅샷은 런타임에서 거부한다.
 
 모델 선택지는 미리 박아 둔 표에서 고르지 않고, 묻기 직전에 실행한 조회 결과에서만 만든다. 다음을 실행한다.
 
@@ -54,8 +54,8 @@ node <runtime> init --org <project>/.omt/organization.json --from <draft.json>
 node <runtime> show --org <project>/.omt/organization.json
 ```
 
-`init`은 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 질문을 처음부터 다시 시작하지 않는다.
+`init`은 유효한 조직 파일이 이미 있으면 아무것도 바꾸지 않고 `created: false`로 정상 종료한다. 출력의 `created`가 `true`인 경우에만 신규 결성으로 보고하고, `false`이면 기존 조직을 그대로 쓴다고 알린다. 과거 역할이 들어 있는 조직은 검증 오류를 보고한다. 인증 준비가 끝나지 않은 프로필은 실행 전에 정확한 오류를 알리고 멈춘다. 질문을 처음부터 다시 시작하지 않는다.
 
-결성을 보고할 때에는 선택한 자원마다 provider, 현재 account, subscription, pool, 동시 실행 한도와 호출 한도를 적는다. 모델과 추론 강도를 아직 선택하지 않았으며, 조회 실패한 실행기는 저장하지 않았다는 사실도 함께 적는다. 기존 역할별 profile 조직은 호환 입력으로만 유지하며, 새 조직으로 자동 변경하지 않는다.
+결성을 보고할 때에는 선택한 자원마다 provider, 현재 account, subscription, pool, 동시 실행 한도와 호출 한도를 적는다. 모델과 추론 강도를 아직 선택하지 않았으며, 조회 실패한 실행기는 저장하지 않았다는 사실도 함께 적는다. PM·Worker profile 조직은 호환 입력으로만 유지하며, 새 자원 조직으로 자동 변경하지 않는다.
 
 `.omt/`는 Git에서 제외한다. 별도 저장소 작업에는 `orca-cli`를 읽어 Orca worktree를 사용한다. 조직 파일을 둔 이 프로젝트의 `.omt/`가 이후 kickoff 등록부가 놓이는 자리가 된다. 한 프로젝트에서 kickoff를 여러 개 동시에 진행할 수 있으며, form 자체는 kickoff를 등록하지 않는다. 자세한 계약은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)에 있다.
