@@ -14,21 +14,41 @@
     "findings"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
-    "requirementId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "requirementId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
     "reviewer": {
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "role", "executionId"],
       "properties": {
-        "kind": { "const": "agent-review" },
-        "role": { "enum": ["senior", "worker"] },
-        "executionId": { "type": "string", "minLength": 1 }
+        "kind": {
+          "const": "agent-review"
+        },
+        "role": {
+          "enum": ["worker"]
+        },
+        "executionId": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
-    "implementationExecutionId": { "type": "string", "minLength": 1 },
-    "conclusion": { "enum": ["approved", "changes-requested", "inconclusive"] },
+    "implementationExecutionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "conclusion": {
+      "enum": ["approved", "changes-requested", "inconclusive"]
+    },
     "criteria": {
       "type": "array",
       "items": {
@@ -36,11 +56,16 @@
         "additionalProperties": false,
         "required": ["id", "conclusion", "evidence"],
         "properties": {
-          "id": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
           "conclusion": {
             "enum": ["approved", "changes-requested", "inconclusive"]
           },
-          "evidence": { "type": "string", "minLength": 1 }
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -50,12 +75,25 @@
         "type": "object",
         "required": ["id", "status", "description"],
         "properties": {
-          "id": { "type": "string" },
-          "status": { "enum": ["open", "resolved", "accepted-risk"] },
-          "description": { "type": "string", "minLength": 1 },
-          "resolution": { "type": "string" },
-          "authority": { "enum": ["pm", "user", "director"] },
-          "reason": { "type": "string" }
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": ["open", "resolved", "accepted-risk"]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "authority": {
+            "enum": ["pm", "user", "director"]
+          },
+          "reason": {
+            "type": "string"
+          }
         }
       }
     }

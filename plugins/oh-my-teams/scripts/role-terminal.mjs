@@ -287,12 +287,9 @@ export function launchLine(command) {
   return { typed: command.command, columns: null };
 }
 
-/** Tag each role's tab title starts with, so PM and PL tabs are told apart. */
+/** Tag each role's tab title starts with. */
 export const ROLE_TITLE_TAGS = Object.freeze({
   pm: "[PM]",
-  pl: "[PL]",
-  senior: "[Senior]",
-  junior: "[Junior]",
   worker: "[Worker]",
   auditor: "[Auditor]",
 });

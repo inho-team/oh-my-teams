@@ -197,7 +197,7 @@ function tokenCount(base, minutes, total) {
 
 test("Codex rollouts take the cumulative total's change inside the window", (t) => {
   const home = tempDir(t);
-  const worktree = path.join(home, "work", "pl");
+  const worktree = path.join(home, "work", "pm");
   const base = Date.parse("2026-09-10T10:00:00.000Z");
   const meta = (id, cwd) => ({
     timestamp: at(base, -24 * 60),
@@ -332,7 +332,7 @@ function agyTime(ms) {
 
 test("Agy conversations are unmeasured and read only whitelisted columns", async (t) => {
   const home = tempDir(t);
-  const worktree = path.join(home, "work", "senior");
+  const worktree = path.join(home, "work", "worker");
   const base = Date.now() - 30 * MINUTE;
   assert.deepEqual(AGY_SUMMARY_COLUMNS, [
     "conversation_id",
@@ -514,11 +514,11 @@ test("headless streams report usage for each provider, summed over turns", (t) =
     state,
     "junior-1",
     {
-      role: "junior",
+      role: "worker",
       profile: "claude-profile",
       provider: "claude",
       modelRequested: "claude-sonnet-5",
-      cwd: path.join(dir, "junior"),
+      cwd: path.join(dir, "worker"),
       createdAt: at(base, 1),
     },
     [
@@ -557,11 +557,11 @@ test("headless streams report usage for each provider, summed over turns", (t) =
     state,
     "senior-1",
     {
-      role: "senior",
+      role: "worker",
       profile: "codex-profile",
       provider: "codex",
       modelRequested: "gpt-5.6-luna",
-      cwd: path.join(dir, "senior"),
+      cwd: path.join(dir, "worker"),
       createdAt: at(base, 5),
     },
     [
@@ -576,7 +576,7 @@ test("headless streams report usage for each provider, summed over turns", (t) =
   const byWorker = Object.fromEntries(
     records.map((record) => [record.workerId, record]),
   );
-  assert.equal(byWorker["junior-1"].role, "junior");
+  assert.equal(byWorker["junior-1"].role, "worker");
   assert.equal(byWorker["junior-1"].turns, 2);
   assert.equal(byWorker["junior-1"].calls, 8);
   assert.equal(byWorker["junior-1"].costUsd, 0.5);
@@ -608,7 +608,7 @@ test("harness calls keep the session id that lets a report skip duplicates", (t)
 
   writeJSON(path.join(dir, "runs", "run-1", "report.json"), {
     runId: "run-1",
-    role: "junior",
+    role: "worker",
     summary: CANARY,
     calls: [
       {
@@ -630,7 +630,7 @@ test("harness calls keep the session id that lets a report skip duplicates", (t)
     ],
   });
   writeJSON(path.join(dir, "assists", "a-1.json"), {
-    callerRole: "junior",
+    callerRole: "worker",
     profile: "agy-oss",
     requestedModel: "gpt-oss-120b-medium",
     effectiveModel: null,
@@ -645,11 +645,11 @@ test("harness calls keep the session id that lets a report skip duplicates", (t)
   const [first, second, assist] = records;
   assert.equal(first.sessionKey, "th-harness");
   assert.equal(first.promptTokens, 90);
-  assert.equal(first.role, "junior");
+  assert.equal(first.role, "worker");
   assert.equal(second.measured, false);
   assert.equal(second.reason, "harness-call-without-usage");
   assert.equal(second.sessionKey, "harness:run-1:2");
-  assert.equal(assist.role, "junior");
+  assert.equal(assist.role, "worker");
   assert.equal(assist.provider, "agy");
   assert.equal(assist.promptTokens, 40);
   assert.ok(!JSON.stringify(records).includes(CANARY));

@@ -1224,7 +1224,7 @@ test("worker-start refuses to assign under an audited kickoff before the brief a
       "--org",
       fixture.org,
       "--role",
-      "senior",
+      "worker",
       "--spec",
       "x",
       "--terminal",
@@ -1333,7 +1333,7 @@ test(
         "--org",
         fixture.org,
         "--role",
-        "senior",
+        "worker",
         "--spec",
         "x",
         "--orca",
@@ -1357,7 +1357,7 @@ test(
     // test here).
     recordLaunch(fixture.org, {
       via: "role-terminal",
-      role: "senior",
+      role: "worker",
       terminal: "term_child_1",
       stateDir: fixture.entry.pm.stateDir,
       worktreePath: childDir,
@@ -1394,7 +1394,7 @@ test(
     fs.mkdirSync(nestedChildDir, { recursive: true });
     recordLaunch(fixture.org, {
       via: "role-terminal",
-      role: "senior",
+      role: "worker",
       terminal: "term_nested_only",
       stateDir: fixture.entry.pm.stateDir,
       worktreePath: nestedChildDir,
@@ -1417,7 +1417,7 @@ test(
     t.after(() => fs.rmSync(workerOnlyDir, { recursive: true, force: true }));
     recordLaunch(fixture.org, {
       via: "worker-start",
-      role: "senior",
+      role: "worker",
       terminal: "term_worker_only",
       stateDir: fixture.entry.pm.stateDir,
       worktreePath: workerOnlyDir,
@@ -1432,7 +1432,7 @@ test(
           "--org",
           fixture.org,
           "--role",
-          "senior",
+          "worker",
           "--spec",
           "x",
           "--terminal",
@@ -1489,7 +1489,7 @@ test(
         id: "wf-d2-other",
         goal: "unrelated kickoff's own workflow",
         repo: ".",
-        tasks: [{ file: "a.json", role: "senior" }],
+        tasks: [{ file: "a.json", role: "worker" }],
         policy: { maxRunning: 1, maxReviewPending: 1 },
         budget: { maxAttempts: 1, maxCalls: 4 },
       },
@@ -1554,7 +1554,7 @@ test(
           "--org",
           soloOrg,
           "--role",
-          "senior",
+          "worker",
           "--spec",
           "x",
           "--terminal",
@@ -1609,7 +1609,7 @@ test("role-worktree-create (D2 rule 6): a swallowed launch-ledger write failure 
       id: "wf-ledger-error",
       goal: "fixture's own workflow",
       repo: ".",
-      tasks: [{ file: "a.json", role: "senior" }],
+      tasks: [{ file: "a.json", role: "worker" }],
       policy: { maxRunning: 1, maxReviewPending: 1 },
       budget: { maxAttempts: 1, maxCalls: 4 },
     },
@@ -1621,7 +1621,7 @@ test("role-worktree-create (D2 rule 6): a swallowed launch-ledger write failure 
   const result = await createRoleWorktree(
     {
       org: fixture.org,
-      role: "senior",
+      role: "worker",
       repo: fixture.entry.pm.path,
       "workflow-id": "wf-ledger-error",
       "workflow-task": "a",
@@ -1664,7 +1664,7 @@ test("role-worktree-create (D2 rule 6): a swallowed launch-ledger write failure 
       open: async () => ({
         ready: true,
         terminal: "term_ledger_error",
-        role: "senior",
+        role: "worker",
         worktree: "id:wt_ledger_error",
         modelRequested: "claude-current",
         ledgerError: "EACCES: permission denied, open '.omt/launches.jsonl'",
@@ -1734,7 +1734,7 @@ test(
     t.after(() => fs.rmSync(workerDir, { recursive: true, force: true }));
     recordLaunch(fixture.org, {
       via: "worker-start",
-      role: "senior",
+      role: "worker",
       stateDir: fixture.entry.pm.stateDir,
       worktreePath: workerDir,
       callerCwd: workerDir,
@@ -2120,7 +2120,7 @@ test(
             "--org",
             fixture.org,
             "--role",
-            "senior",
+            "worker",
             "--worktree",
             `path:${fixture.entry.pm.path}`,
             "--orca",
@@ -2184,7 +2184,7 @@ function boundKickoff(t, worktreeId = "wt-1") {
 function recordBoundChild(fixture, dir, terminal) {
   recordLaunch(fixture.org, {
     via: "role-terminal",
-    role: "senior",
+    role: "worker",
     terminal,
     stateDir: fixture.entry.pm.stateDir,
     worktreePath: dir,
@@ -2200,7 +2200,7 @@ async function directSeniorLaunch(fixture, cwd, worktree, extraArgs = []) {
       "--org",
       fixture.org,
       "--role",
-      "senior",
+      "worker",
       "--worktree",
       `path:${worktree}`,
       "--orca",
@@ -2220,7 +2220,7 @@ const AGY_WIN32_REASON = "agy-interactive-terminal-unavailable";
 // What the launch matrix answers for the example organization's senior on
 // win32 with no trust record, from the public predictor alone.
 function seniorWin32MatrixRefusal() {
-  const command = roleCommand(readJSON(fileURLToPath(exampleOrg)), "senior");
+  const command = roleCommand(readJSON(fileURLToPath(exampleOrg)), "worker");
   const matrix = predictLaunchPath({
     runner: command.provider,
     model: command.modelRequested,
@@ -2324,7 +2324,7 @@ test("role-terminal (counterexample 1): the internal role-worktree-create marker
         "--org",
         fixture.org,
         "--role",
-        "senior",
+        "worker",
         "--worktree",
         `path:${child}`,
         spelling,
@@ -2355,7 +2355,7 @@ test("role-terminal (counterexamples 7, 8): an unrecorded child and an unregiste
         "--org",
         fixture.org,
         "--role",
-        "senior",
+        "worker",
         "--worktree",
         `path:${child}`,
         "--orca",
@@ -2427,7 +2427,7 @@ test("role-terminal (counterexamples 3, 10): existing bound children resume unde
           "--org",
           fixture.org,
           "--role",
-          "senior",
+          "worker",
           "--spec",
           "x",
           "--terminal",
@@ -2580,14 +2580,14 @@ test(
     // 15: --repo is kickoff A's PM worktree, the caller sits in kickoff B's PM
     // worktree, and no --state/--workflow names any kickoff at all.
     await refused(
-      { role: "senior", repo: fixture.entry.pm.path },
+      { role: "worker", repo: fixture.entry.pm.path },
       other.entry.pm.path,
       /An active kickoff exists in this organization/,
     );
     // 8: --state names no registered kickoff.
     await refused(
       {
-        role: "senior",
+        role: "worker",
         repo: fixture.entry.pm.path,
         "workflow-id": "wf-d2-cx15",
         "workflow-task": "a",
@@ -2600,7 +2600,7 @@ test(
     // --state names kickoff A, but --repo is kickoff B's PM worktree.
     await refused(
       {
-        role: "senior",
+        role: "worker",
         repo: other.entry.pm.path,
         "workflow-id": "wf-d2-cx15",
         "workflow-task": "a",
@@ -2640,7 +2640,7 @@ test("automatic candidate miss never invents a fresh reason before Orca creation
         createRoleWorktree(
           {
             org: fixture.org,
-            role: "senior",
+            role: "worker",
             repo: fixture.entry.pm.path,
             "workflow-id": "wf-no-candidate",
             "workflow-task": "a",
@@ -2677,7 +2677,7 @@ test("role-worktree-create (counterexample 9): a normal first child under its ow
   const workspace = { id: `wt_d2_cx9::${childDir}`, path: childDir };
   const baseArgs = {
     org: fixture.org,
-    role: "senior",
+    role: "worker",
     repo: fixture.entry.pm.path,
     "workflow-id": "wf-d2-cx9",
     "workflow-task": "a",
@@ -2707,7 +2707,7 @@ test("role-worktree-create (counterexample 9): a normal first child under its ow
       ports(async () => ({
         ready: true,
         terminal: "term_d2_cx9",
-        role: "senior",
+        role: "worker",
         worktree: `id:${workspace.id}`,
         modelRequested: "claude-current",
       })),
@@ -2747,7 +2747,7 @@ test("role-worktree-create (counterexample 9): a normal first child under its ow
   // The same no-session result also comes from the D4 shared-worktree branch
   // of the open wrapper, which only runs for the auditor role; this launch is
   // the senior's, and its open wrapper was reached (recorded above).
-  assert.equal(baseArgs.role, "senior");
+  assert.equal(baseArgs.role, "worker");
   // And the matrix is what refuses this launch, by its reason code.
   seniorWin32MatrixRefusal();
 });
@@ -6307,7 +6307,7 @@ test("D4: role-terminal --role auditor refuses a differently-cased spelling of a
   }
   recordLaunch(fixture.org, {
     via: "worker-start",
-    role: "senior",
+    role: "worker",
     stateDir: fixture.entry.pm.stateDir,
     worktreePath: workerDir,
     callerCwd: workerDir,
@@ -6541,7 +6541,7 @@ test("h2: worker-start under a kickoff with no pinned audit policy is refused by
         "--org",
         fixture.org,
         "--role",
-        "senior",
+        "worker",
         "--spec",
         "x",
         "--terminal",
@@ -6842,7 +6842,7 @@ async function integrationRequiredWorkflow(fixture, workflowId) {
       goal: "integration required",
       repo: ".",
       integrationTask: "integration.json",
-      tasks: [{ file: "a.json", role: "junior" }],
+      tasks: [{ file: "a.json", role: "worker" }],
       policy: { maxRunning: 1, maxReviewPending: 1 },
       budget: { maxAttempts: 1, maxCalls: 4 },
     },
@@ -7117,7 +7117,7 @@ async function f7IntegrationWorkflow(fixture, workflowId) {
       goal: "integration required",
       repo: ".",
       integrationTask: "int-final.json",
-      tasks: [{ file: "int-comp.json", role: "junior" }],
+      tasks: [{ file: "int-comp.json", role: "worker" }],
       policy: { maxRunning: 1, maxReviewPending: 1 },
       budget: { maxAttempts: 1, maxCalls: 4 },
     },

@@ -9,7 +9,6 @@ import {
   foldRole,
   hash,
   inside,
-  migrateLegacyOrg,
   ownerHasExited,
   profileEnv,
   resolveRole,
@@ -310,7 +309,7 @@ function markImplementationPassed(report, task) {
   }
   report.status = "passed";
   if (task.risk !== "low") {
-    report.issues.push("Senior review required before integration");
+    report.issues.push("Independent review required before integration");
   }
 }
 
@@ -343,9 +342,7 @@ export async function work(
   org,
   task,
   {
-    role: requestedRole = Object.hasOwn(org.roles, "worker")
-      ? "worker"
-      : "junior",
+    role: requestedRole = "worker",
     stateDir,
     call = invoke,
     workflowId,
@@ -354,10 +351,7 @@ export async function work(
     selectionReason = "role-primary",
   } = {},
 ) {
-  // A snapshot frozen before 2.6.0 may still bind intern. It runs on the
-  // migrated ladder, but its hash stays the frozen one the workflow recorded.
   const frozenHash = hash(org);
-  org = migrateLegacyOrg(org);
   validateOrg(org);
   validateTask(task);
   assert(stateDir, "Shared PM state directory required");
@@ -583,7 +577,7 @@ export async function work(
  * Requests citation/checklist observations without granting pass/fail authority.
  *
  * @param {string} repo - Workspace containing the allowed task files.
- * @param {object} org - Organization snapshot selecting the Junior profile.
+ * @param {object} org - Organization snapshot selecting the Worker profile.
  * @param {object} task - Task contract used as read-only context.
  * @param {object} [options] - Draft kind and injectable provider call.
  * @returns {Promise<object>} Verified citations plus usage and timing.
@@ -618,7 +612,7 @@ export async function draft(
     '"quote":"exact full source line","why":"observation"}]}. ' +
     `Do not edit or use tools. Provide at most 12 source citations for ${kind}. ` +
     `Make no pass/fail judgment.\n${context}`;
-  const profile = org.profiles[org.roles[resolveRole(org, "junior")].profile];
+  const profile = org.profiles[org.roles[resolveRole(org, "worker")].profile];
   const response = await call(profile, repo, prompt, org.policy.timeoutMs);
   assert(
     response.code === 0 && !response.providerError && !response.timedOut,

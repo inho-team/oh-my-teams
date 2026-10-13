@@ -145,7 +145,7 @@ async function kickoff(
     schemaVersion: 2,
     revision: 1,
     kind: "edit",
-    id: "junior",
+    id: "worker",
     goal: "Prompt answers",
     instruction: "Make the change",
     nonGoals: [],
@@ -169,7 +169,7 @@ async function kickoff(
     id: "wf",
     goal: "Prompt answers",
     repo: ".",
-    tasks: [{ file: "junior.json", role: "junior" }],
+    tasks: [{ file: "junior.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 2 },
   };
@@ -183,7 +183,7 @@ async function kickoff(
       ...fields,
     });
   launch({
-    role: "pl",
+    role: "pm",
     workflowTaskId: "pl-task",
     provider: "claude",
     terminal: PL,
@@ -191,8 +191,8 @@ async function kickoff(
     stateDir,
   });
   launch({
-    role: "senior",
-    workflowTaskId: "junior",
+    role: "worker",
+    workflowTaskId: "worker",
     provider: seniorProvider,
     terminal: SENIOR,
     worktreePath: ROLE_WORKTREE,
@@ -403,19 +403,19 @@ test("a role's terminal cannot answer, nor a PL for a role it did not start", as
   assert.equal(orca.keys().length, 0);
 });
 
-test("the PL that started the role may answer for it", async (t) => {
-  const fixture = await kickoff(t, { seniorFrom: "pl" });
+test("the PM that started the Worker may answer for it", async (t) => {
+  const fixture = await kickoff(t, { seniorFrom: "pm" });
   const orca = fakeOrca({
-    runs: { [PL]: "run_pl" },
+    runs: { [PM]: RUN },
     terminals: { [SENIOR]: at(ROLE_WORKTREE, CODEX_ASKS) },
     advance: { [SENIOR]: [CODEX_DONE] },
   });
   const record = await answer(fixture, orca, {
-    env: { ORCA_TERMINAL_HANDLE: PL },
+    env: { ORCA_TERMINAL_HANDLE: PM },
   });
   assert.equal(record.status, "resolved");
-  assert.equal(record.supervisor.role, "pl");
-  assert.equal(record.supervisor.runId, "run_pl");
+  assert.equal(record.supervisor.role, "pm");
+  assert.equal(record.supervisor.runId, RUN);
   assert.equal(orca.keys().length, 1);
 });
 
@@ -436,7 +436,7 @@ test("a terminal outside the worktree this kickoff launched the role in is refus
     if (pmLaunch)
       recordLaunch(fixture.orgFile, {
         via: "role-terminal",
-        role: "senior",
+        role: "worker",
         provider: "codex",
         terminal: SENIOR,
         worktreePath: fixture.pmPath,
@@ -454,36 +454,6 @@ test("a terminal outside the worktree this kickoff launched the role in is refus
   }
 });
 
-test("a worktree that belongs to another role's task is refused", async (t) => {
-  const fixture = await kickoff(t);
-  attachExecution(
-    fixture.stateDir,
-    "wf",
-    readWorkflow(fixture.stateDir, "wf").state.revision,
-    {
-      schemaVersion: 1,
-      eventId: "attach-junior",
-      attemptId: "attempt-junior",
-      taskId: "junior",
-      callAllowance: 1,
-      receipt: {
-        executionId: "junior",
-        runId: "junior",
-        taskId: "junior",
-        dispatchId: "junior",
-        worktreeId: `repo::${ROLE_WORKTREE}`,
-        role: "junior",
-      },
-    },
-  );
-  const orca = fakeOrca({
-    terminals: { [SENIOR]: at(ROLE_WORKTREE, CODEX_ASKS) },
-  });
-  const record = await answer(fixture, orca);
-  assert.equal(record.refusal, "worktree-shared");
-  assert.equal(orca.keys().length, 0);
-});
-
 test("a terminal nobody launched, a wrong role and a wrong workflow are refused", async (t) => {
   const fixture = await kickoff(t);
   const orca = fakeOrca({
@@ -497,7 +467,7 @@ test("a terminal nobody launched, a wrong role and a wrong workflow are refused"
     "terminal-not-launched",
   );
   assert.equal(
-    (await answer(fixture, orca, { role: "junior" })).refusal,
+    (await answer(fixture, orca, { role: "pm" })).refusal,
     "role-mismatch",
   );
   assert.equal(
@@ -710,7 +680,7 @@ test("every attempt is one line in the state's record and shows in status", asyn
   ])
     assert.ok(field in final, field);
   assert.equal(final.event, "prompt-answer");
-  assert.equal(final.role, "senior");
+  assert.equal(final.role, "worker");
   assert.equal(final.terminal, SENIOR);
   assert.equal(final.worktree, ROLE_WORKTREE);
   assert.equal(final.kind, "trust");
@@ -764,8 +734,8 @@ const READY = ["OpenAI Codex (fake)", "gpt-5.6-terra · ready"];
 // same supervisor path: the caller and the worktree are proven before a key.
 async function openSenior(t, fixture, profile, orca, overrides = {}) {
   const org = structuredClone(fixture.org);
-  org.roles.senior.profile = profile;
-  const command = roleCommand(org, "senior");
+  org.roles.worker.profile = profile;
+  const command = roleCommand(org, "worker");
   const opened = await openRoleTerminal({
     worktree: `path:${ROLE_WORKTREE}`,
     command,
@@ -942,7 +912,7 @@ test("a worktree Orca does not show under the kickoff's PM worktree gets no key"
 });
 
 test("a worktree under a PL's worktree that Orca shows under the PM is accepted, and a loop or a dead end is not", async (t) => {
-  const fixture = await kickoff(t, { seniorFrom: "pl" });
+  const fixture = await kickoff(t, { seniorFrom: "pm" });
   const id = `repo::${ROLE_WORKTREE}`;
   const plId = `repo::${fixture.plPath}`;
   const run = async (worktrees) => {
@@ -957,7 +927,7 @@ test("a worktree under a PL's worktree that Orca shows under the PM is accepted,
       terminal: SENIOR,
       workflowId: "wf",
       stateDir: fixture.stateDir,
-      env: { ORCA_TERMINAL_HANDLE: PL },
+      env: { ORCA_TERMINAL_HANDLE: PM },
       execute: orca.execute,
       ...fast,
     });

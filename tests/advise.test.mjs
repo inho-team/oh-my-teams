@@ -57,9 +57,7 @@ function astraLedOrg() {
   };
   const profiles = {
     pm: "codex-gpt-6-astra",
-    pl: "codex-gpt-5-6-sol",
-    senior: "codex-gpt-5-6-terra",
-    junior: "codex-gpt-5-6-luna",
+    worker: "codex-gpt-5-6-sol",
   };
   for (const [role, profile] of Object.entries(profiles)) {
     org.roles[role] = { ...org.roles[role], profile, fallbacks: [] };
@@ -75,8 +73,7 @@ function advisedOrg(budget) {
   const org = astraLedOrg();
   org.advisors = {
     pm: ["codex-gpt-6-astra"],
-    pl: ["codex-gpt-6-astra"],
-    senior: ["codex-gpt-6-astra"],
+    worker: ["codex-gpt-6-astra"],
   };
   if (budget) org.policy.adviceBudget = budget;
   return validateOrg(org);
@@ -172,15 +169,16 @@ test("advice is persisted with its slot, decision, and verified citations", asyn
 test("advice refuses roles without an advisor and kinds it does not know", async (t) => {
   const dir = fixture(t);
   const org = advisedOrg();
+  delete org.advisors.worker;
   await assert.rejects(
     () =>
       advise(dir, org, brief, {
-        role: "junior",
+        role: "worker",
         kind: "review",
         stateDir: path.join(dir, ".omt"),
         call: async () => response(answer),
       }),
-    /Advisor profile not allowed: junior/,
+    /Advisor profile not allowed: worker/,
   );
   await assert.rejects(
     () =>
@@ -201,7 +199,7 @@ test("the advice budget counts failed calls and stops at the limit", async (t) =
   await assert.rejects(
     () =>
       advise(dir, org, brief, {
-        role: "senior",
+        role: "worker",
         kind: "review",
         stateDir,
         call: async () => ({ ...response(answer), code: 1 }),
@@ -209,7 +207,7 @@ test("the advice budget counts failed calls and stops at the limit", async (t) =
     /Advisor provider failed/,
   );
   await advise(dir, org, brief, {
-    role: "senior",
+    role: "worker",
     kind: "review",
     stateDir,
     call: async () => response(answer),
@@ -218,7 +216,7 @@ test("the advice budget counts failed calls and stops at the limit", async (t) =
   await assert.rejects(
     () =>
       advise(dir, org, brief, {
-        role: "senior",
+        role: "worker",
         kind: "review",
         stateDir,
         call: async () => {

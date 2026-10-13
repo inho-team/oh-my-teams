@@ -15,10 +15,10 @@ import {
 test("P-09: readLaunches and recordLaunch", () => {
   const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ledger-"));
   const orgFile = path.join(tmpdir, "organization.json");
-  recordLaunch(orgFile, { role: "senior", via: "role-terminal" });
+  recordLaunch(orgFile, { role: "worker", via: "role-terminal" });
   const launches = readLaunches(orgFile);
   assert.equal(launches.length, 1);
-  assert.equal(launches[0].role, "senior");
+  assert.equal(launches[0].role, "worker");
   assert.equal(launches[0].via, "role-terminal");
   fs.rmSync(tmpdir, { recursive: true, force: true });
 });

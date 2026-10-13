@@ -22,23 +22,54 @@
     "designRef"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "docId": { "type": "string", "minLength": 1 },
-    "stage": { "const": "implementation" },
-    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "schemaVersion": {
+      "const": 1
+    },
+    "docId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stage": {
+      "const": "implementation"
+    },
+    "kickoffId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "workflowId": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$",
       "$comment": "Never null: this document type only exists once a workflow request has been created for this kickoff."
     },
-    "revision": { "type": "integer", "minimum": 1 },
-    "state": { "enum": ["open", "in-review", "resolved"] },
-    "author": { "$ref": "#/$defs/author" },
-    "createdAt": { "type": "string", "format": "date-time" },
-    "basedOnRevision": {
-      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    "revision": {
+      "type": "integer",
+      "minimum": 1
     },
-    "reason": { "type": "string", "minLength": 1 },
+    "state": {
+      "enum": ["open", "in-review", "resolved"]
+    },
+    "author": {
+      "$ref": "#/$defs/author"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "basedOnRevision": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
     "workflowRef": {
       "$ref": "#/$defs/ref",
       "$comment": "Points at `.omt/workflows/<id>/request.json` (1.2 table #5), written once and immutable."
@@ -49,12 +80,17 @@
     },
     "attemptRefs": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "$comment": "attemptId values issued by workflow-reserve (3.13)."
     },
     "designRef": {
       "oneOf": [
-        { "type": "null" },
+        {
+          "type": "null"
+        },
         {
           "type": "string",
           "pattern": "^omt-doc:[a-f0-9]{64}/(none|[a-z0-9][a-z0-9-]*)/design/design-contract/.+@r[0-9]+$"
@@ -70,9 +106,12 @@
       "required": ["role", "executionId"],
       "properties": {
         "role": {
-          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+          "enum": ["director", "pm", "worker"]
         },
-        "executionId": { "type": "string", "minLength": 1 }
+        "executionId": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "ref": {
@@ -80,8 +119,14 @@
       "additionalProperties": false,
       "required": ["path", "sha256"],
       "properties": {
-        "path": { "type": "string", "minLength": 1 },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
       }
     }
   }

@@ -110,7 +110,7 @@ function envelope({
     workflowId,
     revision: 1,
     state,
-    author: { role: "senior", executionId: "exec-1" },
+    author: { role: "worker", executionId: "exec-1" },
     createdAt: new Date().toISOString(),
     basedOnRevision: null,
     reason: "test fixture",

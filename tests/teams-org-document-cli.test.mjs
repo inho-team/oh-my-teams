@@ -176,7 +176,7 @@ const reviewGateTask = (id) =>
       {
         id: "semantic-review",
         kind: "agent-review",
-        role: "senior",
+        role: "worker",
         criteria: ["scope-review"],
       },
     ],
@@ -205,7 +205,7 @@ function envelope({
   stageSlug,
   docType,
   localId,
-  author = { role: "senior", executionId: "doc-writer" },
+  author = { role: "worker", executionId: "doc-writer" },
   revision = 1,
   basedOnRevision = null,
   ...extra
@@ -242,7 +242,7 @@ const reviewInput = (overrides = {}) => ({
   schemaVersion: 1,
   id: "review-1",
   requirementId: "semantic-review",
-  reviewer: { kind: "agent-review", role: "senior", executionId: "senior-1" },
+  reviewer: { kind: "agent-review", role: "worker", executionId: "senior-1" },
   implementationExecutionId: "impl-run",
   conclusion: "approved",
   criteria: [
@@ -272,7 +272,7 @@ function backingReviewRef(
         id: localId,
         reviewer: {
           kind: "agent-review",
-          role: "senior",
+          role: "worker",
           executionId: reviewerExecutionId,
         },
         implementationExecutionId,
@@ -402,7 +402,7 @@ test("doc-save refuses when the author's role may not write that stage/docType (
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
-      author: { role: "junior", executionId: "junior-1" },
+      author: { role: "pm", executionId: "pm-1" },
     }),
   );
 
@@ -417,7 +417,7 @@ test("doc-save refuses when the author's role may not write that stage/docType (
   assert.notEqual(saved.code, 0);
   assert.match(
     saved.stderr,
-    /Role junior may not author review\/review-ref documents/,
+    /Role pm may not author review\/review-ref documents/,
   );
 });
 
@@ -435,7 +435,7 @@ test("doc-save refuses a different execution writing the next revision of a docu
       docType: "review-ref",
       localId: "review-1",
       reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "senior-1"),
-      author: { role: "senior", executionId: "senior-1" },
+      author: { role: "worker", executionId: "senior-1" },
     }),
   );
   const firstSave = await cliRun(
@@ -457,7 +457,7 @@ test("doc-save refuses a different execution writing the next revision of a docu
       docType: "review-ref",
       localId: "review-1",
       reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "senior-1"),
-      author: { role: "senior", executionId: "senior-2" },
+      author: { role: "worker", executionId: "senior-2" },
     }),
   );
   const secondSave = await cliRun(
@@ -495,7 +495,7 @@ test("doc-save refuses a review-ref whose reviewFileRef names an implementation 
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
-      author: { role: "senior", executionId: "senior-1" },
+      author: { role: "worker", executionId: "senior-1" },
       reviewFileRef: {
         path: reviewFileRef,
         sha256: fileSha256(path.join(wt.stateDir, reviewFileRef)),
@@ -544,7 +544,7 @@ test("doc-save rejects review references that do not identify the backing record
         stageSlug: "review",
         docType: "review-ref",
         localId: "review-1",
-        author: { role: "senior", executionId: "senior-1" },
+        author: { role: "worker", executionId: "senior-1" },
         reviewFileRef: invalid.ref,
       }),
     );
@@ -575,7 +575,7 @@ test("doc-save rejects review references that do not identify the backing record
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
-      author: { role: "senior", executionId: "senior-1" },
+      author: { role: "worker", executionId: "senior-1" },
       reviewFileRef: backingReviewRef(wt.stateDir, "review-1", "senior-1"),
     }),
   );
@@ -862,7 +862,7 @@ test("review-record, gate-check, accept and merge-check forward kickoffHash for 
       docType: "review-ref",
       localId: "review-1",
       reviewFileRef: backingReviewRef(stateDir, "review-1", "senior-1"),
-      author: { role: "senior", executionId: "senior-1" },
+      author: { role: "worker", executionId: "senior-1" },
     }),
   );
   assert.equal(readJSON(reviewDocFile).docId, reviewDocId);
@@ -1080,7 +1080,7 @@ test("gate-check only finds a workflow-scoped review-ref document when --workflo
       docType: "review-ref",
       localId: "review-1",
       reviewFileRef: backingReviewRef(stateDir, "review-1", "senior-1"),
-      author: { role: "senior", executionId: "senior-1" },
+      author: { role: "worker", executionId: "senior-1" },
     }),
   );
   assert.equal(readJSON(reviewDocFile).docId, reviewDocId);
@@ -1429,8 +1429,8 @@ test("workflow-accept forwards kickoffHash for a current kickoff entry, gating o
     repo: ".",
     integrationTask: "integration.json",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 4 },

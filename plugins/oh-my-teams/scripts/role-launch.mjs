@@ -12,7 +12,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HANDOFF_SECTIONS } from "./handoff.mjs";
 import {
-  canonicalRole,
   assert,
   AUDITOR_ROLE,
   claudeAutoCompact,
@@ -37,7 +36,7 @@ import {
  * model, the effort and the permission bypass flag, and is then handed its
  * task with `worker-start --terminal`. `worker-start --agent` has no option
  * for extra arguments: the command Orca builds takes them from the user's
- * per-agent default arguments, which may be empty, so a Codex PL started that
+ * per-agent default arguments, which may be empty, so a Codex role started that
  * way stopped at its first command approval. Orca cannot pass Agy
  * (`antigravity`) a model at all. Ollama has no interactive agent in Orca and
  * runs through the `work` harness.
@@ -119,14 +118,10 @@ export function kickoffBriefPrompt(briefPath) {
 /**
  * Roles each role may start as supervised workers, before folding.
  *
- * Only PM and PL create Dispatches. Senior hands its implementation scope back
- * instead, and Junior implements what it is given without delegating further.
+ * PM may dispatch to Worker. Worker cannot dispatch further.
  */
 export const DISPATCH_AUTHORITY = Object.freeze({
-  pm: ["pl", "senior", "junior", "worker"],
-  pl: ["senior", "junior"],
-  senior: [],
-  junior: [],
+  pm: ["worker"],
   worker: [],
 });
 
@@ -155,13 +150,10 @@ function worktreePath(worktreeId) {
 /**
  * Refuses to start a role in a worktree another role's task works in.
  *
- * In the literacy-test kickoff PM opened the Agy Senior reviewer in Junior's
- * worktree, because Agy had already been trusted there. Playwright files the
- * review needed were left uncommitted beside Junior's report. A reviewer reads
- * another role's work by path and commit from its own worktree. The workflow
- * records which role each attempt ran in which worktree, so that record is the
- * check. A role that supervises the owner may still work there, as Senior does
- * in PL's worktree with `--worktree current`.
+ * A reviewer reads another role's work by path and commit from its own
+ * worktree. The workflow records which role each attempt ran in which worktree,
+ * so that record is the check. A supervising PM can work in the current
+ * worktree when it owns the integration task.
  *
  * @param {object} [workflowState] - Workflow state; nothing is checked without one.
  * @param {string} role - Role about to start, after folding.
@@ -199,9 +191,6 @@ export function assertWorktreeUnshared(
 const CHARTER_HEADING = "## 권한·책임·한계";
 const ROLE_NAMES = {
   pm: "PM",
-  pl: "PL",
-  senior: "Senior",
-  junior: "Junior",
   worker: "Worker",
 };
 const skillsDir = path.resolve(
@@ -392,8 +381,7 @@ function launchableProfile(role, profileId, profile) {
 function activeRoles(org, roles) {
   const declared = definedRoles(org);
   if (roles === undefined) return declared;
-  // A workflow saved before 2.6.0 may list intern; it reads as its successor.
-  const run = Array.isArray(roles) ? roles.map(canonicalRole) : roles;
+  const run = roles;
   assert(
     Array.isArray(run) &&
       run.includes(ROOT_ROLE) &&
@@ -840,13 +828,8 @@ export function directorCommand(
  */
 export function readRoleCharter(role, directory = skillsDir) {
   assert(ROLES.includes(role), `Unknown role: ${role}`);
-  const charterRole = ["pl", "senior", "junior"].includes(role)
-    ? role === "pl"
-      ? "pm"
-      : "worker"
-    : role;
   const text = fs
-    .readFileSync(path.join(directory, charterRole, "SKILL.md"), "utf8")
+    .readFileSync(path.join(directory, role, "SKILL.md"), "utf8")
     .replace(/\r\n/g, "\n");
   const start = text.indexOf(`${CHARTER_HEADING}\n`);
   assert(start >= 0, `${role} skill has no ${CHARTER_HEADING} section`);
@@ -931,7 +914,7 @@ export function roleSpec(
     ...(workflowId ? [`workflow: ${workflowId} (state ${stateDir})`] : []),
     ...checkpointRule(workflowId, stateDir, workflowTask),
     ...handoffBrief(workflowState, workflowTask),
-    `역할 스킬 전문: ${path.join(skillsDir, ["pl", "senior", "junior"].includes(role) ? (role === "pl" ? "pm" : "worker") : role, "SKILL.md")}`,
+    `역할 스킬 전문: ${path.join(skillsDir, role, "SKILL.md")}`,
     "",
     "아래 권한·책임·한계를 벗어나는 요청은 수행하지 않고, 거부 사유와 함께 보고 대상에게 돌려보낸다.",
     // Untracked files count toward verify's fingerprint, and the literacy-test

@@ -569,7 +569,7 @@ async function settleLimited(t, org) {
     id: "limit-run",
     goal: "Route a limit",
     repo: ".",
-    tasks: [{ file: "a.json", role: "pl" }],
+    tasks: [{ file: "a.json", role: "pm" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 2 },
   };
@@ -616,14 +616,14 @@ test("a settled limit reads the frozen organization's policy and fallbacks", asy
       ),
     );
   const withFallback = org();
-  withFallback.roles.pl.fallbacks = ["agy-pro"];
+  withFallback.roles.pm.fallbacks = ["agy-pro"];
   assert.equal(
     (await settleLimited(t, withFallback)).category,
     "capacity-handoff",
   );
   assert.equal((await settleLimited(t, org())).category, "quota-exhausted");
   const stopping = org();
-  stopping.roles.pl.fallbacks = ["agy-pro"];
+  stopping.roles.pm.fallbacks = ["agy-pro"];
   stopping.policy.onExhaustion = "stop";
   assert.equal((await settleLimited(t, stopping)).category, "quota-exhausted");
 });

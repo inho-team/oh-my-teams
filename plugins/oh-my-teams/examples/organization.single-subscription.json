@@ -45,7 +45,7 @@
       "attempts": 1,
       "fallbacks": []
     },
-    "junior": {
+    "worker": {
       "parent": "pm",
       "profile": "agy-sonnet",
       "concurrency": 1,

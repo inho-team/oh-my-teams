@@ -83,14 +83,14 @@ agy --model claude-opus-4-6-thinking ...
 감독 worker는 역할 이름과 조직 파일로만 시작한다. 원시 `orca orchestration worker-start`로 `--agent`와 `--model`을 손으로 적지 않는다. 손으로 적은 명령은 저장된 모델을 빠뜨려도 아무 오류 없이 계정 기본 모델로 실행되고, 보고서는 여전히 역할의 프로필을 적기 때문이다. kickoff 안에서는 항상 그 workflow를 함께 지정한다.
 
 ```text
-node <runtime> worker-start --org <organization.json> --role <pl|senior|junior> --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <handle> --worktree <selector> --spec <작업> [--run <runId>]
+node <runtime> worker-start --org <organization.json> --role worker --repo <run-bound-worktree> --workflow-id <workflowId> --state <pm-state> --terminal <handle> --worktree <selector> --spec <작업> [--run <runId>]
 ```
 
-`<run-bound-worktree>`는 Run에 바인딩된 터미널이 서 있는 워크트리다. PM이 시작하면 PM 워크트리이고, 자기 Run을 바인딩한 PL이 시작하면 PL 워크트리다. `<pm-state>`는 PM 워크트리의 `.omt` 디렉터리로, 등록 항목의 `pm.stateDir`와 같으며 PL과 worker도 이 경로를 함께 쓴다. 자원 조직의 첫 PM 워크트리는 이사가 `role-worktree-create --pm-selection <선택 파일>`로 열며, 선택 파일 형식은 [`pm-bootstrap-selection.schema.json`](../schemas/pm-bootstrap-selection.schema.json)을 따른다. `--terminal`에는 아래 「역할 터미널에서 시작」 절에 따라 `role-terminal`로 연 터미널을 넘긴다. 래퍼는 새 agent 터미널을 띄우지 않는다.
+`<run-bound-worktree>`는 Run에 바인딩된 PM 터미널의 워크트리다. `<pm-state>`는 PM 워크트리의 `.omt` 디렉터리이며, 등록 항목의 `pm.stateDir`와 같습니다. 자원 조직의 첫 PM 워크트리는 이사가 `role-worktree-create --pm-selection <선택 파일>`로 열고, 선택 파일은 [`pm-bootstrap-selection.schema.json`](../schemas/pm-bootstrap-selection.schema.json)을 따릅니다. `--terminal`에는 `role-terminal`로 연 Worker 터미널을 넘깁니다. 래퍼는 새 agent 터미널을 열지 않습니다.
 
-래퍼는 worker가 시작되면 receipt의 `effects`에 기록된 agent 터미널의 탭 제목을 역할 태그로 시작하게 바꾼다. 제목은 `[PL] <워크트리 이름>` 형식이며, `--title`을 주면 워크트리 이름 대신 그 문구가 태그 뒤에 온다. `--worktree current`처럼 워크트리 이름을 알 수 없고 `--title`도 없으면 제목을 바꾸지 않고 `role-terminal`이 붙인 제목을 유지한다. 같은 워크트리에서 같은 역할을 둘 이상 띄울 때에는 `--title`로 작업을 구분한다. 결과의 `title`과 `titlePinned`가 적용한 제목과 성공 여부를 나타내며, 제목 변경에 실패해도 이미 시작된 worker를 실패로 처리하지 않는다. 탭 제목을 붙이는 이유는 아래 「역할 탭 제목」 절에 있다.
+래퍼는 Worker가 시작되면 receipt의 `effects`에 기록된 터미널 제목을 `[Worker] <워크트리 이름>`으로 설정합니다. `--title`을 주면 그 문구를 태그 뒤에 붙입니다. 제목 변경에 실패해도 이미 시작된 Worker의 실행을 실패로 처리하지 않고 결과의 `titlePinned`에 기록합니다.
 
-`--workflow-id`와 `--state`를 주면 래퍼는 조직 파일 대신 그 workflow가 만들어질 때 고정한 조직 스냅샷을 읽고, workflow에 기록된 이번 실행의 역할 목록으로 역할을 접는다. 실행 도중 `adjust`로 바뀐 조직이나 삭제된 역할이 진행 중인 kickoff에 섞이지 않게 하기 위해서다. workflow를 주지 않으면 `--org`의 파일을 읽고 조직이 선언한 역할로 접는다.
+`--workflow-id`와 `--state`를 주면 래퍼는 workflow 생성 시 고정한 조직 스냅샷과 역할 목록을 읽습니다. 실행 도중 `adjust`로 바뀐 조직은 해당 workflow에 적용되지 않습니다. workflow를 주지 않으면 `--org`의 현재 조직 파일을 읽습니다. 과거 역할이 들어 있는 스냅샷은 재개를 거부합니다.
 
 그다음 역할 프로필에서 시작 경로와 Orca agent, 모델, 강도를 정한다.
 
@@ -111,7 +111,7 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 - 프로필이 모델 없이 강도만 기록한다. Orca는 `--model` 없는 `--effort`를 거부한다.
 - 받은 워크트리가 이번 workflow에서 다른 역할의 task가 작업하는 워크트리다. 아래 「역할과 워크트리」 절을 따른다.
 
-`--spec` 앞에는 받는 역할의 머리글이 붙는다. 머리글에는 역할, 보고 대상, 이번 실행에 없어 이어받는 역할, 직접 배정할 수 있는 역할, 조직 파일 경로, workflow ID와 PM state 경로, [두괄식](bluf.md) 보고·지시 규칙, 그리고 역할 스킬의 `권한·책임·한계` 절 전문이 들어간다. 중첩 worker로 실행되는 PL은 이 경로로 자기 하위 역할을 시작한다. `task-create`로 만든 Task를 `--task`로 시작할 때에는 래퍼가 머리글을 붙일 수 없으므로, Task 설명을 `node <runtime> role-spec --org <organization.json> --role <역할> --workflow-id <workflowId> --state <pm-state> --spec <작업>`의 출력으로 만든다.
+`--spec` 앞에는 Worker의 역할, 보고 대상, 조직 파일, workflow ID, PM state 경로와 역할 스킬의 `권한·책임·한계` 절이 붙습니다. Task 파일로 시작할 때는 `role-spec`의 출력으로 작업 지시문을 만듭니다.
 
 시작 결과의 `binding`에는 `via`, `modelRequested`, `effortRequested`, `modelProof`, `screenCheck`가 남는다. `via`는 항상 `terminal`이며, `modelProof`는 다음 둘 중 하나다.
 
@@ -124,15 +124,15 @@ Claude·Codex 역할도 `worker-start --agent`로 띄우지 않는 이유는 권
 
 ### 역할과 워크트리
 
-역할은 다른 역할의 task가 작업하는 워크트리에서 시작하지 않는다. literacy-test kickoff에서 PM은 Agy가 이미 신뢰를 받아 둔 Junior의 워크트리에 Agy Senior 검토자를 띄웠고, 검토 뒤 그 워크트리에는 URL 확인용 Playwright 파일(`package.json`, `node_modules/`, 테스트 스크립트)이 커밋되지 않은 채 Junior의 보고서 옆에 남았다. 같은 워크트리를 쓰면 한 역할의 부산물이 다른 역할의 산출물에 섞이고, 누가 남긴 변경인지도 가릴 수 없다.
+Worker는 다른 task의 미검증 워크트리에서 시작하지 않습니다. 검토자는 구현 결과를 경로와 커밋으로 읽고 별도 워크트리에서 실행합니다.
 
-- 검토 역할은 검토 대상을 **경로와 커밋으로 읽고**, 구현과 다른 실행 ID 및 별도 워크트리에서 실행한다. 기존 검토 워크트리가 있으면 재사용 증명을 먼저 적용하고, 안전하게 재사용할 수 없는 경우에만 새 워크트리를 만든다. 이전 kickoff의 PL이나 PM이 띄운 Senior는 `--worktree current`로 띄운 역할의 워크트리를 쓰는 기존 절차를 따른다.
+- 검토자는 구현 결과를 경로와 커밋으로 읽고, 구현과 다른 실행 ID와 별도 워크트리에서 실행합니다. 기존 검토 워크트리는 재사용 증명을 통과한 경우에만 다시 씁니다.
 - Agy의 폴더 신뢰 질문은 `role-terminal`이 감독자 경로로 답하고 터미널을 다시 열어 처리하므로, 신뢰를 피하려고 이미 신뢰된 다른 역할의 워크트리를 빌리지 않는다.
 - `role-terminal`과 `worker-start`는 `--workflow-id`와 `--state`를 받으면, workflow의 각 시도에 기록된 `worktreeId`와 역할을 대조해 이 규칙을 강제한다. 워크트리가 다른 역할의 것이면 터미널을 만들기 전에 `is where <역할> works on task <task>`로 거부한다. 워크트리를 기록한 역할 자신과, 그 역할이 배정할 수 있는 하위 역할은 허용한다. 검토 역할은 구현 역할의 워크트리에서 시작하지 않는다. `new-child`는 아직 아무도 쓰지 않는 워크트리라 대조하지 않으며, `current`와 `active`는 `worker-start`에서는 `--repo`, `role-terminal`에서는 명령을 실행한 디렉터리로 해석한다. 이 거부를 우회하려고 워크트리 선택자를 바꾸지 않는다.
 
 ### 역할 터미널에서 시작
 
-모든 감독 역할은 모델·강도·권한 우회 플래그를 명령줄에 담아 터미널을 먼저 열고, 화면에서 모델을 확인한 뒤 그 터미널에 작업을 넘긴다. Claude·Codex·Agy 모두 같은 순서를 따른다. Agy 역할의 시작 경로는 `role-terminal`이 `scripts/launch-matrix.mjs`의 호환성 표를 조회해 정한다. 표가 `blocked`를 돌려주면 터미널을 만들기 전에 시도 예약도 하지 않고 PM에게 보고한다. 실행 경로가 `supervised-terminal`이고 근거가 `unverified`인 조합도 별도 승인 없이 터미널을 연다. 결과의 `matrix`와 `warnings`에 근거 등급·환경·버전 경고를 남기며, 실행 후 준비 상태와 모델을 확인하기 전에는 작업을 넘기지 않는다. `--allow-unverified` 옵션은 이전 호출과의 호환을 위해 남겨 두며 알려진 실패를 우회하지 않는다. 검사 대상은 이사(kickoff를 선언한 호스트 세션)가 아니라 저장된 역할 프로필의 실행기다. Orca는 `--terminal`과 새 워크트리 생성을 함께 받지 않으므로, 별도 워크트리가 필요하면 먼저 만든다. PL의 워크트리에서 실행하는 Senior처럼 기존 워크트리를 쓰면 첫 줄을 건너뛰고 두 명령에 같은 워크트리 선택자를 넘긴다.
+모든 감독 역할은 모델·강도·권한 우회 플래그를 담아 터미널을 열고, 화면에서 모델과 준비 상태를 확인한 뒤 작업을 넘깁니다. 새 워크트리가 필요하면 Orca로 먼저 만들며, 실행 경로는 `scripts/launch-matrix.mjs`의 판정을 따릅니다.
 
 ```text
 node <runtime> role-worktree-create --org <organization.json> --role <역할> --repo <pm-worktree> --name <name> --base <base-sha> --workflow-id <workflowId> --state <pm-state> --workflow-task <task id> [--worktree <worktreeId> --prior-workflow-id <accepted-workflowId> --prior-task-id <accepted-taskId>] [--fresh-reason <새 워크트리가 필요한 이유>]
@@ -163,7 +163,7 @@ Orca의 `worker-start --terminal`은 넘겨받은 터미널이 인식한 agent�
 
 Orca의 `worker-start`는 Dispatch를 먼저 만든 뒤, 넘겨받은 터미널이 `tui-idle`에 이를 때까지 기다리고 이르지 않으면 작업을 주입하지 못한 채 실패한다. 이렇게 실패하면 회수할 Dispatch가 남고 시도 예산도 줄어든다. 그래서 `worker-start --terminal`은 Orca를 호출하기 전에 같은 터미널에 `terminal wait --for tui-idle`을 20초 동안 실행하고, `timeout`이 돌아오면 Orca를 호출하지 않고 거부한다. 이때 Dispatch는 만들어지지 않는다. `workflow-reserve`로 시도를 예약한 뒤 이 거부를 받으면, `workflow-release`로 예약을 반납해도 시도는 소진된 채 남는다. 그래서 같은 점검을 `terminal-idle-check`로 **예약보다 먼저** 실행하고, 통과한 터미널에만 시도를 예약한다. 이 명령은 아무것도 만들지 않으며, 거부할 때 `worker-start`와 같은 신호를 돌려준다.
 
-화면에 폴더 신뢰, 업데이트, 명령 승인 같은 질문이 남아 있으면 Orca는 기다리지 않고 `satisfied: false`와 `blockedReason`(예: `agent-trust-workspace`, `agent-approval-prompt`)을 돌려준다. 응답 봉투 자체는 `ok: true`이므로, `terminal-idle-check`와 `worker-start --terminal`의 사전 점검은 이 경우도 대기 상태가 아닌 것으로 보고 `blockedReason`을 신호의 `code`로 삼아 Dispatch 없이 거부한다. 이 신호에는 경로를 정하지 않는다. 질문에는 사람이 아니라 감독자(Run을 바인딩한 PM, 또는 그 역할을 시작하고 Run을 바인딩한 PL)가 아래 「프롬프트 질문 답하기」 절의 `prompt-answer` 명령으로 답하고, 그 뒤 `terminal-idle-check`부터 다시 진행한다. 다만 `prompt-answer`가 키를 보내는 것은 분류기가 알아보는 질문뿐이다. 캡처되지 않은 명령 승인·업데이트 화면은 분류기가 알아보지 못하므로, `prompt-answer`는 Orca가 이 터미널을 질문에 멈춘 상태(`blockedReason`)로 보고하는 경우 키 없이 `escalate`로 끝내고 그 `blockedReason`을 기록한다. 이 결과를 받으면 점검으로 되돌아가지 않고 상위에 보고한다. 거부 메시지도 같은 순서를 안내한다.
+화면에 폴더 신뢰, 업데이트, 명령 승인 같은 질문이 남아 있으면 Orca는 `satisfied: false`와 `blockedReason`을 돌려줍니다. PM은 `prompt-answer`로 확인된 질문에만 답하고 `terminal-idle-check`부터 다시 실행합니다. 분류하지 못한 화면에는 키를 보내지 않고 증거를 보고합니다.
 
 Orca 1.4.203은 Claude 터미널의 대기 상태를 agent가 보내는 터미널 제목(`✳`로 시작하는 제목)과 상태 훅으로, Codex 터미널은 같은 신호와 화면의 `OpenAI Codex` 배너(`model:`과 `directory:` 줄)로 판정한다. 대기 중인 Claude 터미널에 `terminal wait --for tui-idle`을 실행하면 곧바로 `satisfied: true`가 돌아오는 것을 확인했다. Codex 터미널은 소스에서 판정 규칙만 확인했고 실제 터미널로는 확인하지 않았다. Claude·Codex 터미널이 `timeout`으로 거부되면 agent가 아직 화면을 그리는 중이거나 다른 입력을 처리하는 중이므로, 화면을 읽어 확인한 뒤 보고한다. Claude의 폴더 신뢰 질문이나 권한 우회 모드를 처음 켤 때 나오는 확인 질문은 `role-terminal`이 답하지 않는다. 이런 질문이 새 워크트리에서 나오면 위 사전 점검이 `blockedReason`과 함께 거부하므로, 감독자가 「프롬프트 질문 답하기」 절의 `prompt-answer` 명령으로 답한 뒤 다시 점검한다. Claude 역할은 실제로 끝까지 확인했다. Claude Code 2.1.274와 Haiku 4.5로, Run을 바인딩한 PM 터미널에서 새 자식 워크트리에 `role-terminal` → `terminal-idle-check` → `worker-start --terminal` 순서로 작업을 넘기자 worker가 파일을 만들고 커밋한 뒤 `worker_done`을 보냈다(2026-09-17). 이 새 워크트리에서는 폴더 신뢰 질문도, 권한 우회 모드의 확인 질문도 나오지 않았다. 다만 이 확인 질문은 사용자 설정의 `skipDangerousModePermissionPrompt`가 켜진 환경이었으므로, 그 설정이 없는 환경에서는 나올 수 있다. 정산 뒤 `worker-release`는 `role-terminal`로 연 터미널을 `retained`(`external_terminal`)로 남기고 프로세스를 멈추지 않으므로, 워크트리를 회수할 때 그 터미널도 `terminal close`로 직접 닫는다. Codex 역할 터미널은 신뢰 질문이 나온다는 것만 확인했고(위 Codex 신뢰 문단), `worker_done`까지는 확인하지 않았다.
 
@@ -197,7 +197,7 @@ workflow에 연결할 때에는 `dispatchId`를 실행 ID로 쓰고, receipt에 
 
 ### 프롬프트 질문 답하기
 
-역할 터미널이 폴더 신뢰 같은 질문에서 멈추면 사람이 그 터미널에서 답하기를 기다리지 않는다. 그 역할의 감독자가 `prompt-answer` 명령으로 화면을 읽고 분류기(`prompt-answers.mjs`)가 정한 키를 한 번 보내며, 답한 결과까지 확인해 PM 상태에 기록한다. 분류기가 알아보는 질문에만 답하며, 명령 승인과 업데이트 안내는 화면이 캡처된 적이 없어 알아보지 못하므로 이 화면에는 키를 보내지 않는다. 그런 화면은 아래 「분류기가 알아보지 못한 화면」에 따라 처리한다. 감독자는 Run을 바인딩한 PM이거나, 그 역할을 시작하고 자신의 Run을 바인딩한 PL이다.
+Worker 터미널이 폴더 신뢰 질문에서 멈추면 PM이 `prompt-answer`로 화면을 읽고 확인된 키를 한 번 보냅니다. 결과는 PM 상태에 기록하며, 분류하지 못한 화면에는 키를 보내지 않습니다.
 
 ```text
 node <runtime> prompt-answer --org <organization.json> --terminal <handle> --workflow-id <workflowId> --state <pm-state> [--role <역할>] [--orca <실행 파일>]
@@ -205,7 +205,7 @@ node <runtime> prompt-answer --org <organization.json> --terminal <handle> --wor
 
 명령은 호출한 터미널을 환경 변수 `ORCA_TERMINAL_HANDLE`에서 읽는다. 호출한 터미널이 이 역할의 감독자이고, 대상 터미널이 이 kickoff의 실행 기록에 그 역할로 남아 있으며, 터미널의 워크트리가 실행 기록이 그 역할에 적은 워크트리와 같고 Orca가 그 워크트리를 이 kickoff의 PM 워크트리 아래에 만들어진 것으로 기록하고 있을 때에만 진행한다. 소유자 체크아웃, PM의 워크트리, 다른 역할의 워크트리에서 열린 터미널에는 키를 보내지 않는다. 그런 다음 다음 순서를 따른다.
 
-**워크트리 확인.** 실행 기록의 워크트리 경로는 `role-terminal`을 호출한 쪽이 고른 값이므로, 그 값만으로는 kickoff가 만든 워크트리라는 증거가 되지 않는다. 그래서 호출자와 무관하게 Orca가 남긴 계보를 `orca worktree show --worktree id:<repoId>::<경로> --json`으로 읽는다. `repoId`는 kickoff의 PM 워크트리 id(`<repoId>::<경로>`)에서 얻는다. 응답의 `result.worktree`에서 `id`와 `repoId`가 그 저장소의 워크트리임을 보이고, `parentWorktreeId`와 `lineage`(`worktreeId`, `parentWorktreeId`, `origin`, `capture.confidence`)가 서로 일치하며 `origin`이 `cli`이고 `capture.confidence`가 `explicit`인 경우에만 그 부모를 인정한다. 부모를 따라 올라가 kickoff의 PM 워크트리에 닿아야 하고(PL이 만든 워크트리처럼 손자여도 같은 저장소에서 계보가 이어지면 닿는다), 최대 8단계까지만 따른다. 워크트리를 Orca가 모르거나, 다른 저장소이거나, 부모가 없거나, 계보가 추정된 값이거나 서로 어긋나거나 순환하면 `worktree-lineage-unproven`으로 거부하고 키를 보내지 않는다. `cliProvenance.callerTerminalHandle`은 만든 터미널을 알려 주지만 PL이 만든 워크트리도 정상이므로 근거로 쓰지 않는다.
+**워크트리 확인.** 실행 기록의 경로만으로는 kickoff가 만든 워크트리인지 알 수 없습니다. Orca의 `worktree show` 결과에서 저장소 ID와 명시적으로 기록된 부모 계보를 확인하고 PM 워크트리까지 추적합니다. 계보가 없거나 충돌하거나 순환하면 `worktree-lineage-unproven`으로 거부하고 키를 보내지 않습니다.
 
 1. 화면을 읽고 분류한다. 렌더된 화면을 얻지 못하면 키를 보내지 않는다. 분류기가 알아보지 못한 화면은 아래 「분류기가 알아보지 못한 화면」을 따른다.
 2. 화면이 캡처된 신뢰 질문이거나 기존 동작이 확인된 질문이면 분류기가 정한 키를 한 번 보낸다. Esc는 어떤 경우에도 보내지 않으며, 보낼 수 있는 키는 Enter와 Down뿐이다. Claude의 신뢰 질문은 Down 뒤 Enter가 필요하지만 두 키를 이어 보내지 않고, 화면이 바뀐 것을 읽은 뒤 각 화면 상태마다 키 하나씩 보낸다.
@@ -226,7 +226,7 @@ node <runtime> prompt-answer --org <organization.json> --terminal <handle> --wor
 
 **기록.** 시도마다 PM 상태의 `prompt-answers.jsonl`에 역할, 터미널, 워크트리, 질문 종류, 화면 발췌, 보낸 키와 그 근거(`captured-input`, `existing-behavior`, `footer-text`), 답한 감독자, 재확인 결과를 한 줄로 남긴다. 화면 발췌에는 분류기가 질문으로 인식한 줄만 남기고, 질문이 없는 화면, 분류기가 알아보지 못한 채 Orca가 멈춤으로 보고한 화면, 질문이 사라진 뒤 재확인한 화면은 발췌를 비운다. 그래서 역할의 작업 화면에 있던 토큰이나 설정 내용이 기록에 들어가지 않는다. 질문 자체에 적힌 폴더 경로와 선택지는 남으며, 기록 파일은 소유자만 읽도록 `0o600`으로 만든다. `status`는 이 파일을 읽어 `promptAnswers`에 시도 수와 풀리지 않은 시도를 보여 준다. 근거가 `footer-text`인 키는 화면 하단 안내 문구에서 얻은 것이므로 효과가 실측되지 않았고, 그래서 재확인 없이 성공으로 보지 않는다.
 
-**사람이 필요한 경우.** 결과가 `escalate`이거나 `unresolved`이거나 감독자 확인에서 거부되었으면, 감독자는 화면과 기록을 증거로 상위에 보고한다. `repeated: true`인 `escalate`는 이미 보고한 같은 대기이므로 다시 보고하지 않는다. PL은 PM에게, PM은 사람이 정해야 하는 것에 한해 `director-signal`로 이사에게 알린다. 감독자가 답할 수 있는 질문은 사용자에게 넘기지 않는다.
+**사람이 필요한 경우.** `escalate`나 `unresolved` 결과는 PM이 화면과 기록을 근거로 이사에게 보고합니다. `repeated: true`인 같은 대기는 다시 보고하지 않습니다.
 
 ### 역할 간 메시지 전달
 
@@ -234,17 +234,17 @@ node <runtime> prompt-answer --org <organization.json> --terminal <handle> --wor
 
 ### 역할 탭 제목
 
-신규 조직의 역할 태그는 `[PM]`과 `[Worker]`입니다. 아래의 PL·Senior·Junior 태그는 이전 kickoff의 터미널에서만 사용합니다.
+역할 태그는 `[PM]`과 `[Worker]`입니다.
 
-역할 터미널의 탭 제목은 `[PM]`, `[PL]`, `[Senior]`, `[Junior]` 태그로 시작한다. 태그가 없으면 Orca 탭에는 agent가 스스로 보내는 세션 요약 제목(예: `✳ Oh my teams kickoff coordinator`)만 보여서 어느 탭이 PM이고 어느 탭이 PL인지 구분할 수 없다. `role-terminal`의 `--title`은 태그를 대신하지 않고 태그 뒤에 붙으며, 생략하면 워크트리 이름이 붙는다.
+역할 터미널의 탭 제목은 `[PM]` 또는 `[Worker]` 태그로 시작합니다. `--title`은 태그 뒤에 붙고, 생략하면 워크트리 이름이 붙습니다.
 
 제목은 터미널을 만들 때 한 번 주는 것으로 끝내지 않고, agent가 뜬 뒤 `terminal rename`으로 다시 지정한다. literacy-test kickoff에서 `terminal create --title`로 연 PM 탭이 나중에 사용자 지정 제목을 잃고 agent의 세션 제목으로 표시되었다. Orca는 탭 기록이 없는 터미널을 넘겨받을 때 사용자 지정 제목 없이 탭을 다시 만들기 때문이다. Orca 탭은 사용자 지정 제목을 agent가 보내는 제목보다 먼저 표시하므로, 다시 지정한 제목은 agent가 작업하는 동안에도 유지된다. 반면 `terminal show`와 `terminal list`의 `title`은 agent가 보낸 실시간 제목이므로, 이 값이 태그로 시작하지 않는다고 해서 탭 제목이 사라진 것은 아니다. agent의 제목 기능 자체는 끄지 않는다. Orca가 그 제목으로 agent의 작업 상태를 판단하기 때문이다.
 
-역할 명령에는 실행기별 권한 우회 플래그가 붙는다. Claude와 Agy에는 `--dangerously-skip-permissions`, Codex에는 `--dangerously-bypass-approvals-and-sandbox`다. 역할 터미널에는 도구 승인 창에 답할 사람이 없고 상위 역할이 대신 승인하는 절차도 없으므로, 플래그 없이 뜬 역할은 첫 도구 호출에서 멈춘다. `worker-start --agent codex --model`로 띄운 Codex PL은 Windows 샌드박스가 `orca.cmd`를 막자 "Would you like to run the following command?"에서 멈췄다. Orca가 agent를 직접 띄울 때에는 설정의 agent별 기본 인자(`agentDefaultArgs`)를 명령에 붙인다. Orca 1.4.203 소스에서는 `--model`을 함께 줘도 기본 인자 가운데 모델 인자만 빼고 나머지를 유지한다. 그러나 이 값은 사용자가 바꿀 수 있는 설정이라 비어 있을 수 있고(이 사례의 호스트에서는 `claude`와 `codex`가 빈 문자열이었다), `worker-start`에는 인자를 더하는 옵션이 없다. `terminal send`로 입력한 역할 명령에는 기본 인자가 붙지 않는다. 그래서 OMT는 Orca 설정에 기대지 않고, 모든 감독 역할을 플래그와 모델을 담은 `role-command`의 명령으로 열어 `--terminal`로 넘긴다. 래퍼는 `--terminal` 없는 시작을 거부하므로 플래그 없이 뜨는 경로가 없다. 역할 프로필의 `command`는 실행 파일 이름 하나만 허용되므로 플래그가 두 번 붙지 않는다. Codex는 같은 플래그가 두 번 오면 실행을 거부한다.
+역할 명령에는 Claude·Agy의 `--dangerously-skip-permissions`와 Codex의 `--dangerously-bypass-approvals-and-sandbox`가 붙습니다. OMT는 프로필의 실행 파일 이름 하나만 받아 필요한 모델과 플래그를 `role-command`에 담고 `--terminal`로 넘깁니다.
 
 이 래퍼는 argv를 배열로 전달하고, receipt에서 Dispatch 신원을 확인한 뒤, 시작이 `ready`에 이르지 못하면 3값 liveness와 번역된 실패 신호가 담긴 receipt를 돌려준다. 거부되어 Dispatch가 만들어지지 않은 경우에만 오류를 던지며, 그 오류에도 신호와 원본 receipt가 함께 실린다.
 
-**`worker-start`는 해당 Run에 바인딩된 coordinator 터미널에서만 호출할 수 있다.** Orca는 Run에 바인딩된 터미널을 coordinator 터미널이라고 부르며, 기본적으로 PM 터미널이 여기에 해당하고 Nested worker depth를 2 이상으로 올려 자기 Run을 바인딩한 PL 터미널도 해당한다. 바인딩된 Run이 없는 상태에서 호출하면 Task의 존재 여부와 무관하게 `consumer_fenced`로 거부되므로, 먼저 같은 터미널에서 `orchestration run-create`로 Run을 만들어 바인딩한다. 이 코드는 호출한 자리가 잘못되었다는 뜻이므로 재시도로 해소되지 않으며, 번역표에 넣지 않고 증거와 함께 에스컬레이션한다.
+**`worker-start`는 Run에 바인딩된 PM 터미널에서만 호출합니다.** 바인딩된 Run이 없으면 `consumer_fenced`로 거부하며, 재시도 전에 PM이 바인딩 상태를 확인합니다.
 
 Run을 바인딩한 뒤에는 `--spec`으로 Task와 첫 시도를 한 번에 만들 수 있고, 성공한 시작은 `state: "ready"`와 함께 `runId`, `taskId`, `dispatchId`를 돌려준다. `--agent`로 시작한 receipt의 `launch.requested`와 `launch.effective`에는 요청한 agent·모델·강도와 적용된 값이 나란히 들어 있지만, 래퍼가 쓰는 `--terminal` 시작에서는 두 값 모두 모델을 담지 않는다.
 
@@ -287,7 +287,7 @@ PM은 `orca orchestration check --run <runId> --wait 30000`으로 Worker의 메�
 
 ## 사용 한도 handoff
 
-worker가 사용 한도에 걸리면 같은 워크트리의 작업을 조직이 그 역할에 선언한 fallback 프로필이 이어받는다. 설계와 근거는 저장소의 `docs/plan/role-handoff.md`에 있다. PM이 이 절차를 수행하며, PL은 자기가 감독하는 worker가 한도에 걸렸으면 아래 1단계의 판정 결과를 `message-send --type escalation`으로 PM에게 보내고 직접 handoff하지 않는다. PM 자신의 한도는 이 절차의 대상이 아니며, 이사에게 `blocked`로 보고한다.
+Worker가 사용 한도에 걸리면 PM이 같은 워크트리에서 선언된 fallback 프로필로 작업을 넘깁니다. PM 자신의 사용 한도는 이 절차의 대상이 아니며 이사에게 `blocked`로 보고합니다.
 
 1. **판정:** 위 「무응답 worker 감독」의 `inspect`나 `escalate` 단계에서, 또는 `worker-read` 출력에 한도 문구가 보이면 다음을 실행한다. Codex와 Claude는 워크트리 경로만으로 세션 기록을 찾고, Agy는 `--workflow-id`와 `--workflow-task`로 찾는다. 세션 기록이 없을 때에만 `--terminal`의 화면을 읽는다.
 
@@ -382,7 +382,7 @@ node <runtime> doc-save --state <pm-worktree>/.omt --doc <envelope.json> [--expe
 - `doc-save`는 저장 전에 `assertDocumentAuthority`로 design 3.4절의 작성 권한·독립성을 검사한 뒤 `saveDocument(stateDir, doc, { expectedRevision, refs })`를 호출한다. `--doc`은 전체 envelope JSON 파일 경로이며, `--refs`는 검증할 `omt-doc:` 문서 참조만 쉼표로 구분해 전달한다. `saveDocument`가 호출하는 `validateReference`는 `omt-doc:`으로 시작하지 않는 참조를 즉시 거부하므로, legacy 참조(`validateLegacyRef`, org 인자가 필요한 별도 export 함수)는 이 옵션으로 검증되지 않는다.
 - `assertDocumentAuthority`는 design 3.4절의 작성 역할과 수정 권한을 검사한다. PM이 `design/design-contract`를 작성할 때는 이번 실행에 하위 역할이 없는지도 확인한다. `review/review-ref`를 저장할 때는 `reviewFileRef` 객체의 경로와 SHA-256 해시가 해당 검토 기록과 일치하는지, 문서 작성자가 실제 검토 실행인지, 구현과 검토의 실행이 독립적인지 확인한다. 검토 참조의 경로에는 `reviews/<id>.json`과 `.omt/reviews/<id>.json`을 허용한다. 자세한 판정은 `document-authority.mjs`를 따른다.
 
-PL의 "배정 관련 필드만"이라는 수정 범위(design 3.4.3절)도 own-document 검사와 별도로 `assertDocumentAuthority`가 판정한다. own-document 검사 자체는 여전히 PL을 예외로 둬 PM이 쓴 첫 revision을 다른 실행의 PL이 이어 쓰는 정상 흐름을 막지 않지만, PL이 `implementation/workflow-task-ref` 또는 `implementation/integration-ref`의 다음 revision을 쓸 때는 직전 revision과 비교해 각 docType이 허용한 필드(`workflow-task-ref`는 `attemptRefs`, `integration-ref`는 `taskHashRef`·`extensionHistory`)만 달라야 저장을 허용한다. `revision`·`basedOnRevision`·`createdAt`·`author` 네 필드는 저장 계층이 강제하거나 호출마다 자연히 달라지는 값이라 비교에서 항상 제외하며, 비교는 `JSON.stringify` 동등 비교를 쓴다. 나머지 필드가 하나라도 다르면 거부한다.
+문서 revision을 갱신할 때에는 이전 작성 실행 ID와 같은 실행만 다음 revision을 쓸 수 있습니다. 수용 문서는 별도 권한 규칙을 따릅니다.
 
 ## `review-record`/`gate-check`/`accept`/`merge-check`/`workflow-accept`의 `--org` 판정 절차
 

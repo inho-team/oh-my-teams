@@ -65,8 +65,8 @@ process.stdout.write(JSON.stringify({ result: JSON.stringify(payload), model: "f
 
   const org = structuredClone(exampleOrg);
   org.profiles["claude-current"].command = [process.execPath, provider];
-  org.roles.junior.profile = "claude-current";
-  org.roles.junior.fallbacks = [];
+  org.roles.worker.profile = "claude-current";
+  org.roles.worker.fallbacks = [];
   org.policy.timeoutMs = 120000;
   const orgFile = path.join(repo, "org.json");
   writeJson(orgFile, org);
@@ -103,7 +103,7 @@ process.stdout.write(JSON.stringify({ result: JSON.stringify(payload), model: "f
       {
         id: "semantic-review",
         kind: "agent-review",
-        role: "senior",
+        role: "worker",
         criteria: ["scope-review"],
       },
     ],
@@ -150,7 +150,7 @@ process.stdout.write(JSON.stringify({ result: JSON.stringify(payload), model: "f
     requirementId: "semantic-review",
     reviewer: {
       kind: "agent-review",
-      role: "senior",
+      role: "worker",
       executionId: "senior-cli-1",
     },
     implementationExecutionId: report.runId,
@@ -289,8 +289,8 @@ test("CLI newer changes-requested review with no findings revokes prior approval
   );
   const org = structuredClone(exampleOrg);
   org.profiles["claude-current"].command = [process.execPath, provider];
-  org.roles.junior.profile = "claude-current";
-  org.roles.junior.fallbacks = [];
+  org.roles.worker.profile = "claude-current";
+  org.roles.worker.fallbacks = [];
   const orgFile = path.join(repo, "org.json");
   writeJson(orgFile, org);
   const task = {
@@ -316,7 +316,7 @@ test("CLI newer changes-requested review with no findings revokes prior approval
       {
         id: "semantic-review",
         kind: "agent-review",
-        role: "senior",
+        role: "worker",
         criteria: ["review"],
       },
     ],
@@ -348,7 +348,7 @@ test("CLI newer changes-requested review with no findings revokes prior approval
     requirementId: "semantic-review",
     reviewer: {
       kind: "agent-review",
-      role: "senior",
+      role: "worker",
       executionId: "senior-cli-2",
     },
     implementationExecutionId: report.runId,
@@ -440,7 +440,7 @@ test("STATE-04: terminal-idle-check warns about launch path prediction failures 
       "--org",
       "org.json",
       "--role",
-      "intern",
+      "worker",
       "--terminal",
       "t-123",
       "--orca",

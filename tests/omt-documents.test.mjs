@@ -344,7 +344,7 @@ const reviewGateTaskDef = (id) =>
       {
         id: "semantic-review",
         kind: "agent-review",
-        role: "senior",
+        role: "worker",
         criteria: ["scope-review"],
       },
     ],
@@ -373,7 +373,7 @@ function gateEnvelope({
   stageSlug,
   docType,
   localId,
-  author = { role: "senior", executionId: "doc-writer" },
+  author = { role: "worker", executionId: "doc-writer" },
   ...extra
 }) {
   return {
@@ -421,7 +421,7 @@ const reviewInput = (overrides = {}) => ({
   schemaVersion: 1,
   id: "review-1",
   requirementId: "semantic-review",
-  reviewer: { kind: "agent-review", role: "senior", executionId: "senior-1" },
+  reviewer: { kind: "agent-review", role: "worker", executionId: "senior-1" },
   implementationExecutionId: "impl-run",
   conclusion: "approved",
   criteria: [
@@ -480,7 +480,7 @@ test("정상_생성_참조_갱신", () => {
       "design",
       "design-contract",
       "design-1",
-      { role: "senior", executionId: "charlie-exec-1" },
+      { role: "worker", executionId: "charlie-exec-1" },
     );
     designDoc.problemStatement = "test problem";
     designDoc.decisions = [];
@@ -525,7 +525,7 @@ test("정상_생성_참조_갱신", () => {
       "review",
       "review-ref",
       "review-1",
-      { role: "senior", executionId: "diana-exec-1" },
+      { role: "worker", executionId: "diana-exec-1" },
     );
     reviewDoc.reviewFileRef = null;
     reviewDoc.implementationRef = implRef;
@@ -637,7 +637,7 @@ test("권한_없는_수정", () => {
       "design",
       "design-contract",
       "design-1",
-      { role: "senior", executionId: "charlie-exec-1" },
+      { role: "worker", executionId: "charlie-exec-1" },
     );
     designDoc.problemStatement = "test problem";
     designDoc.decisions = [];
@@ -649,7 +649,7 @@ test("권한_없는_수정", () => {
 
     designDoc.revision = 2;
     designDoc.basedOnRevision = 1;
-    designDoc.author = { role: "senior", executionId: "charlie-exec-2" };
+    designDoc.author = { role: "worker", executionId: "charlie-exec-2" };
     designDoc.reason = "attempted update by different execution";
     const designUpdateFile = path.join(tempDir, "design-doc-update.json");
     fs.writeFileSync(designUpdateFile, JSON.stringify(designDoc, null, 2));
@@ -665,7 +665,7 @@ test("권한_없는_수정", () => {
       "review",
       "review-ref",
       "review-1",
-      { role: "junior", executionId: "eve-exec-1" },
+      { role: "pm", executionId: "eve-exec-1" },
     );
     juniorReviewDoc.reviewFileRef = null;
     juniorReviewDoc.implementationRef = null;
@@ -678,7 +678,7 @@ test("권한_없는_수정", () => {
     assert.notEqual(juniorAttempt.code, 0);
     assert.match(
       juniorAttempt.stderr,
-      /Role junior may not author review\/review-ref/,
+      /Role pm may not author review\/review-ref/,
     );
 
     // (c) Senior가 자신이 구현한 작업을 스스로 검토하려는 시도는 독립성 검사로 거부된다.
@@ -702,7 +702,7 @@ test("권한_없는_수정", () => {
       "review",
       "review-ref",
       "review-2",
-      { role: "senior", executionId: "charlie-exec-1" },
+      { role: "worker", executionId: "charlie-exec-1" },
     );
     selfReviewDoc.reviewFileRef = {
       path: "reviews/review-2.json",
@@ -910,7 +910,7 @@ test("동시_갱신", async () => {
       "design",
       "design-contract",
       "design-1",
-      { role: "senior", executionId: "charlie-exec-1" },
+      { role: "worker", executionId: "charlie-exec-1" },
     );
     doc.problemStatement = "test";
     doc.decisions = [];
@@ -1513,7 +1513,7 @@ test("current_kickoff의_kickoffHash_전달_미커밋_문서", async (t) => {
       stageSlug: "review",
       docType: "review-ref",
       localId: "review-1",
-      author: { role: "senior", executionId: "senior-1" },
+      author: { role: "worker", executionId: "senior-1" },
       reviewFileRef: {
         path: "reviews/review-1.json",
         sha256: fileSha256(path.join(stateDir, "reviews", "review-1.json")),
@@ -1845,7 +1845,7 @@ test("상태_기반_거부_초안_참조", () => {
       "design",
       "design-contract",
       "design-1",
-      { role: "senior", executionId: "charlie-exec-1" },
+      { role: "worker", executionId: "charlie-exec-1" },
     );
     designDoc.problemStatement = "test";
     designDoc.decisions = [];

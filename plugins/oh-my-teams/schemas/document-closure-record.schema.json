@@ -23,24 +23,60 @@
     "lessonCandidateRefs"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "docId": { "type": "string", "minLength": 1 },
-    "stage": { "const": "closure" },
-    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "schemaVersion": {
+      "const": 1
+    },
+    "docId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stage": {
+      "const": "closure"
+    },
+    "kickoffId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "workflowId": {
       "oneOf": [
-        { "type": "null" },
-        { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        }
       ]
     },
-    "revision": { "type": "integer", "minimum": 1 },
-    "state": { "enum": ["open", "in-review", "resolved"] },
-    "author": { "$ref": "#/$defs/author" },
-    "createdAt": { "type": "string", "format": "date-time" },
-    "basedOnRevision": {
-      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    "revision": {
+      "type": "integer",
+      "minimum": 1
     },
-    "reason": { "type": "string", "minLength": 1 },
+    "state": {
+      "enum": ["open", "in-review", "resolved"]
+    },
+    "author": {
+      "$ref": "#/$defs/author"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "basedOnRevision": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
     "directorSignalRef": {
       "$ref": "#/$defs/ref",
       "$comment": "Points at `<ownerProject>/.omt/director/inbox/<id>.json` (1.2 table #28)."
@@ -55,12 +91,18 @@
     },
     "incidentRefs": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "$comment": "3.2 확정된 결정: relative paths to incidents.mjs records, not omt-doc references; may be empty."
     },
     "lessonCandidateRefs": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "$comment": "3.2 확정된 결정: relative paths to lessons.mjs records, not omt-doc references; may be empty."
     }
   },
@@ -71,9 +113,12 @@
       "required": ["role", "executionId"],
       "properties": {
         "role": {
-          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+          "enum": ["director", "pm", "worker"]
         },
-        "executionId": { "type": "string", "minLength": 1 }
+        "executionId": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "ref": {
@@ -81,8 +126,14 @@
       "additionalProperties": false,
       "required": ["path", "sha256"],
       "properties": {
-        "path": { "type": "string", "minLength": 1 },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
       }
     }
   }

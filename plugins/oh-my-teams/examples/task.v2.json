@@ -30,7 +30,7 @@
     {
       "id": "semantic-review",
       "kind": "agent-review",
-      "role": "senior",
+      "role": "worker",
       "criteria": ["public-api"]
     }
   ],

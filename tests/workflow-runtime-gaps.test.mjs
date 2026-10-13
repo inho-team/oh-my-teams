@@ -114,7 +114,7 @@ async function singleTaskWorkflow(t, { id, budget, policy }) {
     id,
     goal: "Single task workflow",
     repo: ".",
-    tasks: [{ file: "a.json", role: "junior" }],
+    tasks: [{ file: "a.json", role: "worker" }],
     policy: policy ?? { maxRunning: 1, maxReviewPending: 1 },
     budget: budget ?? { maxAttempts: 2, maxCalls: 3 },
   };
@@ -694,8 +694,8 @@ test("workflow-integration-checks appends new checks to a frozen integration tas
     repo: ".",
     integrationTask: "integration.json",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 4 },
@@ -846,7 +846,7 @@ const reviewableTask = (checks) =>
       {
         id: "semantic-review",
         kind: "agent-review",
-        role: "senior",
+        role: "worker",
         criteria: ["scope-review"],
       },
     ],
@@ -876,7 +876,7 @@ test("review-record accepts failed evidence to record a rejection but never to r
     schemaVersion: 1,
     id: "review-rejects-failing-run",
     requirementId: "semantic-review",
-    reviewer: { kind: "agent-review", role: "senior", executionId: "senior-1" },
+    reviewer: { kind: "agent-review", role: "worker", executionId: "senior-1" },
     implementationExecutionId: report.runId,
     conclusion: "changes-requested",
     criteria: [

@@ -137,7 +137,7 @@ test("a launch is tied to its kickoff by state, by PM worktree, or through an ea
     fixture.orgFile,
     {
       via: "role-terminal",
-      role: "pl",
+      role: "pm",
       provider: "codex",
       worktreePath: plWorktree,
       callerCwd: fixture.dir,
@@ -147,21 +147,21 @@ test("a launch is tied to its kickoff by state, by PM worktree, or through an ea
   );
   assert.equal(first.line.kickoffPmWorktreeId, fixture.worktreeId);
   const fromPm = recordLegacyLaunch(fixture.orgFile, {
-    role: "junior",
+    role: "worker",
     callerCwd: path.join(fixture.pmPath, "sub"),
   });
   assert.equal(fromPm.line.kickoffPmWorktreeId, fixture.worktreeId);
   // PL launches Senior from its own worktree, with no --state of its own.
   const fromPl = recordLaunch(fixture.orgFile, {
     via: "worker-start",
-    role: "senior",
+    role: "worker",
     worktreePath: plWorktree,
     callerCwd: plWorktree,
   });
   assert.equal(fromPl.line.kickoffPmWorktreeId, fixture.worktreeId);
   const unrelated = recordLaunch(fixture.orgFile, {
     via: "role-terminal",
-    role: "junior",
+    role: "worker",
     callerCwd: path.join(fixture.dir, "elsewhere"),
   });
   assert.equal(unrelated.line.kickoffPmWorktreeId, null);
@@ -174,7 +174,7 @@ test("a launch is tied to its kickoff by state, by PM worktree, or through an ea
   fs.appendFileSync(ledgerFile(fixture.orgFile), '{"schemaVersion":1,"at"');
   assert.equal(readLaunches(fixture.orgFile).length, 4);
   assert.throws(
-    () => recordLaunch(fixture.orgFile, { via: "typed-by-hand", role: "pl" }),
+    () => recordLaunch(fixture.orgFile, { via: "typed-by-hand", role: "pm" }),
     /Launch via must be one of/,
   );
 });
@@ -192,7 +192,7 @@ test("F-04: recordLaunch reads only until found, keeping cost low regardless of 
       schemaVersion: 1,
       at: new Date().toISOString(),
       via: "role-terminal",
-      role: "senior",
+      role: "worker",
       kickoffPmWorktreeId: "repo::dummy",
     }) + "\n";
 
@@ -209,7 +209,7 @@ test("F-04: recordLaunch reads only until found, keeping cost low regardless of 
       schemaVersion: 1,
       at: new Date().toISOString(),
       via: "role-terminal",
-      role: "junior",
+      role: "worker",
       kickoffPmWorktreeId: "repo::target",
       worktreePath: targetCwd,
     }) + "\n";
@@ -259,7 +259,7 @@ test("F-04: recordLaunch reads only until found, keeping cost low regardless of 
   try {
     const launch = recordLaunch(orgFile, {
       via: "role-terminal",
-      role: "junior",
+      role: "worker",
       callerCwd: path.join(targetCwd, "sub"),
     });
     assert.equal(launch.line.kickoffPmWorktreeId, "repo::target");
@@ -301,22 +301,22 @@ test("sessions go to the role launched in their place, and unclear ones are not 
     kickoffPmWorktreeId: "repo::pm",
   });
   const launches = [
-    line(10, "pl", "codex", w1, "t-pl"),
-    line(20, "senior", "agy", w1, "t-senior"),
-    line(60, "pl", "agy", w1, "t-pl-agy"),
-    line(60.5, "junior", "agy", w1, "t-junior"),
+    line(10, "pm", "codex", w1, "t-pl"),
+    line(20, "worker", "agy", w1, "t-senior"),
+    line(60, "pm", "agy", w1, "t-pl-agy"),
+    line(60.5, "worker", "agy", w1, "t-junior"),
     // Another kickoff's launch in the same worktree is not this kickoff's.
-    { ...line(30, "junior", "codex", w1, "t-x"), kickoffPmWorktreeId: "o" },
+    { ...line(30, "worker", "codex", w1, "t-x"), kickoffPmWorktreeId: "o" },
   ];
   const places = kickoffPlaces({ entry, org, launches, end });
   assert.deepEqual(
     places.map((place) => [place.role, place.source]),
     [
       ["pm", "registry"],
-      ["pl", "ledger"],
-      ["senior", "ledger"],
-      ["pl", "ledger"],
-      ["junior", "ledger"],
+      ["pm", "ledger"],
+      ["worker", "ledger"],
+      ["pm", "ledger"],
+      ["worker", "ledger"],
     ],
   );
   // PL's Agy launch in the same worktree and provider ends Senior's hold.
@@ -337,15 +337,15 @@ test("sessions go to the role launched in their place, and unclear ones are not 
   const records = attributeSessions(
     [
       session("pm", "claude", pm, 1),
-      session("pl", "codex", path.join(w1, "src"), 11, {
+      session("codex-role", "codex", path.join(w1, "src"), 11, {
         modelReported: ["gpt-6-astra"],
       }),
-      session("senior", "agy", w1, 21),
+      session("agy-role", "agy", w1, 21),
       session("late-senior", "agy", w1, 62),
       session("sibling", "claude", `${pm}-2`, 30),
       session("early-agy", "agy", w1, 5),
       session("declared", "agy", null, 1, {
-        role: "junior",
+        role: "worker",
         attribution: { method: "declared" },
         modelRequested: "m",
         modelReported: ["m"],
@@ -357,20 +357,20 @@ test("sessions go to the role launched in their place, and unclear ones are not 
     records.map((record) => [record.sessionKey, record]),
   );
   assert.equal(byKey.pm.role, "pm");
-  assert.equal(byKey.pl.role, "pl");
-  assert.equal(byKey.pl.modelVerdict, "mismatched");
-  assert.equal(byKey.senior.role, "senior");
+  assert.equal(byKey["codex-role"].role, "pm");
+  assert.equal(byKey["codex-role"].modelVerdict, "mismatched");
+  assert.equal(byKey["agy-role"].role, "worker");
   assert.equal(byKey["late-senior"].role, "ambiguous");
   assert.deepEqual(byKey["late-senior"].attribution.roles.sort(), [
-    "junior",
-    "pl",
+    "pm",
+    "worker",
   ]);
   assert.equal(byKey["late-senior"].measured, "partial");
   assert.equal(byKey.sibling.role, "unattributed");
   assert.equal(byKey.sibling.attribution.reason, "no-place");
   assert.equal(byKey["early-agy"].role, "unattributed");
   assert.equal(byKey["early-agy"].attribution.reason, "outside-launch-window");
-  assert.equal(byKey.declared.role, "junior");
+  assert.equal(byKey.declared.role, "worker");
   assert.equal(byKey.declared.modelVerdict, "matched");
 
   // Windows reports one checkout in several spellings.
@@ -384,7 +384,7 @@ test("sessions go to the role launched in their place, and unclear ones are not 
     ],
     [
       {
-        role: "pl",
+        role: "pm",
         provider: "codex",
         path: "C:\\Work\\w1",
         at: base,
@@ -393,7 +393,7 @@ test("sessions go to the role launched in their place, and unclear ones are not 
     ],
     { platform: "win32" },
   );
-  assert.equal(windows.role, "pl");
+  assert.equal(windows.role, "pm");
 });
 
 // The session is created when its first event is written, after the launch
@@ -441,7 +441,7 @@ function kickoffWithSessions(t) {
     );
   launch(5, {
     via: "role-terminal",
-    role: "pl",
+    role: "pm",
     provider: "codex",
     modelRequested: "gpt-5.6-sol",
     worktreePath: shared,
@@ -449,7 +449,7 @@ function kickoffWithSessions(t) {
   });
   launch(10, {
     via: "role-terminal",
-    role: "senior",
+    role: "worker",
     provider: "agy",
     modelRequested: "gemini-3.8-flash-high",
     worktreePath: shared,
@@ -458,7 +458,7 @@ function kickoffWithSessions(t) {
   recordLegacyLaunch(
     fixture.orgFile,
     {
-      role: "junior",
+      role: "worker",
       provider: "codex",
       worktreePath: juniorDir,
       workerId: "junior-1",
@@ -499,7 +499,7 @@ function kickoffWithSessions(t) {
   writeJSON(path.join(worker, "worker.json"), {
     schemaVersion: 1,
     id: "junior-1",
-    role: "junior",
+    role: "worker",
     profile: "codex-current",
     provider: "codex",
     binary: ["codex"],
@@ -567,20 +567,17 @@ test("a report shares measured tokens by role and leaves the unmeasured null", a
   assert.equal(report.kickoffs.length, 1);
   const [kickoff] = report.kickoffs;
   assert.equal(kickoff.excludedDuplicates, 1);
-  assert.equal(kickoff.byRole.pl.promptTokens, 3000);
-  assert.equal(kickoff.byRole.pl.turns, 1);
-  assert.equal(kickoff.byRole.junior.promptTokens, 1000);
-  assert.deepEqual(kickoff.byRole.junior.sources, ["headless"]);
-  assert.equal(kickoff.byRole.senior.steps, 12);
-  assert.equal(kickoff.byRole.senior.promptTokens, null);
-  assert.equal(kickoff.byRole.senior.outputTokens, null);
-  assert.deepEqual(kickoff.byRole.senior.reasons, [
+  assert.equal(kickoff.byRole.pm.promptTokens, 3000);
+  assert.equal(kickoff.byRole.pm.turns, 1);
+  assert.equal(kickoff.byRole.worker.promptTokens, 1000);
+  assert.deepEqual(kickoff.byRole.worker.sources, ["agy-summary", "headless"]);
+  assert.equal(kickoff.byRole.worker.steps, 12);
+  assert.deepEqual(kickoff.byRole.worker.reasons, [
     "agy-interactive-usage-not-recorded",
   ]);
-  assert.equal(kickoff.share.senior, "unmeasured");
-  assert.equal(kickoff.share.pl, Number((3200 / 4200).toFixed(4)));
-  assert.equal(kickoff.share.junior, Number((1000 / 4200).toFixed(4)));
-  assert.deepEqual(kickoff.coverage.unmeasuredRoles, ["senior"]);
+  assert.equal(kickoff.share.pm, Number((3200 / 4200).toFixed(4)));
+  assert.equal(kickoff.share.worker, Number((1000 / 4200).toFixed(4)));
+  assert.deepEqual(kickoff.coverage.unmeasuredRoles, []);
   assert.equal(kickoff.coverage.measuredSessions, 2);
   assert.equal(kickoff.coverage.totalSessions, 3);
   assert.deepEqual(kickoff.mismatches, []);
@@ -591,7 +588,7 @@ test("a report shares measured tokens by role and leaves the unmeasured null", a
   assert.equal(report.totals.promptTokens, 4000);
   assert.ok(!JSON.stringify(report).includes(CANARY));
   const table = formatUsageTable(report);
-  assert.match(table, /senior .*unmeasured/);
+  assert.match(table, /worker /);
   assert.match(table, /coverage: 2\/3 sessions measured/);
   assert.equal(kickoff.recordedLaunches, 3);
   assert.doesNotMatch(table, /no launches recorded/);
@@ -604,6 +601,9 @@ test("an archived pre-rename kickoff is reported, with its places named by hand"
     released: at(base, 120),
     legacy: true,
   });
+  const org = readJSON(fixture.orgFile);
+  org.roles.worker.profile = "codex-current";
+  writeJSON(fixture.orgFile, org);
   const child = path.join(fixture.dir, "child-worktree");
   codexRollout(
     path.join(fixture.homes.codexHome, "sessions", "rollout-child.jsonl"),
@@ -628,10 +628,10 @@ test("an archived pre-rename kickoff is reported, with its places named by hand"
 
   const backfilled = await usageReport({
     ...options,
-    places: [`pl=${child}`],
+    places: [`worker=${child}`],
   });
   const [kickoff] = backfilled.kickoffs;
-  assert.equal(kickoff.byRole.pl.promptTokens, 700);
+  assert.equal(kickoff.byRole.worker.promptTokens, 700);
   assert.equal(kickoff.records[0].attribution.place, "manual");
   assert.equal(kickoff.window.to, at(base, 120));
 
@@ -704,7 +704,7 @@ test("usage-report runs from the CLI with explicit homes and writes a snapshot",
   ]);
   captured.restore();
   const report = JSON.parse(captured.lines.join("\n"));
-  assert.equal(report.kickoffs[0].byRole.pl.promptTokens, 3000);
+  assert.equal(report.kickoffs[0].byRole.pm.promptTokens, 3000);
   assert.equal(
     report.kickoffs[0].sources["agy-summary"].unavailable,
     "agy-summary-db-missing",
@@ -724,9 +724,9 @@ test("usage-report runs from the CLI with explicit homes and writes a snapshot",
   const printed = table.lines.join("\n");
   assert.match(
     printed,
-    /pl +\| OpenCodex gpt-5\.6-sol -> OpenCodex gpt-5\.6-sol/,
+    /pm +\| OpenCodex gpt-5\.6-sol -> OpenCodex gpt-5\.6-sol/,
   );
-  assert.match(printed, /junior +\| OpenCodex gpt-5\.6-sol -> -/);
+  assert.match(printed, /worker +\|/);
   const [written] = fs
     .readdirSync(path.join(path.dirname(fixture.orgFile), "history"))
     .filter((name) => name.startsWith("usage-"));
@@ -751,9 +751,9 @@ test("usage-report runs from the CLI with explicit homes and writes a snapshot",
     defaults.sources["codex-rollout"].unavailable,
     "codex-sessions-missing",
   );
-  assert.equal(defaults.byRole.pl, undefined);
+  assert.equal(defaults.byRole.pm, undefined);
   await assert.rejects(
-    main(["usage-report", "--org", fixture.orgFile, "--place", "pl"]),
+    main(["usage-report", "--org", fixture.orgFile, "--place", "pm"]),
     /--place takes role=path/,
   );
 });
@@ -766,7 +766,7 @@ test("a historical headless launch remains readable but cannot be appended", (t)
   const recorded = recordLegacyLaunch(
     fixture.orgFile,
     {
-      role: "junior",
+      role: "worker",
       workerId: "junior-1",
       worktreePath: worktree,
       callerCwd: fixture.pmPath,
@@ -784,7 +784,7 @@ test("a historical headless launch remains readable but cannot be appended", (t)
     () =>
       recordLaunch(fixture.orgFile, {
         via: "headless-start",
-        role: "junior",
+        role: "worker",
       }),
     /Launch via must be one of/,
   );
@@ -793,7 +793,7 @@ test("a historical headless launch remains readable but cannot be appended", (t)
 test("summarizeByRole includes both models if provider differs but model is the same", () => {
   const records = [
     {
-      role: "senior",
+      role: "worker",
       provider: "claude",
       modelRequested: "sonnet",
       modelReported: [],
@@ -808,7 +808,7 @@ test("summarizeByRole includes both models if provider differs but model is the 
       timeToFirstToken: 0,
     },
     {
-      role: "senior",
+      role: "worker",
       provider: "agy",
       modelRequested: "sonnet",
       modelReported: [],
@@ -824,14 +824,14 @@ test("summarizeByRole includes both models if provider differs but model is the 
     },
   ];
   const byRole = summarizeByRole(records);
-  assert.equal(byRole.senior.models.requested.length, 1);
-  assert.equal(byRole.senior.modelsDisplay.requested.length, 2);
+  assert.equal(byRole.worker.models.requested.length, 1);
+  assert.equal(byRole.worker.modelsDisplay.requested.length, 2);
   assert.equal(
-    byRole.senior.modelsDisplay.requested.includes("Claude Code sonnet"),
+    byRole.worker.modelsDisplay.requested.includes("Claude Code sonnet"),
     true,
   );
   assert.equal(
-    byRole.senior.modelsDisplay.requested.includes("Agy sonnet"),
+    byRole.worker.modelsDisplay.requested.includes("Agy sonnet"),
     true,
   );
 });

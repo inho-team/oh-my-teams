@@ -13,12 +13,32 @@
     "observedAt"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "source": { "type": "string", "minLength": 1 },
-    "externalId": { "type": "string", "minLength": 1 },
-    "dedupeKey": { "type": "string", "minLength": 1 },
-    "summary": { "type": "string", "minLength": 1 },
-    "evidence": { "type": "string", "minLength": 1 },
-    "observedAt": { "type": "string", "format": "date-time" }
+    "schemaVersion": {
+      "const": 1
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "externalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dedupeKey": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
   }
 }

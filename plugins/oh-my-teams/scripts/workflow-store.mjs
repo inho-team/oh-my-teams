@@ -60,7 +60,7 @@ export function workflowStateFile(stateDir, id) {
  * @param {string} id - Workflow ID.
  * @param {() => T} callback - Critical state transition.
  * @returns {T} Callback result.
- * @throws {Error} When another writer (PM or PL) holds the lock or callback fails.
+ * @throws {Error} When another writer holds the lock or callback fails.
  */
 export function withWorkflowUpdate(stateDir, id, callback) {
   const directory = workflowDirectory(stateDir, id);

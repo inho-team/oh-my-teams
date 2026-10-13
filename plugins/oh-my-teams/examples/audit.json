@@ -3,15 +3,26 @@
   "worktreeId": "5a8b2c1d::/Users/me/orca/workspaces/app/task",
   "checkpoints": {
     "brief": {
-      "binding": { "ledgerHash": "sha256-of-statements-and-criteria" },
+      "binding": {
+        "ledgerHash": "sha256-of-statements-and-criteria"
+      },
       "checked": [
-        { "type": "statement", "id": "s1" },
-        { "type": "criterion", "id": "c1" }
+        {
+          "type": "statement",
+          "id": "s1"
+        },
+        {
+          "type": "criterion",
+          "id": "c1"
+        }
       ],
       "objections": [
         {
           "id": "o1",
-          "target": { "type": "criterion", "id": "c1" },
+          "target": {
+            "type": "criterion",
+            "id": "c1"
+          },
           "kind": "mismatch",
           "description": "narrower 기준이 원문의 다른 카드 요소까지 포함하는지 불분명하다.",
           "rebuttalRequested": "카드 그림자 외 요소는 범위 밖임을 사용자 확인 문구로 밝혀 달라.",
@@ -53,8 +64,14 @@
         "evidenceFingerprint": "sha256-of-fidelity-items-presentations-and-responses"
       },
       "checked": [
-        { "type": "statement", "id": "s1" },
-        { "type": "criterion", "id": "c1" }
+        {
+          "type": "statement",
+          "id": "s1"
+        },
+        {
+          "type": "criterion",
+          "id": "c1"
+        }
       ],
       "objections": [],
       "responses": [],

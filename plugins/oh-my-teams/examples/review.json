@@ -4,7 +4,7 @@
   "requirementId": "semantic-review",
   "reviewer": {
     "kind": "agent-review",
-    "role": "senior",
+    "role": "worker",
     "executionId": "actual-review-dispatch-id"
   },
   "implementationExecutionId": "actual-implementation-run-id",

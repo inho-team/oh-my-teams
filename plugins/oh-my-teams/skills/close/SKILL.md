@@ -7,7 +7,7 @@ description: 성공한 oh my teams kickoff를 검증하고 허가된 PR/MR 생�
 
 성공한 kickoff의 전달과 정리를 담당한다. 활성 kickoff가 없으면 삭제나 병합을 추측해서 수행하지 않는다.
 
-병합은 두 종류로 나뉜다. kickoff의 워크트리끼리 합치는 병합(worker 브랜치를 통합 워크트리나 PM 워크트리에 합치는 일)은 팀 내부 작업이므로 PM·PL이 게이트를 통과시킨 뒤 별도 허가 없이 수행한다. 반면 **주인 체크아웃**, 즉 kickoff를 선언한 원본 프로젝트의 브랜치로 결과를 넣는 병합은 이 절차에서 이사만 수행한다. 사용자가 브리프에서 확정한 전달 방식이 그 허가이며, 등록 항목의 `delivery`에 기록되어 있다. 런타임은 kickoff가 진행 중인 주인 체크아웃에서 `merge-check`를 실행하거나 역할을 띄우는 요청을 거부하므로, 워커의 커밋이 주인 브랜치로 바로 들어가지 않는다.
+병합은 두 종류로 나뉜다. kickoff의 워크트리끼리 합치는 병합(worker 브랜치를 통합 워크트리나 PM 워크트리에 합치는 일)은 팀 내부 작업이므로 PM이 게이트를 통과시킨 뒤 별도 허가 없이 수행한다. 반면 **주인 체크아웃**, 즉 kickoff를 선언한 원본 프로젝트의 브랜치로 결과를 넣는 병합은 이 절차에서 이사만 수행한다. 사용자가 브리프에서 확정한 전달 방식이 그 허가이며, 등록 항목의 `delivery`에 기록되어 있다. 런타임은 kickoff가 진행 중인 주인 체크아웃에서 `merge-check`를 실행하거나 역할을 띄우는 요청을 거부하므로, 워커의 커밋이 주인 브랜치로 바로 들어가지 않는다.
 
 이 절차는 PM이 `director-signal --kind close-ready`를 보낸 뒤에 수행한다. `close` 명령은 등록부에서 해당 kickoff의 `close-ready` 신호를 확인한다. PM이 `close-ready`를 여러 번 보냈으면 가장 최근 신호만 유효하며, 이전 신호는 `superseded` 상태로 남아 확인 대상에서 빠진다. 신호에 기록된 HEAD가 현재 통합 워크트리의 HEAD와 다르면 거부하고, 신호가 없으면 경고한 뒤 진행한다. 신호가 없는 경우는 신호 통로가 생기기 전에 등록된 kickoff를 종료할 수 있도록 남겨 둔 호환 경로이며, 이 경우 PM의 완료 준비 확인 없이 종료한다는 사실을 보고에 적는다. `kickoff-branch-cleanup`은 `entry.delivered.mergeCommit`이 기록된 경우에만 브랜치를 삭제한다. PR이 닫혔다는 사실만으로는 병합이 확인되지 않으므로 브랜치를 지우지 않는다. `disband`는 실패 결과를 복구할 수 있도록 브랜치를 보존한다.
 
@@ -25,7 +25,7 @@ node <runtime> workflow-status --id <workflow> --state <pm-state>
    게이트는 kickoff의 통합 워크트리에서 실행한다. 주인 체크아웃을 `--repo`로 주면 `merge-check`가 거부한다.
 3. 등록 항목의 `delivery`로 주인 체크아웃에 전달하는 방법을 정한다. 이 값은 브리프에서 사용자가 확정한 전달 방식이므로 다시 묻지 않고 허가로 사용하며, 기록된 방식 밖으로 넓히지 않는다.
    - `local-merge`: 게이트를 통과한 통합 워크트리의 HEAD를 고정해 `deliver`로 `delivery.branch`에 병합한다. `deliver`는 병합 직전에 같은 `merge-check`를 다시 실행하고, 통합 워크트리가 그 HEAD에서 움직였거나, 주인 체크아웃이 기록된 브랜치가 아니거나 커밋되지 않은 변경이 있으면 거부한다. 병합이 충돌하면 `git merge --abort`로 되돌리고 실패를 보고한다. 이때 주인 체크아웃에서 충돌을 직접 해결하지 않고, 주인 브랜치를 통합 워크트리에 합쳐 해결하도록 PM에게 돌려보낸 뒤 게이트부터 다시 실행한다. 같은 HEAD로 다시 실행하면 병합하지 않고 기록된 결과를 돌려준다.
-   - `pull-request`: PR을 병합하기 전에 `kickoff-check-close-ready`로 신호 유무와 HEAD 일치를 확인한다. 신호가 없으면 경고 후 계속하고, 신호가 있는데 HEAD가 다르면 거부한다. 확인 후 `delivery.branch`를 base로 PR/MR을 만들고, 실제 head SHA, 최신 base, 필수 CI와 승인 상태를 다시 확인한 뒤 [pl](../pl/SKILL.md)의 머지 절차에 따라 HEAD를 고정하여 병합한다. 병합이 완료되면 `kickoff-merge-record`로 병합 커밋을 등록부에 기록한다. 이 기록이 있어야 `kickoff-branch-cleanup`이 브랜치를 삭제할 수 있다. 기록 전에 주인 체크아웃에서 `git fetch`로 병합을 받아 둔다. 병합 커밋이 `delivery.branch`에서 도달할 수 없거나 `--head`를 포함하지 않으면 런타임이 기록을 거부한다.
+   - `pull-request`: PR을 병합하기 전에 `kickoff-check-close-ready`로 신호 유무와 HEAD 일치를 확인한다. 신호가 없으면 경고 후 계속하고, 신호가 있는데 HEAD가 다르면 거부한다. 확인 후 `delivery.branch`를 base로 PR/MR을 만들고, 실제 head SHA, 최신 base, 필수 CI와 승인 상태를 다시 확인한 뒤 HEAD를 고정하여 병합한다. 병합이 완료되면 `kickoff-merge-record`로 병합 커밋을 등록부에 기록한다. 이 기록이 있어야 `kickoff-branch-cleanup`이 브랜치를 삭제할 수 있다. 기록 전에 주인 체크아웃에서 `git fetch`로 병합을 받아 둔다. 병합 커밋이 `delivery.branch`에서 도달할 수 없거나 `--head`를 포함하지 않으면 런타임이 기록을 거부한다.
    - `none`: 주인 체크아웃에 병합하지 않는다.
    - `delivery`가 없는 항목은 이 기록을 도입하기 전에 등록된 kickoff다. 전달 방식을 추측하지 않고 사용자에게 확인한다.
 

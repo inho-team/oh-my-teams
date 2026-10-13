@@ -73,7 +73,7 @@ async function singleTaskWorkflow(t, { id, budget, policy }) {
     id,
     goal: "Single task workflow",
     repo: ".",
-    tasks: [{ file: "a.json", role: "junior" }],
+    tasks: [{ file: "a.json", role: "worker" }],
     policy: policy ?? { maxRunning: 1, maxReviewPending: 1 },
     budget: budget ?? { maxAttempts: 1, maxCalls: 5 },
   };
@@ -92,13 +92,15 @@ async function twoTaskWorkflow(t, { id, budget, policy }) {
     goal: "Two task workflow",
     repo: ".",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "senior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: policy ?? { maxRunning: 2, maxReviewPending: 2 },
     budget: budget ?? { maxAttempts: 1, maxCalls: 10 },
   };
-  await createWorkflow(stateDir, request, structuredClone(organization), dir);
+  const org = structuredClone(organization);
+  org.roles.worker.concurrency = 2;
+  await createWorkflow(stateDir, request, org, dir);
   return { dir, stateDir, request };
 }
 

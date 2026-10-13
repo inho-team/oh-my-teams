@@ -18,35 +18,8 @@ import {
 import { OPENCODEX_RUNNER_PROVIDERS } from "./opencodex.mjs";
 import { validateModelAssignment } from "./model-assignment.mjs";
 
-/**
- * Stable role identifiers used by schemas, organization graphs, and reports.
- *
- * The first four identifiers preserve the saved legacy ladder. Worker is the
- * only subordinate role in new organizations. `foldRole` handles both shapes.
- */
-export const ROLES = ["pm", "pl", "senior", "junior", "worker"];
-
-/** Roles used by newly formed organizations. The other names remain for saved runs. */
-export const ACTIVE_ROLES = Object.freeze(["pm", "worker"]);
-
-/**
- * Role names that no longer exist, mapped to the role that took over their work.
- *
- * Intern was removed in 2.6.0 and its narrow edits went to Junior. Workflow
- * snapshots, failure records, and review requirements saved before then still
- * name it, and running kickoffs may still ask for it, so those names are read
- * as the successor instead of failing. An organization file may not declare a
- * removed role; `validateOrg` refuses it with the way to migrate.
- */
-export const LEGACY_ROLE_ALIASES = Object.freeze({ intern: "junior" });
-
-/**
- * Maps a role name, current or removed, to the role that holds it now.
- *
- * @param {string} role - Role name as written by a caller or a saved record.
- * @returns {string} Current role name; unknown names are returned unchanged.
- */
-export const canonicalRole = (role) => LEGACY_ROLE_ALIASES[role] ?? role;
+/** Role identifiers used by organizations, workflows, and reports. */
+export const ROLES = Object.freeze(["pm", "worker"]);
 
 /**
  * The top-level role that sits above PM in the full seniority ladder.
@@ -74,40 +47,21 @@ export const AUDITOR_ROLE = "auditor";
  * `ROLES` lists only the roles an organization may bind and launch as workers.
  * `ROLE_LADDER` adds the director so that authority checks and header
  * generation can express "above PM" without mixing director into the folding
- * or depth logic that `ROLES` drives. New organizations use the
- * Director–PM–Worker hierarchy; legacy role identifiers remain in `ROLES`
- * for saved runs.
+ * or depth logic that `ROLES` drives.
  */
-export const ROLE_LADDER = Object.freeze([DIRECTOR_ROLE, ...ACTIVE_ROLES]);
+export const ROLE_LADDER = Object.freeze([DIRECTOR_ROLE, ...ROLES]);
 
 /** The one role every organization must declare, and the root of its graph. */
 export const ROOT_ROLE = "pm";
 
-/**
- * Legacy roles a run of each depth uses, from the most senior down.
- *
- * Roles join in the order a team misses them most. Implementation comes first,
- * because a PM alone has nobody to hand work to; independent review comes next;
- * and PL last, since splitting and integrating parallel waves only pays off
- * once there are several of them.
- * A role left out of a depth has its work folded upward by `foldRole`.
- */
+/** Roles available at each workflow depth. */
 export const DEPTH_ROLES = Object.freeze({
   1: Object.freeze(["pm"]),
-  2: Object.freeze(["pm", "junior"]),
-  3: Object.freeze(["pm", "senior", "junior"]),
-  4: Object.freeze(["pm", "pl", "senior", "junior"]),
+  2: ROLES,
 });
 
-/** Legacy depth that uses every role in a four-role organization. */
-export const FULL_DEPTH = 4;
-
-/** Maximum depth for newly formed PM/Worker organizations. */
-export const ACTIVE_FULL_DEPTH = 2;
-
-// Depth 5 meant the full ladder while Intern existed. Saved workflows keep that
-// number, and the full ladder is now depth 4, so it is read as the full depth.
-const LEGACY_FULL_DEPTH = 5;
+/** Maximum workflow depth. */
+export const FULL_DEPTH = ROLES.length;
 
 /**
  * Lists the roles a run of one depth uses within an organization's ladder.
@@ -117,23 +71,14 @@ const LEGACY_FULL_DEPTH = 5;
  * PM is always among them because every organization declares it.
  *
  * @param {string[]} declared - Roles the organization declares.
- * @param {number} depth - Run depth from 1 to 2 for new teams, or 1 to 4 for legacy teams; a saved depth 5 reads as 4.
+ * @param {number} depth - Run depth from 1 to 2.
  * @returns {string[]} Active roles in ladder order.
- * @throws {Error} When the depth is outside 1..4.
+ * @throws {Error} When the depth is outside 1..2.
  */
 export function depthRoles(declared, depth) {
-  const roles = DEPTH_ROLES[depth === LEGACY_FULL_DEPTH ? FULL_DEPTH : depth];
+  const roles = DEPTH_ROLES[depth];
   assert(roles, `Depth must be 1..${FULL_DEPTH}`);
   const present = new Set(declared);
-  if (
-    present.has("worker") &&
-    !["pl", "senior", "junior"].some((role) => present.has(role))
-  ) {
-    assert(depth <= ACTIVE_FULL_DEPTH, `Depth must be 1..${ACTIVE_FULL_DEPTH}`);
-    return depth === 1
-      ? ["pm"]
-      : ACTIVE_ROLES.filter((role) => present.has(role));
-  }
   return roles.filter((role) => present.has(role));
 }
 
@@ -162,10 +107,7 @@ export const definedRoles = (org) =>
   ROLES.filter((role) => Object.hasOwn(org.roles ?? {}, role));
 
 /**
- * Folds a responsibility addressed to one role onto the role that holds it.
- *
- * In new organizations, PL work belongs to PM and Senior/Junior work belongs
- * to Worker. Saved legacy runs still fold to the closest declared senior role.
+ * Folds a responsibility addressed to Worker onto PM at depth one.
  *
  * Takes the declared names rather than the organization so a persisted workflow
  * can fold a later routing decision from the role list it recorded at creation,
@@ -177,12 +119,9 @@ export const definedRoles = (org) =>
  * @throws {Error} When the name is not a known role or nothing declares it.
  */
 export function foldRole(declared, role) {
-  const canonical = canonicalRole(role);
-  const rank = ROLES.indexOf(canonical);
+  const rank = ROLES.indexOf(role);
   assert(rank >= 0, `Unknown role: ${role}`);
-  const present = new Set((declared ?? []).map(canonicalRole));
-  if (present.has("worker") && ["senior", "junior"].includes(canonical))
-    return "worker";
+  const present = new Set(declared ?? []);
   for (let index = rank; index >= 0; index -= 1) {
     if (present.has(ROLES[index])) return ROLES[index];
   }
@@ -961,26 +900,10 @@ export function validateOrg(org) {
     }
   }
 
-  // An organization may run a reduced ladder, so only PM is mandatory. Role
-  // names stay fixed because routing, skills, and reports address them by name;
-  // a reduced team omits a role rather than inventing one.
-  for (const [removed, successor] of Object.entries(LEGACY_ROLE_ALIASES)) {
-    assert(
-      !Object.hasOwn(org.roles, removed),
-      `Role ${removed} was removed in 2.6.0; move its profile to ${successor} ` +
-        `and delete ${removed} with the adjust skill`,
-    );
-  }
+  // A reduced organization may omit Worker, but PM is mandatory.
   assert(
     Object.keys(org.roles).every((role) => ROLES.includes(role)),
     `Roles must be named from ${ROLES.join("/")}`,
-  );
-  assert(
-    !Object.hasOwn(org.roles, "worker") ||
-      !["pl", "senior", "junior"].some((role) =>
-        Object.hasOwn(org.roles, role),
-      ),
-    "Worker organizations cannot declare legacy PL, Senior, or Junior roles",
   );
   assert(
     Object.hasOwn(org.roles, ROOT_ROLE),
@@ -1184,43 +1107,6 @@ export function jevPolicy(org) {
 }
 
 /**
- * Rewrites a snapshot saved before a role was removed so the current runtime reads it.
- *
- * Only snapshots go through this: a kickoff that started before 2.6.0 must be
- * able to finish on the organization it froze. A removed role's binding is
- * dropped when its successor is declared, or renamed to the successor when not,
- * and allowlists and parents that named it follow. A live organization file is
- * never migrated silently; `validateOrg` refuses it instead.
- *
- * @param {object} org - Organization snapshot, possibly from before 2.6.0.
- * @returns {object} A migrated copy, or the same object when nothing changed.
- */
-export function migrateLegacyOrg(org) {
-  if (!org?.roles) return org;
-  const removed = Object.keys(LEGACY_ROLE_ALIASES).filter((role) =>
-    Object.hasOwn(org.roles, role),
-  );
-  if (!removed.length) return org;
-  const migrated = structuredClone(org);
-  for (const role of removed) {
-    const successor = LEGACY_ROLE_ALIASES[role];
-    if (!Object.hasOwn(migrated.roles, successor)) {
-      migrated.roles[successor] = migrated.roles[role];
-    }
-    delete migrated.roles[role];
-    for (const binding of Object.values(migrated.roles)) {
-      if (binding.parent === role) binding.parent = successor;
-    }
-    for (const key of ["advisors"]) {
-      if (!migrated[key]?.[role]) continue;
-      migrated[key][successor] ??= migrated[key][role];
-      delete migrated[key][role];
-    }
-  }
-  return migrated;
-}
-
-/**
  * Creates or revision-updates an organization under an exclusive file lock.
  *
  * Existing configurations are returned unchanged unless `update` is explicit.
@@ -1245,10 +1131,7 @@ export function saveOrg(file, org, { update = false, expectedRevision } = {}) {
         if (!update) {
           return { created: false, organization: validateOrg(previousRaw) };
         }
-        // An edit is how a file still declaring a removed role gets repaired,
-        // so the file being replaced is read through the migration; the new
-        // content is validated strictly and the original is archived as-is.
-        previous = validateOrg(migrateLegacyOrg(previousRaw));
+        previous = validateOrg(previousRaw);
         assert(
           expectedRevision === previous.revision,
           "Organization changed; read it again before editing",

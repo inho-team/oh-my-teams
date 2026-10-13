@@ -295,7 +295,7 @@ async function fixture(t) {
       .executionId;
     recordLaunch(orgFile, {
       via: "worker-start",
-      role: "senior",
+      role: "worker",
       stateDir,
       workflowId,
       workflowTaskId: "a",
@@ -399,7 +399,7 @@ async function fixture(t) {
       stateDir: `${target.path}/.omt`,
       workflowId: "target-flow",
       taskId: "a",
-      role: "senior",
+      role: "worker",
       repo: target.path,
       base: head,
     },

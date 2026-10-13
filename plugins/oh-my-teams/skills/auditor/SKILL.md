@@ -5,7 +5,7 @@ description: 서열 밖에서 이사가 여는 선택적 검토자로서 브리�
 
 # 감사: 서열 밖 검토자
 
-감사(auditor)는 선택적 역할이며, kickoff 등록 항목에 고정된 `auditPolicy.auditorConfigured`가 참인 kickoff에만 적용된다. 이 정책은 `kickoff-claim` 때 그 시점 조직의 `org.auditor` 선언 여부로 고정되며, 정책이 없는 기존 kickoff는 이사가 `kickoff-audit-policy-retrofit`으로 고정하기 전까지 `worker-start`가 거부된다. 감사는 PM·PL·Senior·Junior의 지휘 서열에 속하지 않는다. 이사만 `role-terminal --role auditor`로 감사 터미널을 연다. 감사는 원장(requirements ledger)이 확정한 statement·criterion과 실제 구현·제시 증거를 대조해 이의를 제기하고, 상대의 응답을 판정하며, 판정이 끝나면 체크포인트를 수용한다. 감사가 직접 코드를 고치거나 완료를 선언하지는 않는다.
+감사(auditor)는 선택적 역할이며, kickoff 등록 항목에 고정된 `auditPolicy.auditorConfigured`가 참인 kickoff에만 적용된다. 이 정책은 `kickoff-claim` 때 그 시점 조직의 `org.auditor` 선언 여부로 고정되며, 정책이 없는 기존 kickoff는 이사가 `kickoff-audit-policy-retrofit`으로 고정하기 전까지 `worker-start`가 거부된다. 감사는 PM·Worker의 지휘 서열에 속하지 않는다. 이사만 `role-terminal --role auditor`로 감사 터미널을 연다. 감사는 원장(requirements ledger)이 확정한 statement·criterion과 실제 구현·제시 증거를 대조해 이의를 제기하고, 상대의 응답을 판정하며, 판정이 끝나면 체크포인트를 수용한다. 감사가 직접 코드를 고치거나 완료를 선언하지는 않는다.
 
 ## 권한·책임·한계
 

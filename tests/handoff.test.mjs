@@ -76,7 +76,7 @@ async function workflow(t) {
     id: "handoff-run",
     goal: "Keep a checkpoint",
     repo: ".",
-    tasks: [{ file: "a.json", role: "pl" }],
+    tasks: [{ file: "a.json", role: "pm" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts: 2, maxCalls: 2 },
   };
@@ -118,7 +118,7 @@ test("recordCheckpoint stores the document with HEAD and a rising sequence", asy
     repo: dir,
   });
   assert.equal(first.head, head);
-  assert.equal(first.role, "pl");
+  assert.equal(first.role, "pm");
   assert.equal(first.sequence, 1);
   assert.equal(fs.readFileSync(first.checkpoint, "utf8"), checkpoint());
   assert.equal(
@@ -191,12 +191,12 @@ test("handoff-checkpoint records through the CLI from the worker's worktree", as
 
 test("the brief carries the checkpoint rule only for a workflow task", async (t) => {
   const { stateDir, id } = await workflow(t);
-  const plain = roleSpec(org(), "pl", "일을 한다", {
+  const plain = roleSpec(org(), "pm", "일을 한다", {
     workflowId: id,
     stateDir,
   });
   assert.doesNotMatch(plain, /handoff checkpoint/);
-  const brief = roleSpec(org(), "pl", "일을 한다", {
+  const brief = roleSpec(org(), "pm", "일을 한다", {
     workflowId: id,
     stateDir,
     workflowTask: "a",

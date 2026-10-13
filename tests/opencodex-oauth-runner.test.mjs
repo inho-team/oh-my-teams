@@ -1000,7 +1000,7 @@ async function runWork(t, org, environment) {
 }
 
 test("work refuses runner accounts whose session homes are shared or are an account home", async (t) => {
-  const org = runnerOrganization({ junior: "acct-a", senior: "acct-b" });
+  const org = runnerOrganization({ worker: "acct-a", pm: "acct-b" });
   const overlap = /session homes must differ/;
   const cases = {
     "two accounts on the one shared session home": {
@@ -1045,11 +1045,11 @@ test("work keeps its behavior for runs with no runner or a single runner account
       { OMT_OPENCODEX_SESSION_HOME: "/omt-test/a" },
     ],
     "one runner account": [
-      runnerOrganization({ junior: "acct-a" }),
+      runnerOrganization({ worker: "acct-a" }),
       { ...distinct, OMT_OPENCODEX_SESSION_HOME: "/omt-test/shared" },
     ],
     "two runner accounts with apart homes": [
-      runnerOrganization({ junior: "acct-a", senior: "acct-b" }),
+      runnerOrganization({ worker: "acct-a", pm: "acct-b" }),
       distinct,
     ],
   };

@@ -34,7 +34,7 @@ node <runtime> advise --org <organization.json> --brief <brief.json> --repo <wor
   "schemaVersion": 1,
   "id": "wave-split",
   "question": "마이그레이션을 한 파동으로 보낼지 두 파동으로 나눌지 결정해야 한다.",
-  "summary": "두 task가 같은 스키마 파일을 고친다. 전체 검사는 9분 걸린다. PL은 두 파동을 제안했다.",
+  "summary": "두 task가 같은 스키마 파일을 고친다. 전체 검사는 9분 걸린다. PM은 두 파동을 제안했다.",
   "files": ["docs/plan/migration.md"],
   "options": ["한 파동", "두 파동"]
 }
@@ -50,8 +50,8 @@ node <runtime> advise --org <organization.json> --brief <brief.json> --repo <wor
 
 | `kind` | 호출하는 시점 |
 |---|---|
-| `plan` | PM이 목표를 task로 나눈 계획을 확정하기 전, PL이 파동과 의존성을 확정하기 전 |
-| `design` | Senior가 인터페이스나 변경 순서를 정할 때 대안이 둘 이상 남은 경우 |
+| `plan` | PM이 목표를 task로 나누고 파동과 의존성을 확정하기 전 |
+| `design` | PM이나 Worker가 인터페이스나 변경 순서를 정할 때 대안이 둘 이상 남은 경우 |
 | `review` | 병합이나 최종 수용 직전에 검토 판정이 갈리거나 위험이 큰 경우 |
 | `unblock` | 같은 실패가 반복되어 접근 방법을 바꿔야 하는 경우 |
 

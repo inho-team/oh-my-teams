@@ -23,30 +23,68 @@
     "kickoffEntryRef"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "docId": { "type": "string", "minLength": 1 },
-    "stage": { "const": "planning" },
-    "kickoffId": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "schemaVersion": {
+      "const": 1
+    },
+    "docId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stage": {
+      "const": "planning"
+    },
+    "kickoffId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "workflowId": {
       "const": null,
       "$comment": "3.7 item 4: kickoff-brief-ref is written before a workflow exists for this kickoff."
     },
-    "revision": { "type": "integer", "minimum": 1 },
-    "state": { "enum": ["open", "in-review", "resolved"] },
-    "author": { "$ref": "#/$defs/author" },
-    "createdAt": { "type": "string", "format": "date-time" },
-    "basedOnRevision": {
-      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }]
+    "revision": {
+      "type": "integer",
+      "minimum": 1
     },
-    "reason": { "type": "string", "minLength": 1 },
+    "state": {
+      "enum": ["open", "in-review", "resolved"]
+    },
+    "author": {
+      "$ref": "#/$defs/author"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "basedOnRevision": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
     "briefPath": {
       "type": "string",
       "minLength": 1,
       "$comment": "Path to the accepted brief markdown file this kickoff was formed from."
     },
-    "acceptanceSummary": { "type": "string", "minLength": 1 },
-    "nonGoals": { "$ref": "#/$defs/strings" },
-    "constraints": { "$ref": "#/$defs/strings" },
+    "acceptanceSummary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nonGoals": {
+      "$ref": "#/$defs/strings"
+    },
+    "constraints": {
+      "$ref": "#/$defs/strings"
+    },
     "kickoffEntryRef": {
       "type": "string",
       "minLength": 1,
@@ -60,14 +98,20 @@
       "required": ["role", "executionId"],
       "properties": {
         "role": {
-          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+          "enum": ["director", "pm", "worker"]
         },
-        "executionId": { "type": "string", "minLength": 1 }
+        "executionId": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "strings": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   }
 }

@@ -3,8 +3,7 @@
  *
  * A role terminal can stop at a folder trust question or at a question the CLI
  * asks its user. Nobody types at that terminal, so the role's supervisor
- * answers it here: the Run-bound PM, or a PL for the roles it started from its
- * own worktree. Every answer goes through the same steps.
+ * answers it here: the Run-bound PM. Every answer goes through the same steps.
  *
  * 1. The caller is proven to supervise the role (its Orca Run, the launch
  *    ledger and the workflow record), and the terminal is proven to sit in a
@@ -314,8 +313,7 @@ async function readTerminalScreen(orca, terminal, execute) {
  * Proves that a caller supervises a role's terminal.
  *
  * The caller's Orca terminal handle must be the coordinator of a Run it is
- * bound to. That Run must be the Run the kickoff's PM bound, or the caller must
- * be a PL that the launch ledger shows started this role from its own worktree.
+ * bound to. That Run must be the Run the kickoff's PM bound.
  * The kickoff is the one the terminal's launch was recorded under, so a
  * terminal from another kickoff, or one nobody launched, is refused.
  *
@@ -329,7 +327,6 @@ async function readTerminalScreen(orca, terminal, execute) {
  * @param {string} options.callerHandle - Orca terminal handle of the caller.
  * @param {string} options.role - Role the terminal runs.
  * @param {string} options.kickoffPmWorktreeId - Kickoff the launch was recorded under.
- * @param {string} options.launchCwd - Directory the launch ran from.
  * @param {string} options.orca - Orca executable.
  * @param {Function} [options.execute=run] - Injectable command runner.
  * @returns {Promise<{handle: string, role: string, runId: string, kickoff: object}>} The supervisor.
@@ -340,7 +337,6 @@ export async function verifySupervisor({
   callerHandle,
   role,
   kickoffPmWorktreeId,
-  launchCwd,
   orca,
   execute = run,
 }) {
@@ -370,30 +366,14 @@ export async function verifySupervisor({
       "not-supervisor",
       `Caller ${callerHandle} is not bound to any Run, so it supervises no role`,
     );
-  if (kickoff.runId && bound.id === kickoff.runId) {
-    if (!DISPATCH_AUTHORITY.pm.includes(role))
-      throw new Refusal("not-supervisor", `PM does not supervise ${role}`);
-    return { handle: callerHandle, role: "pm", runId: bound.id, kickoff };
-  }
-  const parent = readLaunches(orgFile).findLast(
-    (line) =>
-      line.terminal === callerHandle &&
-      line.kickoffPmWorktreeId === kickoffPmWorktreeId &&
-      DISPATCH_AUTHORITY[line.role]?.includes(role) &&
-      pathWithin(launchCwd, line.worktreePath),
-  );
-  if (!parent)
+  if (!kickoff.runId || bound.id !== kickoff.runId)
     throw new Refusal(
       "not-supervisor",
-      `Caller ${callerHandle} is neither the PM bound to this kickoff's Run nor a PL that started ${role} from its own worktree`,
+      `Caller ${callerHandle} is not the PM bound to this kickoff's Run`,
     );
-  return {
-    handle: callerHandle,
-    role: parent.role,
-    runId: bound.id,
-    kickoff,
-    workflowTaskId: parent.workflowTaskId,
-  };
+  if (!DISPATCH_AUTHORITY.pm.includes(role))
+    throw new Refusal("not-supervisor", `PM does not supervise ${role}`);
+  return { handle: callerHandle, role: "pm", runId: bound.id, kickoff };
 }
 
 function keyOf(classification) {
@@ -1073,7 +1053,6 @@ export async function authorizeLaunch({
     callerHandle: caller,
     role,
     kickoffPmWorktreeId: kickoff.pm.worktreeId,
-    launchCwd,
     orca,
     execute,
   });
@@ -1183,7 +1162,6 @@ export async function answerPrompt({
       callerHandle: caller,
       role: launch.role,
       kickoffPmWorktreeId: kickoff.pm.worktreeId,
-      launchCwd: launch.callerCwd,
       orca,
       execute,
     });

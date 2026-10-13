@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { readJSON, writeJSON } from "../plugins/oh-my-teams/scripts/core.mjs";
 import {
-  draftOrganization,
+  draftThreeTierOrganization,
   draftResourceOrganization,
 } from "../plugins/oh-my-teams/scripts/org-draft.mjs";
 import { executeCommand } from "../plugins/oh-my-teams/scripts/teams-org.mjs";
@@ -99,17 +99,15 @@ function tempDir(t) {
 // pm gets the Claude host-default, pl and junior share one Codex profile,
 // senior gets the one Agy Gemini choice the fake catalog lists.
 function baseModels() {
-  return [
-    "claude:default",
-    "codex:gpt-6-astra",
-    "agy:gemini-3.1-pro-high",
-    "codex:gpt-6-astra",
-  ];
+  return ["claude:default", "agy:gemini-3.1-pro-high"];
 }
 
 async function initOrg(dir, execute, overrides = {}) {
   const orgFile = path.join(dir, "organization.json");
-  const draft = draftOrganization({ name: "team", models: baseModels() });
+  const draft = draftThreeTierOrganization({
+    name: "team",
+    models: baseModels(),
+  });
   const fromFile = path.join(dir, "draft.json");
   writeJSON(fromFile, draft);
   const result = await executeCommand(
@@ -263,14 +261,9 @@ test("show --json returns a resource organization without profile decoration", a
 test("init refuses a model the catalog no longer lists", async (t) => {
   const dir = tempDir(t);
   const orgFile = path.join(dir, "organization.json");
-  const draft = draftOrganization({
+  const draft = draftThreeTierOrganization({
     name: "team",
-    models: [
-      "claude:default",
-      "codex:gpt-9-ghost",
-      "agy:gemini-3.1-pro-high",
-      "codex:gpt-9-ghost",
-    ],
+    models: ["claude:default", "codex:gpt-9-ghost"],
   });
   const fromFile = path.join(dir, "draft.json");
   writeJSON(fromFile, draft);
@@ -293,14 +286,9 @@ test("init refuses a model the catalog no longer lists", async (t) => {
 test("init refuses a fresh model when its executor's catalog lookup fails", async (t) => {
   const dir = tempDir(t);
   const orgFile = path.join(dir, "organization.json");
-  const draft = draftOrganization({
+  const draft = draftThreeTierOrganization({
     name: "team",
-    models: [
-      "claude:default",
-      "codex:gpt-6-astra",
-      "agy:gemini-3.1-pro-high",
-      "codex:gpt-6-astra",
-    ],
+    models: ["claude:default", "agy:gemini-3.1-pro-high"],
   });
   const fromFile = path.join(dir, "draft.json");
   writeJSON(fromFile, draft);
@@ -327,7 +315,7 @@ test("edit preserves an untouched profile when only its own provider's lookup fa
   // Change something unrelated to any profile (a role's concurrency) while
   // leaving every profile's provider/model exactly as it was.
   const candidate = structuredClone(previous);
-  candidate.roles.junior.concurrency = 2;
+  candidate.roles.worker.concurrency = 2;
   const fromFile = path.join(dir, "edit.json");
   writeJSON(fromFile, candidate);
 
@@ -351,7 +339,7 @@ test("edit preserves an untouched profile when only its own provider's lookup fa
       (entry) => entry.savable && (entry.preserved || entry.hostDefault),
     ),
   );
-  assert.equal(readJSON(orgFile).roles.junior.concurrency, 2);
+  assert.equal(readJSON(orgFile).roles.worker.concurrency, 2);
 });
 
 test("edit validates a touched profile fully even while another provider's lookup fails", async (t) => {
@@ -362,7 +350,7 @@ test("edit validates a touched profile fully even while another provider's looku
   // Move senior to a different, still-listed Agy model (touched) while
   // leaving the Codex profiles alone; Codex's own lookup fails this time.
   const candidate = structuredClone(previous);
-  const seniorProfileId = candidate.roles.senior.profile;
+  const seniorProfileId = candidate.roles.worker.profile;
   candidate.profiles[seniorProfileId] = {
     ...candidate.profiles[seniorProfileId],
     model: "gemini-3.8-flash-high",
@@ -402,7 +390,7 @@ test("edit refuses a new host-default profile with no explicit --host-default", 
   const previous = readJSON(orgFile);
 
   const candidate = structuredClone(previous);
-  const juniorProfileId = candidate.roles.junior.profile;
+  const juniorProfileId = candidate.roles.worker.profile;
   candidate.profiles[juniorProfileId] = {
     ...candidate.profiles[juniorProfileId],
     provider: "claude",
@@ -440,7 +428,7 @@ test("a snapshot's observational modelResolvedAtFormation field never blocks a s
   writeJSON(orgFile, previous);
 
   const candidate = structuredClone(previous);
-  candidate.roles.junior.concurrency = 3;
+  candidate.roles.worker.concurrency = 3;
   const fromFile = path.join(dir, "edit.json");
   writeJSON(fromFile, candidate);
 

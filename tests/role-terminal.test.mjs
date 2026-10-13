@@ -206,7 +206,7 @@ test("every role command runs tools without an approval prompt", () => {
   const org = example();
   for (const [role, provider] of [
     ["pm", "claude"],
-    ["senior", "agy"],
+    ["worker", "agy"],
   ]) {
     const command = roleCommand(org, role);
     assert.equal(command.provider, provider);
@@ -233,7 +233,8 @@ test("an Agy Gemini role is launched with no width adjustment on any platform", 
   // banner-width check #41 relied on is gone), so no platform narrows the
   // terminal anymore.
   const org = example();
-  const gemini = roleCommand(org, "senior");
+  org.roles.worker.profile = "agy-flash";
+  const gemini = roleCommand(org, "worker");
   assert.equal(gemini.modelRequested, "gemini-3.8-flash-high");
   for (const platform of ["darwin", "linux", "win32"]) {
     assert.deepEqual(launchLine(gemini, platform), {
@@ -242,9 +243,9 @@ test("an Agy Gemini role is launched with no width adjustment on any platform", 
     });
   }
   // A non-Gemini model never carried a width adjustment either.
-  const claudeOnAgy = roleCommand(org, "junior");
+  const claudeOnAgy = roleCommand(org, "worker");
   assert.equal(launchLine(claudeOnAgy, "linux").columns, null);
-  assert.equal(launchLine(roleCommand(org, "pl"), "linux").columns, null);
+  assert.equal(launchLine(roleCommand(org, "pm"), "linux").columns, null);
 
   const { typed } = launchLine(gemini);
   const orca = fakeOrca([
@@ -332,7 +333,7 @@ test("a command still being echoed is neither pending nor a started agent", asyn
 });
 
 test("Enter waits for the echo to finish and is then sent exactly once", async () => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   const line = typedFor(command);
   const cut = `${PROMPT} ${line.slice(0, 20)}`;
   const whole = `${PROMPT} ${line}`;
@@ -410,7 +411,7 @@ test("Enter waits for the echo to finish and is then sent exactly once", async (
 });
 
 test("a role terminal Orca started itself gets no extra Enter", async () => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   const orca = fakeOrca([
     [`${PROMPT} ${typedFor(command)}`, "Antigravity", ">"],
   ]);
@@ -433,11 +434,11 @@ test("a role terminal Orca started itself gets no extra Enter", async () => {
     "--worktree",
     `id:repo::${TEST_WORKTREE}`,
     "--title",
-    "[Senior] wt",
+    "[Worker] wt",
   ]);
   assert.equal(orca.sends().length, 1);
   assert.deepEqual(orca.closes(), []);
-  assert.equal(opened.title, "[Senior] wt");
+  assert.equal(opened.title, "[Worker] wt");
   assert.equal(opened.titlePinned, true);
 });
 
@@ -568,7 +569,7 @@ function trustedFakeOrca(screens) {
 }
 
 test("T1 the trusted placeholder opens a role terminal through the trusted runner: create, read, wait, rename and list all go through it", async () => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   const orca = trustedFakeOrca([
     [`${PROMPT} ${typedFor(command)}`, "Antigravity", ">"],
   ]);
@@ -613,7 +614,7 @@ test("T1 the trusted placeholder opens a role terminal through the trusted runne
 });
 
 test("T2 the trusted placeholder with a general runner, or none, is refused as a pre-create refusal before any Orca call", async () => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   let generalCalls = 0;
   const general = async () => {
     generalCalls += 1;
@@ -645,7 +646,7 @@ test("T2 the trusted placeholder with a general runner, or none, is refused as a
 });
 
 test("a typed but unsubmitted command is sent Enter exactly once", async () => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   const typed = [`${PROMPT} ${typedFor(command)}`];
   const started = fakeOrca([typed, typed, [...typed, "Antigravity", ">"]]);
   const opened = await openRoleTerminal({
@@ -773,12 +774,12 @@ test("the worktree's unused plain shell is closed, other tabs are not", async ()
 });
 
 test("role titles lead with the role tag and name the worktree", () => {
-  assert.equal(roleTitle("pl", "literacy-pl"), "[PL] literacy-pl");
+  assert.equal(roleTitle("pm", "literacy-pl"), "[PM] literacy-pl");
   assert.equal(
-    roleTitle("junior", "[Junior] already tagged"),
-    "[Junior] already tagged",
+    roleTitle("worker", "[Worker] already tagged"),
+    "[Worker] already tagged",
   );
-  assert.equal(roleTitle("senior", null), "[Senior]");
+  assert.equal(roleTitle("worker", null), "[Worker]");
   assert.throws(() => roleTitle("owner", "x"), /No title tag/);
   // Intern was removed in 2.6.0; no terminal is opened for it.
   assert.throws(() => roleTitle("intern", "x"), /No title tag/);
@@ -818,7 +819,7 @@ test("role titles lead with the role tag and name the worktree", () => {
 });
 
 test("Agy's folder trust question is answered once, only when trust is selected", async (t) => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   const asked = [
     `${PROMPT} ${typedFor(command)}`,
     "Accessing workspace:",
@@ -870,7 +871,7 @@ test("Agy's folder trust question is answered once, only when trust is selected"
   // The title goes to the terminal that is kept, not the one closed.
   assert.deepEqual(
     trusted.renames().map((call) => [call[3], call[5]]),
-    [["term_2", "[Senior]"]],
+    [["term_2", "[Worker]"]],
   );
 
   // A question that stays after one Enter blocks rather than repeating it,
@@ -892,7 +893,7 @@ test("Agy's folder trust question is answered once, only when trust is selected"
 });
 
 test("a reopened terminal asking for trust again is blocked, not reopened", async (t) => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   const asked = [
     `${PROMPT} ${typedFor(command)}`,
     "Accessing workspace:",
@@ -929,7 +930,7 @@ test("a reopened terminal asking for trust again is blocked, not reopened", asyn
 });
 
 test("a trust question still on the screen under other lines is not reopened but blocked", async (t) => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   const asked = [
     `${PROMPT} ${typedFor(command)}`,
     "Accessing workspace:",
@@ -961,7 +962,7 @@ test("a trust question still on the screen under other lines is not reopened but
 });
 
 test("a trusted terminal that will not close is reported, not doubled", async (t) => {
-  const command = roleCommand(example(), "senior");
+  const command = roleCommand(example(), "worker");
   const asked = [
     `${PROMPT} ${typedFor(command)}`,
     "Accessing workspace:",
@@ -1011,14 +1012,15 @@ test("the launch documents open role terminals through role-terminal", () => {
   // A title given only at creation was lost, so the documents keep the tag
   // and the rename after start together.
   assert.match(runtime, /### 역할 탭 제목/);
-  assert.match(runtime, /`\[PM\]`, `\[PL\]`/);
+  assert.match(runtime, /`\[PM\]`과 `\[Worker\]`/);
   assert.match(runtime, /agent가 뜬 뒤 `terminal rename`으로 다시 지정한다/);
 });
 
 test("on Windows an Agy Gemini role is refused before any terminal opens", async () => {
   // Windows Agy의 감독 터미널 경로는 검증되지 않았으므로 새 실행을 차단한다.
   const org = example();
-  const gemini = roleCommand(org, "senior");
+  org.roles.worker.profile = "agy-flash";
+  const gemini = roleCommand(org, "worker");
   const calls = [];
   const execute = async (argv) => {
     calls.push(argv);
@@ -1051,7 +1053,8 @@ test("on Windows an Agy Gemini role is refused before any terminal opens", async
 test("win32/POSIX별 실행 명령: 어떤 플랫폼에서도 폭 조정 명령이 붙지 않는다", () => {
   // #104: Orca 1.4.210에서는 POSIX Agy Gemini도 폭 조정 없이 tui-idle을 통과한다.
   const org = example();
-  const gemini = roleCommand(org, "senior");
+  org.roles.worker.profile = "agy-flash";
+  const gemini = roleCommand(org, "worker");
   assert.equal(gemini.provider, "agy");
   assert.match(gemini.modelRequested, /^gemini/i);
 
@@ -1071,7 +1074,8 @@ test("win32/POSIX별 실행 명령: 어떤 플랫폼에서도 폭 조정 명령�
 
 test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", async () => {
   const org = example();
-  const gemini = roleCommand(org, "senior");
+  org.roles.worker.profile = "agy-flash";
+  const gemini = roleCommand(org, "worker");
   const calls = [];
   const execute = async (argv) => {
     calls.push(argv);
@@ -1127,7 +1131,7 @@ test("실행 전 거부는 터미널 생성 호출을 일으키지 않는다", a
 });
 test("Windows Agy 차단은 터미널 생성 호출을 일으키지 않는다", async () => {
   const blockedCommand = {
-    role: "senior",
+    role: "worker",
     profile: "agy-gpt-oss",
     provider: "agy",
     argv: ["agy", "--dangerously-skip-permissions", "--model", "gpt-oss-120b"],
@@ -1177,7 +1181,8 @@ test("Windows Agy 차단은 터미널 생성 호출을 일으키지 않는다", 
 
 test("Windows Agy는 신뢰 기록이 없거나 확인되지 않아도 차단된다", async () => {
   const org = example();
-  const gemini = roleCommand(org, "senior");
+  org.roles.worker.profile = "agy-flash";
+  const gemini = roleCommand(org, "worker");
 
   for (const trustRecordExists of [false, "unknown"]) {
     const orcaCalls = [];
@@ -1236,7 +1241,7 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
     "--org",
     "org.json",
     "--role",
-    "senior",
+    "worker",
     "--worktree",
     "active",
     "--allow-unverified",
@@ -1256,7 +1261,7 @@ test("role-terminal CLI allow-unverified 옵션 처리", () => {
         "--org",
         "org.json",
         "--role",
-        "senior",
+        "worker",
         "--worktree",
         "active",
         "--allow-unverified",
@@ -1293,7 +1298,7 @@ test("role-terminal CLI --brief 옵션 등록과 PM 전용 제약 (#86)", async 
         "--org",
         orgFile,
         "--role",
-        "senior",
+        "worker",
         "--worktree",
         "current",
         "--brief",
@@ -2310,7 +2315,7 @@ test("freshenTerminal's freshContext carries clearRoleTerminal's own cleared/rea
     orgFile,
     {
       via: "worker-start",
-      role: "senior",
+      role: "worker",
       provider: "claude",
       terminal: "term_1",
       workflowId: "wf",
@@ -2370,12 +2375,12 @@ test("the launch ledger records the task a worker-start handed over", (t) => {
   const orgFile = path.join(dir, ".omt", "organization.json");
   recordLaunch(orgFile, {
     via: "role-terminal",
-    role: "senior",
+    role: "worker",
     terminal: "term_1",
   });
   recordLaunch(orgFile, {
     via: "worker-start",
-    role: "senior",
+    role: "worker",
     terminal: "term_1",
     workflowId: "wf",
     workflowTaskId: "task-a",

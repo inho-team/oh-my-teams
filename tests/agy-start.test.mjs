@@ -170,7 +170,7 @@ test("role-spec --text prints the instruction itself, not JSON", async () => {
       "--org",
       org,
       "--role",
-      "senior",
+      "worker",
       "--spec",
       "출처를 대조한다.",
       "--text",
@@ -179,7 +179,7 @@ test("role-spec --text prints the instruction itself, not JSON", async () => {
     console.log = log;
   }
   assert.equal(printed.length, 1);
-  assert.match(printed[0], /^# oh my teams 역할 지시\n역할: Senior/);
+  assert.match(printed[0], /^# oh my teams 역할 지시\n역할: Worker/);
   assert.match(printed[0], /# 작업\n출처를 대조한다\./);
   assert.doesNotMatch(printed[0], /^\{/);
 });

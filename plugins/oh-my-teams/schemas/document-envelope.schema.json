@@ -18,7 +18,9 @@
     "reason"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": {
+      "const": 1
+    },
     "docId": {
       "type": "string",
       "minLength": 1,
@@ -43,23 +45,47 @@
     },
     "workflowId": {
       "oneOf": [
-        { "type": "null" },
-        { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        }
       ],
       "$comment": "null before a workflow exists for this kickoff (e.g. `01. 기획` documents, 3.7 item 4). String form matches WORKFLOW_ID_PATTERN (workflow-store.mjs)."
     },
-    "revision": { "type": "integer", "minimum": 1 },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
     "state": {
       "enum": ["open", "in-review", "resolved"],
       "$comment": "3.3, 3.7 item 7 contract B. review-ref/acceptance-ref/delivery-ref are pinned to `resolved` in their own schema because they are written only after their backing record already carries the approval."
     },
-    "author": { "$ref": "#/$defs/author" },
-    "createdAt": { "type": "string", "format": "date-time" },
+    "author": {
+      "$ref": "#/$defs/author"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
     "basedOnRevision": {
-      "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }],
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ],
       "$comment": "null for a document's first revision."
     },
-    "reason": { "type": "string", "minLength": 1 }
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    }
   },
   "$defs": {
     "author": {
@@ -68,9 +94,12 @@
       "required": ["role", "executionId"],
       "properties": {
         "role": {
-          "enum": ["director", "pm", "pl", "senior", "junior", "worker"]
+          "enum": ["director", "pm", "worker"]
         },
-        "executionId": { "type": "string", "minLength": 1 }
+        "executionId": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     }
   }

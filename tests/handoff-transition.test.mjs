@@ -40,7 +40,8 @@ function org(fallbacks = ["agy-pro"], onExhaustion = "fallback") {
       import.meta.url,
     ),
   );
-  value.roles.pl.fallbacks = fallbacks;
+  value.roles.worker.profile = "codex-current";
+  value.roles.worker.fallbacks = fallbacks;
   value.policy.onExhaustion = onExhaustion;
   return value;
 }
@@ -106,7 +107,7 @@ async function workflow(t, organization = org(), maxAttempts = 1) {
     id: "handoff-flow",
     goal: "Finish across a limit",
     repo: ".",
-    tasks: [{ file: "a.json", role: "pl" }],
+    tasks: [{ file: "a.json", role: "worker" }],
     policy: { maxRunning: 1, maxReviewPending: 1 },
     budget: { maxAttempts, maxCalls: 4 },
   };
@@ -275,7 +276,10 @@ test("a handoff refuses profiles that are not unused fallbacks on another limit"
   const ctx = await workflow(t, org(["codex-luna", "agy-pro", "agy-flash"]), 3);
   attach(ctx, 1);
   settle(ctx, 1, limit);
-  assert.throws(() => handoff(ctx, "claude-current"), /not a fallback of pl/);
+  assert.throws(
+    () => handoff(ctx, "claude-current"),
+    /not a fallback of worker/,
+  );
   assert.throws(
     () => handoff(ctx, "codex-luna"),
     /shares the exhausted limit of codex-current/,
@@ -457,21 +461,21 @@ test("profilesShareLimit compares accounts per provider and declared pools", () 
 
 test("launches take a handoff profile only when it is a fallback of the role", () => {
   const organization = org(["agy-pro"]);
-  const command = roleCommand(organization, "pl", { profile: "agy-pro" });
+  const command = roleCommand(organization, "worker", { profile: "agy-pro" });
   assert.equal(command.profile, "agy-pro");
   assert.equal(command.provider, "agy");
   assert.throws(
-    () => roleCommand(organization, "pl", { profile: "agy-flash" }),
-    /not a fallback of pl/,
+    () => roleCommand(organization, "worker", { profile: "agy-flash" }),
+    /not a fallback of worker/,
   );
   const launch = resolveRoleLaunch(
     organization,
-    "pl",
+    "worker",
     {},
     { terminal: "term-1", profile: "agy-pro" },
   );
   assert.equal(launch.profile, "agy-pro");
-  assert.equal(roleCommand(organization, "pl").profile, "codex-current");
+  assert.equal(roleCommand(organization, "worker").profile, "codex-current");
 });
 
 test("briefs carry the handoff history and, while pending, what to read first", async (t) => {
@@ -485,7 +489,7 @@ test("briefs carry the handoff history and, while pending, what to read first", 
     workflowTask: "a",
     workflowState: state,
   };
-  const pending = roleSpec(org(), "pl", "이어서 한다", run);
+  const pending = roleSpec(org(), "worker", "이어서 한다", run);
   assert.match(pending, /handoff 이력: 1\. codex-current → agy-pro/);
   assert.match(pending, /codex-current 프로필이 사용 한도로 멈춘 뒤/);
   assert.match(
@@ -494,19 +498,22 @@ test("briefs carry the handoff history and, while pending, what to read first", 
   );
   assert.match(pending, /먼저 worktree/);
   attach(ctx, 2);
-  const running = roleSpec(org(), "pl", "이어서 한다", {
+  const running = roleSpec(org(), "worker", "이어서 한다", {
     ...run,
     workflowState: current(ctx),
   });
   assert.match(running, /먼저 worktree/);
   settle(ctx, 2);
-  const review = roleSpec(org(), "pl", "검토한다", {
+  const review = roleSpec(org(), "worker", "검토한다", {
     ...run,
     workflowState: current(ctx),
   });
   assert.match(review, /handoff 이력/);
   assert.doesNotMatch(review, /먼저 worktree/);
-  const plain = roleSpec(org(), "pl", "일한다", { ...run, workflowTask: "b" });
+  const plain = roleSpec(org(), "worker", "일한다", {
+    ...run,
+    workflowTask: "b",
+  });
   assert.doesNotMatch(plain, /handoff 이력/);
 });
 
@@ -517,7 +524,7 @@ test("the ledger names the profile a handoff launch replaced", (t) => {
   writeJSON(orgFile, org());
   const { line } = recordLaunch(orgFile, {
     via: "role-terminal",
-    role: "pl",
+    role: "worker",
     profile: "agy-pro",
     provider: "agy",
     handoffFrom: "codex-current",
@@ -525,7 +532,7 @@ test("the ledger names the profile a handoff launch replaced", (t) => {
   });
   assert.equal(line.handoffFrom, "codex-current");
   assert.equal(line.handoffIndex, 1);
-  const plain = recordLaunch(orgFile, { via: "role-terminal", role: "pl" });
+  const plain = recordLaunch(orgFile, { via: "role-terminal", role: "worker" });
   assert.equal("handoffFrom" in plain.line, false);
 });
 
@@ -570,7 +577,7 @@ test("workflow-handoff and role-command --profile go through the CLI", async (t)
     "--org",
     orgFile,
     "--role",
-    "pl",
+    "worker",
     "--worktree",
     "current",
     "--profile",
@@ -585,7 +592,7 @@ test("workflow-handoff and role-command --profile go through the CLI", async (t)
     "--org",
     orgFile,
     "--role",
-    "pl",
+    "worker",
     "--repo",
     ctx.dir,
     "--spec",

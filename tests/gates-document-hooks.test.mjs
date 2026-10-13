@@ -120,7 +120,7 @@ function envelope({
     workflowId,
     revision: 1,
     state: "resolved",
-    author: { role: "senior", executionId: "doc-writer" },
+    author: { role: "worker", executionId: "doc-writer" },
     createdAt: new Date().toISOString(),
     basedOnRevision: null,
     reason: "test fixture",
@@ -155,7 +155,7 @@ const reviewInput = (overrides = {}) => ({
   schemaVersion: 1,
   id: "review-1",
   requirementId: "semantic-review",
-  reviewer: { kind: "agent-review", role: "senior", executionId: "senior-1" },
+  reviewer: { kind: "agent-review", role: "worker", executionId: "senior-1" },
   implementationExecutionId: "impl-run",
   conclusion: "approved",
   criteria: [
@@ -179,7 +179,7 @@ const reviewGateTask = (id) =>
       {
         id: "semantic-review",
         kind: "agent-review",
-        role: "senior",
+        role: "worker",
         criteria: ["scope-review"],
       },
     ],
@@ -305,8 +305,8 @@ test("acceptWorkflowIntegration forwards kickoffHash and its own id to gateCheck
     repo: ".",
     integrationTask: "integration.json",
     tasks: [
-      { file: "a.json", role: "junior" },
-      { file: "b.json", role: "junior" },
+      { file: "a.json", role: "worker" },
+      { file: "b.json", role: "worker" },
     ],
     policy: { maxRunning: 2, maxReviewPending: 2 },
     budget: { maxAttempts: 3, maxCalls: 4 },
