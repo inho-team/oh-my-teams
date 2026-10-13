@@ -1,31 +1,10 @@
 ---
 name: disband
-description: 실패·취소·중단된 oh my teams kickoff의 실행 팀을 안전하게 해체하고 원인과 복구 가능한 결과를 보존한다.
+description: 실패하거나 취소된 작업에서 Orca 세션과 워크트리 상태를 확인하고 복구 가능한 결과를 보존한다.
 ---
 
-# 팀 해체
+# 작업 중단
 
-성공으로 종료할 수 없는 kickoff를 정리한다. 해체는 성공 완료가 아니며 실패를 숨기거나 Goal을 `complete`로 바꾸지 않는다.
+현재 워크트리의 소유 세션이 중단 사유와 마지막으로 확인한 커밋, 미전달 변경과 실행 중인 자식 세션을 기록한다. Orca에서 정확한 세션과 워크트리 ID를 확인한 뒤, 사용자가 중단을 요청한 실행만 종료한다.
 
-해체할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회해 `<pm-state>` 경로를 확인한다. kickoff가 여럿이면 사용자가 지목한 것만 해체한다. PM 워크트리를 회수하므로 이 절차도 이사가 맡으며, kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식과 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
-
-1. 해체 사유를 `failed`, `cancelled`, `abandoned` 가운데 하나로 기록하고, 충족한 기준과 미완료 기준을 분리한다.
-2. 새 작업 배정을 중단하고 살아 있는 worker와 프로세스에 취소를 전달한다. 종료가 확인되지 않은 프로세스를 사라진 것으로 간주하지 않는다.
-3. workflow가 있으면 남은 attempt를 종결 상태로 만든다. 실행 중인 attempt는 `workflow-settle`에 `outcome: failed`와 실패 근거를 기록하고, 예약만 남은 attempt는 `workflow-release`로 반납한다. 이 단계를 건너뛰면 workflow가 영원히 `running`으로 남아 같은 목표를 다시 시작할 수 없다.
-
-```text
-node <runtime> workflow-settle --id <workflow> --state <pm-state> --revision <read-revision> --settlement <settlement.json>
-node <runtime> workflow-release --id <workflow> --state <pm-state> --revision <read-revision> --release <release.json>
-```
-
-4. 유용한 변경은 커밋, 별도 브랜치 또는 복구 가능한 패치로 보존한다. 실패 로그, 검사 증거, 시도한 접근, 비용·사용량과 재개 조건을 남긴다.
-5. 보존과 프로세스 종료가 확인된 child worktree만 Orca 가이드에 따라 회수하거나 삭제한다. 불명확한 워크트리는 유지하고 이유를 보고한다. 종료를 확인하지 못한 worker는 `worker-release` 대신 `worker-abandon`으로 봉인한다. `worker-release`는 정산이 끝난 worker 전용이며, 상태 불명 worker에 쓰면 살아 있을 수 있는 자원을 종료된 것으로 처리한다.
-6. 해체 사유와 보존 위치를 기록한 뒤 이 kickoff의 등록 항목을 해제한다. 실패로 끝났더라도 해제해야 `status`가 끝난 kickoff를 진행 중으로 보여 주지 않는다. 다만 종료를 확인하지 못해 봉인만 해 둔 worker가 남아 있으면, 항목을 해제하면서 그 자원의 식별자와 상태를 해체 기록과 사용자 보고에 함께 남긴다.
-
-```text
-node <runtime> kickoff-release --org <project>/.omt/organization.json --worktree <pm-worktree-id> --reason disbanded
-```
-
-7. 상설 조직 설정과 과거 실행 기록은 삭제하지 않는다. 사용자가 조직 자체의 폐기를 명시적으로 요청한 경우에도 먼저 보관 위치와 삭제 범위를 제시하고 별도 승인을 받는다.
-
-호스트가 Goal 취소 상태를 지원하면 그 상태를 사용한다. 지원하지 않으면 실행 기록에 해체 결과를 남기고, 실제로 차단 기준을 충족하지 않은 Goal을 임의로 `blocked` 또는 `complete`로 바꾸지 않는다.
+수정된 파일, 추적되지 않거나 무시된 중요한 파일, 미전달 커밋, 생존 상태가 불명확한 터미널이 있는 워크트리는 보존한다. 자식 세션이 종료됐고 Git 상태가 깨끗하며 결과가 이미 전달된 워크트리만 Orca에서 인스턴스 식별자를 재확인한 뒤 회수한다. 현재 세션이 서 있는 워크트리는 스스로 제거하지 않는다. 남은 결과와 복구 방법을 사용자에게 보고하고, 네이티브 Goal은 실제 중단 사유에 맞춰 처리한다.

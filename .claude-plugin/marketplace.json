@@ -1,15 +1,17 @@
 {
   "name": "oh-my-teams",
-  "owner": { "name": "inho-team" },
+  "owner": {
+    "name": "inho-team"
+  },
   "metadata": {
-    "description": "oh my teams — an agent organization running on Orca",
-    "version": "2.18.4"
+    "description": "oh my teams — session-owned work on Orca",
+    "version": "3.0.0"
   },
   "plugins": [
     {
       "name": "oh-my-teams",
       "source": "./plugins/oh-my-teams",
-      "description": "Agent organization setup, role assignment, evidence, and execution on Orca"
+      "description": "Orca worktree ownership and on-demand specialist skills"
     }
   ]
 }
