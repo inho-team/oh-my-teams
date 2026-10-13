@@ -1,56 +1,22 @@
 ---
 name: kickoff
-description: 사용자가 팀 실행과 지속 감독을 요청했을 때 저장된 조직으로 개발 목표를 시작하거나 재개한다. 일반적인 직접 수정·조사·QA에는 사용하지 않는다.
+description: 사용자가 여러 세션의 협업이나 지속 감독을 요청했을 때 현재 Orca 워크트리의 소유 세션에서 작업을 시작하거나 재개한다. 일반적인 직접 작업에는 사용하지 않는다.
 ---
 
-# 팀 킥오프
+# 팀 작업 시작
 
-팀을 구성해 지속 감독할 개발 과제의 진입점이다. 먼저 [`../../references/execution-path.md`](../../references/execution-path.md)의 실행 경로를 확인한다. 직접 처리할 작업에는 kickoff를 시작하지 않는다. 상설 조직이 없으면 `form`으로 먼저 결성한다. 조직이 있으면 구독이나 모델을 다시 묻지 않고 kickoff 시점의 조직 revision을 실행 스냅샷으로 고정한다.
+사용자의 요청을 받은 현재 세션이 작업의 소유자다. 별도의 이사나 PM 세션을 열지 않는다. 먼저 [세션 소유권 구조](../../../../docs/ARCHITECTURE.md)를 읽고, 사용 중인 Orca CLI의 `orca-cli` 가이드를 확인한다. Orca 워크트리의 경로와 전체 ID, 현재 세션을 조회한다. 확인되지 않은 워크트리를 소유한다고 보고하지 않는다.
 
-## 하나의 지속 실행 권한
+## 시작
 
-서로 독립된 목표라면 한 프로젝트에서 여러 kickoff를 동시에 진행할 수 있다. 각 kickoff는 자기 PM 워크트리에서 감독되고, 어떤 kickoff가 어느 워크트리에서 도는지는 등록부에 남는다. 시작하기 전에 등록된 kickoff를 조회하고, 인계를 마친 뒤에 등록한다. 현재 스킬 기준 `../../scripts/teams-org.mjs`를 절대 경로로 해석한다.
+1. 목표, 측정 가능한 수용 기준, 제약, 필수 검사와 전달 범위를 사용자 요청에서 정한다. 결정에 필요한 정보가 없을 때에만 소유 세션이 사용자에게 묻는다.
+2. 같은 목표를 이미 진행 중이면 현재 워크트리와 Git 상태에서 이어서 진행한다. 기록을 찾지 못했다는 이유로 새 워크트리를 만들지 않는다.
+3. 사용자가 Goal 생성을 명시적으로 요청했고 호스트가 지원한다면 현재 소유 세션에서 하나를 만든다. 별도 실행 루프를 중복으로 시작하지 않는다.
+4. 순차 편집과 일반 검사는 현재 워크트리에서 수행한다. 읽기 전용 조사와 판단이 필요하면 [consult](../consult/SKILL.md)에 따라 전문 서브에이전트를 호출할 수 있다.
+5. 독립적인 동시 편집이 필요할 때에만 Orca 자식 워크트리에 새 소유 세션을 연다. 작업 범위, 기준 커밋, 완료 조건과 보고 대상을 전달하고 Orca에서 감독한다. 읽기 전용 검토만을 위해 새 워크트리를 만들지 않는다.
 
-```text
-node <runtime> kickoff-show --org <project>/.omt/organization.json
-node <runtime> kickoff-claim --org <project>/.omt/organization.json --from <claim.json>
-node <runtime> kickoff-bind --org <project>/.omt/organization.json --worktree <id> --run <runId>
-```
+## 진행과 종료
 
-`kickoff-show`에 같은 목표가 이미 있으면 새로 시작하지 않고 기록된 PM 워크트리에서 재개한다. 다른 목표는 함께 진행해도 되지만, 같은 구독을 쓰는 kickoff가 늘면 할당량을 함께 소모한다는 점을 사용자에게 알린다. 이사가 시작하는 kickoff의 요청 파일에는 `director: {terminalHandle, checkoutPath}`를 적는다. 다른 이름의 키는 무시되고 이사 기록 없이 등록되므로 결과의 `warnings`를 확인한다. `kickoff-claim`은 같은 워크트리가 이미 kickoff를 감독하고 있거나 요청 파일에 전달 방식(`delivery`)이 없으면 실패하므로 그 결과를 성공으로 보고하지 않는다. 요청 파일의 형식, 병렬 kickoff의 비용, 인계 절차와 종료 조건은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
+한 워크트리에서는 소유 세션만 편집한다. 서브에이전트가 같은 파일을 병렬로 고치지 않는다. 자식 워크트리의 결과는 소유 세션이 커밋과 검사를 확인한 뒤 통합한다. 작업을 재개할 때에는 Orca의 실제 세션과 워크트리 상태, Git HEAD를 확인하고 같은 일을 중복 배정하지 않는다.
 
-이사는 목표를 확정해 브리프로 넘기고 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `PM 실행` 절에 따라 `role-worktree-create`로 PM 워크트리 생성과 PM 역할 세션 증명을 한 호출로 수행한 뒤에만 등록하고 인계 사실을 알린다. 자원 조직에서는 이사가 [PM bootstrap 선택 스키마](../../schemas/pm-bootstrap-selection.schema.json)에 맞춘 선택 파일을 준비하여 같은 호출의 `--pm-selection`으로 전달한다. 이 명령은 `role-terminal`의 `ready: true`와 역할 터미널을 확인해야 성공하며, 세션이 없다는 실패가 명확하면 Orca로 새 워크트리를 회수한다. 터미널이나 프로세스 상태가 불명확하면 회수하지 않고 멈춰 보고한다. `orca worktree create --agent`나 `terminal create --command`를 직접 호출해 띄우지 않는다. 이사는 PM을 대신 맡지 않는다.
-
-**이사는 PM을 대신 맡지 않는다.** 이사는 PM을 대신 맡지 않는다는 원칙에 따라, PM을 띄우지 못했다는 이유로 이사가 Goal을 만들거나 Run을 바인딩하거나 `worker-start`를 호출하지 않는다. 그러면 이사의 대화 맥락과 모델이 PM 프로필을 대신하고, 종료 절차가 회수할 PM 워크트리도 사라진다. 이사가 PM을 겸하는 경우는 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)의 「인계할 수 없는 호스트」 절이 정한 조건을 충족하고 사용자가 승인했을 때뿐이다. 감독은 이사 세션에서 시작하지 않는다. 네이티브 Goal은 PM 세션이 브리프를 읽고 하나 만들며, Run도 같은 세션에서 바인딩한 뒤 `kickoff-bind`로 등록부에 적는다. 이 분리는 취향이 아니라 `worker-start`가 Run에 바인딩된 coordinator 터미널만 허용하기 때문에 필요하다. 등록을 건너뛴 kickoff는 `status`·`close`·`disband`가 찾지 못하므로 반드시 등록한다.
-
-Goal의 objective에는 사용자가 원하는 결과, 측정 가능한 수용 기준, 비목표, 필수 검사와 요청된 전달 범위를 포함한다. 전달 범위에는 결과를 원본 프로젝트의 어느 브랜치에 어떤 방식(`local-merge`, `pull-request`, `none`)으로 넣을지를 반드시 포함한다. 이 값은 종료할 때 주인 체크아웃에 병합하는 허가가 되므로, 브리프에 문장으로 적고 등록 요청의 `delivery`에도 같은 값을 적는다. 이 가운데 사용자 요청과 저장소 상태에서 확정할 수 없는 항목은 이사가 [`../../references/user-choice.md`](../../references/user-choice.md)의 방식으로 한 번에 확인해 브리프에 담고, PM 세션은 그 브리프로 Goal을 만든다. 확인하지 못한 수용 기준을 추측해 채우지 않으며, 사용자가 이미 답한 항목을 PM 세션에서 다시 묻지 않는다. 브리프는 [두괄식](../../references/bluf.md)의 「아래로 내리는 지시」 순서대로 목표와 수용 기준을 맨 앞에 두고, 범위·제약·전달 방식과 근거를 뒤에 쓴다. 사용자가 토큰 예산을 명시하지 않았다면 임의의 토큰 예산을 설정하지 않는다. 네이티브 Goal이 없는 호스트에서는 같은 계약을 oh my teams workflow와 Orca Run에 보존하되, 네이티브 기능이 있는 것처럼 보고하지 않는다.
-
-수용 기준은 브리프에 적는 것과 별도로 요구 원장(requirements ledger)에도 남긴다. `requirements-draft --org <project>/.omt/organization.json --worktree <id> --from <draft.json>`로 statement·criterion 초안을 만들고, criterion마다 `scope`를 `"equal"`(사용자 원문 그대로) 또는 `"narrower"`(범위를 좁힌 재구성)로 명시한다. narrower criterion은 이사가 사용자에게 직접 확인한 뒤 `requirements-confirm --draft --checkout <이사 체크아웃 경로>`로 그 확인을 기록해야 하며, 확인 없는 narrower criterion은 `kickoff-claim`이 거부한다. `kickoff-claim`의 요청 파일에는 `director`뿐 아니라 이 draft 파일 내용을 그대로 담은 `requirements`도 포함하고, claim이 draft-confirm의 위치와 `director.checkoutPath`를 대조해 통과한 뒤에야 확정 원장이 만들어진다. 자세한 흐름은 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)의 A.2를 따른다.
-
-kickoff가 활성화된 동안에는 다른 Ralph·Goal·autopilot·Stop-hook 루프를 함께 시작하지 않는다. kickoff가 유일한 지속 실행 권한이며 PM과 Worker가 그 아래의 실행 주체입니다. 과거 역할이 들어 있는 조직이나 workflow 스냅샷은 현재 런타임에서 재개하지 않습니다.
-
-## 실행 주기
-
-[pm](../pm/SKILL.md)의 「실행 깊이」에서 PM 단독 실행과 PM·Worker 실행을 확인합니다.
-
-[pm](../pm/SKILL.md)과 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)을 읽고 다음 주기를 수행한다.
-
-1. 원래 Goal과 현재 저장소 상태를 대조하고, 아직 충족되지 않은 수용 기준 가운데 다음으로 의미 있는 작업을 선택한다.
-2. PM이 목표를 분할하고 의존성과 통합을 책임지며, 필요한 구현·설계·독립 검토를 Worker에게 배정합니다. 일반 QA·회귀 검사·본문 확인 및 실제 OS 화면 관측에는 호출 역할의 서브에이전트를 우선 쓰고, 호출 역할이 그 결과를 확인해 자기 증거로 기록합니다. 정식 독립 검토는 구현과 다른 실행 ID 및 별도 워크트리를 사용하며, 기존 검토 워크트리의 안전한 재사용을 먼저 확인합니다. 독립 편집에 새 Orca child worktree가 필요하면 재사용 검토 근거와 격리 사유를 기록합니다. Worker는 `worker-start --org --role worker --workflow-id --state` 래퍼로만 시작합니다.
-   읽기 전용 QA만을 위한 workflow task와 새 워크트리는 만들지 않습니다. 기존 실행을 재사용할 수 없으면 PM이 사용 가능한 기존 체크아웃에서 직접 확인하거나 실행기의 서브에이전트에 맡깁니다.
-3. 각 주기마다 코드 변경, 새 검사 결과, 검토 결과, 명확해진 장애물 중 하나 이상의 확인 가능한 진전을 남긴다.
-4. 실패하면 같은 시도를 무한 반복하지 않는다. 실패 원인과 시도를 기록하고 접근 방법이나 담당 역할을 바꾼다. `work` 실행·attempt마다 적용되는 provider 호출 한도, workflow의 호출 예산과 attempt 한도, 사용자가 정한 중단 조건을 지킨다. 대화형 역할 터미널의 턴은 이 한도에 세지 않으므로, 사용량은 `usage-report`로 따로 확인한다.
-5. worker를 기다리는 동안 Orca `orchestration check`의 대기 시간이 끝날 때마다 [`../../references/orca-runtime.md`](../../references/orca-runtime.md)의 `무응답 worker 감독` 절을 적용하고, 무응답 worker를 `진행 중`으로 보고하지 않는다.
-6. 대화가 이어지거나 재개되면 authoritative Goal, workflow, Run과 worker 상태를 먼저 대조한다. 계획만 존재하거나 worker 상태가 불명확하다는 이유로 새 작업을 중복 생성하지 않는다.
-
-주기를 도는 동안의 판단은 [`../../references/autonomy.md`](../../references/autonomy.md)의 경계를 따른다. 브리프의 범위 안에서 끝나는 판단은 이사와 PM이 정하고 보고하며, 확정한 계약의 변경, 브리프 밖의 새 범위, 되돌릴 수 없고 사용자가 소유한 대상에 주는 영향, 사용자만 아는 암묵지에 해당할 때에만 사용자에게 확인한다.
-
-단순히 모델이 완료했다고 말했거나 일부 테스트가 통과했다는 이유로 루프를 끝내지 않는다. 모든 수용 기준, 필수 검토, 최신 소스에 대한 검증과 사용자가 요청한 전달 범위가 충족되어야 한다.
-
-## 종료 경계
-
-kickoff의 워크트리끼리 합치는 병합은 PM이 게이트를 통과시킨 뒤 별도 허가 없이 진행한다. 원본 프로젝트, 즉 주인 체크아웃에는 어떤 역할도 커밋하거나 병합하지 않으며, 결과는 `close`에서 이사가 기록된 전달 방식으로만 넣는다.
-
-완료 조건이 충족되면 `close` 절차로 전달, 병합과 실행 자원 정리를 수행한다. `close`와 `disband`는 PM 워크트리 자체를 회수하므로 PM 세션이 아니라 이사 세션에서 수행하며, 등록 항목은 그 절차가 끝난 뒤에 해제된다. 다른 kickoff의 항목은 건드리지 않는다. 브리프에 기록된 전달 방식 밖의 외부 변경(예: `none`인데 병합이 필요하거나, 기록되지 않은 원격 push)이 필요하면 Goal을 완료 처리하지 않고 이사의 결정을 기다린다.
-
-완료를 선언할 때에만 네이티브 Goal을 `complete`로 갱신한다. 실제 완료가 아니거나 예산이 얼마 남지 않았다는 이유로 완료 처리하지 않는다. 같은 장애 조건이 반복되어 호스트 Goal 정책의 차단 기준을 충족한 경우에만 `blocked`로 갱신한다. `workflow-status`가 보고하는 `blocked`는 실패한 task 하나를 뜻할 뿐이므로 그것만으로 Goal을 차단 처리하지 않는다. 사용자가 취소하거나 실패로 정리하라고 요청하면 `disband`를 사용한다.
+완료 전에 최신 결과와 수용 기준을 대조한다. 필요한 독립 검토는 구현과 다른 실행 ID가 고정된 커밋을 읽게 한다. 전달과 회수는 [close](../close/SKILL.md)를 따른다. 취소하거나 목표를 달성하지 못한 경우에는 [disband](../disband/SKILL.md)를 따른다.

@@ -1,18 +1,18 @@
 {
   "name": "oh-my-teams",
-  "version": "2.18.4+codex.20261013044912",
-  "description": "oh my teams: an agent organization with role subscriptions and reusable evidence, running on Orca.",
+  "version": "3.0.0+codex.20261013131132",
+  "description": "oh my teams: session-owned worktrees and on-demand specialists on Orca.",
   "author": {
     "name": "inho-team"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "oh my teams",
-    "shortDescription": "Run an agent organization on Orca.",
-    "longDescription": "Configure PM and Worker roles, then run isolated Orca workers with reusable verification evidence.",
+    "shortDescription": "Own team work in Orca worktrees.",
+    "longDescription": "Keep each worktree under one session and call specialists as read-only subagents when needed.",
     "developerName": "inho-team",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Form my oh my teams organization, then kick off a development goal."
+    "defaultPrompt": "Start a team task in my current Orca worktree."
   }
 }

@@ -1,81 +1,14 @@
 ---
 name: close
-description: 성공한 oh my teams kickoff를 검증하고 허가된 PR/MR 생성·병합과 워크트리 회수까지 마친 뒤 Goal을 완료한다.
+description: Orca 워크트리의 소유 세션이 결과를 검증하고 허가된 방식으로 전달한 뒤 자식 워크트리를 안전하게 회수한다.
 ---
 
-# 팀 종료
+# 작업 완료
 
-성공한 kickoff의 전달과 정리를 담당한다. 활성 kickoff가 없으면 삭제나 병합을 추측해서 수행하지 않는다.
+현재 워크트리의 소유 세션이 [세션 소유권 구조](../../../../docs/ARCHITECTURE.md)에 따라 종료를 책임진다. 다른 역할의 종료 승인을 기다리지 않는다.
 
-병합은 두 종류로 나뉜다. kickoff의 워크트리끼리 합치는 병합(worker 브랜치를 통합 워크트리나 PM 워크트리에 합치는 일)은 팀 내부 작업이므로 PM이 게이트를 통과시킨 뒤 별도 허가 없이 수행한다. 반면 **주인 체크아웃**, 즉 kickoff를 선언한 원본 프로젝트의 브랜치로 결과를 넣는 병합은 이 절차에서 이사만 수행한다. 사용자가 브리프에서 확정한 전달 방식이 그 허가이며, 등록 항목의 `delivery`에 기록되어 있다. 런타임은 kickoff가 진행 중인 주인 체크아웃에서 `merge-check`를 실행하거나 역할을 띄우는 요청을 거부하므로, 워커의 커밋이 주인 브랜치로 바로 들어가지 않는다.
-
-이 절차는 PM이 `director-signal --kind close-ready`를 보낸 뒤에 수행한다. `close` 명령은 등록부에서 해당 kickoff의 `close-ready` 신호를 확인한다. PM이 `close-ready`를 여러 번 보냈으면 가장 최근 신호만 유효하며, 이전 신호는 `superseded` 상태로 남아 확인 대상에서 빠진다. 신호에 기록된 HEAD가 현재 통합 워크트리의 HEAD와 다르면 거부하고, 신호가 없으면 경고한 뒤 진행한다. 신호가 없는 경우는 신호 통로가 생기기 전에 등록된 kickoff를 종료할 수 있도록 남겨 둔 호환 경로이며, 이 경우 PM의 완료 준비 확인 없이 종료한다는 사실을 보고에 적는다. `kickoff-branch-cleanup`은 `entry.delivered.mergeCommit`이 기록된 경우에만 브랜치를 삭제한다. PR이 닫혔다는 사실만으로는 병합이 확인되지 않으므로 브랜치를 지우지 않는다. `disband`는 실패 결과를 복구할 수 있도록 브랜치를 보존한다.
-
-종료할 kickoff의 PM 워크트리 ID로 `kickoff-show --worktree <pm-worktree-id>`를 먼저 조회한다. kickoff가 여럿이면 사용자가 지목한 것만 종료한다. 기록된 `pm.stateDir`이 아래 명령의 `<pm-state>`이고, 회수 대상은 기록된 PM 워크트리와 그 아래의 자식 워크트리다. 이 절차는 PM 세션이 아니라 이사가 맡는다. 자기가 서 있는 워크트리는 스스로 제거할 수 없으므로, kickoff를 선언한 세션에서 수행한다. 등록 항목의 형식은 [`../../references/kickoff-registry.md`](../../references/kickoff-registry.md)를 따른다.
-
-1. 원래 Goal의 모든 수용 기준, 필수 검토, 최신 HEAD의 검사와 미해결 사항을 확인한다. 요구 원장이 있는 kickoff는 `kickoff-check-close-ready`와 `deliverKickoff`, `kickoff-finish`가 원장 완결성(userVisible 기준의 제시 증거, 원문 대조 완전성, 미충족 항목의 항목별 예외)을 자동으로 검사하므로 눈으로 다시 세지 않는다. 다만 이 검사는 기록의 무결성과 연결(해시·HEAD·ledgerHash·권한)만 강제하며, 결과가 사용자 원문의 의미를 충족하는지는 PM이 `requirements-fidelity`로, 이사가 `requirements-fidelity-confirm`으로 대조한 판단에 의존한다. kickoff에 고정된 `auditPolicy.auditorConfigured`가 참인 kickoff에서는 같은 세 지점이 `checkpoints.brief.acceptance`와 `checkpoints.outcome.acceptance`도 함께 확인하며, 원장이나 결과·제시 증거가 감사 수용 이후에 바뀌었으면 그 수용은 이미 무효가 되어 있으므로 재수용을 먼저 받은 뒤 종료를 진행한다. 근거는 [`docs/plan/requirements-ledger-and-audit.md`](../../../../docs/plan/requirements-ledger-and-audit.md)의 A.3·B.5를 따른다.
-2. 눈으로 확인하지 말고 게이트를 실행한다. `merge-check`는 필수 검토와 PM 수용이 source·task hash에 연결되기 전에는 병합을 거부하며, 비정상 종료는 병합 중단 조건이다.
-
-```text
-node <runtime> verify --task <integration-task.json> --repo <integration-worktree> --state <pm-state>
-node <runtime> merge-check --evidence <evidence.json> --task <integration-task.json> --repo <integration-worktree> --base <origin/main> --report <report.json> --state <pm-state>
-node <runtime> workflow-status --id <workflow> --state <pm-state>
-```
-
-   게이트는 kickoff의 통합 워크트리에서 실행한다. 주인 체크아웃을 `--repo`로 주면 `merge-check`가 거부한다.
-3. 등록 항목의 `delivery`로 주인 체크아웃에 전달하는 방법을 정한다. 이 값은 브리프에서 사용자가 확정한 전달 방식이므로 다시 묻지 않고 허가로 사용하며, 기록된 방식 밖으로 넓히지 않는다.
-   - `local-merge`: 게이트를 통과한 통합 워크트리의 HEAD를 고정해 `deliver`로 `delivery.branch`에 병합한다. `deliver`는 병합 직전에 같은 `merge-check`를 다시 실행하고, 통합 워크트리가 그 HEAD에서 움직였거나, 주인 체크아웃이 기록된 브랜치가 아니거나 커밋되지 않은 변경이 있으면 거부한다. 병합이 충돌하면 `git merge --abort`로 되돌리고 실패를 보고한다. 이때 주인 체크아웃에서 충돌을 직접 해결하지 않고, 주인 브랜치를 통합 워크트리에 합쳐 해결하도록 PM에게 돌려보낸 뒤 게이트부터 다시 실행한다. 같은 HEAD로 다시 실행하면 병합하지 않고 기록된 결과를 돌려준다.
-   - `pull-request`: PR을 병합하기 전에 `kickoff-check-close-ready`로 신호 유무와 HEAD 일치를 확인한다. 신호가 없으면 경고 후 계속하고, 신호가 있는데 HEAD가 다르면 거부한다. 확인 후 `delivery.branch`를 base로 PR/MR을 만들고, 실제 head SHA, 최신 base, 필수 CI와 승인 상태를 다시 확인한 뒤 HEAD를 고정하여 병합한다. 병합이 완료되면 `kickoff-merge-record`로 병합 커밋을 등록부에 기록한다. 이 기록이 있어야 `kickoff-branch-cleanup`이 브랜치를 삭제할 수 있다. 기록 전에 주인 체크아웃에서 `git fetch`로 병합을 받아 둔다. 병합 커밋이 `delivery.branch`에서 도달할 수 없거나 `--head`를 포함하지 않으면 런타임이 기록을 거부한다.
-   - `none`: 주인 체크아웃에 병합하지 않는다.
-   - `delivery`가 없는 항목은 이 기록을 도입하기 전에 등록된 kickoff다. 전달 방식을 추측하지 않고 사용자에게 확인한다.
-
-```text
-node <runtime> kickoff-check-close-ready --org <project>/.omt/organization.json --worktree <pm-worktree-id> --head <verified-head>
-```
-
-   `pull-request` 전달이 완료된 뒤 병합 커밋을 기록한다.
-
-```text
-node <runtime> kickoff-merge-record --org <project>/.omt/organization.json --worktree <pm-worktree-id> --head <verified-head> --merge-commit <pr-merge-commit>
-```
-
-   `local-merge` 전달에는 아래 `deliver` 명령을 사용한다.
-
-```text
-node <runtime> deliver --org <project>/.omt/organization.json --worktree <pm-worktree-id> --source <integration-worktree> --head <verified-head> --evidence <evidence.json> --task <integration-task.json> --report <report.json> --state <pm-state>
-```
-
-4. PR/MR 생성, 병합 또는 push를 할 수 없는 환경이면 수행한 것으로 표현하지 않고 정확한 제약과 필요한 후속 작업을 알린다.
-5. 코드, 검사 증거, 검토 결과와 병합 식별자를 영속적인 위치에 보존한다. 워크트리를 회수하면 PM state의 headless 기록도 사라지므로, 회수 전에 역할별 사용량 스냅샷을 `<project>/.omt/history`에 남긴다. 스냅샷에 실패하면 그 사실을 최종 기록에 적고 종료 절차는 계속한다.
-
-```text
-node <runtime> usage-report --org <project>/.omt/organization.json --worktree <pm-worktree-id> --write
-```
-
-   실행 중인 프로세스가 없는지 확인한다. "정산"은 세 대상을 가리키므로 각각 따로 확인한다. Orca Dispatch의 accepted settlement, `workflow-status`가 보고하는 모든 attempt의 종결 상태, 그리고 하네스 보고서가 없을 때 붙는 `unsettled` 표시는 저장 위치와 확인 명령이 서로 다르다.
-6. 완료된 kickoff의 워크트리 후보를 읽기 전용으로 조회한다. 후보별 Git 변경·로컬 증거·전달된 HEAD·Orca 터미널과 worker 상태를 확인하고 `safe-to-remove`, `preserve`, `already-removed` 판정을 따른다. 터미널이 보이지 않는다는 사실만으로 프로세스 종료를 판단하지 않는다. 보존 사유가 있으면 삭제하지 않는다. 종료를 확인하지 못한 worker는 `worker-abandon`으로 봉인한다. 정산이 끝난 worker의 release와 안전한 워크트리 회수에는 Orca 공식 명령을 사용한다. 과거 완료 kickoff는 보관된 기록을 지정해 다시 조회한다.
-
-```text
-node <runtime> kickoff-cleanup-candidates --org <project>/.omt/organization.json --worktree <pm-worktree-id>
-node <runtime> kickoff-cleanup-candidates --org <project>/.omt/organization.json --worktree <pm-worktree-id> --history-file <project>/.omt/history/kickoff-<id>.json
-```
-7. kickoff 브랜치를 정리한다. 전달(병합)이 확인된 뒤에만 원격 브랜치와 로컬 브랜치, 그리고 회수한 하위 워크트리의 브랜치를 삭제한다. 확인은 브랜치 이름이나 PR 상태가 아니라 커밋 내용이 전달 대상에 포함되었는지를 검사한다(`git merge-base --is-ancestor`). 전달이 확인되지 않은 브랜치는 지우지 않고 결과에 남긴다. `disband`는 실패 결과를 복구할 수 있도록 브랜치를 보존하므로, 이 단계는 `close`에서만 수행하고 `disband`에서는 수행하지 않는다.
-
-```text
-node <runtime> kickoff-branch-cleanup --org <project>/.omt/organization.json --worktree <pm-worktree-id> --branches <branch>[,<branch>...] [--remote <remote-name>]
-```
-
-8. 사용자가 이미 전달과 회수를 허가했다면 그 범위 안에서 `kickoff-finish`를 실행한다. 별도 최종 승인이 실제로 필요한 환경에서만 정확한 삭제 대상을 제시하고 [`../../references/user-choice.md`](../../references/user-choice.md)에 따라 확인한다.
-9. `kickoff-finish`로 등록 항목을 해제하고 보관한 다음 안전 판정을 다시 받은 워크트리를 자식부터 회수한다. `delivery.mode`가 `local-merge`인데 `deliver`가 병합을 기록하지 않았으면 완료 해제는 거부된다. 요청된 전달 없이 닫으려면 사용자의 결정을 받은 경우에만 `--force`를 붙인다. 회수 실패나 보존 대상이 있으면 결과는 `blocked`이며 보관 경로가 함께 나온다.
-
-```text
-node <runtime> kickoff-finish --org <project>/.omt/organization.json --worktree <pm-worktree-id>
-```
-
-10. 결과가 `clean`이고 요청된 전달과 검증이 끝난 뒤에만 kickoff Goal을 완료 처리한다. `blocked`라면 보관 경로와 회수 기록을 확인하고, 불명확한 삭제를 자동으로 재시도하지 않는다. 증거를 보완해 다시 정리할 때에는 아래 명령을 사용한다. 환경이 삭제를 지원하지 않으면 남은 항목을 정확히 보고하고 사용자의 결정을 따른다.
-
-```text
-node <runtime> kickoff-cleanup-reclaim --org <project>/.omt/organization.json --worktree <pm-worktree-id> --history-file <project>/.omt/history/kickoff-<id>.json
-```
-
-최종 기록에는 Goal 결과, 전달 방식, 사용량 스냅샷 경로, PR/MR 주소 또는 식별자, 주인 브랜치의 병합 커밋, 검사 근거, 회수·삭제한 워크트리와 보존한 후속 항목을 포함한다. 사용자에게 전달하는 문장은 [`../../references/korean-result-reporting.md`](../../references/korean-result-reporting.md)의 기준을 따른다.
+1. 사용자의 수용 기준을 최신 Git HEAD와 대조한다. 필수 검사와 독립 검토가 이 HEAD를 대상으로 수행됐는지 확인한다. 미해결 이의나 실패를 완료로 처리하지 않는다.
+2. 사용자가 요청하거나 허가한 방식으로 결과를 전달한다. PR/MR을 사용한다면 대상 브랜치와 포함된 커밋을 확인한 뒤 병합한다. 사용자에게 외부 변경의 최종 승인이 필요한 경우에는 실제 결과와 대상을 먼저 준비한다.
+3. Orca에서 자식 워크트리의 전체 ID, 인스턴스 식별자, 부모 관계와 터미널 상태를 다시 조회한다. 제거 직전에 같은 인스턴스인지 다시 확인한다. 자식 세션이 끝났고, 추적되지 않거나 무시된 파일까지 검토했으며, 필요한 커밋이 전달됐다는 증거가 있을 때에만 Orca로 정확한 자식 워크트리를 회수한다. 제거 후 Orca 목록에서 결과를 확인한다. 조회가 불완전하거나 삭제 결과가 불명확하면 보존하고 남은 대상을 보고한다. 같은 삭제 요청을 추측으로 반복하지 않는다.
+4. 현재 세션이 서 있는 워크트리는 스스로 제거하지 않는다. 다른 소유자가 회수할 필요가 있다면 그 소유자에게 경로와 검증 결과를 전달한다.
+5. 전달과 필수 정리를 확인한 뒤에만 네이티브 Goal을 완료한다. 지원되지 않는 호스트에서는 실제 결과와 남은 사항을 보고한다.
