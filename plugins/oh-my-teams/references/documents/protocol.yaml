@@ -1,0 +1,72 @@
+schema_version: 1
+name: omt_documents
+description: |
+  OMT가 정의하는 검토 요청·검토 결과·상태 보고의 본문은 YAML로 교환합니다.
+  코드는 검증한 JSON 호환 객체를 처리하고, 사용자에게 보여주는 문서는 HTML로 생성합니다.
+  이 문서는 사용 규칙이며, 메시지의 필드와 자료형은 document.schema.json에서 정의합니다.
+schema: document.schema.json
+scope:
+  review_request: consult에서 전달하는 검토 요청에 사용합니다.
+  review_result: consult에서 반환하는 검토 결과에 사용합니다.
+  status_report: status에서 관측한 작업 상태를 보고할 때 사용합니다.
+  deferred: 작업 시작·완료·중단 문서는 후속 전환 대상으로 남깁니다.
+transport:
+  body: YAML 1.2 단일 문서를 사용합니다.
+  tool_arguments: 호스트와 Orca 도구가 요구하는 기존 인자 형식을 유지합니다.
+  identity: |
+    id에는 작성 세션 안에서 중복되지 않는 문서 식별자를 사용합니다.
+    issuer.session_id에는 호스트가 제공하는 실제 실행 식별자를 사용합니다.
+    식별자를 확인할 수 없다면 임의의 값을 만들어 유효한 보고서라고 주장하지 않습니다.
+  timestamps: issued_at과 observed_at에는 시간대가 포함된 RFC 3339 시각을 사용합니다.
+  response: review_result의 in_reply_to에는 요청의 id를 그대로 넣습니다.
+  subject: |
+    subject.worktree_id에는 Orca에서 확인한 전체 워크트리 ID를 넣습니다.
+    commit에는 축약하지 않은 Git 객체 ID를 넣습니다.
+    auditor 요청과 결과에는 commit과 implementation_session_id가 모두 필요합니다.
+yaml_rules:
+  - 모든 매핑 키는 문자열이어야 합니다.
+  - 문자열, 유한한 숫자, 불리언, null, 배열과 객체만 사용합니다.
+  - 정수는 JavaScript에서 손실 없이 표현할 수 있는 범위로 제한합니다.
+  - 중복 키, 앵커, 별칭, 병합 키와 명시적 태그를 사용하지 않습니다.
+  - 문서 하나의 크기는 백만 UTF-16 코드 단위, 중첩은 40단계로 제한합니다.
+  - 긴 설명에는 리터럴 블록을 사용하고, 중요한 내용은 주석에 넣지 않습니다.
+  - 필수 항목을 생략하거나 정의되지 않은 필드를 추가하지 않습니다.
+  - 예제의 식별자와 관측값은 가상의 값이므로 실제 보고서에 그대로 사용하지 않습니다.
+review_rules:
+  - 요청에는 질문, 사실, 선택지, 제약, 수용 기준과 근거를 구분해서 담습니다.
+  - 결과에는 추천 사항, 반대 근거, 지적 사항과 확인하지 못한 사항을 구분해서 담습니다.
+  - 지적 사항마다 출처와 위치를 포함한 근거를 하나 이상 남깁니다.
+  - changes_requested에는 지적 사항이 있어야 하며, no_findings에는 지적 사항이 없어야 합니다.
+  - inconclusive에는 판단을 완료하지 못한 이유를 uncertainties에 남깁니다.
+  - independent가 true이면 대상 커밋과 구현 세션을 고정하고 작성 세션이 구현 세션과 다른지 확인합니다.
+  - 독립 검토자의 원문은 보존하고 수정 결과를 새 요청과 새 문서로 검토받습니다.
+status_rules:
+  authority: Orca, Git과 CI의 실제 상태를 조회하며 별도 실행 등록부를 만들지 않습니다.
+  observation: |
+    complete는 이번 조회의 필요한 관측을 모두 확보한 경우입니다.
+    partial은 일부 관측에 실패한 경우이며, 실패한 범위를 uncertainties에 적습니다.
+    failed는 필요한 관측을 확보하지 못한 경우입니다. execution은 unknown, git은 null로 두고
+    CI 항목을 남긴다면 현재 status는 unknown으로 기록하며 기존 build_id는 보존합니다.
+    complete는 작업 완료를 뜻하지 않으며, succeeded는 호스트에서 작업 성공을 확인한 경우에만 사용합니다.
+  ci: |
+    빈 ci 배열은 검사 통과를 뜻하지 않습니다. 관측한 검사 이름과 상태를 각각 기록합니다.
+    unregistered는 검사 미등록을 확인한 경우이며 build_id가 없어야 합니다.
+    queued, running, passed, failed, cancelled와 skipped에는 실제 build_id가 필요합니다.
+    passed에는 source_commit과 target_branch가 필요하며 source_commit은 관측한 Git HEAD와 같아야 합니다.
+    병합 커밋을 검사하는 CI에서도 source_commit에는 연결을 확인한 원본 소스 커밋을 기록합니다.
+    조회 실패를 검사 미등록이나 통과로 바꾸지 않습니다.
+  delivery: delivered에는 실제 전달 위치가 필요하며 전달과 정리 상태는 별도로 보고합니다.
+  cleanup: |
+    completed이면 remaining이 비어 있어야 합니다.
+    preserved이면 remaining에 보존한 워크트리의 정확한 식별자와 이유를 적습니다.
+rendering:
+  input: 구조와 의미를 검증한 동일한 JSON 호환 객체를 사용합니다.
+  output: 외부 자원 없이 열 수 있는 UTF-8 단일 HTML 파일을 생성합니다.
+  rules:
+    - YAML을 파싱한 뒤 스키마와 의미 규칙을 검사하고, 실패하면 변환을 중단합니다.
+    - JSON은 같은 데이터의 직렬화 결과이며 HTML과 함께 별도의 편집 정본으로 관리하지 않습니다.
+    - 모든 문서 값은 HTML 텍스트로 이스케이프하고 스크립트나 실행 가능한 링크로 삽입하지 않습니다.
+    - 근거, 불확실성, 대상 커밋과 관측 시각을 HTML에서도 생략하지 않습니다.
+    - 호스트가 HTML 파일을 표시하거나 첨부할 수 있으면 생성한 파일을 전달하고 채팅에는 짧은 요약을 남깁니다.
+    - HTML 표시를 지원하지 않는 호스트에서는 제약을 밝히고 채팅으로 요약합니다.
+    - 플러그인 설치만으로 저장소 개발용 변환 명령이 설치됐다고 가정하지 않습니다.

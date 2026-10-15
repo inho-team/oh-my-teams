@@ -1,6 +1,6 @@
 # 개발 도구와 공통 예제
 
-플러그인은 스킬과 참조 문서만 배포한다. 아래 모듈과 예제는 저장소 개발 도구이며, 설치 패키지에 실행기를 추가하지 않는다. 새 검사를 작성할 때는 기존 책임에 맞는 모듈을 사용한다.
+플러그인은 스킬, 참조 문서와 내부 문서의 JSON Schema·YAML 예제를 배포한다. 아래 모듈과 예제는 저장소 개발 도구이며, 설치 패키지에 실행기를 추가하지 않는다. 새 검사를 작성할 때는 기존 책임에 맞는 모듈을 사용한다.
 
 | 파일 | 책임 |
 |---|---|
@@ -13,6 +13,9 @@
 | `scripts/adapters/node-files.mjs` | 실제 파일 접근, 읽기 오류의 경로 보존, 일괄 쓰기와 실패 복구를 구현한다. |
 | `scripts/adapters/document-syntax.mjs`, `javascript-syntax.mjs` | YAML·Markdown 파싱과 JavaScript 구문·스코프 분석을 구현한다. |
 | `scripts/adapters/version-syntax.mjs` | 정본 버전이 빌드 메타데이터 없는 엄격한 SemVer인지 확인한다. |
+| `scripts/documents.mjs` | YAML 문서 변환의 공개 함수와 CLI를 제공한다. |
+| `scripts/core/omt-documents.mjs` | 보고서의 의미 규칙, 요청·결과의 대응과 HTML 표시를 담당한다. |
+| `scripts/adapters/omt-documents.mjs` | 제한된 YAML 파싱, JSON Schema 검사와 CLI 입출력을 구현한다. |
 | `tests/helpers/plugin-fixture.mjs` | 정규화된 임시 경로, 설치 구조 복사, 매니페스트 수정을 제공한다. |
 
 `validatePlugin(pluginRoot)`는 저장소와 독립적인 설치 경로를 받아 `{ status, skills, findings }`를 반환한다. 검사 규칙은 발견한 문제를 `findings`에 추가한다. 파일 시스템 오류는 최상위에서 경로·오류 코드와 함께 보고한다. 파일 포트는 읽기 오류의 `code`, `syscall`, `path`를 보존한다. 문서 파서는 잘못된 입력에 `SyntaxError`를 사용하고, `TypeError` 같은 예상하지 못한 구현 오류는 호출자에게 전달한다. JSON 문법 오류와 패키지 계약 위반은 해당 매니페스트의 검사 실패로 보고한다.
@@ -76,6 +79,27 @@ const result = synchronize(false, options);
 동기화는 한 번에 하나의 실행자가 대상 파일을 변경한다는 전제에서 사용한다. 사전 비교 이후 외부 수정은 덮어쓸 수 있으며 복구도 외부 변경과 충돌할 수 있다. 동시에 버전을 편집하거나 여러 동기화 프로세스를 실행하지 않는다.
 
 정본 버전은 `semver` 어댑터로 검사한다. `3.0.6`이나 `3.0.6-rc.1`은 허용하지만 `v3.0.6`, 앞뒤 공백, 잘못된 숫자 형식과 `3.0.6+build`는 거부한다. Codex 빌드 접미사를 별도로 붙이므로 정본의 빌드 메타데이터는 허용하지 않는다. Codex 접미사는 여전히 14자리 숫자인지만 검사하며 실제 달력 날짜는 검증하지 않는다. 공개 `synchronize(write, options)`는 기본 버전 어댑터를 제공하고, core 함수를 직접 호출할 때에는 `options.versions`도 전달해야 한다.
+
+## 내부 문서의 변환과 표시
+
+내부 통신 문서의 필드와 자료형은 설치되는 [JSON Schema](../plugins/oh-my-teams/references/documents/document.schema.json)에 정의한다. [YAML 사용 규칙](../plugins/oh-my-teams/references/documents/protocol.yaml)은 의미 검사와 사용 범위를 설명한다. 최초 전환 범위는 검토 요청, 검토 결과와 상태 보고다. 작업 시작·완료·중단 문서는 아직 전환하지 않았다. 스킬 진입점과 기존 정책 참조 문서는 호스트의 기존 Markdown 구조를 유지한다.
+
+`parseOmtDocument(source, options)`는 코드에서 직접 사용할 JSON 호환 객체를 반환한다. `convertDocument(source, format, options)`는 같은 객체를 `json`, `html`, `check` 중 하나의 결과 문자열로 변환한다. 먼저 YAML 1.2 단일 문서를 읽고, 중복 키·별칭·태그·비문자열 키·손실이 발생하는 숫자·과도한 크기와 중첩을 거부한다. Ajv와 `ajv-formats`로 draft-07 스키마와 실제 날짜를 검사하며, 자료형을 강제로 변환하거나 누락된 값을 자동으로 채우지 않는다. 이후 core에서 독립 검토의 실행 식별자, 관측 실패, CI 대상 커밋과 전달·정리 상태의 모순을 검사한다. 구조가 맞더라도 관측 실패를 성공으로 바꾸는 보고는 변환하지 않는다.
+
+`options.requestSource`에 원래 검토 요청 YAML을 전달하면 결과의 `in_reply_to`, 목적과 대상 식별자를 대조한다. CLI에서는 `--request request.yaml`을 사용한다. 이 옵션을 생략한 검사는 결과 문서 자체만 검증하며, 실제 요청과의 일치를 입증하지 않는다. 구조와 의미 검사는 출처의 실제 존재, 독립 실행의 진위나 사용자 권한을 대신 확인하지 않는다. 소유 세션이 Orca·Git·CI에서 근거를 확인해야 한다.
+
+JSON과 HTML은 같은 검증 데이터의 파생 결과다. 코드는 객체를 직접 사용하고, 외부 전달이나 저장에 필요한 경우에만 JSON으로 직렬화한다. HTML에는 문서 정보, 근거와 불확실성을 모두 포함하며 모든 값을 텍스트로 이스케이프한다. 스크립트와 외부 자원, 실행 가능한 링크가 없는 단일 파일이며 모바일 표시와 인쇄 스타일을 포함한다. 출처 위치는 안전한 텍스트로 표시한다.
+
+```sh
+node scripts/documents.mjs check plugins/oh-my-teams/references/documents/review-result.example.yaml --request plugins/oh-my-teams/references/documents/review-request.example.yaml
+node scripts/documents.mjs html plugins/oh-my-teams/references/documents/status-report.example.yaml /new/path/status.html
+```
+
+입력 경로 `-`는 표준 입력이며, 출력 경로를 생략하면 표준 출력으로 내보낸다. 출력 파일은 새 파일만 만들고 기존 파일은 덮어쓰지 않는다. 변환에 실패하면 종료 코드 1과 진단을 반환하고 출력 파일을 만들지 않는다. `npm run documents --`를 앞에 붙여 호출할 수도 있지만 JSON을 다른 프로그램에 연결할 때에는 npm 로그가 섞이지 않도록 `node scripts/documents.mjs`를 직접 사용한다.
+
+설치 패키지는 양식과 스키마를 자체 포함하며 저장소 개발 명령에 링크하지 않는다. 설치된 호스트는 문서 규칙을 읽고 지원하는 도구로 객체와 HTML을 생성한다. 저장소 변환기는 개발·검증에 사용하며 설치만으로 실행된다고 가정하지 않는다. HTML 표시가 불가능한 호스트의 대체 보고 규칙은 YAML 사용 규칙을 따른다.
+
+[문서 회귀 검사](../tests/omt-documents.test.mjs)는 격리된 플러그인 설치의 스키마와 예제, 잘못된 YAML·스키마·상태 보고, 요청 대응, HTML 텍스트 보존과 삽입 방지, 파일·표준 입력 CLI와 기존 출력 보존을 검사한다. 이 검사는 실제 호스트의 스킬 선택이나 Orca 조회를 자동 실행하지 않는다.
 
 ## 자동 품질 검사와 CI
 
