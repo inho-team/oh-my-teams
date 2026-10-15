@@ -63,6 +63,33 @@ test("a failed staging write preserves its destination and restores earlier file
   assert.equal(fs.readdirSync(path.dirname(changes[0].file)).length, 2);
 });
 
+test("a staging flush failure preserves its destination and flushes restored files", (t) => {
+  const changes = changesIn(t);
+  const denied = Object.assign(new Error("simulated flush failure"), {
+    code: "EIO",
+  });
+  const flushed = [];
+  const files = createNodeFiles({
+    flush(file) {
+      const text = fs.readFileSync(file, "utf8");
+      flushed.push(text);
+      if (text === changes[1].after) throw denied;
+    },
+  });
+  assert.throws(
+    () => files.writeBatch(changes),
+    (error) => error === denied,
+  );
+  assert.deepEqual(flushed, [
+    changes[0].after,
+    changes[1].after,
+    changes[0].before,
+  ]);
+  for (const { file, before } of changes)
+    assert.equal(fs.readFileSync(file, "utf8"), before);
+  assert.equal(fs.readdirSync(path.dirname(changes[0].file)).length, 2);
+});
+
 test("restoration failure reports both errors rather than claiming recovery", (t) => {
   const changes = changesIn(t);
   const files = createNodeFiles({

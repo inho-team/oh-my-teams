@@ -19,5 +19,5 @@
  * @typedef {{node: string, path: string[]}} JavaScriptBinding
  * @typedef {{ast: object, comments: object[], bindings: Object<number, JavaScriptBinding[]>, globals: {name: string, line: number}[]}} JavaScriptModule
  * @typedef {(source: string) => JavaScriptModule} JavaScriptParser
- * @typedef {{isReleaseVersion: (version: unknown) => boolean}} VersionSyntaxPort
+ * @typedef {{isReleaseVersion: (version: unknown) => boolean, isBuildTimestamp: (value: unknown) => boolean}} VersionSyntaxPort
  */

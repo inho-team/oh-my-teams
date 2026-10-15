@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { synchronize } from "../scripts/metadata.mjs";
 import { temporaryDirectory } from "./helpers/plugin-fixture.mjs";
 
@@ -153,6 +154,15 @@ test("invalid Codex versions are reported and repaired instead of crashing", asy
     "3.0.4+codex.",
     "3.0.4+codex.invalid",
     "3.0.4+codex.20261001000000.extra",
+    "3.0.4+codex.99999999999999",
+    "3.0.4+codex.20260229000000",
+    "3.0.4+codex.19000229000000",
+    "3.0.4+codex.20261301000000",
+    "3.0.4+codex.20260132000000",
+    "3.0.4+codex.20260101240000",
+    "3.0.4+codex.20260101006000",
+    "3.0.4+codex.20260101000060",
+    "3.0.4+codex.00000101000000",
   ]) {
     await t.test(String(current), (context) => {
       const options = repositoryFixture(context, current);
@@ -166,6 +176,116 @@ test("invalid Codex versions are reported and repaired instead of crashing", asy
         JSON.parse(fs.readFileSync(options.file, "utf8")).version,
         "3.0.4+codex.20261015010203",
       );
+    });
+  }
+});
+
+test("valid UTC calendar dates including leap centuries and boundary years are preserved", (t) => {
+  for (const stamp of [
+    "00010101000000",
+    "20000229010203",
+    "20240229235959",
+    "99991231235959",
+  ]) {
+    const current = `3.0.4+codex.${stamp}`;
+    const options = repositoryFixture(t, current);
+    synchronize(true, options);
+    assert.equal(
+      JSON.parse(fs.readFileSync(options.file, "utf8")).version,
+      current,
+    );
+  }
+});
+
+test("an unrepresentable build clock cannot modify any manifest", (t) => {
+  const options = repositoryFixture(t, "3.0.0+codex.20261001000000");
+  options.now = new Date("+010000-01-01T00:00:00.000Z");
+  const paths = [
+    ".claude-plugin/marketplace.json",
+    "plugins/oh-my-teams/.claude-plugin/plugin.json",
+    "plugins/oh-my-teams/.codex-plugin/plugin.json",
+  ];
+  const before = paths.map((file) =>
+    fs.readFileSync(path.join(options.root, file), "utf8"),
+  );
+  for (const write of [false, true])
+    assert.throws(() => synchronize(write, options), /valid UTC calendar date/);
+  assert.deepEqual(
+    paths.map((file) => fs.readFileSync(path.join(options.root, file), "utf8")),
+    before,
+  );
+});
+
+test("a fresh sync repairs manifests after a writer exits between replacements", (t) => {
+  for (const completed of [1, 2]) {
+    const options = repositoryFixture(t, "3.0.0+codex.20261001000000");
+    const entry = new URL("../scripts/metadata.mjs", import.meta.url).href;
+    const adapter = new URL(
+      "../scripts/adapters/node-files.mjs",
+      import.meta.url,
+    ).href;
+    const source = `
+      import fs from "node:fs";
+      import { synchronize } from ${JSON.stringify(entry)};
+      import { createNodeFiles } from ${JSON.stringify(adapter)};
+      let writes = 0;
+      const files = createNodeFiles({ writeText(file, text) {
+        if (++writes > ${completed}) process.exit(86);
+        fs.writeFileSync(file, text);
+      }});
+      synchronize(true, {
+        root: ${JSON.stringify(options.root)}, files,
+        now: new Date("2026-10-15T01:02:03Z")
+      });
+    `;
+    const child = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", source],
+      {
+        encoding: "utf8",
+        timeout: 20_000,
+      },
+    );
+    assert.ifError(child.error);
+    assert.equal(child.status, 86, child.stderr);
+    const marketplace = path.join(
+      options.root,
+      ".claude-plugin/marketplace.json",
+    );
+    const claude = path.join(
+      options.root,
+      "plugins/oh-my-teams/.claude-plugin/plugin.json",
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(marketplace, "utf8")).metadata.version,
+      "3.0.4",
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(claude, "utf8")).version,
+      completed === 2 ? "3.0.4" : "3.0.0",
+    );
+    assert.equal(
+      JSON.parse(fs.readFileSync(options.file, "utf8")).version,
+      "3.0.0+codex.20261001000000",
+    );
+    const before = fs.readFileSync(options.file, "utf8");
+    assert.equal(synchronize(false, options).mismatches.length, 3 - completed);
+    assert.equal(fs.readFileSync(options.file, "utf8"), before);
+    const codex = JSON.parse(before);
+    codex.description = "edit preserved during recovery";
+    fs.writeFileSync(options.file, JSON.stringify(codex));
+    assert.equal(synchronize(true, options).changed.length, 3 - completed);
+    assert.equal(
+      JSON.parse(fs.readFileSync(options.file, "utf8")).description,
+      codex.description,
+    );
+    assert.deepEqual(synchronize(false, options), {
+      changed: [],
+      mismatches: [],
+    });
+    assert.deepEqual(synchronize(true, options), {
+      changed: [],
+      mismatches: [],
     });
   }
 });
