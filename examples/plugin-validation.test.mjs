@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { validatePlugin } from "../scripts/check-skills.mjs";
+import { createDocumentSyntax } from "../scripts/adapters/document-syntax.mjs";
 import {
   pluginFixture,
   editManifest,
@@ -17,6 +18,21 @@ test("example: configure a bundled manifest entry point", (t) => {
     skills: 7,
     findings: [],
   });
+});
+
+test("example: override one parser port without changing a global library", (t) => {
+  const plugin = pluginFixture(t);
+  const unexpected = new TypeError("parser implementation failure");
+  const syntax = {
+    ...createDocumentSyntax(),
+    skillMetadata: () => {
+      throw unexpected;
+    },
+  };
+  assert.throws(
+    () => validatePlugin(plugin, { syntax }),
+    (error) => error === unexpected,
+  );
 });
 
 test("example: assert a specific failure after changing one document", (t) => {

@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { validatePlugin } from "../scripts/check-skills.mjs";
+import { createNodeFiles } from "../scripts/adapters/node-files.mjs";
+import { createDocumentSyntax } from "../scripts/adapters/document-syntax.mjs";
 import {
   pluginFixture as fixture,
   editManifest,
@@ -274,17 +276,18 @@ test("a regular file cannot be used as the plugin root", (t) => {
 test("filesystem read errors report their code and the affected file", (t) => {
   const plugin = fixture(t);
   const file = path.join(plugin, "skills/kickoff/SKILL.md");
-  const original = fs.readFileSync;
-  t.mock.method(fs, "readFileSync", (target, ...args) => {
+  const files = createNodeFiles();
+  const readText = (target) => {
     if (target === file) {
       throw Object.assign(new Error("access denied"), {
         code: "EACCES",
         syscall: "open",
+        path: file,
       });
     }
-    return original(target, ...args);
-  });
-  const report = validatePlugin(plugin);
+    return files.readText(target);
+  };
+  const report = validatePlugin(plugin, { files: { ...files, readText } });
   assert.equal(report.status, "failed");
   assert.equal(report.skills, 7);
   assert.ok(
@@ -297,14 +300,14 @@ test("filesystem read errors report their code and the affected file", (t) => {
 test("unexpected programming errors are not mislabeled as filesystem failures", (t) => {
   const plugin = fixture(t);
   const file = path.join(plugin, "skills/kickoff/SKILL.md");
-  const original = fs.readFileSync;
+  const files = createNodeFiles();
   const unexpected = new TypeError("unexpected validation bug");
-  t.mock.method(fs, "readFileSync", (target, ...args) => {
+  const readText = (target) => {
     if (target === file) throw unexpected;
-    return original(target, ...args);
-  });
+    return files.readText(target);
+  };
   assert.throws(
-    () => validatePlugin(plugin),
+    () => validatePlugin(plugin, { files: { ...files, readText } }),
     (error) => error === unexpected,
   );
 });
@@ -317,17 +320,18 @@ test("filesystem diagnostics remain testable through an aliased temporary root",
   fs.symlinkSync(temporaryRoot, alias, "junction");
   const plugin = fixture(t, alias);
   const file = path.join(plugin, "skills/kickoff/SKILL.md");
-  const original = fs.readFileSync;
-  t.mock.method(fs, "readFileSync", (target, ...args) => {
+  const files = createNodeFiles();
+  const readText = (target) => {
     if (target === file) {
       throw Object.assign(new Error("access denied"), {
         code: "EACCES",
         syscall: "open",
+        path: file,
       });
     }
-    return original(target, ...args);
-  });
-  const report = validatePlugin(plugin);
+    return files.readText(target);
+  };
+  const report = validatePlugin(plugin, { files: { ...files, readText } });
   assert.equal(report.status, "failed");
   assert.ok(
     report.findings.some(
@@ -346,18 +350,23 @@ test("manifest reads preserve filesystem diagnostics and propagate programming e
     await t.test(error.name, (context) => {
       const plugin = fixture(context);
       const file = path.join(plugin, ".claude-plugin/plugin.json");
-      const original = fs.readFileSync;
-      context.mock.method(fs, "readFileSync", (target, ...args) => {
-        if (target === file) throw error;
-        return original(target, ...args);
-      });
+      const files = createNodeFiles();
+      const readText = (target) => {
+        if (target === file) {
+          if (error.syscall) error.path = file;
+          throw error;
+        }
+        return files.readText(target);
+      };
       if (error === unexpected) {
         assert.throws(
-          () => validatePlugin(plugin),
+          () => validatePlugin(plugin, { files: { ...files, readText } }),
           (caught) => caught === error,
         );
       } else {
-        const report = validatePlugin(plugin);
+        const report = validatePlugin(plugin, {
+          files: { ...files, readText },
+        });
         assert.equal(report.status, "failed");
         assert.ok(
           report.findings.some(
@@ -367,4 +376,36 @@ test("manifest reads preserve filesystem diagnostics and propagate programming e
       }
     });
   }
+});
+
+test("parser implementation errors propagate while syntax errors become findings", (t) => {
+  const plugin = fixture(t);
+  const syntax = createDocumentSyntax();
+  const unexpected = new TypeError("unexpected parser bug");
+  assert.throws(
+    () =>
+      validatePlugin(plugin, {
+        syntax: {
+          ...syntax,
+          skillMetadata: () => {
+            throw unexpected;
+          },
+        },
+      }),
+    (error) => error === unexpected,
+  );
+  const report = validatePlugin(plugin, {
+    syntax: {
+      ...syntax,
+      skillMetadata: () => {
+        throw new SyntaxError("invalid header");
+      },
+    },
+  });
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((finding) =>
+      finding.includes("invalid YAML: invalid header"),
+    ),
+  );
 });
