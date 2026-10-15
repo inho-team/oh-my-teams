@@ -2,9 +2,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { synchronize } from "../scripts/metadata.mjs";
+import { validatePlugin } from "../scripts/check-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const plugin = path.join(root, "plugins/oh-my-teams");
@@ -48,7 +50,7 @@ test("plugin manifests follow the package version", () => {
 });
 
 test("the owner keeps one writer per worktree and specialist calls stay read-only", () => {
-  const architecture = read("docs/ARCHITECTURE.md");
+  const architecture = read("plugins/oh-my-teams/references/architecture.md");
   assert.match(architecture, /편집을 책임지는 소유 세션은 한 번에 하나/);
   assert.match(
     architecture,
@@ -59,4 +61,84 @@ test("the owner keeps one writer per worktree and specialist calls stay read-onl
     architecture,
     /현재 세션이 서 있는 워크트리는 스스로 삭제하지 않는다/,
   );
+});
+
+function isolatedPlugin(t) {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "omt-package-"));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const installed = path.join(temporary, "plugin");
+  fs.cpSync(plugin, installed, { recursive: true });
+  return installed;
+}
+
+test("an isolated installation has all documents needed by its skills", (t) => {
+  const installed = isolatedPlugin(t);
+  assert.deepEqual(validatePlugin(installed), {
+    status: "passed",
+    skills: 7,
+    findings: [],
+  });
+});
+
+test("validation rejects links to existing files outside the plugin", (t) => {
+  const installed = isolatedPlugin(t);
+  fs.writeFileSync(
+    path.join(installed, "..", "outside.md"),
+    "Repository-only document\n",
+  );
+  fs.appendFileSync(
+    path.join(installed, "skills/kickoff/SKILL.md"),
+    "\n[External file](../../../outside.md)\n",
+  );
+  const report = validatePlugin(installed);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((item) =>
+      item.includes("link outside plugin ../../../outside.md"),
+    ),
+  );
+});
+
+test("validation follows bundled references and reports missing documents", (t) => {
+  const installed = isolatedPlugin(t);
+  fs.appendFileSync(
+    path.join(installed, "references/architecture.md"),
+    "\n[Missing reference](missing.md)\n",
+  );
+  const report = validatePlugin(installed);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((item) => item.includes("broken link missing.md")),
+  );
+});
+
+test("validation rejects links through directories outside the plugin", (t) => {
+  const installed = isolatedPlugin(t);
+  const outside = path.join(installed, "..", "external");
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, "document.md"), "External document\n");
+  fs.symlinkSync(
+    outside,
+    path.join(installed, "references/external"),
+    "junction",
+  );
+  fs.appendFileSync(
+    path.join(installed, "references/architecture.md"),
+    "\n[External reference](external/document.md)\n",
+  );
+  const report = validatePlugin(installed);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((item) =>
+      item.includes("link outside plugin external/document.md"),
+    ),
+  );
+});
+
+test("Windows line endings preserve valid skill metadata", (t) => {
+  const installed = isolatedPlugin(t);
+  const skill = path.join(installed, "skills/kickoff/SKILL.md");
+  const source = fs.readFileSync(skill, "utf8").replaceAll("\r\n", "\n");
+  fs.writeFileSync(skill, source.replaceAll("\n", "\r\n"));
+  assert.equal(validatePlugin(installed).status, "passed");
 });
