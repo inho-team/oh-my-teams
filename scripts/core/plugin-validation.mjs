@@ -31,9 +31,6 @@ function checkSkill(file, skill, findings, files, syntax) {
     if (!(error instanceof SyntaxError)) throw error;
     findings.push(`${skill}: invalid YAML: ${error.message}`);
   }
-  if (forbidden.test(source)) {
-    findings.push(`${skill}: removed runtime command referenced`);
-  }
 }
 
 function inspectPlugin(pluginRoot, report, files, syntax) {
@@ -80,6 +77,11 @@ function inspectPlugin(pluginRoot, report, files, syntax) {
   }
 
   for (const file of markdownFiles(pluginRoot, files)) {
+    if (forbidden.test(files.readText(file))) {
+      findings.push(
+        `${path.relative(pluginRoot, file)}: removed runtime command referenced`,
+      );
+    }
     checkLinks(pluginRoot, file, findings, files, syntax);
   }
 }

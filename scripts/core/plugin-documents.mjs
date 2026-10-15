@@ -2,6 +2,13 @@
 import path from "node:path";
 import { pathProblem } from "./plugin-paths.mjs";
 
+function isSkillDocument(file, pluginRoot) {
+  return (
+    path.basename(file) === "SKILL.md" &&
+    path.dirname(path.dirname(file)) === path.join(pluginRoot, "skills")
+  );
+}
+
 function manifestProblem(manifest, host, pluginRoot, skillRoot, files) {
   if (manifest?.name !== "oh-my-teams") return "name must be oh-my-teams";
   if (typeof manifest.version !== "string" || !manifest.version.trim()) {
@@ -72,9 +79,7 @@ export function checkManifests(pluginRoot, skillRoot, findings, files) {
 export function checkLinks(pluginRoot, file, findings, files, syntax) {
   const label = path.relative(pluginRoot, file);
   // A leading horizontal rule in an ordinary reference must not hide its links.
-  const frontmatter =
-    path.basename(file) === "SKILL.md" &&
-    path.dirname(path.dirname(file)) === path.join(pluginRoot, "skills");
+  const frontmatter = isSkillDocument(file, pluginRoot);
   for (const destination of syntax.markdownDestinations(files.readText(file), {
     frontmatter,
   })) {
@@ -84,14 +89,19 @@ export function checkLinks(pluginRoot, file, findings, files, syntax) {
     )
       continue;
     let target;
+    let anchor;
     try {
       target = decodeURIComponent(destination.split(/[?#]/)[0]);
+      anchor = decodeURIComponent(
+        destination.includes("#")
+          ? destination.slice(destination.indexOf("#") + 1)
+          : "",
+      );
     } catch {
       findings.push(`${label}: invalid link encoding ${destination}`);
       continue;
     }
-    if (!target) continue;
-    const resolved = path.resolve(path.dirname(file), target);
+    const resolved = target ? path.resolve(path.dirname(file), target) : file;
     const issue =
       /^file:/i.test(target) || path.win32.isAbsolute(target)
         ? "outside plugin"
@@ -99,6 +109,16 @@ export function checkLinks(pluginRoot, file, findings, files, syntax) {
     if (issue) {
       const kind = issue === "missing" ? "broken link" : "link outside plugin";
       findings.push(`${label}: ${kind} ${target}`);
+    } else if (
+      anchor &&
+      /\.md$/i.test(resolved) &&
+      files.kind(resolved) === "file"
+    ) {
+      const anchors = syntax.markdownAnchors(files.readText(resolved), {
+        frontmatter: isSkillDocument(resolved, pluginRoot),
+      });
+      if (!anchors.includes(anchor))
+        findings.push(`${label}: broken anchor ${destination}`);
     }
   }
 }

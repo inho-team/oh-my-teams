@@ -141,6 +141,75 @@ test("injected bindings and property names do not become forbidden global refere
   );
 });
 
+test("destructured function exports resolve renamed, nested, default and assigned bindings", () => {
+  for (const body of [
+    "const { run } = { run: (value) => value };",
+    "const source = { run: (value) => value }; const { run: alias } = source; const run = alias;",
+    "const { nested: [run] } = { nested: [(value) => value] };",
+    "const { run = (value) => value } = {};",
+    "let run; ({ run } = { run: (value) => value });",
+    "const { run } = { run(value) { return value; } };",
+  ]) {
+    const source = `/** Module. */\n${body}\n/** Export. */\nexport { run };`;
+    const findings = inspectSources([
+      module("scripts/core/example.mjs", source),
+    ]);
+    assert.ok(
+      findings.some((item) => item.includes("@param missing")),
+      body,
+    );
+    assert.ok(
+      findings.some((item) => item.includes("@returns missing")),
+      body,
+    );
+    const documented = source.replace(
+      "/** Export. */",
+      "/** Export. @param {string} value - Input. @returns {string} Result. */",
+    );
+    assert.deepEqual(
+      inspectSources([module("scripts/core/example.mjs", documented)]),
+      [],
+      body,
+    );
+  }
+  const numeric =
+    "/** Module. */\nconst { run } = { run: 1, other: value => value };\n/** Export. */\nexport { run };";
+  assert.deepEqual(
+    inspectSources([module("scripts/core/example.mjs", numeric)]),
+    [],
+  );
+});
+
+test("destructured alias cycles terminate even when projection paths grow", () => {
+  const source =
+    "/** Module. */\nlet a; let b; ({ child: a } = b); b = a;\n/** Export. */\nexport { a };";
+  assert.deepEqual(
+    inspectSources([module("scripts/core/example.mjs", source)]),
+    [],
+  );
+});
+
+test("directly exported destructuring declarations retain function documentation requirements", () => {
+  for (const declaration of [
+    "const { run } = { run: value => value };",
+    "const [run] = [value => value];",
+    "let run; run = value => value;",
+  ]) {
+    const source = `/** Module. */\n/** Export. */\nexport ${declaration}`;
+    const findings = inspectSources([
+      module("scripts/core/example.mjs", source),
+    ]);
+    assert.ok(
+      findings.some((item) => item.includes("@param missing")),
+      declaration,
+    );
+    assert.ok(
+      findings.some((item) => item.includes("@returns missing")),
+      declaration,
+    );
+  }
+});
+
 test("cyclic alias bindings terminate without inventing a function signature", () => {
   const body =
     "/** Module. */\nlet first; let second; first = second; second = first;\n/** Export. */\nexport { first };";
