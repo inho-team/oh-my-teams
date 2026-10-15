@@ -9,14 +9,14 @@ import { validatePlugin } from "../scripts/check-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function fixture(t) {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "omt-validation-"));
+function fixture(t, temporaryRoot = os.tmpdir()) {
+  const temporary = fs.mkdtempSync(path.join(temporaryRoot, "omt-validation-"));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
   const plugin = path.join(temporary, "plugin");
   fs.cpSync(path.join(root, "plugins/oh-my-teams"), plugin, {
     recursive: true,
   });
-  return plugin;
+  return fs.realpathSync(plugin);
 }
 
 function editManifest(plugin, host, update) {
@@ -321,5 +321,32 @@ test("unexpected programming errors are not mislabeled as filesystem failures", 
   assert.throws(
     () => validatePlugin(plugin),
     (error) => error === unexpected,
+  );
+});
+
+test("filesystem diagnostics remain testable through an aliased temporary root", (t) => {
+  const outer = fixture(t);
+  const temporaryRoot = path.join(outer, "temporary-root");
+  const alias = path.join(outer, "temporary-alias");
+  fs.mkdirSync(temporaryRoot);
+  fs.symlinkSync(temporaryRoot, alias, "junction");
+  const plugin = fixture(t, alias);
+  const file = path.join(plugin, "skills/kickoff/SKILL.md");
+  const original = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (target, ...args) => {
+    if (target === file) {
+      throw Object.assign(new Error("access denied"), {
+        code: "EACCES",
+        syscall: "open",
+      });
+    }
+    return original(target, ...args);
+  });
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some(
+      (item) => item.includes(file) && item.includes("EACCES"),
+    ),
   );
 });
