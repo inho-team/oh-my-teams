@@ -36,9 +36,24 @@ function markdownFiles(directory) {
 
 function pathProblem(pluginRoot, file) {
   if (!isWithin(pluginRoot, file)) return "outside plugin";
-  if (!fs.existsSync(file)) return "missing";
-  if (!isWithin(pluginRoot, fs.realpathSync(file))) return "outside plugin";
-  return null;
+  try {
+    fs.statSync(file);
+    return isWithin(pluginRoot, fs.realpathSync(file))
+      ? null
+      : "outside plugin";
+  } catch (error) {
+    if (["ENOENT", "ENOTDIR"].includes(error.code)) return "missing";
+    throw error;
+  }
+}
+
+function readText(file) {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if (error.syscall) error.path ??= file;
+    throw error;
+  }
 }
 
 function checkManifests(pluginRoot, skillRoot, findings) {
@@ -48,7 +63,7 @@ function checkManifests(pluginRoot, skillRoot, findings) {
       const file = path.join(pluginRoot, label);
       const problem = pathProblem(pluginRoot, file);
       if (problem) throw new Error(`manifest ${problem}`);
-      const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+      const manifest = JSON.parse(readText(file));
       if (manifest?.name !== "oh-my-teams")
         throw new Error("name must be oh-my-teams");
       if (typeof manifest.version !== "string" || !manifest.version.trim()) {
@@ -84,9 +99,12 @@ function checkManifests(pluginRoot, skillRoot, findings) {
 
 function checkLinks(pluginRoot, file, findings) {
   const label = path.relative(pluginRoot, file);
-  for (const destination of markdownDestinations(
-    fs.readFileSync(file, "utf8"),
-  )) {
+  const frontmatter =
+    path.basename(file) === "SKILL.md" &&
+    path.dirname(path.dirname(file)) === path.join(pluginRoot, "skills");
+  for (const destination of markdownDestinations(readText(file), {
+    frontmatter,
+  })) {
     if (
       /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(destination) &&
       !/^file:|^[a-z]:[/\\]/i.test(destination)
@@ -112,28 +130,22 @@ function checkLinks(pluginRoot, file, findings) {
   }
 }
 
-/**
- * Checks the installable plugin, including links in bundled reference documents.
- *
- * @param {string} [pluginRoot] - Plugin directory, independent of a repository checkout.
- * @returns {{status: string, skills: number, findings: string[]}} Validation report.
- */
-export function validatePlugin(
-  pluginRoot = path.join(root, "plugins/oh-my-teams"),
-) {
+function inspectPlugin(pluginRoot, report) {
   pluginRoot = fs.realpathSync(pluginRoot);
-  const findings = [];
+  const { findings } = report;
+  if (!fs.statSync(pluginRoot).isDirectory()) {
+    findings.push(`${pluginRoot}: plugin root is not a directory`);
+    return;
+  }
   const skillRoot = path.join(pluginRoot, "skills");
   if (
-    !fs.existsSync(skillRoot) ||
-    !fs.statSync(skillRoot).isDirectory() ||
-    pathProblem(pluginRoot, skillRoot)
+    pathProblem(pluginRoot, skillRoot) ||
+    !fs.statSync(skillRoot).isDirectory()
   ) {
-    return {
-      status: "failed",
-      skills: 0,
-      findings: ["bundled skills directory missing or outside plugin"],
-    };
+    findings.push(
+      `${skillRoot}: bundled skills directory missing, outside plugin, or not a directory`,
+    );
+    return;
   }
   checkManifests(pluginRoot, skillRoot, findings);
   const installed = fs
@@ -141,6 +153,7 @@ export function validatePlugin(
     .filter((item) => item.isDirectory() && !item.name.startsWith("."))
     .map((item) => item.name)
     .sort();
+  report.skills = installed.length;
 
   if (JSON.stringify(installed) !== JSON.stringify([...expected].sort())) {
     findings.push(`Skill set differs: ${installed.join(", ")}`);
@@ -153,7 +166,11 @@ export function validatePlugin(
       findings.push(`${skill}: SKILL.md ${issue}`);
       continue;
     }
-    const source = fs.readFileSync(file, "utf8");
+    if (!fs.statSync(file).isFile()) {
+      findings.push(`${file}: SKILL.md is not a regular file`);
+      continue;
+    }
+    const source = readText(file);
     try {
       const metadata = skillMetadata(source);
       if (metadata.name !== skill)
@@ -175,12 +192,30 @@ export function validatePlugin(
   for (const file of markdownFiles(pluginRoot)) {
     checkLinks(pluginRoot, file, findings);
   }
+}
 
-  return {
-    status: findings.length ? "failed" : "passed",
-    skills: installed.length,
-    findings,
-  };
+/**
+ * Checks an installable plugin and reports filesystem failures with their paths.
+ *
+ * @param {string} [pluginRoot] - Plugin directory, independent of a repository checkout.
+ * @returns {{status: string, skills: number, findings: string[]}} Validation report.
+ * @throws {Error} For unexpected errors unrelated to filesystem operations.
+ */
+export function validatePlugin(
+  pluginRoot = path.join(root, "plugins/oh-my-teams"),
+) {
+  const report = { status: "passed", skills: 0, findings: [] };
+  try {
+    inspectPlugin(pluginRoot, report);
+  } catch (error) {
+    if (typeof error.code !== "string" || typeof error.syscall !== "string")
+      throw error;
+    report.findings.push(
+      `${error.path ?? pluginRoot}: ${error.code}: ${error.message}`,
+    );
+  }
+  report.status = report.findings.length ? "failed" : "passed";
+  return report;
 }
 
 if (

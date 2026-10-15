@@ -9,14 +9,14 @@ import { validatePlugin } from "../scripts/check-skills.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function fixture(t) {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "omt-validation-"));
+function fixture(t, temporaryRoot = os.tmpdir()) {
+  const temporary = fs.mkdtempSync(path.join(temporaryRoot, "omt-validation-"));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
   const plugin = path.join(temporary, "plugin");
   fs.cpSync(path.join(root, "plugins/oh-my-teams"), plugin, {
     recursive: true,
   });
-  return plugin;
+  return fs.realpathSync(plugin);
 }
 
 function editManifest(plugin, host, update) {
@@ -223,4 +223,130 @@ test("reference definitions and encoded links cannot escape the plugin", async (
       );
     });
   }
+});
+
+test("a missing plugin directory produces a failed report with its path", (t) => {
+  const plugin = fixture(t);
+  const absent = path.join(plugin, "absent-plugin");
+  const report = validatePlugin(absent);
+  assert.equal(report.status, "failed");
+  assert.equal(report.skills, 0);
+  assert.ok(
+    report.findings.some(
+      (item) => item.includes(absent) && item.includes("ENOENT"),
+    ),
+  );
+});
+
+test("a directory replacing SKILL.md is a reported validation failure", (t) => {
+  const plugin = fixture(t);
+  const file = path.join(plugin, "skills/kickoff/SKILL.md");
+  fs.unlinkSync(file);
+  fs.mkdirSync(file);
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some(
+      (item) => item.includes("kickoff") && item.includes("not a regular file"),
+    ),
+  );
+});
+
+test("reference documents retain links between leading horizontal rules", async (t) => {
+  for (const name of ["example.md", "SKILL.md"]) {
+    await t.test(name, (context) => {
+      const plugin = fixture(context);
+      fs.writeFileSync(
+        path.join(plugin, "references", name),
+        "---\n[Missing](missing.md)\n---\n",
+      );
+      const report = validatePlugin(plugin);
+      assert.equal(report.status, "failed");
+      assert.ok(
+        report.findings.some(
+          (item) =>
+            item.includes(name) && item.includes("broken link missing.md"),
+        ),
+      );
+    });
+  }
+});
+
+test("a regular file cannot be used as the plugin root", (t) => {
+  const plugin = fixture(t);
+  const file = path.join(plugin, "root-file");
+  fs.writeFileSync(file, "not a directory\n");
+  const report = validatePlugin(file);
+  assert.equal(report.status, "failed");
+  assert.equal(report.skills, 0);
+  assert.ok(
+    report.findings.some(
+      (item) => item.includes(file) && item.includes("not a directory"),
+    ),
+  );
+});
+
+test("filesystem read errors report their code and the affected file", (t) => {
+  const plugin = fixture(t);
+  const file = path.join(plugin, "skills/kickoff/SKILL.md");
+  const original = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (target, ...args) => {
+    if (target === file) {
+      throw Object.assign(new Error("access denied"), {
+        code: "EACCES",
+        syscall: "open",
+      });
+    }
+    return original(target, ...args);
+  });
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.equal(report.skills, 7);
+  assert.ok(
+    report.findings.some(
+      (item) => item.includes(file) && item.includes("EACCES"),
+    ),
+  );
+});
+
+test("unexpected programming errors are not mislabeled as filesystem failures", (t) => {
+  const plugin = fixture(t);
+  const file = path.join(plugin, "skills/kickoff/SKILL.md");
+  const original = fs.readFileSync;
+  const unexpected = new TypeError("unexpected validation bug");
+  t.mock.method(fs, "readFileSync", (target, ...args) => {
+    if (target === file) throw unexpected;
+    return original(target, ...args);
+  });
+  assert.throws(
+    () => validatePlugin(plugin),
+    (error) => error === unexpected,
+  );
+});
+
+test("filesystem diagnostics remain testable through an aliased temporary root", (t) => {
+  const outer = fixture(t);
+  const temporaryRoot = path.join(outer, "temporary-root");
+  const alias = path.join(outer, "temporary-alias");
+  fs.mkdirSync(temporaryRoot);
+  fs.symlinkSync(temporaryRoot, alias, "junction");
+  const plugin = fixture(t, alias);
+  const file = path.join(plugin, "skills/kickoff/SKILL.md");
+  const original = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (target, ...args) => {
+    if (target === file) {
+      throw Object.assign(new Error("access denied"), {
+        code: "EACCES",
+        syscall: "open",
+      });
+    }
+    return original(target, ...args);
+  });
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some(
+      (item) => item.includes(file) && item.includes("EACCES"),
+    ),
+  );
 });

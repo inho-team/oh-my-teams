@@ -29,11 +29,16 @@ export function skillMetadata(source) {
 /**
  * Collects actual Markdown destinations, including reference definitions and images.
  *
- * @param {string} source - Document text, optionally with skill frontmatter.
+ * @param {string} source - Document text.
+ * @param {object} [options] - Document context provided by the package validator.
+ * @param {boolean} [options.frontmatter=false] - Whether this is an actual skill document.
  * @returns {string[]} Link destinations, excluding code and escaped link examples.
  */
-export function markdownDestinations(source) {
-  const body = normalize(source).replace(/^---\n[\s\S]*?\n---(?:\n|$)/, "");
+export function markdownDestinations(source, { frontmatter = false } = {}) {
+  const normalized = normalize(source);
+  const body = frontmatter
+    ? normalized.replace(/^---\n[\s\S]*?\n---(?:\n|$)/, "")
+    : normalized;
   const destinations = [];
   function visit(node) {
     if (["link", "image", "definition"].includes(node.type)) {
