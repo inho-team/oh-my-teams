@@ -38,7 +38,7 @@ test("all bundled examples validate in an isolated skill installation", (t) => {
   const examples = fs
     .readdirSync(directory)
     .filter((file) => file.endsWith(".example.yaml"));
-  assert.equal(examples.length, 3);
+  assert.equal(examples.length, 6);
   for (const file of examples) {
     const source = fs.readFileSync(path.join(directory, file), "utf8");
     assert.equal(

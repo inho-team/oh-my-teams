@@ -49,7 +49,7 @@ export function assertOmtDocument(value, schemaErrors) {
           "inconclusive requires uncertainties",
         );
     }
-  } else {
+  } else if (kind === "status_report") {
     ensure(
       subject.worktree_id === payload.worktree.id,
       "subject and observed worktree IDs must match",
@@ -69,22 +69,13 @@ export function assertOmtDocument(value, schemaErrors) {
         "failed observation cannot assert current CI results",
       );
     }
-    for (const check of payload.ci) {
-      if (!["unregistered", "unknown"].includes(check.status))
-        ensure(check.build_id, "observed CI execution requires build_id");
-      if (check.status === "unregistered")
-        ensure(check.build_id === null, "unregistered CI cannot have build_id");
-      if (check.status === "passed") {
-        ensure(
-          check.source_commit && check.target_branch,
-          "passed CI requires source_commit and target_branch",
-        );
-        ensure(
-          payload.git && check.source_commit === payload.git.head,
-          "passed CI must correspond to observed Git HEAD",
-        );
-      }
-    }
+    for (const check of payload.ci) checkCi(check, payload.git?.head, ensure);
+  } else {
+    checkLifecycle(value, ensure);
+  }
+  if (
+    ["status_report", "completion_report", "interruption_report"].includes(kind)
+  ) {
     if (payload.delivery.state === "delivered")
       ensure(
         payload.delivery.reference,
@@ -102,6 +93,161 @@ export function assertOmtDocument(value, schemaErrors) {
       );
   }
   return value;
+}
+
+function checkCi(check, head, ensure) {
+  if (!["unregistered", "unknown"].includes(check.status))
+    ensure(check.build_id, "observed CI execution requires build_id");
+  if (check.status === "unregistered")
+    ensure(check.build_id === null, "unregistered CI cannot have build_id");
+  if (check.status === "passed") {
+    ensure(
+      check.source_commit && check.target_branch,
+      "passed CI requires source_commit and target_branch",
+    );
+    ensure(
+      check.source_commit === head,
+      "passed CI must correspond to observed Git HEAD",
+    );
+  }
+}
+
+function checkLifecycle({ kind, subject, payload }, ensure) {
+  ensure(subject.commit, "lifecycle documents require a fixed subject.commit");
+  if (kind === "task_request") {
+    ensure(
+      new Set(payload.acceptance_criteria).size ===
+        payload.acceptance_criteria.length,
+      "task acceptance criteria must be unique",
+    );
+    ensure(
+      new Set(payload.required_checks.map((item) => item.name)).size ===
+        payload.required_checks.length,
+      "required check names must be unique",
+    );
+    if (payload.delivery.mode === "none")
+      ensure(
+        payload.delivery.target === null,
+        "no delivery must have null target",
+      );
+    else
+      ensure(payload.delivery.target, "requested delivery requires a target");
+    if (payload.delivery.mode === "merge")
+      ensure(
+        payload.delivery.authorization,
+        "merge delivery requires recorded authorization",
+      );
+  } else if (kind === "completion_report") {
+    const { acceptance_results: results, checks } = payload;
+    ensure(
+      new Set(results.map((item) => item.criterion)).size === results.length,
+      "acceptance results must have unique criteria",
+    );
+    ensure(
+      new Set(checks.map((item) => item.name)).size === checks.length,
+      "completion check names must be unique",
+    );
+    for (const result of results)
+      if (result.result === "met")
+        ensure(
+          result.evidence.length,
+          "met acceptance criteria require evidence",
+        );
+    for (const check of checks)
+      if (check.status === "passed")
+        ensure(check.evidence.length, "passed checks require evidence");
+    for (const check of payload.ci) checkCi(check, subject.commit, ensure);
+    if (payload.outcome === "completed") {
+      ensure(
+        results.every((item) => item.result === "met"),
+        "completed outcome requires all acceptance criteria to be met",
+      );
+      ensure(
+        checks.every((item) => !item.required || item.status === "passed"),
+        "completed outcome requires mandatory checks to pass",
+      );
+      ensure(
+        payload.ci.every((item) => item.status === "passed"),
+        "completed outcome requires CI approvals to pass",
+      );
+      ensure(
+        !payload.remaining.length,
+        "completed outcome cannot have remaining required work",
+      );
+    } else
+      ensure(
+        payload.remaining.length,
+        "incomplete outcome requires remaining work",
+      );
+  } else {
+    for (const session of payload.sessions) {
+      if (session.action !== "preserved")
+        ensure(
+          session.stop_authorization,
+          "stopping a session requires recorded authorization",
+        );
+      if (session.action === "stopped")
+        ensure(
+          session.liveness === "exited",
+          "stopped sessions require confirmed exit",
+        );
+      if (session.liveness === "unknown")
+        ensure(
+          payload.uncertainties.length,
+          "unknown session liveness requires uncertainties",
+        );
+    }
+  }
+}
+
+/**
+ * Checks a lifecycle report against the original task rather than a reduced scope.
+ * @param {object} request - Validated task_request document.
+ * @param {object} response - Validated completion_report or interruption_report document.
+ * @returns {void} Throws when task identity, required criteria, checks, delivery, or cleanup differ.
+ */
+export function assertTaskResponse(request, response) {
+  const ensure = (condition, message) => {
+    if (!condition) throw new SyntaxError(message);
+  };
+  ensure(
+    request.kind === "task_request" &&
+      ["completion_report", "interruption_report"].includes(response.kind),
+    "task correlation requires a task and a lifecycle report",
+  );
+  ensure(
+    response.in_reply_to === request.id &&
+      response.subject.worktree_id === request.subject.worktree_id,
+    "lifecycle report must match task ID and worktree",
+  );
+  if (response.kind !== "completion_report") return;
+  const { payload: task } = request;
+  const { payload: report } = response;
+  const criteria = report.acceptance_results.map((item) => item.criterion);
+  ensure(
+    criteria.length === task.acceptance_criteria.length &&
+      task.acceptance_criteria.every((item) => criteria.includes(item)),
+    "completion must preserve every requested acceptance criterion",
+  );
+  for (const expected of task.required_checks) {
+    const check = report.checks.find((item) => item.name === expected.name);
+    ensure(
+      check && check.required && check.command === expected.command,
+      "completion must preserve required check names and commands",
+    );
+  }
+  if (report.outcome === "completed") {
+    if (task.delivery.mode !== "none")
+      ensure(
+        report.delivery.state === "delivered",
+        "completed task requires requested delivery",
+      );
+    if (task.cleanup_required)
+      ensure(
+        report.cleanup.state === "completed",
+        "completed task requires requested cleanup",
+      );
+  }
 }
 
 /**
@@ -137,6 +283,30 @@ function escapeHtml(value) {
 }
 
 const labels = {
+  task_request: "작업 요청",
+  completion_report: "완료 보고",
+  interruption_report: "중단·인계 보고",
+  goal: "목표",
+  scope: "작업 범위",
+  required_checks: "필수 검사",
+  command: "명령",
+  mode: "전달 방식",
+  target: "전달 대상",
+  authorization: "허가 근거",
+  cleanup_required: "필수 정리 여부",
+  outcome: "완료 판단",
+  acceptance_results: "수용 기준별 결과",
+  criterion: "수용 기준",
+  result: "판정",
+  checks: "검증 결과",
+  required: "필수 여부",
+  reason: "중단 사유",
+  undelivered_changes: "미전달 변경",
+  sessions: "관측한 세션",
+  liveness: "생존 상태",
+  action: "수행한 조치",
+  stop_authorization: "종료 허가 근거",
+  resume_steps: "재개 절차",
   review_request: "검토 요청",
   review_result: "검토 결과",
   status_report: "상태 보고",
