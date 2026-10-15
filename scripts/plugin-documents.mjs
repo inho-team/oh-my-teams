@@ -1,0 +1,102 @@
+/** Validates host entry points and local Markdown links. */
+import fs from "node:fs";
+import path from "node:path";
+import { markdownDestinations } from "./plugin-syntax.mjs";
+import { pathProblem, readText } from "./plugin-files.mjs";
+
+function manifestProblem(manifest, host, pluginRoot, skillRoot) {
+  if (manifest?.name !== "oh-my-teams") return "name must be oh-my-teams";
+  if (typeof manifest.version !== "string" || !manifest.version.trim()) {
+    return "version must be a nonempty string";
+  }
+  if (host === "claude" && manifest.skills === undefined) return null;
+  const paths =
+    host === "claude" && Array.isArray(manifest.skills)
+      ? manifest.skills
+      : [manifest.skills];
+  if (!paths.length) return "skills must include the bundled skills directory";
+  for (const target of paths) {
+    if (typeof target !== "string" || !target.startsWith("./")) {
+      return "skills must use plugin-relative directory paths starting with ./";
+    }
+    const resolved = path.resolve(pluginRoot, target);
+    const issue = pathProblem(pluginRoot, resolved);
+    if (issue) return `skills path ${issue}: ${target}`;
+    if (!fs.statSync(resolved).isDirectory())
+      return `skills path is not a directory: ${target}`;
+    if (fs.realpathSync(resolved) !== fs.realpathSync(skillRoot)) {
+      return "skills path must point to the bundled skills directory";
+    }
+  }
+  return null;
+}
+
+/**
+ * Checks manifest syntax and entry points without hiding programming errors.
+ * @param {string} pluginRoot - Canonical plugin root.
+ * @param {string} skillRoot - Bundled skills directory.
+ * @param {string[]} findings - Accumulated validation failures.
+ * @returns {void} Appends manifest failures.
+ */
+export function checkManifests(pluginRoot, skillRoot, findings) {
+  for (const host of ["claude", "codex"]) {
+    const label = `.${host}-plugin/plugin.json`;
+    const file = path.join(pluginRoot, label);
+    const problem = pathProblem(pluginRoot, file);
+    if (problem) {
+      findings.push(`${label}: manifest ${problem}`);
+      continue;
+    }
+    const source = readText(file);
+    let manifest;
+    try {
+      manifest = JSON.parse(source);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      findings.push(`${label}: ${error.message}`);
+      continue;
+    }
+    const issue = manifestProblem(manifest, host, pluginRoot, skillRoot);
+    if (issue) findings.push(`${label}: ${issue}`);
+  }
+}
+
+/**
+ * Reports missing and external local Markdown destinations.
+ * @param {string} pluginRoot - Canonical plugin root.
+ * @param {string} file - Markdown file inside the plugin.
+ * @param {string[]} findings - Accumulated validation failures.
+ * @returns {void} Appends link failures.
+ */
+export function checkLinks(pluginRoot, file, findings) {
+  const label = path.relative(pluginRoot, file);
+  const frontmatter =
+    path.basename(file) === "SKILL.md" &&
+    path.dirname(path.dirname(file)) === path.join(pluginRoot, "skills");
+  for (const destination of markdownDestinations(readText(file), {
+    frontmatter,
+  })) {
+    if (
+      /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(destination) &&
+      !/^file:|^[a-z]:[/\\]/i.test(destination)
+    )
+      continue;
+    let target;
+    try {
+      target = decodeURIComponent(destination.split(/[?#]/)[0]);
+    } catch {
+      findings.push(`${label}: invalid link encoding ${destination}`);
+      continue;
+    }
+    if (!target) continue;
+    const resolved = path.resolve(path.dirname(file), target);
+    const issue =
+      /^file:/i.test(target) || path.win32.isAbsolute(target)
+        ? "outside plugin"
+        : pathProblem(pluginRoot, resolved);
+    if (issue) {
+      const kind = issue === "missing" ? "broken link" : "link outside plugin";
+      findings.push(`${label}: ${kind} ${target}`);
+    }
+  }
+}

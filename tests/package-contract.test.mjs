@@ -2,11 +2,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { synchronize } from "../scripts/metadata.mjs";
 import { validatePlugin } from "../scripts/check-skills.mjs";
+import { pluginFixture } from "./helpers/plugin-fixture.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const plugin = path.join(root, "plugins/oh-my-teams");
@@ -63,16 +63,8 @@ test("the owner keeps one writer per worktree and specialist calls stay read-onl
   );
 });
 
-function isolatedPlugin(t) {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "omt-package-"));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
-  const installed = path.join(temporary, "plugin");
-  fs.cpSync(plugin, installed, { recursive: true });
-  return installed;
-}
-
 test("an isolated installation has all documents needed by its skills", (t) => {
-  const installed = isolatedPlugin(t);
+  const installed = pluginFixture(t);
   assert.deepEqual(validatePlugin(installed), {
     status: "passed",
     skills: 7,
@@ -81,7 +73,7 @@ test("an isolated installation has all documents needed by its skills", (t) => {
 });
 
 test("validation rejects links to existing files outside the plugin", (t) => {
-  const installed = isolatedPlugin(t);
+  const installed = pluginFixture(t);
   fs.writeFileSync(
     path.join(installed, "..", "outside.md"),
     "Repository-only document\n",
@@ -100,7 +92,7 @@ test("validation rejects links to existing files outside the plugin", (t) => {
 });
 
 test("validation follows bundled references and reports missing documents", (t) => {
-  const installed = isolatedPlugin(t);
+  const installed = pluginFixture(t);
   fs.appendFileSync(
     path.join(installed, "references/architecture.md"),
     "\n[Missing reference](missing.md)\n",
@@ -113,7 +105,7 @@ test("validation follows bundled references and reports missing documents", (t) 
 });
 
 test("validation rejects links through directories outside the plugin", (t) => {
-  const installed = isolatedPlugin(t);
+  const installed = pluginFixture(t);
   const outside = path.join(installed, "..", "external");
   fs.mkdirSync(outside);
   fs.writeFileSync(path.join(outside, "document.md"), "External document\n");
@@ -136,7 +128,7 @@ test("validation rejects links through directories outside the plugin", (t) => {
 });
 
 test("Windows line endings preserve valid skill metadata", (t) => {
-  const installed = isolatedPlugin(t);
+  const installed = pluginFixture(t);
   const skill = path.join(installed, "skills/kickoff/SKILL.md");
   const source = fs.readFileSync(skill, "utf8").replaceAll("\r\n", "\n");
   fs.writeFileSync(skill, source.replaceAll("\n", "\r\n"));

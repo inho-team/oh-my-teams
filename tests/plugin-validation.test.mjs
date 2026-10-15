@@ -2,28 +2,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { validatePlugin } from "../scripts/check-skills.mjs";
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-function fixture(t, temporaryRoot = os.tmpdir()) {
-  const temporary = fs.mkdtempSync(path.join(temporaryRoot, "omt-validation-"));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
-  const plugin = path.join(temporary, "plugin");
-  fs.cpSync(path.join(root, "plugins/oh-my-teams"), plugin, {
-    recursive: true,
-  });
-  return fs.realpathSync(plugin);
-}
-
-function editManifest(plugin, host, update) {
-  const file = path.join(plugin, `.${host}-plugin/plugin.json`);
-  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
-  fs.writeFileSync(file, JSON.stringify({ ...manifest, ...update }));
-}
+import {
+  pluginFixture as fixture,
+  editManifest,
+} from "./helpers/plugin-fixture.mjs";
 
 test("Codex cannot point to a missing skills directory", (t) => {
   const plugin = fixture(t);
@@ -73,6 +57,7 @@ test("both host manifests reject malformed metadata and skill entry points", asy
       ["different scan directory", { skills: "./references/" }],
     ];
     if (host === "codex") cases.push(["missing skills", { skills: undefined }]);
+    else cases.push(["empty skills", { skills: [] }]);
     for (const [label, update] of cases) {
       await t.test(`${host}: ${label}`, (context) => {
         const plugin = fixture(context);
@@ -349,4 +334,37 @@ test("filesystem diagnostics remain testable through an aliased temporary root",
       (item) => item.includes(file) && item.includes("EACCES"),
     ),
   );
+});
+
+test("manifest reads preserve filesystem diagnostics and propagate programming errors", async (t) => {
+  const denied = Object.assign(new Error("access denied"), {
+    code: "EACCES",
+    syscall: "open",
+  });
+  const unexpected = new TypeError("unexpected manifest bug");
+  for (const error of [denied, unexpected]) {
+    await t.test(error.name, (context) => {
+      const plugin = fixture(context);
+      const file = path.join(plugin, ".claude-plugin/plugin.json");
+      const original = fs.readFileSync;
+      context.mock.method(fs, "readFileSync", (target, ...args) => {
+        if (target === file) throw error;
+        return original(target, ...args);
+      });
+      if (error === unexpected) {
+        assert.throws(
+          () => validatePlugin(plugin),
+          (caught) => caught === error,
+        );
+      } else {
+        const report = validatePlugin(plugin);
+        assert.equal(report.status, "failed");
+        assert.ok(
+          report.findings.some(
+            (finding) => finding.includes(file) && finding.includes("EACCES"),
+          ),
+        );
+      }
+    });
+  }
 });
