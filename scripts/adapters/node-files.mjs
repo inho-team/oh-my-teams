@@ -22,7 +22,16 @@ function assertSnapshot(file, expected) {
     throw new Error(`File changed since planning: ${file}`);
 }
 
-function replaceFile(file, expected, next, writeText) {
+function flushFile(file) {
+  const descriptor = fs.openSync(file, "r+");
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function replaceFile(file, expected, next, writeText, flush) {
   const temporary = path.join(
     path.dirname(file),
     `.${path.basename(file)}.${randomUUID()}.tmp`,
@@ -40,6 +49,8 @@ function replaceFile(file, expected, next, writeText) {
     created = true;
     writeText(temporary, next);
     fs.chmodSync(temporary, mode);
+    // Flush the staged contents before they can replace a valid destination.
+    flush(temporary);
     assertSnapshot(file, expected);
     fs.renameSync(temporary, file);
   } catch (error) {
@@ -61,7 +72,7 @@ function replaceFile(file, expected, next, writeText) {
   }
 }
 
-function writeBatch(changes, writeText) {
+function writeBatch(changes, writeText, flush) {
   // Check every snapshot before the first write so stale plans cannot overwrite edits.
   for (const { file, before } of changes) {
     assertSnapshot(file, before);
@@ -69,14 +80,14 @@ function writeBatch(changes, writeText) {
   const attempted = [];
   try {
     for (const change of changes) {
-      replaceFile(change.file, change.before, change.after, writeText);
+      replaceFile(change.file, change.before, change.after, writeText, flush);
       attempted.push(change);
     }
   } catch (error) {
     const failures = [error];
     for (const { file, before, after } of attempted.reverse()) {
       try {
-        replaceFile(file, after, before, writeText);
+        replaceFile(file, after, before, writeText, flush);
       } catch (restoreError) {
         failures.push(restoreError);
       }
@@ -95,10 +106,12 @@ function writeBatch(changes, writeText) {
  * Creates the production filesystem adapter without accessing user settings.
  * @param {object} [options] - Low-level writer for adapter fault tests.
  * @param {(file: string, text: string) => void} [options.writeText] - UTF-8 staging-file writer.
+ * @param {(file: string) => void} [options.flush] - Staging-file durability boundary for fault tests.
  * @returns {import('../core/ports.mjs').FilesPort} Synchronous filesystem capabilities.
  */
 export function createNodeFiles({
   writeText = (file, text) => fs.writeFileSync(file, text),
+  flush = flushFile,
 } = {}) {
   return {
     realPath: (file) => fs.realpathSync(file),
@@ -108,6 +121,6 @@ export function createNodeFiles({
         .readdirSync(directory, { withFileTypes: true })
         .map((entry) => ({ name: entry.name, kind: kind(entry) })),
     readText,
-    writeBatch: (changes) => writeBatch(changes, writeText),
+    writeBatch: (changes) => writeBatch(changes, writeText, flush),
   };
 }

@@ -50,9 +50,7 @@ pipeline {
             steps {
                 checkout scm
                 sh 'node --version && npm ci'
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { sh 'npm run quality' }
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { sh 'npm run format:check' }
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { sh 'npm test' }
+                sh 'npm run verify'
             }
             post { always { cleanWs(deleteDirs: true, notFailBuild: true) } }
         }

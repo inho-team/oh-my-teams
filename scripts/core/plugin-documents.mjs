@@ -2,10 +2,10 @@
 import path from "node:path";
 import { pathProblem } from "./plugin-paths.mjs";
 
-function isSkillDocument(file, pluginRoot) {
+function isSkillDocument(file, skillRoot) {
   return (
     path.basename(file) === "SKILL.md" &&
-    path.dirname(path.dirname(file)) === path.join(pluginRoot, "skills")
+    path.dirname(path.dirname(file)) === skillRoot
   );
 }
 
@@ -74,12 +74,22 @@ export function checkManifests(pluginRoot, skillRoot, findings, files) {
  * @param {string[]} findings - Accumulated validation failures.
  * @param {import("./ports.mjs").FilesPort} files - Filesystem capabilities.
  * @param {import("./ports.mjs").DocumentSyntaxPort} syntax - Document parsers.
+ * @param {object} [options] - Containment and skill document context.
+ * @param {string} [options.boundary='plugin'] - Containing root label for diagnostics.
+ * @param {string} [options.skillRoot] - Exact skill directory whose YAML is excluded.
  * @returns {void} Appends link failures.
  */
-export function checkLinks(pluginRoot, file, findings, files, syntax) {
+export function checkLinks(
+  pluginRoot,
+  file,
+  findings,
+  files,
+  syntax,
+  { boundary = "plugin", skillRoot = path.join(pluginRoot, "skills") } = {},
+) {
   const label = path.relative(pluginRoot, file);
   // A leading horizontal rule in an ordinary reference must not hide its links.
-  const frontmatter = isSkillDocument(file, pluginRoot);
+  const frontmatter = isSkillDocument(file, skillRoot);
   for (const destination of syntax.markdownDestinations(files.readText(file), {
     frontmatter,
   })) {
@@ -104,10 +114,11 @@ export function checkLinks(pluginRoot, file, findings, files, syntax) {
     const resolved = target ? path.resolve(path.dirname(file), target) : file;
     const issue =
       /^file:/i.test(target) || path.win32.isAbsolute(target)
-        ? "outside plugin"
-        : pathProblem(pluginRoot, resolved, files);
+        ? `outside ${boundary}`
+        : pathProblem(pluginRoot, resolved, files, boundary);
     if (issue) {
-      const kind = issue === "missing" ? "broken link" : "link outside plugin";
+      const kind =
+        issue === "missing" ? "broken link" : `link outside ${boundary}`;
       findings.push(`${label}: ${kind} ${target}`);
     } else if (
       anchor &&
@@ -115,7 +126,7 @@ export function checkLinks(pluginRoot, file, findings, files, syntax) {
       files.kind(resolved) === "file"
     ) {
       const anchors = syntax.markdownAnchors(files.readText(resolved), {
-        frontmatter: isSkillDocument(resolved, pluginRoot),
+        frontmatter: isSkillDocument(resolved, skillRoot),
       });
       if (!anchors.includes(anchor))
         findings.push(`${label}: broken anchor ${destination}`);
