@@ -16,4 +16,4 @@ description: 단순화된 oh my teams 스킬과 Orca 워크트리 소유권의 �
 | `disband` | 실패하거나 취소된 작업을 안전하게 중단할 때 사용한다. |
 | `fluent-korean` | 한국어 문서와 보고서의 문체를 다듬을 때 사용한다. |
 
-자세한 소유권과 검토 규칙은 [세션 소유권 구조](../../../../docs/ARCHITECTURE.md)에 있다. 2.x의 조직과 kickoff 기록은 자동으로 3.x 실행에 이어 붙이지 않는다.
+자세한 소유권과 검토 규칙은 [세션 소유권 구조](../../references/architecture.md)에 있다. 2.x의 조직과 kickoff 기록은 자동으로 3.x 실행에 이어 붙이지 않는다.
