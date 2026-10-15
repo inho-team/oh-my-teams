@@ -1,0 +1,466 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OMT document v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "id",
+    "issued_at",
+    "issuer",
+    "subject",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["review_request", "review_result", "status_report"]
+    },
+    "id": {
+      "$ref": "#/definitions/text"
+    },
+    "issued_at": {
+      "$ref": "#/definitions/timestamp"
+    },
+    "in_reply_to": {
+      "$ref": "#/definitions/text"
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id"],
+      "properties": {
+        "session_id": {
+          "$ref": "#/definitions/text"
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktree_id"],
+      "properties": {
+        "worktree_id": {
+          "$ref": "#/definitions/text"
+        },
+        "commit": {
+          "$ref": "#/definitions/commit"
+        },
+        "implementation_session_id": {
+          "$ref": "#/definitions/text"
+        }
+      }
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "review_request"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/definitions/reviewRequest"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "review_result"
+          }
+        }
+      },
+      "then": {
+        "required": ["in_reply_to"],
+        "properties": {
+          "in_reply_to": { "$ref": "#/definitions/text" },
+          "payload": {
+            "$ref": "#/definitions/reviewResult"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "status_report"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/definitions/statusReport"
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "texts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/text"
+      }
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "locator"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["file", "git", "orca", "ci", "user"]
+        },
+        "locator": {
+          "$ref": "#/definitions/text"
+        },
+        "excerpt": {
+          "$ref": "#/definitions/text"
+        }
+      }
+    },
+    "reviewRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "question",
+        "facts",
+        "options",
+        "constraints",
+        "acceptance_criteria",
+        "evidence"
+      ],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "enum": ["advisor", "lawyer", "auditor"]
+        },
+        "question": {
+          "$ref": "#/definitions/text"
+        },
+        "facts": {
+          "$ref": "#/definitions/texts"
+        },
+        "options": {
+          "$ref": "#/definitions/texts"
+        },
+        "constraints": {
+          "$ref": "#/definitions/texts"
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/text"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        }
+      }
+    },
+    "reviewResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "conclusion",
+        "summary",
+        "recommendation",
+        "counterarguments",
+        "independent",
+        "findings",
+        "uncertainties",
+        "evidence"
+      ],
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "enum": ["advisor", "lawyer", "auditor"]
+        },
+        "conclusion": {
+          "type": "string",
+          "enum": [
+            "recommended",
+            "changes_requested",
+            "no_findings",
+            "inconclusive"
+          ]
+        },
+        "summary": {
+          "$ref": "#/definitions/text"
+        },
+        "recommendation": {
+          "$ref": "#/definitions/text"
+        },
+        "counterarguments": {
+          "$ref": "#/definitions/texts"
+        },
+        "independent": {
+          "type": "boolean"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["severity", "description", "evidence"],
+            "properties": {
+              "severity": {
+                "type": "string",
+                "enum": ["high", "medium", "low"]
+              },
+              "description": {
+                "$ref": "#/definitions/text"
+              },
+              "evidence": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/definitions/evidence"
+                }
+              }
+            }
+          }
+        },
+        "uncertainties": {
+          "$ref": "#/definitions/texts"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "build_id",
+        "source_commit",
+        "target_branch",
+        "status",
+        "observed_at"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/text"
+        },
+        "build_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_commit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/commit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_branch": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "unregistered",
+            "queued",
+            "running",
+            "passed",
+            "failed",
+            "cancelled",
+            "skipped",
+            "unknown"
+          ]
+        },
+        "observed_at": {
+          "$ref": "#/definitions/timestamp"
+        }
+      }
+    },
+    "statusReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "observation",
+        "execution",
+        "worktree",
+        "git",
+        "ci",
+        "delivery",
+        "cleanup",
+        "remaining",
+        "uncertainties",
+        "evidence"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/definitions/text"
+        },
+        "observation": {
+          "type": "string",
+          "enum": ["complete", "partial", "failed"]
+        },
+        "execution": {
+          "type": "string",
+          "enum": ["unknown", "running", "succeeded", "failed", "stopped"]
+        },
+        "worktree": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "instance_id", "owner_session_id"],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/text"
+            },
+            "instance_id": {
+              "$ref": "#/definitions/text"
+            },
+            "owner_session_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "git": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["head", "dirty"],
+              "properties": {
+                "head": {
+                  "$ref": "#/definitions/commit"
+                },
+                "dirty": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ci": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ci"
+          }
+        },
+        "delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "reference"],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": ["not_requested", "pending", "delivered", "unknown"]
+            },
+            "reference": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "cleanup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "remaining"],
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "not_requested",
+                "pending",
+                "completed",
+                "preserved",
+                "unknown"
+              ]
+            },
+            "remaining": {
+              "$ref": "#/definitions/texts"
+            }
+          }
+        },
+        "remaining": {
+          "$ref": "#/definitions/texts"
+        },
+        "uncertainties": {
+          "$ref": "#/definitions/texts"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        }
+      }
+    }
+  }
+}

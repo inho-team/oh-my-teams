@@ -1,0 +1,24 @@
+schema_version: 1
+kind: review_request
+id: example-request-001
+issued_at: "2026-10-15T09:00:00+09:00"
+issuer:
+  session_id: example-owner-session
+subject:
+  worktree_id: example-repository::/example/worktree
+  commit: "1111111111111111111111111111111111111111"
+  implementation_session_id: example-owner-session
+payload:
+  purpose: auditor
+  question: |
+    CI 결과를 확인하지 못했을 때 성공으로 보고하는 경로가 있는지 검토해 주세요.
+  facts:
+    - 이 문서는 형식을 설명하기 위한 가상의 예제입니다.
+  options: []
+  constraints:
+    - 파일을 편집하지 않고 고정된 커밋만 검토합니다.
+  acceptance_criteria:
+    - 조회 실패를 검사 성공과 구분해야 합니다.
+  evidence:
+    - source: git
+      locator: "1111111111111111111111111111111111111111"

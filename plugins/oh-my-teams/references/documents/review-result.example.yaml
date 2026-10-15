@@ -1,0 +1,34 @@
+schema_version: 1
+kind: review_result
+id: example-review-001
+in_reply_to: example-request-001
+issued_at: "2026-10-15T09:05:00+09:00"
+issuer:
+  session_id: example-reviewer-session
+subject:
+  worktree_id: example-repository::/example/worktree
+  commit: "1111111111111111111111111111111111111111"
+  implementation_session_id: example-owner-session
+payload:
+  purpose: auditor
+  conclusion: changes_requested
+  summary: |
+    조회 실패를 성공으로 바꾸는 경로를 수정해야 합니다. 이 문서는 가상의 예제입니다.
+  recommendation: |
+    조회 실패를 unknown으로 보고하고 기존 빌드 식별자를 보존하도록 수정합니다.
+  counterarguments:
+    - 일시적인 조회 오류만으로 실제 빌드 실패라고 판단해서도 안 됩니다.
+  independent: true
+  findings:
+    - severity: high
+      description: |
+        CI 조회 오류가 발생하면 현재 검사 상태를 확인할 수 없다고 보고해야 합니다.
+      evidence:
+        - source: file
+          locator: example-ci-handler.mjs:42
+          excerpt: 이 위치와 인용은 실제 결함을 가리키지 않는 예제입니다.
+  uncertainties:
+    - 실제 네트워크 단절 상황은 재현하지 않았습니다.
+  evidence:
+    - source: git
+      locator: "1111111111111111111111111111111111111111"
