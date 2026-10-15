@@ -2,16 +2,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { temporaryDirectory } from "./helpers/plugin-fixture.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("Jenkins overrides Git only in the build process without changing global files", (t) => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "omt-ci-git-"));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const temporary = temporaryDirectory(t);
   const globalFile = path.join(temporary, "global.gitconfig");
   const original = "[core]\n\tautocrlf = true\n";
   fs.writeFileSync(globalFile, original);

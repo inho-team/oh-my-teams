@@ -50,6 +50,8 @@ npm test
 
 `npm run quality`는 활성 스킬의 이름과 링크, 이전 런타임 명령 참조를 검사한다. 공통 문서를 포함한 모든 로컬 링크는 플러그인 안에서 해결돼야 한다. `npm test`는 저장소 없이 플러그인 폴더만 복사한 설치 구조에서도 이를 확인한다. `npm run sync`는 `package.json`의 버전을 마켓플레이스와 플러그인 매니페스트에 반영한다. Linux와 macOS의 Jenkins 검사에서도 린트와 테스트를 실행한다.
 
+개발 모듈의 책임과 공통 함수 사용법은 [개발 도구와 공통 예제](docs/DEVELOPMENT.md)에 정리했다. 실행 가능한 예제도 `npm test`에서 함께 검사한다.
+
 ## 라이선스
 
 MIT 라이선스를 따른다. 자세한 내용은 [LICENSE](LICENSE)에 있다.
