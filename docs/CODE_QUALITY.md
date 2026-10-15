@@ -14,10 +14,30 @@ CI 상태 구분, 재개와 삭제 응답 단절에 대한 지침 검토에는 [
 
 로컬 Markdown 링크의 조각 식별자는 대상 문서의 제목과 HTML 앵커에도 존재해야 한다. 제목은 [github-slugger](https://github.com/Flet/github-slugger)의 GitHub 규칙을 사용하며 한글·중복 제목·인라인 서식을 처리한다. 명시적인 HTML `id`와 `a`의 `name`은 [parse5](https://github.com/inikulin/parse5)로 읽는다. 코드 예제의 가짜 제목이나 HTML은 앵커로 세지 않는다. 파일 경로와 조각은 각각 URL 디코딩하며, 외부 URL과 Markdown 이외 파일의 조각은 검사하지 않는다. 정의되지 않은 참조형 문구는 Markdown 파서가 일반 텍스트로 취급하므로 링크 오류로 추정하지 않는다.
 
-활성 `.mjs` 파일은 모듈 JSDoc을 작성하고 공개 export에는 인접 JSDoc을 붙인다. 공개 함수는 인자의 `@param`과 반환값의 `@returns`를 작성한다. `npm run quality`가 이 규칙과 실행문 180자 제한, core·어댑터·진입점의 의존성 방향과 순환 참조를 검사한다. 포맷은 Prettier가 결정한다. 새 클론에서는 `npm ci`를 실행한 뒤 `npm run format`, `npm run sync`, `npm run lint`, `npm test`를 차례로 실행한다. Jenkins의 Linux와 macOS 단계가 같은 검사를 수행한다.
+활성 `.mjs` 파일은 모듈 JSDoc을 작성하고 공개 export에는 인접 JSDoc을 붙인다. 공개 함수는 인자의 `@param`과 반환값의 `@returns`를 작성한다. `npm run quality`가 이 규칙과 실행문 180자 제한, core·어댑터·진입점의 의존성 방향과 순환 참조를 검사한다. 포맷은 Prettier가 결정한다. 새 클론에서는 `npm ci`를 실행한 뒤 `npm run format`, `npm run sync`, `npm run lint`, `npm test`를 차례로 실행한다. Jenkins의 정확한 실행 범위는 아래 표를 따른다.
 
 Jenkins의 macOS checkout에는 [Git의 프로세스별 설정](https://git-scm.com/docs/git-config#ENVIRONMENT)을 사용하며 전역 설정 파일을 변경하지 않는다. 회귀 검사는 Jenkins에 선언한 환경 옵션을 실제 Git 프로세스에 적용해 값이 덮어써지는지, 빌드 밖의 값과 임시 전역 설정 파일은 그대로인지 확인한다.
 
 검증하지 않은 Orca 세션이나 워크트리를 종료됐다고 가정하지 않는다. 삭제 전에 정확한 Orca ID, 소유 세션의 종료, Git 상태와 결과 전달을 다시 확인한다. 이 규칙의 정본은 [세션 소유권 구조](ARCHITECTURE.md)다.
 
 개발 도구의 모듈 경계와 실행 가능한 공통 함수 예제는 [개발 도구와 공통 예제](DEVELOPMENT.md)를 따른다. 버전 동기화는 격리된 저장소에서도 검사하며, 누락되거나 형식이 잘못된 Codex 버전을 보고하고 복구한다.
+
+## 검사 범위와 한계
+
+| 검사 | 확인하는 범위 | 확인하지 않는 범위 |
+|---|---|---|
+| `quality`: 스킬 | 고정된 7개 스킬 집합과 YAML 메타데이터를 확인한다. | 실제 에이전트의 지침 준수는 검사하지 않는다. |
+| `quality`: 문서 | 설치되는 모든 일반 Markdown 파일의 폐기 명령 패턴, 링크·이미지·참조 정의, 로컬 대상의 존재와 플러그인 경계를 확인한다. Markdown 조각은 제목·HTML 앵커와 대조한다. | 외부 URL의 응답, 정의가 없어 일반 텍스트가 된 참조형 문구, 저장소 `docs/`는 검사하지 않는다. 디렉터리 링크를 따라 전체 문서를 탐색하지 않는다. |
+| `quality`: 소스 | 활성 `.mjs`의 문법, JSDoc 태그, 주석을 제외한 줄 길이, 정적 import와 계층·순환 관계를 확인한다. 스코프 분석으로 공개 함수 별칭과 금지된 전역 참조도 확인한다. | 주석의 정확성, 모든 동적 호출과 런타임 동작은 보장하지 않는다. |
+| `format:check` | Prettier로 `.mjs`와 `.json` 형식을 확인한다. | Markdown의 문체와 표·링크는 대상이 아니다. |
+| `sync:check` | 빌드 메타데이터 없는 엄격한 SemVer 정본, 세 매니페스트의 버전 일치, Codex 기본 버전과 14자리 빌드 형식을 확인한다. | 빌드 값의 실제 달력 날짜는 검증하지 않는다. |
+| `test` | 설치 복사본, 입력 오류, 포트 실패 주입, 동기화 복구, 소스 규칙과 CI Git 설정을 검증한다. | 실제 호스트 설치, 모델 행동, Orca 재개·회수, Colima 실행을 자동 검증하지 않는다. |
+| Jenkins Linux·macOS | `npm ci` 뒤 `quality`, `format:check`, `test`를 실행한다. 버전 일치는 패키지 계약 테스트에서 확인한다. | `npm run lint`나 `sync:check`를 별도 단계로 호출하지 않는다. 로컬 Windows 결과로 두 단계의 성공을 대신할 수 없다. |
+
+`passed`는 수행한 검사에서 진단이 없었다는 뜻이다. 호스트의 전체 스키마, 모든 배포 파일의 안전성이나 에이전트의 정상 동작을 보장한다는 뜻이 아니다. 설치 경계의 `realpath` 검사는 검사 시점의 경로를 확인하며, 이후 다른 프로세스가 경로를 바꾸는 상황까지 격리하지 않는다.
+
+실제 코드로 재현한 공백과 수정 우선순위는 [프로젝트 분석](PROJECT_ANALYSIS.md)에 있다. 새 검사를 추가할 때에는 이 표의 범위도 함께 바꾼다.
+
+별도 실행으로 확보한 [호스트 판단 평가](../evals/README.md)와 [실제 스킬 선택·Orca 재조회 검증](../evals/LIVE_INTEGRATION.md)은 `npm test`에 포함되지 않는다. 제공된 관측에 대한 판단, 실제 도구 호출과 검증하지 않은 장애 범위를 각각 구분해 기록한다.
+
+JavaScript 어댑터는 Acorn의 구문 트리와 함께 `eslint-scope`의 바인딩·전역 참조 정보를 사용한다. 지역 인자나 객체 속성의 이름이 `Date`라는 이유만으로 전역 접근으로 판정하지 않는다. 버전 어댑터는 `semver`를 사용하며, YAML 변환 중 발생하는 알려진 별칭 입력 오류는 실패 진단으로 변환한다. 이 의존성들도 저장소 개발용이며 설치 스킬의 실행 의존성이 아니다.

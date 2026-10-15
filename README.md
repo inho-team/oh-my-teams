@@ -52,6 +52,8 @@ npm test
 
 개발 모듈의 책임과 공통 함수 사용법은 [개발 도구와 공통 예제](docs/DEVELOPMENT.md)에 정리했다. 실행 가능한 예제도 `npm test`에서 함께 검사한다.
 
+전체 문서는 [개발 문서 안내](docs/README.md)에서 찾을 수 있다. 복잡도와 검증 공백의 근거, 재현 결과와 개선 우선순위는 [프로젝트 분석과 개선 계획](docs/PROJECT_ANALYSIS.md)에 정리했다.
+
 ## 라이선스
 
 MIT 라이선스를 따른다. 자세한 내용은 [LICENSE](LICENSE)에 있다.
