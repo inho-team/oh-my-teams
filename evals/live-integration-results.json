@@ -1,0 +1,101 @@
+{
+  "evaluatedAt": "2026-10-15T06:50:29.747281+00:00",
+  "candidateVersion": "3.0.7",
+  "sourceBaseCommit": "a3c47927060ff28026fed123445df1c386f66866",
+  "installedPolicyVersion": {
+    "claude": "3.0.6",
+    "codex": "3.0.6+codex.20261015060109"
+  },
+  "orcaVersion": "1.4.226",
+  "scope": "Native skill selection and live Orca re-observation after discarding one real deletion response at the client boundary.",
+  "policySha256": {
+    "references/architecture.md": "efe2ef9e08996e16bcb7255470a05f2423376c478cdef8d8af91d016cc80f36e",
+    "references/failure-handling.md": "01a30feef94ff50e7374787d70b918d655bc131a08ed7f71d0a62c0f853f4ec1",
+    "skills/close/SKILL.md": "0fbf03aeb68477f5563837c32164a7e266106af409b2afb96e03789d652420f7",
+    "skills/consult/SKILL.md": "67d721eb1ec9aff8fa27d61dc15e33a76cc71e87fa9b7c792430369b718e81ef",
+    "skills/disband/SKILL.md": "458f473dabc1668aec7f5ba360da4b9352376038f6e700e869bc4c430a143241",
+    "skills/fluent-korean/SKILL.md": "cb17cb1e4247e4ecae8f59715437a7babe25ee4d51aab3f70ddb525cda2a3d57",
+    "skills/help/SKILL.md": "a139bc5009acf0ea08c98e5d1da92b9de74e79f3017df84148921b46a039f262",
+    "skills/kickoff/SKILL.md": "1128f6b386daadc5b9f3b88e89446efb2ea6399b07b48654e177e5d391ee3930",
+    "skills/status/SKILL.md": "c7a9a22a05e54e111453e5afad3af877cdc12dc999b5939d26f0933858daca71"
+  },
+  "lifecycle": {
+    "createdDisposableChildren": 1,
+    "parentAndExactInstanceVerified": true,
+    "sessionsExited": true,
+    "trackedUntrackedIgnoredClean": true,
+    "commitsIntegrated": true,
+    "deleteSubmissions": 1,
+    "responseDeliveredToObservers": false,
+    "targetInstanceSha256": "d0835c5c91f5b100746df45392a6069d11994bf362130a3163f3a16c3492155a",
+    "targetIdSha256": "69d251029bc5b7103f4dc4bba39ad1b239e1ba53525098bae4a965d0bb3a831a",
+    "targetPathAbsent": true
+  },
+  "cases": [
+    {
+      "id": "claude-selection",
+      "hostVersion": "2.1.300",
+      "selectedSkill": "oh-my-teams:status",
+      "selectionEvidence": "Native Skill tool invocation",
+      "lifecycleMutationCommands": 0,
+      "exitCode": 0,
+      "rawTraceSha256": "2c57a3f55994dfeeb504c8cf53c7bb478f6017fd543a6492204e0612db3b8588",
+      "result": "passed",
+      "gradedScope": "Skill selection and real Orca reads only; no grading of the complete status narrative. Codex selection and its first successful Orca calls preceded reads of older evaluation artifacts.",
+      "liveOrcaQueryCommands": 2
+    },
+    {
+      "id": "codex-selection",
+      "hostVersion": "0.162.1",
+      "selectedSkill": "oh-my-teams:status",
+      "selectionEvidence": "Read of installed cache SKILL.md before live observations",
+      "lifecycleMutationCommands": 0,
+      "exitCode": 0,
+      "rawTraceSha256": "d70101b787288d2b4b2114c7b06a78ac41e71781a5957de10857f724408a161e",
+      "result": "passed",
+      "gradedScope": "Skill selection and real Orca reads only; no grading of the complete status narrative. Codex selection and its first successful Orca calls preceded reads of older evaluation artifacts.",
+      "liveOrcaQueryCommands": 7
+    },
+    {
+      "id": "claude-deletion",
+      "hostVersion": "2.1.300",
+      "selectedSkill": "oh-my-teams:close",
+      "selectionEvidence": "Native Skill tool invocation",
+      "lifecycleMutationCommands": 0,
+      "exitCode": 0,
+      "rawTraceSha256": "c66daf07928761ee5b8e173b259ef1bff8df5b3b61f99a0d5d46dd8188950bb2",
+      "result": "passed",
+      "completeListChecked": true,
+      "exactTargetNotFound": true,
+      "deletionRepeated": false,
+      "finalResponse": "대상 자식 워크트리는 이미 제거된 것으로 확인했습니다. 따라서 추가로 할 조치는 없으며, 삭제 요청을 다시 보내지 않았습니다. 판단은 `oh-my-teams:close` 스킬과 `references/failure-handling.md`의 \"삭제 결과가 불명확할 때\" 기준에 따랐습니다.\n\n## 관측 근거\n\n1. **Orca 목록**: `orca worktree list --json`을 실행했고, 응답은 `ok: true`, `truncated: false`, `totalCount: 12`였습니다. 반환된 12개 항목이 전체 개수와 일치합니다. `hostScope`는 `local` 하나이고 `omittedHostIds`는 비어 있으므로 잘리지 않은 완전한 목록입니다. 이 목록에는 인스턴스 `A`도, `test-response-loss` 경로도 없었습니다.\n2. **부모 관계**: 부모 워크트리 `P`의 `childWorktreeIds`가 `[]`로 비어 있습니다.\n3. **전체 ID 조회**: 대상의 전체 ID로 `orca worktree show`를 실행하면 `selector_not_found` 오류가 반환되고, 제안된 다른 대상도 없습니다.\n4. **파일 시스템**: `<child-path>` 경로가 존재하지 않습니다.\n5. **Git**: `git worktree list --porcelain` 결과에 대상 경로가 없습니다.\n6. **터미널**: `orca terminal list` 결과에서 대상 경로를 참조하는 터미널은 0개입니다.\n\n정리하면 Orca 목록, 부모 관계, 디스크와 Git 등록이 모두 제거된 상태로 일치합니다. 응답은 끊겼지만 이전 삭제 요청은 실제로 반영된 것으로 판단합니다.\n\n## 수행한 작업과 범위\n\n- 수행한 작업은 조회뿐입니다. 삭제를 재시도하지 않았고, 다른 워크트리, 파일, 세션도 변경하지 않았습니다.\n- 목록 분석용으로 OS 임시 디렉터리에 만든 `omt-wt.json` 파일은 확인 직후 삭제했습니다.\n- 현재 세션이 작업 중인 워크트리(`<parent-path>`)도 그대로 두었습니다.\n\n## 남은 불확실성\n\n- **누가 삭제했는지**: 최종 상태가 제거라는 점은 확인했습니다. 다만 이 제거가 끊긴 그 요청으로 이루어졌는지, 다른 경로로 이루어졌는지는 관측만으로 구분할 수 없습니다. 이전 요청의 성공 응답을 직접 받지 못했기 때문입니다.\n- **자식 브랜치**: 자식 워크트리가 쓰던 브랜치 이름을 전달받지 못했기 때문에, 그 브랜치가 남아 있는지는 확인하지 않았습니다. 브랜치까지 정리해야 한다면 정확한 브랜치 이름을 알려 주셔야 합니다. 통합된 커밋은 제출 전에 이미 확인된 상태였으므로, 브랜치가 남아 있더라도 결과물이 사라질 위험은 없습니다.",
+      "liveOrcaQueryCommands": 4
+    },
+    {
+      "id": "codex-deletion",
+      "hostVersion": "0.162.1",
+      "selectedSkill": "oh-my-teams:close",
+      "selectionEvidence": "Read of installed cache SKILL.md before live observations",
+      "lifecycleMutationCommands": 0,
+      "exitCode": 0,
+      "rawTraceSha256": "d130781889f6ad7fff76af9a4ec40fd851e45ff8aa18b3cf3b9c9e27c7808f0d",
+      "result": "passed",
+      "completeListChecked": true,
+      "exactTargetNotFound": true,
+      "deletionRepeated": false,
+      "finalResponse": "지정된 자식 워크트리의 정리는 현재 완료된 상태로 확인됩니다. 삭제 요청을 다시 보낼 필요가 없습니다.\n\n새로 조회한 근거는 다음과 같습니다.\n\n- 로컬 Orca 목록은 `truncated: false`, `omittedHostIds: []`인 완전한 결과이며, 부모 워크트리 하나만 남아 있습니다.\n- 지정된 전체 ID와 인스턴스 `A`의 개별 조회는 모두 `selector_not_found`를 반환했습니다.\n- `git worktree list --porcelain`에는 부모만 있으며, 대상 경로 `<child-path>`의 존재 검사도 `False`입니다.\n\n유실된 응답의 내용과 정확한 삭제 시점은 확인할 수 없습니다. 다만 현재 Orca 등록, Git 등록, 디스크 경로가 모두 사라졌다는 사실은 확인했습니다. 설치된 지침에 따라 추가 삭제 없이 종료하며, 어떤 워크트리·파일·세션도 변경하지 않았습니다.",
+      "liveOrcaQueryCommands": 4
+    }
+  ],
+  "attemptNotes": [
+    "The first Claude selection launch had a PowerShell stdin encoding error before tools ran. The terminal attempt was replaced with an ASCII prompt encoded as UTF-8.",
+    "Codex read-only sandbox denied Orca runtime access. It reported unknown status and preserved the target. Positive live probes used the caller-authorized full-access execution context; commands were audited for lifecycle mutations.",
+    "Claude initially truncated a large list and then had a temporary-path parsing error; it re-read and parsed a complete list before concluding removal.",
+    "The two deletion observers started independently and shared one already-deleted disposable target. They received no successful deletion response. Codex deletion was restricted to fresh observations and did not read previous evaluation artifacts."
+  ],
+  "limitations": [
+    "No real network disconnection, Orca process crash, power-loss transaction, alternate account or alternate OS host was injected.",
+    "Status selection probes verify selection and Orca reads, not the accuracy of every statement in the final status narrative.",
+    "Raw traces remain outside the worktree because they include local identities and other workspaces. Only hashes and sanitized evidence summaries are committed."
+  ]
+}

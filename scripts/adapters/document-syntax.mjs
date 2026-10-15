@@ -1,9 +1,21 @@
 /** Parses plugin document syntax using the development-only YAML and Markdown parsers. */
 import { parseDocument } from "yaml";
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { toString } from "mdast-util-to-string";
+import GithubSlugger from "github-slugger";
+import { parseFragment } from "parse5";
 
 function normalize(source) {
   return source.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n");
+}
+
+function markdownTree(source, frontmatter) {
+  const normalized = normalize(source);
+  return fromMarkdown(
+    frontmatter
+      ? normalized.replace(/^---\n[\s\S]*?\n---(?:\n|$)/, "")
+      : normalized,
+  );
 }
 
 function metadataValue(document) {
@@ -54,10 +66,6 @@ export function skillMetadata(source) {
  * @returns {string[]} Link destinations, excluding code and escaped link examples.
  */
 export function markdownDestinations(source, { frontmatter = false } = {}) {
-  const normalized = normalize(source);
-  const body = frontmatter
-    ? normalized.replace(/^---\n[\s\S]*?\n---(?:\n|$)/, "")
-    : normalized;
   const destinations = [];
   function visit(node) {
     if (["link", "image", "definition"].includes(node.type)) {
@@ -65,8 +73,38 @@ export function markdownDestinations(source, { frontmatter = false } = {}) {
     }
     for (const child of node.children ?? []) visit(child);
   }
-  visit(fromMarkdown(body));
+  visit(markdownTree(source, frontmatter));
   return destinations;
+}
+
+/**
+ * Collects GitHub heading slugs and explicit HTML anchors in document order.
+ * @param {string} source - Markdown document text.
+ * @param {object} [options] - Document context.
+ * @param {boolean} [options.frontmatter=false] - Whether to remove skill frontmatter.
+ * @returns {string[]} Heading and explicit anchor identifiers; code examples are excluded.
+ */
+export function markdownAnchors(source, { frontmatter = false } = {}) {
+  const slugger = new GithubSlugger();
+  const anchors = [];
+  function html(node) {
+    for (const attribute of node.attrs ?? []) {
+      if (
+        attribute.name === "id" ||
+        (node.tagName === "a" && attribute.name === "name")
+      )
+        anchors.push(attribute.value);
+    }
+    for (const child of node.childNodes ?? []) html(child);
+  }
+  function visit(node) {
+    if (node.type === "heading")
+      anchors.push(slugger.slug(toString(node, { includeHtml: false })));
+    if (node.type === "html") html(parseFragment(node.value));
+    for (const child of node.children ?? []) visit(child);
+  }
+  visit(markdownTree(source, frontmatter));
+  return anchors;
 }
 
 /**
@@ -74,5 +112,5 @@ export function markdownDestinations(source, { frontmatter = false } = {}) {
  * @returns {import('../core/ports.mjs').DocumentSyntaxPort} YAML and Markdown adapter.
  */
 export function createDocumentSyntax() {
-  return { skillMetadata, markdownDestinations };
+  return { skillMetadata, markdownDestinations, markdownAnchors };
 }

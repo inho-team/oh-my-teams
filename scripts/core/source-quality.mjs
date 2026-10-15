@@ -44,6 +44,8 @@ function parameterNames(doc) {
 }
 
 function checkDocumentation(module, findings) {
+  const nodes = new Map();
+  visit(module.ast, (item) => nodes.set(`${item.start}:${item.type}`, item));
   const first = module.comments[0];
   if (
     !first ||
@@ -62,7 +64,7 @@ function checkDocumentation(module, findings) {
       );
       continue;
     }
-    const functions = exportedFunctions(module, node);
+    const functions = exportedFunctions(module, node, nodes);
     for (const fn of functions) {
       const params = parameterNames(doc.value);
       const rootParams = params.filter((name) => !name.includes("."));
@@ -107,23 +109,59 @@ function checkDocumentation(module, findings) {
     });
 }
 
-function exportedFunctions(module, node) {
-  const nodes = new Map();
-  visit(module.ast, (item) => nodes.set(`${item.start}:${item.type}`, item));
-  function resolve(value, seen = new Set()) {
+function boundIdentifiers(pattern) {
+  if (!pattern) return [];
+  if (pattern.type === "Identifier") return [pattern];
+  if (pattern.type === "AssignmentPattern")
+    return boundIdentifiers(pattern.left);
+  if (pattern.type === "RestElement") return boundIdentifiers(pattern.argument);
+  if (pattern.type === "ObjectPattern")
+    return pattern.properties.flatMap((item) =>
+      boundIdentifiers(item.value ?? item.argument),
+    );
+  if (pattern.type === "ArrayPattern")
+    return pattern.elements.flatMap(boundIdentifiers);
+  return [];
+}
+
+function exportedFunctions(module, node, nodes) {
+  function resolve(value, seen = new Set(), projection = []) {
     if (!value) return [];
     const key = `${value.start}:${value.type}`;
     if (seen.has(key)) return [];
     const next = new Set([...seen, key]);
-    if (/Function/.test(value.type)) return [value];
     if (value.type === "Identifier") {
-      return (module.bindings[value.start] ?? []).flatMap((start) =>
-        resolve(nodes.get(start), next),
+      return (module.bindings[value.start] ?? []).flatMap((binding) =>
+        resolve(nodes.get(binding.node), next, [
+          ...binding.path,
+          ...projection,
+        ]),
       );
     }
+    if (projection.length) {
+      const [property, ...rest] = projection;
+      if (value.type === "ObjectExpression") {
+        const entry = value.properties.findLast(
+          (item) =>
+            item.type === "Property" &&
+            (!item.computed || item.key.type === "Literal") &&
+            String(
+              !item.computed && item.key.type === "Identifier"
+                ? item.key.name
+                : item.key.value,
+            ) === property,
+        );
+        return resolve(entry?.value, next, rest);
+      }
+      if (value.type === "ArrayExpression")
+        return resolve(value.elements[Number(property)], next, rest);
+      return [];
+    }
+    if (/Function/.test(value.type)) return [value];
     if (value.type === "VariableDeclaration")
       return value.declarations.flatMap((item) => resolve(item, next));
-    if (value.type === "VariableDeclarator") return resolve(value.init, next);
+    if (value.type === "VariableDeclarator")
+      return boundIdentifiers(value.id).flatMap((item) => resolve(item, next));
     return [];
   }
   const values = node.declaration
