@@ -29,12 +29,15 @@ export function markdownFiles(directory, files) {
  * @param {string} pluginRoot - Canonical plugin root.
  * @param {string} file - Absolute candidate path.
  * @param {import("./ports.mjs").FilesPort} files - Filesystem capabilities.
+ * @param {string} [boundary='plugin'] - Diagnostic name for the containing root.
  * @returns {string|null} Missing or external path diagnosis, or null.
  */
-export function pathProblem(pluginRoot, file, files) {
-  if (!isWithin(pluginRoot, file)) return "outside plugin";
+export function pathProblem(pluginRoot, file, files, boundary = "plugin") {
+  if (!isWithin(pluginRoot, file)) return `outside ${boundary}`;
   try {
-    return isWithin(pluginRoot, files.realPath(file)) ? null : "outside plugin";
+    return isWithin(pluginRoot, files.realPath(file))
+      ? null
+      : `outside ${boundary}`;
   } catch (error) {
     if (["ENOENT", "ENOTDIR"].includes(error.code)) return "missing";
     throw error;

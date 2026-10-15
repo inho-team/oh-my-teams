@@ -7,12 +7,12 @@ const sources = [
   "plugins/oh-my-teams/.codex-plugin/plugin.json",
 ];
 
-function codexVersion(version, current, now) {
+function codexVersion(version, current, now, versions) {
   const prefix = `${version}+codex.`;
   if (
     typeof current === "string" &&
     current.startsWith(prefix) &&
-    /^\d{14}$/.test(current.slice(prefix.length))
+    versions.isBuildTimestamp(current.slice(prefix.length))
   )
     return current;
   const stamp = now
@@ -20,6 +20,10 @@ function codexVersion(version, current, now) {
     .replace(/[-:]/g, "")
     .replace("T", "")
     .replace(/\.\d{3}Z$/, "");
+  if (!versions.isBuildTimestamp(stamp))
+    throw new RangeError(
+      "Build timestamp must be a valid UTC calendar date in years 0001-9999",
+    );
   return `${version}+codex.${stamp}`;
 }
 
@@ -50,7 +54,7 @@ function plan(root, files, now, versions) {
       throw new SyntaxError(`${file}: version target must be an object`);
     }
     const expected = relative.includes(".codex-plugin")
-      ? codexVersion(version, target.version, now)
+      ? codexVersion(version, target.version, now, versions)
       : version;
     if (target.version === expected) return [];
     target.version = expected;
