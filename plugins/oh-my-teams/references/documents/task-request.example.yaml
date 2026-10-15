@@ -1,0 +1,29 @@
+schema_version: 1
+kind: task_request
+id: example-task-001
+issued_at: "2026-10-15T09:00:00+09:00"
+issuer:
+  session_id: example-owner-session
+subject:
+  worktree_id: example-repository::/example/worktree
+  commit: "1111111111111111111111111111111111111111"
+payload:
+  goal: YAML 보고서를 검증하고 HTML로 표시합니다. 가상의 작업 예제입니다.
+  scope:
+    - 문서 파서와 HTML 표시를 구현합니다.
+  acceptance_criteria:
+    - 조회 실패를 성공으로 표시하지 않아야 합니다.
+  constraints:
+    - 사용자 설정 파일을 직접 수정하지 않습니다.
+  required_checks:
+    - name: document-tests
+      command: npm test
+  delivery:
+    mode: pr
+    target: example-repository/main
+    authorization: 사용자가 구현과 검토 가능한 PR 생성을 요청한 가상의 예제입니다.
+  cleanup_required: true
+  evidence:
+    - source: user
+      locator: example-conversation/task-001
+      excerpt: 이 요청과 허가는 실제 사용자 발언이 아닌 예제입니다.

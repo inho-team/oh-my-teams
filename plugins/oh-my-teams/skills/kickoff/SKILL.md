@@ -17,6 +17,8 @@ description: 사용자가 여러 세션의 협업이나 지속 감독을 요청�
 
 ## 진행과 종료
 
+목표와 범위를 정한 뒤 작업 요청 본문은 [YAML 문서 규칙](../../references/documents/protocol.yaml)과 [JSON Schema](../../references/documents/document.schema.json)의 `task_request`로 작성한다. [작업 요청 예제](../../references/documents/task-request.example.yaml)의 가상 값을 실제 값으로 바꾸고, 원래 수용 기준·필수 검사·전달 범위와 사용자 허가 근거를 보존한다. 사용자가 정리를 완료 조건으로 요구했다면 `cleanup_required`에 기록한다. 이 문서는 요청이며 Orca의 실행 상태를 복제한 등록부가 아니다. 사용자에게 문서로 보여줄 때는 검증한 같은 데이터에서 HTML을 생성한다.
+
 한 워크트리에서는 소유 세션만 편집한다. 서브에이전트가 같은 파일을 병렬로 고치지 않는다. 자식 워크트리의 결과는 소유 세션이 커밋과 검사를 확인한 뒤 통합한다. 작업을 재개할 때에는 Orca의 실제 세션과 워크트리 상태, Git HEAD를 확인하고 같은 일을 중복 배정하지 않는다.
 
 세션이 보이지 않거나 관측이 타임아웃된 경우에는 [실패 상황의 판단 기준](../../references/failure-handling.md)에 따라 기존 실행을 다시 확인한다. 관측 실패만으로 대체 세션을 만들지 않는다.

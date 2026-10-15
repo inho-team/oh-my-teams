@@ -10,6 +10,7 @@ import {
 import {
   assertOmtDocument,
   assertReviewResponse,
+  assertTaskResponse,
   renderOmtHtml,
 } from "./core/omt-documents.mjs";
 
@@ -18,9 +19,12 @@ import {
  * @param {string} source - OMT YAML document.
  * @param {object} [options] - Optional correlation context.
  * @param {string} [options.requestSource] - Original request YAML for a review result.
+ * @param {string} [options.taskSource] - Original task YAML for a lifecycle report.
  * @returns {object} Validated JSON-compatible data without a serialization round trip.
  */
-export function parseOmtDocument(source, { requestSource } = {}) {
+export function parseOmtDocument(source, { requestSource, taskSource } = {}) {
+  if (requestSource !== undefined && taskSource !== undefined)
+    throw new SyntaxError("choose either requestSource or taskSource");
   const value = assertOmtDocument(parseOmtYaml(source), documentSchemaErrors);
   if (requestSource !== undefined) {
     const request = assertOmtDocument(
@@ -29,6 +33,13 @@ export function parseOmtDocument(source, { requestSource } = {}) {
     );
     assertReviewResponse(request, value);
   }
+  if (taskSource !== undefined) {
+    const task = assertOmtDocument(
+      parseOmtYaml(taskSource),
+      documentSchemaErrors,
+    );
+    assertTaskResponse(task, value);
+  }
   return value;
 }
 
@@ -36,7 +47,7 @@ export function parseOmtDocument(source, { requestSource } = {}) {
  * Converts one restricted YAML message after structural and semantic validation.
  * @param {string} source - OMT YAML document.
  * @param {'json'|'html'|'check'} format - Output representation; check emits only a validation receipt.
- * @param {object} [options] - Optional requestSource correlation context.
+ * @param {object} [options] - Optional requestSource or taskSource correlation context.
  * @returns {string} Generated representation with a trailing newline.
  */
 export function convertDocument(source, format = "json", options = {}) {
@@ -57,23 +68,30 @@ if (
     const [format, input, ...args] = process.argv.slice(2);
     const output =
       args.length && !args[0].startsWith("--") ? args.shift() : undefined;
-    const requestFile =
-      args.length === 2 && args[0] === "--request" ? args[1] : undefined;
+    const contextFile =
+      args.length === 2 && ["--request", "--task"].includes(args[0])
+        ? args[1]
+        : undefined;
     if (
       !format ||
       !input ||
-      (args.length && !requestFile) ||
+      (args.length && !contextFile) ||
       (format === "check" && output) ||
-      requestFile === "-"
+      contextFile === "-"
     ) {
       throw new SyntaxError(
-        "usage: node scripts/documents.mjs <check|json|html> <input.yaml|-> [new-output-file] [--request request.yaml]",
+        "usage: node scripts/documents.mjs <check|json|html> <input.yaml|-> [new-output-file] [--request request.yaml | --task task.yaml]",
       );
     }
-    const requestSource = requestFile ? readDocument(requestFile) : undefined;
+    const options = contextFile
+      ? {
+          [args[0] === "--task" ? "taskSource" : "requestSource"]:
+            readDocument(contextFile),
+        }
+      : {};
     writeDocument(
       output,
-      convertDocument(readDocument(input), format, { requestSource }),
+      convertDocument(readDocument(input), format, options),
     );
   } catch (error) {
     console.error(`OMT document: ${error.message}`);

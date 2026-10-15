@@ -81,16 +81,19 @@ const result = synchronize(false, options);
 
 ## 내부 문서의 변환과 표시
 
-내부 통신 문서의 필드와 자료형은 설치되는 [JSON Schema](../plugins/oh-my-teams/references/documents/document.schema.json)에 정의한다. [YAML 사용 규칙](../plugins/oh-my-teams/references/documents/protocol.yaml)은 의미 검사와 사용 범위를 설명한다. 최초 전환 범위는 검토 요청, 검토 결과와 상태 보고다. 작업 시작·완료·중단 문서는 아직 전환하지 않았다. 스킬 진입점과 기존 정책 참조 문서는 호스트의 기존 Markdown 구조를 유지한다.
+내부 통신 문서의 필드와 자료형은 설치되는 [JSON Schema](../plugins/oh-my-teams/references/documents/document.schema.json)에 정의한다. [YAML 사용 규칙](../plugins/oh-my-teams/references/documents/protocol.yaml)은 의미 검사와 사용 범위를 설명한다. 작업 요청, 검토 요청·결과, 상태 보고, 완료 보고와 중단·인계 보고의 여섯 종류를 지원한다. 스킬 진입점과 기존 정책 참조 문서는 호스트의 기존 Markdown 구조를 유지한다.
 
 `parseOmtDocument(source, options)`는 코드에서 직접 사용할 JSON 호환 객체를 반환한다. `convertDocument(source, format, options)`는 같은 객체를 `json`, `html`, `check` 중 하나의 결과 문자열로 변환한다. 먼저 YAML 1.2 단일 문서를 읽고, 중복 키·별칭·태그·비문자열 키·손실이 발생하는 숫자·과도한 크기와 중첩을 거부한다. Ajv와 `ajv-formats`로 draft-07 스키마와 실제 날짜를 검사하며, 자료형을 강제로 변환하거나 누락된 값을 자동으로 채우지 않는다. 이후 core에서 독립 검토의 실행 식별자, 관측 실패, CI 대상 커밋과 전달·정리 상태의 모순을 검사한다. 구조가 맞더라도 관측 실패를 성공으로 바꾸는 보고는 변환하지 않는다.
 
 `options.requestSource`에 원래 검토 요청 YAML을 전달하면 결과의 `in_reply_to`, 목적과 대상 식별자를 대조한다. CLI에서는 `--request request.yaml`을 사용한다. 이 옵션을 생략한 검사는 결과 문서 자체만 검증하며, 실제 요청과의 일치를 입증하지 않는다. 구조와 의미 검사는 출처의 실제 존재, 독립 실행의 진위나 사용자 권한을 대신 확인하지 않는다. 소유 세션이 Orca·Git·CI에서 근거를 확인해야 한다.
 
+`options.taskSource` 또는 CLI의 `--task task.yaml`은 완료·중단 보고를 원래 작업 요청과 연결한다. 두 대조 옵션은 동시에 사용하지 않는다. 완료 보고에서는 원래 수용 기준을 모두 보고했는지와 필수 검사의 이름·명령·필수 여부를 대조한다. 목표를 달성했다고 보고하려면 모든 기준·필수 검사·승인 근거로 기록한 CI가 통과하고, 요청한 전달과 필수 정리가 완료돼야 한다. 작업 요청의 시작 커밋과 완료 보고의 최종 커밋은 달라질 수 있다. 중단 보고는 실제로 종료를 확인한 세션만 `stopped`로 표시하며 종료 조치에는 사용자 허가 근거가 필요하다. 이 필드는 실제 종료 명령을 실행하지 않는다.
+
 JSON과 HTML은 같은 검증 데이터의 파생 결과다. 코드는 객체를 직접 사용하고, 외부 전달이나 저장에 필요한 경우에만 JSON으로 직렬화한다. HTML에는 문서 정보, 근거와 불확실성을 모두 포함하며 모든 값을 텍스트로 이스케이프한다. 스크립트와 외부 자원, 실행 가능한 링크가 없는 단일 파일이며 모바일 표시와 인쇄 스타일을 포함한다. 출처 위치는 안전한 텍스트로 표시한다.
 
 ```sh
 node scripts/documents.mjs check plugins/oh-my-teams/references/documents/review-result.example.yaml --request plugins/oh-my-teams/references/documents/review-request.example.yaml
+node scripts/documents.mjs check plugins/oh-my-teams/references/documents/completion-report.example.yaml --task plugins/oh-my-teams/references/documents/task-request.example.yaml
 node scripts/documents.mjs html plugins/oh-my-teams/references/documents/status-report.example.yaml /new/path/status.html
 ```
 

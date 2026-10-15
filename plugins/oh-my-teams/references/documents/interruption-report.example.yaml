@@ -1,0 +1,38 @@
+schema_version: 1
+kind: interruption_report
+id: example-interruption-001
+in_reply_to: example-task-001
+issued_at: "2026-10-15T09:30:00+09:00"
+issuer:
+  session_id: example-owner-session
+subject:
+  worktree_id: example-repository::/example/worktree
+  commit: "1111111111111111111111111111111111111111"
+payload:
+  summary: 관측할 수 없는 자식 세션과 변경을 보존했습니다. 가상의 중단 예제입니다.
+  reason: 세션 생존과 CI 결과를 확인할 수 없습니다.
+  undelivered_changes:
+    - example-document.mjs의 미커밋 변경을 보존했습니다.
+  sessions:
+    - session_id: example-child-session
+      worktree_id: example-repository::/example/child
+      instance_id: example-child-instance
+      liveness: unknown
+      action: preserved
+      stop_authorization: null
+  delivery:
+    state: pending
+    reference: null
+  cleanup:
+    state: preserved
+    remaining:
+      - example-repository::/example/child는 생존 상태가 불명확하므로 보존합니다.
+  resume_steps:
+    - example-task-001의 원래 목표와 수용 기준을 다시 읽습니다.
+    - 같은 세션과 워크트리 인스턴스를 Orca에서 조회한 뒤 기존 작업을 재개합니다.
+  uncertainties:
+    - 자식 세션이 종료됐는지 확인하지 못했습니다.
+  evidence:
+    - source: orca
+      locator: example-repository::/example/child
+      excerpt: 이 조회 실패는 가상의 관측 예제입니다.

@@ -18,7 +18,7 @@ Claude Code와 Codex에서 사용하는 Orca 중심 팀 작업 스킬이다. **�
 
 작업 소유권, 독립 검토와 회수 기준은 플러그인에 포함된 [세션 소유권 구조](plugins/oh-my-teams/references/architecture.md)에 정리했다. PR/MR 생성 요청만으로 병합 권한을 추정하지 않으며, 결과 전달과 워크트리 정리 상태도 각각 보고한다. Orca 명령은 설치된 버전의 `orca-cli` 가이드를 확인한 뒤 실행한다.
 
-`consult`의 요청·결과와 `status`의 보고 본문은 [YAML 문서 규칙](plugins/oh-my-teams/references/documents/protocol.yaml)을 따른다. 설치 패키지에는 JSON Schema와 YAML 예제를 포함한다. 코드는 검증한 JSON 호환 객체를 처리하며 사용자에게 보여주는 문서는 같은 데이터에서 HTML로 생성한다. 호스트의 `SKILL.md` 진입점과 도구 인자 형식은 유지한다.
+작업 요청, 검토 요청·결과, 상태 보고, 완료 보고와 중단·인계 보고의 여섯 문서는 [YAML 문서 규칙](plugins/oh-my-teams/references/documents/protocol.yaml)을 따른다. 설치 패키지에는 JSON Schema와 YAML 예제를 포함한다. 코드는 검증한 JSON 호환 객체를 처리하며 사용자에게 보여주는 문서는 같은 데이터에서 HTML로 생성한다. 호스트의 `SKILL.md` 진입점과 도구 인자 형식은 유지한다.
 
 ## 설치
 
@@ -63,7 +63,7 @@ npm run documents -- json plugins/oh-my-teams/references/documents/status-report
 npm run documents -- html plugins/oh-my-teams/references/documents/status-report.example.yaml /new/path/status.html
 ```
 
-검토 결과에는 `--request /path/request.yaml`을 붙여 요청 식별자, 검토 목적과 대상 커밋도 대조할 수 있다. 구조 검사만으로 실제 근거의 진위나 실행 성공이 입증되지는 않는다. 자세한 처리 범위는 [개발 도구 안내](docs/DEVELOPMENT.md#내부-문서의-변환과-표시)에 정리했다.
+검토 결과에는 `--request /path/request.yaml`을 붙여 요청 식별자, 검토 목적과 대상 커밋도 대조할 수 있다. 완료·중단 보고에는 `--task /path/task.yaml`을 붙여 원래 작업과 연결하고, 완료 보고의 수용 기준·필수 검사·전달·정리 조건도 대조한다. 구조 검사만으로 실제 근거의 진위나 실행 성공이 입증되지는 않는다. 자세한 처리 범위는 [개발 도구 안내](docs/DEVELOPMENT.md#내부-문서의-변환과-표시)에 정리했다.
 
 ## 라이선스
 

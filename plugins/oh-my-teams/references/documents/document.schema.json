@@ -18,7 +18,14 @@
     },
     "kind": {
       "type": "string",
-      "enum": ["review_request", "review_result", "status_report"]
+      "enum": [
+        "review_request",
+        "review_result",
+        "status_report",
+        "task_request",
+        "completion_report",
+        "interruption_report"
+      ]
     },
     "id": {
       "$ref": "#/definitions/text"
@@ -87,7 +94,9 @@
       "then": {
         "required": ["in_reply_to"],
         "properties": {
-          "in_reply_to": { "$ref": "#/definitions/text" },
+          "in_reply_to": {
+            "$ref": "#/definitions/text"
+          },
           "payload": {
             "$ref": "#/definitions/reviewResult"
           }
@@ -108,6 +117,62 @@
             "$ref": "#/definitions/statusReport"
           }
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "task_request"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/definitions/taskRequest"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "completion_report"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/definitions/completionReport"
+          },
+          "in_reply_to": {
+            "$ref": "#/definitions/text"
+          }
+        },
+        "required": ["in_reply_to"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "interruption_report"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/definitions/interruptionReport"
+          },
+          "in_reply_to": {
+            "$ref": "#/definitions/text"
+          }
+        },
+        "required": ["in_reply_to"]
       }
     }
   ],
@@ -408,45 +473,10 @@
           }
         },
         "delivery": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["state", "reference"],
-          "properties": {
-            "state": {
-              "type": "string",
-              "enum": ["not_requested", "pending", "delivered", "unknown"]
-            },
-            "reference": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/text"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          }
+          "$ref": "#/definitions/delivery"
         },
         "cleanup": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["state", "remaining"],
-          "properties": {
-            "state": {
-              "type": "string",
-              "enum": [
-                "not_requested",
-                "pending",
-                "completed",
-                "preserved",
-                "unknown"
-              ]
-            },
-            "remaining": {
-              "$ref": "#/definitions/texts"
-            }
-          }
+          "$ref": "#/definitions/cleanup"
         },
         "remaining": {
           "$ref": "#/definitions/texts"
@@ -459,6 +489,348 @@
           "items": {
             "$ref": "#/definitions/evidence"
           }
+        }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reference"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": ["not_requested", "pending", "delivered", "unknown"]
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "remaining"],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "not_requested",
+            "pending",
+            "completed",
+            "preserved",
+            "unknown"
+          ]
+        },
+        "remaining": {
+          "$ref": "#/definitions/texts"
+        }
+      }
+    },
+    "taskRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "goal",
+        "scope",
+        "acceptance_criteria",
+        "constraints",
+        "required_checks",
+        "delivery",
+        "cleanup_required",
+        "evidence"
+      ],
+      "properties": {
+        "goal": {
+          "$ref": "#/definitions/text"
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "minItems": 1
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "minItems": 1
+        },
+        "constraints": {
+          "$ref": "#/definitions/texts"
+        },
+        "required_checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "command"],
+            "properties": {
+              "name": {
+                "$ref": "#/definitions/text"
+              },
+              "command": {
+                "$ref": "#/definitions/text"
+              }
+            }
+          },
+          "minItems": 0
+        },
+        "delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "target", "authorization"],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["none", "commit", "pr", "merge", "artifact"]
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "authorization": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/text"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "cleanup_required": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "completionReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "outcome",
+        "acceptance_results",
+        "checks",
+        "ci",
+        "delivery",
+        "cleanup",
+        "remaining",
+        "uncertainties",
+        "evidence"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/definitions/text"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["completed", "incomplete"]
+        },
+        "acceptance_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["criterion", "result", "evidence"],
+            "properties": {
+              "criterion": {
+                "$ref": "#/definitions/text"
+              },
+              "result": {
+                "type": "string",
+                "enum": ["met", "unmet", "unknown"]
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/evidence"
+                },
+                "minItems": 0
+              }
+            }
+          },
+          "minItems": 1
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "required", "status", "command", "evidence"],
+            "properties": {
+              "name": {
+                "$ref": "#/definitions/text"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "unknown",
+                  "skipped",
+                  "unregistered"
+                ]
+              },
+              "command": {
+                "$ref": "#/definitions/text"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/evidence"
+                },
+                "minItems": 0
+              }
+            }
+          },
+          "minItems": 0
+        },
+        "ci": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ci"
+          },
+          "minItems": 0
+        },
+        "delivery": {
+          "$ref": "#/definitions/delivery"
+        },
+        "cleanup": {
+          "$ref": "#/definitions/cleanup"
+        },
+        "remaining": {
+          "$ref": "#/definitions/texts"
+        },
+        "uncertainties": {
+          "$ref": "#/definitions/texts"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "interruptionReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "reason",
+        "undelivered_changes",
+        "sessions",
+        "delivery",
+        "cleanup",
+        "resume_steps",
+        "uncertainties",
+        "evidence"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/definitions/text"
+        },
+        "reason": {
+          "$ref": "#/definitions/text"
+        },
+        "undelivered_changes": {
+          "$ref": "#/definitions/texts"
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "session_id",
+              "worktree_id",
+              "instance_id",
+              "liveness",
+              "action",
+              "stop_authorization"
+            ],
+            "properties": {
+              "session_id": {
+                "$ref": "#/definitions/text"
+              },
+              "worktree_id": {
+                "$ref": "#/definitions/text"
+              },
+              "instance_id": {
+                "$ref": "#/definitions/text"
+              },
+              "liveness": {
+                "type": "string",
+                "enum": ["running", "exited", "unknown"]
+              },
+              "action": {
+                "type": "string",
+                "enum": ["preserved", "stop_requested", "stopped"]
+              },
+              "stop_authorization": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/text"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "minItems": 0
+        },
+        "delivery": {
+          "$ref": "#/definitions/delivery"
+        },
+        "cleanup": {
+          "$ref": "#/definitions/cleanup"
+        },
+        "resume_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/text"
+          },
+          "minItems": 1
+        },
+        "uncertainties": {
+          "$ref": "#/definitions/texts"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/evidence"
+          },
+          "minItems": 0
         }
       }
     }

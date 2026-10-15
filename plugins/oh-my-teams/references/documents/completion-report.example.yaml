@@ -1,0 +1,42 @@
+schema_version: 1
+kind: completion_report
+id: example-completion-001
+in_reply_to: example-task-001
+issued_at: "2026-10-15T10:00:00+09:00"
+issuer:
+  session_id: example-owner-session
+subject:
+  worktree_id: example-repository::/example/worktree
+  commit: "2222222222222222222222222222222222222222"
+payload:
+  summary: YAML 검증과 HTML 표시를 구현하고 PR을 만들었습니다. 가상의 완료 예제입니다.
+  outcome: completed
+  acceptance_results:
+    - criterion: 조회 실패를 성공으로 표시하지 않아야 합니다.
+      result: met
+      evidence:
+        - source: file
+          locator: example-document.test.mjs:12
+          excerpt: 이 검사 위치는 가상의 예제입니다.
+  checks:
+    - name: document-tests
+      required: true
+      status: passed
+      command: npm test
+      evidence:
+        - source: file
+          locator: example-test-output.txt
+          excerpt: 가상의 테스트 통과 기록입니다.
+  ci: []
+  delivery:
+    state: delivered
+    reference: https://example.com/pull/1
+  cleanup:
+    state: completed
+    remaining: []
+  remaining: []
+  uncertainties:
+    - 실제 호스트의 자동 스킬 선택은 검증 범위에 포함하지 않았습니다.
+  evidence:
+    - source: git
+      locator: "2222222222222222222222222222222222222222"

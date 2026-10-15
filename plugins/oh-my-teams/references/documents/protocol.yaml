@@ -1,7 +1,7 @@
 schema_version: 1
 name: omt_documents
 description: |
-  OMT가 정의하는 검토 요청·검토 결과·상태 보고의 본문은 YAML로 교환합니다.
+  OMT가 정의하는 작업 요청·검토 요청·검토 결과·상태 보고·완료 보고·중단 및 인계 보고의 본문은 YAML로 교환합니다.
   코드는 검증한 JSON 호환 객체를 처리하고, 사용자에게 보여주는 문서는 HTML로 생성합니다.
   이 문서는 사용 규칙이며, 메시지의 필드와 자료형은 document.schema.json에서 정의합니다.
 schema: document.schema.json
@@ -9,7 +9,9 @@ scope:
   review_request: consult에서 전달하는 검토 요청에 사용합니다.
   review_result: consult에서 반환하는 검토 결과에 사용합니다.
   status_report: status에서 관측한 작업 상태를 보고할 때 사용합니다.
-  deferred: 작업 시작·완료·중단 문서는 후속 전환 대상으로 남깁니다.
+  task_request: kickoff에서 목표, 수용 기준과 허가된 전달 범위를 정할 때 사용합니다.
+  completion_report: close에서 원래 요청과 최종 결과를 대조할 때 사용합니다.
+  interruption_report: disband에서 보존한 결과와 재개 절차를 전달할 때 사용합니다.
 transport:
   body: YAML 1.2 단일 문서를 사용합니다.
   tool_arguments: 호스트와 Orca 도구가 요구하는 기존 인자 형식을 유지합니다.
@@ -18,11 +20,12 @@ transport:
     issuer.session_id에는 호스트가 제공하는 실제 실행 식별자를 사용합니다.
     식별자를 확인할 수 없다면 임의의 값을 만들어 유효한 보고서라고 주장하지 않습니다.
   timestamps: issued_at과 observed_at에는 시간대가 포함된 RFC 3339 시각을 사용합니다.
-  response: review_result의 in_reply_to에는 요청의 id를 그대로 넣습니다.
+  response: review_result, completion_report와 interruption_report의 in_reply_to에는 원래 요청의 id를 그대로 넣습니다.
   subject: |
     subject.worktree_id에는 Orca에서 확인한 전체 워크트리 ID를 넣습니다.
     commit에는 축약하지 않은 Git 객체 ID를 넣습니다.
     auditor 요청과 결과에는 commit과 implementation_session_id가 모두 필요합니다.
+    작업 요청에는 시작 커밋을, 완료 보고에는 검증한 최종 커밋을, 중단 보고에는 마지막으로 확인한 커밋을 넣습니다.
 yaml_rules:
   - 모든 매핑 키는 문자열이어야 합니다.
   - 문자열, 유한한 숫자, 불리언, null, 배열과 객체만 사용합니다.
@@ -70,3 +73,24 @@ rendering:
     - 호스트가 HTML 파일을 표시하거나 첨부할 수 있으면 생성한 파일을 전달하고 채팅에는 짧은 요약을 남깁니다.
     - HTML 표시를 지원하지 않는 호스트에서는 제약을 밝히고 채팅으로 요약합니다.
     - 플러그인 설치만으로 저장소 개발용 변환 명령이 설치됐다고 가정하지 않습니다.
+lifecycle_rules:
+  task_request:
+    - 목표, 작업 범위, 중복되지 않는 수용 기준과 필수 검사 이름·명령을 구분합니다.
+    - 필수 검사가 없는 경우에는 빈 배열을 사용하며, 빈 배열을 검사 통과의 증거로 삼지 않습니다.
+    - 전달하지 않는 요청은 delivery.mode를 none, target을 null로 기록합니다.
+    - merge를 요청하면 실제 사용자의 허가 근거를 authorization에 기록합니다. PR 생성 허가만으로 병합을 허가받았다고 기록하지 않습니다.
+    - 사용자가 정리를 완료 조건으로 요구했다면 cleanup_required를 true로 기록합니다.
+  completion_report:
+    - 수용 기준마다 met, unmet 또는 unknown과 근거를 기록하며, met에는 근거가 필요합니다.
+    - 통과한 검사에는 근거가 필요하며 CI 성공은 최종 subject.commit과 연결합니다.
+    - completed는 모든 수용 기준과 필수 검사, 승인 근거로 사용한 CI가 통과하고 필수 남은 일이 없는 경우에만 사용합니다.
+    - incomplete에는 remaining에 남은 일을 기록합니다. 전달과 정리의 상태도 각각 기록합니다.
+    - 원래 작업 요청과 대조하여 수용 기준을 빠뜨리거나 필수 검사의 이름·명령·필수 여부를 줄이지 않습니다.
+    - completed를 기록하기 전에 요청한 전달과 필수 정리가 실제로 완료됐는지 확인합니다.
+  interruption_report:
+    - 중단 사유, 마지막 커밋, 미전달 변경과 재개 절차를 기록합니다.
+    - 세션별 전체 워크트리 ID와 인스턴스를 보존합니다. 이 목록은 관측 기록이며 실행 등록부가 아닙니다.
+    - 세션 종료 요청이나 종료 조치에는 실제 사용자 허가 근거가 필요합니다.
+    - stopped는 실제 종료가 확인된 exited 세션에만 사용합니다.
+    - 생존을 확인하지 못한 세션은 unknown과 preserved로 기록하고 uncertainties에 확인할 수 없는 범위를 남깁니다.
+    - 결과 전달과 정리는 각각 보고하며 원래 작업의 목표와 기존 실행 식별자를 재개 절차에 보존합니다.
