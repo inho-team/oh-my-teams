@@ -91,12 +91,63 @@ test("core rejects native IO, concrete adapters and implicit runtime clocks", ()
     "const result = new Date();",
     "const result = Date.now();",
     "const result = import(process.env.MODULE);",
+    "const environment = process; const result = environment.cwd();",
+    "const clock = Date; const result = clock.now();",
+    "const root = globalThis; const result = root.process.cwd();",
+    "const { env } = process;",
   ]) {
     const findings = inspectSources([
       module("scripts/core/example.mjs", `/** Module. */\n${body}`),
     ]);
     assert.ok(findings.length > 0, body);
   }
+});
+
+test("function aliases keep their lexical binding across chains and shadowed names", () => {
+  const body = [
+    "const original = (value) => value;",
+    "const middle = original; const alias = middle;",
+    "function nested() { const original = 1; return original; }",
+    "/** Export. @returns {string} Result. */",
+    "export { alias };",
+  ].join("\n");
+  assert.ok(
+    inspectSources([
+      module("scripts/core/example.mjs", `/** Module. */\n${body}`),
+    ]).some((finding) => finding.includes("@param missing")),
+  );
+  const documented = body.replace(
+    "/** Export.",
+    "/** Export. @param {string} value - Input.",
+  );
+  assert.deepEqual(
+    inspectSources([
+      module("scripts/core/example.mjs", `/** Module. */\n${documented}`),
+    ]),
+    [],
+  );
+});
+
+test("injected bindings and property names do not become forbidden global references", () => {
+  const body = [
+    "/** Module. */",
+    "function check(process, Date) { const environment = process; return Date.now() + environment.cwd(); }",
+    "const labels = { process: 1, Date: 2 };",
+    "const value = labels.process;",
+  ].join("\n");
+  assert.deepEqual(
+    inspectSources([module("scripts/core/example.mjs", body)]),
+    [],
+  );
+});
+
+test("cyclic alias bindings terminate without inventing a function signature", () => {
+  const body =
+    "/** Module. */\nlet first; let second; first = second; second = first;\n/** Export. */\nexport { first };";
+  assert.deepEqual(
+    inspectSources([module("scripts/core/example.mjs", body)]),
+    [],
+  );
 });
 
 test("dependency direction, cycles and unresolved imports are diagnosed", () => {

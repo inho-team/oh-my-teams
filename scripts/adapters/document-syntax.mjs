@@ -6,6 +6,24 @@ function normalize(source) {
   return source.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n");
 }
 
+function metadataValue(document) {
+  try {
+    return document.toJS();
+  } catch (error) {
+    // yaml 2.9.x reports these input failures during alias conversion, not parsing.
+    const aliasInputFailure =
+      error instanceof ReferenceError &&
+      (error.message.startsWith(
+        "Unresolved alias (the anchor must be set before the alias): ",
+      ) ||
+        error.message ===
+          "Excessive alias count indicates a resource exhaustion attack");
+    if (aliasInputFailure)
+      throw new SyntaxError(error.message, { cause: error });
+    throw error;
+  }
+}
+
 /**
  * Reads YAML frontmatter without treating invalid syntax as plain text.
  *
@@ -20,7 +38,7 @@ export function skillMetadata(source) {
   const problems = [...document.errors, ...document.warnings];
   if (problems.length)
     throw new SyntaxError(problems.map((item) => item.message).join("; "));
-  const metadata = document.toJS();
+  const metadata = metadataValue(document);
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
     throw new SyntaxError("frontmatter must be a mapping");
   }
