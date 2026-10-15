@@ -1,0 +1,226 @@
+/** Regression checks for malformed plugin entry points and document syntax. */
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { validatePlugin } from "../scripts/check-skills.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function fixture(t) {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "omt-validation-"));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const plugin = path.join(temporary, "plugin");
+  fs.cpSync(path.join(root, "plugins/oh-my-teams"), plugin, {
+    recursive: true,
+  });
+  return plugin;
+}
+
+function editManifest(plugin, host, update) {
+  const file = path.join(plugin, `.${host}-plugin/plugin.json`);
+  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(file, JSON.stringify({ ...manifest, ...update }));
+}
+
+test("Codex cannot point to a missing skills directory", (t) => {
+  const plugin = fixture(t);
+  editManifest(plugin, "codex", { skills: "./missing-skills/" });
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((item) => item.includes(".codex-plugin/plugin.json")),
+  );
+});
+
+test("an unterminated YAML description is rejected", (t) => {
+  const plugin = fixture(t);
+  const file = path.join(plugin, "skills/kickoff/SKILL.md");
+  fs.writeFileSync(
+    file,
+    fs
+      .readFileSync(file, "utf8")
+      .replace(/^description:.*$/m, 'description: "unterminated'),
+  );
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.ok(report.findings.some((item) => item.includes("invalid YAML")));
+});
+
+test("missing reference-style Markdown destinations are rejected", (t) => {
+  const plugin = fixture(t);
+  fs.appendFileSync(
+    path.join(plugin, "skills/kickoff/SKILL.md"),
+    "\n[Required document][required]\n\n[required]: missing.md\n",
+  );
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((item) => item.includes("broken link missing.md")),
+  );
+});
+
+test("both host manifests reject malformed metadata and skill entry points", async (t) => {
+  for (const host of ["claude", "codex"]) {
+    const cases = [
+      ["wrong name", { name: "other-plugin" }],
+      ["missing version", { version: null }],
+      ["wrong path type", { skills: 42 }],
+      ["missing directory", { skills: "./absent/" }],
+      ["file instead of directory", { skills: "./skills/kickoff/SKILL.md" }],
+      ["different scan directory", { skills: "./references/" }],
+    ];
+    if (host === "codex") cases.push(["missing skills", { skills: undefined }]);
+    for (const [label, update] of cases) {
+      await t.test(`${host}: ${label}`, (context) => {
+        const plugin = fixture(context);
+        editManifest(plugin, host, update);
+        const report = validatePlugin(plugin);
+        assert.equal(report.status, "failed");
+        assert.ok(
+          report.findings.some((item) =>
+            item.startsWith(`.${host}-plugin/plugin.json:`),
+          ),
+        );
+      });
+    }
+    for (const [label, contents] of [
+      ["invalid JSON", "{"],
+      ["non-object JSON", "null"],
+    ]) {
+      await t.test(`${host}: ${label}`, (context) => {
+        const plugin = fixture(context);
+        fs.writeFileSync(
+          path.join(plugin, `.${host}-plugin/plugin.json`),
+          contents,
+        );
+        const report = validatePlugin(plugin);
+        assert.equal(report.status, "failed");
+        assert.ok(
+          report.findings.some((item) =>
+            item.startsWith(`.${host}-plugin/plugin.json:`),
+          ),
+        );
+      });
+    }
+    await t.test(`${host}: missing manifest`, (context) => {
+      const plugin = fixture(context);
+      fs.unlinkSync(path.join(plugin, `.${host}-plugin/plugin.json`));
+      assert.equal(validatePlugin(plugin).status, "failed");
+    });
+  }
+});
+
+test("manifest entry points cannot escape through an existing sibling directory", (t) => {
+  const plugin = fixture(t);
+  fs.mkdirSync(path.join(plugin, "..", "external-skills"));
+  editManifest(plugin, "codex", { skills: "./../external-skills/" });
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((item) => item.includes("skills path outside plugin")),
+  );
+});
+
+test("manifest entry points cannot escape through a directory link", (t) => {
+  const plugin = fixture(t);
+  const external = path.join(plugin, "..", "external-skills");
+  fs.mkdirSync(external);
+  fs.symlinkSync(external, path.join(plugin, "linked-skills"), "junction");
+  editManifest(plugin, "codex", { skills: "./linked-skills/" });
+  const report = validatePlugin(plugin);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((item) => item.includes("skills path outside plugin")),
+  );
+});
+
+test("Claude can declare the bundled skills using a path or an array", (t) => {
+  const plugin = fixture(t);
+  for (const skills of ["./skills/", ["./skills/"]]) {
+    editManifest(plugin, "claude", { skills });
+    assert.equal(validatePlugin(plugin).status, "passed");
+  }
+});
+
+test("quoted names and folded descriptions remain valid YAML metadata", (t) => {
+  const plugin = fixture(t);
+  const file = path.join(plugin, "skills/kickoff/SKILL.md");
+  fs.writeFileSync(
+    file,
+    '\uFEFF---\r\nname: "kickoff"\r\ndescription: >-\r\n  First line\r\n  second line\r\n---\r\n# Kickoff\r\n',
+  );
+  assert.equal(validatePlugin(plugin).status, "passed");
+});
+
+test("invalid YAML mappings and non-string descriptions are rejected", async (t) => {
+  const cases = [
+    [
+      "duplicate keys",
+      "name: kickoff\ndescription: first\ndescription: second",
+    ],
+    ["non-mapping header", "- kickoff\n- description"],
+    ["non-string description", "name: kickoff\ndescription: [one, two]"],
+    ["empty description", 'name: kickoff\ndescription: "  "'],
+    ["unknown YAML tag", "name: kickoff\ndescription: !unknown text"],
+  ];
+  for (const [label, header] of cases) {
+    await t.test(label, (context) => {
+      const plugin = fixture(context);
+      fs.writeFileSync(
+        path.join(plugin, "skills/kickoff/SKILL.md"),
+        `---\n${header}\n---\n# Kickoff\n`,
+      );
+      assert.equal(validatePlugin(plugin).status, "failed");
+    });
+  }
+});
+
+test("Markdown references and percent-encoded destinations resolve inside the plugin", (t) => {
+  const plugin = fixture(t);
+  fs.writeFileSync(path.join(plugin, "references/guide (1).md"), "# Guide\n");
+  fs.appendFileSync(
+    path.join(plugin, "references/architecture.md"),
+    '\n[Guide][guide]\n![Guide][guide]\n[guide][]\n\n[guide]: <guide (1).md> "Guide title"\n\n[Encoded](guide%20%281%29.md#guide)\n',
+  );
+  assert.equal(validatePlugin(plugin).status, "passed");
+});
+
+test("code examples, escaped brackets and frontmatter are not Markdown links", (t) => {
+  const plugin = fixture(t);
+  const file = path.join(plugin, "skills/kickoff/SKILL.md");
+  fs.writeFileSync(
+    file,
+    fs
+      .readFileSync(file, "utf8")
+      .replace(/^description:.*$/m, 'description: "[example](absent.md)"'),
+  );
+  fs.appendFileSync(
+    file,
+    "\n`[example](absent.md)`\n\n```md\n[example][example]\n[example]: absent.md\n```\n\n\\[example](absent.md)\n",
+  );
+  assert.equal(validatePlugin(plugin).status, "passed");
+});
+
+test("reference definitions and encoded links cannot escape the plugin", async (t) => {
+  for (const [label, contents] of [
+    ["reference", "[Outside][outside]\n\n[outside]: ../../../outside.md"],
+    ["encoded path", "[Outside](%2e%2e/%2e%2e/%2e%2e/outside.md)"],
+    ["file URL", "[Outside](file:///outside.md)"],
+  ]) {
+    await t.test(label, (context) => {
+      const plugin = fixture(context);
+      fs.appendFileSync(
+        path.join(plugin, "skills/kickoff/SKILL.md"),
+        `\n${contents}\n`,
+      );
+      const report = validatePlugin(plugin);
+      assert.equal(report.status, "failed");
+      assert.ok(
+        report.findings.some((item) => item.includes("link outside plugin")),
+      );
+    });
+  }
+});
