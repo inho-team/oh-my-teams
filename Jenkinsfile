@@ -42,9 +42,11 @@ pipeline {
             agent { label 'macmini' }
             environment {
                 PATH = "/Users/kimjinseong/.nvm/versions/node/v22.23.2/bin:${env.PATH}"
+                GIT_CONFIG_COUNT = "1"
+                GIT_CONFIG_KEY_0 = "core.autocrlf"
+                GIT_CONFIG_VALUE_0 = "false"
             }
             steps {
-                sh 'git config --global core.autocrlf false'
                 checkout scm
                 sh 'node --version && npm ci'
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') { sh 'npm run quality' }
