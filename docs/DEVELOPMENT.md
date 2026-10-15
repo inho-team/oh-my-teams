@@ -70,7 +70,7 @@ const result = synchronize(false, options);
 
 `npm run quality`는 먼저 JavaScript 소스를 검사한 뒤 설치 패키지를 검사한다. 소스 검사는 상태 디렉터리와 `node_modules`·`.git`을 제외한 `.mjs`를 수집하고, 파싱된 구문 트리와 주석 위치로 모듈 JSDoc, 공개 함수의 인자·반환 설명, 실행문 줄 길이와 의존성을 확인한다. 허용되지 않은 계층의 모듈, 계산된 import, 누락된 로컬 import와 순환 참조도 실패로 보고한다. 새 파일도 커밋 전부터 검사한다. 이 검사는 정적 규칙이며 주석의 의미나 모든 동적 실행을 검증하는 보안 격리 장치는 아니다.
 
-Jenkins의 Linux 단계는 OMT 전용 Colima 프로필을 사용한다. 시작·이미지 빌드·컨테이너 실행·종료를 모두 같은 전역 자원 잠금 안에서 처리하여 PR별 작업이 공유 프로필을 동시에 조작하지 않게 한다. 잠금에는 Jenkins의 [Lockable Resources 플러그인](https://www.jenkins.io/doc/pipeline/steps/lockable-resources/)이 필요하다. 잠금의 실제 가용성과 Linux·macOS 실행 결과는 PR 검사에서 확인한다. 다른 프로젝트의 Colima 프로필을 종료하지 않는다.
+Jenkins의 Linux 단계는 OMT 전용 Colima 프로필을 사용한다. 현재 `macmini` 에이전트의 실행 슬롯이 하나라 PR별 작업이 프로필을 동시에 조작하지 않는다. 실행 슬롯을 늘릴 때에는 프로필 공유를 막을 직렬화 수단을 먼저 마련해야 한다. Linux 단계는 시작·이미지 빌드·컨테이너 실행·종료를 한 실행에서 처리하며, 다른 프로젝트의 Colima 프로필을 종료하지 않는다.
 
 ## 수정과 검증
 
