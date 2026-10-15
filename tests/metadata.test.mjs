@@ -42,6 +42,38 @@ test("check mode detects drift without modifying manifests; write mode converges
   );
 });
 
+test("an invalid final manifest leaves all earlier inputs byte-for-byte unchanged", (t) => {
+  const options = repositoryFixture(t, "3.0.0+codex.20261001000000");
+  const paths = [
+    ".claude-plugin/marketplace.json",
+    "plugins/oh-my-teams/.claude-plugin/plugin.json",
+  ].map((file) => path.join(options.root, file));
+  const before = paths.map((file) => fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(options.file, "{");
+  assert.throws(
+    () => synchronize(true, options),
+    (error) =>
+      error instanceof SyntaxError && error.message.includes(options.file),
+  );
+  assert.deepEqual(
+    paths.map((file) => fs.readFileSync(file, "utf8")),
+    before,
+  );
+  assert.equal(fs.readFileSync(options.file, "utf8"), "{");
+});
+
+test("an invalid version target is rejected before writing any manifest", (t) => {
+  const options = repositoryFixture(t, "3.0.0+codex.20261001000000");
+  const file = path.join(options.root, ".claude-plugin/marketplace.json");
+  fs.writeFileSync(file, JSON.stringify({ metadata: null }));
+  const before = fs.readFileSync(options.file, "utf8");
+  assert.throws(
+    () => synchronize(true, options),
+    /version target must be an object/,
+  );
+  assert.equal(fs.readFileSync(options.file, "utf8"), before);
+});
+
 test("a valid Codex build timestamp is preserved while other versions synchronize", (t) => {
   const current = "3.0.4+codex.20261001000000";
   const options = repositoryFixture(t, current);

@@ -11,17 +11,18 @@ function normalize(source) {
  *
  * @param {string} source - Skill document text.
  * @returns {object} Parsed metadata mapping.
+ * @throws {SyntaxError} For invalid frontmatter; other parser failures propagate.
  */
 export function skillMetadata(source) {
   const header = normalize(source).match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
-  if (!header) throw new Error("frontmatter missing");
+  if (!header) throw new SyntaxError("frontmatter missing");
   const document = parseDocument(header[1], { prettyErrors: false });
   const problems = [...document.errors, ...document.warnings];
   if (problems.length)
-    throw new Error(problems.map((item) => item.message).join("; "));
+    throw new SyntaxError(problems.map((item) => item.message).join("; "));
   const metadata = document.toJS();
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    throw new Error("frontmatter must be a mapping");
+    throw new SyntaxError("frontmatter must be a mapping");
   }
   return metadata;
 }
@@ -48,4 +49,12 @@ export function markdownDestinations(source, { frontmatter = false } = {}) {
   }
   visit(fromMarkdown(body));
   return destinations;
+}
+
+/**
+ * Provides document parsing capabilities to the validator.
+ * @returns {import('../core/ports.mjs').DocumentSyntaxPort} YAML and Markdown adapter.
+ */
+export function createDocumentSyntax() {
+  return { skillMetadata, markdownDestinations };
 }

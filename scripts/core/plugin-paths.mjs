@@ -1,5 +1,4 @@
-/** Provides filesystem operations shared by plugin validation rules. */
-import fs from "node:fs";
+/** Applies plugin containment and traversal policies through filesystem capabilities. */
 import path from "node:path";
 
 function isWithin(directory, file) {
@@ -14,13 +13,14 @@ function isWithin(directory, file) {
 /**
  * Enumerates regular Markdown files without following directory links.
  * @param {string} directory - Directory to inspect recursively.
+ * @param {import("./ports.mjs").FilesPort} files - Filesystem capabilities.
  * @returns {string[]} Absolute Markdown paths.
  */
-export function markdownFiles(directory) {
-  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((item) => {
+export function markdownFiles(directory, files) {
+  return files.entries(directory).flatMap((item) => {
     const file = path.join(directory, item.name);
-    if (item.isDirectory()) return markdownFiles(file);
-    return item.isFile() && item.name.endsWith(".md") ? [file] : [];
+    if (item.kind === "directory") return markdownFiles(file, files);
+    return item.kind === "file" && item.name.endsWith(".md") ? [file] : [];
   });
 }
 
@@ -28,30 +28,15 @@ export function markdownFiles(directory) {
  * Checks lexical and resolved containment before accepting a plugin path.
  * @param {string} pluginRoot - Canonical plugin root.
  * @param {string} file - Absolute candidate path.
+ * @param {import("./ports.mjs").FilesPort} files - Filesystem capabilities.
  * @returns {string|null} Missing or external path diagnosis, or null.
  */
-export function pathProblem(pluginRoot, file) {
+export function pathProblem(pluginRoot, file, files) {
   if (!isWithin(pluginRoot, file)) return "outside plugin";
   try {
-    return isWithin(pluginRoot, fs.realpathSync(file))
-      ? null
-      : "outside plugin";
+    return isWithin(pluginRoot, files.realPath(file)) ? null : "outside plugin";
   } catch (error) {
     if (["ENOENT", "ENOTDIR"].includes(error.code)) return "missing";
-    throw error;
-  }
-}
-
-/**
- * Reads UTF-8 text and preserves the affected path in filesystem errors.
- * @param {string} file - File to read.
- * @returns {string} File contents.
- */
-export function readText(file) {
-  try {
-    return fs.readFileSync(file, "utf8");
-  } catch (error) {
-    if (error.syscall) error.path ??= file;
     throw error;
   }
 }

@@ -4,7 +4,7 @@
 
 두 호스트의 JSON 매니페스트가 현재 패키지의 고정 스킬 집합과 같은 디렉터리를 가리키는지 확인한다. Claude의 기본 `skills/` 탐색은 유지하며, 경로를 명시한다면 단일 경로나 배열 모두 검사하고 빈 배열은 거부한다. Codex의 `skills`는 설치에 포함된 디렉터리를 가리키는 문자열이어야 한다. 이는 OMT 패키지 계약의 검사이며 호스트의 전체 매니페스트 스키마를 대신하지 않는다.
 
-메타데이터 문법은 [yaml](https://github.com/eemeli/yaml), 문서 링크는 [mdast-util-from-markdown](https://github.com/syntax-tree/mdast-util-from-markdown)으로 읽는다. 문법 오류, 중복 YAML 키와 문자열이 아닌 필수 필드를 거부하고, 정상적인 따옴표와 여러 줄 설명은 허용한다. Markdown의 인라인·참조형 링크와 이미지를 검사하며 코드 예제와 이스케이프된 문장은 링크로 취급하지 않는다. URL로 인코딩된 로컬 경로도 파일 경로로 확인한다. 두 파서는 개발 의존성이며 플러그인 실행 의존성으로 배포하지 않는다.
+메타데이터 문법은 [yaml](https://github.com/eemeli/yaml), 문서 링크는 [mdast-util-from-markdown](https://github.com/syntax-tree/mdast-util-from-markdown)으로 읽는다. 문법 오류, 중복 YAML 키와 문자열이 아닌 필수 필드를 거부하고, 정상적인 따옴표와 여러 줄 설명은 허용한다. Markdown의 인라인·참조형 링크와 이미지를 검사하며 코드 예제와 이스케이프된 문장은 링크로 취급하지 않는다. URL로 인코딩된 로컬 경로도 파일 경로로 확인한다. JavaScript 소스 검사는 [Acorn](https://github.com/acornjs/acorn/tree/master/acorn)의 구문 트리와 주석 위치를 사용한다. 파서는 모두 개발 의존성이며 플러그인 실행 의존성으로 배포하지 않는다.
 
 메타데이터 영역은 `skills/<이름>/SKILL.md`에서만 제외한다. 참조 문서가 같은 파일 이름을 쓰거나 `---` 구분선으로 시작하더라도 본문 링크를 검사한다. 플러그인 경로 누락과 파일 읽기 등의 파일 시스템 오류는 경로와 오류 코드를 포함한 실패 보고서로 반환하며, 잘못된 파일 형식도 실패로 보고한다. 예상하지 못한 프로그래밍 오류는 파일 시스템 오류로 바꾸지 않는다.
 
@@ -12,7 +12,7 @@
 
 CI 상태 구분, 재개와 삭제 응답 단절에 대한 지침 검토에는 [실패 대응 시나리오](SCENARIO_CHECKS.md)를 사용한다. 실제 호스트 검증 결과와 문서 대조를 구분해 기록한다.
 
-활성 `.mjs` 파일은 모듈 JSDoc을 작성하고 공개 export에 `@param`과 `@returns`를 붙인다. 포맷은 Prettier가 결정한다. 새 클론에서는 `npm ci`를 실행한 뒤 `npm run format`, `npm run sync`, `npm run lint`, `npm test`를 차례로 실행한다. Jenkins의 Linux와 macOS 단계가 같은 검사를 수행한다.
+활성 `.mjs` 파일은 모듈 JSDoc을 작성하고 공개 export에는 인접 JSDoc을 붙인다. 공개 함수는 인자의 `@param`과 반환값의 `@returns`를 작성한다. `npm run quality`가 이 규칙과 실행문 180자 제한, core·어댑터·진입점의 의존성 방향과 순환 참조를 검사한다. 포맷은 Prettier가 결정한다. 새 클론에서는 `npm ci`를 실행한 뒤 `npm run format`, `npm run sync`, `npm run lint`, `npm test`를 차례로 실행한다. Jenkins의 Linux와 macOS 단계가 같은 검사를 수행한다.
 
 Jenkins의 macOS checkout에는 [Git의 프로세스별 설정](https://git-scm.com/docs/git-config#ENVIRONMENT)을 사용하며 전역 설정 파일을 변경하지 않는다. 회귀 검사는 Jenkins에 선언한 환경 옵션을 실제 Git 프로세스에 적용해 값이 덮어써지는지, 빌드 밖의 값과 임시 전역 설정 파일은 그대로인지 확인한다.
 

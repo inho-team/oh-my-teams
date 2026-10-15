@@ -1,10 +1,8 @@
 /** Validates host entry points and local Markdown links. */
-import fs from "node:fs";
 import path from "node:path";
-import { markdownDestinations } from "./plugin-syntax.mjs";
-import { pathProblem, readText } from "./plugin-files.mjs";
+import { pathProblem } from "./plugin-paths.mjs";
 
-function manifestProblem(manifest, host, pluginRoot, skillRoot) {
+function manifestProblem(manifest, host, pluginRoot, skillRoot, files) {
   if (manifest?.name !== "oh-my-teams") return "name must be oh-my-teams";
   if (typeof manifest.version !== "string" || !manifest.version.trim()) {
     return "version must be a nonempty string";
@@ -20,11 +18,11 @@ function manifestProblem(manifest, host, pluginRoot, skillRoot) {
       return "skills must use plugin-relative directory paths starting with ./";
     }
     const resolved = path.resolve(pluginRoot, target);
-    const issue = pathProblem(pluginRoot, resolved);
+    const issue = pathProblem(pluginRoot, resolved, files);
     if (issue) return `skills path ${issue}: ${target}`;
-    if (!fs.statSync(resolved).isDirectory())
+    if (files.kind(resolved) !== "directory")
       return `skills path is not a directory: ${target}`;
-    if (fs.realpathSync(resolved) !== fs.realpathSync(skillRoot)) {
+    if (files.realPath(resolved) !== files.realPath(skillRoot)) {
       return "skills path must point to the bundled skills directory";
     }
   }
@@ -36,18 +34,19 @@ function manifestProblem(manifest, host, pluginRoot, skillRoot) {
  * @param {string} pluginRoot - Canonical plugin root.
  * @param {string} skillRoot - Bundled skills directory.
  * @param {string[]} findings - Accumulated validation failures.
+ * @param {import("./ports.mjs").FilesPort} files - Filesystem capabilities.
  * @returns {void} Appends manifest failures.
  */
-export function checkManifests(pluginRoot, skillRoot, findings) {
+export function checkManifests(pluginRoot, skillRoot, findings, files) {
   for (const host of ["claude", "codex"]) {
     const label = `.${host}-plugin/plugin.json`;
     const file = path.join(pluginRoot, label);
-    const problem = pathProblem(pluginRoot, file);
+    const problem = pathProblem(pluginRoot, file, files);
     if (problem) {
       findings.push(`${label}: manifest ${problem}`);
       continue;
     }
-    const source = readText(file);
+    const source = files.readText(file);
     let manifest;
     try {
       manifest = JSON.parse(source);
@@ -56,7 +55,7 @@ export function checkManifests(pluginRoot, skillRoot, findings) {
       findings.push(`${label}: ${error.message}`);
       continue;
     }
-    const issue = manifestProblem(manifest, host, pluginRoot, skillRoot);
+    const issue = manifestProblem(manifest, host, pluginRoot, skillRoot, files);
     if (issue) findings.push(`${label}: ${issue}`);
   }
 }
@@ -66,14 +65,17 @@ export function checkManifests(pluginRoot, skillRoot, findings) {
  * @param {string} pluginRoot - Canonical plugin root.
  * @param {string} file - Markdown file inside the plugin.
  * @param {string[]} findings - Accumulated validation failures.
+ * @param {import("./ports.mjs").FilesPort} files - Filesystem capabilities.
+ * @param {import("./ports.mjs").DocumentSyntaxPort} syntax - Document parsers.
  * @returns {void} Appends link failures.
  */
-export function checkLinks(pluginRoot, file, findings) {
+export function checkLinks(pluginRoot, file, findings, files, syntax) {
   const label = path.relative(pluginRoot, file);
+  // A leading horizontal rule in an ordinary reference must not hide its links.
   const frontmatter =
     path.basename(file) === "SKILL.md" &&
     path.dirname(path.dirname(file)) === path.join(pluginRoot, "skills");
-  for (const destination of markdownDestinations(readText(file), {
+  for (const destination of syntax.markdownDestinations(files.readText(file), {
     frontmatter,
   })) {
     if (
@@ -93,7 +95,7 @@ export function checkLinks(pluginRoot, file, findings) {
     const issue =
       /^file:/i.test(target) || path.win32.isAbsolute(target)
         ? "outside plugin"
-        : pathProblem(pluginRoot, resolved);
+        : pathProblem(pluginRoot, resolved, files);
     if (issue) {
       const kind = issue === "missing" ? "broken link" : "link outside plugin";
       findings.push(`${label}: ${kind} ${target}`);
