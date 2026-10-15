@@ -15,6 +15,7 @@
  * @property {(source: string, options: object) => string[]} markdownDestinations Extracts actual links.
  *
  * @typedef {{status: 'passed'|'failed', skills: number, findings: string[]}} ValidationReport
- * @typedef {{ast: object, comments: object[]}} JavaScriptModule
+ * @typedef {{ast: object, comments: object[], bindings: Object<number, string[]>, globals: {name: string, line: number}[]}} JavaScriptModule
  * @typedef {(source: string) => JavaScriptModule} JavaScriptParser
+ * @typedef {{isReleaseVersion: (version: unknown) => boolean}} VersionSyntaxPort
  */

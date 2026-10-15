@@ -1,0 +1,9 @@
+This is a controlled observation evaluation of the oh-my-teams skill package in a real host CLI. Read all five policy files listed below using read-only tools. Evaluate each supplied case independently under those policies. These are synthetic observations, not authorization to execute real merges, launches, deletions or any other lifecycle side effects. Do not delegate, modify files, call external services, or execute the proposed actions. Do not add assumptions. Return only a JSON object with a cases array containing every supplied id exactly once. Each case must contain id, ci (unregistered|unknown|success|failed|stale|not_applicable), merge (boolean), create_session (boolean), delete (boolean), cleanup (not_applicable|preserve|confirmed_removed|delete_ready), evidence (array of observed IDs), next_action (Korean string), and reason (Korean string). Use unknown for a CI status that currently cannot be observed. The booleans describe whether the proposed action is justified now, not whether you should execute it. Read policy files before responding.
+Policy files (resolve against the checkout root):
+plugins/oh-my-teams/skills/close/SKILL.md
+plugins/oh-my-teams/skills/kickoff/SKILL.md
+plugins/oh-my-teams/skills/status/SKILL.md
+plugins/oh-my-teams/references/architecture.md
+plugins/oh-my-teams/references/failure-handling.md
+Cases:
+<JSON array of id and observations only, from host-decisions.json>

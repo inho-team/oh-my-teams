@@ -62,7 +62,7 @@ function checkDocumentation(module, findings) {
       );
       continue;
     }
-    const functions = exportedFunctions(module.ast, node);
+    const functions = exportedFunctions(module, node);
     for (const fn of functions) {
       const params = parameterNames(doc.value);
       const rootParams = params.filter((name) => !name.includes("."));
@@ -107,28 +107,31 @@ function checkDocumentation(module, findings) {
     });
 }
 
-function exportedFunctions(ast, node) {
-  function functionIn(declaration, name) {
-    if (declaration?.type === "VariableDeclaration") {
-      return declaration.declarations
-        .filter((item) => !name || item.id.name === name)
-        .map((item) => item.init);
+function exportedFunctions(module, node) {
+  const nodes = new Map();
+  visit(module.ast, (item) => nodes.set(`${item.start}:${item.type}`, item));
+  function resolve(value, seen = new Set()) {
+    if (!value) return [];
+    const key = `${value.start}:${value.type}`;
+    if (seen.has(key)) return [];
+    const next = new Set([...seen, key]);
+    if (/Function/.test(value.type)) return [value];
+    if (value.type === "Identifier") {
+      return (module.bindings[value.start] ?? []).flatMap((start) =>
+        resolve(nodes.get(start), next),
+      );
     }
-    return declaration && (!name || declaration.id?.name === name)
-      ? [declaration]
-      : [];
+    if (value.type === "VariableDeclaration")
+      return value.declarations.flatMap((item) => resolve(item, next));
+    if (value.type === "VariableDeclarator") return resolve(value.init, next);
+    return [];
   }
-  const names =
-    node.specifiers?.map((specifier) => specifier.local?.name) ?? [];
-  if (node.declaration?.type === "Identifier")
-    names.push(node.declaration.name);
-  const functions =
-    names.length && !node.source
-      ? names.flatMap((name) =>
-          ast.body.flatMap((declaration) => functionIn(declaration, name)),
-        )
-      : functionIn(node.declaration);
-  return functions.filter((item) => /Function/.test(item?.type));
+  const values = node.declaration
+    ? [node.declaration]
+    : node.source
+      ? []
+      : node.specifiers.map((specifier) => specifier.local);
+  return [...new Set(values.flatMap((value) => resolve(value)))];
 }
 
 function checkDependency(file, target, findings) {
@@ -180,35 +183,20 @@ function dependencies(module, findings) {
         if (resolved) edges.push(resolved);
       }
     }
-    if (layer(module.file) === "core") {
-      if (
-        node.type === "MemberExpression" &&
-        node.object.type === "Identifier" &&
-        ["process", "globalThis"].includes(node.object.name)
-      ) {
+  });
+  if (layer(module.file) === "core") {
+    for (const reference of module.globals) {
+      if (["process", "globalThis"].includes(reference.name)) {
         findings.push(
-          `${module.file}:${node.loc.start.line}: core cannot access ${node.object.name}; inject a port`,
+          `${module.file}:${reference.line}: core cannot access ${reference.name}; inject a port`,
         );
-      }
-      if (
-        (node.type === "NewExpression" || node.type === "CallExpression") &&
-        node.callee.name === "Date"
-      ) {
+      } else if (reference.name === "Date") {
         findings.push(
-          `${module.file}:${node.loc.start.line}: core clock must be provided by the caller`,
-        );
-      }
-      if (
-        node.type === "MemberExpression" &&
-        node.object.name === "Date" &&
-        node.property.name === "now"
-      ) {
-        findings.push(
-          `${module.file}:${node.loc.start.line}: core clock must be provided by the caller`,
+          `${module.file}:${reference.line}: core clock must be provided by the caller`,
         );
       }
     }
-  });
+  }
   return edges;
 }
 
@@ -231,7 +219,7 @@ function checkCycles(graph, findings) {
 
 /**
  * Checks every supplied module and its internal dependency graph.
- * @param {{file: string, source: string, ast: object, comments: object[]}[]} modules - Parsed repository-relative modules.
+ * @param {(import('./ports.mjs').JavaScriptModule & {file: string, source: string})[]} modules - Parsed repository-relative modules.
  * @returns {string[]} Documentation and architecture failures.
  */
 export function inspectSources(modules) {

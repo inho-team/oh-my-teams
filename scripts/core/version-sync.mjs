@@ -33,11 +33,13 @@ function readJson(files, file) {
   }
 }
 
-function plan(root, files, now) {
+function plan(root, files, now, versions) {
   const canonical = readJson(files, path.join(root, "package.json")).value;
   const version = canonical?.version;
-  if (typeof version !== "string" || !version.trim()) {
-    throw new SyntaxError("package.json: version must be a nonempty string");
+  if (!versions.isReleaseVersion(version)) {
+    throw new SyntaxError(
+      "package.json: version must be strict SemVer without build metadata",
+    );
   }
   // Parse and validate every input before exposing the plan to a writer.
   return sources.flatMap((relative) => {
@@ -70,11 +72,12 @@ function plan(root, files, now) {
  * @param {string} options.root - Repository path.
  * @param {import('./ports.mjs').FilesPort} options.files - Filesystem capabilities.
  * @param {Date} options.now - Timestamp used for a new Codex build value.
+ * @param {import('./ports.mjs').VersionSyntaxPort} options.versions - Release syntax validator.
  * @returns {{changed: string[], mismatches: string[]}} Synchronization result.
  * @throws {Error} For invalid inputs, stale snapshots or failed writes.
  */
-export function synchronize(write, { root, files, now }) {
-  const changes = plan(root, files, now);
+export function synchronize(write, { root, files, now, versions }) {
+  const changes = plan(root, files, now, versions);
   const names = changes.map((change) => change.relative);
   if (!write) return { changed: [], mismatches: names };
   files.writeBatch(changes);

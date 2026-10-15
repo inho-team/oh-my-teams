@@ -42,6 +42,67 @@ test("check mode detects drift without modifying manifests; write mode converges
   );
 });
 
+test("invalid canonical releases are rejected in check and write modes without changing manifests", async (t) => {
+  for (const version of [
+    undefined,
+    null,
+    42,
+    "",
+    "invalid version",
+    "1.2",
+    "01.2.3",
+    "v1.2.3",
+    " 1.2.3",
+    "1.2.3 ",
+    "1.2.3-01",
+    "1.2.3+build",
+  ]) {
+    await t.test(String(version), (context) => {
+      const options = repositoryFixture(context, "3.0.0+codex.20261001000000");
+      fs.writeFileSync(
+        path.join(options.root, "package.json"),
+        JSON.stringify({ version }),
+      );
+      const manifests = [
+        ".claude-plugin/marketplace.json",
+        "plugins/oh-my-teams/.claude-plugin/plugin.json",
+        "plugins/oh-my-teams/.codex-plugin/plugin.json",
+      ];
+      const snapshot = manifests.map((file) =>
+        fs.readFileSync(path.join(options.root, file), "utf8"),
+      );
+      for (const write of [false, true])
+        assert.throws(
+          () => synchronize(write, options),
+          /strict SemVer without build metadata/,
+        );
+      assert.deepEqual(
+        manifests.map((file) =>
+          fs.readFileSync(path.join(options.root, file), "utf8"),
+        ),
+        snapshot,
+      );
+    });
+  }
+});
+
+test("valid prereleases synchronize and keep a single Codex build suffix", (t) => {
+  const options = repositoryFixture(t, "3.0.0+codex.20261001000000");
+  fs.writeFileSync(
+    path.join(options.root, "package.json"),
+    JSON.stringify({ version: "3.0.6-rc.1" }),
+  );
+  synchronize(true, options);
+  assert.equal(
+    JSON.parse(fs.readFileSync(options.file, "utf8")).version,
+    "3.0.6-rc.1+codex.20261015010203",
+  );
+  assert.deepEqual(synchronize(false, options), {
+    changed: [],
+    mismatches: [],
+  });
+});
+
 test("an invalid final manifest leaves all earlier inputs byte-for-byte unchanged", (t) => {
   const options = repositoryFixture(t, "3.0.0+codex.20261001000000");
   const paths = [
