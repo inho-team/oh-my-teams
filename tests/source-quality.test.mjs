@@ -247,9 +247,56 @@ test("dependency direction, cycles and unresolved imports are diagnosed", () => 
   );
 });
 
+test("test regexes reject fixed slash separators and accept portable path expectations", () => {
+  for (const body of [
+    String.raw`assert.match(spec, /로드맵 규칙: .*references\/roadmap\.md/);`,
+    String.raw`assert.doesNotMatch(spec, /references[/]roadmap\.md/);`,
+    String.raw`const expected = /references\/roadmap\.md/;`,
+    String.raw`/references\/roadmap\.md/.test(spec);`,
+    String.raw`const expected = /\[references\/subdir[\\/]roadmap\.md\]/;`,
+  ]) {
+    for (const file of [
+      "tests/example.test.mjs",
+      "examples/example.test.mjs",
+    ]) {
+      assert.ok(
+        inspectSources([module(file, `/** Module. */\n${body}`)]).some(
+          (finding) => finding.includes("fixed slash separator in test regex"),
+        ),
+        body,
+      );
+    }
+  }
+  for (const body of [
+    'assert.ok(spec.includes(path.join(references, "roadmap.md")));',
+    String.raw`assert.match(spec, /references[\\/]roadmap\.md/);`,
+    String.raw`assert.match(spec, /references[/\\]roadmap\.md/);`,
+    String.raw`assert.match(spec, /references[^\\/]roadmap\.md/);`,
+    String.raw`assert.match(spec, /\[references[\\/]subdir[/\\]roadmap\.md\]/);`,
+    "assert.match(message, /missing file/);",
+  ]) {
+    assert.deepEqual(
+      inspectSources([
+        module("tests/example.test.mjs", `/** Module. */\n${body}`),
+      ]),
+      [],
+      body,
+    );
+  }
+  assert.deepEqual(
+    inspectSources([
+      module(
+        "scripts/core/example.mjs",
+        String.raw`/** Module. */ const pattern = /references\/roadmap\.md/;`,
+      ),
+    ]),
+    [],
+  );
+});
+
 test("the repository entry point catches missing comments and invalid JavaScript in new modules", (t) => {
   const root = temporaryDirectory(t);
-  const file = path.join(root, "scripts/core/new.mjs");
+  const file = path.join(root, "tests/new.mjs");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, "/** Module. */\nconst value = 1;\n");
   assert.equal(validateSources(root).status, "passed");
@@ -257,6 +304,15 @@ test("the repository entry point catches missing comments and invalid JavaScript
   assert.ok(
     validateSources(root).findings.some((finding) =>
       finding.includes("module JSDoc missing"),
+    ),
+  );
+  fs.writeFileSync(
+    file,
+    String.raw`/** Module. */ const pattern = /\[references\/subdir[\\/]roadmap\.md\]/;`,
+  );
+  assert.ok(
+    validateSources(root).findings.some((finding) =>
+      finding.includes("fixed slash separator in test regex"),
     ),
   );
   fs.writeFileSync(file, "const = ;\n");

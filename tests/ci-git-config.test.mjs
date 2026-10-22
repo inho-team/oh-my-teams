@@ -1,4 +1,4 @@
-/** Verifies the Jenkins Git override against a temporary global configuration. */
+/** Verifies Git configuration and checkout line endings in isolated repositories. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -49,4 +49,72 @@ test("Jenkins overrides Git only in the build process without changing global fi
   assert.equal(readValue({ ...baseline, ...overrides }), "false");
   assert.equal(readValue(baseline), "true");
   assert.equal(fs.readFileSync(globalFile, "utf8"), original);
+});
+
+test("YAML documents keep LF when Git checks out with core.autocrlf enabled", (t) => {
+  const temporary = temporaryDirectory(t);
+  const documents = path.join(root, "plugins/oh-my-teams/references/documents");
+  const yamlFiles = fs
+    .readdirSync(documents)
+    .filter((file) => file.endsWith(".yaml"));
+  assert.ok(yamlFiles.length > 0);
+  fs.copyFileSync(
+    path.join(root, ".gitattributes"),
+    path.join(temporary, ".gitattributes"),
+  );
+  for (const file of yamlFiles) {
+    fs.copyFileSync(path.join(documents, file), path.join(temporary, file));
+  }
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: path.join(temporary, "global.gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_COUNT: "0",
+  };
+  for (const key of [
+    "GIT_CONFIG",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_INDEX_FILE",
+  ]) {
+    delete env[key];
+  }
+  for (const args of [
+    ["init", "--quiet"],
+    ["add", "."],
+    ["checkout-index", "--all", "--force"],
+  ]) {
+    if (args[0] === "checkout-index") {
+      for (const file of yamlFiles) fs.unlinkSync(path.join(temporary, file));
+    }
+    const result = spawnSync(
+      "git",
+      [
+        "-c",
+        "core.autocrlf=true",
+        "-c",
+        "core.safecrlf=false",
+        "-c",
+        "core.attributesFile=",
+        ...args,
+      ],
+      {
+        cwd: temporary,
+        env,
+        encoding: "utf8",
+        timeout: 10000,
+        windowsHide: true,
+      },
+    );
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+  }
+  for (const file of yamlFiles) {
+    assert.doesNotMatch(
+      fs.readFileSync(path.join(temporary, file), "utf8"),
+      /\r/,
+      file,
+    );
+  }
 });
