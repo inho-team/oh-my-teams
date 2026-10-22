@@ -1,4 +1,4 @@
-/** Checks documentation and dependency boundaries from parsed source data. */
+/** Checks documentation, dependency boundaries and portable test regexes from parsed sources. */
 import path from "node:path";
 
 function layer(file) {
@@ -269,6 +269,21 @@ export function inspectSources(modules) {
         `${module.file}: module is outside declared architecture layers`,
       );
     checkDocumentation(module, findings);
+    if (layer(module.file) === "test") {
+      visit(module.ast, (node) => {
+        if (node.type !== "Literal" || !node.regex) return;
+        const pattern = node.regex.pattern.replace(
+          /\[(?:\\.|[^\]\\])*\]/g,
+          (group) =>
+            group.includes("/") && group.includes("\\\\") ? "" : group,
+        );
+        if (pattern.includes("/")) {
+          findings.push(
+            `${module.file}:${node.loc.start.line}: fixed slash separator in test regex; use path.join or a [\\\\/] separator class`,
+          );
+        }
+      });
+    }
     graph.set(module.file, dependencies(module, findings));
   }
   for (const [file, targets] of graph) {
