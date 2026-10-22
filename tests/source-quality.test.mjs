@@ -253,6 +253,7 @@ test("test regexes reject fixed slash separators and accept portable path expect
     String.raw`assert.doesNotMatch(spec, /references[/]roadmap\.md/);`,
     String.raw`const expected = /references\/roadmap\.md/;`,
     String.raw`/references\/roadmap\.md/.test(spec);`,
+    String.raw`const expected = /\[references\/subdir[\\/]roadmap\.md\]/;`,
   ]) {
     for (const file of [
       "tests/example.test.mjs",
@@ -271,6 +272,7 @@ test("test regexes reject fixed slash separators and accept portable path expect
     String.raw`assert.match(spec, /references[\\/]roadmap\.md/);`,
     String.raw`assert.match(spec, /references[/\\]roadmap\.md/);`,
     String.raw`assert.match(spec, /references[^\\/]roadmap\.md/);`,
+    String.raw`assert.match(spec, /\[references[\\/]subdir[/\\]roadmap\.md\]/);`,
     "assert.match(message, /missing file/);",
   ]) {
     assert.deepEqual(
@@ -306,7 +308,7 @@ test("the repository entry point catches missing comments and invalid JavaScript
   );
   fs.writeFileSync(
     file,
-    String.raw`/** Module. */ const pattern = /references\/roadmap\.md/;`,
+    String.raw`/** Module. */ const pattern = /\[references\/subdir[\\/]roadmap\.md\]/;`,
   );
   assert.ok(
     validateSources(root).findings.some((finding) =>

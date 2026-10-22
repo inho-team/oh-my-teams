@@ -1,6 +1,6 @@
 {
   "name": "oh-my-teams",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "Orca worktree ownership skills for Claude Code and Codex.",
   "private": true,
   "license": "MIT",

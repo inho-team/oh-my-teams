@@ -272,12 +272,32 @@ export function inspectSources(modules) {
     if (layer(module.file) === "test") {
       visit(module.ast, (node) => {
         if (node.type !== "Literal" || !node.regex) return;
-        const pattern = node.regex.pattern.replace(
-          /\[(?:\\.|[^\]\\])*\]/g,
-          (group) =>
-            group.includes("/") && group.includes("\\\\") ? "" : group,
-        );
-        if (pattern.includes("/")) {
+        const pattern = node.regex.pattern;
+        let inClass = false;
+        let classSlash = false;
+        let classBackslash = false;
+        let fixedSeparator = false;
+        for (let index = 0; index < pattern.length; index++) {
+          const character = pattern[index];
+          if (character === "\\") {
+            const escaped = pattern[++index];
+            if (inClass) {
+              classSlash ||= escaped === "/";
+              classBackslash ||= escaped === "\\";
+            } else if (escaped === "/") fixedSeparator = true;
+          } else if (character === "[" && !inClass) {
+            inClass = true;
+            classSlash = false;
+            classBackslash = false;
+          } else if (character === "]" && inClass) {
+            fixedSeparator ||= classSlash && !classBackslash;
+            inClass = false;
+          } else if (character === "/") {
+            if (inClass) classSlash = true;
+            else fixedSeparator = true;
+          }
+        }
+        if (fixedSeparator) {
           findings.push(
             `${module.file}:${node.loc.start.line}: fixed slash separator in test regex; use path.join or a [\\\\/] separator class`,
           );
