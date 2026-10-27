@@ -1,7 +1,9 @@
-/** Checks documentation and dependency boundaries from parsed source data. */
+/** Checks documentation, dependency boundaries and portable test regexes from parsed sources. */
 import path from "node:path";
 
 function layer(file) {
+  if (file.startsWith("plugins/oh-my-teams/scripts/"))
+    file = file.slice("plugins/oh-my-teams/".length);
   if (file.startsWith("scripts/core/")) return "core";
   if (file.startsWith("scripts/adapters/")) return "adapter";
   if (/^scripts\/[^/]+\.mjs$/.test(file)) return "entry";
@@ -269,6 +271,41 @@ export function inspectSources(modules) {
         `${module.file}: module is outside declared architecture layers`,
       );
     checkDocumentation(module, findings);
+    if (layer(module.file) === "test") {
+      visit(module.ast, (node) => {
+        if (node.type !== "Literal" || !node.regex) return;
+        const pattern = node.regex.pattern;
+        let inClass = false;
+        let classSlash = false;
+        let classBackslash = false;
+        let fixedSeparator = false;
+        for (let index = 0; index < pattern.length; index++) {
+          const character = pattern[index];
+          if (character === "\\") {
+            const escaped = pattern[++index];
+            if (inClass) {
+              classSlash ||= escaped === "/";
+              classBackslash ||= escaped === "\\";
+            } else if (escaped === "/") fixedSeparator = true;
+          } else if (character === "[" && !inClass) {
+            inClass = true;
+            classSlash = false;
+            classBackslash = false;
+          } else if (character === "]" && inClass) {
+            fixedSeparator ||= classSlash && !classBackslash;
+            inClass = false;
+          } else if (character === "/") {
+            if (inClass) classSlash = true;
+            else fixedSeparator = true;
+          }
+        }
+        if (fixedSeparator) {
+          findings.push(
+            `${module.file}:${node.loc.start.line}: fixed slash separator in test regex; use path.join or a [\\\\/] separator class`,
+          );
+        }
+      });
+    }
     graph.set(module.file, dependencies(module, findings));
   }
   for (const [file, targets] of graph) {

@@ -1,4 +1,4 @@
-/** Regression checks for the skill-only 3.x package boundary. */
+/** Regression checks for the provider-free 3.x package boundary and closed generated runtime. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -13,9 +13,25 @@ const plugin = path.join(root, "plugins/oh-my-teams");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
 test("the public plugin has no mandatory role runtime or bundled provider", () => {
-  for (const directory of ["scripts", "schemas", "resources", "examples"]) {
+  for (const directory of ["schemas", "resources", "examples"]) {
     assert.equal(fs.existsSync(path.join(plugin, directory)), false, directory);
   }
+  assert.deepEqual(fs.readdirSync(path.join(plugin, "scripts")).sort(), [
+    "core",
+    "generated",
+  ]);
+  assert.deepEqual(fs.readdirSync(path.join(plugin, "scripts/core")), [
+    "omt-documents.mjs",
+  ]);
+  assert.deepEqual(
+    fs.readdirSync(path.join(plugin, "scripts/generated")).sort(),
+    [
+      "THIRD_PARTY_NOTICES.md",
+      "document-validator.cjs",
+      "formats.cjs",
+      "ucs2length.cjs",
+    ],
+  );
   const skills = fs
     .readdirSync(path.join(plugin, "skills"))
     .filter((name) => !name.startsWith("."))

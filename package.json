@@ -11,8 +11,8 @@
   "scripts": {
     "format": "prettier --write \"**/*.{mjs,json,yaml}\"",
     "format:check": "prettier --check \"**/*.{mjs,json,yaml}\"",
-    "sync": "node scripts/metadata.mjs --write",
-    "sync:check": "node scripts/metadata.mjs",
+    "sync": "node scripts/metadata.mjs --write && node scripts/runtime-build.mjs --write",
+    "sync:check": "node scripts/metadata.mjs && node scripts/runtime-build.mjs",
     "documents": "node scripts/documents.mjs",
     "quality": "node scripts/check-source.mjs && node scripts/check-skills.mjs && node scripts/check-docs.mjs",
     "lint": "npm run quality && npm run format:check && npm run sync:check",
