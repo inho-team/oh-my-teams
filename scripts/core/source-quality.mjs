@@ -2,6 +2,8 @@
 import path from "node:path";
 
 function layer(file) {
+  if (file.startsWith("plugins/oh-my-teams/scripts/"))
+    file = file.slice("plugins/oh-my-teams/".length);
   if (file.startsWith("scripts/core/")) return "core";
   if (file.startsWith("scripts/adapters/")) return "adapter";
   if (/^scripts\/[^/]+\.mjs$/.test(file)) return "entry";

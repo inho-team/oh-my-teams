@@ -103,6 +103,66 @@ test("core rejects native IO, concrete adapters and implicit runtime clocks", ()
   }
 });
 
+test("installed scripts use the existing layers without admitting unrelated plugin paths", () => {
+  const prefix = "plugins/oh-my-teams/scripts";
+  const core = module(`${prefix}/core/value.mjs`, "/** Core. */");
+  const adapter = module(
+    `${prefix}/adapters/value.mjs`,
+    '/** Adapter. */\nimport "node:fs";\nimport "../core/value.mjs";',
+  );
+  const entry = module(
+    `${prefix}/check.mjs`,
+    '/** Entry. */\nimport "./adapters/value.mjs";\nimport "./core/value.mjs";',
+  );
+  assert.deepEqual(inspectSources([entry, adapter, core]), []);
+  for (const [file, body, expected] of [
+    [`${prefix}/core/bad.mjs`, 'import "node:fs";', "core cannot import"],
+    [
+      `${prefix}/core/bad.mjs`,
+      'import "../adapters/value.mjs";',
+      "core to adapter",
+    ],
+    [
+      `${prefix}/adapters/bad.mjs`,
+      'import "../check.mjs";',
+      "adapter to entry",
+    ],
+    [`${prefix}/bad.mjs`, 'import "./check.mjs";', "entry to entry"],
+    [`${prefix}/bad.mjs`, 'import "node:fs";', "entry cannot import"],
+    [
+      `${prefix}/core/bad.mjs`,
+      "const value = process.cwd();",
+      "core cannot access",
+    ],
+    [`${prefix}/core/bad.mjs`, "const value = Date.now();", "core clock"],
+    ["plugins/other/scripts/core/bad.mjs", "", "outside declared"],
+    ["plugins/oh-my-teams/other/core/bad.mjs", "", "outside declared"],
+    [`${prefix}/other/bad.mjs`, "", "outside declared"],
+    [
+      `${prefix}/core/bad.mjs`,
+      'import "../other/value.mjs";',
+      "core to unknown",
+    ],
+  ]) {
+    assert.ok(
+      inspectSources([
+        entry,
+        adapter,
+        core,
+        module(file, `/** Module. */\n${body}`),
+      ]).some((finding) => finding.includes(expected)),
+      `${file}: ${body}`,
+    );
+  }
+  const a = module(`${prefix}/core/a.mjs`, '/** A. */\nimport "./b.mjs";');
+  const b = module(`${prefix}/core/b.mjs`, '/** B. */\nimport "./a.mjs";');
+  assert.ok(
+    inspectSources([a, b]).some((finding) =>
+      finding.includes("Dependency cycle"),
+    ),
+  );
+});
+
 test("function aliases keep their lexical binding across chains and shadowed names", () => {
   const body = [
     "const original = (value) => value;",
