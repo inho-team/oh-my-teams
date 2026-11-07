@@ -1,4 +1,9 @@
 /** Enforces OMT report invariants and renders validated data as standalone HTML. */
+import {
+  assertCompletionEvidence,
+  assertDeliveryEvidence,
+  assertTaskVerification,
+} from "./task-verification.mjs";
 
 /**
  * Checks schema and semantic invariants without treating reports as authoritative state.
@@ -76,6 +81,10 @@ export function assertOmtDocument(value, schemaErrors) {
   if (
     ["status_report", "completion_report", "interruption_report"].includes(kind)
   ) {
+    assertDeliveryEvidence(
+      payload.delivery,
+      kind === "status_report" ? payload.git?.head : subject.commit,
+    );
     if (payload.delivery.state === "delivered")
       ensure(
         payload.delivery.reference,
@@ -115,6 +124,18 @@ function checkCi(check, head, ensure) {
 function checkLifecycle({ kind, subject, payload }, ensure) {
   ensure(subject.commit, "lifecycle documents require a fixed subject.commit");
   if (kind === "task_request") {
+    if (payload.verification) {
+      const names = payload.verification.required_ci.map((check) => check.name);
+      ensure(
+        new Set(names).size === names.length,
+        "required CI names must be unique",
+      );
+      ensure(
+        !payload.verification.delivery_receipt ||
+          payload.delivery.mode !== "none",
+        "delivery receipt cannot be required without delivery",
+      );
+    }
     ensure(
       new Set(payload.acceptance_criteria).size ===
         payload.acceptance_criteria.length,
@@ -138,6 +159,7 @@ function checkLifecycle({ kind, subject, payload }, ensure) {
         "merge delivery requires recorded authorization",
       );
   } else if (kind === "completion_report") {
+    assertCompletionEvidence({ subject, payload });
     const { acceptance_results: results, checks } = payload;
     ensure(
       new Set(results.map((item) => item.criterion)).size === results.length,
@@ -223,6 +245,7 @@ export function assertTaskResponse(request, response) {
   if (response.kind !== "completion_report") return;
   const { payload: task } = request;
   const { payload: report } = response;
+  assertTaskVerification(request, response);
   const criteria = report.acceptance_results.map((item) => item.criterion);
   ensure(
     criteria.length === task.acceptance_criteria.length &&
@@ -283,6 +306,16 @@ function escapeHtml(value) {
 }
 
 const labels = {
+  verification: "완료 검증 조건",
+  required_ci: "필수 CI",
+  independent_review: "필수 독립 검토 여부",
+  delivery_receipt: "필수 전달 증거 여부",
+  receipt: "전달 관측 기록",
+  delivered_commit: "전달된 커밋",
+  reviews: "검토 근거",
+  request_id: "검토 요청 식별자",
+  result_id: "검토 결과 식별자",
+  reviewer_session_id: "검토 세션 식별자",
   task_request: "작업 요청",
   completion_report: "완료 보고",
   interruption_report: "중단·인계 보고",

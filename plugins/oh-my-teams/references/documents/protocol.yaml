@@ -80,6 +80,8 @@ lifecycle_rules:
     - 전달하지 않는 요청은 delivery.mode를 none, target을 null로 기록합니다.
     - merge를 요청하면 실제 사용자의 허가 근거를 authorization에 기록합니다. PR 생성 허가만으로 병합을 허가받았다고 기록하지 않습니다.
     - 사용자가 정리를 완료 조건으로 요구했다면 cleanup_required를 true로 기록합니다.
+    - 새 요청은 task-workflow.md에 따라 verification에 필수 CI 이름·대상 브랜치, 독립 검토와 전달 관측 기록의 필요 여부를 정합니다. 필요하지 않은 조건을 임의로 추가하지 않습니다.
+    - verification이 없는 이전 요청도 읽을 수 있지만 그 형식 검사만으로 새 검증 조건을 충족했다고 주장하지 않습니다.
   completion_report:
     - 수용 기준마다 met, unmet 또는 unknown과 근거를 기록하며, met에는 근거가 필요합니다.
     - 통과한 검사에는 근거가 필요하며 CI 성공은 최종 subject.commit과 연결합니다.
@@ -87,6 +89,12 @@ lifecycle_rules:
     - incomplete에는 remaining에 남은 일을 기록합니다. 전달과 정리의 상태도 각각 기록합니다.
     - 원래 작업 요청과 대조하여 수용 기준을 빠뜨리거나 필수 검사의 이름·명령·필수 여부를 줄이지 않습니다.
     - completed를 기록하기 전에 요청한 전달과 필수 정리가 실제로 완료됐는지 확인합니다.
+    - verification이 있는 작업의 completed 보고는 통과한 checks에 최종 source_commit을 기록하고 요청한 필수 CI를 이름별로 한 번씩 포함해야 합니다. 대상 브랜치도 요청과 같아야 합니다.
+    - reviews를 기록하면 결과 ID가 중복되지 않아야 합니다. completed의 모든 검토는 최종 커밋·구현 세션과 연결되고 no_findings여야 하며 독립 검토자는 구현자와 달라야 합니다.
+    - 필수 독립 검토가 있으면 최종 커밋의 독립 검토 근거가 필요합니다. 원문 요청·결과의 대응과 실제 실행 ID는 소유 세션이 확인합니다.
+    - delivery.receipt는 실제 전달을 관측한 경우에만 기록하고 최종 소스 SHA와 연결합니다. 원래 작업 요청과 전달 방식·대상을 대조합니다.
+    - commit과 merge 전달 관측 기록에는 delivered_commit이 필요합니다. commit은 소스 SHA와 같아야 하며 merge는 소유 세션이 실제 병합 결과와 소스의 연결을 확인합니다.
+    - 구조 검사는 근거의 존재·진위나 실제 사용자 허가를 인증하지 않습니다. 검증 조건이 요구한 근거가 없으면 incomplete와 남은 일을 기록합니다.
   interruption_report:
     - 중단 사유, 마지막 커밋, 미전달 변경과 재개 절차를 기록합니다.
     - 세션별 전체 워크트리 ID와 인스턴스를 보존합니다. 이 목록은 관측 기록이며 실행 등록부가 아닙니다.

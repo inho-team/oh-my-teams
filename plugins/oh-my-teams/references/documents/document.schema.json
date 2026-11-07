@@ -510,6 +510,9 @@
               "type": "null"
             }
           ]
+        },
+        "receipt": {
+          "$ref": "#/definitions/deliveryReceipt"
         }
       }
     },
@@ -624,6 +627,9 @@
             "$ref": "#/definitions/evidence"
           },
           "minItems": 0
+        },
+        "verification": {
+          "$ref": "#/definitions/verification"
         }
       }
     },
@@ -707,6 +713,9 @@
                   "$ref": "#/definitions/evidence"
                 },
                 "minItems": 0
+              },
+              "source_commit": {
+                "$ref": "#/definitions/commit"
               }
             }
           },
@@ -737,6 +746,12 @@
             "$ref": "#/definitions/evidence"
           },
           "minItems": 0
+        },
+        "reviews": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/reviewReceipt"
+          }
         }
       }
     },
@@ -831,6 +846,116 @@
             "$ref": "#/definitions/evidence"
           },
           "minItems": 0
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_ci", "independent_review", "delivery_receipt"],
+      "properties": {
+        "required_ci": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "target_branch"],
+            "properties": {
+              "name": {
+                "$ref": "#/definitions/text"
+              },
+              "target_branch": {
+                "$ref": "#/definitions/text"
+              }
+            }
+          }
+        },
+        "independent_review": {
+          "type": "boolean"
+        },
+        "delivery_receipt": {
+          "type": "boolean"
+        }
+      }
+    },
+    "deliveryReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "target",
+        "source_commit",
+        "observed_at",
+        "evidence"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["commit", "pr", "merge", "artifact"]
+        },
+        "target": {
+          "$ref": "#/definitions/text"
+        },
+        "source_commit": {
+          "$ref": "#/definitions/commit"
+        },
+        "observed_at": {
+          "$ref": "#/definitions/timestamp"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        },
+        "delivered_commit": {
+          "$ref": "#/definitions/commit"
+        }
+      }
+    },
+    "reviewReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "result_id",
+        "reviewer_session_id",
+        "implementation_session_id",
+        "source_commit",
+        "conclusion",
+        "independent",
+        "evidence"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/definitions/text"
+        },
+        "result_id": {
+          "$ref": "#/definitions/text"
+        },
+        "reviewer_session_id": {
+          "$ref": "#/definitions/text"
+        },
+        "implementation_session_id": {
+          "$ref": "#/definitions/text"
+        },
+        "source_commit": {
+          "$ref": "#/definitions/commit"
+        },
+        "conclusion": {
+          "type": "string",
+          "enum": ["no_findings", "changes_requested", "inconclusive"]
+        },
+        "independent": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
         }
       }
     }
