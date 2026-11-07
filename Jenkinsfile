@@ -25,7 +25,7 @@ pipeline {
                             set -eu
                             omt_archive=$(mktemp)
                             trap 'rm -f "$omt_archive"' EXIT
-                            tar -cf "$omt_archive" .
+                            COPYFILE_DISABLE=1 tar --no-xattrs -cf "$omt_archive" .
                             docker run --rm -i -e HOME=/tmp -w /workspace inho-team-oh-my-teams-ci:node22 \\
                                 sh -c 'tar -xf - && sh .ci/run-linux.sh' < "$omt_archive"
                         '''
