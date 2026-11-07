@@ -12,6 +12,63 @@ function module(file, source) {
   return { file, source, ...parseModule(source) };
 }
 
+test("source checks reject POSIX-only file paths in assertion regex literals", () => {
+  for (const body of [
+    String.raw`import assert from "node:assert/strict"; assert.match(spec, /references\/roadmap\.md/);`,
+    String.raw`import * as check from "node:assert"; check.doesNotMatch(spec, /references\/roadmap\.md/);`,
+    String.raw`import { match as check } from "node:assert/strict"; check(spec, /references\/roadmap\.md/);`,
+    String.raw`import { strict as check } from "node:assert"; check.match(spec, /references\/roadmap\.md/);`,
+  ]) {
+    const findings = inspectSources([
+      module("tests/paths.test.mjs", `/** Module. */\n${body}`),
+    ]);
+    assert.ok(
+      findings.some((finding) =>
+        finding.includes("nonportable path assertion"),
+      ),
+      body,
+    );
+  }
+});
+
+test("path assertion checks preserve portable regexes, URLs, fixtures and shadowed bindings", () => {
+  for (const body of [
+    String.raw`assert.match(spec, /references[/\\]roadmap\.md/);`,
+    String.raw`assert.match(spec, /references[\\/]roadmap\.md/);`,
+    String.raw`assert.match(url, /https:\/\/example\.com\/docs\/guide\.md/);`,
+    String.raw`assert.match(message, /invalid input/);`,
+    String.raw`const fixture = "assert.match(spec, /references\\/roadmap\\.md/);";`,
+    String.raw`function check(assert) { assert.match(spec, /references\/roadmap\.md/); }`,
+  ]) {
+    const source = `/** Module. */\nimport assert from "node:assert/strict";\n${body}`;
+    assert.deepEqual(
+      inspectSources([module("tests/paths.test.mjs", source)]),
+      [],
+      body,
+    );
+  }
+});
+
+test("repository validation catches nonportable assertions in new test files before a commit", (t) => {
+  const root = temporaryDirectory(t);
+  const file = path.join(root, "tests", "paths.test.mjs");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    String.raw`/** Module. */
+import assert from "node:assert/strict";
+assert.match(spec, /references\/roadmap\.md/);
+`,
+  );
+  const report = validateSources(root);
+  assert.equal(report.status, "failed");
+  assert.ok(
+    report.findings.some((finding) =>
+      finding.includes("tests/paths.test.mjs:3: nonportable path assertion"),
+    ),
+  );
+});
+
 test("source checks distinguish module, export, parameter and return documentation", () => {
   const file = "scripts/core/example.mjs";
   for (const [source, expected] of [

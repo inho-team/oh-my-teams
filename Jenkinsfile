@@ -21,7 +21,14 @@ pipeline {
                     try {
                         sh 'colima start --profile omt-ci --activate=false'
                         sh 'docker build -t inho-team-oh-my-teams-ci:node22 -f .ci/Dockerfile.linux .'
-                        sh '''docker run --rm -e HOME=/tmp -v "$WORKSPACE:/workspace" -w /workspace inho-team-oh-my-teams-ci:node22 sh .ci/run-linux.sh'''
+                        sh '''
+                            set -eu
+                            omt_archive=$(mktemp)
+                            trap 'rm -f "$omt_archive"' EXIT
+                            COPYFILE_DISABLE=1 tar --no-xattrs -cf "$omt_archive" .
+                            docker run --rm -i -e HOME=/tmp -w /workspace inho-team-oh-my-teams-ci:node22 \\
+                                sh -c 'tar -xf - && sh .ci/run-linux.sh' < "$omt_archive"
+                        '''
                     } finally {
                         sh '''
                             if docker info >/dev/null 2>&1; then
