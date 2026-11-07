@@ -5,7 +5,7 @@
 | 파일 | 책임 |
 |---|---|
 | `scripts/check-skills.mjs`, `metadata.mjs`, `check-source.mjs`, `check-docs.mjs` | 기본 경로·시간·어댑터를 조합하고 공개 함수와 CLI를 제공한다. |
-| `scripts/core/repository-documents.mjs` | 저장소 README·`docs/`·`evals/`를 수집하고 기존 링크 검사에 저장소 경계를 전달한다. |
+| `scripts/core/repository-documents.mjs` | 저장소 README·선택적 AGENTS·`docs/`·`evals/`를 수집하고 기존 링크 검사에 저장소 경계를 전달한다. |
 | `scripts/core/plugin-validation.mjs` | 검사 순서와 스킬 집합·메타데이터 규칙, 최종 보고서를 담당한다. |
 | `scripts/core/plugin-paths.mjs`, `plugin-documents.mjs` | 경로의 경계와 탐색 정책, 매니페스트 진입점, 로컬 링크를 검사한다. |
 | `scripts/core/version-sync.mjs` | 모든 입력을 읽고 검증한 뒤 버전 변경 계획을 만들고 적용한다. |
@@ -89,11 +89,18 @@ const result = synchronize(false, options);
 
 `options.taskSource` 또는 CLI의 `--task task.yaml`은 완료·중단 보고를 원래 작업 요청과 연결한다. 두 대조 옵션은 동시에 사용하지 않는다. 완료 보고에서는 원래 수용 기준을 모두 보고했는지와 필수 검사의 이름·명령·필수 여부를 대조한다. 목표를 달성했다고 보고하려면 모든 기준·필수 검사·승인 근거로 기록한 CI가 통과하고, 요청한 전달과 필수 정리가 완료돼야 한다. 작업 요청의 시작 커밋과 완료 보고의 최종 커밋은 달라질 수 있다. 중단 보고는 실제로 종료를 확인한 세션만 `stopped`로 표시하며 종료 조치에는 사용자 허가 근거가 필요하다. 이 필드는 실제 종료 명령을 실행하지 않는다.
 
+3.3.0의 선택적 `task_request.payload.verification`은 `required_ci`의 이름·대상 브랜치 목록, `independent_review`, `delivery_receipt`를 정의한다. 이 조건이 있는 작업의 완료 보고는 통과한 검사에 최종 SHA인 `source_commit`을 기록하고, 요청한 CI를 정확히 한 번씩 포함해야 한다. 독립 검토가 필수이면 `reviews`에 최종 커밋·구현 세션과 연결된 다른 검토 실행의 `no_findings` 결과와 원문 근거가 필요하다. 원문 요청·결과의 대응은 소유 세션이 확인한다. 상세 검사 구현은 [task-verification.mjs](../scripts/core/task-verification.mjs)에 있다.
+
+`delivery.receipt`는 관측한 방식·대상·소스 SHA·시각·근거를 기록한다. `--task` 대조는 요청의 방식·대상과 정확히 일치하는지 확인한다. `commit`과 `merge`는 `delivered_commit`도 필요하며 commit 전달은 소스 SHA와 같아야 한다. merge는 결과 SHA가 다를 수 있으므로 실제 포함 관계를 소유 세션이 확인한다. 새 필드는 선택적이며 이전 여섯 예제와 호출 형식을 유지한다. 검증 조건이 없는 기존 요청의 통과를 새 검증 조건의 충족으로 해석하지 않는다.
+
+검증기는 네트워크 조회를 실행하지 않는다. 전달 URL의 실재, PR의 실제 base branch·head SHA, 빌드 로그와 검토 원문의 진위를 소유 세션이 확인한 뒤 기록한다. 임의의 근거 문자열이 구조 검사를 통과하는 것은 외부 전달의 증명이 아니다. 새 필드와 반례는 [검증 조건 테스트](../tests/task-verification.test.mjs), 호스트 행동의 후속 평가는 [작업 흐름 평가](../evals/TASK_WORKFLOW.md)를 따른다.
+
 JSON과 HTML은 같은 검증 데이터의 파생 결과다. 코드는 객체를 직접 사용하고, 외부 전달이나 저장에 필요한 경우에만 JSON으로 직렬화한다. HTML에는 문서 정보, 근거와 불확실성을 모두 포함하며 모든 값을 텍스트로 이스케이프한다. 스크립트와 외부 자원, 실행 가능한 링크가 없는 단일 파일이며 모바일 표시와 인쇄 스타일을 포함한다. 출처 위치는 안전한 텍스트로 표시한다.
 
 ```sh
 node scripts/documents.mjs check plugins/oh-my-teams/references/documents/review-result.example.yaml --request plugins/oh-my-teams/references/documents/review-request.example.yaml
 node scripts/documents.mjs check plugins/oh-my-teams/references/documents/completion-report.example.yaml --task plugins/oh-my-teams/references/documents/task-request.example.yaml
+node scripts/documents.mjs check plugins/oh-my-teams/references/documents/verified-completion.example.yaml --task plugins/oh-my-teams/references/documents/verified-task.example.yaml
 node scripts/documents.mjs html plugins/oh-my-teams/references/documents/status-report.example.yaml /new/path/status.html
 ```
 
@@ -105,7 +112,7 @@ node scripts/documents.mjs html plugins/oh-my-teams/references/documents/status-
 
 ## 자동 품질 검사와 CI
 
-저장소 문서 검사도 `quality`에 포함된다. `npm run docs:check`로 README·`docs/`·`evals/`의 링크와 앵커만 확인할 수 있다. `validateRepositoryDocs(root, { files, syntax })`는 `{ status, documents, findings }`를 반환하며 설치 문서 검사와 같은 파서를 사용한다. 저장소 문서는 저장소 경계를, 설치 문서는 플러그인 경계를 적용한다. 설치 문서의 경계는 넓히지 않는다.
+저장소 문서 검사도 `quality`에 포함된다. `npm run docs:check`로 README·AGENTS·`docs/`·`evals/`의 링크와 앵커만 확인할 수 있다. AGENTS는 존재할 때 검사하며 필수 파일로 만들지는 않는다. `validateRepositoryDocs(root, { files, syntax })`는 `{ status, documents, findings }`를 반환하며 설치 문서 검사와 같은 파서를 사용한다. 저장소 문서는 저장소 경계를, 설치 문서는 플러그인 경계를 적용한다. 설치 문서의 경계는 넓히지 않는다.
 
 `npm run quality`는 먼저 JavaScript 소스를 검사한 뒤 설치 패키지를 검사한다. 소스 검사는 상태 디렉터리와 `node_modules`·`.git`을 제외한 `.mjs`를 수집하고, 파싱된 구문 트리와 주석 위치로 모듈 JSDoc, 공개 함수의 인자·반환 설명, 실행문 줄 길이와 의존성을 확인한다. 허용되지 않은 계층의 모듈, 계산된 import, 누락된 로컬 import와 순환 참조도 실패로 보고한다. 새 파일도 커밋 전부터 검사한다. 이 검사는 정적 규칙이며 주석의 의미나 모든 동적 실행을 검증하는 보안 격리 장치는 아니다.
 

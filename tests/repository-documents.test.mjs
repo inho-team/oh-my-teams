@@ -101,6 +101,30 @@ test("repository links and directory aliases cannot escape the checkout", (t) =>
   );
 });
 
+test("optional AGENTS guidance is checked for broken links, anchors and repository escapes", (t) => {
+  const root = repository(t);
+  assert.equal(validateRepositoryDocs(root).documents, 3);
+  const file = path.join(root, "AGENTS.md");
+  fs.writeFileSync(file, "[Guide](docs/guide.md#설정)\n");
+  assert.equal(validateRepositoryDocs(root).documents, 4);
+  assert.equal(validateRepositoryDocs(root).status, "passed");
+  fs.appendFileSync(
+    file,
+    "[Missing](absent.md)\n[Anchor](README.md#absent)\n[Outside](../outside.md)\n",
+  );
+  const report = validateRepositoryDocs(root);
+  assert.equal(report.status, "failed");
+  assert.equal(report.findings.length, 3);
+  assert.ok(report.findings.every((finding) => finding.includes("AGENTS.md")));
+  fs.unlinkSync(file);
+  fs.mkdirSync(file);
+  assert.ok(
+    validateRepositoryDocs(root).findings.includes(
+      "AGENTS.md: not a regular file",
+    ),
+  );
+});
+
 test("repository documentation reports read errors and propagates programming failures", (t) => {
   const root = repository(t);
   for (const failure of [

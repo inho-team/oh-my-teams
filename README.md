@@ -20,6 +20,8 @@ Claude Code와 Codex에서 사용하는 Orca 중심 팀 작업 스킬이다. **�
 
 작업 요청, 검토 요청·결과, 상태 보고, 완료 보고와 중단·인계 보고의 여섯 문서는 [YAML 문서 규칙](plugins/oh-my-teams/references/documents/protocol.yaml)을 따른다. 설치 패키지에는 JSON Schema와 YAML 예제를 포함한다. 코드는 검증한 JSON 호환 객체를 처리하며 사용자에게 보여주는 문서는 같은 데이터에서 HTML로 생성한다. 호스트의 `SKILL.md` 진입점과 도구 인자 형식은 유지한다.
 
+3.3.0에서는 [작업 흐름](plugins/oh-my-teams/references/task-workflow.md)에 따라 사용자 요청에서 기준·검사·전달 범위를 구성하고 필요한 검토만 선택한다. 새 작업 요청의 `verification`으로 필수 CI·독립 검토·전달 증거를 정하며, 완료 보고에서는 검사·검토·전달을 최종 소스 커밋에 연결한다. 기존 문서도 계속 읽을 수 있다. 실제 증거와 권한은 소유 세션이 Orca·Git·CI에서 확인한다.
+
 ## 설치
 
 이 저장소를 로컬 마켓플레이스로 추가하고 플러그인을 설치한다. Claude Code 또는 Codex 중 사용하는 호스트에 해당하는 명령만 실행한다.
@@ -49,11 +51,11 @@ npm run sync
 npm run verify
 ```
 
-`npm run verify`는 로컬과 Jenkins의 Linux·macOS 검사에서 공통으로 사용하는 진입점이며 린트와 테스트를 실행한다. `npm run quality`는 활성 소스·스킬과 설치 문서, 저장소 README·`docs/`·`evals/`의 링크와 앵커를 검사한다. 설치 문서의 모든 로컬 링크는 플러그인 안에서 해결돼야 한다. `npm test`는 플러그인 폴더만 복사한 설치 구조도 확인한다. `npm run sync`는 `package.json`의 버전을 마켓플레이스와 플러그인 매니페스트에 반영한다.
+`npm run verify`는 로컬과 Jenkins의 Linux·macOS 검사에서 공통으로 사용하는 진입점이며 린트와 테스트를 실행한다. `npm run quality`는 활성 소스·스킬과 설치 문서, 저장소 README·AGENTS·`docs/`·`evals/`의 링크와 앵커를 검사한다. 설치 문서의 모든 로컬 링크는 플러그인 안에서 해결돼야 한다. `npm test`는 플러그인 폴더만 복사한 설치 구조도 확인한다. `npm run sync`는 `package.json`의 버전을 마켓플레이스와 플러그인 매니페스트에 반영한다.
 
 개발 모듈의 책임과 공통 함수 사용법은 [개발 도구와 공통 예제](docs/DEVELOPMENT.md)에 정리했다. 실행 가능한 예제도 `npm test`에서 함께 검사한다.
 
-전체 문서는 [개발 문서 안내](docs/README.md)에서 찾을 수 있다. 복잡도와 검증 공백의 근거, 재현 결과와 개선 우선순위는 [프로젝트 분석과 개선 계획](docs/PROJECT_ANALYSIS.md)에 정리했다.
+AI가 이 저장소를 수정할 때에는 [AI 작업 안내](docs/AI_GUIDE.md)에서 읽기 순서, 요청별 수정 위치와 관련 테스트를 찾는다. 현재 구조와 공개 계약, 검증 한계·재현 결과·개선 우선순위는 [프로젝트 분석과 개선 계획](docs/PROJECT_ANALYSIS.md)에 정리했다. 전체 문서와 과거 기록은 [개발 문서 안내](docs/README.md)에서 구분해 찾을 수 있다.
 
 저장소의 문서 변환 도구는 `npm ci` 후 사용할 수 있다. 이 명령은 설치 플러그인의 필수 실행 의존성이 아니다. 출력 경로를 생략하면 표준 출력으로 내보내며, 경로를 지정하면 기존 파일을 덮어쓰지 않는다.
 

@@ -4,7 +4,7 @@ import { markdownFiles, pathProblem } from "./plugin-paths.mjs";
 import { checkLinks } from "./plugin-documents.mjs";
 
 /**
- * Validates README and documentation trees without following external paths.
+ * Validates README, optional AGENTS and documentation trees within the repository.
  * @param {string} root - Repository root.
  * @param {import('./ports.mjs').FilesPort} files - Filesystem capabilities.
  * @param {import('./ports.mjs').DocumentSyntaxPort} syntax - Markdown parsers.
@@ -16,7 +16,7 @@ export function inspectRepositoryDocuments(root, files, syntax) {
   try {
     root = files.realPath(root);
     const documents = [];
-    for (const relative of ["README.md", "docs", "evals"]) {
+    for (const relative of ["README.md", "AGENTS.md", "docs", "evals"]) {
       const file = path.join(root, relative);
       const issue = pathProblem(root, file, files, "repository");
       if (issue === "missing" && relative !== "README.md") continue;
@@ -24,9 +24,9 @@ export function inspectRepositoryDocuments(root, files, syntax) {
         report.findings.push(`${relative}: ${issue}`);
         continue;
       }
-      if (relative === "README.md") {
+      if (["README.md", "AGENTS.md"].includes(relative)) {
         if (files.kind(file) === "file") documents.push(file);
-        else report.findings.push("README.md: not a regular file");
+        else report.findings.push(`${relative}: not a regular file`);
       } else if (files.kind(file) === "directory")
         documents.push(...markdownFiles(file, files));
       else report.findings.push(`${relative}: not a directory`);

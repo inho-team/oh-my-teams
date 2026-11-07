@@ -13,6 +13,8 @@ description: 워크트리 소유 세션이 advisor, lawyer, auditor 목적의 �
 
 ## 요청과 결과 형식
 
+호출자는 [검토 요청 구성 절차](../../references/task-workflow.md#검토-요청을-구성한다)에 따라 변경 목적, 기준·대상 커밋, 원래 수용 기준과 관련 위험에서 요청을 구성한다. 설계 선택이나 결과 대조가 필요할 때에만 호출하며, 사용자에게 이미 확인한 배경을 다시 요구하지 않는다.
+
 검토 요청 본문과 회신은 [YAML 문서 규칙](../../references/documents/protocol.yaml)과 [JSON Schema](../../references/documents/document.schema.json)를 따른다. 호스트 도구가 요구하는 인자는 유지하고, 그 안의 OMT 메시지 본문을 YAML로 작성한다. [요청 예제](../../references/documents/review-request.example.yaml)와 [결과 예제](../../references/documents/review-result.example.yaml)의 가상 값을 실제 관측값으로 바꾼다. 결과의 `in_reply_to`와 검토 대상은 요청과 일치해야 하며, 다른 대상의 결과를 같은 요청의 승인으로 사용하지 않는다.
 
 소유 세션은 요청과 결과의 구조·의미 규칙, 근거와 실행 식별자를 확인한다. 사용자에게 검토 문서를 보여줄 때는 검증한 같은 데이터에서 HTML을 생성한다. 독립 검토 원문은 유지하고, HTML 표시 제약이 있으면 제약과 짧은 요약을 전달한다.
