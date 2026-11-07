@@ -13,8 +13,9 @@ function visit(node, callback) {
   if (!node || typeof node !== "object" || !node.type) return;
   callback(node);
   for (const value of Object.values(node)) {
-    if (Array.isArray(value)) value.forEach((child) => visit(child, callback));
-    else if (value && typeof value === "object") visit(value, callback);
+    if (Array.isArray(value)) {
+      value.forEach((child) => visit(child, callback));
+    } else if (value && typeof value === "object") visit(value, callback);
   }
 }
 
@@ -85,10 +86,11 @@ function checkDocumentation(module, findings) {
           `${module.file}:${node.loc.start.line}: public function @param missing`,
         );
       }
-      if (!/@returns\s+\{/.test(doc.value))
+      if (!/@returns\s+\{/.test(doc.value)) {
         findings.push(
           `${module.file}:${node.loc.start.line}: public function @returns missing`,
         );
+      }
     }
   }
   // Ignore comments, preserving offsets and newlines so diagnostics stay accurate.
@@ -102,25 +104,31 @@ function checkDocumentation(module, findings) {
     .join("")
     .split(/\r?\n/)
     .forEach((line, index) => {
-      if (line.trimEnd().length > 180)
+      if (line.trimEnd().length > 180) {
         findings.push(
           `${module.file}:${index + 1}: executable line exceeds 180 characters`,
         );
+      }
     });
 }
 
 function boundIdentifiers(pattern) {
   if (!pattern) return [];
   if (pattern.type === "Identifier") return [pattern];
-  if (pattern.type === "AssignmentPattern")
+  if (pattern.type === "AssignmentPattern") {
     return boundIdentifiers(pattern.left);
-  if (pattern.type === "RestElement") return boundIdentifiers(pattern.argument);
-  if (pattern.type === "ObjectPattern")
+  }
+  if (pattern.type === "RestElement") {
+    return boundIdentifiers(pattern.argument);
+  }
+  if (pattern.type === "ObjectPattern") {
     return pattern.properties.flatMap((item) =>
       boundIdentifiers(item.value ?? item.argument),
     );
-  if (pattern.type === "ArrayPattern")
+  }
+  if (pattern.type === "ArrayPattern") {
     return pattern.elements.flatMap(boundIdentifiers);
+  }
   return [];
 }
 
@@ -153,15 +161,18 @@ function exportedFunctions(module, node, nodes) {
         );
         return resolve(entry?.value, next, rest);
       }
-      if (value.type === "ArrayExpression")
+      if (value.type === "ArrayExpression") {
         return resolve(value.elements[Number(property)], next, rest);
+      }
       return [];
     }
     if (/Function/.test(value.type)) return [value];
-    if (value.type === "VariableDeclaration")
+    if (value.type === "VariableDeclaration") {
       return value.declarations.flatMap((item) => resolve(item, next));
-    if (value.type === "VariableDeclarator")
+    }
+    if (value.type === "VariableDeclarator") {
       return boundIdentifiers(value.id).flatMap((item) => resolve(item, next));
+    }
     return [];
   }
   const values = node.declaration
@@ -180,8 +191,9 @@ function checkDependency(file, target, findings) {
       current === "adapter" ||
       target === "node:path" ||
       (current === "entry" && target === "node:url");
-    if (!allowed)
+    if (!allowed) {
       findings.push(`${file}: ${current} cannot import ${target}; use a port`);
+    }
     return null;
   }
   const resolved = path.posix.normalize(
@@ -193,10 +205,11 @@ function checkDependency(file, target, findings) {
     (current === "entry" && ["core", "adapter"].includes(next)) ||
     (current === "adapter" && ["adapter", "core"].includes(next)) ||
     (current === "core" && next === "core");
-  if (!allowed)
+  if (!allowed) {
     findings.push(
       `${file}: dependency from ${current} to ${next} is forbidden: ${target}`,
     );
+  }
   return resolved;
 }
 
@@ -238,6 +251,54 @@ function dependencies(module, findings) {
   return edges;
 }
 
+function checkPathAssertions(module, findings) {
+  if (layer(module.file) !== "test") return;
+  const imports = new Map(
+    module.ast.body
+      .filter(
+        (node) =>
+          node.type === "ImportDeclaration" &&
+          ["node:assert", "node:assert/strict"].includes(node.source.value),
+      )
+      .flatMap((node) =>
+        node.specifiers.map((specifier) => [
+          `${specifier.start}:${specifier.type}`,
+          specifier.imported?.name ?? "*",
+        ]),
+      ),
+  );
+  visit(module.ast, (node) => {
+    if (node.type !== "CallExpression" || !node.arguments[1]?.regex) return;
+    let target = node.callee;
+    const members = [];
+    while (target.type === "MemberExpression" && !target.computed) {
+      members.unshift(target.property.name);
+      target = target.object;
+    }
+    if (target.type !== "Identifier") return;
+    const imported = (module.bindings[target.start] ?? [])
+      .map((binding) => imports.get(binding.node))
+      .find((name) => name !== undefined);
+    if (imported === undefined) return;
+    const method = [imported, ...members]
+      .filter((name) => !["*", "strict"].includes(name))
+      .join(".");
+    if (!["match", "doesNotMatch"].includes(method)) return;
+    const pattern = node.arguments[1].regex.pattern.replace(
+      /\[(?:\\.|[^\]])*\]/g,
+      "",
+    );
+    if (
+      !/:\\\/\\\//.test(pattern) &&
+      /[\w.-]+\\\/[\w.-]+\\\.[\w]+/.test(pattern)
+    ) {
+      findings.push(
+        `${module.file}:${node.loc.start.line}: nonportable path assertion; use path.join or a separator character class`,
+      );
+    }
+  });
+}
+
 function checkCycles(graph, findings) {
   const active = new Set();
   const done = new Set();
@@ -248,7 +309,9 @@ function checkCycles(graph, findings) {
     }
     if (done.has(file)) return;
     active.add(file);
-    for (const target of graph.get(file) ?? []) walk(target, [...chain, file]);
+    for (const target of graph.get(file) ?? []) {
+      walk(target, [...chain, file]);
+    }
     active.delete(file);
     done.add(file);
   }
@@ -264,17 +327,21 @@ export function inspectSources(modules) {
   const findings = [];
   const graph = new Map();
   for (const module of modules) {
-    if (layer(module.file) === "unknown")
+    if (layer(module.file) === "unknown") {
       findings.push(
         `${module.file}: module is outside declared architecture layers`,
       );
+    }
     checkDocumentation(module, findings);
+    checkPathAssertions(module, findings);
     graph.set(module.file, dependencies(module, findings));
   }
   for (const [file, targets] of graph) {
-    for (const target of targets)
-      if (!graph.has(target))
+    for (const target of targets) {
+      if (!graph.has(target)) {
         findings.push(`${file}: unresolved source import ${target}`);
+      }
+    }
   }
   checkCycles(graph, findings);
   return findings;

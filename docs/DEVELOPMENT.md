@@ -9,7 +9,7 @@
 | `scripts/core/plugin-validation.mjs` | 검사 순서와 스킬 집합·메타데이터 규칙, 최종 보고서를 담당한다. |
 | `scripts/core/plugin-paths.mjs`, `plugin-documents.mjs` | 경로의 경계와 탐색 정책, 매니페스트 진입점, 로컬 링크를 검사한다. |
 | `scripts/core/version-sync.mjs` | 모든 입력을 읽고 검증한 뒤 버전 변경 계획을 만들고 적용한다. |
-| `scripts/core/source-quality.mjs` | 파싱된 소스에서 JSDoc, 줄 길이, 의존성 방향과 순환 참조를 검사한다. |
+| `scripts/core/source-quality.mjs` | 파싱된 소스에서 JSDoc, 줄 길이, 의존성 방향과 순환 참조, 테스트의 파일형 경로 정규식을 검사한다. |
 | `scripts/core/ports.mjs` | 파일 접근·문서 파서·JavaScript 분석·버전 문법·보고서의 구조적 계약을 정의한다. |
 | `scripts/adapters/node-files.mjs` | 실제 파일 접근, 읽기 오류의 경로 보존, 일괄 쓰기와 실패 복구를 구현한다. |
 | `scripts/adapters/document-syntax.mjs`, `javascript-syntax.mjs` | YAML·Markdown 파싱과 JavaScript 구문·스코프 분석을 구현한다. |
