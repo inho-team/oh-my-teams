@@ -50,7 +50,8 @@ npm run sync:check
 | 스킬의 읽기 분량 검사가 실패하거나 측정 범위를 바꾼다. | [reading-budget](../scripts/core/reading-budget.mjs), [진입점](../scripts/check-reading.mjs)과 [스킬별 상한](../scripts/reading-budget.json)을 읽는다. `npm run reading:check -- --files`로 스킬별 파일과 문자 수를 확인한다. | [reading-budget 테스트](../tests/reading-budget.test.mjs)와 [검사 범위](CODE_QUALITY.md#검사-범위와-한계)를 확인한다. 링크를 줄이거나 문서를 나누어 해결하고, 상한을 올릴 때에는 이유를 기록한다. |
 | JSDoc·import·전역 변수·경로 정규식 진단이 잘못됐다. | [source-quality](../scripts/core/source-quality.mjs)와 [javascript-syntax](../scripts/adapters/javascript-syntax.mjs)를 읽는다. | [source-quality 테스트](../tests/source-quality.test.mjs)와 [검사 범위](CODE_QUALITY.md#검사-범위와-한계)를 확인한다. |
 | 진단 항목·목표 재대조·검토 기준을 바꾼다. | [diagnostics.md](../plugins/oh-my-teams/references/diagnostics.md), [작업 흐름](../plugins/oh-my-teams/references/task-workflow.md#목표를-다시-대조한다), [consult](../plugins/oh-my-teams/skills/consult/SKILL.md)를 읽는다. | [SCENARIO_CHECKS](SCENARIO_CHECKS.md)와 [호스트 평가 기준](../evals/TASK_WORKFLOW.md)의 해당 사례를 대조한다. 스키마의 `severity` 값은 바꾸지 않는다. |
-| 통신 문서에 필드나 상태를 추가한다. | 스키마·protocol·해당 [YAML 예제](../plugins/oh-my-teams/references/documents/)와 [문서 core](../scripts/core/omt-documents.mjs)를 함께 읽는다. | [omt-documents 테스트](../tests/omt-documents.test.mjs), [lifecycle-documents 테스트](../tests/lifecycle-documents.test.mjs)와 HTML의 필드 보존을 확인한다. |
+| 통신 문서에 필드나 상태를 추가한다. | 스키마·protocol·해당 [YAML 예제](../plugins/oh-my-teams/references/documents/)와 [문서 core](../scripts/core/omt-documents.mjs)를 함께 읽는다. 수정한 뒤 `npm run cards`로 [문서 카드](../plugins/oh-my-teams/references/documents/cards/)를 갱신하며 카드를 직접 고치지 않는다. | [omt-documents 테스트](../tests/omt-documents.test.mjs), [lifecycle-documents 테스트](../tests/lifecycle-documents.test.mjs)와 HTML의 필드 보존을 확인한다. |
+| 문서 카드의 동기화 검사가 실패하거나 카드의 구성을 바꾼다. | [document-cards](../scripts/core/document-cards.mjs)와 [진입점](../scripts/cards.mjs)을 읽는다. 스키마에 새 구문을 추가했다면 생성기가 그 구문을 표현하는지 확인한다. | [document-cards 테스트](../tests/document-cards.test.mjs)와 [카드 설명](DEVELOPMENT.md#작성용-문서-카드)을 확인한다. |
 | 완료 근거와 원래 작업의 검증 조건을 대조한다. | [task-verification](../scripts/core/task-verification.mjs)과 [작업 흐름](../plugins/oh-my-teams/references/task-workflow.md)을 읽는다. | [검증 조건 테스트](../tests/task-verification.test.mjs)와 [호스트 평가 기준](../evals/TASK_WORKFLOW.md)을 확인한다. |
 | YAML 파싱·변환 CLI·출력 문제가 발생한다. | [documents 진입점](../scripts/documents.mjs)과 [문서 어댑터](../scripts/adapters/omt-documents.mjs)를 읽는다. | 파일·표준 입력·기존 출력 보존과 요청 대응의 CLI 테스트를 확인한다. |
 | Linux·macOS CI가 실패한다. | [Jenkinsfile](../Jenkinsfile), [.ci](../.ci/), [CI 설명](DEVELOPMENT.md#자동-품질-검사와-ci)을 읽고 실제 실패 로그를 확인한다. | [Git 환경 변수 검사](../tests/ci-git-config.test.mjs)를 확인한다. 환경 실패와 코드 실패, 건너뛴 단계를 구분한다. |
@@ -119,7 +120,7 @@ HTML 출력 경로는 저장소 밖 OS 임시 디렉터리에서 아직 없는 �
 | 제품의 소유권·실패 판단·스킬 선택이다. | 설치 스킬·참조 문서를 정본으로 바꾸고 README와 시나리오의 설명을 대조한다. |
 | 공개 API·포트·검증 흐름이다. | [개발 안내](DEVELOPMENT.md), 실행 가능한 예제와 이 안내의 수정 위치 표를 확인한다. |
 | 검사 범위·제한이다. | [코드 품질 안내](CODE_QUALITY.md)와 [현재 분석](PROJECT_ANALYSIS.md)의 해당 한계를 확인한다. |
-| 통신 문서의 필드·불변 조건이다. | 스키마·protocol·여덟 예제·문서 core·검증 조건·HTML 표시·테스트를 함께 대조한다. |
+| 통신 문서의 필드·불변 조건이다. | 스키마·protocol·여덟 예제·문서 카드·문서 core·검증 조건·HTML 표시·테스트를 함께 대조한다. |
 | 실제 호스트·장애 실험의 결과다. | [평가 기록](../evals/README.md)과 해당 [후속 작업](todo/README.md)에 새 환경·정책 해시·관측 근거를 연결한다. |
 
 후속 개발은 [현재 분석의 우선순위](PROJECT_ANALYSIS.md#8-현재의-한계와-개선-우선순위)에서 선택한다. 실제 호스트 검증과 외부 전달 증거의 확인을 우선하며, 진단 통일·분석 모듈 분리·복구 보장 확대는 구체적인 요구가 생겼을 때 설계한다. 과거 이슈를 닫거나 장애 실험을 실행하는 권한은 이 문서에 포함되지 않는다.

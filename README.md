@@ -24,6 +24,8 @@ Claude Code와 Codex에서 사용하는 Orca 중심 팀 작업 스킬이다. **�
 
 3.4.0에서는 외부 오케스트레이션 도구의 점검 절차 중 OMT 경계에 맞는 것만 지침으로 옮겼다. [환경 진단](plugins/oh-my-teams/references/diagnostics.md)은 고정 점검 ID와 `pass`·`warn`·`fail`·`unknown` 판정으로 Orca·Git·CI 관측을 보고하며 진단과 수리를 분리한다. [작업 흐름](plugins/oh-my-teams/references/task-workflow.md#목표를-다시-대조한다)에는 위임·통합·재개·범위 변경·완료 직전의 목표 재대조를 추가했다. `consult`에는 검토 심각도 기준, 검토 분할과 auditor의 정직성 점검 항목을 추가했다. 런타임, 훅, 모델 라우터와 상태 저장소는 추가하지 않았다.
 
+3.5.0에서는 문서 종류별 [작성 카드](plugins/oh-my-teams/references/documents/cards/)를 설치 패키지에 추가했다. 카드는 JSON Schema와 YAML 문서 규칙에서 생성한 파생 자료이며, 문서 하나를 작성할 때 필요한 필드와 규칙만 담는다. 스키마와 문서 규칙이 계속 정본이고 문서 형식은 바뀌지 않았다. 이 버전의 스킬은 아직 카드를 링크하지 않는다.
+
 ## 설치
 
 이 저장소를 로컬 마켓플레이스로 추가하고 플러그인을 설치한다. Claude Code 또는 Codex 중 사용하는 호스트에 해당하는 명령만 실행한다.
@@ -53,7 +55,7 @@ npm run sync
 npm run verify
 ```
 
-`npm run verify`는 로컬과 Jenkins의 Linux·macOS 검사에서 공통으로 사용하는 진입점이며 린트와 테스트를 실행한다. `npm run quality`는 활성 소스·스킬과 설치 문서, 저장소 README·AGENTS·`docs/`·`evals/`의 링크와 앵커를 검사한다. 스킬마다 `SKILL.md`와 직접 링크한 파일의 문자 수가 정해진 상한을 넘지 않는지도 확인한다. 설치 문서의 모든 로컬 링크는 플러그인 안에서 해결돼야 한다. `npm test`는 플러그인 폴더만 복사한 설치 구조도 확인한다. `npm run sync`는 `package.json`의 버전을 마켓플레이스와 플러그인 매니페스트에 반영한다.
+`npm run verify`는 로컬과 Jenkins의 Linux·macOS 검사에서 공통으로 사용하는 진입점이며 린트와 테스트를 실행한다. `npm run quality`는 활성 소스·스킬과 설치 문서, 저장소 README·AGENTS·`docs/`·`evals/`의 링크와 앵커를 검사한다. 스킬마다 `SKILL.md`와 직접 링크한 파일의 문자 수가 정해진 상한을 넘지 않는지도 확인한다. 설치 문서의 모든 로컬 링크는 플러그인 안에서 해결돼야 한다. `npm test`는 플러그인 폴더만 복사한 설치 구조도 확인한다. `npm run sync`는 `package.json`의 버전을 마켓플레이스와 플러그인 매니페스트에 반영한다. `npm run cards`는 스키마와 문서 규칙에서 작성 카드를 다시 생성한다.
 
 개발 모듈의 책임과 공통 함수 사용법은 [개발 도구와 공통 예제](docs/DEVELOPMENT.md)에 정리했다. 실행 가능한 예제도 `npm test`에서 함께 검사한다.
 

@@ -17,6 +17,12 @@ function readText(file) {
   }
 }
 
+function createText(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // The exclusive flag keeps a file that appeared after planning.
+  fs.writeFileSync(file, text, { flag: "wx" });
+}
+
 function assertSnapshot(file, expected) {
   if (readText(file) !== expected)
     throw new Error(`File changed since planning: ${file}`);
@@ -122,5 +128,6 @@ export function createNodeFiles({
         .map((entry) => ({ name: entry.name, kind: kind(entry) })),
     readText,
     writeBatch: (changes) => writeBatch(changes, writeText, flush),
+    createText,
   };
 }

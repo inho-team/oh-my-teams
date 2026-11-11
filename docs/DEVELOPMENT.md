@@ -12,10 +12,12 @@
 | `scripts/core/version-sync.mjs` | 모든 입력을 읽고 검증한 뒤 버전 변경 계획을 만들고 적용한다. |
 | `scripts/core/source-quality.mjs` | 파싱된 소스에서 JSDoc, 줄 길이, 의존성 방향과 순환 참조, 테스트의 파일형 경로 정규식을 검사한다. |
 | `scripts/core/ports.mjs` | 파일 접근·문서 파서·JavaScript 분석·버전 문법·보고서의 구조적 계약을 정의한다. |
-| `scripts/adapters/node-files.mjs` | 실제 파일 접근, 읽기 오류의 경로 보존, 일괄 쓰기와 실패 복구를 구현한다. |
+| `scripts/adapters/node-files.mjs` | 실제 파일 접근, 읽기 오류의 경로 보존, 일괄 쓰기와 실패 복구, 덮어쓰지 않는 새 파일 생성을 구현한다. |
 | `scripts/adapters/document-syntax.mjs`, `javascript-syntax.mjs` | YAML·Markdown 파싱과 JavaScript 구문·스코프 분석을 구현한다. |
 | `scripts/adapters/version-syntax.mjs` | 엄격한 정본 SemVer와 Codex 빌드 값의 UTC 달력 날짜를 확인한다. |
 | `scripts/documents.mjs` | YAML 문서 변환의 공개 함수와 CLI를 제공한다. |
+| `scripts/cards.mjs` | 문서 카드의 생성·동기화 검사의 공개 함수와 CLI를 제공한다. |
+| `scripts/core/document-cards.mjs` | 스키마와 사용 규칙에서 문서 종류별 작성 카드를 만들고, 설치된 카드와의 차이를 계획한다. |
 | `scripts/core/omt-documents.mjs` | 보고서의 의미 규칙, 요청·결과의 대응과 HTML 표시를 담당한다. |
 | `scripts/adapters/omt-documents.mjs` | 제한된 YAML 파싱, JSON Schema 검사와 CLI 입출력을 구현한다. |
 | `tests/helpers/plugin-fixture.mjs` | 정규화된 임시 경로, 설치 구조 복사, 매니페스트 수정을 제공한다. |
@@ -111,6 +113,16 @@ node scripts/documents.mjs html plugins/oh-my-teams/references/documents/status-
 
 [문서 회귀 검사](../tests/omt-documents.test.mjs)는 격리된 플러그인 설치의 스키마와 예제, 잘못된 YAML·스키마·상태 보고, 요청 대응, HTML 텍스트 보존과 삽입 방지, 파일·표준 입력 CLI와 기존 출력 보존을 검사한다. 이 검사는 실제 호스트의 스킬 선택이나 Orca 조회를 자동 실행하지 않는다.
 
+### 작성용 문서 카드
+
+[JSON Schema](../plugins/oh-my-teams/references/documents/document.schema.json)는 검증기가 읽는 정본이고 [protocol.yaml](../plugins/oh-my-teams/references/documents/protocol.yaml)은 사용 규칙의 정본이다. 두 파일은 여섯 문서 종류를 모두 담고 있어서, 문서 하나를 작성하는 모델이 나머지 다섯 종류의 정의까지 읽게 된다. [문서 카드](../plugins/oh-my-teams/references/documents/cards/)는 두 정본에서 한 종류에 필요한 내용만 옮긴 파생 자료다. 종류별 카드 여섯 개와 [공통 규칙 카드](../plugins/oh-my-teams/references/documents/cards/common.md) 하나가 있다.
+
+카드는 손으로 관리하지 않고 생성한다. 손으로 쓴 요약은 스키마와 어긋나도 검사할 방법이 없기 때문이다. `npm run cards`가 카드를 갱신하고, `npm run cards:check`가 설치된 카드와 생성 결과의 차이를 보고한다. `lint`에 이 검사가 포함되므로 스키마나 사용 규칙을 수정하고 카드를 갱신하지 않은 변경은 실패한다. `synchronizeCards(write, { pluginRoot, files })`는 `{ changed, mismatches }`를 반환한다. 카드 디렉터리에 생성 대상이 아닌 파일이 있으면 `not generated`로 보고하며 삭제하지 않는다.
+
+종류별 카드의 필드 개요는 스키마에서 만든다. 필드 이름 뒤의 `?`는 생략할 수 있다는 뜻이며, 여러 곳에서 참조하는 객체 정의는 `<이름>` 구조로 한 번만 적는다. 규칙은 `protocol.yaml`의 해당 항목을 그대로 옮긴다. 검토 요청과 결과는 `review_rules`를, 상태 보고는 `status_rules`를, 나머지 세 종류는 `lifecycle_rules`의 같은 이름 항목을 사용한다. `transport`, `yaml_rules`, `rendering`은 공통 규칙 카드에 둔다. 카드가 표현하지 못하는 스키마 구문이 추가되면 생성기는 `TypeError`로 중단하므로, 스키마를 확장할 때에는 생성기와 테스트를 함께 수정한다. 문서 종류를 추가하거나 예제 파일 이름을 바꿀 때에는 생성기의 종류 정의도 수정한다.
+
+카드는 설치 패키지의 `scripts`·`schemas`·`resources`·`examples` 디렉터리 금지 계약을 지키기 위해 `references/documents/cards/`에 둔다. 3.5.0의 스킬은 아직 카드를 링크하지 않는다. 호스트의 실제 읽기 행동을 변경 전 기준으로 관측한 뒤에 스킬의 링크를 카드로 바꾼다. 카드가 스키마와 일치한다는 것은 필드와 허용 값의 표기에 한정되며, 모델이 카드만 읽고 유효한 문서를 작성하는지는 호스트 평가에서 따로 확인한다.
+
 ## 자동 품질 검사와 CI
 
 저장소 문서 검사도 `quality`에 포함된다. `npm run docs:check`로 README·AGENTS·`docs/`·`evals/`의 링크와 앵커만 확인할 수 있다. AGENTS는 존재할 때 검사하며 필수 파일로 만들지는 않는다. `validateRepositoryDocs(root, { files, syntax })`는 `{ status, documents, findings }`를 반환하며 설치 문서 검사와 같은 파서를 사용한다. 저장소 문서는 저장소 경계를, 설치 문서는 플러그인 경계를 적용한다. 설치 문서의 경계는 넓히지 않는다.
@@ -123,7 +135,7 @@ Jenkins의 Linux 단계는 OMT 전용 Colima 프로필을 사용한다. 기존 �
 
 Linux 검사에는 체크아웃을 임시 tar 파일로 묶어 컨테이너의 표준 입력으로 전달한다. Jenkins 작업 공간이 외장 드라이브의 심볼릭 링크여도 Colima의 호스트 경로 마운트에 의존하지 않는다. macOS의 확장 속성과 AppleDouble 보조 파일은 생성하지 않는다. 압축 파일 생성과 컨테이너 실행의 실패를 각각 전파하며 임시 파일은 셸 종료 시 삭제한다. 검사 결과 파일은 컨테이너 밖으로 복사하지 않는다.
 
-로컬과 두 CI 단계는 `npm run verify`를 공통으로 실행한다. 이 명령은 `lint`와 `test`를 순서대로 실행하며 `lint`에 소스·설치 문서·저장소 문서 품질과 읽기 분량, 포맷과 버전 동기화 검사가 포함된다. 앞 검사가 실패하면 다음 명령으로 진행하지 않는다. Jenkins 플러그인을 사용하는 단계를 추가하기 전에는 실제 서버의 지원 여부를 확인한다. 설정 파일만 보고 단계 실행 성공을 추정하지 않는다.
+로컬과 두 CI 단계는 `npm run verify`를 공통으로 실행한다. 이 명령은 `lint`와 `test`를 순서대로 실행하며 `lint`에 소스·설치 문서·저장소 문서 품질과 읽기 분량, 포맷, 버전 동기화와 문서 카드 동기화 검사가 포함된다. 앞 검사가 실패하면 다음 명령으로 진행하지 않는다. Jenkins 플러그인을 사용하는 단계를 추가하기 전에는 실제 서버의 지원 여부를 확인한다. 설정 파일만 보고 단계 실행 성공을 추정하지 않는다.
 
 ## 수정과 검증
 
