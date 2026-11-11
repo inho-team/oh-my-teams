@@ -53,7 +53,7 @@ npm run sync
 npm run verify
 ```
 
-`npm run verify`는 로컬과 Jenkins의 Linux·macOS 검사에서 공통으로 사용하는 진입점이며 린트와 테스트를 실행한다. `npm run quality`는 활성 소스·스킬과 설치 문서, 저장소 README·AGENTS·`docs/`·`evals/`의 링크와 앵커를 검사한다. 설치 문서의 모든 로컬 링크는 플러그인 안에서 해결돼야 한다. `npm test`는 플러그인 폴더만 복사한 설치 구조도 확인한다. `npm run sync`는 `package.json`의 버전을 마켓플레이스와 플러그인 매니페스트에 반영한다.
+`npm run verify`는 로컬과 Jenkins의 Linux·macOS 검사에서 공통으로 사용하는 진입점이며 린트와 테스트를 실행한다. `npm run quality`는 활성 소스·스킬과 설치 문서, 저장소 README·AGENTS·`docs/`·`evals/`의 링크와 앵커를 검사한다. 스킬마다 `SKILL.md`와 직접 링크한 파일의 문자 수가 정해진 상한을 넘지 않는지도 확인한다. 설치 문서의 모든 로컬 링크는 플러그인 안에서 해결돼야 한다. `npm test`는 플러그인 폴더만 복사한 설치 구조도 확인한다. `npm run sync`는 `package.json`의 버전을 마켓플레이스와 플러그인 매니페스트에 반영한다.
 
 개발 모듈의 책임과 공통 함수 사용법은 [개발 도구와 공통 예제](docs/DEVELOPMENT.md)에 정리했다. 실행 가능한 예제도 `npm test`에서 함께 검사한다.
 
