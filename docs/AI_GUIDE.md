@@ -27,6 +27,7 @@ npm run sync:check
 |---|---|---|
 | 사용자 목표와 허가 | 현재 사용자 요청과 해당 작업에서 이미 확인한 결정이다. | 분석 문서의 제안이나 예제 값을 실행 권한으로 바꾸지 않는다. |
 | 편집 소유권·전달·회수 | [설치 정책](../plugins/oh-my-teams/references/architecture.md)과 관련 스킬이다. | 새 등록부를 만들어 Orca 상태를 복제하지 않는다. |
+| 실행 환경 점검 | [환경 진단](../plugins/oh-my-teams/references/diagnostics.md)의 점검 ID와 판정이다. | `unknown`을 `pass`로 채우지 않으며 진단 중에 상태를 바꾸지 않는다. |
 | 실행·세션·인스턴스 | 현재 호스트의 Orca 관측이다. | 불완전한 목록과 응답 유실을 종료·삭제 성공으로 해석하지 않는다. |
 | 소스·전달·검사 | 실제 Git SHA, PR·CI와 해당 로그다. | 이전 HEAD의 검사와 자기 검토를 최신 독립 검토의 승인으로 사용하지 않는다. |
 | 버전 | [package.json](../package.json)이다. | 잠금 파일은 npm으로, 세 매니페스트는 `sync`로 갱신한다. |
@@ -47,6 +48,7 @@ npm run sync:check
 | 버전이 다르거나 Codex 날짜 값이 잘못됐다. | [metadata 진입점](../scripts/metadata.mjs), [version-sync](../scripts/core/version-sync.mjs), [version-syntax](../scripts/adapters/version-syntax.mjs)를 읽는다. | [metadata 테스트](../tests/metadata.test.mjs), [복구 계약](METADATA_RECOVERY.md)을 확인한다. 매니페스트를 수동으로 맞추지 않는다. |
 | 쓰기·교체·복구 중 충돌이나 오류가 발생한다. | [node-files 어댑터](../scripts/adapters/node-files.mjs)와 [FilesPort](../scripts/core/ports.mjs)를 읽는다. | [node-files 테스트](../tests/node-files.test.mjs)와 실제 자식 프로세스 중단을 다루는 metadata 테스트를 확인한다. |
 | JSDoc·import·전역 변수·경로 정규식 진단이 잘못됐다. | [source-quality](../scripts/core/source-quality.mjs)와 [javascript-syntax](../scripts/adapters/javascript-syntax.mjs)를 읽는다. | [source-quality 테스트](../tests/source-quality.test.mjs)와 [검사 범위](CODE_QUALITY.md#검사-범위와-한계)를 확인한다. |
+| 진단 항목·목표 재대조·검토 기준을 바꾼다. | [diagnostics.md](../plugins/oh-my-teams/references/diagnostics.md), [작업 흐름](../plugins/oh-my-teams/references/task-workflow.md#목표를-다시-대조한다), [consult](../plugins/oh-my-teams/skills/consult/SKILL.md)를 읽는다. | [SCENARIO_CHECKS](SCENARIO_CHECKS.md)와 [호스트 평가 기준](../evals/TASK_WORKFLOW.md)의 해당 사례를 대조한다. 스키마의 `severity` 값은 바꾸지 않는다. |
 | 통신 문서에 필드나 상태를 추가한다. | 스키마·protocol·해당 [YAML 예제](../plugins/oh-my-teams/references/documents/)와 [문서 core](../scripts/core/omt-documents.mjs)를 함께 읽는다. | [omt-documents 테스트](../tests/omt-documents.test.mjs), [lifecycle-documents 테스트](../tests/lifecycle-documents.test.mjs)와 HTML의 필드 보존을 확인한다. |
 | 완료 근거와 원래 작업의 검증 조건을 대조한다. | [task-verification](../scripts/core/task-verification.mjs)과 [작업 흐름](../plugins/oh-my-teams/references/task-workflow.md)을 읽는다. | [검증 조건 테스트](../tests/task-verification.test.mjs)와 [호스트 평가 기준](../evals/TASK_WORKFLOW.md)을 확인한다. |
 | YAML 파싱·변환 CLI·출력 문제가 발생한다. | [documents 진입점](../scripts/documents.mjs)과 [문서 어댑터](../scripts/adapters/omt-documents.mjs)를 읽는다. | 파일·표준 입력·기존 출력 보존과 요청 대응의 CLI 테스트를 확인한다. |

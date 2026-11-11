@@ -22,6 +22,8 @@ Claude Code와 Codex에서 사용하는 Orca 중심 팀 작업 스킬이다. **�
 
 3.3.0에서는 [작업 흐름](plugins/oh-my-teams/references/task-workflow.md)에 따라 사용자 요청에서 기준·검사·전달 범위를 구성하고 필요한 검토만 선택한다. 새 작업 요청의 `verification`으로 필수 CI·독립 검토·전달 증거를 정하며, 완료 보고에서는 검사·검토·전달을 최종 소스 커밋에 연결한다. 기존 문서도 계속 읽을 수 있다. 실제 증거와 권한은 소유 세션이 Orca·Git·CI에서 확인한다.
 
+3.4.0에서는 외부 오케스트레이션 도구의 점검 절차 중 OMT 경계에 맞는 것만 지침으로 옮겼다. [환경 진단](plugins/oh-my-teams/references/diagnostics.md)은 고정 점검 ID와 `pass`·`warn`·`fail`·`unknown` 판정으로 Orca·Git·CI 관측을 보고하며 진단과 수리를 분리한다. [작업 흐름](plugins/oh-my-teams/references/task-workflow.md#목표를-다시-대조한다)에는 위임·통합·재개·범위 변경·완료 직전의 목표 재대조를 추가했다. `consult`에는 검토 심각도 기준, 검토 분할과 auditor의 정직성 점검 항목을 추가했다. 런타임, 훅, 모델 라우터와 상태 저장소는 추가하지 않았다.
+
 ## 설치
 
 이 저장소를 로컬 마켓플레이스로 추가하고 플러그인을 설치한다. Claude Code 또는 Codex 중 사용하는 호스트에 해당하는 명령만 실행한다.
