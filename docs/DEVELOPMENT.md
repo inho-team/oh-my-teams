@@ -4,10 +4,11 @@
 
 | 파일 | 책임 |
 |---|---|
-| `scripts/check-skills.mjs`, `metadata.mjs`, `check-source.mjs`, `check-docs.mjs` | 기본 경로·시간·어댑터를 조합하고 공개 함수와 CLI를 제공한다. |
+| `scripts/check-skills.mjs`, `metadata.mjs`, `check-source.mjs`, `check-docs.mjs`, `check-reading.mjs` | 기본 경로·시간·어댑터를 조합하고 공개 함수와 CLI를 제공한다. |
 | `scripts/core/repository-documents.mjs` | 저장소 README·선택적 AGENTS·`docs/`·`evals/`를 수집하고 기존 링크 검사에 저장소 경계를 전달한다. |
 | `scripts/core/plugin-validation.mjs` | 검사 순서와 스킬 집합·메타데이터 규칙, 최종 보고서를 담당한다. |
 | `scripts/core/plugin-paths.mjs`, `plugin-documents.mjs` | 경로의 경계와 탐색 정책, 매니페스트 진입점, 로컬 링크를 검사한다. |
+| `scripts/core/reading-budget.mjs` | 스킬마다 `SKILL.md`와 직접 링크한 파일의 문자 수를 계산하고 [스킬별 상한](../scripts/reading-budget.json)과 비교한다. |
 | `scripts/core/version-sync.mjs` | 모든 입력을 읽고 검증한 뒤 버전 변경 계획을 만들고 적용한다. |
 | `scripts/core/source-quality.mjs` | 파싱된 소스에서 JSDoc, 줄 길이, 의존성 방향과 순환 참조, 테스트의 파일형 경로 정규식을 검사한다. |
 | `scripts/core/ports.mjs` | 파일 접근·문서 파서·JavaScript 분석·버전 문법·보고서의 구조적 계약을 정의한다. |
@@ -116,11 +117,13 @@ node scripts/documents.mjs html plugins/oh-my-teams/references/documents/status-
 
 `npm run quality`는 먼저 JavaScript 소스를 검사한 뒤 설치 패키지를 검사한다. 소스 검사는 상태 디렉터리와 `node_modules`·`.git`을 제외한 `.mjs`를 수집하고, 파싱된 구문 트리와 주석 위치로 모듈 JSDoc, 공개 함수의 인자·반환 설명, 실행문 줄 길이와 의존성을 확인한다. 허용되지 않은 계층의 모듈, 계산된 import, 누락된 로컬 import와 순환 참조도 실패로 보고한다. 새 파일도 커밋 전부터 검사한다. 이 검사는 정적 규칙이며 주석의 의미나 모든 동적 실행을 검증하는 보안 격리 장치는 아니다.
 
+`quality`의 마지막 단계는 스킬의 읽기 분량 검사다. `npm run reading:check`로 이 검사만 실행할 수 있으며 `--files`를 붙이면 스킬별 파일 목록도 출력한다. `validateReading(pluginRoot, { files, syntax, ceilings })`는 `{ status, unit, skills, findings }`를 반환한다. 각 스킬의 `characters`는 `SKILL.md`와 그 파일이 플러그인 안에서 직접 링크한 파일의 합계이며, 같은 대상의 반복 링크·외부 URL·조각만 있는 링크·플러그인 밖의 경로는 세지 않는다. 문자 수는 BOM을 제거하고 줄바꿈을 LF로 맞춘 뒤의 유니코드 코드 포인트 수다. 상한은 [reading-budget.json](../scripts/reading-budget.json)에 스킬 이름별로 기록하며, 설치된 스킬과 상한의 이름 집합이 다르면 실패한다. 스킬이 읽게 하는 분량을 줄이면 상한도 새 측정값으로 낮추고, 올려야 할 때에는 이유를 커밋 메시지와 [코드 품질 안내](CODE_QUALITY.md)에 남긴다. 잘못된 상한 파일과 파일 접근 오류는 진단으로 바꾸지 않고 예외로 전달한다.
+
 Jenkins의 Linux 단계는 OMT 전용 Colima 프로필을 사용한다. 기존 운영 전제는 `macmini` 에이전트의 실행 슬롯이 하나라는 것이지만 슬롯 수는 저장소 설정만으로 확인할 수 없다. `disableConcurrentBuilds()`만으로 서로 다른 브랜치 작업까지 직렬화된다고 가정하지 않는다. 실행 슬롯을 늘릴 때에는 프로필 공유를 막을 수단을 먼저 마련해야 한다. Linux 단계는 시작·이미지 빌드·컨테이너 실행·종료를 한 실행에서 처리하며 다른 프로젝트의 Colima 프로필을 종료하지 않는다.
 
 Linux 검사에는 체크아웃을 임시 tar 파일로 묶어 컨테이너의 표준 입력으로 전달한다. Jenkins 작업 공간이 외장 드라이브의 심볼릭 링크여도 Colima의 호스트 경로 마운트에 의존하지 않는다. macOS의 확장 속성과 AppleDouble 보조 파일은 생성하지 않는다. 압축 파일 생성과 컨테이너 실행의 실패를 각각 전파하며 임시 파일은 셸 종료 시 삭제한다. 검사 결과 파일은 컨테이너 밖으로 복사하지 않는다.
 
-로컬과 두 CI 단계는 `npm run verify`를 공통으로 실행한다. 이 명령은 `lint`와 `test`를 순서대로 실행하며 `lint`에 소스·설치 문서·저장소 문서 품질, 포맷과 버전 동기화 검사가 포함된다. 앞 검사가 실패하면 다음 명령으로 진행하지 않는다. Jenkins 플러그인을 사용하는 단계를 추가하기 전에는 실제 서버의 지원 여부를 확인한다. 설정 파일만 보고 단계 실행 성공을 추정하지 않는다.
+로컬과 두 CI 단계는 `npm run verify`를 공통으로 실행한다. 이 명령은 `lint`와 `test`를 순서대로 실행하며 `lint`에 소스·설치 문서·저장소 문서 품질과 읽기 분량, 포맷과 버전 동기화 검사가 포함된다. 앞 검사가 실패하면 다음 명령으로 진행하지 않는다. Jenkins 플러그인을 사용하는 단계를 추가하기 전에는 실제 서버의 지원 여부를 확인한다. 설정 파일만 보고 단계 실행 성공을 추정하지 않는다.
 
 ## 수정과 검증
 
