@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .omc/
 .omo/
+graft/
 .orca/
 .omt/
 experiments/results/
