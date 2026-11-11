@@ -9,6 +9,7 @@
  * @property {(directory: string) => FileEntry[]} entries Lists immediate entries without following links.
  * @property {(file: string) => string} readText Reads UTF-8 and preserves filesystem error context.
  * @property {(changes: FileChange[]) => void} writeBatch Stages writes and restores owned snapshots; preserves observed conflicts.
+ * @property {(file: string, text: string) => void} createText Creates a new UTF-8 file and its parent directories; never overwrites.
  *
  * @typedef {object} DocumentSyntaxPort
  * @property {(source: string) => object} skillMetadata Parses metadata; SyntaxError denotes invalid input.
