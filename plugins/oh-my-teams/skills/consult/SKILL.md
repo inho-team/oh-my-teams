@@ -15,7 +15,7 @@ description: 워크트리 소유 세션이 advisor, lawyer, auditor 목적의 �
 
 호출자는 [검토 요청 구성 절차](../../references/task-workflow.md#검토-요청을-구성한다)에 따라 변경 목적, 기준·대상 커밋, 원래 수용 기준과 관련 위험에서 요청을 구성한다. 설계 선택이나 결과 대조가 필요할 때에만 호출하며, 사용자에게 이미 확인한 배경을 다시 요구하지 않는다.
 
-검토 요청 본문과 회신은 [YAML 문서 규칙](../../references/documents/protocol.yaml)과 [JSON Schema](../../references/documents/document.schema.json)를 따른다. 호스트 도구가 요구하는 인자는 유지하고, 그 안의 OMT 메시지 본문을 YAML로 작성한다. [요청 예제](../../references/documents/review-request.example.yaml)와 [결과 예제](../../references/documents/review-result.example.yaml)의 가상 값을 실제 관측값으로 바꾼다. 결과의 `in_reply_to`와 검토 대상은 요청과 일치해야 하며, 다른 대상의 결과를 같은 요청의 승인으로 사용하지 않는다.
+검토 요청 본문은 [`review_request` 카드](../../references/documents/cards/review-request.md)를, 회신은 [`review_result` 카드](../../references/documents/cards/review-result.md)를 따르며 두 문서 모두 [공통 규칙](../../references/documents/cards/common.md)을 따른다. 호스트 도구가 요구하는 인자는 유지하고, 그 안의 OMT 메시지 본문을 YAML로 작성한다. [요청 예제](../../references/documents/review-request.example.yaml)와 [결과 예제](../../references/documents/review-result.example.yaml)의 가상 값을 실제 관측값으로 바꾼다. 결과의 `in_reply_to`와 검토 대상은 요청과 일치해야 하며, 다른 대상의 결과를 같은 요청의 승인으로 사용하지 않는다.
 
 변경이 크면 한 요청에서 근거를 모두 확인할 수 있는 범위로 검토를 나눈다. 서로 독립된 모듈이나 수용 기준별로 요청을 분리하고, 나눈 요청은 모두 같은 `subject.commit`을 사용한다. 서로 독립된 읽기 전용 검토는 한 번에 요청하고, 결과를 기다리는 동안 같은 상태를 반복해서 조회하지 않는다. 이 규칙은 편집 작업의 병렬화에는 적용하지 않는다.
 

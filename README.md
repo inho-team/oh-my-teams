@@ -18,13 +18,15 @@ Claude Code와 Codex에서 사용하는 Orca 중심 팀 작업 스킬이다. **�
 
 작업 소유권, 독립 검토와 회수 기준은 플러그인에 포함된 [세션 소유권 구조](plugins/oh-my-teams/references/architecture.md)에 정리했다. PR/MR 생성 요청만으로 병합 권한을 추정하지 않으며, 결과 전달과 워크트리 정리 상태도 각각 보고한다. Orca 명령은 설치된 버전의 `orca-cli` 가이드를 확인한 뒤 실행한다.
 
-작업 요청, 검토 요청·결과, 상태 보고, 완료 보고와 중단·인계 보고의 여섯 문서는 [YAML 문서 규칙](plugins/oh-my-teams/references/documents/protocol.yaml)을 따른다. 설치 패키지에는 JSON Schema와 YAML 예제를 포함한다. 코드는 검증한 JSON 호환 객체를 처리하며 사용자에게 보여주는 문서는 같은 데이터에서 HTML로 생성한다. 호스트의 `SKILL.md` 진입점과 도구 인자 형식은 유지한다.
+작업 요청, 검토 요청·결과, 상태 보고, 완료 보고와 중단·인계 보고의 여섯 문서는 [YAML 문서 규칙](plugins/oh-my-teams/references/documents/protocol.yaml)을 따른다. 설치 패키지에는 JSON Schema, YAML 예제와 문서 종류별 작성 카드를 포함한다. 코드는 검증한 JSON 호환 객체를 처리하며 사용자에게 보여주는 문서는 같은 데이터에서 HTML로 생성한다. 호스트의 `SKILL.md` 진입점과 도구 인자 형식은 유지한다.
 
 3.3.0에서는 [작업 흐름](plugins/oh-my-teams/references/task-workflow.md)에 따라 사용자 요청에서 기준·검사·전달 범위를 구성하고 필요한 검토만 선택한다. 새 작업 요청의 `verification`으로 필수 CI·독립 검토·전달 증거를 정하며, 완료 보고에서는 검사·검토·전달을 최종 소스 커밋에 연결한다. 기존 문서도 계속 읽을 수 있다. 실제 증거와 권한은 소유 세션이 Orca·Git·CI에서 확인한다.
 
 3.4.0에서는 외부 오케스트레이션 도구의 점검 절차 중 OMT 경계에 맞는 것만 지침으로 옮겼다. [환경 진단](plugins/oh-my-teams/references/diagnostics.md)은 고정 점검 ID와 `pass`·`warn`·`fail`·`unknown` 판정으로 Orca·Git·CI 관측을 보고하며 진단과 수리를 분리한다. [작업 흐름](plugins/oh-my-teams/references/task-workflow.md#목표를-다시-대조한다)에는 위임·통합·재개·범위 변경·완료 직전의 목표 재대조를 추가했다. `consult`에는 검토 심각도 기준, 검토 분할과 auditor의 정직성 점검 항목을 추가했다. 런타임, 훅, 모델 라우터와 상태 저장소는 추가하지 않았다.
 
 3.5.0에서는 문서 종류별 [작성 카드](plugins/oh-my-teams/references/documents/cards/)를 설치 패키지에 추가했다. 카드는 JSON Schema와 YAML 문서 규칙에서 생성한 파생 자료이며, 문서 하나를 작성할 때 필요한 필드와 규칙만 담는다. 스키마와 문서 규칙이 계속 정본이고 문서 형식은 바뀌지 않았다. 이 버전의 스킬은 아직 카드를 링크하지 않는다.
+
+3.6.0에서는 문서를 작성하는 다섯 스킬이 스키마와 문서 규칙 전체 대신 해당 종류의 작성 카드와 공통 규칙 카드를 링크한다. 스킬 하나가 직접 링크하는 분량은 스킬에 따라 절반에서 4분의 1 수준으로 줄었다. 문서 형식과 검증 규칙은 바뀌지 않았으며, 변경 전후의 호스트 관측은 [읽기 관측](evals/READING_OBSERVATION.md)에 기록했다.
 
 ## 설치
 
