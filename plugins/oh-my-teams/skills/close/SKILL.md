@@ -9,7 +9,7 @@ description: Orca 워크트리의 소유 세션이 결과를 검증하고 허가
 
 CI 결과나 삭제 응답을 확인할 수 없으면 [실패 상황의 판단 기준](../../references/failure-handling.md)을 따른다. 필수 검사 목록이 비어 있는 상태와 실제 빌드의 실행·실패를 구분한다.
 
-완료 보고는 [YAML 문서 규칙](../../references/documents/protocol.yaml)과 [JSON Schema](../../references/documents/document.schema.json)의 `completion_report`로 작성한다. [완료 보고 예제](../../references/documents/completion-report.example.yaml)의 가상 값을 실제 관측값으로 바꾼다. `in_reply_to`는 원래 `task_request`를 가리키며, 각 수용 기준과 필수 검사 이름·명령을 원래 요청과 대조한다. 요청 문서가 없는 기존 작업은 확인한 원래 사용자 요청에서 작업 양식을 먼저 구성하며 목표나 필수 작업을 줄이지 않는다. 미충족 기준이나 필수 남은 일이 있으면 `outcome`을 `incomplete`로 기록한다. 사용자에게 보여주는 문서는 검증한 같은 데이터에서 HTML로 생성하며, HTML 표시가 불가능하면 제약과 요약을 전달한다.
+완료 보고는 [`completion_report` 카드](../../references/documents/cards/completion-report.md)와 [공통 규칙](../../references/documents/cards/common.md)에 따라 YAML로 작성한다. [완료 보고 예제](../../references/documents/completion-report.example.yaml)의 가상 값을 실제 관측값으로 바꾼다. `in_reply_to`는 원래 `task_request`를 가리키며, 각 수용 기준과 필수 검사 이름·명령을 원래 요청과 대조한다. 요청 문서가 없는 기존 작업은 확인한 원래 사용자 요청에서 작업 양식을 먼저 구성하며 목표나 필수 작업을 줄이지 않는다. 미충족 기준이나 필수 남은 일이 있으면 `outcome`을 `incomplete`로 기록한다. 사용자에게 보여주는 문서는 검증한 같은 데이터에서 HTML로 생성하며, HTML 표시가 불가능하면 제약과 요약을 전달한다.
 
 1. [완료 근거 대조 절차](../../references/task-workflow.md#완료-근거를-대조한다)와 [검증 조건을 포함한 완료 예제](../../references/documents/verified-completion.example.yaml)에 따라 사용자의 수용 기준을 최신 Git HEAD와 대조한다. 검사 소스 SHA, 필수 CI의 이름·빌드 ID·대상 브랜치, 검토 요청·결과 ID와 구현·검토 실행 ID를 확인한다. 전달 관측 기록은 실제 목적지를 조회한 뒤 작성한다. `verification`을 포함한 요청은 그 조건도 대조한다. 미해결 이의나 실패를 완료로 처리하지 않는다.
 2. 사용자가 요청하거나 허가한 방식으로 결과를 전달한다. PR/MR 생성과 병합은 별개의 권한이다. 해당 작업의 병합을 사용자가 허가한 경우에만 대상 브랜치, 포함된 커밋과 필수 CI 결과를 확인한 뒤 병합한다. 이미 받은 허가는 다시 묻지 않는다. 최종 승인이 필요한 경우에는 실제 결과와 대상을 먼저 준비한다.

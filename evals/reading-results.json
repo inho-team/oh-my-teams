@@ -1,0 +1,819 @@
+{
+  "description": "Observed reads, token usage and document check results per host and case. Raw event streams contain local paths and stay outside the repository. Token counts are cumulative across the turns of one run and are not comparable between hosts.",
+  "runs": {
+    "baseline-3.5.0": {
+      "observedAt": "2026-11-11",
+      "pluginVersion": "3.5.0",
+      "policyCommit": "a2d4c200638ebcc27d67fd79fb284e74b27cd4f3",
+      "pluginTreeSha256": "92bc615f4c2e5d81d8b46f18b643549c3a718a08b1b10904c76dd20cea4fd348",
+      "casesSha256": "521513774ab00c32f3824282a67da543ea825342e8557ed8f0b6ba3a68b789e0",
+      "promptSha256": "7973b1d2631355e2ff08c5e3260421059ea387d1e184280ed476e6ef5247f61e",
+      "taskSha256": "9236463cff087b9a2f98826ccf940200e7f714013defc126064313e0b3b34251",
+      "environment": {
+        "os": "Windows 11",
+        "claudeCode": "2.1.317",
+        "codexCli": "0.162.1",
+        "models": "each host's default"
+      },
+      "results": [
+        {
+          "host": "claude",
+          "case": "status-report-partial",
+          "readCalls": 5,
+          "files": [
+            {
+              "file": "skills/status/SKILL.md",
+              "characters": 1084
+            },
+            {
+              "file": "references/documents/protocol.yaml",
+              "characters": 5401
+            },
+            {
+              "file": "references/documents/status-report.example.yaml",
+              "characters": 1108
+            },
+            {
+              "file": "references/failure-handling.md",
+              "characters": 2483
+            },
+            {
+              "file": "references/documents/document.schema.json",
+              "characters": 22475
+            }
+          ],
+          "uniqueCharacters": 32551,
+          "otherTools": [],
+          "tokens": {
+            "input": 49392,
+            "output": 2790
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "passed",
+            "kind": "status_report",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "4062e4bd83d6e049dd3385c3943d6ee61c9b9f64df1064d397a2051a939cf271"
+        },
+        {
+          "host": "claude",
+          "case": "review-request-auditor",
+          "readCalls": 4,
+          "files": [
+            {
+              "file": "skills/consult/SKILL.md",
+              "characters": 2700
+            },
+            {
+              "file": "references/documents/protocol.yaml",
+              "characters": 5401
+            },
+            {
+              "file": "references/documents/review-request.example.yaml",
+              "characters": 650
+            },
+            {
+              "file": "references/documents/document.schema.json",
+              "characters": 22475
+            }
+          ],
+          "uniqueCharacters": 31226,
+          "otherTools": ["Grep"],
+          "tokens": {
+            "input": 51519,
+            "output": 2551
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "passed",
+            "kind": "review_request",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "bca5a778b6038a647fabe2a00c0019e1d4fa1ab889e18a23e58e461ff4f39d74"
+        },
+        {
+          "host": "claude",
+          "case": "task-request-child",
+          "readCalls": 6,
+          "files": [
+            {
+              "file": "skills/kickoff/SKILL.md",
+              "characters": 2504
+            },
+            {
+              "file": "references/documents/cards/task-request.md",
+              "characters": 1855
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/documents/task-request.example.yaml",
+              "characters": 789
+            },
+            {
+              "file": "references/documents/verified-task.example.yaml",
+              "characters": 981
+            },
+            {
+              "file": "skills/close/SKILL.md",
+              "characters": 1899
+            }
+          ],
+          "uniqueCharacters": 9653,
+          "otherTools": ["Glob", "Grep"],
+          "tokens": {
+            "input": 84761,
+            "output": 2795
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "passed",
+            "kind": "task_request",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "24d6e27e68ec47c9c59277bd711dbcba69112a1a34cfb1b9c9660e1446400a89"
+        },
+        {
+          "host": "claude",
+          "case": "completion-report-verified",
+          "readCalls": 5,
+          "files": [
+            {
+              "file": "references/documents/cards/completion-report.md",
+              "characters": 3261
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/documents/completion-report.example.yaml",
+              "characters": 1116
+            },
+            {
+              "file": "references/documents/verified-completion.example.yaml",
+              "characters": 2406
+            },
+            {
+              "file": "skills/close/SKILL.md",
+              "characters": 1899
+            }
+          ],
+          "uniqueCharacters": 10307,
+          "otherTools": ["Glob"],
+          "tokens": {
+            "input": 61117,
+            "output": 2601
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "passed",
+            "kind": "completion_report",
+            "kindMatches": true,
+            "correlated": true
+          },
+          "rawEventsSha256": "a5f352780dca3196074dce234595398ea4e597e6df089f8a5e3be5cb4e15c9d5"
+        },
+        {
+          "host": "claude",
+          "case": "resume-after-timeout",
+          "readCalls": 1,
+          "files": [
+            {
+              "file": "references/failure-handling.md",
+              "characters": 2483
+            }
+          ],
+          "uniqueCharacters": 2483,
+          "otherTools": ["Grep"],
+          "tokens": {
+            "input": 33083,
+            "output": 921
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "matched",
+            "create_session": false
+          },
+          "rawEventsSha256": "2d791117ed9b059ffc750035ca14a5c237c18a0e602368399db2bf169a18d774"
+        },
+        {
+          "host": "codex",
+          "case": "status-report-partial",
+          "readCalls": 12,
+          "files": [
+            {
+              "file": "skills/status/SKILL.md",
+              "characters": 1084
+            },
+            {
+              "file": "references/documents/protocol.yaml",
+              "characters": 5401
+            },
+            {
+              "file": "references/failure-handling.md",
+              "characters": 2483
+            },
+            {
+              "file": "references/documents/document.schema.json",
+              "characters": 22475
+            },
+            {
+              "file": "references/documents/status-report.example.yaml",
+              "characters": 1108
+            }
+          ],
+          "uniqueCharacters": 32551,
+          "otherTools": ["shell x9"],
+          "tokens": {
+            "input": 190628,
+            "output": 3852
+          },
+          "models": [],
+          "check": {
+            "status": "passed",
+            "kind": "status_report",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "145e5302950c6d4a3619c971ba223fe5c47d02bfecb94ff5ccacb1c6e8c9f4d2"
+        },
+        {
+          "host": "codex",
+          "case": "review-request-auditor",
+          "readCalls": 12,
+          "files": [
+            {
+              "file": "skills/consult/SKILL.md",
+              "characters": 2700
+            },
+            {
+              "file": "references/task-workflow.md",
+              "characters": 4672
+            },
+            {
+              "file": "references/documents/document.schema.json",
+              "characters": 22475
+            },
+            {
+              "file": "references/documents/protocol.yaml",
+              "characters": 5401
+            },
+            {
+              "file": "references/documents/review-request.example.yaml",
+              "characters": 650
+            }
+          ],
+          "uniqueCharacters": 35898,
+          "otherTools": ["shell x5"],
+          "tokens": {
+            "input": 147213,
+            "output": 2620
+          },
+          "models": [],
+          "check": {
+            "status": "passed",
+            "kind": "review_request",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "3ffded14dcfac7020de62080ffb22a3f21902913cab67ff8a6cc5d8869206bea"
+        },
+        {
+          "host": "codex",
+          "case": "task-request-child",
+          "readCalls": 16,
+          "files": [
+            {
+              "file": "skills/kickoff/SKILL.md",
+              "characters": 2504
+            },
+            {
+              "file": "references/documents/protocol.yaml",
+              "characters": 5401
+            },
+            {
+              "file": "references/task-workflow.md",
+              "characters": 4672
+            },
+            {
+              "file": "references/architecture.md",
+              "characters": 2427
+            },
+            {
+              "file": "references/documents/verified-task.example.yaml",
+              "characters": 981
+            },
+            {
+              "file": "references/documents/document.schema.json",
+              "characters": 22475
+            }
+          ],
+          "uniqueCharacters": 38460,
+          "otherTools": ["shell x9"],
+          "tokens": {
+            "input": 160189,
+            "output": 1765
+          },
+          "models": [],
+          "check": {
+            "status": "passed",
+            "kind": "task_request",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "d5961bc63334d8f9231fbb5b33ec2fec32ef4f8c6de6015c9151672f99f853a2"
+        },
+        {
+          "host": "codex",
+          "case": "completion-report-verified",
+          "readCalls": 16,
+          "files": [
+            {
+              "file": "skills/close/SKILL.md",
+              "characters": 1899
+            },
+            {
+              "file": "skills/fluent-korean/SKILL.md",
+              "characters": 2874
+            },
+            {
+              "file": "references/task-workflow.md",
+              "characters": 4672
+            },
+            {
+              "file": "references/documents/protocol.yaml",
+              "characters": 5401
+            },
+            {
+              "file": "references/documents/completion-report.example.yaml",
+              "characters": 1116
+            },
+            {
+              "file": "references/documents/verified-completion.example.yaml",
+              "characters": 2406
+            },
+            {
+              "file": "references/documents/document.schema.json",
+              "characters": 22475
+            }
+          ],
+          "uniqueCharacters": 40843,
+          "otherTools": ["shell x11"],
+          "tokens": {
+            "input": 250556,
+            "output": 2312
+          },
+          "models": [],
+          "check": {
+            "status": "passed",
+            "kind": "completion_report",
+            "kindMatches": true,
+            "correlated": true
+          },
+          "rawEventsSha256": "3c636b4b3a85f38e4122414ea3383c7bdd324a2eaad91e6d472c71bf74bcab76"
+        },
+        {
+          "host": "codex",
+          "case": "resume-after-timeout",
+          "readCalls": 10,
+          "files": [
+            {
+              "file": "skills/kickoff/SKILL.md",
+              "characters": 2504
+            },
+            {
+              "file": "references/architecture.md",
+              "characters": 2427
+            },
+            {
+              "file": "references/failure-handling.md",
+              "characters": 2483
+            }
+          ],
+          "uniqueCharacters": 7414,
+          "otherTools": ["shell x4"],
+          "tokens": {
+            "input": 154182,
+            "output": 841
+          },
+          "models": [],
+          "check": {
+            "status": "matched",
+            "create_session": false
+          },
+          "rawEventsSha256": "453704d07bebc0513ebe335dafcb60b72eafcf92c2e5adf9da56b93d7edf9fc8"
+        }
+      ]
+    },
+    "cards-3.6.0": {
+      "observedAt": "2026-11-11",
+      "pluginVersion": "3.6.0",
+      "policyCommit": "working tree on a2d4c200638ebcc27d67fd79fb284e74b27cd4f3",
+      "pluginTreeSha256": "a393dc555c7cb6acca67fb6da7c1548ba6b815c030c892c0022eee51616bc889",
+      "casesSha256": "521513774ab00c32f3824282a67da543ea825342e8557ed8f0b6ba3a68b789e0",
+      "promptSha256": "7973b1d2631355e2ff08c5e3260421059ea387d1e184280ed476e6ef5247f61e",
+      "taskSha256": "9236463cff087b9a2f98826ccf940200e7f714013defc126064313e0b3b34251",
+      "environment": {
+        "os": "Windows 11",
+        "claudeCode": "2.1.317",
+        "codexCli": "0.162.1",
+        "models": "each host's default"
+      },
+      "results": [
+        {
+          "host": "claude",
+          "case": "status-report-partial",
+          "readCalls": 5,
+          "files": [
+            {
+              "file": "skills/status/SKILL.md",
+              "characters": 1082
+            },
+            {
+              "file": "references/documents/cards/status-report.md",
+              "characters": 2691
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/documents/status-report.example.yaml",
+              "characters": 1108
+            },
+            {
+              "file": "references/failure-handling.md",
+              "characters": 2483
+            }
+          ],
+          "uniqueCharacters": 8989,
+          "otherTools": [],
+          "tokens": {
+            "input": 38836,
+            "output": 2647
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "passed",
+            "kind": "status_report",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "37fb410b9a78dd682d6f27b2445ca7c92877f6771180926c03ca2d197b6740bc"
+        },
+        {
+          "host": "claude",
+          "case": "review-request-auditor",
+          "readCalls": 4,
+          "files": [
+            {
+              "file": "skills/consult/SKILL.md",
+              "characters": 2794
+            },
+            {
+              "file": "references/documents/cards/review-request.md",
+              "characters": 1335
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/documents/review-request.example.yaml",
+              "characters": 650
+            }
+          ],
+          "uniqueCharacters": 6404,
+          "otherTools": ["Grep"],
+          "tokens": {
+            "input": 40236,
+            "output": 2245
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "passed",
+            "kind": "review_request",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "f5b3046dfc802f69e5236e4fd5531d92037894adc5a00ff4f12aa78a66f59aee"
+        },
+        {
+          "host": "claude",
+          "case": "task-request-child",
+          "readCalls": 6,
+          "files": [
+            {
+              "file": "skills/kickoff/SKILL.md",
+              "characters": 2501
+            },
+            {
+              "file": "references/documents/cards/task-request.md",
+              "characters": 1855
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/documents/task-request.example.yaml",
+              "characters": 789
+            },
+            {
+              "file": "references/documents/verified-task.example.yaml",
+              "characters": 981
+            },
+            {
+              "file": "references/task-workflow.md",
+              "characters": 4672
+            }
+          ],
+          "uniqueCharacters": 12423,
+          "otherTools": ["Glob"],
+          "tokens": {
+            "input": 62147,
+            "output": 2720
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "passed",
+            "kind": "task_request",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "78312b2e7ffcf4f883f170cb4767ee8c7ab45ecffd20c1f3a54a01736616d1d0"
+        },
+        {
+          "host": "claude",
+          "case": "completion-report-verified",
+          "readCalls": 4,
+          "files": [
+            {
+              "file": "references/documents/cards/completion-report.md",
+              "characters": 3261
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/documents/verified-completion.example.yaml",
+              "characters": 2406
+            },
+            {
+              "file": "references/documents/protocol.yaml",
+              "characters": 5401
+            }
+          ],
+          "uniqueCharacters": 12693,
+          "otherTools": ["Glob", "Grep"],
+          "tokens": {
+            "input": 79198,
+            "output": 2763
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "passed",
+            "kind": "completion_report",
+            "kindMatches": true,
+            "correlated": true
+          },
+          "rawEventsSha256": "409aa32eb7a5622833bd4a7e2e6c97004f7f5afc8a4243ea463f704949d0e2a8"
+        },
+        {
+          "host": "claude",
+          "case": "resume-after-timeout",
+          "readCalls": 1,
+          "files": [
+            {
+              "file": "references/failure-handling.md",
+              "characters": 2483
+            }
+          ],
+          "uniqueCharacters": 2483,
+          "otherTools": ["Grep"],
+          "tokens": {
+            "input": 33130,
+            "output": 921
+          },
+          "models": ["claude-haiku-5-5", "claude-opus-5-5"],
+          "check": {
+            "status": "matched",
+            "create_session": false
+          },
+          "rawEventsSha256": "a6d5e57b7cae7b1f38dc6abae4d21c3efb8de1b33740e0976fc677f9fe1fa214"
+        },
+        {
+          "host": "codex",
+          "case": "status-report-partial",
+          "readCalls": 15,
+          "files": [
+            {
+              "file": "skills/status/SKILL.md",
+              "characters": 1082
+            },
+            {
+              "file": "references/documents/cards/status-report.md",
+              "characters": 2691
+            },
+            {
+              "file": "references/documents/status-report.example.yaml",
+              "characters": 1108
+            },
+            {
+              "file": "references/failure-handling.md",
+              "characters": 2483
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            }
+          ],
+          "uniqueCharacters": 8989,
+          "otherTools": ["shell x8"],
+          "tokens": {
+            "input": 138149,
+            "output": 2195
+          },
+          "models": [],
+          "check": {
+            "status": "passed",
+            "kind": "status_report",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "0d13d22e38827b033fcc36df4cc9a016fd4a83a623fd8b4c9c8cb00615197ebb"
+        },
+        {
+          "host": "codex",
+          "case": "review-request-auditor",
+          "readCalls": 9,
+          "files": [
+            {
+              "file": "skills/consult/SKILL.md",
+              "characters": 2794
+            },
+            {
+              "file": "references/task-workflow.md",
+              "characters": 4672
+            },
+            {
+              "file": "references/documents/review-request.example.yaml",
+              "characters": 650
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/documents/cards/review-request.md",
+              "characters": 1335
+            }
+          ],
+          "uniqueCharacters": 11076,
+          "otherTools": ["shell x3"],
+          "tokens": {
+            "input": 113412,
+            "output": 2291
+          },
+          "models": [],
+          "check": {
+            "status": "passed",
+            "kind": "review_request",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "8a96a5b2be43bab03e76baaa26bd23bc8104d55301dd3f2b57ca6037e3041b6c"
+        },
+        {
+          "host": "codex",
+          "case": "task-request-child",
+          "readCalls": 10,
+          "files": [
+            {
+              "file": "skills/kickoff/SKILL.md",
+              "characters": 2501
+            },
+            {
+              "file": "references/documents/verified-task.example.yaml",
+              "characters": 981
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/task-workflow.md",
+              "characters": 4672
+            },
+            {
+              "file": "references/architecture.md",
+              "characters": 2427
+            },
+            {
+              "file": "references/documents/cards/task-request.md",
+              "characters": 1855
+            }
+          ],
+          "uniqueCharacters": 14061,
+          "otherTools": ["shell x8"],
+          "tokens": {
+            "input": 113699,
+            "output": 1195
+          },
+          "models": [],
+          "check": {
+            "status": "passed",
+            "kind": "task_request",
+            "kindMatches": true,
+            "correlated": false
+          },
+          "rawEventsSha256": "c6b26943303220c882dcc2a3821b3a81f0680cb5a59187498e1af6645c82635d"
+        },
+        {
+          "host": "codex",
+          "case": "completion-report-verified",
+          "readCalls": 11,
+          "files": [
+            {
+              "file": "skills/close/SKILL.md",
+              "characters": 1901
+            },
+            {
+              "file": "references/documents/cards/common.md",
+              "characters": 1625
+            },
+            {
+              "file": "references/documents/cards/completion-report.md",
+              "characters": 3261
+            },
+            {
+              "file": "references/task-workflow.md",
+              "characters": 4672
+            },
+            {
+              "file": "references/documents/verified-completion.example.yaml",
+              "characters": 2406
+            },
+            {
+              "file": "references/documents/completion-report.example.yaml",
+              "characters": 1116
+            }
+          ],
+          "uniqueCharacters": 14981,
+          "otherTools": ["shell x8"],
+          "tokens": {
+            "input": 103018,
+            "output": 1851
+          },
+          "models": [],
+          "check": {
+            "status": "passed",
+            "kind": "completion_report",
+            "kindMatches": true,
+            "correlated": true
+          },
+          "rawEventsSha256": "76ecb76ee6be6438edfb8c694fb9128c66708060a38f54a9116ac3b53501c09d"
+        },
+        {
+          "host": "codex",
+          "case": "resume-after-timeout",
+          "readCalls": 8,
+          "files": [
+            {
+              "file": "skills/kickoff/SKILL.md",
+              "characters": 2501
+            },
+            {
+              "file": "references/failure-handling.md",
+              "characters": 2483
+            },
+            {
+              "file": "references/architecture.md",
+              "characters": 2427
+            }
+          ],
+          "uniqueCharacters": 7411,
+          "otherTools": ["shell x6"],
+          "tokens": {
+            "input": 139493,
+            "output": 1075
+          },
+          "models": [],
+          "check": {
+            "status": "matched",
+            "create_session": false
+          },
+          "rawEventsSha256": "45dd9976632ad680b8cef263323b337d133ef8c77be67ac7c84374d6dc20e6dc"
+        }
+      ]
+    }
+  }
+}

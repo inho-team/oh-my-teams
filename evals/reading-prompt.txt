@@ -1,0 +1,12 @@
+This is a controlled observation of how a host uses the oh-my-teams skill package. The installed plugin is at:
+<PLUGIN>
+Its skills are under skills/<name>/SKILL.md and the names are kickoff, consult, status, close, disband and help. No file has been selected for you. Decide yourself which installed guidance applies, and read only what you need with read-only tools. Do not delegate, modify files, run Orca, Git or CI commands, perform lifecycle actions, or contact anyone. The observations below are synthetic. Treat them as the complete result of your own queries, and do not add facts that are not listed.
+
+Task:
+<TASK>
+
+Observations:
+<OBSERVATIONS>
+
+Output:
+<OUTPUT>

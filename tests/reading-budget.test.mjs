@@ -54,7 +54,14 @@ test("a new direct link raises only the linking skill and exceeds its ceiling", 
   assert.equal(after.status, "failed");
   assert.equal(after.findings.length, 1);
   assert.match(after.findings[0], /^status: reads \d+ characters, ceiling \d+/);
-  assert.ok(after.findings[0].includes("document.schema.json"));
+  const largest = after.skills
+    .find((item) => item.skill === "status")
+    .documents.reduce((left, right) =>
+      right.characters > left.characters ? right : left,
+    );
+  assert.ok(
+    after.findings[0].includes(`${largest.file} ${largest.characters}`),
+  );
 });
 
 test("repeated, external, fragment-only and missing links add no linked file", (t) => {

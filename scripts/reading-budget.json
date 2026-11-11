@@ -2,12 +2,12 @@
   "unit": "unicode-code-points",
   "scope": "SKILL.md plus the files it links directly inside the plugin",
   "skills": {
-    "close": 42879,
-    "consult": 39329,
-    "disband": 32560,
+    "close": 19891,
+    "consult": 16031,
+    "disband": 8249,
     "fluent-korean": 3941,
     "help": 9935,
-    "kickoff": 48439,
-    "status": 34384
+    "kickoff": 24140,
+    "status": 10822
   }
 }

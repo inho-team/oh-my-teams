@@ -121,7 +121,7 @@ node scripts/documents.mjs html plugins/oh-my-teams/references/documents/status-
 
 종류별 카드의 필드 개요는 스키마에서 만든다. 필드 이름 뒤의 `?`는 생략할 수 있다는 뜻이며, 여러 곳에서 참조하는 객체 정의는 `<이름>` 구조로 한 번만 적는다. 규칙은 `protocol.yaml`의 해당 항목을 그대로 옮긴다. 검토 요청과 결과는 `review_rules`를, 상태 보고는 `status_rules`를, 나머지 세 종류는 `lifecycle_rules`의 같은 이름 항목을 사용한다. `transport`, `yaml_rules`, `rendering`은 공통 규칙 카드에 둔다. 카드가 표현하지 못하는 스키마 구문이 추가되면 생성기는 `TypeError`로 중단하므로, 스키마를 확장할 때에는 생성기와 테스트를 함께 수정한다. 문서 종류를 추가하거나 예제 파일 이름을 바꿀 때에는 생성기의 종류 정의도 수정한다.
 
-카드는 설치 패키지의 `scripts`·`schemas`·`resources`·`examples` 디렉터리 금지 계약을 지키기 위해 `references/documents/cards/`에 둔다. 3.5.0의 스킬은 아직 카드를 링크하지 않는다. 호스트의 실제 읽기 행동을 변경 전 기준으로 관측한 뒤에 스킬의 링크를 카드로 바꾼다. 카드가 스키마와 일치한다는 것은 필드와 허용 값의 표기에 한정되며, 모델이 카드만 읽고 유효한 문서를 작성하는지는 호스트 평가에서 따로 확인한다.
+카드는 설치 패키지의 `scripts`·`schemas`·`resources`·`examples` 디렉터리 금지 계약을 지키기 위해 `references/documents/cards/`에 둔다. 3.6.0부터 문서를 작성하는 다섯 스킬은 스키마와 `protocol.yaml` 대신 해당 종류의 카드와 공통 규칙 카드를 링크한다. 두 정본으로 가는 링크는 카드의 마지막에만 있으므로 스킬의 읽기 분량에는 포함되지 않는다. 카드가 스키마와 일치한다는 것은 필드와 허용 값의 표기에 한정된다. 모델이 카드만 읽고 유효한 문서를 작성하는지는 [읽기 관측](../evals/READING_OBSERVATION.md)에서 따로 확인한다.
 
 ## 자동 품질 검사와 CI
 

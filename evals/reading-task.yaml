@@ -1,0 +1,40 @@
+schema_version: 1
+kind: task_request
+id: obs-task-001
+issued_at: 2026-11-11T10:00:00+09:00
+issuer:
+  session_id: obs-owner-session-01
+subject:
+  worktree_id: repo-7f3a::C:/work/sample
+  commit: a0a1a2a3a4a5a6a7a8a9b0b1b2b3b4b5b6b7b8b9
+payload:
+  goal: 문서 파서의 구문 오류 메시지에 줄 번호를 넣습니다. 읽기 관측용 가상의 작업입니다.
+  scope:
+    - src/parser.mjs와 tests/parser.test.mjs를 수정합니다.
+  acceptance_criteria:
+    - 구문 오류 메시지가 1부터 시작하는 줄 번호를 포함해야 합니다.
+    - 기존 오류 메시지의 나머지 문구는 바뀌지 않아야 합니다.
+  constraints:
+    - 공유 매니페스트와 잠금 파일은 수정하지 않습니다.
+  required_checks:
+    - name: lint
+      command: npm run lint
+    - name: test
+      command: npm test
+  delivery:
+    mode: pr
+    target: sample-org/sample/main
+    authorization: 사용자가 PR 생성까지 요청했고 병합은 직접 하겠다고 말한 가상의 예제입니다.
+  cleanup_required: false
+  evidence:
+    - source: user
+      locator: conversation/obs-001
+      excerpt: 이 요청과 허가는 실제 사용자 발언이 아닌 관측용 입력입니다.
+  verification:
+    required_ci:
+      - name: linux
+        target_branch: main
+      - name: macos
+        target_branch: main
+    independent_review: false
+    delivery_receipt: true
